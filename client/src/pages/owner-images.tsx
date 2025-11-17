@@ -44,8 +44,8 @@ export default function OwnerImagesPage() {
       });
       
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'فشل رفع الصور');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'فشل رفع الصور');
       }
       
       return response.json();
@@ -59,10 +59,10 @@ export default function OwnerImagesPage() {
         description: "تم إضافة الصور إلى ملف العقار",
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "فشل رفع الصور",
-        description: "حدث خطأ أثناء رفع الصور",
+        description: error.message || "حدث خطأ أثناء رفع الصور",
         variant: "destructive",
       });
     },
@@ -72,10 +72,14 @@ export default function OwnerImagesPage() {
     const files = Array.from(e.target.files || []);
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
     
-    if (imageFiles.length + (property?.imageUrls.length || 0) > 10) {
+    const currentCount = property?.imageUrls.length || 0;
+    const newCount = imageFiles.length;
+    const totalCount = currentCount + newCount;
+    
+    if (totalCount > 15) {
       toast({
         title: "تجاوز الحد الأقصى",
-        description: "يمكنك رفع 10 صور كحد أقصى",
+        description: `الحد الأقصى 15 صورة. لديك ${currentCount} صورة، يمكنك إضافة ${15 - currentCount} صورة فقط`,
         variant: "destructive",
       });
       return;
@@ -178,7 +182,7 @@ export default function OwnerImagesPage() {
 
         {/* Current Images */}
         <Card className="p-6">
-          <h2 className="text-xl font-bold mb-4">الصور الحالية ({property?.imageUrls.length || 0}/10)</h2>
+          <h2 className="text-xl font-bold mb-4">الصور الحالية ({property?.imageUrls.length || 0}/15)</h2>
           
           {property?.imageUrls && property.imageUrls.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -230,7 +234,7 @@ export default function OwnerImagesPage() {
               <Upload className="w-12 h-12 mx-auto mb-4 text-[#b88d2b]" />
               <p className="text-lg font-semibold mb-2">اختر الصور للرفع</p>
               <p className="text-sm text-muted-foreground mb-4">
-                يمكنك رفع حتى 10 صور (PNG, JPG, JPEG)
+                الحد الأقصى 15 صورة (PNG, JPG, JPEG)
               </p>
               <input
                 ref={fileInputRef}
