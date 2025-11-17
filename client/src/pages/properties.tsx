@@ -7,8 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, X, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Link } from "wouter";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -65,14 +66,20 @@ export default function PropertiesPage() {
       if (!matchesSearch) return false;
     }
 
-    // City filter (fixed: check for empty string)
-    if (selectedCity && selectedCity !== 'all' && selectedCity !== '' && property.city !== selectedCity) return false;
+    // City filter - only apply if a specific city is selected (not empty and not "all")
+    if (selectedCity && selectedCity !== '' && selectedCity !== 'all') {
+      if (property.city !== selectedCity) return false;
+    }
 
-    // Direction filter (fixed: check for empty string)
-    if (selectedDirection && selectedDirection !== 'all' && selectedDirection !== '' && property.direction !== selectedDirection) return false;
+    // Direction filter - only apply if a specific direction is selected
+    if (selectedDirection && selectedDirection !== '' && selectedDirection !== 'all') {
+      if (property.direction !== selectedDirection) return false;
+    }
 
-    // Type filter (fixed: check for empty string)
-    if (selectedType && selectedType !== 'all' && selectedType !== '' && property.type !== selectedType) return false;
+    // Type filter - only apply if a specific type is selected
+    if (selectedType && selectedType !== '' && selectedType !== 'all') {
+      if (property.type !== selectedType) return false;
+    }
 
     // Facilities filter
     if (selectedFacilities.length > 0) {
@@ -117,9 +124,9 @@ export default function PropertiesPage() {
 
   const clearFilters = () => {
     setSearchQuery("");
-    setSelectedCity("");
-    setSelectedDirection("");
-    setSelectedType("");
+    setSelectedCity("all");
+    setSelectedDirection("all");
+    setSelectedType("all");
     setSelectedFacilities([]);
     setPriceRange([0, 5000]);
   };
@@ -171,6 +178,31 @@ export default function PropertiesPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* Subscribe CTA Banner */}
+        <Card className="p-6 mb-6 bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border-primary/20">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="text-center md:text-right flex-1">
+              <h2 className="text-xl md:text-2xl font-bold text-primary mb-2 flex items-center justify-center md:justify-start gap-2">
+                <Sparkles className="w-6 h-6" />
+                هل لديك عقار استثماري؟
+              </h2>
+              <p className="text-muted-foreground text-sm md:text-base">
+                سجّل عقارك الآن واحصل على عرض مميز في منصة مودي الذكي
+              </p>
+            </div>
+            <Link href="/owner/subscription">
+              <Button 
+                size="lg" 
+                className="gradient-golden min-w-48 text-base font-bold shadow-lg"
+                data-testid="button-subscribe-cta"
+              >
+                <Sparkles className="w-5 h-5 ml-2" />
+                اشترك معنا الآن
+              </Button>
+            </Link>
+          </div>
+        </Card>
+
         {/* Filters */}
         <Card className="p-4 md:p-6 mb-6 bg-muted/30">
           <div className="flex items-center justify-between mb-4">
