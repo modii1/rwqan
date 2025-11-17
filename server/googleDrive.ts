@@ -125,14 +125,17 @@ class GoogleDriveService {
       const drive = await this.getDrive();
       const response = await drive.files.list({
         q: `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`,
-        fields: 'files(id, name)',
+        fields: 'files(id, name, mimeType)',
         orderBy: 'createdTime',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       const files = response.data.files || [];
+      console.log(`Folder ${folderId}: Found ${files.length} files:`, files.map((f: any) => f.name));
       return files.map((file: any) => `https://drive.google.com/uc?export=view&id=${file.id}`);
     } catch (error) {
-      console.error('Error listing images:', error);
+      console.error('Error listing images for folder', folderId, ':', error);
       return [];
     }
   }
