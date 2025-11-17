@@ -355,6 +355,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bank transfer payment with receipt upload
+  app.post("/api/owner/payment/bank-transfer", requireOwnerAuth, async (req: any, res) => {
+    try {
+      const { packageId, discountCode, receiptFile } = req.body;
+
+      if (!receiptFile || !receiptFile.data) {
+        return res.status(400).json({ error: 'يجب رفع إيصال الدفع' });
+      }
+
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+      if (!allowedTypes.includes(receiptFile.type)) {
+        return res.status(400).json({ error: 'نوع الملف غير مدعوم. يرجى رفع صورة (JPG, PNG) أو PDF' });
+      }
+
+      // Validate file size (max 5MB)
+      const buffer = Buffer.from(receiptFile.data, 'base64');
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (buffer.length > maxSize) {
+        return res.status(400).json({ error: 'حجم الملف كبير جداً. الحد الأقصى 5MB' });
+      }
+
+      const pkg = await storage.getPackageById(packageId);
+      if (!pkg) {
+        return res.status(404).json({ error: 'الباقة غير موجودة' });
+      }
+
+      let finalAmount = pkg.price;
+      let discountAmount = 0;
+
+      // Apply discount if provided
+      if (discountCode) {
+        const discount = await storage.getDiscountCodeByCode(discountCode);
+        if (discount && discount.isActive) {
+          if (discount.type === 'نسبة') {
+            discountAmount = (pkg.price * discount.value) / 100;
+          } else {
+            discountAmount = discount.value;
+          }
+          finalAmount = Math.max(0, pkg.price - discountAmount);
+        }
+      }
+
+      // Upload receipt to object storage
+      const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
+      if (!bucketId) {
+        throw new Error('Object storage not configured');
+      }
+
+      const fileExtension = receiptFile.type.split('/')[1] || 'pdf';
+      const fileName = `receipt-${req.propertyNumber}-${Date.now()}.${fileExtension}`;
+      const privateDirPath = `${bucketId}/.private`;
+      const fullPath = `${privateDirPath}/${fileName}`;
+
+      // Ensure private directory exists and write file
+      const { mkdir, writeFile } = await import('node:fs/promises');
+      try {
+        await mkdir(privateDirPath, { recursive: true });
+      } catch (err) {
+        // Directory might already exist, ignore error
+      }
+      await writeFile(fullPath, buffer);
+
+      // Create payment record with "قيد المراجعة" status
+      const payment = await storage.createPayment({
+        propertyNumber: req.propertyNumber,
+        packageId,
+        amount: pkg.price,
+        discountCode: discountCode || undefined,
+        discountAmount,
+        finalAmount,
+        status: 'قيد المراجعة',
+        paymentMethod: 'تحويل بنكي',
+        receiptUrl: filePath,
+      });
+
+      res.json({
+        paymentId: payment.id,
+        message: 'تم إرسال الطلب بنجاح. سيتم مراجعة الدفع وتفعيل الاشتراك قريباً',
+      });
+    } catch (error) {
+      console.error('Error processing bank transfer:', error);
+      res.status(500).json({ error: 'فشل في معالجة الطلب' });
+    }
+  });
+
   // Paymob webhook
   app.post("/api/webhook/paymob", async (req, res) => {
     try {
