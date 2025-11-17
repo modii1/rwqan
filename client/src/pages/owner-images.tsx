@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -8,9 +9,22 @@ import { Upload, X, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function OwnerImagesPage() {
+  const [, setLocation] = useLocation();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const { toast } = useToast();
+
+  // Protect page - redirect to login if not authenticated
+  useEffect(() => {
+    fetch('/api/owner/session')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.isLoggedIn) {
+          setLocation('/owner/login');
+        }
+      })
+      .catch(() => setLocation('/owner/login'));
+  }, [setLocation]);
 
   const { data: property, isLoading } = useQuery<Property>({
     queryKey: ['/api/owner/property'],
