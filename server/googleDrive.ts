@@ -199,15 +199,31 @@ class GoogleDriveService {
   async deleteImage(imageUrl: string): Promise<void> {
     try {
       const drive = await this.getDrive();
-      // Extract file ID from URL
-      const fileId = imageUrl.match(/id=([^&]+)/)?.[1];
+      // Extract file ID from URL - supports multiple URL formats
+      let fileId: string | undefined;
+      
+      // Format 1: https://drive.google.com/uc?export=view&id={fileId}
+      const match1 = imageUrl.match(/id=([^&]+)/);
+      if (match1) {
+        fileId = match1[1];
+      }
+      
+      // Format 2: https://lh3.googleusercontent.com/d/{fileId}
+      const match2 = imageUrl.match(/googleusercontent\.com\/d\/([^/?]+)/);
+      if (match2) {
+        fileId = match2[1];
+      }
+      
       if (!fileId) {
-        throw new Error('Invalid image URL');
+        console.error('Could not extract file ID from URL:', imageUrl);
+        throw new Error('Invalid image URL format');
       }
 
+      console.log(`Deleting file with ID: ${fileId}`);
       await drive.files.delete({
         fileId: fileId,
       });
+      console.log(`Successfully deleted file: ${fileId}`);
     } catch (error) {
       console.error('Error deleting image:', error);
       throw error;
