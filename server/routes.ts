@@ -43,16 +43,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch images from Google Drive for each property
       const propertiesWithImages = await Promise.all(
         properties.map(async (property) => {
-          // If imageUrls is empty and we have imagesFolderUrl, fetch images
-          if ((!property.imageUrls || property.imageUrls.length === 0) && property.imagesFolderUrl) {
+          // If imageUrls is empty, fetch from main Drive folder
+          if (!property.imageUrls || property.imageUrls.length === 0) {
             try {
-              // Extract folder ID from URL
-              const folderIdMatch = property.imagesFolderUrl.match(/folders\/([^/?]+)/);
-              if (folderIdMatch) {
-                const folderId = folderIdMatch[1];
-                console.log(`Fetching images for property ${property.propertyNumber}, folder: ${folderId}`);
-                const images = await googleDriveService.listFolderImages(folderId);
-                console.log(`Found ${images.length} images for property ${property.propertyNumber}`);
+              const images = await googleDriveService.getPropertyFolderImages(property.propertyNumber);
+              if (images.length > 0) {
                 return { ...property, imageUrls: images };
               }
             } catch (error) {
