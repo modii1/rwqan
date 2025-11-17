@@ -160,10 +160,19 @@ class GoogleDriveService {
       const images = imagesResponse.data.files || [];
       console.log(`Property ${propertyNumber}: Found ${images.length} images in folder ${folders[0].name}`);
       
-      // Make all images publicly accessible
-      await Promise.all(
-        images.map(async (file: any) => {
-          try {
+      // Make images public if they aren't already (with error handling)
+      const publicImagePromises = images.map(async (file: any) => {
+        try {
+          // Check if already public
+          const permissions = await drive.permissions.list({
+            fileId: file.id,
+            fields: 'permissions(type)',
+          });
+          
+          const isPublic = permissions.data.permissions?.some((p: any) => p.type === 'anyone');
+          
+          if (!isPublic) {
+            // Make it public
             await drive.permissions.create({
               fileId: file.id,
               requestBody: {
@@ -171,14 +180,15 @@ class GoogleDriveService {
                 type: 'anyone',
               },
             });
-          } catch (err) {
-            // Ignore if already public
-            console.log(`Image ${file.id} already public or error:`, err.message);
           }
-        })
-      );
+        } catch (err) {
+          // Silently ignore errors (rate limits, already public, etc.)
+        }
+        
+        return `https://drive.google.com/uc?export=view&id=${file.id}`;
+      });
       
-      return images.map((file: any) => `https://drive.google.com/uc?export=view&id=${file.id}`);
+      return await Promise.all(publicImagePromises);
     } catch (error) {
       console.error(`Error getting images for property ${propertyNumber}:`, error);
       return [];
