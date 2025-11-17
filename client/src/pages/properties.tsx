@@ -278,245 +278,238 @@ export default function PropertiesPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProperties.map(property => (
+            {filteredProperties.map(property => {
+              const mainPrice = property.prices.weekend || property.prices.weekday || '0';
+              const topFacilities = property.facilities.slice(0, 3);
+              
+              return (
               <Card
                 key={property.propertyNumber}
-                className={`relative overflow-visible ${
+                className={`relative overflow-hidden ${
                   property.subscriptionType === 'موثوق'
                     ? 'property-card-premium'
                     : 'property-card-standard'
                 }`}
                 data-testid={`card-property-${property.propertyNumber}`}
               >
-                {/* Property Number */}
-                <div className="absolute top-3 left-3 bg-foreground/90 text-background px-2 py-1 rounded text-sm font-bold z-10">
-                  {property.propertyNumber.padStart(5, '0')}
+                {/* Image Section - Full width at top */}
+                <div className="relative group">
+                  {property.imageUrls.length > 0 && (
+                    <>
+                      <img
+                        src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
+                        alt={property.name}
+                        className="w-full h-72 object-cover cursor-pointer"
+                        onClick={() => setSelectedImage({ 
+                          url: property.imageUrls[getCurrentImageIndex(property.propertyNumber)], 
+                          index: getCurrentImageIndex(property.propertyNumber), 
+                          total: property.imageUrls.length 
+                        })}
+                        data-testid={`img-property-${property.propertyNumber}-current`}
+                      />
+                      
+                      {/* Trusted Badge - Top Right Corner on Image */}
+                      {property.subscriptionType === 'موثوق' && (
+                        <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+                          <span className="text-yellow-600 text-xl">⭐</span>
+                          <span className="text-[#b38b00] font-bold text-sm">موثوق</span>
+                        </div>
+                      )}
+                      
+                      {/* Navigation Arrows */}
+                      {property.imageUrls.length > 1 && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              nextImage(property.propertyNumber, property.imageUrls.length);
+                            }}
+                            data-testid={`button-next-image-${property.propertyNumber}`}
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              prevImage(property.propertyNumber, property.imageUrls.length);
+                            }}
+                            data-testid={`button-prev-image-${property.propertyNumber}`}
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  )}
                 </div>
 
-                {/* Trusted Badge */}
-                {property.subscriptionType === 'موثوق' && (
-                  <Badge className="absolute top-3 right-3 bg-[#fff8d6] text-[#b38b00] font-bold border-none z-10">
-                    موثوق ⭐
-                  </Badge>
-                )}
+                {/* Content Section */}
+                <div className="p-5">
+                  {/* Title */}
+                  <h3 className="text-xl font-bold text-[#4a3b2a] mb-3">{property.name}</h3>
 
-                <div className="p-4 flex flex-col h-full">
-                  {/* Content wrapper - takes available space */}
-                  <div className="flex-1">
-                    {/* Image Carousel */}
-                    {property.imageUrls.length > 0 && (
-                      <div className="relative mb-4 group">
-                        {/* Main Image */}
-                        <div className="relative overflow-hidden rounded-xl">
-                          <img
-                            src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
-                            alt={`${property.name}`}
-                            className="w-full h-64 object-cover cursor-pointer"
-                            onClick={() => setSelectedImage({ 
-                              url: property.imageUrls[getCurrentImageIndex(property.propertyNumber)], 
-                              index: getCurrentImageIndex(property.propertyNumber), 
-                              total: property.imageUrls.length 
-                            })}
-                            data-testid={`img-property-${property.propertyNumber}-current`}
-                          />
-                          
-                          {/* Navigation Arrows - show only if more than 1 image */}
-                          {property.imageUrls.length > 1 && (
-                            <>
-                              <Button
-                                variant="secondary"
-                                size="icon"
-                                className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  nextImage(property.propertyNumber, property.imageUrls.length);
-                                }}
-                                data-testid={`button-next-image-${property.propertyNumber}`}
-                              >
-                                <ChevronRight className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="secondary"
-                                size="icon"
-                                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  prevImage(property.propertyNumber, property.imageUrls.length);
-                                }}
-                                data-testid={`button-prev-image-${property.propertyNumber}`}
-                              >
-                                <ChevronLeft className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
+                  {/* Location */}
+                  <div className="flex items-center gap-2 text-sm text-[#b88d2b] mb-4">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
+                    </svg>
+                    <span className="font-semibold">{property.city} {property.location && `• ${property.location}`}</span>
+                  </div>
 
-                        {/* Image Indicators - show only if more than 1 image */}
-                        {property.imageUrls.length > 1 && (
-                          <div className="flex justify-center gap-1.5 mt-2">
-                            {property.imageUrls.map((_, idx) => (
-                              <button
-                                key={`indicator-${property.propertyNumber}-${idx}`}
-                                className={`h-1.5 rounded-full transition-all ${
-                                  idx === getCurrentImageIndex(property.propertyNumber)
-                                    ? 'w-6 bg-primary'
-                                    : 'w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50'
-                                }`}
-                                onClick={() => goToImage(property.propertyNumber, idx)}
-                                data-testid={`indicator-${property.propertyNumber}-${idx}`}
-                              />
-                            ))}
-                          </div>
-                        )}
+                  {/* Description (First 2-3 facilities as description) */}
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                    {property.facilities.slice(0, 3).join(' • ')}
+                  </p>
+
+                  {/* Top Facilities with Icons */}
+                  <div className="flex items-center gap-6 mb-6 text-sm text-[#b88d2b]">
+                    {topFacilities.map((facility, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-lg">
+                          {facility.includes('مسبح') ? '🏊' : 
+                           facility.includes('غرف') || facility.includes('غرفة') ? '🛏️' : 
+                           facility.includes('حمام') ? '🚿' : 
+                           facility.includes('ملعب') ? '⚽' : 
+                           facility.includes('مبيت') ? '🌙' : '✨'}
+                        </span>
+                        <span className="font-semibold text-xs">{facility}</span>
                       </div>
-                    )}
+                    ))}
+                  </div>
 
-                    {/* Title */}
-                    <h3 className="text-lg font-bold text-foreground mb-2">{property.name}</h3>
-
-                    {/* Info */}
-                    <div className="flex gap-2 mb-3 text-sm text-muted-foreground">
-                      <span>{property.city}</span>
-                      <span>•</span>
-                      <span>{property.direction}</span>
-                      <span>•</span>
-                      <span>{property.type}</span>
+                  {/* Price and CTA */}
+                  <div className="flex items-center justify-between gap-4">
+                    {/* Price */}
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
+                      <span className="text-sm text-muted-foreground">ريال/ليلة</span>
                     </div>
 
-                    {/* Prices */}
-                    <div className="price-box rounded-lg p-3 mb-4 space-y-1 text-sm">
-                    {/* Always show: Weekday and Weekend */}
-                    {property.prices.weekday && (
-                      <div className="flex justify-between">
-                        <span>وسط الأسبوع:</span>
-                        <span className="font-bold text-green-600">{property.prices.weekday} ريال</span>
-                      </div>
-                    )}
-                    {property.prices.weekend && (
-                      <div className="flex justify-between">
-                        <span>نهاية الأسبوع:</span>
-                        <span className="font-bold text-green-600">{property.prices.weekend} ريال</span>
-                      </div>
-                    )}
-                    
-                    {/* Show additional prices when expanded */}
-                    {expandedPrices.has(property.propertyNumber) && (
-                      <>
-                        {property.prices.overnight && (
-                          <div className="flex justify-between">
-                            <span>مبيت:</span>
-                            <span className="font-bold text-green-600">{property.prices.overnight} ريال</span>
-                          </div>
-                        )}
-                        {property.prices.holidays && (
-                          <div className="flex justify-between">
-                            <span>إجازات:</span>
-                            <span className="font-bold text-green-600">{property.prices.holidays} ريال</span>
-                          </div>
-                        )}
-                        {property.prices.special && (
-                          <div className="flex justify-between">
-                            <span>سعر خاص:</span>
-                            <span className="font-bold text-green-600">{property.prices.special} ريال</span>
-                          </div>
-                        )}
-                        {property.prices.display && (
-                          <div className="flex justify-between">
-                            <span>سعر العرض:</span>
-                            <span className="font-bold text-green-600">{property.prices.display} ريال</span>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    
-                    {/* Show "المزيد" button if there are additional prices */}
-                    {(property.prices.overnight || property.prices.holidays || property.prices.special || property.prices.display) && (
-                      <div 
-                        className="text-center pt-2 border-t border-border cursor-pointer text-primary hover:text-primary/80 font-semibold"
-                        onClick={() => {
-                          const newExpanded = new Set(expandedPrices);
-                          if (newExpanded.has(property.propertyNumber)) {
-                            newExpanded.delete(property.propertyNumber);
-                          } else {
-                            newExpanded.add(property.propertyNumber);
-                          }
-                          setExpandedPrices(newExpanded);
-                        }}
-                        data-testid={`button-expand-prices-${property.propertyNumber}`}
-                      >
-                        {expandedPrices.has(property.propertyNumber) ? 'إخفاء' : 'المزيد من الأسعار'}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Facilities */}
-                  <div className="mb-4">
-                    <div className="flex flex-wrap gap-1">
-                      {(expandedFacilities.has(property.propertyNumber) 
-                        ? property.facilities 
-                        : property.facilities.slice(0, 6)
-                      ).map((facility, idx) => (
-                        <Badge key={`${property.propertyNumber}-facility-${idx}-${facility}`} variant="secondary" className="text-xs" data-testid={`badge-facility-${facility}`}>
-                          {facility}
-                        </Badge>
-                      ))}
-                      {property.facilities.length > 6 && (
-                        <Badge 
-                          variant="secondary" 
-                          className="text-xs cursor-pointer hover:bg-secondary/80"
-                          onClick={() => {
-                            const newExpanded = new Set(expandedFacilities);
-                            if (newExpanded.has(property.propertyNumber)) {
-                              newExpanded.delete(property.propertyNumber);
-                            } else {
-                              newExpanded.add(property.propertyNumber);
-                            }
-                            setExpandedFacilities(newExpanded);
-                          }}
-                          data-testid={`badge-expand-facilities-${property.propertyNumber}`}
-                        >
-                          {expandedFacilities.has(property.propertyNumber) 
-                            ? 'إخفاء' 
-                            : `+${property.facilities.length - 6} المزيد`
-                          }
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  </div>
-
-                  {/* Actions - Always at bottom */}
-                  <div className="flex gap-2 pt-3 border-t border-border mt-auto">
-                    {(property.imagesFolderUrl || property.driveFolderId) && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => {
-                          const url = property.imagesFolderUrl || `https://drive.google.com/drive/folders/${property.driveFolderId}`;
-                          window.open(url, '_blank');
-                        }}
-                        data-testid={`button-drive-${property.propertyNumber}`}
-                      >
-                        <ExternalLink className="w-4 h-4 ml-2" />
-                        فتح ملف العقار
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-[#25D366] hover:bg-[#1da851] text-white"
-                      onClick={() => handleWhatsApp(property)}
-                      data-testid={`button-whatsapp-${property.propertyNumber}`}
+                    {/* CTA Button */}
+                    <Button 
+                      className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-6 py-6 rounded-lg shadow-md"
+                      onClick={() => setSelectedProperty(property)}
+                      data-testid={`button-details-${property.propertyNumber}`}
                     >
-                      واتساب
+                      عرض التفاصيل
                     </Button>
                   </div>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Property Details Dialog */}
+      <Dialog open={!!selectedProperty} onOpenChange={(open) => !open && setSelectedProperty(null)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {selectedProperty && (
+            <div className="space-y-6">
+              {/* Image Gallery */}
+              {selectedProperty.imageUrls.length > 0 && (
+                <div className="relative">
+                  <img
+                    src={selectedProperty.imageUrls[getCurrentImageIndex(selectedProperty.propertyNumber)]}
+                    alt={selectedProperty.name}
+                    className="w-full h-96 object-cover rounded-lg"
+                  />
+                  {selectedProperty.imageUrls.length > 1 && (
+                    <div className="flex justify-center gap-2 mt-4">
+                      {selectedProperty.imageUrls.map((_, idx) => (
+                        <button
+                          key={idx}
+                          className={`h-2 rounded-full transition-all ${
+                            idx === getCurrentImageIndex(selectedProperty.propertyNumber)
+                              ? 'w-8 bg-primary'
+                              : 'w-2 bg-muted-foreground/30'
+                          }`}
+                          onClick={() => goToImage(selectedProperty.propertyNumber, idx)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Details */}
+              <div>
+                <h2 className="text-2xl font-bold text-foreground mb-2">{selectedProperty.name}</h2>
+                <p className="text-muted-foreground mb-4">
+                  {selectedProperty.city} • {selectedProperty.direction} • {selectedProperty.type}
+                </p>
+                
+                {/* All Prices */}
+                <div className="price-box rounded-lg p-4 mb-4 space-y-2">
+                  {selectedProperty.prices.weekday && (
+                    <div className="flex justify-between">
+                      <span>وسط الأسبوع:</span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekday} ريال</span>
+                    </div>
+                  )}
+                  {selectedProperty.prices.weekend && (
+                    <div className="flex justify-between">
+                      <span>نهاية الأسبوع:</span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekend} ريال</span>
+                    </div>
+                  )}
+                  {selectedProperty.prices.overnight && (
+                    <div className="flex justify-between">
+                      <span>مبيت:</span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.overnight} ريال</span>
+                    </div>
+                  )}
+                  {selectedProperty.prices.holidays && (
+                    <div className="flex justify-between">
+                      <span>إجازات:</span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.holidays} ريال</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* All Facilities */}
+                <div className="mb-6">
+                  <h4 className="font-semibold mb-2">المرافق:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedProperty.facilities.map((facility, idx) => (
+                      <Badge key={`dialog-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
+                        {facility}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  {selectedProperty.imagesFolderUrl && (
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => window.open(selectedProperty.imagesFolderUrl, '_blank')}
+                    >
+                      <ExternalLink className="w-4 h-4 ml-2" />
+                      فتح ملف العقار
+                    </Button>
+                  )}
+                  <Button
+                    className="flex-1 bg-[#25D366] hover:bg-[#1da851] text-white"
+                    onClick={() => handleWhatsApp(selectedProperty)}
+                  >
+                    تواصل عبر واتساب
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Image Modal */}
       <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
