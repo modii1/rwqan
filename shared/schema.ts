@@ -7,23 +7,27 @@ import { createInsertSchema } from "drizzle-zod";
 export const propertySchema = z.object({
   propertyNumber: z.string(), // رقم العقار (5 أرقام)
   name: z.string(),
-  pin: z.string(), // رقم سري للدخول
+  whatsappNumber: z.string(), // رقم واتساب للتواصل
+  location: z.string().optional(), // الموقع (رابط خرائط)
   city: z.enum(['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب']),
   direction: z.enum(['شمال', 'جنوب', 'شرق', 'غرب']),
   type: z.enum(['قسم', 'قسمين']),
   facilities: z.array(z.string()), // 100 مرفق
+  imagesFolderUrl: z.string().optional(), // رابط مجلد الصور
   prices: z.object({
+    display: z.string().optional(), // سعر العرض
     weekday: z.string(), // وسط الأسبوع
     weekend: z.string(), // نهاية الأسبوع
     overnight: z.string(), // مبيت
+    special: z.string().optional(), // سعر خاص
     holidays: z.string(), // إجازات
-    offers: z.string().optional(), // عروض
   }),
   subscriptionType: z.enum(['عادي', 'موثوق']), // نوع الاشتراك
-  subscriptionEndDate: z.string().optional(), // تاريخ انتهاء الاشتراك
+  lastUpdate: z.string().optional(), // آخر تحديث
+  subscriptionDate: z.string().optional(), // تاريخ الاشتراك
+  pin: z.string().optional(), // رقم سري للدخول (للنظام القديم)
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
-  whatsappNumber: z.string(), // رقم واتساب للتواصل
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

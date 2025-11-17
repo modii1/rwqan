@@ -35,6 +35,7 @@ export default function PropertiesPage() {
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 5000]);
   const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
+  const [expandedFacilities, setExpandedFacilities] = useState<Set<string>>(new Set());
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
@@ -310,6 +311,12 @@ export default function PropertiesPage() {
 
                   {/* Prices */}
                   <div className="price-box rounded-lg p-3 mb-4 space-y-1 text-sm">
+                    {property.prices.display && (
+                      <div className="flex justify-between">
+                        <span>سعر العرض:</span>
+                        <span className="font-bold text-green-600">{property.prices.display} ريال</span>
+                      </div>
+                    )}
                     {property.prices.weekday && (
                       <div className="flex justify-between">
                         <span>وسط الأسبوع:</span>
@@ -328,6 +335,12 @@ export default function PropertiesPage() {
                         <span className="font-bold text-green-600">{property.prices.overnight} ريال</span>
                       </div>
                     )}
+                    {property.prices.special && (
+                      <div className="flex justify-between">
+                        <span>سعر خاص:</span>
+                        <span className="font-bold text-green-600">{property.prices.special} ريال</span>
+                      </div>
+                    )}
                     {property.prices.holidays && (
                       <div className="flex justify-between">
                         <span>إجازات:</span>
@@ -339,14 +352,33 @@ export default function PropertiesPage() {
                   {/* Facilities */}
                   <div className="mb-4">
                     <div className="flex flex-wrap gap-1">
-                      {property.facilities.slice(0, 6).map((facility, idx) => (
-                        <Badge key={`${property.propertyNumber}-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
+                      {(expandedFacilities.has(property.propertyNumber) 
+                        ? property.facilities 
+                        : property.facilities.slice(0, 6)
+                      ).map((facility, idx) => (
+                        <Badge key={`${property.propertyNumber}-facility-${idx}-${facility}`} variant="secondary" className="text-xs" data-testid={`badge-facility-${facility}`}>
                           {facility}
                         </Badge>
                       ))}
                       {property.facilities.length > 6 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{property.facilities.length - 6} المزيد
+                        <Badge 
+                          variant="secondary" 
+                          className="text-xs cursor-pointer hover:bg-secondary/80"
+                          onClick={() => {
+                            const newExpanded = new Set(expandedFacilities);
+                            if (newExpanded.has(property.propertyNumber)) {
+                              newExpanded.delete(property.propertyNumber);
+                            } else {
+                              newExpanded.add(property.propertyNumber);
+                            }
+                            setExpandedFacilities(newExpanded);
+                          }}
+                          data-testid={`badge-expand-facilities-${property.propertyNumber}`}
+                        >
+                          {expandedFacilities.has(property.propertyNumber) 
+                            ? 'إخفاء' 
+                            : `+${property.facilities.length - 6} المزيد`
+                          }
                         </Badge>
                       )}
                     </div>
@@ -354,12 +386,15 @@ export default function PropertiesPage() {
 
                   {/* Actions */}
                   <div className="flex gap-2 pt-3 border-t border-border">
-                    {property.driveFolderId && (
+                    {(property.imagesFolderUrl || property.driveFolderId) && (
                       <Button
                         variant="secondary"
                         size="sm"
                         className="flex-1"
-                        onClick={() => window.open(`https://drive.google.com/drive/folders/${property.driveFolderId}`, '_blank')}
+                        onClick={() => {
+                          const url = property.imagesFolderUrl || `https://drive.google.com/drive/folders/${property.driveFolderId}`;
+                          window.open(url, '_blank');
+                        }}
                         data-testid={`button-drive-${property.propertyNumber}`}
                       >
                         <ExternalLink className="w-4 h-4 ml-2" />
