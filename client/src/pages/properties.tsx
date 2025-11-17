@@ -78,7 +78,8 @@ export default function PropertiesPage() {
     );
   };
 
-  const filteredProperties = properties.filter(property => {
+  const filteredProperties = properties
+    .filter(property => {
     // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -143,6 +144,12 @@ export default function PropertiesPage() {
     }
 
     return true;
+  })
+  .sort((a, b) => {
+    // Sort: verified (موثوق) properties first, then free (عادي)
+    if (a.subscriptionType === 'موثوق' && b.subscriptionType !== 'موثوق') return -1;
+    if (a.subscriptionType !== 'موثوق' && b.subscriptionType === 'موثوق') return 1;
+    return 0;
   });
 
   const handleWhatsApp = async (property: Property) => {
@@ -477,13 +484,15 @@ export default function PropertiesPage() {
 
                 {/* Content Section - Flexible grow */}
                 <div className="flex flex-col flex-1 p-3 md:p-5">
-                  {/* Title */}
-                  <h3 
-                    className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                    onClick={() => setLocation(`/property/${property.propertyNumber}`)}
-                  >
-                    {property.name}
-                  </h3>
+                  {/* Title - Only show for verified properties */}
+                  {property.subscriptionType === 'موثوق' && (
+                    <h3 
+                      className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                    >
+                      {property.name}
+                    </h3>
+                  )}
 
                   {/* Location */}
                   <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">

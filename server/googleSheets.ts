@@ -321,7 +321,7 @@ class GoogleSheetsService {
       (s: any) => s.properties?.title === sheetName
     );
 
-    if (!sheet || !sheet.properties?.sheetId) {
+    if (!sheet || sheet.properties?.sheetId == null) {
       throw new Error(`Sheet not found: ${sheetName}`);
     }
 
