@@ -92,12 +92,12 @@ export default function SubscriptionPage() {
       
       const data = await response.json();
 
-      // Open Paymob iframe
-      window.open(data.iframeUrl, '_blank');
+      // Redirect to Paymob checkout
+      window.location.href = data.checkoutUrl;
       
       toast({
-        title: "جاري معالجة الدفع",
-        description: "يرجى إكمال عملية الدفع في النافذة الجديدة",
+        title: "جاري التحويل لصفحة الدفع",
+        description: "يرجى إكمال عملية الدفع",
       });
     } catch (error: any) {
       if (error.message?.includes('تسجيل الدخول') || error.message?.includes('Unauthorized')) {

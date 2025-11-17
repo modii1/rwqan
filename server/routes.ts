@@ -332,21 +332,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentMethod: paymentMethod || 'بطاقة',
       });
 
+      // Get property info
+      const property = await storage.getPropertyByNumber(req.propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: 'العقار غير موجود' });
+      }
+
       // Initiate Paymob payment
       const paymobResponse = await paymobService.initiatePayment(
         finalAmount,
         req.propertyNumber,
+        property.name,
+        property.whatsappNumber,
+        pkg.name,
+        pkg.duration,
         paymentMethod || 'cards'
       );
 
-      // Update payment with Paymob order ID
+      // Update payment with Paymob intention ID
       await storage.updatePayment(payment.id, {
-        paymobOrderId: paymobResponse.orderId.toString(),
+        paymobOrderId: paymobResponse.intentionId,
       });
 
       res.json({
         paymentId: payment.id,
-        iframeUrl: paymobResponse.iframeUrl,
+        checkoutUrl: paymobResponse.checkoutUrl,
         amount: finalAmount,
       });
     } catch (error) {
@@ -428,7 +438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         finalAmount,
         status: 'قيد المراجعة',
         paymentMethod: 'تحويل بنكي',
-        receiptUrl: filePath,
+        receiptUrl: fullPath,
       });
 
       res.json({
@@ -488,7 +498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Update property subscription type
           await storage.updateProperty(payment.propertyNumber, {
             subscriptionType: pkg.type,
-            subscriptionEndDate: endDate,
+            subscriptionDate: endDate,
           });
 
           // Record profit
