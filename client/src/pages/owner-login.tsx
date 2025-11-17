@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Home, Info } from "lucide-react";
 
 export default function OwnerLogin() {
   const [, setLocation] = useLocation();
@@ -41,7 +42,11 @@ export default function OwnerLogin() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md p-8">
         <div className="text-center mb-8">
-          <div className="text-4xl mb-4">🏡</div>
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Home className="w-8 h-8 text-primary" />
+            </div>
+          </div>
           <h1 className="text-2xl font-bold text-primary mb-2">مودي الذكي</h1>
           <p className="text-muted-foreground">تسجيل دخول أصحاب العقارات</p>
         </div>
