@@ -57,7 +57,7 @@ export function AppSidebar() {
   const [location] = useLocation();
 
   return (
-    <Sidebar>
+    <Sidebar side="right" collapsible="offcanvas">
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
           <div className="text-3xl">🏡</div>
@@ -78,10 +78,9 @@ export function AppSidebar() {
                   <SidebarMenuButton 
                     asChild 
                     isActive={location === item.url}
-                    data-testid={`sidebar-link-${item.url}`}
                   >
-                    <Link href={item.url}>
-                      <item.icon className="ml-2" />
+                    <Link href={item.url} data-testid={`sidebar-link-${item.url}`}>
+                      <item.icon className="mr-2" />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
@@ -100,10 +99,9 @@ export function AppSidebar() {
                   <SidebarMenuButton 
                     asChild 
                     isActive={location === item.url}
-                    data-testid={`sidebar-link-${item.url}`}
                   >
-                    <Link href={item.url}>
-                      <item.icon className="ml-2" />
+                    <Link href={item.url} data-testid={`sidebar-link-${item.url}`}>
+                      <item.icon className="mr-2" />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
