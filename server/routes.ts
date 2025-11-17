@@ -280,8 +280,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/owner/images", requireOwnerAuth, upload.array('images', 15), async (req: any, res) => {
     try {
       const property = await storage.getPropertyByNumber(req.propertyNumber);
-      if (!property || !property.driveFolderId) {
-        return res.status(404).json({ error: 'العقار غير موجود أو لا يوجد مجلد Drive' });
+      if (!property) {
+        return res.status(404).json({ error: 'العقار غير موجود' });
+      }
+
+      // Create Drive folder if it doesn't exist
+      let driveFolderId = property.driveFolderId;
+      if (!driveFolderId) {
+        console.log(`Creating Drive folder for property ${req.propertyNumber}...`);
+        driveFolderId = await googleDriveService.createPropertyFolder(req.propertyNumber);
+        await storage.updateProperty(req.propertyNumber, { driveFolderId });
+        console.log(`Drive folder created: ${driveFolderId}`);
       }
 
       const files = req.files as Express.Multer.File[];
@@ -302,7 +311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const file of files) {
         const filename = `${Date.now()}-${file.originalname}`;
         const url = await googleDriveService.uploadImage(
-          property.driveFolderId,
+          driveFolderId,
           file.buffer,
           filename
         );
