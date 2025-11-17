@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "@shared/schema";
 import { Card } from "@/components/ui/card";
@@ -7,14 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Check } from "lucide-react";
+import { Check, CreditCard, Upload, FileText } from "lucide-react";
+import { useLocation } from "wouter";
 
 export default function SubscriptionPage() {
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ['/api/packages'],
@@ -43,7 +48,7 @@ export default function SubscriptionPage() {
     }
   };
 
-  const handleSubscribe = async () => {
+  const handleOnlinePayment = async () => {
     if (!selectedPackage) return;
 
     setIsProcessing(true);
@@ -65,11 +70,85 @@ export default function SubscriptionPage() {
         description: "يرجى إكمال عملية الدفع في النافذة الجديدة",
       });
     } catch (error: any) {
+      if (error.message?.includes('تسجيل الدخول')) {
+        toast({
+          title: "يجب تسجيل الدخول أولاً",
+          description: "يرجى تسجيل الدخول كمالك عقار للمتابعة",
+          variant: "destructive",
+        });
+        setTimeout(() => setLocation('/owner/login'), 2000);
+      } else {
+        toast({
+          title: "خطأ في بدء عملية الدفع",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleBankTransfer = async () => {
+    if (!selectedPackage || !receiptFile) {
       toast({
-        title: "خطأ في بدء عملية الدفع",
-        description: error.message,
+        title: "خطأ",
+        description: "الرجاء رفع إيصال الدفع أولاً",
         variant: "destructive",
       });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.readAsDataURL(receiptFile);
+      });
+
+      const response = await apiRequest('/api/owner/payment/bank-transfer', {
+        method: 'POST',
+        body: JSON.stringify({
+          packageId: selectedPackage,
+          discountCode: validatedDiscount?.code,
+          receiptFile: {
+            name: receiptFile.name,
+            type: receiptFile.type,
+            data: base64,
+          },
+        }),
+      });
+
+      toast({
+        title: "تم إرسال الطلب بنجاح ✅",
+        description: "سيتم مراجعة الدفع وتفعيل الاشتراك خلال 24 ساعة",
+      });
+
+      // Reset file and payment method, but keep package selected
+      setReceiptFile(null);
+      setPaymentMethod(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      
+    } catch (error: any) {
+      if (error.message?.includes('تسجيل الدخول')) {
+        toast({
+          title: "يجب تسجيل الدخول أولاً",
+          description: "يرجى تسجيل الدخول كمالك عقار للمتابعة",
+          variant: "destructive",
+        });
+        setTimeout(() => setLocation('/owner/login'), 2000);
+      } else {
+        toast({
+          title: "خطأ في إرسال الطلب",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -177,18 +256,112 @@ export default function SubscriptionPage() {
           })}
         </div>
 
-        {/* Subscribe Button */}
+        {/* Payment Methods */}
         {selectedPackage && (
-          <div className="mt-8 text-center">
-            <Button
-              size="lg"
-              className="gradient-golden min-w-64"
-              onClick={handleSubscribe}
-              disabled={isProcessing}
-              data-testid="button-proceed-payment"
-            >
-              {isProcessing ? 'جاري المعالجة...' : 'متابعة إلى الدفع'}
-            </Button>
+          <div className="mt-8">
+            <Card className="p-6">
+              <h2 className="text-xl font-bold mb-6 text-center">اختر طريقة الدفع</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {/* Online Payment */}
+                <Card
+                  className={`p-6 cursor-pointer transition-all hover:shadow-lg ${
+                    paymentMethod === 'online'
+                      ? 'border-2 border-primary shadow-lg bg-primary/5'
+                      : 'border hover:border-primary/50'
+                  }`}
+                  onClick={() => setPaymentMethod('online')}
+                  data-testid="card-payment-online"
+                >
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                      <CreditCard className="w-8 h-8 text-primary" />
+                    </div>
+                    <h3 className="font-bold text-lg">الدفع عبر البوابة الإلكترونية</h3>
+                    <p className="text-sm text-muted-foreground text-center">
+                      بطاقات الائتمان • Apple Pay • مدى
+                    </p>
+                    {paymentMethod === 'online' && (
+                      <Badge className="mt-2">✓ محدد</Badge>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Bank Transfer */}
+                <Card
+                  className={`p-6 cursor-pointer transition-all hover:shadow-lg ${
+                    paymentMethod === 'bank'
+                      ? 'border-2 border-primary shadow-lg bg-primary/5'
+                      : 'border hover:border-primary/50'
+                  }`}
+                  onClick={() => setPaymentMethod('bank')}
+                  data-testid="card-payment-bank"
+                >
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                      <FileText className="w-8 h-8 text-primary" />
+                    </div>
+                    <h3 className="font-bold text-lg">الدفع عبر التحويل البنكي</h3>
+                    <p className="text-sm text-muted-foreground text-center">
+                      تحويل بنكي + رفع الإيصال
+                    </p>
+                    {paymentMethod === 'bank' && (
+                      <Badge className="mt-2">✓ محدد</Badge>
+                    )}
+                  </div>
+                </Card>
+              </div>
+
+              {/* Bank Transfer Upload */}
+              {paymentMethod === 'bank' && (
+                <Card className="p-4 bg-muted/50 mb-4">
+                  <label className="block text-sm font-semibold mb-2">
+                    📤 رفع إيصال الدفع (صورة أو PDF)
+                  </label>
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                    data-testid="input-receipt-file"
+                  />
+                  {receiptFile && (
+                    <p className="text-sm text-muted-foreground mt-2">
+                      ✓ تم اختيار: {receiptFile.name}
+                    </p>
+                  )}
+                </Card>
+              )}
+
+              {/* Payment Buttons */}
+              <div className="flex flex-col gap-3">
+                {paymentMethod === 'online' && (
+                  <Button
+                    size="lg"
+                    className="gradient-golden w-full"
+                    onClick={handleOnlinePayment}
+                    disabled={isProcessing}
+                    data-testid="button-pay-online"
+                  >
+                    <CreditCard className="w-5 h-5 ml-2" />
+                    {isProcessing ? 'جاري المعالجة...' : 'متابعة إلى الدفع الإلكتروني'}
+                  </Button>
+                )}
+
+                {paymentMethod === 'bank' && (
+                  <Button
+                    size="lg"
+                    className="gradient-golden w-full"
+                    onClick={handleBankTransfer}
+                    disabled={isProcessing || !receiptFile}
+                    data-testid="button-pay-bank"
+                  >
+                    <Upload className="w-5 h-5 ml-2" />
+                    {isProcessing ? 'جاري الإرسال...' : 'إرسال الطلب'}
+                  </Button>
+                )}
+              </div>
+            </Card>
           </div>
         )}
       </div>
