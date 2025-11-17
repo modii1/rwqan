@@ -378,20 +378,29 @@ class GoogleSheetsService {
 
   // Conversion methods
   private rowToProperty(row: any[]): Property {
-    // Helper to safely parse JSON
+    // Helper to safely parse JSON or comma-separated text
     const safeJSONParse = (value: any, fallback: any = []) => {
       if (!value) return fallback;
       if (typeof value !== 'string') return fallback;
+      
+      const trimmed = value.trim();
+      
       // Check if it looks like JSON (starts with [ or {)
-      if (!value.trim().startsWith('[') && !value.trim().startsWith('{')) {
-        return fallback;
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          return JSON.parse(value);
+        } catch (error) {
+          // Silent fallback for invalid JSON
+          return fallback;
+        }
       }
-      try {
-        return JSON.parse(value);
-      } catch (error) {
-        // Silent fallback for invalid JSON
-        return fallback;
-      }
+      
+      // Otherwise, treat as comma-separated text
+      // Split by comma and clean up whitespace
+      return trimmed
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item.length > 0);
     };
 
     return {
