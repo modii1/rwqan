@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Home, Info } from "lucide-react";
 
 export default function OwnerLogin() {
@@ -20,6 +20,9 @@ export default function OwnerLogin() {
 
     try {
       await apiRequest('POST', '/api/owner/login', { propertyNumber, pin });
+
+      // Invalidate session query to update sidebar
+      queryClient.invalidateQueries({ queryKey: ['/api/owner/session'] });
 
       toast({
         title: "تم تسجيل الدخول بنجاح",
