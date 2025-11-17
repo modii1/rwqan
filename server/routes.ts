@@ -40,8 +40,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const properties = await storage.getProperties();
       
+      // Fetch images from Google Drive for each property
+      const propertiesWithImages = await Promise.all(
+        properties.map(async (property) => {
+          // If imageUrls is empty and we have imagesFolderUrl, fetch images
+          if ((!property.imageUrls || property.imageUrls.length === 0) && property.imagesFolderUrl) {
+            try {
+              // Extract folder ID from URL
+              const folderIdMatch = property.imagesFolderUrl.match(/folders\/([^/?]+)/);
+              if (folderIdMatch) {
+                const folderId = folderIdMatch[1];
+                console.log(`Fetching images for property ${property.propertyNumber}, folder: ${folderId}`);
+                const images = await googleDriveService.listFolderImages(folderId);
+                console.log(`Found ${images.length} images for property ${property.propertyNumber}`);
+                return { ...property, imageUrls: images };
+              }
+            } catch (error) {
+              console.error(`Error fetching images for property ${property.propertyNumber}:`, error);
+            }
+          }
+          return property;
+        })
+      );
+      
       // Sort: موثوق properties first
-      const sorted = properties.sort((a, b) => {
+      const sorted = propertiesWithImages.sort((a, b) => {
         if (a.subscriptionType === 'موثوق' && b.subscriptionType !== 'موثوق') return -1;
         if (a.subscriptionType !== 'موثوق' && b.subscriptionType === 'موثوق') return 1;
         return 0;
