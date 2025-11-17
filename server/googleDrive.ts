@@ -130,20 +130,7 @@ class GoogleDriveService {
       const PARENT_FOLDER_ID = '169jrXmGGQ27mtjkubu-i762xwQQ3e1uE';
       const drive = await this.getDrive();
       
-      // DEBUG: List ALL folders in parent first (only for first property)
-      if (propertyNumber === '88115') {
-        const allFoldersResponse = await drive.files.list({
-          q: `'${PARENT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-          fields: 'files(id, name)',
-          pageSize: 20,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-        });
-        console.log(`DEBUG: Total folders in parent:`, allFoldersResponse.data.files?.length || 0);
-        console.log(`DEBUG: First 20 folder names:`, allFoldersResponse.data.files?.map((f: any) => f.name) || []);
-      }
-      
-      // First, find the subfolder for this property
+      // Find the subfolder for this property
       const folderResponse = await drive.files.list({
         q: `'${PARENT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${propertyNumber}' and trashed=false`,
         fields: 'files(id, name)',

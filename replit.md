@@ -31,7 +31,11 @@
 
 ### 3. التكاملات
 - **Google Sheets**: تخزين جميع البيانات (عقارات، اشتراكات، مدفوعات، إلخ)
-- **Google Drive**: إدارة صور العقارات مع نظام كاش
+- **Google Drive**: إدارة صور العقارات الحقيقية
+  - **Service Account**: `moddy-drive-service@modi-bot-465120.iam.gserviceaccount.com`
+  - تجلب الصور تلقائياً من مجلدات Drive
+  - تجعل الصور public تلقائياً عند الجلب
+  - المجلد الرئيسي: `169jrXmGGQ27mtjkubu-i762xwQQ3e1uE` (صلاحية Editor)
 - **Paymob**: بوابة دفع إلكتروني + Webhook للتحديث التلقائي
 - **Object Storage**: حفظ إيصالات الدفع
 - **Google Analytics**: تتبع الزوار والإحصائيات
@@ -107,6 +111,7 @@
 ## متغيرات البيئة المطلوبة
 ```
 GOOGLE_SHEET_ID=xxx
+GOOGLE_SERVICE_ACCOUNT_KEY=xxx  # JSON key من Google Cloud Service Account
 PAYMOB_API_KEY=xxx
 PAYMOB_PUBLIC_KEY=xxx
 PAYMOB_HMAC_SECRET=xxx
