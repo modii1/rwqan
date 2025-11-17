@@ -39,6 +39,7 @@ export default function PropertiesPage() {
   const [expandedPrices, setExpandedPrices] = useState<Set<string>>(new Set());
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
+  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
@@ -64,14 +65,14 @@ export default function PropertiesPage() {
       if (!matchesSearch) return false;
     }
 
-    // City filter
-    if (selectedCity && selectedCity !== 'all' && property.city !== selectedCity) return false;
+    // City filter (fixed: check for empty string)
+    if (selectedCity && selectedCity !== 'all' && selectedCity !== '' && property.city !== selectedCity) return false;
 
-    // Direction filter
-    if (selectedDirection && selectedDirection !== 'all' && property.direction !== selectedDirection) return false;
+    // Direction filter (fixed: check for empty string)
+    if (selectedDirection && selectedDirection !== 'all' && selectedDirection !== '' && property.direction !== selectedDirection) return false;
 
-    // Type filter
-    if (selectedType && selectedType !== 'all' && property.type !== selectedType) return false;
+    // Type filter (fixed: check for empty string)
+    if (selectedType && selectedType !== 'all' && selectedType !== '' && property.type !== selectedType) return false;
 
     // Facilities filter
     if (selectedFacilities.length > 0) {
@@ -81,15 +82,18 @@ export default function PropertiesPage() {
       if (!hasAllFacilities) return false;
     }
 
-    // Price filter
+    // Price filter (fixed: handle Infinity case)
     const prices = [
       parseFloat(property.prices.weekday) || 0,
       parseFloat(property.prices.weekend) || 0,
       parseFloat(property.prices.overnight) || 0,
       parseFloat(property.prices.holidays) || 0,
     ];
-    const minPrice = Math.min(...prices.filter(p => p > 0));
-    if (minPrice < priceRange[0] || minPrice > priceRange[1]) return false;
+    const validPrices = prices.filter(p => p > 0);
+    if (validPrices.length > 0) {
+      const minPrice = Math.min(...validPrices);
+      if (minPrice < priceRange[0] || minPrice > priceRange[1]) return false;
+    }
 
     return true;
   });
@@ -125,19 +129,43 @@ export default function PropertiesPage() {
   };
 
   const nextImage = (propertyNumber: string, totalImages: number) => {
-    const current = getCurrentImageIndex(propertyNumber);
-    const next = (current + 1) % totalImages;
-    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
+    setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
+    setTimeout(() => {
+      const current = getCurrentImageIndex(propertyNumber);
+      const next = (current + 1) % totalImages;
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
+      setTimeout(() => {
+        const newSet = new Set(imageTransitioning);
+        newSet.delete(propertyNumber);
+        setImageTransitioning(newSet);
+      }, 50);
+    }, 150);
   };
 
   const prevImage = (propertyNumber: string, totalImages: number) => {
-    const current = getCurrentImageIndex(propertyNumber);
-    const prev = current === 0 ? totalImages - 1 : current - 1;
-    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
+    setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
+    setTimeout(() => {
+      const current = getCurrentImageIndex(propertyNumber);
+      const prev = current === 0 ? totalImages - 1 : current - 1;
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
+      setTimeout(() => {
+        const newSet = new Set(imageTransitioning);
+        newSet.delete(propertyNumber);
+        setImageTransitioning(newSet);
+      }, 50);
+    }, 150);
   };
 
   const goToImage = (propertyNumber: string, index: number) => {
-    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
+    setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
+    setTimeout(() => {
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
+      setTimeout(() => {
+        const newSet = new Set(imageTransitioning);
+        newSet.delete(propertyNumber);
+        setImageTransitioning(newSet);
+      }, 50);
+    }, 150);
   };
 
   return (
@@ -277,7 +305,7 @@ export default function PropertiesPage() {
             <p className="text-lg text-muted-foreground">لا توجد عقارات تطابق البحث</p>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {filteredProperties.map(property => {
               const mainPrice = property.prices.weekend || property.prices.weekday || '0';
               const topFacilities = property.facilities.slice(0, 3);
@@ -285,21 +313,47 @@ export default function PropertiesPage() {
               return (
               <Card
                 key={property.propertyNumber}
-                className={`relative overflow-hidden ${
+                className={`flex flex-col relative overflow-hidden ${
                   property.subscriptionType === 'موثوق'
                     ? 'property-card-premium'
                     : 'property-card-standard'
                 }`}
                 data-testid={`card-property-${property.propertyNumber}`}
               >
-                {/* Image Section - Full width at top */}
-                <div className="relative group">
+                {/* Image Section - Full width at top with swipe support */}
+                <div 
+                  className="relative group touch-pan-y"
+                  onTouchStart={(e) => {
+                    if (property.imageUrls.length <= 1) return;
+                    const touch = e.touches[0];
+                    (e.currentTarget as any).touchStartX = touch.clientX;
+                  }}
+                  onTouchEnd={(e) => {
+                    if (property.imageUrls.length <= 1) return;
+                    const touch = e.changedTouches[0];
+                    const startX = (e.currentTarget as any).touchStartX;
+                    const diff = startX - touch.clientX;
+                    
+                    // Swipe threshold: 50px
+                    if (Math.abs(diff) > 50) {
+                      if (diff > 0) {
+                        // Swipe left (next image in RTL)
+                        prevImage(property.propertyNumber, property.imageUrls.length);
+                      } else {
+                        // Swipe right (previous image in RTL)
+                        nextImage(property.propertyNumber, property.imageUrls.length);
+                      }
+                    }
+                  }}
+                >
                   {property.imageUrls.length > 0 && (
                     <>
                       <img
                         src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
                         alt={property.name}
-                        className="w-full h-72 object-cover cursor-pointer"
+                        className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 ${
+                          imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
+                        }`}
                         onClick={() => setSelectedImage({ 
                           url: property.imageUrls[getCurrentImageIndex(property.propertyNumber)], 
                           index: getCurrentImageIndex(property.propertyNumber), 
@@ -310,19 +364,19 @@ export default function PropertiesPage() {
                       
                       {/* Trusted Badge - Top Right Corner on Image */}
                       {property.subscriptionType === 'موثوق' && (
-                        <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
-                          <span className="text-yellow-600 text-xl">⭐</span>
-                          <span className="text-[#b38b00] font-bold text-sm">موثوق</span>
+                        <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
+                          <span className="text-yellow-600 text-base md:text-xl">⭐</span>
+                          <span className="text-[#b38b00] font-bold text-xs md:text-sm">موثوق</span>
                         </div>
                       )}
                       
-                      {/* Navigation Arrows */}
+                      {/* Navigation Arrows (Desktop only) */}
                       {property.imageUrls.length > 1 && (
                         <>
                           <Button
                             variant="secondary"
                             size="icon"
-                            className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
                             onClick={(e) => {
                               e.stopPropagation();
                               nextImage(property.propertyNumber, property.imageUrls.length);
@@ -334,7 +388,7 @@ export default function PropertiesPage() {
                           <Button
                             variant="secondary"
                             size="icon"
-                            className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
                             onClick={(e) => {
                               e.stopPropagation();
                               prevImage(property.propertyNumber, property.imageUrls.length);
@@ -345,55 +399,66 @@ export default function PropertiesPage() {
                           </Button>
                         </>
                       )}
+
+                      {/* Image Dots Indicator (Mobile only) */}
+                      {property.imageUrls.length > 1 && (
+                        <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+                          {property.imageUrls.map((_, idx) => (
+                            <div
+                              key={idx}
+                              className={`h-1.5 rounded-full transition-all ${
+                                idx === getCurrentImageIndex(property.propertyNumber)
+                                  ? 'w-4 bg-white'
+                                  : 'w-1.5 bg-white/50'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
 
-                {/* Content Section */}
-                <div className="p-5">
+                {/* Content Section - Flexible grow */}
+                <div className="flex flex-col flex-1 p-3 md:p-5">
                   {/* Title */}
-                  <h3 className="text-xl font-bold text-[#4a3b2a] mb-3">{property.name}</h3>
+                  <h3 className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1">{property.name}</h3>
 
                   {/* Location */}
-                  <div className="flex items-center gap-2 text-sm text-[#b88d2b] mb-4">
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
+                    <svg className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd"/>
                     </svg>
-                    <span className="font-semibold">{property.city} {property.location && `• ${property.location}`}</span>
+                    <span className="font-semibold truncate">{property.city}</span>
                   </div>
 
-                  {/* Description (First 2-3 facilities as description) */}
-                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                    {property.facilities.slice(0, 3).join(' • ')}
-                  </p>
-
-                  {/* Top Facilities with Icons */}
-                  <div className="flex items-center gap-6 mb-6 text-sm text-[#b88d2b]">
+                  {/* Top Facilities - Hidden on small mobile */}
+                  <div className="hidden md:flex items-center gap-4 lg:gap-6 mb-4 lg:mb-6 text-sm text-[#b88d2b]">
                     {topFacilities.map((facility, idx) => (
                       <div key={idx} className="flex items-center gap-2">
-                        <span className="text-lg">
+                        <span className="text-base lg:text-lg">
                           {facility.includes('مسبح') ? '🏊' : 
                            facility.includes('غرف') || facility.includes('غرفة') ? '🛏️' : 
                            facility.includes('حمام') ? '🚿' : 
                            facility.includes('ملعب') ? '⚽' : 
                            facility.includes('مبيت') ? '🌙' : '✨'}
                         </span>
-                        <span className="font-semibold text-xs">{facility}</span>
+                        <span className="font-semibold text-xs">{ facility}</span>
                       </div>
                     ))}
                   </div>
 
-                  {/* Price and CTA */}
-                  <div className="flex items-center justify-between gap-4">
+                  {/* Price and CTA - Always at bottom */}
+                  <div className="mt-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4">
                     {/* Price */}
                     <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
-                      <span className="text-sm text-muted-foreground">ريال/ليلة</span>
+                      <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
+                      <span className="text-xs md:text-sm text-muted-foreground">ريال</span>
                     </div>
 
-                    {/* CTA Button */}
+                    {/* CTA Button - Fixed at bottom */}
                     <Button 
-                      className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-6 py-6 rounded-lg shadow-md"
+                      className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
                       onClick={() => setSelectedProperty(property)}
                       data-testid={`button-details-${property.propertyNumber}`}
                     >
