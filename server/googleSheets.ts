@@ -319,7 +319,9 @@ class GoogleSheetsService {
   // Properties methods
   async getProperties(): Promise<Property[]> {
     const rows = await this.readSheet(SHEETS.PROPERTIES);
-    return rows.map(row => this.rowToProperty(row));
+    // Filter out empty rows (no property number)
+    const validRows = rows.filter(row => row[0] && row[0].trim());
+    return validRows.map(row => this.rowToProperty(row));
   }
 
   async getPropertyByNumber(propertyNumber: string): Promise<Property | null> {
@@ -375,6 +377,22 @@ class GoogleSheetsService {
 
   // Conversion methods
   private rowToProperty(row: any[]): Property {
+    // Helper to safely parse JSON
+    const safeJSONParse = (value: any, fallback: any = []) => {
+      if (!value) return fallback;
+      if (typeof value !== 'string') return fallback;
+      // Check if it looks like JSON (starts with [ or {)
+      if (!value.trim().startsWith('[') && !value.trim().startsWith('{')) {
+        return fallback;
+      }
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        // Silent fallback for invalid JSON
+        return fallback;
+      }
+    };
+
     return {
       propertyNumber: row[0] || '',
       name: row[1] || '',
@@ -382,7 +400,7 @@ class GoogleSheetsService {
       city: row[3] as any,
       direction: row[4] as any,
       type: row[5] as any,
-      facilities: row[6] ? JSON.parse(row[6]) : [],
+      facilities: safeJSONParse(row[6], []),
       prices: {
         weekday: row[7] || '',
         weekend: row[8] || '',
@@ -393,7 +411,7 @@ class GoogleSheetsService {
       subscriptionType: row[12] as any || 'عادي',
       subscriptionEndDate: row[13] || undefined,
       driveFolderId: row[14] || undefined,
-      imageUrls: row[15] ? JSON.parse(row[15]) : [],
+      imageUrls: safeJSONParse(row[15], []),
       whatsappNumber: row[16] || '',
       createdAt: row[17] || '',
       updatedAt: row[18] || '',
