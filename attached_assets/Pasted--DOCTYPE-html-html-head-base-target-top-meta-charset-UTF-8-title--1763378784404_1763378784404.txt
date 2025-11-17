@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top" />
+  <meta charset="UTF-8" />
+  <title>📤 مودي الذكي</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Cairo', sans-serif; direction: rtl; margin: 0; padding: 30px; background: linear-gradient(to bottom right, #d4af37, #e0e0e0); color: #333; }
+    h2 { text-align: center; color: #b88d2b; font-weight: 700; margin-bottom: 30px; font-size: 28px; }
+    .form-container { background: #ffffffee; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); max-width: 700px; margin: auto; }
+    label { font-weight: bold; display: block; margin-top: 15px; }
+    input[type="text"], input[type="file"], select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 8px; font-family: 'Cairo', sans-serif; font-size: 15px; }
+    select[multiple] { height: auto; }
+    button { background-color: #b88d2b; color: white; border: none; padding: 12px 20px; margin-top: 25px; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; transition: background 0.3s; width: 100%; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button:hover:not(:disabled) { background-color: #a27b20; }
+    .status { margin-top: 20px; font-weight: bold; font-size: 15px; color: green; text-align: center; }
+    .status.error { color: red; }
+    .contact-number { text-align: center; font-size: 14px; margin-top: 30px; }
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; }
+    .price-field { margin-top: 8px; display: none; }
+    .facilities-group { max-height: 220px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 8px; background: #fafafa; column-count: 2; column-gap: 15px; }
+    .facilities-group label { display: block; margin-bottom: 5px; cursor: pointer; user-select: none; }
+  </style>
+</head>
+<body>
+  <div class="form-container">
+    <h2>📤 مودي الذكي</h2>
+    <form id="propertyForm">
+      <label>نوع الطلب:</label>
+      <select name="requestType" required>
+        <option value="جديد">جديد</option>
+        <option value="تحديث">تحديث</option>
+      </select>
+
+      <label>🏷 رقم العقار:</label>
+      <input type="text" name="propertyNumber" pattern="^\d{1,5}$" inputmode="numeric" maxlength="5" required placeholder="مثال: آخر 5 أرقام من هاتفك" />
+
+      <label>🏡 اسم العقار:</label>
+      <input type="text" name="propertyName" placeholder="مثال: شالية مودي" maxlength="25" />
+      
+      <label>📞 رقم الجوال:</label>
+      <input type="text" name="phoneNumber" inputmode="numeric" placeholder="مثال: 05xxxxxxxx" />
+
+      <label>📍 الموقع:</label>
+      <input type="text" name="location" placeholder="مثال: حي ضراس" maxlength="15" />
+      
+      <label>📍 المنطقة:</label>
+      <select name="region" required>
+        <option value="">اختر المنطقة</option>
+        <option value="بريدة">بريدة</option>
+        <option value="عنيزة">عنيزة</option>
+        <option value="الرس">الرس</option>
+        <option value="البكيرية">البكيرية</option>
+        <option value="المذنب">المذنب</option>
+      </select>
+
+      <label>🧭 الاتجاه:</label>
+      <select name="direction" required>
+        <option value="">اختر الاتجاه</option>
+        <option value="شمال">شمال</option>
+        <option value="جنوب">جنوب</option>
+        <option value="شرق">شرق</option>
+        <option value="غرب">غرب</option>
+      </select>
+
+      <label>🏠 النوع:</label>
+      <select name="type">
+        <option value="قسم">قسم</option>
+        <option value="قسمين">قسمين</option>
+      </select>
+
+      <label>🔹 المرافق (حتى 10 فقط):</label>
+      <div class="facilities-group" id="facilitiesGroup"></div>
+
+      <label>💰 الأسعار (اختيار حتى 4 فقط):</label>
+      <label>* ملاحظة لحذف السعر ضع (0) :</label>
+      <div class="checkbox-group">
+        <label><input type="checkbox" value="midweekPrice" onchange="togglePriceField(this)" /> وسط الأسبوع</label>
+        <label><input type="checkbox" value="weekendPrice" onchange="togglePriceField(this)" /> نهاية الأسبوع</label>
+        <label><input type="checkbox" value="overnightPrice" onchange="togglePriceField(this)" /> مبيت</label>
+        <label><input type="checkbox" value="offerPrice" onchange="togglePriceField(this)" /> عرض خاص</label>
+        <label><input type="checkbox" value="holidayPrice" onchange="togglePriceField(this)" /> إجازات</label>
+      </div>
+
+      <input type="text" name="midweekPrice" class="price-field" placeholder="💰 سعر وسط الأسبوع" />
+      <input type="text" name="weekendPrice" class="price-field" placeholder="💰 سعر نهاية الأسبوع" />
+      <input type="text" name="overnightPrice" class="price-field" placeholder="💰 سعر المبيت" />
+      <input type="text" name="offerPrice" class="price-field" placeholder="💰 سعر العرض الخاص" />
+      <input type="text" name="holidayPrice" class="price-field" placeholder="💰 سعر الإجازات" />
+
+      <label>📷 رفع الصور:</label>
+      <input type="file" name="myFiles" multiple accept="image/*" />
+
+      <button type="submit">📩 إرسال البيانات</button>
+      <div class="status" id="status"></div>
+    </form>
+    <div class="contact-number">
+      📞 للتواصل عبر الواتساب:
+      <a href="https://wa.me/966533220646" target="_blank">966533220646+</a>
+    </div>
+  </div>
+
+  <script>
+    const facilitiesList = [
+      "غرفتين نوم","غرفة نوم","غرفة اطفال","صالة جلوس","صالة طعام","مجلس داخلي","مجلس رجال","مجلس نساء",
+      "مطبخ مجهز","فرن كهربائي","فرن مندي","ميكروويف","مقلط",
+      "مسبح داخلي","مسبح خارجي بحاجز","مسبح خارجي بدون حاجز","مسبح أطفال","مسبح أطفال آمن","بدون مسبح","مسبح مفلتر","جاكوزي","ساونا","غرفة بخار",
+      "مكيفات سبليت","مغسلة يدين","تلفزيون ذكي","شاشة تلفزيون","إنترنت Wi-Fi","نظام صوت داخلي","نظام إضاءة ليزر","ستارة سينما + بروجكتر",
+      "أرضيات رخام / باركيه","عازل صوتي","ستائر كهربائية","بوابة إلكترونية","مدخل سيارة","مواقف سيارات داخلية","كاميرات مراقبة","إنذار حريق","حارس / مراقبة",
+      "فرش صلاة","مصلى صغير","صوتيات للقرآن","ألعاب أطفال","ألعاب مائية","ألعاب هوائية","ألعاب لوحية","غرفة ألعاب إلكترونية",
+      "طاولة بلياردو","طاولة تنس","طاولة هوكي هوائي","بلايستيشن 5","سينما للأطفال","جلسة مغطاة للأطفال","منطقة رمل",
+      "جلسات خارجية","منطقة شواء","دكة نار","حديقة","مشب","مسطحات خضراء","ملعب طائرة","ملعب تنس","ملعب قدم",
+      "خيمة عربية","خيمة شتوية","بيت شعر","بئر تقليدي","مسرح صغير","كوشة","إنارة مناسبات","مكبرات صوت","منسق حفلات","قاعة احتفالات",
+      "مخيم","نظام قسمين رجال ونساء","ملحق","ممشى صحي"
+    ];
+    const container = document.getElementById("facilitiesGroup");
+    facilitiesList.forEach((facility, idx) => {
+      const id = "facility_" + idx;
+      const label = document.createElement("label");
+      label.htmlFor = id;
+      label.innerHTML = `<input type="checkbox" id="${id}" name="facilities" value="${facility}" /> ${facility}`;
+      container.appendChild(label);
+    });
+
+    function togglePriceField(checkbox){
+      const field = document.querySelector(`input[name='${checkbox.value}']`);
+      field.style.display = checkbox.checked ? "block" : "none";
+      field.required = checkbox.checked;
+      if(!checkbox.checked) field.value = ""; // ← حذف القيمة القديمة تمامًا
+    }
+
+    const propertyNumberInput = document.querySelector("input[name='propertyNumber']");
+    const requestTypeSelect = document.querySelector("select[name='requestType']");
+    const statusDiv = document.getElementById("status");
+    const form = document.getElementById("propertyForm");
+
+    let propertyTimeout;
+propertyNumberInput.addEventListener("input", function(){
+  if(propertyTimeout) clearTimeout(propertyTimeout);
+
+  // نبحث فقط إذا طول الرقم 3+ أرقام
+  const number = propertyNumberInput.value.trim();
+  if(number.length < 4) {
+    statusDiv.innerText = "أدخل 3 أرقام على الأقل للبحث...";
+    statusDiv.className = "status";
+    return;
+  }
+
+  propertyTimeout = setTimeout(()=>{ 
+    loadPropertyData(); 
+  }, 2000); // زيادة التأخير قليلاً لمنح المستخدم فرصة الإكمال
+});
+
+
+    requestTypeSelect.addEventListener("change", loadPropertyData);
+
+    function loadPropertyData(){
+      const number = propertyNumberInput.value.trim();
+      const requestType = requestTypeSelect.value;
+
+      if(!number){ statusDiv.innerText=""; return; }
+
+      statusDiv.innerText="🔎 جاري التحقق...";
+      statusDiv.className="status";
+
+      google.script.run.withSuccessHandler(res=>{
+        if(res && res.exists){
+          if(requestType === "جديد"){
+            statusDiv.innerText="⚠️ رقم العقار موجود مسبقًا، اختر تحديث بدلًا من جديد";
+            statusDiv.className="status error";
+            form.reset();
+            document.querySelectorAll(".price-field").forEach(f=>f.style.display="none");
+          } else if(requestType === "تحديث"){
+            const data=res.data;
+            document.querySelector("input[name='propertyName']").value=data.propertyName||"";
+            document.querySelector("input[name='phoneNumber']").value=data.phoneNumber||"";
+            document.querySelector("input[name='location']").value=data.location||"";
+            document.querySelector("select[name='region']").value=data.region||"";
+            document.querySelector("select[name='direction']").value=data.direction||"";
+            document.querySelector("select[name='type']").value=data.type||"";
+            document.querySelectorAll("input[name='facilities']").forEach(cb=>{
+              cb.checked = data.facilities?.includes(cb.value) || false;
+            });
+
+            // تعبئة الأسعار وحذف الحقول غير المحددة
+            ["offerPrice","midweekPrice","weekendPrice","overnightPrice","holidayPrice"].forEach(field=>{
+              const cb = document.querySelector(`.checkbox-group input[value='${field}']`);
+              const inputField = document.querySelector(`input[name='${field}']`);
+              if(data[field]){
+                cb.checked = true;
+                inputField.value = data[field];
+              } else {
+                cb.checked = false;
+                inputField.value = "";
+              }
+              togglePriceField(cb); // ← يضمن مسح القيمة القديمة وإخفاء الحقل إذا لم يكن محدد
+            });
+
+            statusDiv.innerText="✅ تم تحميل البيانات بنجاح";
+            statusDiv.className="status";
+          }
+        } else {
+          if(requestType==="جديد"){
+            statusDiv.innerText="✅ رقم العقار جديد، يمكنك إدخال البيانات";
+            statusDiv.className="status";
+          } else {
+            statusDiv.innerText="ℹ️ لم يتم العثور على بيانات لهذا الرقم";
+            statusDiv.className="status";
+            form.reset();
+            document.querySelectorAll(".price-field").forEach(f=>f.style.display="none");
+          }
+        }
+      }).getPropertyData(number);
+    }
+
+    form.addEventListener("submit", async function(e){
+      e.preventDefault();
+      const formData = new FormData(form);
+      const submitButton = form.querySelector("button[type='submit']");
+      submitButton.disabled = true;
+      statusDiv.innerText = "⏳ جاري المعالجة...";
+      statusDiv.className = "status";
+
+      try {
+        const selectedFacilities = Array.from(form.querySelectorAll("input[name='facilities']:checked")).map(cb => cb.value);
+
+       function getPriceValue(fieldName){
+  const cb = document.querySelector(`.checkbox-group input[value='${fieldName}']`);
+  const inputField = document.querySelector(`input[name='${fieldName}']`);
+  // إذا مفعل → ترسل القيمة الموجودة، إذا مش مفعل → ترسل 0
+  return cb.checked ? inputField.value : 0;
+}
+
+
+
+        const output = {
+          requestType: formData.get("requestType"),
+          propertyNumber: formData.get("propertyNumber"),
+          propertyName: formData.get("propertyName"),
+          region: formData.get("region"),
+          location: formData.get("location"),
+          direction: formData.get("direction"),
+          type: formData.get("type"),
+          phoneNumber: formData.get("phoneNumber"),
+          facilities: selectedFacilities,
+          offerPrice: getPriceValue("offerPrice"),
+          midweekPrice: getPriceValue("midweekPrice"),
+          weekendPrice: getPriceValue("weekendPrice"),
+          overnightPrice: getPriceValue("overnightPrice"),
+          holidayPrice: getPriceValue("holidayPrice"),
+          myFiles: []
+        };
+
+        const files = form.querySelector("input[name='myFiles']").files;
+        for(let file of files){
+          const reader = new FileReader();
+          output.myFiles.push(await new Promise(resolve=>{
+            reader.onload = () => resolve({name:file.name, type:file.type, data:reader.result.split(",")[1]});
+            reader.readAsDataURL(file);
+          }));
+        }
+
+        google.script.run.withSuccessHandler(res=>{
+          if(res.status === "success"){
+            statusDiv.innerHTML = `✅ تم الحفظ بنجاح<br><a href="${res.folderUrl}" target="_blank">📂 فتح مجلد الصور</a>`;
+            form.reset();
+            document.querySelectorAll(".price-field").forEach(f => f.style.display = "none");
+          } else {
+            statusDiv.innerText = "❌ " + res.message;
+            statusDiv.className = "status error";
+          }
+          submitButton.disabled = false;
+        }).uploadFiles(output);
+
+      } catch(err){
+        statusDiv.innerText = "⚠️ خطأ: " + err.message;
+        statusDiv.className = "status error";
+        submitButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
