@@ -37,7 +37,22 @@ const PRIORITY_FACILITIES = [
   'واي فاي',
 ];
 
+// Normalize text for smart filtering (remove Arabic & Latin diacritics, normalize variants)
+const normalizeText = (text: string): string => {
+  return text
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f\u064b-\u0652\u0670\u06d6-\u06ed]/g, '') // Remove Latin & Arabic diacritics
+    .replace(/\u0640/g, '') // Remove tatweel
+    .replace(/[إأٱآ]/g, 'ا') // All alef forms to simple alef
+    .replace(/[ؤئ]/g, 'و') // Hamza on waw/ya to waw
+    .replace(/ى/g, 'ي') // Alef maqsura to yaa
+    .replace(/ة/g, 'ه'); // Taa marbuta to haa
+};
+
 export default function PropertiesPage() {
+  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedDirection, setSelectedDirection] = useState<string>("");
@@ -90,7 +105,7 @@ export default function PropertiesPage() {
       if (property.type !== selectedType) return false;
     }
 
-    // Facilities filter with smart matching
+    // Facilities filter with smart matching and normalization
     if (selectedFacilities.length > 0) {
       const hasAllFacilities = selectedFacilities.every(selectedFacility => {
         // Direct match
@@ -98,12 +113,15 @@ export default function PropertiesPage() {
           return true;
         }
         
-        // Smart match using SMART_FILTERS
+        // Smart match using SMART_FILTERS with normalization
         const smartKeywords = SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
         if (smartKeywords) {
-          return property.facilities.some(facility =>
-            smartKeywords.some(keyword => facility.includes(keyword))
-          );
+          return property.facilities.some(facility => {
+            const normalizedFacility = normalizeText(facility);
+            return smartKeywords.some(keyword => 
+              normalizedFacility.includes(normalizeText(keyword))
+            );
+          });
         }
         
         return false;
@@ -390,16 +408,15 @@ export default function PropertiesPage() {
                 >
                   {property.imageUrls.length > 0 && (
                     <>
-                      <Link href={`/property/${property.propertyNumber}`}>
-                        <img
-                          src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
-                          alt={property.name}
-                          className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
-                            imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
-                          }`}
-                          data-testid={`img-property-${property.propertyNumber}-current`}
-                        />
-                      </Link>
+                      <img
+                        src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
+                        alt={property.name}
+                        className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
+                          imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
+                        }`}
+                        onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                        data-testid={`img-property-${property.propertyNumber}-current`}
+                      />
                       
                       {/* Trusted Badge - Top Right Corner on Image */}
                       {property.subscriptionType === 'موثوق' && (
@@ -461,11 +478,12 @@ export default function PropertiesPage() {
                 {/* Content Section - Flexible grow */}
                 <div className="flex flex-col flex-1 p-3 md:p-5">
                   {/* Title */}
-                  <Link href={`/property/${property.propertyNumber}`}>
-                    <h3 className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors">
-                      {property.name}
-                    </h3>
-                  </Link>
+                  <h3 
+                    className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
+                    onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                  >
+                    {property.name}
+                  </h3>
 
                   {/* Location */}
                   <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
@@ -494,14 +512,13 @@ export default function PropertiesPage() {
                     </div>
 
                     {/* CTA Button - Fixed at bottom */}
-                    <Link href={`/property/${property.propertyNumber}`}>
-                      <Button 
-                        className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                        data-testid={`button-details-${property.propertyNumber}`}
-                      >
-                        عرض التفاصيل
-                      </Button>
-                    </Link>
+                    <Button 
+                      className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
+                      onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                      data-testid={`button-details-${property.propertyNumber}`}
+                    >
+                      عرض التفاصيل
+                    </Button>
                   </div>
                 </div>
               </Card>
