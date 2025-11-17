@@ -55,15 +55,19 @@ class GoogleDriveService {
 
   async uploadImage(folderId: string, imageBuffer: Buffer, filename: string): Promise<string> {
     try {
+      const { Readable } = await import('stream');
       const drive = await this.getDrive();
       const fileMetadata = {
         name: filename,
         parents: [folderId],
       };
 
+      // Convert Buffer to Stream for Google Drive API
+      const stream = Readable.from(imageBuffer);
+      
       const media = {
         mimeType: 'image/jpeg',
-        body: imageBuffer,
+        body: stream,
       };
 
       const file = await drive.files.create({
