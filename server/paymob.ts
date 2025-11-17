@@ -5,6 +5,8 @@ const PUBLIC_KEY = process.env.PAYMOB_PUBLIC_KEY!;
 const HMAC_SECRET = process.env.PAYMOB_HMAC_SECRET!;
 const INTEGRATION_ID_CARDS = process.env.PAYMOB_INTEGRATION_ID_CARDS!;
 const INTEGRATION_ID_APPLEPAY = process.env.PAYMOB_INTEGRATION_ID_APPLEPAY!;
+const IFRAME_ID_CARDS = process.env.PAYMOB_IFRAME_ID_CARDS || '869748'; // Default iframe ID
+const IFRAME_ID_APPLEPAY = process.env.PAYMOB_IFRAME_ID_APPLEPAY || '869749'; // Default iframe ID
 
 const PAYMOB_API_URL = 'https://accept.paymob.com/api';
 
@@ -37,7 +39,19 @@ export class PaymobService {
       body: JSON.stringify({ api_key: API_KEY }),
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Paymob auth error:', errorText);
+      throw new Error(`فشل في المصادقة مع Paymob: ${response.status}`);
+    }
+
     const data: PaymobAuthResponse = await response.json();
+    
+    if (!data.token) {
+      console.error('No token in response:', data);
+      throw new Error('لم يتم الحصول على رمز المصادقة من Paymob');
+    }
+
     this.authToken = data.token;
     this.tokenExpiry = Date.now() + 55 * 60 * 1000; // 55 minutes
 
@@ -69,7 +83,19 @@ export class PaymobService {
       }),
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Paymob create order error:', errorText);
+      throw new Error(`فشل في إنشاء طلب الدفع: ${response.status}`);
+    }
+
     const data: PaymobOrderResponse = await response.json();
+    
+    if (!data.id) {
+      console.error('No order ID in response:', data);
+      throw new Error('لم يتم الحصول على معرف الطلب من Paymob');
+    }
+
     return data.id;
   }
 
@@ -113,7 +139,19 @@ export class PaymobService {
       }),
     });
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Paymob create payment key error:', errorText);
+      throw new Error(`فشل في إنشاء مفتاح الدفع: ${response.status}`);
+    }
+
     const data: PaymobPaymentKeyResponse = await response.json();
+    
+    if (!data.token) {
+      console.error('No payment token in response:', data);
+      throw new Error('لم يتم الحصول على رمز الدفع من Paymob');
+    }
+
     return data.token;
   }
 
@@ -125,9 +163,8 @@ export class PaymobService {
     const orderId = await this.createOrder(amount, propertyNumber);
     const paymentToken = await this.createPaymentKey(orderId, amount, propertyNumber, paymentMethod);
 
-    const iframeUrl = paymentMethod === 'applepay'
-      ? `https://accept.paymob.com/api/acceptance/iframes/YOUR_APPLEPAY_IFRAME_ID?payment_token=${paymentToken}`
-      : `https://accept.paymob.com/api/acceptance/iframes/YOUR_CARDS_IFRAME_ID?payment_token=${paymentToken}`;
+    const iframeId = paymentMethod === 'applepay' ? IFRAME_ID_APPLEPAY : IFRAME_ID_CARDS;
+    const iframeUrl = `https://accept.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
 
     return {
       orderId,
