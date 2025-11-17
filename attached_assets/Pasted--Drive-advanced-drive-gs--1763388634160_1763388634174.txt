@@ -1,0 +1,121 @@
+يوضّح نموذج الرمز البرمجي التالي كيفية حفظ ملف في حساب المستخدم على Drive.
+
+advanced/drive.gsعرض على GitHub
+
+/**
+ * Uploads a new file to the user's Drive.
+ */
+function uploadFile() {
+  try {
+    // Makes a request to fetch a URL.
+    const image = UrlFetchApp.fetch('http://goo.gl/nd7zjB').getBlob();
+    let file = {
+      name: 'google_logo.png',
+      mimeType: 'image/png'
+    };
+    // Create a file in the user's Drive.
+    file = Drive.Files.create(file, image, {'fields': 'id,size'});
+    console.log('ID: %s, File size (bytes): %s', file.id, file.size);
+  } catch (err) {
+    // TODO (developer) - Handle exception
+    console.log('Failed to upload file with error %s', err.message);
+  }
+}
+سرد المجلدات
+يوضّح نموذج الرمز البرمجي التالي كيفية إدراج المجلدات ذات المستوى الأعلى في Drive الخاص بالمستخدم. يُرجى العِلم أنّه يتم استخدام رموز مميزة للصفحات للوصول إلى القائمة الكاملة بالنتائج.
+
+advanced/drive.gsعرض على GitHub
+
+/**
+ * Lists the top-level folders in the user's Drive.
+ */
+function listRootFolders() {
+  const query = '"root" in parents and trashed = false and ' +
+    'mimeType = "application/vnd.google-apps.folder"';
+  let folders;
+  let pageToken = null;
+  do {
+    try {
+      folders = Drive.Files.list({
+        q: query,
+        pageSize: 100,
+        pageToken: pageToken
+      });
+      if (!folders.files || folders.files.length === 0) {
+        console.log('All folders found.');
+        return;
+      }
+      for (let i = 0; i < folders.files.length; i++) {
+        const folder = folders.files[i];
+        console.log('%s (ID: %s)', folder.name, folder.id);
+      }
+      pageToken = folders.nextPageToken;
+    } catch (err) {
+      // TODO (developer) - Handle exception
+      console.log('Failed with error %s', err.message);
+    }
+  } while (pageToken);
+}
+مراجعات القائمة
+تعرض عيّنة الرمز البرمجي التالية كيفية إدراج المراجعات لملف معيّن. يُرجى العِلم أنّ بعض الملفات يمكن أن تتضمّن عدة مراجعات، وعليك استخدام رموز الصفحات للوصول إلى القائمة الكاملة من النتائج.
+
+advanced/drive.gsعرض على GitHub
+
+/**
+ * Lists the revisions of a given file.
+ * @param {string} fileId The ID of the file to list revisions for.
+ */
+function listRevisions(fileId) {
+  let revisions;
+  const pageToken = null;
+  do {
+    try {
+      revisions = Drive.Revisions.list(
+          fileId,
+          {'fields': 'revisions(modifiedTime,size),nextPageToken'});
+      if (!revisions.revisions || revisions.revisions.length === 0) {
+        console.log('All revisions found.');
+        return;
+      }
+      for (let i = 0; i < revisions.revisions.length; i++) {
+        const revision = revisions.revisions[i];
+        const date = new Date(revision.modifiedTime);
+        console.log('Date: %s, File size (bytes): %s', date.toLocaleString(),
+            revision.size);
+      }
+      pageToken = revisions.nextPageToken;
+    } catch (err) {
+      // TODO (developer) - Handle exception
+      console.log('Failed with error %s', err.message);
+    }
+  } while (pageToken);
+}
+إضافة خصائص الملف
+يستخدم نموذج الرمز البرمجي التالي الحقل appProperties لإضافة سمة مخصّصة إلى ملف. لا تظهر السمة المخصّصة إلا للنص البرمجي. لإضافة خاصية مخصّصة إلى الملف يمكن للتطبيقات الأخرى الاطّلاع عليها أيضًا، استخدِم الحقل properties بدلاً من ذلك. لمزيد من المعلومات، يُرجى الاطّلاع على إضافة خصائص ملفات مخصّصة.
+
+advanced/drive.gsعرض على GitHub
+
+/**
+ * Adds a custom app property to a file. Unlike Apps Script's DocumentProperties,
+ * Drive's custom file properties can be accessed outside of Apps Script and
+ * by other applications; however, appProperties are only visible to the script.
+ * @param {string} fileId The ID of the file to add the app property to.
+ */
+function addAppProperty(fileId) {
+  try {
+    let file = {
+      'appProperties': {
+        'department': 'Sales'
+      }
+    };
+    // Updates a file to add an app property.
+    file = Drive.Files.update(file, fileId, null, {'fields': 'id,appProperties'});
+    console.log(
+        'ID: %s, appProperties: %s',
+        file.id,
+        JSON.stringify(file.appProperties, null, 2));
+  } catch (err) {
+    // TODO (developer) - Handle exception
+    console.log('Failed with error %s', err.message);
+  }
+}
