@@ -1,0 +1,228 @@
+import { useRoute, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { Property } from "@shared/schema";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
+import { useState } from "react";
+
+export default function PropertyDetailsPage() {
+  const [, params] = useRoute("/property/:id");
+  const [, setLocation] = useLocation();
+  const [selectedImage, setSelectedImage] = useState<number>(0);
+
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ['/api/properties'],
+  });
+
+  const property = properties.find(p => p.propertyNumber === params?.id);
+
+  if (!property) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <h2 className="text-xl font-bold mb-2">العقار غير موجود</h2>
+          <Button onClick={() => setLocation('/')} data-testid="button-back">
+            العودة للرئيسية
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  const isVerified = property.subscriptionType === 'موثوق';
+  const images = property.imageUrls || [];
+
+  const handleWhatsApp = () => {
+    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber} - ${property.name}`;
+    const url = `https://wa.me/${property.whatsappNumber}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setLocation('/')}
+            data-testid="button-back-header"
+          >
+            <ArrowRight className="w-5 h-5" />
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-lg font-bold text-primary truncate">{property.name}</h1>
+            <p className="text-xs text-muted-foreground">عقار رقم {property.propertyNumber}</p>
+          </div>
+          {isVerified && (
+            <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
+              موثوق
+            </Badge>
+          )}
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Image Gallery */}
+          <div className="lg:col-span-2 space-y-4">
+            <Card className={`overflow-hidden ${isVerified ? 'ring-2 ring-primary/20' : ''}`}>
+              {images.length > 0 ? (
+                <>
+                  <div className="relative aspect-video bg-muted">
+                    <img
+                      src={images[selectedImage]}
+                      alt={`${property.name} - صورة ${selectedImage + 1}`}
+                      className="w-full h-full object-cover"
+                      data-testid="img-main"
+                    />
+                  </div>
+                  {images.length > 1 && (
+                    <div className="p-4 bg-muted/30 flex gap-2 overflow-x-auto">
+                      {images.map((img, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedImage(idx)}
+                          className={`flex-shrink-0 w-20 h-20 rounded-md overflow-hidden transition-all ${
+                            selectedImage === idx
+                              ? 'ring-2 ring-primary'
+                              : 'opacity-60 hover:opacity-100'
+                          }`}
+                          data-testid={`button-thumbnail-${idx}`}
+                        >
+                          <img
+                            src={img}
+                            alt={`صورة ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="aspect-video bg-muted flex items-center justify-center">
+                  <div className="text-center">
+                    <Home className="w-16 h-16 mx-auto mb-2 text-muted-foreground" />
+                    <p className="text-muted-foreground">لا توجد صور</p>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Description & Details */}
+            <Card className="p-6">
+              <h2 className="text-xl font-bold text-primary mb-4">تفاصيل العقار</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">المدينة</p>
+                    <p className="font-semibold">{property.city || 'غير محدد'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Compass className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">الاتجاه</p>
+                    <p className="font-semibold">{property.direction || 'غير محدد'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Home className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">النوع</p>
+                    <p className="font-semibold">{property.type || 'غير محدد'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Facilities */}
+              {property.facilities && property.facilities.length > 0 && (
+                <div>
+                  <h3 className="font-bold mb-3">المرافق</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {property.facilities.map((facility, idx) => (
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className="text-sm"
+                        data-testid={`badge-facility-${idx}`}
+                      >
+                        {facility}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Pricing & Contact */}
+          <div className="space-y-4">
+            {/* Pricing Card */}
+            <Card className="p-6">
+              <h3 className="text-lg font-bold text-primary mb-4">الأسعار</h3>
+              <div className="space-y-3">
+                {property.prices?.weekday && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">وسط الأسبوع</span>
+                    <span className="font-bold text-primary">{property.prices.weekday} ر.س</span>
+                  </div>
+                )}
+                {property.prices?.weekend && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">نهاية الأسبوع</span>
+                    <span className="font-bold text-primary">{property.prices.weekend} ر.س</span>
+                  </div>
+                )}
+                {property.prices?.overnight && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">مبيت</span>
+                    <span className="font-bold text-primary">{property.prices.overnight} ر.س</span>
+                  </div>
+                )}
+                {property.prices?.holidays && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">إجازات</span>
+                    <span className="font-bold text-primary">{property.prices.holidays} ر.س</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* Contact Card */}
+            <Card className="p-6">
+              <h3 className="text-lg font-bold text-primary mb-4">التواصل</h3>
+              <Button
+                onClick={handleWhatsApp}
+                className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white"
+                size="lg"
+                data-testid="button-whatsapp"
+              >
+                <Phone className="w-5 h-5 ml-2" />
+                تواصل عبر واتساب
+              </Button>
+            </Card>
+
+            {/* Verified Badge */}
+            {isVerified && (
+              <Card className="p-6 bg-primary/5 border-primary/20">
+                <div className="text-center">
+                  <Badge className="bg-primary text-white mb-2">موثوق</Badge>
+                  <p className="text-sm text-muted-foreground">
+                    هذا العقار تم التحقق منه وهو عضو مميز في مودي الذكي
+                  </p>
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

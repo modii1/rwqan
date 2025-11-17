@@ -7,13 +7,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
 const TYPES = ['قسم', 'قسمين'];
+
+// Smart filters mapping - تطابق ذكي للمرافق
+const SMART_FILTERS = {
+  'مبيت': ['غرف نوم', 'غرفة نوم', 'نوم', 'مبيت'],
+  'شتاء': ['خيمة', 'مشب', 'تدفئة', 'شتاء', 'شتوية'],
+  'صيف': ['مسبح', 'ألعاب مائية', 'مكيف', 'صيف', 'صيفية'],
+  'مناسبات': ['قاعة', 'صالة', 'مناسبات', 'حفلات'],
+  'ألعاب': ['ملعب', 'ألعاب', 'ترامبولين', 'زحليقة'],
+};
 
 const PRIORITY_FACILITIES = [
   'مسبح',
@@ -81,11 +90,24 @@ export default function PropertiesPage() {
       if (property.type !== selectedType) return false;
     }
 
-    // Facilities filter
+    // Facilities filter with smart matching
     if (selectedFacilities.length > 0) {
-      const hasAllFacilities = selectedFacilities.every(f =>
-        property.facilities.includes(f)
-      );
+      const hasAllFacilities = selectedFacilities.every(selectedFacility => {
+        // Direct match
+        if (property.facilities.includes(selectedFacility)) {
+          return true;
+        }
+        
+        // Smart match using SMART_FILTERS
+        const smartKeywords = SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
+        if (smartKeywords) {
+          return property.facilities.some(facility =>
+            smartKeywords.some(keyword => facility.includes(keyword))
+          );
+        }
+        
+        return false;
+      });
       if (!hasAllFacilities) return false;
     }
 
@@ -368,24 +390,21 @@ export default function PropertiesPage() {
                 >
                   {property.imageUrls.length > 0 && (
                     <>
-                      <img
-                        src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
-                        alt={property.name}
-                        className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 ${
-                          imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
-                        }`}
-                        onClick={() => setSelectedImage({ 
-                          url: property.imageUrls[getCurrentImageIndex(property.propertyNumber)], 
-                          index: getCurrentImageIndex(property.propertyNumber), 
-                          total: property.imageUrls.length 
-                        })}
-                        data-testid={`img-property-${property.propertyNumber}-current`}
-                      />
+                      <Link href={`/property/${property.propertyNumber}`}>
+                        <img
+                          src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
+                          alt={property.name}
+                          className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
+                            imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
+                          }`}
+                          data-testid={`img-property-${property.propertyNumber}-current`}
+                        />
+                      </Link>
                       
                       {/* Trusted Badge - Top Right Corner on Image */}
                       {property.subscriptionType === 'موثوق' && (
                         <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
-                          <span className="text-yellow-600 text-base md:text-xl">⭐</span>
+                          <Star className="w-4 h-4 md:w-5 md:h-5 text-yellow-600 fill-yellow-600" />
                           <span className="text-[#b38b00] font-bold text-xs md:text-sm">موثوق</span>
                         </div>
                       )}
@@ -442,7 +461,11 @@ export default function PropertiesPage() {
                 {/* Content Section - Flexible grow */}
                 <div className="flex flex-col flex-1 p-3 md:p-5">
                   {/* Title */}
-                  <h3 className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1">{property.name}</h3>
+                  <Link href={`/property/${property.propertyNumber}`}>
+                    <h3 className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors">
+                      {property.name}
+                    </h3>
+                  </Link>
 
                   {/* Location */}
                   <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
@@ -456,14 +479,8 @@ export default function PropertiesPage() {
                   <div className="hidden md:flex items-center gap-4 lg:gap-6 mb-4 lg:mb-6 text-sm text-[#b88d2b]">
                     {topFacilities.map((facility, idx) => (
                       <div key={idx} className="flex items-center gap-2">
-                        <span className="text-base lg:text-lg">
-                          {facility.includes('مسبح') ? '🏊' : 
-                           facility.includes('غرف') || facility.includes('غرفة') ? '🛏️' : 
-                           facility.includes('حمام') ? '🚿' : 
-                           facility.includes('ملعب') ? '⚽' : 
-                           facility.includes('مبيت') ? '🌙' : '✨'}
-                        </span>
-                        <span className="font-semibold text-xs">{ facility}</span>
+                        <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
+                        <span className="font-semibold text-xs">{facility}</span>
                       </div>
                     ))}
                   </div>
@@ -477,13 +494,14 @@ export default function PropertiesPage() {
                     </div>
 
                     {/* CTA Button - Fixed at bottom */}
-                    <Button 
-                      className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                      onClick={() => setSelectedProperty(property)}
-                      data-testid={`button-details-${property.propertyNumber}`}
-                    >
-                      عرض التفاصيل
-                    </Button>
+                    <Link href={`/property/${property.propertyNumber}`}>
+                      <Button 
+                        className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
+                        data-testid={`button-details-${property.propertyNumber}`}
+                      >
+                        عرض التفاصيل
+                      </Button>
+                    </Link>
                   </div>
                 </div>
               </Card>

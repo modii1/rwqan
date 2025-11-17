@@ -7,6 +7,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import NotFound from "@/pages/not-found";
 import PropertiesPage from "@/pages/properties";
+import PropertyDetailsPage from "@/pages/property-details";
 import OwnerLogin from "@/pages/owner-login";
 import OwnerDashboard from "@/pages/owner-dashboard";
 import SubscriptionPage from "@/pages/subscription";
@@ -17,6 +18,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={PropertiesPage} />
+      <Route path="/property/:id" component={PropertyDetailsPage} />
       <Route path="/owner/login" component={OwnerLogin} />
       <Route path="/owner/dashboard" component={OwnerDashboard} />
       <Route path="/owner/subscription" component={SubscriptionPage} />
