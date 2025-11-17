@@ -40,20 +40,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const properties = await storage.getProperties();
       
-      // Use placeholder image if no images available
-      const propertiesWithImages = properties.map(property => {
-        if (!property.imageUrls || property.imageUrls.length === 0) {
-          // Add placeholder image
-          return { 
-            ...property, 
-            imageUrls: ['https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80'] 
-          };
-        }
-        return property;
-      });
-      
       // Sort: موثوق properties first
-      const sorted = propertiesWithImages.sort((a, b) => {
+      const sorted = properties.sort((a, b) => {
         if (a.subscriptionType === 'موثوق' && b.subscriptionType !== 'موثوق') return -1;
         if (a.subscriptionType !== 'موثوق' && b.subscriptionType === 'موثوق') return 1;
         return 0;

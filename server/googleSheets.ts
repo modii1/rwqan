@@ -322,7 +322,26 @@ class GoogleSheetsService {
     const rows = await this.readSheet(SHEETS.PROPERTIES);
     // Filter out empty rows (no property number)
     const validRows = rows.filter(row => row[0] && row[0].trim());
-    return validRows.map(row => this.rowToProperty(row));
+    const properties = validRows.map(row => this.rowToProperty(row));
+    
+    // Fetch real images from Google Drive
+    const { googleDriveService } = await import('./googleDrive');
+    const propertiesWithImages = await Promise.all(
+      properties.map(async (property) => {
+        try {
+          const images = await googleDriveService.getPropertyFolderImages(property.propertyNumber);
+          return {
+            ...property,
+            imageUrls: images.length > 0 ? images : property.imageUrls,
+          };
+        } catch (error) {
+          console.error(`Error fetching images for property ${property.propertyNumber}:`, error);
+          return property;
+        }
+      })
+    );
+    
+    return propertiesWithImages;
   }
 
   async getPropertyByNumber(propertyNumber: string): Promise<Property | null> {

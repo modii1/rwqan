@@ -8,7 +8,7 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Search, X, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -413,6 +413,7 @@ export default function PropertiesPage() {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           {selectedProperty && (
             <div className="space-y-6">
+              <DialogTitle className="sr-only">{selectedProperty.name}</DialogTitle>
               {/* Image Gallery */}
               {selectedProperty.imageUrls.length > 0 && (
                 <div className="relative">
@@ -420,7 +421,30 @@ export default function PropertiesPage() {
                     src={selectedProperty.imageUrls[getCurrentImageIndex(selectedProperty.propertyNumber)]}
                     alt={selectedProperty.name}
                     className="w-full h-96 object-cover rounded-lg"
+                    data-testid="img-dialog-current"
                   />
+                  
+                  {/* Navigation Arrows */}
+                  {selectedProperty.imageUrls.length > 1 && (
+                    <>
+                      <button
+                        onClick={() => prevImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
+                        data-testid="button-prev-image"
+                      >
+                        <ChevronRight className="w-6 h-6" />
+                      </button>
+                      <button
+                        onClick={() => nextImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
+                        data-testid="button-next-image"
+                      >
+                        <ChevronLeft className="w-6 h-6" />
+                      </button>
+                    </>
+                  )}
+                  
+                  {/* Slide Dots */}
                   {selectedProperty.imageUrls.length > 1 && (
                     <div className="flex justify-center gap-2 mt-4">
                       {selectedProperty.imageUrls.map((_, idx) => (
@@ -428,10 +452,11 @@ export default function PropertiesPage() {
                           key={idx}
                           className={`h-2 rounded-full transition-all ${
                             idx === getCurrentImageIndex(selectedProperty.propertyNumber)
-                              ? 'w-8 bg-primary'
+                              ? 'w-8 bg-[#b88d2b]'
                               : 'w-2 bg-muted-foreground/30'
                           }`}
                           onClick={() => goToImage(selectedProperty.propertyNumber, idx)}
+                          data-testid={`button-slide-${idx}`}
                         />
                       ))}
                     </div>
@@ -516,6 +541,7 @@ export default function PropertiesPage() {
         <DialogContent className="max-w-4xl p-0">
           {selectedImage && (
             <div className="relative">
+              <DialogTitle className="sr-only">صورة العقار</DialogTitle>
               <img
                 src={selectedImage.url}
                 alt="صورة العقار"
