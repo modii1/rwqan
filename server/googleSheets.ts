@@ -116,7 +116,7 @@ class GoogleSheetsService {
         spreadsheetId: SHEET_ID,
       });
 
-      const existingSheets = response.data.sheets.map((s: any) => s.properties.title);
+      const existingSheets = response.data.sheets?.map((s: any) => s.properties?.title) || [];
       const requiredSheets = Object.values(SHEETS);
 
       // Create missing sheets
@@ -317,11 +317,11 @@ class GoogleSheetsService {
       spreadsheetId: SHEET_ID,
     });
 
-    const sheet = response.data.sheets.find(
-      (s: any) => s.properties.title === sheetName
+    const sheet = response.data.sheets?.find(
+      (s: any) => s.properties?.title === sheetName
     );
 
-    if (!sheet) {
+    if (!sheet || !sheet.properties?.sheetId) {
       throw new Error(`Sheet not found: ${sheetName}`);
     }
 
