@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, X, ExternalLink } from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
@@ -38,6 +38,7 @@ export default function PropertiesPage() {
   const [expandedFacilities, setExpandedFacilities] = useState<Set<string>>(new Set());
   const [expandedPrices, setExpandedPrices] = useState<Set<string>>(new Set());
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
@@ -117,6 +118,26 @@ export default function PropertiesPage() {
     setSelectedType("");
     setSelectedFacilities([]);
     setPriceRange([0, 5000]);
+  };
+
+  const getCurrentImageIndex = (propertyNumber: string) => {
+    return currentImageIndex.get(propertyNumber) || 0;
+  };
+
+  const nextImage = (propertyNumber: string, totalImages: number) => {
+    const current = getCurrentImageIndex(propertyNumber);
+    const next = (current + 1) % totalImages;
+    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
+  };
+
+  const prevImage = (propertyNumber: string, totalImages: number) => {
+    const current = getCurrentImageIndex(propertyNumber);
+    const prev = current === 0 ? totalImages - 1 : current - 1;
+    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
+  };
+
+  const goToImage = (propertyNumber: string, index: number) => {
+    setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
   };
 
   return (
@@ -282,21 +303,71 @@ export default function PropertiesPage() {
                 <div className="p-4 flex flex-col h-full">
                   {/* Content wrapper - takes available space */}
                   <div className="flex-1">
-                    {/* Images */}
+                    {/* Image Carousel */}
                     {property.imageUrls.length > 0 && (
-                      <div className="mb-4 overflow-x-auto">
-                        <div className="flex gap-2">
-                          {property.imageUrls.map((url, idx) => (
-                            <img
-                              key={`${property.propertyNumber}-img-${idx}`}
-                              src={url}
-                              alt={`${property.name} - ${idx + 1}`}
-                              className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
-                              onClick={() => setSelectedImage({ url, index: idx, total: property.imageUrls.length })}
-                              data-testid={`img-property-${property.propertyNumber}-${idx}`}
-                            />
-                          ))}
+                      <div className="relative mb-4 group">
+                        {/* Main Image */}
+                        <div className="relative overflow-hidden rounded-xl">
+                          <img
+                            src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
+                            alt={`${property.name}`}
+                            className="w-full h-64 object-cover cursor-pointer"
+                            onClick={() => setSelectedImage({ 
+                              url: property.imageUrls[getCurrentImageIndex(property.propertyNumber)], 
+                              index: getCurrentImageIndex(property.propertyNumber), 
+                              total: property.imageUrls.length 
+                            })}
+                            data-testid={`img-property-${property.propertyNumber}-current`}
+                          />
+                          
+                          {/* Navigation Arrows - show only if more than 1 image */}
+                          {property.imageUrls.length > 1 && (
+                            <>
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  nextImage(property.propertyNumber, property.imageUrls.length);
+                                }}
+                                data-testid={`button-next-image-${property.propertyNumber}`}
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  prevImage(property.propertyNumber, property.imageUrls.length);
+                                }}
+                                data-testid={`button-prev-image-${property.propertyNumber}`}
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
                         </div>
+
+                        {/* Image Indicators - show only if more than 1 image */}
+                        {property.imageUrls.length > 1 && (
+                          <div className="flex justify-center gap-1.5 mt-2">
+                            {property.imageUrls.map((_, idx) => (
+                              <button
+                                key={`indicator-${property.propertyNumber}-${idx}`}
+                                className={`h-1.5 rounded-full transition-all ${
+                                  idx === getCurrentImageIndex(property.propertyNumber)
+                                    ? 'w-6 bg-primary'
+                                    : 'w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50'
+                                }`}
+                                onClick={() => goToImage(property.propertyNumber, idx)}
+                                data-testid={`indicator-${property.propertyNumber}-${idx}`}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
