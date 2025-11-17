@@ -172,9 +172,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/owner/session", (req, res) => {
     const propertyNumber = (req.session as any)?.propertyNumber;
     if (!propertyNumber) {
-      return res.status(401).json({ error: 'غير مسجل الدخول' });
+      return res.json({ isLoggedIn: false });
     }
-    res.json({ propertyNumber });
+    res.json({ isLoggedIn: true, propertyNumber });
   });
 
   // ================================
