@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+
+<script src="https://cdn.counter.dev/script.js" data-id="deaae242-6261-491b-911e-a1d3321b2b74" data-utcoffset="3"></script>
+
+
+<meta charset="UTF-8" />
+<title>مودي الذكي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+body{font-family:'Cairo',sans-serif;direction:rtl;margin:20px;background:#fafaf5;color:#4a3b2a;}
+h1{display:flex;align-items:center;padding:10px 20px;background:#fff;color:#4a3b2a;position:sticky;top:0;z-index:10;box-shadow:0 2px 4px rgba(0,0,0,0.05);}
+h1 .logo img{height:80px;width:auto;margin-right:15px;border-radius:8px;}
+h1 .title-text{font-weight:700;font-size:20px;}
+#lastUpdate{text-align:center;font-weight:600;margin-bottom:15px;color:#5b4a1f;}
+#container{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:20px 0;}
+.column{background:#fcfbf5;border-radius:8px;padding:10px 12px;box-shadow:0 0 5px #c0b29955;cursor:pointer;font-weight:700;text-align:center;min-width:100px;}
+.column:hover,.column.active{background:#dcd6b8;color:#fff;}
+.filters-container{display:flex;flex-wrap:wrap;justify-content:center;gap:20px;background:#f9f8f0;padding:15px;border-radius:10px;box-shadow:0 0 6px #c0b29955;margin-bottom:30px;}
+.filter-box{display:flex;flex-direction:column;min-width:140px;}
+.filter-box label{font-weight:bold;margin-bottom:5px;color:#4a3b2a;}
+.filter-box select,.filter-box input{padding:7px;border-radius:6px;border:1px solid #ccc;font-family:'Cairo',sans-serif;}
+.container{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px;}
+.card{background:#fcfbf5;border-radius:10px;padding:15px;box-shadow:0 0 6px #c0b29955;display:flex;flex-direction:column;position:relative;}
+.card-title{font-weight:700;font-size:18px;margin-bottom:8px;color:#4a3b2a;}
+.card-detail{font-size:15px;color:#5b4a1f;margin-bottom:6px;}
+.card-detail.name {font-weight: 700;font-size: 15px;color: #4a3b2a;margin-bottom: 6px;}
+.carousel-container{width:100%;height:200px;overflow-x:auto;overflow-y:hidden;border-radius:12px;margin-bottom:10px;display:flex;gap:10px;scroll-behavior:smooth;}
+.carousel-container img{flex:0 0 auto;width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;border-radius:12px;}
+.modal{display:none;position:fixed;z-index:9999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);justify-content:center;align-items:center;overflow:hidden;}
+.modal-content{position:relative;max-width:90vw;max-height:80vh;display:flex;align-items:center;justify-content:center;}
+.modal-content img{max-height:80vh;max-width:90vw;border-radius:8px;display:none;}
+.modal-content img.active{display:block;}
+.modal-close{position:absolute;top:10px;right:15px;font-size:35px;color:#fff;cursor:pointer;z-index:10000;font-weight:bold;}
+.modal-prev,.modal-next{position:fixed;top:50%;transform:translateY(-50%);font-size:45px;color:#fff;background:rgba(0,0,0,0.4);border-radius:50%;width:55px;height:55px;text-align:center;line-height:55px;cursor:pointer;z-index:10000;}
+.modal-prev{left:20px;} .modal-next{right:20px;}
+.card-premium{background:#fffdf0;border:2px solid #e0c97b;box-shadow:0 0 8px #e0c97b55;}
+.trusted{background:#fff8d6;color:#b38b00;font-weight:bold;font-size:13px;padding:2px 6px;border-radius:4px;}
+.prices-box {position: relative;top: auto;left: auto;display: flex;flex-direction: column;gap: 4px;margin: 8px 0;padding: 8px 10px;background: #fff8e5;border: 1px solid #f0c419;border-radius: 6px;font-size: 14px;color: #333;}
+.prices-box div {display: flex;justify-content: space-between;font-weight: bold;}
+.prices-box span:first-child {color: #444;}
+.prices-box span:last-child {color: #008000;font-size: 15px;}
+.card {padding-bottom: 78px;box-sizing: border-box;position: relative;}
+.card-footer {position: absolute;left: 12px;right: 12px;bottom: 12px;display: flex;gap: 8px;align-items: center;justify-content: space-between;background: transparent;}
+.card-footer a {flex: 1 1 0;text-align: center;padding: 10px 8px;border-radius: 6px;text-decoration: none;font-weight: 700;display: inline-block;white-space: nowrap;overflow: hidden;text-overflow: ellipsis;}
+.card-footer .open-folder {background: #4a3b1a;color: #fff;}
+.card-footer .whatsapp {background: #25D366;color: #fff;}
+@media (max-width:420px){.card-footer{flex-direction: column;gap: 6px;}}
+</style>
+</head>
+<body>
+
+<h1 style="display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:#fff;color:#4a3b2a;position:sticky;top:0;z-index:10;box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+  <div class="logo">
+    <img src="https://i.imgur.com/e6m7F3E.png" alt="شعار موحد" style="height:90px;width:auto;border-radius:8px;">
+  </div>
+  <span class="title-text" style="font-weight:700;font-size:22px;">
+    🏡 مودي الذكي - قائمة الشاليهات المتاحة
+  </span>
+</h1>
+
+<div id="lastUpdate"></div>
+<div id="container">
+  <div class="column" id="all"><h3>الكل</h3></div>
+  <div class="column" id="pool"><h3>مسبح</h3></div>
+  <div class="column" id="noPool"><h3>بدون مسبح</h3></div>
+  <div class="column" id="overnight"><h3>مناسب للمبيت</h3></div>
+  <div class="column" id="waterGames"><h3>ألعاب مائية</h3></div>
+  <div class="column" id="playground"><h3>ملعب</h3></div>
+  <div class="column" id="events"><h3>مناسب للمناسبات</h3></div>
+  <div class="column" id="winter"><h3>شاليهات الشتاء</h3></div>
+</div>
+
+<div id="loadingMessage" style="
+    text-align:center;
+    font-weight:bold;
+    padding:10px 20px;
+    margin-bottom:15px;
+    background:#fff8d6;
+    border:1px solid #f0c419;
+    border-radius:8px;
+    color:#b38b00;
+    display:none;
+">
+🔄 لحظة من فضلك... جاري تحميل الفلاتر
+</div>
+
+<div class="filters-container">
+  <div class="filter-box">
+    <label for="directionSelect">الاتجاه</label>
+    <select id="directionSelect">
+      <option value="">الكل</option>
+      <option value="شمال">شمال</option>
+      <option value="جنوب">جنوب</option>
+      <option value="شرق">شرق</option>
+      <option value="غرب">غرب</option>
+    </select>
+  </div>
+  <div class="filter-box">
+    <label for="regionSelect">المنطقة</label>
+    <select id="regionSelect">
+      <option value="">الكل</option>
+      <option value="بريدة">بريدة</option>
+      <option value="عنيزة">عنيزة</option>
+      <option value="الرس">الرس</option>
+      <option value="البكيرية">البكيرية</option>
+      <option value="المذنب">المذنب</option>
+    </select>
+  </div>
+  <div class="filter-box">
+    <label for="typeSelect">النوع</label>
+    <select id="typeSelect">
+      <option value="">الكل</option>
+      <option value="قسم">قسم</option>
+      <option value="قسمين">قسمين</option>
+    </select>
+  </div>
+  <div class="filter-box">
+    <label for="facilitySearch">🔍 بحث شامل</label>
+    <input type="text" id="facilitySearch" placeholder="مثال: عن كل شي" />
+  </div>
+  <div class="filter-box">
+    <label>السعر</label>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <span id="minPriceLabel">100</span>
+      <input type="range" id="priceSliderMin" min="0" max="5000" step="50" value="0">
+      <input type="range" id="priceSliderMax" min="0" max="5000" step="50" value="0">
+      <span id="maxPriceLabel">1500</span>
+    </div>
+  </div>
+</div>
+
+<div class="container" id="cards-container"></div>
+
+<div id="imageModal" class="modal">
+  <span class="modal-close" title="إغلاق">&times;</span>
+  <button class="modal-prev" title="السابق">&#10094;</button>
+  <div class="modal-content"></div>
+  <button class="modal-next" title="التالي">&#10095;</button>
+</div>
+
+<script>
+let allData=[], filteredData=[], currentImages=[], currentImageIndex=0;
+
+async function fetchData() {
+  const loadingMsg = document.getElementById('loadingMessage');
+  loadingMsg.style.display = 'block'; // إظهار الرسالة أثناء التحميل
+
+  try {
+    const res = await fetch('https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData');
+    allData = await res.json();
+    document.getElementById('cards-container').innerHTML = '';
+
+    await renderCardsWithProgress(allData); // عرض البطاقات
+    setupFilters(); // إعداد الفلاتر
+
+    loadingMsg.style.display = 'none'; // إخفاء الرسالة بعد اكتمال التحميل
+  } catch (e) {
+    console.error(e);
+    loadingMsg.innerText = '❌ تعذر تحميل البيانات.';
+  }
+}
+
+
+
+function formatPropertyNumber(num){
+  return num.toString().padStart(5,'0');
+}
+
+
+// 🔹 نسخة محسنة لدعم شريط التحميل
+function renderCardsWithProgress(data){
+  filteredData = data;
+  const container = document.getElementById('cards-container');
+  container.innerHTML='';
+
+  const trustedItems = data.filter(item => (item['اسم العقار']||'').trim() !== '');
+  const normalItems = data.filter(item => (item['اسم العقار']||'').trim() === '');
+
+  const allItems = [...trustedItems, ...normalItems];
+  let totalImages = allItems.length * 10; // تقريب 10 صور لكل بطاقة
+  let loadedImages = 0;
+
+  function updateProgress(){
+    const progress = Math.min(100, (loadedImages / totalImages * 100));
+    const progressBar = document.getElementById('progressBar');
+    if(progressBar) progressBar.style.width = progress + '%';
+  }
+
+  function preloadImagesWithProgress(imageUrls){
+    return Promise.all(imageUrls.map(url=>{
+      return new Promise(resolve=>{
+        const img = new Image();
+        img.src = url;
+        img.onload = img.onerror = ()=>{
+          loadedImages++;
+          updateProgress();
+          resolve();
+        };
+      });
+    }));
+  }
+
+  function renderItems(items){
+    return Promise.all(items.map(item=>{
+      return new Promise(resolve=>{
+        const id = item['رقم العقار']||'';
+        google.script.run.withSuccessHandler(async images=>{
+          const limitedImages = images.slice(0,10);
+          renderCardWithImages(item, limitedImages); // تعرض البطاقة فوراً
+          await preloadImagesWithProgress(limitedImages);
+          resolve();
+        }).getCachedImages(id);
+      });
+    }));
+  }
+
+  // نعرض الموثوق أولاً ثم الباقي
+  return renderItems(trustedItems).then(()=>renderItems(normalItems));
+}
+
+// 🔹 دالة تحميل الصور بدون تغيير
+function preloadImages(imageUrls){
+  return Promise.all(imageUrls.map(url=>{
+    return new Promise(resolve=>{
+      const img = new Image();
+      img.src = url;
+      img.onload = resolve;
+      img.onerror = resolve; // نتجاهل أي خطأ
+    });
+  }));
+}
+
+
+
+
+function renderCardWithImages(item, images){
+  const container = document.getElementById('cards-container');
+  const rawId = item['رقم العقار']||'';
+  const id = formatPropertyNumber(rawId);
+  // تنظيف نص نوع الاشتراك
+const subscription = (item['نوع الاشتراك'] || 'عادي').trim();
+  const limitedImages = images.slice(0, 10);
+
+ // زر فتح ملف العقار
+const openFolderButton = item['رابط الصور']
+  ? `<a href="${item['رابط الصور']}" target="_blank" 
+      style="flex:1;text-align:center;background:#4a3b1a;color:#fff;padding:8px;border-radius:5px;text-decoration:none;font-weight:bold;">
+      📁 فتح ملف العقار</a>` 
+  : '';
+
+// زر WhatsApp مع تسجيل الطلب ورقم العقار ديناميكي
+const whatsappButton = item['رقم الجوال']
+  ? `<a href="javascript:void(0)" onclick="
+      google.script.run.withSuccessHandler(function(serialCode){
+        const waNumber = '${item['رقم الجوال'].toString().replace(/^0/, '966')}';
+        const msg = encodeURIComponent('السلام عليكم استفسار الله يسعدك عن  ' + '${item['اسم العقار']||''}' + ' - ' + serialCode);
+        window.open('https://wa.me/' + waNumber + '?text=' + msg, '_blank');
+      }).logPropertyRequest('${item['رقم العقار']||''}', '${item['اسم العقار']||''}');
+    " style="flex:1;text-align:center;background:#25D366;color:#fff;padding:8px;border-radius:5px;text-decoration:none;font-weight:bold;">
+      📲 تواصل عبر واتساب
+    </a>`
+  : `<a href="https://wa.me/966533220646?text=${encodeURIComponent('استفسار عن رقم العقار ' + formatPropertyNumber(item['رقم العقار']||''))}" target="_blank"
+      style="flex:1;text-align:center;background:#25D366;color:#fff;padding:8px;border-radius:5px;text-decoration:none;font-weight:bold;">
+      📲 استفسار عبر واتساب</a>`;
+
+
+
+// تجميع الأزرار داخل div ملتصق بأسفل البطاقة
+const buttonsRow = `
+  <div style="
+    position:absolute;
+    bottom:12px;
+    left:12px;
+    right:12px;
+    display:flex;
+    gap:6px;
+  ">
+    ${openFolderButton}
+    ${whatsappButton}
+  </div>
+`;
+
+
+
+
+
+  const card = document.createElement('div');
+  card.className = 'card ' + (subscription==='مميز' ? 'card-premium' : '');
+  card.dataset.facilities = item['المرافق'] || '';
+  card.dataset.direction = item['الاتجاه'] || '';
+  card.dataset.location = item['الموقع'] || '';
+  card.dataset.region = item['المنطقة'] || '';
+  card.dataset.type = item['النوع'] || '';
+  card.dataset.name = item['اسم العقار'] || '';
+
+  // التفاصيل
+  // 🔹 تفاصيل (منطقة + اتجاه + موقع في صف واحد)
+let detailsHtml = `
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+    <div class="card-detail">📍 ${item['المنطقة']||'-'}</div>
+    <div class="card-detail">🧭 ${item['الاتجاه']||'-'}</div>
+    <div class="card-detail">📍 ${item['الموقع']||'-'}</div>
+  </div>
+  <div class="card-detail">🏠 النوع: ${item['النوع']||'-'}</div>
+  <div class="card-detail">🔹 المرافق: ${item['المرافق']||'-'}</div>
+`;
+
+
+  // صندوق الأسعار
+  const pricesHtml = `
+    <div class="prices-box">
+      ${item['سعر العرض'] ? `<div><span>💰 عرض خاص:</span> <span>${item['سعر العرض']}</span></div>` : ''}
+      ${item['سعر وسط الأسبوع'] ? `<div><span>📅 وسط الأسبوع:</span> <span>${item['سعر وسط الأسبوع']}</span></div>` : ''}
+      ${item['سعر نهاية الأسبوع'] ? `<div><span>📅 الويكند:</span> <span>${item['سعر نهاية الأسبوع']}</span></div>` : ''}
+      ${item['سعر المبيت'] ? `<div><span>🛏 المبيت:</span> <span>${item['سعر المبيت']}</span></div>` : ''}
+      ${item['سعر الإجازات'] ? `<div><span>🎉 الإجازات:</span> <span>${item['سعر الإجازات']}</span></div>` : ''}
+    </div>
+  `;
+
+  // صور الكاروسيل
+  const imagesHtml = limitedImages.length
+    ? `<div class="carousel-container">${limitedImages.map((src,i)=>`<img src="${src}" alt="صورة" onclick="openImageModal([${limitedImages.map(s=>`'${s}'`).join(',')}],${i})">`).join('')}</div>`
+    : '<p style="color:gray;padding:10px;">لا توجد صور</p>';
+
+
+
+// 🔥 سطر العنوان: رقم العقار يمين + اسم العقار يسار + موثوق لكل عقار له اسم
+const titleRow = `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;">
+    <div style="display:flex;align-items:center;gap:5px;">
+      <strong>${item['اسم العقار']||'-'}</strong>
+      ${item['اسم العقار'] ? '<span class="trusted">⭐ موثوق</span>' : ''}
+    </div>
+    <div>🏷 ${formatPropertyNumber(item['رقم العقار']||'')}</div>
+  </div>
+`;
+
+
+
+
+  // ترتيب الكرت
+  card.innerHTML = `
+    ${imagesHtml}
+    ${titleRow}
+    ${pricesHtml}
+    <div class="details-wrapper"><div class="info">${detailsHtml}</div></div>
+    ${buttonsRow}
+
+  `;
+
+  container.appendChild(card);
+}
+
+
+
+
+
+
+
+function openImageModal(images,index){currentImages=images;currentImageIndex=index;updateModalImage();document.getElementById('imageModal').style.display='flex';}
+function updateModalImage(){const modalContent=document.querySelector('.modal-content');modalContent.innerHTML='';currentImages.forEach((src,i)=>{const img=document.createElement('img');img.src=src;img.className=i===currentImageIndex?'active':'';modalContent.appendChild(img);});}
+function showPrevImage(){if(currentImageIndex>0){currentImageIndex--;updateModalImage();}}
+function showNextImage(){if(currentImageIndex<currentImages.length-1){currentImageIndex++;updateModalImage();}}
+function closeModal(){document.getElementById('imageModal').style.display='none';}
+
+function setupFilters(){
+  const filterButtons = document.querySelectorAll('#container .column');
+
+  filterButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const text = btn.innerText.trim();
+      document.querySelectorAll('.card').forEach(card => {
+        let fac = card.dataset.facilities || '';
+        // توحيد النصوص: إزالة مسافات، أحرف متغيرة، تحويل لكل الحروف الصغيرة
+        let facNormalized = fac.toLowerCase().replace(/\s+/g,'')
+                             .replace(/[أإآ]/g,'ا')
+                             .replace(/[ة]/g,'ه')
+                             .replace(/[ى]/g,'ي');
+
+        if(text === 'الكل'){
+          card.style.display = 'flex';
+        } else if(text === 'مناسب للمبيت'){
+          card.style.display = facNormalized.includes('نوم') ? 'flex' : 'none';
+          } else if(text === 'بدون مسبح'){
+          card.style.display = facNormalized.includes('بدونمسبح') ? 'flex' : 'none';
+          } else if(text === 'مسبح'){
+          card.style.display = facNormalized.includes('مسبح') &&!facNormalized.includes('بدونمسبح') ? 'flex' : 'none';
+          
+          
+        } else if(text === 'مناسب للمناسبات'){
+          card.style.display = (
+            facNormalized.includes('مناسبه') ||
+            facNormalized.includes('مناسبة') ||
+            facNormalized.includes('مناسبات') ||
+            facNormalized.includes('صاله') ||
+            facNormalized.includes('صالة')
+          ) ? 'flex' : 'none';
+        } else if(text === 'ألعاب مائية'){
+          card.style.display = (
+            facNormalized.includes('العابمائيه') ||
+            facNormalized.includes('العابمائي') ||
+            facNormalized.includes('ألعابمائية') ||
+            facNormalized.includes('مائيه')
+          ) ? 'flex' : 'none';
+          } else if(text === 'شاليهات الشتاء'){
+          card.style.display = (
+            facNormalized.includes('خيمه') ||
+            facNormalized.includes('خيمة') ||
+            facNormalized.includes('خيمهعربيه') ||
+            facNormalized.includes('عربيه') ||
+            facNormalized.includes('خيمهشتويه') ||
+            facNormalized.includes('شتويه') ||
+            facNormalized.includes('بيتشعر') ||
+            facNormalized.includes('مخيم') ||
+            facNormalized.includes('مشب')
+          ) ? 'flex' : 'none';
+        } else {
+          card.style.display = facNormalized.includes(text.replace(/\s+/g,'')) ? 'flex' : 'none';
+        }
+      });
+
+      // إعادة تعيين الفلاتر المتقدمة
+      ['directionSelect','regionSelect','typeSelect','facilitySearch']
+        .forEach(id => document.getElementById(id).value = '');
+    });
+  });
+
+  ['directionSelect','regionSelect','typeSelect','facilitySearch']
+    .forEach(id => document.getElementById(id).addEventListener('input', applyAdvancedFilters));
+
+  document.getElementById('all').click();
+}
+
+
+function applyAdvancedFilters(){
+  const dir = document.getElementById('directionSelect').value.trim().toLowerCase();
+  const region = document.getElementById('regionSelect').value.trim().toLowerCase();
+  const type = document.getElementById('typeSelect').value.trim().toLowerCase();
+  const facilitySearch = document.getElementById('facilitySearch').value.trim().toLowerCase();
+
+  // القيم الصحيحة للسلايدر
+  const minPrice = parseFloat(document.getElementById('priceSliderMin').value) || 0;
+  const maxPrice = parseFloat(document.getElementById('priceSliderMax').value) || Infinity;
+
+  // تحديث التسميات فوق السلايدر
+  document.getElementById('minPriceLabel').innerText = minPrice;
+  document.getElementById('maxPriceLabel').innerText = maxPrice;
+
+  document.querySelectorAll('.card').forEach(card => {
+    const textDir = (card.dataset.direction || '').toLowerCase();
+    const textReg = (card.dataset.region || '').toLowerCase();
+    const textType = (card.dataset.type || '').toLowerCase();
+    const facilities = (card.dataset.facilities || '').toLowerCase();
+    const location = (card.dataset.location || '').toLowerCase();
+    const name = (card.dataset.name || '').toLowerCase();
+
+    const searchableFields = [
+      normalizeArabic(name),
+      normalizeArabic(textType),
+      normalizeArabic(textReg),
+      normalizeArabic(textDir),
+      normalizeArabic(location),
+      normalizeArabic(facilities)
+    ];
+
+    // استخراج السعر من div الأسعار أو dataset.price
+    let price = parseFloat(card.dataset.price || card.querySelector('.prices-box div span:last-child')?.innerText.replace(/[^\d]/g,'') || 0);
+
+    const matchDir = !dir || textDir === dir;
+    const matchReg = !region || textReg === region;
+    const matchType = !type || textType === type;
+    const matchFacilityOrLocation = !facilitySearch || searchableFields.some(f => f.includes(facilitySearch));
+    const matchPrice = price >= minPrice && price <= maxPrice;
+
+    card.style.display = (matchDir && matchReg && matchType && matchFacilityOrLocation && matchPrice) ? 'flex' : 'none';
+  });
+
+  // إزالة تفعيل الفلاتر العلوية عند تحريك السلايدر
+  document.querySelectorAll('#container .column').forEach(b => b.classList.remove('active'));
+}
+
+// ربط السلايدر بالدالة
+document.getElementById('priceSliderMin').addEventListener('input', applyAdvancedFilters);
+document.getElementById('priceSliderMax').addEventListener('input', applyAdvancedFilters);
+
+function normalizeArabic(text){
+  return text.toLowerCase()
+             .replace(/[أإآا]/g,'ا')
+             .replace(/[ة]/g,'ه')
+             .replace(/[ى]/g,'ي')
+             .replace(/[ء]/g,'')
+             .replace(/[\u064B-\u0652]/g,'')
+             .trim();
+}
+
+window.onload=fetchData;
+document.querySelector('.modal-close').onclick=closeModal;
+document.querySelector('.modal-prev').onclick=showPrevImage;
+document.querySelector('.modal-next').onclick=showNextImage;
+document.getElementById('imageModal').addEventListener('click',e=>{if(e.target===document.getElementById('imageModal')){closeModal();}});
+</script>
+</body>
+</html>
