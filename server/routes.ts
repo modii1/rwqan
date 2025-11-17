@@ -205,6 +205,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get owner's subscription information
+  app.get("/api/owner/subscription", requireOwnerAuth, async (req: any, res) => {
+    try {
+      const property = await storage.getPropertyByNumber(req.propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: 'العقار غير موجود' });
+      }
+
+      // Get all subscriptions and find this property's subscription
+      const allSubscriptions = await storage.getSubscriptions();
+      const subscription = allSubscriptions.find(s => s.propertyNumber === req.propertyNumber);
+
+      // Get latest payment for this property (either from subscription or latest payment)
+      let currentPayment = null;
+      const allPayments = await storage.getPayments();
+      console.log(`📊 Total payments in system: ${allPayments.length}`);
+      console.log(`🔍 Looking for payments with propertyNumber: "${req.propertyNumber}" (type: ${typeof req.propertyNumber})`);
+      
+      const propertyPayments = allPayments
+        .filter(p => {
+          const match = p.propertyNumber === req.propertyNumber || p.propertyNumber === String(req.propertyNumber);
+          if (p.propertyNumber === req.propertyNumber || p.propertyNumber === String(req.propertyNumber)) {
+            console.log(`✅ Match found: Payment ${p.id}, propertyNumber: "${p.propertyNumber}" (type: ${typeof p.propertyNumber})`);
+          }
+          return match;
+        })
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      console.log(`📦 Found ${propertyPayments.length} payment(s) for this property`);
+      
+      if (propertyPayments.length > 0) {
+        const latestPayment = propertyPayments[0];
+        currentPayment = {
+          id: latestPayment.id,
+          status: latestPayment.status,
+          amount: latestPayment.amount,
+          finalAmount: latestPayment.finalAmount,
+          packageId: latestPayment.packageId,
+          paymentMethod: latestPayment.paymentMethod || '',
+          createdAt: latestPayment.createdAt
+        };
+      } else {
+        console.log(`⚠️ No payments found. Sample of all payments:`, allPayments.slice(0, 3).map(p => ({ id: p.id, propertyNumber: p.propertyNumber })));
+      }
+
+      // If no subscription found, return minimal info with current payment
+      if (!subscription) {
+        return res.json({
+          subscriptionType: property.subscriptionType || 'عادي',
+          status: 'inactive',
+          startDate: null,
+          endDate: null,
+          currentPayment
+        });
+      }
+
+      res.json({
+        subscriptionType: property.subscriptionType || 'عادي',
+        status: subscription.status,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        currentPayment
+      });
+    } catch (error) {
+      console.error('Error fetching subscription:', error);
+      res.status(500).json({ error: 'فشل في جلب معلومات الاشتراك' });
+    }
+  });
+
   // Update owner's property
   app.put("/api/owner/property", requireOwnerAuth, async (req: any, res) => {
     try {
