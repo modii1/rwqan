@@ -163,9 +163,18 @@ export default function PropertiesPage() {
         body: JSON.stringify({ propertyNumber: property.propertyNumber }),
       });
 
-      // Open WhatsApp
-      const message = encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`);
-      window.open(`https://wa.me/${property.whatsappNumber}?text=${message}`, '_blank');
+      // Default WhatsApp number for free properties
+      const DEFAULT_WHATSAPP = '966533220646';
+      
+      // Use property's WhatsApp if available, otherwise use default
+      const whatsappNumber = property.whatsappNumber || DEFAULT_WHATSAPP;
+      
+      // Different message for properties with/without their own number
+      const message = property.whatsappNumber
+        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`)
+        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}`);
+      
+      window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
     } catch (error) {
       console.error('Error creating WhatsApp request:', error);
     }
