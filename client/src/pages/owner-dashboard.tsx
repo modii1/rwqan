@@ -30,7 +30,7 @@ export default function OwnerDashboard() {
 
   const handleLogout = async () => {
     try {
-      await apiRequest('/api/owner/logout', { method: 'POST' });
+      await apiRequest('POST', '/api/owner/logout');
       toast({
         title: "تم تسجيل الخروج",
         description: "نراك قريباً!",
@@ -61,7 +61,11 @@ export default function OwnerDashboard() {
       <header className="bg-card border-b border-border shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="text-2xl">🏡</div>
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"></path>
+              </svg>
+            </div>
             <div>
               <h1 className="text-xl font-bold text-primary">لوحة التحكم</h1>
               <p className="text-sm text-muted-foreground">عقار رقم {property.propertyNumber}</p>
@@ -163,6 +167,7 @@ export default function OwnerDashboard() {
           <Button
             variant="outline"
             className="h-20"
+            onClick={() => setLocation('/owner/images')}
             data-testid="button-images"
           >
             <ImageIcon className="w-6 h-6 ml-3" />
