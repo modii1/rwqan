@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "modi-bot-465120",
+  "private_key_id": "dbe3732756cfa0e9d65a3eea3d663543a1b226af",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDWoq9aAuySyMKO\nWMYIM84jUwn2M92bpDZyBFd+YuXxjpLjWW7ySgNdWt2b5SOz/lv1ZE3XICxr9Wmi\ndUH/wYAKG64J+qRaRQcmwubyJkRpHP/lXoxnQLmzpEa94qzcG1QJPJJXbjKwX8bK\nchC3GnT/xAAt7ex93OLKlPq8LbIDbAPCy7vCoTM8tFajZQ1CGF7er0mx6DWTqyF6\nGkZE1CceZLDX2/RyBKFeL8YjveBLWjB7HkdaHzT6LlDMEMOJX0F0otNYPkAN06na\n6a26mrdXC6dzNyozOMs7DRx5yT01IVf1utiaBBIHQ66a9Sx8vMYNmZ2gOBYCcaE1\nwLaZSul/AgMBAAECggEAGNAw9nZ9FBEakOtJZZxbmfDZJ3nihkJLOw4ucUGMtMrX\nR2pI7cDJt8qv8PxiDsZ6qhlg+FxTVl3GSw5ERYWAwGpnyeaMhpURWRVSLq9m3EIK\ngWFXWP5+GXsF5KDmfAG6yuCSSIJIYOSJrlDWhtyLpx/pJ2Yon3pgS6xCemvL9yIY\n5C3xWumTUyb3m1Tm717YkDljJXVXycWLwkGj3leOotHsY0mB2PlJBcwfZFxoUJOX\nwxxf2RDo8aU5m3VMxCh75EjnbHSlWoAwewfq2fO+OmzIB8aXEwk1i5g6mPAurgNl\noFG3HAYguWyC9KGzVX6KAt9sYtd8Jm3SnOLebjtM6QKBgQD0bBNcKlui+z261KFr\ngUSWYrg8Bduf/DddswlgC9pQJ7iByyjuuo2ZjbaeB/EffBuRo1KT9zzl/7GJpRZm\nOrDbz0InH9FF201YA70UbhVjX4DlrvDljpUk4cZ3o/Cww3zU0N6YpyFyRSC3qySL\n6tK7Ee7rASCEAfO2YitygopzuQKBgQDgzWiY3xywJQDc+dgu6cUJX3/vjf6WZg8K\nJjOURMmfvXdhxrWnPn85cnfdxib62+siUyL+xVXmNvr4W/qK8L1/uMd8E4auGavx\nq6QUYO0NnPzuLhRmrlO4TBJ8C/dGgvk/5a5MsieuA/LwI/IURdOObI6X/KyYebFb\n8afWy8RS9wKBgAOSqN3KCLjjL03R2eI2a4g/PS4zb7hw+WY3PcXXpoNRcVMEYz7K\nH1PFTIwW1aF+MPD6EDT1gkBicnfun9sytG8iIndr8aUxxXmp5FOuIEXpmXrCCedx\nJCD74+jPzq7mzKZXv0k/+C8xb37/03LwJdByPKnWxGDpnmRmHvh3jAqRAoGAflYS\nBW/F8JwrGwTyYJMSH81i2d8kB6P9qceETzxFT5esIvAIoJ/34fIZuTImL+8t+tFc\nJnACcWnOq4sNh835wXC381wJ4Ygd4KiEgstiDbd/Ud/lqTspY7ak4L/czOzIZQeQ\naBvrPtmLSzf4UTpYxX7uuC3RVbN2YGSz3XwQrksCgYAxRvgtgZ2S0AYSjTl/ZPRm\ncNSFyk1+vrUHUz6LEF9zZQN1pIPwyxo8HNFiqbIgzfAjtCLYTwq2zuoiU5Ym7qIL\n1kpoxZQ7mU3rj6tnOCzDgPx9sWJhXc4t2kdV7YNtMYzKuF2TH+dQFRudmIKpsfq6\n1rNItbIvumnOt6VjWgCRwA==\n-----END PRIVATE KEY-----\n",
+  "client_email": "moddy-drive-service@modi-bot-465120.iam.gserviceaccount.com",
+  "client_id": "106031618208402148453",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/moddy-drive-service%40modi-bot-465120.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
