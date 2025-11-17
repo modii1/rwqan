@@ -185,7 +185,8 @@ class GoogleDriveService {
           // Silently ignore errors (rate limits, already public, etc.)
         }
         
-        return `https://drive.google.com/uc?export=view&id=${file.id}`;
+        // Use direct Googleusercontent link (better for image embedding)
+        return `https://lh3.googleusercontent.com/d/${file.id}`;
       });
       
       return await Promise.all(publicImagePromises);
