@@ -199,13 +199,11 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getPayments(): Promise<Payment[]> {
-    // Will be implemented
-    return [];
+    return googleSheetsService.getPayments();
   }
 
   async getPaymentById(id: string): Promise<Payment | null> {
-    // Will be implemented
-    return null;
+    return googleSheetsService.getPaymentById(id);
   }
 
   async createPayment(payment: InsertPayment): Promise<Payment> {
