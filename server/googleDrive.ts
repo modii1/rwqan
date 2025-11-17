@@ -123,6 +123,20 @@ class GoogleDriveService {
   async listFolderImages(folderId: string): Promise<string[]> {
     try {
       const drive = await this.getDrive();
+      
+      // First, check if we can access the folder itself
+      try {
+        const folderCheck = await drive.files.get({
+          fileId: folderId,
+          fields: 'id, name, permissions',
+          supportsAllDrives: true,
+        });
+        console.log(`Folder ${folderId} accessible: ${folderCheck.data.name}`);
+      } catch (err) {
+        console.error(`Cannot access folder ${folderId}:`, err);
+        return [];
+      }
+      
       const response = await drive.files.list({
         q: `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`,
         fields: 'files(id, name, mimeType)',
@@ -132,7 +146,9 @@ class GoogleDriveService {
       });
 
       const files = response.data.files || [];
-      console.log(`Folder ${folderId}: Found ${files.length} files:`, files.map((f: any) => f.name));
+      if (files.length > 0) {
+        console.log(`Folder ${folderId}: Found ${files.length} images`);
+      }
       return files.map((file: any) => `https://drive.google.com/uc?export=view&id=${file.id}`);
     } catch (error) {
       console.error('Error listing images for folder', folderId, ':', error);
