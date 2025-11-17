@@ -227,10 +227,12 @@ class GoogleSheetsService {
       const sheets = await this.getSheets();
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SHEET_ID,
-        range: `${sheetName}!A2:Z`,
+        range: `${sheetName}!A2:ZZ`,  // Extended range to support more columns
       });
 
-      return response.data.values || [];
+      const rows = response.data.values || [];
+      console.log(`📖 Read ${rows.length} row(s) from "${sheetName}"`);
+      return rows;
     } catch (error) {
       console.error(`Error reading sheet ${sheetName}:`, error);
       return [];
@@ -241,14 +243,23 @@ class GoogleSheetsService {
   async appendToSheet(sheetName: string, values: any[][]) {
     try {
       const sheets = await this.getSheets();
-      await sheets.spreadsheets.values.append({
+      console.log(`📝 Appending ${values.length} row(s) to "${sheetName}"...`);
+      
+      // First, find the next empty row
+      const existingRows = await this.readSheet(sheetName);
+      const nextRow = existingRows.length + 2; // +2 because row 1 is headers, and we're 0-indexed
+      
+      // Use update instead of append to ensure data goes into columns A onwards
+      const result = await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
-        range: `${sheetName}!A:Z`,
+        range: `${sheetName}!A${nextRow}:ZZ${nextRow}`,
         valueInputOption: 'RAW',
         requestBody: {
           values,
         },
       });
+      
+      console.log(`✅ Added to "${sheetName}" at row ${nextRow}: ${result.data.updatedRows} rows, range: ${result.data.updatedRange}`);
     } catch (error) {
       console.error(`Error appending to sheet ${sheetName}:`, error);
       throw error;
@@ -261,7 +272,7 @@ class GoogleSheetsService {
       const sheets = await this.getSheets();
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
-        range: `${sheetName}!A${rowIndex}:Z${rowIndex}`,
+        range: `${sheetName}!A${rowIndex}:ZZ${rowIndex}`,  // Extended range to support more columns
         valueInputOption: 'RAW',
         requestBody: {
           values: [values],
@@ -649,8 +660,68 @@ class GoogleSheetsService {
       newPayment.completedAt || '',
     ];
 
+    console.log(`💾 Creating payment in sheet "${SHEETS.PAYMENTS}": ID=${id}, PropertyNumber=${newPayment.propertyNumber}`);
     await this.appendToSheet(SHEETS.PAYMENTS, [row]);
+    console.log(`✅ Payment created successfully: ${id}`);
     return newPayment;
+  }
+
+  async updatePayment(id: string, updates: Partial<Payment>): Promise<Payment> {
+    // Retry logic to handle Google Sheets cache/latency
+    let rows = await this.readSheet(SHEETS.PAYMENTS);
+    let rowIndex = rows.findIndex(row => row[0] === id);
+
+    // If not found, wait and retry once (Google Sheets cache delay)
+    if (rowIndex === -1) {
+      console.log(`⏳ Payment not found on first try, waiting 1s and retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      rows = await this.readSheet(SHEETS.PAYMENTS);
+      rowIndex = rows.findIndex(row => row[0] === id);
+    }
+
+    if (rowIndex === -1) {
+      console.log(`❌ Payment not found after retry. ID: ${id}, Available IDs:`, rows.slice(0, 3).map(r => r[0]));
+      throw new Error(`Payment not found: ${id}`);
+    }
+    
+    console.log(`✅ Found payment at row ${rowIndex + 2}, updating...`);
+
+
+    const current = rows[rowIndex];
+    const updatedPayment: Payment = {
+      id: current[0],
+      propertyNumber: updates.propertyNumber ?? current[1],
+      packageId: updates.packageId ?? current[2],
+      amount: updates.amount ?? (parseFloat(current[3]) || 0),
+      discountCode: updates.discountCode ?? (current[4] || undefined),
+      discountAmount: updates.discountAmount ?? (parseFloat(current[5]) || 0),
+      finalAmount: updates.finalAmount ?? (parseFloat(current[6]) || 0),
+      paymobOrderId: updates.paymobOrderId ?? (current[7] || undefined),
+      status: updates.status ?? current[8],
+      paymentMethod: updates.paymentMethod ?? (current[9] || undefined),
+      receiptUrl: updates.receiptUrl ?? (current[10] || undefined),
+      createdAt: current[11],
+      completedAt: updates.completedAt ?? (current[12] || undefined),
+    };
+
+    const row = [
+      updatedPayment.id,
+      updatedPayment.propertyNumber,
+      updatedPayment.packageId,
+      updatedPayment.amount.toString(),
+      updatedPayment.discountCode || '',
+      updatedPayment.discountAmount.toString(),
+      updatedPayment.finalAmount.toString(),
+      updatedPayment.paymobOrderId || '',
+      updatedPayment.status,
+      updatedPayment.paymentMethod || '',
+      updatedPayment.receiptUrl || '',
+      updatedPayment.createdAt,
+      updatedPayment.completedAt || '',
+    ];
+
+    await this.updateRow(SHEETS.PAYMENTS, rowIndex + 2, row);
+    return updatedPayment;
   }
 
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {

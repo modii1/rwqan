@@ -213,8 +213,7 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async updatePayment(id: string, payment: Partial<Payment>): Promise<Payment> {
-    // Will be implemented
-    throw new Error("Not fully implemented yet");
+    return googleSheetsService.updatePayment(id, payment);
   }
 
   async getAnalytics(): Promise<Analytics | null> {
