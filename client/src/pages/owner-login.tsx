@@ -18,10 +18,7 @@ export default function OwnerLogin() {
     setIsLoading(true);
 
     try {
-      await apiRequest('/api/owner/login', {
-        method: 'POST',
-        body: JSON.stringify({ propertyNumber, pin }),
-      });
+      await apiRequest('POST', '/api/owner/login', { propertyNumber, pin });
 
       toast({
         title: "تم تسجيل الدخول بنجاح",
