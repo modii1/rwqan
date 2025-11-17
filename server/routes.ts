@@ -331,20 +331,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'الصورة غير موجودة' });
       }
 
-      // Delete from Google Drive
-      try {
-        await googleDriveService.deleteImage(imageUrl);
-      } catch (error) {
-        console.error('Error deleting from Drive (continuing anyway):', error);
-        // Continue even if Drive deletion fails
-      }
-
-      // Remove from property
+      // Remove from property imageUrls in Google Sheets
+      // Note: We don't delete from Google Drive to avoid permission issues
+      // The image will remain in Drive but won't be visible in the app
       const updatedImageUrls = property.imageUrls.filter(url => url !== imageUrl);
       await storage.updateProperty(req.propertyNumber, {
         imageUrls: updatedImageUrls,
       });
 
+      console.log(`Image removed from property ${req.propertyNumber}. New count: ${updatedImageUrls.length}`);
       res.json({ success: true, imageUrls: updatedImageUrls });
     } catch (error) {
       console.error('Error deleting image:', error);
