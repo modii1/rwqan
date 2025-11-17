@@ -36,6 +36,7 @@ export default function PropertiesPage() {
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 5000]);
   const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
   const [expandedFacilities, setExpandedFacilities] = useState<Set<string>>(new Set());
+  const [expandedPrices, setExpandedPrices] = useState<Set<string>>(new Set());
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
@@ -311,12 +312,7 @@ export default function PropertiesPage() {
 
                   {/* Prices */}
                   <div className="price-box rounded-lg p-3 mb-4 space-y-1 text-sm">
-                    {property.prices.display && (
-                      <div className="flex justify-between">
-                        <span>سعر العرض:</span>
-                        <span className="font-bold text-green-600">{property.prices.display} ريال</span>
-                      </div>
-                    )}
+                    {/* Always show: Weekday and Weekend */}
                     {property.prices.weekday && (
                       <div className="flex justify-between">
                         <span>وسط الأسبوع:</span>
@@ -329,22 +325,53 @@ export default function PropertiesPage() {
                         <span className="font-bold text-green-600">{property.prices.weekend} ريال</span>
                       </div>
                     )}
-                    {property.prices.overnight && (
-                      <div className="flex justify-between">
-                        <span>مبيت:</span>
-                        <span className="font-bold text-green-600">{property.prices.overnight} ريال</span>
-                      </div>
+                    
+                    {/* Show additional prices when expanded */}
+                    {expandedPrices.has(property.propertyNumber) && (
+                      <>
+                        {property.prices.overnight && (
+                          <div className="flex justify-between">
+                            <span>مبيت:</span>
+                            <span className="font-bold text-green-600">{property.prices.overnight} ريال</span>
+                          </div>
+                        )}
+                        {property.prices.holidays && (
+                          <div className="flex justify-between">
+                            <span>إجازات:</span>
+                            <span className="font-bold text-green-600">{property.prices.holidays} ريال</span>
+                          </div>
+                        )}
+                        {property.prices.special && (
+                          <div className="flex justify-between">
+                            <span>سعر خاص:</span>
+                            <span className="font-bold text-green-600">{property.prices.special} ريال</span>
+                          </div>
+                        )}
+                        {property.prices.display && (
+                          <div className="flex justify-between">
+                            <span>سعر العرض:</span>
+                            <span className="font-bold text-green-600">{property.prices.display} ريال</span>
+                          </div>
+                        )}
+                      </>
                     )}
-                    {property.prices.special && (
-                      <div className="flex justify-between">
-                        <span>سعر خاص:</span>
-                        <span className="font-bold text-green-600">{property.prices.special} ريال</span>
-                      </div>
-                    )}
-                    {property.prices.holidays && (
-                      <div className="flex justify-between">
-                        <span>إجازات:</span>
-                        <span className="font-bold text-green-600">{property.prices.holidays} ريال</span>
+                    
+                    {/* Show "المزيد" button if there are additional prices */}
+                    {(property.prices.overnight || property.prices.holidays || property.prices.special || property.prices.display) && (
+                      <div 
+                        className="text-center pt-2 border-t border-border cursor-pointer text-primary hover:text-primary/80 font-semibold"
+                        onClick={() => {
+                          const newExpanded = new Set(expandedPrices);
+                          if (newExpanded.has(property.propertyNumber)) {
+                            newExpanded.delete(property.propertyNumber);
+                          } else {
+                            newExpanded.add(property.propertyNumber);
+                          }
+                          setExpandedPrices(newExpanded);
+                        }}
+                        data-testid={`button-expand-prices-${property.propertyNumber}`}
+                      >
+                        {expandedPrices.has(property.propertyNumber) ? 'إخفاء' : 'المزيد من الأسعار'}
                       </div>
                     )}
                   </div>
