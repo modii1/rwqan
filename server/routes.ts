@@ -217,23 +217,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allSubscriptions = await storage.getSubscriptions();
       const subscription = allSubscriptions.find(s => s.propertyNumber === req.propertyNumber);
 
-      // Get latest payment for this property (either from subscription or latest payment)
+      // Get latest payment for this property
       let currentPayment = null;
       const allPayments = await storage.getPayments();
-      console.log(`📊 Total payments in system: ${allPayments.length}`);
-      console.log(`🔍 Looking for payments with propertyNumber: "${req.propertyNumber}" (type: ${typeof req.propertyNumber})`);
-      
       const propertyPayments = allPayments
-        .filter(p => {
-          const match = p.propertyNumber === req.propertyNumber || p.propertyNumber === String(req.propertyNumber);
-          if (p.propertyNumber === req.propertyNumber || p.propertyNumber === String(req.propertyNumber)) {
-            console.log(`✅ Match found: Payment ${p.id}, propertyNumber: "${p.propertyNumber}" (type: ${typeof p.propertyNumber})`);
-          }
-          return match;
-        })
+        .filter(p => p.propertyNumber === req.propertyNumber)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      
-      console.log(`📦 Found ${propertyPayments.length} payment(s) for this property`);
       
       if (propertyPayments.length > 0) {
         const latestPayment = propertyPayments[0];
@@ -246,8 +235,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paymentMethod: latestPayment.paymentMethod || '',
           createdAt: latestPayment.createdAt
         };
-      } else {
-        console.log(`⚠️ No payments found. Sample of all payments:`, allPayments.slice(0, 3).map(p => ({ id: p.id, propertyNumber: p.propertyNumber })));
       }
 
       // If no subscription found, return minimal info with current payment

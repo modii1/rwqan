@@ -724,6 +724,32 @@ class GoogleSheetsService {
     return updatedPayment;
   }
 
+  async getPayments(): Promise<Payment[]> {
+    const rows = await this.readSheet(SHEETS.PAYMENTS);
+    return rows
+      .filter(row => row[0] && row[0].startsWith('PAY-'))
+      .map(row => ({
+        id: row[0] || '',
+        propertyNumber: row[1] || '',
+        packageId: row[2] || '',
+        amount: parseFloat(row[3]) || 0,
+        discountCode: row[4] || undefined,
+        discountAmount: parseFloat(row[5]) || 0,
+        finalAmount: parseFloat(row[6]) || 0,
+        paymobOrderId: row[7] || undefined,
+        status: row[8] as any || 'معلق',
+        paymentMethod: row[9] as any || undefined,
+        receiptUrl: row[10] || undefined,
+        createdAt: row[11] || new Date().toISOString(),
+        completedAt: row[12] || undefined,
+      }));
+  }
+
+  async getPaymentById(id: string): Promise<Payment | null> {
+    const payments = await this.getPayments();
+    return payments.find(p => p.id === id) || null;
+  }
+
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {
     const id = `SUG-${Date.now()}`;
     const newSuggestion: Suggestion = {
