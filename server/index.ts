@@ -16,6 +16,12 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false }));
 
+// Serve Object Storage files
+const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
+if (bucketId) {
+  app.use('/public', express.static(`${bucketId}/public`));
+}
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
