@@ -39,13 +39,11 @@ export default function RegisterPage() {
     setIsSubmitting(true);
 
     try {
-      await apiRequest('/api/properties/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...formData,
-          facilities,
-          prices,
-        }),
+      await apiRequest('POST', '/api/properties/register', {
+        ...formData,
+        facilities,
+        prices,
+        subscriptionType: 'عادي', // جميع العقارات الجديدة تبدأ بنوع "عادي"
       });
 
       toast({
@@ -179,45 +177,54 @@ export default function RegisterPage() {
 
             {/* Prices */}
             <div>
-              <h3 className="text-lg font-bold text-primary mb-3">الأسعار</h3>
+              <h3 className="text-lg font-bold text-primary mb-3">الأسعار (مطلوبة)</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
+                  <label className="block text-sm font-semibold mb-2">وسط الأسبوع *</label>
                   <Input
-                    placeholder="500 ريال"
+                    placeholder="500"
+                    type="number"
                     value={prices.weekday}
                     onChange={(e) => setPrices({...prices, weekday: e.target.value})}
+                    required
                     data-testid="input-price-weekday"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">نهاية الأسبوع</label>
+                  <label className="block text-sm font-semibold mb-2">نهاية الأسبوع *</label>
                   <Input
-                    placeholder="800 ريال"
+                    placeholder="800"
+                    type="number"
                     value={prices.weekend}
                     onChange={(e) => setPrices({...prices, weekend: e.target.value})}
+                    required
                     data-testid="input-price-weekend"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">مبيت</label>
+                  <label className="block text-sm font-semibold mb-2">مبيت *</label>
                   <Input
-                    placeholder="1200 ريال"
+                    placeholder="1200"
+                    type="number"
                     value={prices.overnight}
                     onChange={(e) => setPrices({...prices, overnight: e.target.value})}
+                    required
                     data-testid="input-price-overnight"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">إجازات</label>
+                  <label className="block text-sm font-semibold mb-2">إجازات *</label>
                   <Input
-                    placeholder="1000 ريال"
+                    placeholder="1000"
+                    type="number"
                     value={prices.holidays}
                     onChange={(e) => setPrices({...prices, holidays: e.target.value})}
+                    required
                     data-testid="input-price-holidays"
                   />
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground mt-2">* جميع حقول الأسعار مطلوبة</p>
             </div>
 
             {/* Facilities */}
