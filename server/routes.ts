@@ -40,28 +40,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const properties = await storage.getProperties();
       
-      // Fetch images from Google Drive for each property
-      const propertiesWithImages = await Promise.all(
-        properties.map(async (property) => {
-          // If imageUrls is empty and we have imagesFolderUrl, fetch images from that folder
-          if ((!property.imageUrls || property.imageUrls.length === 0) && property.imagesFolderUrl) {
-            try {
-              // Extract folder ID from URL
-              const folderIdMatch = property.imagesFolderUrl.match(/folders\/([^/?]+)/);
-              if (folderIdMatch) {
-                const folderId = folderIdMatch[1];
-                const images = await googleDriveService.listFolderImages(folderId);
-                if (images.length > 0) {
-                  return { ...property, imageUrls: images };
-                }
-              }
-            } catch (error) {
-              console.error(`Error fetching images for property ${property.propertyNumber}:`, error);
-            }
-          }
-          return property;
-        })
-      );
+      // Use placeholder image if no images available
+      const propertiesWithImages = properties.map(property => {
+        if (!property.imageUrls || property.imageUrls.length === 0) {
+          // Add placeholder image
+          return { 
+            ...property, 
+            imageUrls: ['https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80'] 
+          };
+        }
+        return property;
+      });
       
       // Sort: موثوق properties first
       const sorted = propertiesWithImages.sort((a, b) => {
