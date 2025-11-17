@@ -335,16 +335,22 @@ class GoogleSheetsService {
     const validRows = rows.filter(row => row[0] && row[0].trim());
     const properties = validRows.map(row => this.rowToProperty(row));
     
-    // Fetch real images from Google Drive
+    // Use imageUrls from Google Sheets as the source of truth
+    // If imageUrls is empty in Sheets, fetch from Drive as fallback
     const { googleDriveService } = await import('./googleDrive');
     const propertiesWithImages = await Promise.all(
       properties.map(async (property) => {
         try {
-          const images = await googleDriveService.getPropertyFolderImages(property.propertyNumber);
-          return {
-            ...property,
-            imageUrls: images.length > 0 ? images : property.imageUrls,
-          };
+          // Only fetch from Drive if imageUrls is empty in Sheets
+          if (!property.imageUrls || property.imageUrls.length === 0) {
+            const images = await googleDriveService.getPropertyFolderImages(property.propertyNumber);
+            return {
+              ...property,
+              imageUrls: images,
+            };
+          }
+          // Otherwise, use imageUrls from Sheets (source of truth)
+          return property;
         } catch (error) {
           console.error(`Error fetching images for property ${property.propertyNumber}:`, error);
           return property;
