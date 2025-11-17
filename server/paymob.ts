@@ -8,7 +8,7 @@ const INTEGRATION_ID_APPLEPAY = process.env.PAYMOB_INTEGRATION_ID_APPLEPAY!;
 const IFRAME_ID_CARDS = process.env.PAYMOB_IFRAME_ID_CARDS || '869748'; // Default iframe ID
 const IFRAME_ID_APPLEPAY = process.env.PAYMOB_IFRAME_ID_APPLEPAY || '869749'; // Default iframe ID
 
-const PAYMOB_API_URL = 'https://accept.paymob.com/api';
+const PAYMOB_API_URL = 'https://ksa.paymob.com/api';
 
 interface PaymobAuthResponse {
   token: string;
@@ -164,7 +164,7 @@ export class PaymobService {
     const paymentToken = await this.createPaymentKey(orderId, amount, propertyNumber, paymentMethod);
 
     const iframeId = paymentMethod === 'applepay' ? IFRAME_ID_APPLEPAY : IFRAME_ID_CARDS;
-    const iframeUrl = `https://accept.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
+    const iframeUrl = `https://ksa.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
 
     return {
       orderId,
