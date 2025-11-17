@@ -1,58 +1,27 @@
 import { google } from 'googleapis';
 
-// Helper to get access token from Replit connection
-async function getAccessToken() {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY 
-    ? 'repl ' + process.env.REPL_IDENTITY 
-    : process.env.WEB_REPL_RENEWAL 
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL 
-    : null;
-
-  if (!xReplitToken || !hostname) {
-    throw new Error('X_REPLIT_TOKEN or hostname not found for repl/depl');
-  }
-
-  const response = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet',
-    {
-      headers: {
-        'Accept': 'application/json',
-        'X_REPLIT_TOKEN': xReplitToken
-      }
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch connection settings: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  const connectionSettings = data.items?.[0];
-
-  if (!connectionSettings?.settings) {
-    throw new Error('Google Sheet not connected or settings missing');
-  }
-
-  const accessToken = 
-    connectionSettings.settings.access_token || 
-    connectionSettings.settings.oauth?.credentials?.access_token;
-
-  if (!accessToken) {
-    throw new Error('Access token not found in connection settings');
-  }
-
-  return accessToken;
-}
-
 class GoogleDriveService {
   private async getDrive() {
-    const accessToken = await getAccessToken();
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({
-      access_token: accessToken
+    // Use Service Account for Drive access
+    const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    
+    if (!serviceAccountKey) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not found in environment variables');
+    }
+
+    let credentials;
+    try {
+      credentials = JSON.parse(serviceAccountKey);
+    } catch (error) {
+      throw new Error('Invalid GOOGLE_SERVICE_ACCOUNT_KEY JSON format');
+    }
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/drive'],
     });
-    return google.drive({ version: 'v3', auth: oauth2Client });
+
+    return google.drive({ version: 'v3', auth });
   }
 
   async createPropertyFolder(propertyNumber: string, propertyName: string): Promise<string> {
@@ -203,6 +172,24 @@ class GoogleDriveService {
 
       const images = imagesResponse.data.files || [];
       console.log(`Property ${propertyNumber}: Found ${images.length} images in folder ${folders[0].name}`);
+      
+      // Make all images publicly accessible
+      await Promise.all(
+        images.map(async (file: any) => {
+          try {
+            await drive.permissions.create({
+              fileId: file.id,
+              requestBody: {
+                role: 'reader',
+                type: 'anyone',
+              },
+            });
+          } catch (err) {
+            // Ignore if already public
+            console.log(`Image ${file.id} already public or error:`, err.message);
+          }
+        })
+      );
       
       return images.map((file: any) => `https://drive.google.com/uc?export=view&id=${file.id}`);
     } catch (error) {
