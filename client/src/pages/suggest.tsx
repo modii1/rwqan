@@ -91,7 +91,7 @@ export default function SuggestPage() {
 
             <div>
               <label className="block text-sm font-semibold mb-2">المدينة</label>
-              <Select value={city} onValueChange={setCity} required>
+              <Select value={city} onValueChange={setCity}>
                 <SelectTrigger data-testid="select-city">
                   <SelectValue placeholder="اختر المدينة" />
                 </SelectTrigger>

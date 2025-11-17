@@ -62,13 +62,13 @@ export default function PropertiesPage() {
     }
 
     // City filter
-    if (selectedCity && property.city !== selectedCity) return false;
+    if (selectedCity && selectedCity !== 'all' && property.city !== selectedCity) return false;
 
     // Direction filter
-    if (selectedDirection && property.direction !== selectedDirection) return false;
+    if (selectedDirection && selectedDirection !== 'all' && property.direction !== selectedDirection) return false;
 
     // Type filter
-    if (selectedType && property.type !== selectedType) return false;
+    if (selectedType && selectedType !== 'all' && property.type !== selectedType) return false;
 
     // Facilities filter
     if (selectedFacilities.length > 0) {
@@ -167,7 +167,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="المدينة" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">الكل</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {CITIES.map(city => (
                   <SelectItem key={city} value={city}>{city}</SelectItem>
                 ))}
@@ -180,7 +180,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">الكل</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {DIRECTIONS.map(dir => (
                   <SelectItem key={dir} value={dir}>{dir}</SelectItem>
                 ))}
@@ -193,7 +193,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="النوع" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">الكل</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {TYPES.map(type => (
                   <SelectItem key={type} value={type}>{type}</SelectItem>
                 ))}
