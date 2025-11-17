@@ -1,17 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Property } from "@shared/schema";
-import { Upload, X, ExternalLink } from "lucide-react";
+import { Upload, X, ExternalLink, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function OwnerImagesPage() {
   const [, setLocation] = useLocation();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   // Protect page - redirect to login if not authenticated
@@ -101,6 +102,61 @@ export default function OwnerImagesPage() {
     }
   };
 
+  // Delete image mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (imageUrl: string) => {
+      console.log('Attempting to delete image:', imageUrl);
+      const response = await fetch('/api/owner/images/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+        credentials: 'include',
+      });
+      
+      console.log('Delete response status:', response.status);
+      
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('Delete error:', error);
+        throw new Error(error || 'فشل حذف الصورة');
+      }
+      
+      const result = await response.json();
+      console.log('Delete successful:', result);
+      return result;
+    },
+    onSuccess: (data) => {
+      console.log('Delete mutation success, invalidating queries');
+      queryClient.invalidateQueries({ queryKey: ['/api/owner/property'] });
+      toast({
+        title: "تم حذف الصورة",
+        description: "تم حذف الصورة بنجاح",
+      });
+    },
+    onError: (error: any) => {
+      console.error('Delete mutation error:', error);
+      toast({
+        title: "فشل حذف الصورة",
+        description: error.message || "حدث خطأ أثناء حذف الصورة",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDeleteImage = async (e: React.MouseEvent, imageUrl: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log('Delete button clicked for:', imageUrl);
+    
+    if (window.confirm('هل أنت متأكد من حذف هذه الصورة؟')) {
+      console.log('User confirmed deletion');
+      deleteMutation.mutate(imageUrl);
+    } else {
+      console.log('User cancelled deletion');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background p-6">
@@ -133,15 +189,26 @@ export default function OwnerImagesPage() {
                     alt={`صورة ${idx + 1}`}
                     className="w-full h-48 object-cover rounded-lg"
                   />
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
                     <a
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-white"
+                      className="text-white bg-blue-500 hover:bg-blue-600 rounded-full p-2"
+                      title="فتح الصورة"
                     >
-                      <ExternalLink className="w-6 h-6" />
+                      <ExternalLink className="w-5 h-5" />
                     </a>
+                    <button
+                      onClick={(e) => handleDeleteImage(e, url)}
+                      disabled={deleteMutation.isPending}
+                      className="text-white bg-red-500 hover:bg-red-600 rounded-full p-2 disabled:opacity-50 cursor-pointer"
+                      title="حذف الصورة"
+                      data-testid={`button-delete-image-${idx}`}
+                      type="button"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -165,25 +232,25 @@ export default function OwnerImagesPage() {
               <p className="text-sm text-muted-foreground mb-4">
                 يمكنك رفع حتى 10 صور (PNG, JPG, JPEG)
               </p>
-              <label className="cursor-pointer">
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  disabled={uploadMutation.isPending}
-                  data-testid="input-select-images"
-                />
-                <Button
-                  type="button"
-                  className="bg-[#b88d2b] hover:bg-[#a07d25]"
-                  disabled={uploadMutation.isPending}
-                  data-testid="button-select-images"
-                >
-                  اختر الصور
-                </Button>
-              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleFileSelect}
+                className="hidden"
+                disabled={uploadMutation.isPending}
+                data-testid="input-select-images"
+              />
+              <Button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-[#b88d2b] hover:bg-[#a07d25]"
+                disabled={uploadMutation.isPending}
+                data-testid="button-select-images"
+              >
+                اختر الصور
+              </Button>
             </div>
 
             {/* Preview Selected Images */}

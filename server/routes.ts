@@ -313,6 +313,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete an image
+  app.post("/api/owner/images/delete", requireOwnerAuth, async (req: any, res) => {
+    try {
+      const { imageUrl } = req.body;
+      if (!imageUrl) {
+        return res.status(400).json({ error: 'رابط الصورة مطلوب' });
+      }
+
+      const property = await storage.getPropertyByNumber(req.propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: 'العقار غير موجود' });
+      }
+
+      // Check if image exists in property
+      if (!property.imageUrls.includes(imageUrl)) {
+        return res.status(404).json({ error: 'الصورة غير موجودة' });
+      }
+
+      // Delete from Google Drive
+      try {
+        await googleDriveService.deleteImage(imageUrl);
+      } catch (error) {
+        console.error('Error deleting from Drive (continuing anyway):', error);
+        // Continue even if Drive deletion fails
+      }
+
+      // Remove from property
+      const updatedImageUrls = property.imageUrls.filter(url => url !== imageUrl);
+      await storage.updateProperty(req.propertyNumber, {
+        imageUrls: updatedImageUrls,
+      });
+
+      res.json({ success: true, imageUrls: updatedImageUrls });
+    } catch (error) {
+      console.error('Error deleting image:', error);
+      res.status(500).json({ error: 'فشل في حذف الصورة' });
+    }
+  });
+
   // Get subscription packages
   app.get("/api/packages", async (req, res) => {
     try {
