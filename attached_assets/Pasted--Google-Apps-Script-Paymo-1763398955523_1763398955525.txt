@@ -1,0 +1,955 @@
+// =========================
+// Google Apps Script كامل لإدارة العقارات والاشتراكات
+// يشمل: Paymob Checkout + Webhook + صفحات HTML + لوحة الأرباح
+// =========================
+
+
+// === مفاتيح حساب Paymob ===
+const PAYMOB_API_KEY        = "sau_sk_live_2ac8d88008fe4fecd25dd8c6ee12f88fe8215ad888b333b291de6740d475137c";
+const PAYMOB_PUBLIC_KEY     = "sau_pk_live_KnQUxbD8zHFD0BvXG4l87rxuRGLTutrF";
+const PAYMOB_HMAC_SECRET    = "DEFA4B6DFCBB3CF746FC59BE1BB1A766"; // المفتاح الصحيح من Paymob
+const SHEET_ID = "1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ"; // شيت الاشتراكات
+const PAYMOB_INTEGRATION_ID_APPLEPAY = 15649; // أبل باي
+const PAYMOB_INTEGRATION_ID_CARDS    = 15650; // بطاقات مدى/فيزا/ماستر
+
+
+// =========================
+// 1️⃣ إنشاء رابط الدفع مع Paymob
+// =========================
+function createPaymobCheckout(subscriptionData, packageData, method = "CARDS") {
+  const packageName = packageData?.name || "باقة عامة";
+  const packagePrice = packageData?.price || 0;
+  const packageDays = packageData?.days || 1;
+
+  let itemName = `${packageName} للعقار ${subscriptionData.name}`;
+  if(itemName.length > 50) itemName = itemName.slice(0,50);
+
+  const amount = packagePrice * 100;
+
+  // نحدد الانتقريشن حسب نوع الدفع
+  const integrationId = (method === "APPLEPAY") 
+      ? PAYMOB_INTEGRATION_ID_APPLEPAY 
+      : PAYMOB_INTEGRATION_ID_CARDS;
+
+  const payload = {
+    amount: amount,
+    currency: "SAR",
+    payment_methods: [integrationId],
+    items: [
+      {
+        name: itemName,
+        amount: amount,
+        description: "الاشتراك يبدأ من تاريخ التفعيل مباشرة وبشكل آلي.",
+        quantity: 1
+      }
+    ],
+    billing_data: {
+      first_name: subscriptionData.name || "عميل",
+      last_name: "N/A",
+      email: subscriptionData.phone + "@example.com",
+      phone_number: subscriptionData.phone,
+      country: "KSA"
+    },
+    customer: {
+      first_name: subscriptionData.name || "عميل",
+      last_name: "N/A",
+      email: subscriptionData.phone + "@example.com"
+    },
+    special_reference: subscriptionData.propertyNumber + "-" + Date.now(),
+    extras: {
+      creation_extras: {
+        propertyNumber: subscriptionData.propertyNumber,
+        packageName: packageName,
+        days: packageDays,
+        price: packagePrice
+      }
+    },
+    notification_url: "https://script.google.com/macros/s/AKfycbzfNOTODQD2EG53U0X8dIjA7J_C5kDz9WYYxGjfVGbvtOz9XXE-YWhP7fY0sznMLvp5/exec",
+    redirect_url: "https://www.example.com/after-payment"
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "Authorization": "Bearer " + PAYMOB_API_KEY },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch("https://ksa.paymob.com/v1/intention/", options);
+    const data = JSON.parse(response.getContentText());
+
+    if (response.getResponseCode() === 200 || response.getResponseCode() === 201) {
+      return `https://ksa.paymob.com/unifiedcheckout/?publicKey=${PAYMOB_PUBLIC_KEY}&clientSecret=${data.client_secret}`;
+    } else {
+      throw new Error("خطأ في إنشاء Intention: " + response.getContentText());
+    }
+  } catch (err) {
+    Logger.log("ERROR createPaymobCheckout: " + err);
+    return null;
+  }
+}
+
+
+// =========================
+// 2️⃣ Webhook لمعالجة الدفع (Paymob POST)
+// =========================
+
+const PRICES_SHEET = "الأسعار"; // اسم ورقة الأسعار
+
+
+
+function doPost(e) {
+  try {
+    if (!e.postData || !e.postData.contents)
+      throw new Error("لم تُرسل بيانات Webhook");
+
+    const data = JSON.parse(e.postData.contents);
+    const transaction = data.obj;
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // =========== ورقة المدفوعات ===========
+    const paymentsSheet = ss.getSheetByName("المدفوعات");
+    const shipping = transaction.order.shipping_data || {};
+    const phone = shipping.phone_number || "";
+
+    // حفظ بيانات الدفع
+    paymentsSheet.appendRow([
+      transaction.id || "", // رقم العملية
+      (transaction.amount_cents || 0) / 100, // المبلغ
+      transaction.success ? "نجحت" : "فشلت", // الحالة
+      shipping.first_name || "", // اسم العميل
+      shipping.email || "", // البريد الإلكتروني
+      phone, // رقم الهاتف
+      transaction.created_at || new Date(), // تاريخ العملية
+    ]);
+
+    // =========== ورقة الأسعار ===========
+    const pricesSheet = ss.getSheetByName("الأسعار");
+    const pricesData = pricesSheet.getDataRange().getValues();
+
+    // رابط الإيصال
+    let receiptLink = "";
+    if (transaction.payment_key_claims && transaction.payment_key_claims.redirect_url) {
+      const token = transaction.payment_key_claims.redirect_url.split("payment_token=")[1];
+      if (token)
+        receiptLink = `https://ksa.paymob.com/unifiedcheckout/payment-status?payment_token=${token}`;
+    }
+
+    if (phone) {
+      // آخر 5 أرقام من رقم الهاتف
+      const last5 = phone.replace(/\D/g, "").slice(-5);
+
+      // =========== ورقة الاشتراكات ===========
+      const subsSheet = ss.getSheetByName("الاشتراكات");
+      const subsData = subsSheet.getDataRange().getValues();
+
+      for (let i = 1; i < subsData.length; i++) {
+        const propertyNumber = String(subsData[i][0]).replace(/\D/g, "").slice(-5); // رقم العقار بعد تنظيفه
+        const propertyName = subsData[i][1]; // اسم العقار
+
+        if (propertyNumber === last5) {
+          // مدة الباقة واسمها
+          let durationDays = transaction.payment_key_claims?.extra?.creation_extras?.days || 30;
+          let subscriptionName = "مميز";
+
+          const startDate = new Date();
+          const endDate = new Date();
+          endDate.setDate(startDate.getDate() + durationDays);
+          const remainingDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+
+          // تحديث الاشتراك في الورقة
+          subsSheet.getRange(i + 1, 4).setValue((transaction.amount_cents || 0) / 100); // المبلغ
+          subsSheet.getRange(i + 1, 5).setValue(subscriptionName); // نوع الاشتراك
+          subsSheet.getRange(i + 1, 6).setValue(startDate); // بداية
+          subsSheet.getRange(i + 1, 7).setValue(endDate); // نهاية
+          subsSheet.getRange(i + 1, 8).setValue(remainingDays); // الأيام المتبقية
+          subsSheet.getRange(i + 1, 9).setValue(receiptLink || ""); // رابط الإيصال
+
+          // كتابة نص الدفع
+          const formattedDate = Utilities.formatDate(startDate, "Asia/Riyadh", "yyyy/MM/dd");
+          subsSheet.getRange(i + 1, 9).setValue(`تم الدفع بتاريخ ${formattedDate} باسم ${propertyName} عبر البوابة`);
+
+
+          // =========== تحديث بيانات العقارات ===========
+          const propertiesSheet = ss.getSheetByName("بيانات العقارات");
+          const propData = propertiesSheet.getDataRange().getValues();
+
+          for (let j = 1; j < propData.length; j++) {
+            const propNumber = String(propData[j][0]).replace(/\D/g, "").slice(-5);
+            if (propNumber === propertyNumber) {
+              propertiesSheet.getRange(j + 1, 16).setValue(subscriptionName); // نوع الاشتراك
+              propertiesSheet.getRange(j + 1, 17).setValue(new Date()).setNumberFormat("yyyy/MM/dd HH:mm:ss"); // آخر تحديث
+              propertiesSheet.getRange(j + 1, 18).setValue(startDate).setNumberFormat("yyyy/MM/dd"); // بداية الاشتراك
+              break;
+            }
+          }
+
+          break; // خروج بعد تحديث الاشتراك
+        }
+      }
+    }
+
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: "success",
+        message: "تم تسجيل الدفع وربطه بالاشتراك",
+        transaction_id: transaction.id,
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    Logger.log("Webhook Error: " + err);
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: "error", message: err.message })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+
+
+
+
+
+
+
+// =========================
+// 3️⃣ التحقق من HMAC
+// =========================
+function verifyPaymobHMAC(data, receivedHmac) {
+  const secret = PAYMOB_HMAC_SECRET;
+  const payload = JSON.stringify(data);
+  const signatureBytes = Utilities.computeHmacSha512Signature(payload, secret, Utilities.Charset.UTF_8);
+  const signatureBase64 = Utilities.base64Encode(signatureBytes);
+  return signatureBase64 === receivedHmac;
+}
+
+
+
+
+function doGet(e) {
+  const page = (e && e.parameter && e.parameter.page) || 'main';
+  switch(page) {
+    case 'dashboard':
+      return HtmlService.createHtmlOutputFromFile('DashboardPage')
+        .setTitle('لوحة الإحصائيات')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    // الحالات الأخرى:
+    case 'upload':
+      return HtmlService.createHtmlOutputFromFile('UploadPage')
+        .setTitle('رفع بيانات الشاليهات')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    case 'main':
+      return HtmlService.createHtmlOutputFromFile('MainPage')
+        .setTitle('عرض الشاليهات')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    case 'subscriptions':
+      return HtmlService.createHtmlOutputFromFile('SubscriptionPage')
+        .setTitle('ادارة الاشتراكات')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    case 'profits':
+      return HtmlService.createHtmlOutputFromFile('ProfitPage')
+        .setTitle('لوحة الأرباح')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    default:
+      return HtmlService.createHtmlOutput("❌ الصفحة غير موجودة")
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+}
+
+
+
+
+
+// === تحديث الاشتراكات تلقائياً ===
+function autoUpdateSubscriptions() {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const subsSheet = ss.getSheetByName("الاشتراكات");
+  const propSheet = ss.getSheetByName("بيانات العقارات");
+
+  const subsData = subsSheet.getDataRange().getValues();
+  const propData = propSheet.getDataRange().getValues();
+
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  for (let i = 1; i < subsData.length; i++) {
+    const row = subsData[i];
+    const propertyNumber = String(row[0]).trim();
+    const startDate = row[5] instanceof Date ? new Date(row[5]) : null;
+    const endDate = row[6] instanceof Date ? new Date(row[6]) : null;
+
+    if (startDate && endDate && !isNaN(startDate) && !isNaN(endDate)) {
+      const endOnly = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+      let remainingDays = Math.floor((endOnly - todayOnly) / (1000 * 60 * 60 * 24)) + 1;
+      remainingDays = Math.max(remainingDays, 0);
+
+      subsSheet.getRange(i + 1, 8).setValue(remainingDays);
+
+      if (remainingDays === 0) {
+        const newType = "عادي";
+        subsSheet.getRange(i + 1, 5).setValue(newType);
+
+        for (let j = 1; j < propData.length; j++) {
+          if (String(propData[j][0]).trim() === propertyNumber) {
+            propSheet.getRange(j + 1, 16).setValue(newType);
+            propSheet.getRange(j + 1, 18).setValue(new Date());
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+
+// =========================
+// تحديث الأرباح وحساب الدورة
+// =========================
+function updateProfitSheet(isTransfer = false, forceNewCycle = false) {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const profitSheet = ss.getSheetByName("الأرباح");
+  const subsSheet   = ss.getSheetByName("الاشتراكات");
+  if (!profitSheet || !subsSheet) return;
+
+  const todayFull = new Date();
+  const today = new Date(todayFull.getFullYear(), todayFull.getMonth(), todayFull.getDate());
+  const monthYear = Utilities.formatDate(today, "GMT+3", "yyyy/MM");
+
+  const subsData = subsSheet.getDataRange().getValues();
+  const startDateCol = subsData[0].indexOf("تاريخ البداية");
+  const endDateCol   = subsData[0].indexOf("تاريخ الانتهاء");
+  const typeCol      = subsData[0].indexOf("نوع الاشتراك");
+  const priceCol     = subsData[0].indexOf("رسوم الاشتراك");
+  const lastCycleCol = subsData[0].indexOf("آخر دورة");
+
+  const profitData = profitSheet.getDataRange().getValues();
+
+  // ---------------------------
+  // تحديد آخر رقم دورة
+  // ---------------------------
+  let lastCycleNumber = 0;
+  for (let i = 1; i < profitData.length; i++) {
+    const cell = profitData[i][0];
+    if (cell && /^\d{4}\/\d{2}-\d+$/.test(cell)) {
+      const [cy, num] = cell.split("-");
+      if (parseInt(num) > lastCycleNumber) lastCycleNumber = parseInt(num);
+    }
+  }
+
+  let currentCycle;
+  let currentRowIndex;
+
+  // ---------------------------
+  // البحث عن آخر دورة نشطة
+  // ---------------------------
+  currentRowIndex = -1;
+  for (let i = profitData.length - 1; i >= 1; i--) {
+    const cell = profitData[i][0];
+    if (cell && /^\d{4}\/\d{2}-\d+$/.test(cell) && !profitData[i][4]) {
+      currentRowIndex = i;
+      currentCycle = cell;
+      break;
+    }
+  }
+
+  // إذا لم توجد دورة نشطة أو نريد فرض دورة جديدة
+  if (currentRowIndex === -1 || forceNewCycle) {
+    currentCycle = monthYear + "-" + (lastCycleNumber + 1);
+    profitSheet.appendRow([currentCycle, 0, 0, 0, "", "دورة جديدة"]);
+    currentRowIndex = profitSheet.getLastRow() - 1;
+  }
+
+  // ---------------------------
+  // احتساب الاشتراكات
+  // ---------------------------
+  let activeSubs = 0;
+  let totalProfit = 0;
+
+  subsData.slice(1).forEach((row, idx) => {
+    const start = row[startDateCol] instanceof Date ? row[startDateCol] : null;
+    const end   = row[endDateCol] instanceof Date ? row[endDateCol] : null;
+    const type  = row[typeCol];
+    const price = Number(row[priceCol]) || 0;
+    const lastCycle = row[lastCycleCol];
+
+    if (!start || !end || type !== "مميز") return;
+
+    const endDateOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    const daysRemaining = (endDateOnly - today) / (1000*60*60*24);
+
+    if (!lastCycle && daysRemaining > 0) {
+      // اشتراك جديد فقط → يحسب في الدورة الحالية
+      activeSubs++;
+      totalProfit += price;
+      subsSheet.getRange(idx + 2, lastCycleCol + 1).setValue(currentCycle);
+
+    } else if (lastCycle === currentCycle && daysRemaining > 0) {
+      // مشترك قديم محسوب في نفس الدورة → يبقى ضمن الحساب
+      activeSubs++;
+      totalProfit += price;
+
+    } else {
+      // منتهي أو قديم في دورة سابقة → لا يتغير
+    }
+  });
+
+  const partnerShare = totalProfit * 0.5;
+
+  if (isTransfer) {
+    profitSheet.getRange(currentRowIndex + 1, 5).setValue(new Date());
+    profitSheet.getRange(currentRowIndex + 1, 6).setValue("تم تحويل نصيب الشريك");
+  }
+
+  profitSheet.getRange(currentRowIndex + 1, 2).setValue(activeSubs);
+  profitSheet.getRange(currentRowIndex + 1, 3).setValue(totalProfit);
+  profitSheet.getRange(currentRowIndex + 1, 4).setValue(partnerShare);
+  if (!isTransfer) profitSheet.getRange(currentRowIndex + 1, 6).setValue("تم التحديث تلقائيًا");
+}
+
+// === دوال تشغيل ===
+function startNewCycle() { updateProfitSheet(false, true); } // دورة جديدة يدويًا
+function refreshProfitSheet() { updateProfitSheet(false); } // تحديث الأرباح
+function transferPartnerShare() { updateProfitSheet(true); } // تحويل نصيب الشريك
+
+
+
+
+// === جلب السعر من ورقة الأسعار حسب ما هو مكتوب مباشرة ===
+function getPrice(subscriptionType, optionDays) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("الأسعار");
+  if (!sheet) return 0;
+
+  const data = sheet.getDataRange().getValues();
+  const normalize = v => (v||"").toString().trim();
+
+  const targetType = normalize(subscriptionType);   // "مميز"
+  const targetDays = normalize(optionDays);         // عدد الأيام من الباقة
+
+  for (let i = 1; i < data.length; i++) {
+    const rowType = normalize(data[i][0]);   // نوع الاشتراك
+    const rowDays = normalize(data[i][1]);   // المدة
+    const rowPrice = Number(data[i][2]) || 0; // الرسوم
+
+    if (rowType === targetType && rowDays === targetDays) {
+      return rowPrice;
+    }
+  }
+  return 0;
+}
+
+// === جلب بيانات الاشتراك مع إخفاء رقم الجوال ===
+function getSubscriptionByProperty(propertyNumber) {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const sheet = ss.getSheetByName("الاشتراكات");
+  const data = sheet.getDataRange().getValues();
+  const target = String(propertyNumber).trim();
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  function maskPhone(phone) {
+    phone = String(phone || "");
+    const last5 = phone.slice(-5);
+    return '*'.repeat(phone.length - 5) + last5;
+  }
+
+  function maskPropertyName(name) {
+    if (!name) return "";
+    const visibleLength = Math.min(7, name.length); // عدد الأحرف الظاهرة قبل النجوم
+    return name.slice(0, visibleLength) + '*'.repeat(name.length - visibleLength);
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    const rowNum = String(data[i][0] || "").trim();
+    if (rowNum === target) {
+      const startDate = data[i][5] instanceof Date ? new Date(data[i][5]) : null;
+      const endDate = data[i][6] instanceof Date ? new Date(data[i][6]) : null;
+      let remainingDays = 0;
+      if (startDate && endDate) {
+        const endOnly = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+        remainingDays = Math.max(Math.ceil((endOnly - todayOnly) / (1000 * 60 * 60 * 24)) + 1, 0);
+      }
+      const status = remainingDays > 0 ? "مفعل" : "منتهي";
+      const subscriptionType = remainingDays > 0 ? data[i][4] || "عادي" : "عادي";
+      const subscriptionPrice = data[i][3] || 0;
+
+      return {
+        propertyNumber: rowNum,
+        name: maskPropertyName(data[i][1]), // <-- الاسم مخفي جزئيًا
+        phone: maskPhone(data[i][2]),       // <-- الرقم مخفي
+        subscriptionType: subscriptionType,
+        startDate: startDate ? Utilities.formatDate(startDate, "GMT+3", "yyyy/MM/dd") : "",
+        endDate: endDate ? Utilities.formatDate(endDate, "GMT+3", "yyyy/MM/dd") : "",
+        remainingDays: remainingDays,
+        status: status,
+        receiptLink: data[i][8] || "",
+        subscriptionPrice: subscriptionPrice
+      };
+    }
+  }
+  return null;
+}
+
+
+
+// === تفعيل الاشتراك مع رفع الإيصال واعتماد أي خيار من ورقة الأسعار ===
+function activateSubscriptionWithReceipt(data){
+  try {
+    const sheetId = "1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ";
+    const folderId = "1dw13P4ip2Uu_uVW4BiUQlJY4l5zHh74f";
+    const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("الاشتراكات");
+    const rowIndex = findPropertyRow(sheet,data.propertyNumber);
+    if(rowIndex === -1) throw new Error("رقم العقار غير موجود");
+
+    const startDate = new Date();
+    const endDate = new Date(startDate.getTime());
+    endDate.setDate(endDate.getDate() + Number(data.packageDays) - 1);
+
+    // رفع الملف للإيصال
+    if(data.receiptFile && data.receiptFile.data){
+      const blob = Utilities.newBlob(
+        Utilities.base64Decode(data.receiptFile.data),
+        data.receiptFile.type,
+        data.receiptFile.name
+      );
+      const folder = DriveApp.getFolderById(folderId);
+      const file = folder.createFile(blob);
+      sheet.getRange(rowIndex+1,9).setValue(file.getUrl()); // رابط الإيصال
+    }
+
+    // تحديث بيانات الاشتراك
+    sheet.getRange(rowIndex+1,5).setValue("مميز"); // نوع الاشتراك
+    sheet.getRange(rowIndex+1,6).setValue(startDate); // تاريخ البداية
+    sheet.getRange(rowIndex+1,7).setValue(endDate);   // تاريخ النهاية
+    sheet.getRange(rowIndex+1,8).setValue(Number(data.packageDays)); // الأيام
+    sheet.getRange(rowIndex+1,4).setValue(Number(data.packagePrice)); // الرسوم
+
+    SpreadsheetApp.flush();
+
+    updateSubscriptionType(data.propertyNumber,"مميز");
+
+    return {status:"success", message:"✅ تم تفعيل الاشتراك ورفع الإيصال بنجاح"};
+  } catch(err){
+    return {status:"error", message:"⚠️ حدث خطأ: " + err.message};
+  }
+}
+
+// ✅ التفعيل بواسطة زر الدفع (Paymob)
+function activateSubscriptionWithPayment(data) {
+  try {
+    const checkoutUrl = createPaymobCheckout(); // الدالة اللي عندك فوق
+    if (!checkoutUrl) throw new Error("تعذر إنشاء رابط الدفع");
+
+    return {
+      status: "pending",
+      message: "💳 اضغط على الرابط لإتمام الدفع",
+      paymentUrl: checkoutUrl
+    };
+  } catch (err) {
+    return { status: "error", message: "⚠️ خطأ في الدفع: " + err.message };
+  }
+}
+
+
+
+// جلب الباقات من ورقة "الأسعار"
+function getPackagesFromSheet(){
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const sheet = ss.getSheetByName("الأسعار");
+  if(!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  const packages = [];
+  for(let i=1;i<data.length;i++){
+    if(data[i][0] && data[i][1] && data[i][2]){
+      packages.push({
+        name: data[i][0],   // اسم الباقة
+        days: data[i][1],   // المدة
+        price: data[i][2]   // الرسوم
+      });
+    }
+  }
+  return packages;
+}
+
+
+// === تحديث نوع الاشتراك ===
+function updateSubscriptionType(propertyNumber,newType){
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const subsSheet = ss.getSheetByName("الاشتراكات");
+  const subsData = subsSheet.getDataRange().getValues();
+  for(let i=1;i<subsData.length;i++){
+    if(String(subsData[i][0]).trim()===String(propertyNumber).trim()){
+      subsSheet.getRange(i+1,5).setValue(newType);
+      break;
+    }
+  }
+  const propSheet = ss.getSheetByName("بيانات العقارات");
+  const propData = propSheet.getDataRange().getValues();
+  for(let i=1;i<propData.length;i++){
+    if(String(propData[i][0]).trim()===String(propertyNumber).trim()){
+      propSheet.getRange(i+1,16).setValue(newType);
+      propSheet.getRange(i+1,18).setValue(new Date());
+      break;
+    }
+  }
+}
+
+// === البحث عن صف العقار ===
+function findPropertyRow(sheet,propertyNumber){
+  const normalize = v=>String(v||"").replace(/\s/g,'').trim();
+  const values = sheet.getDataRange().getDisplayValues();
+  const target = normalize(propertyNumber);
+  for(let i=1;i<values.length;i++){
+    if(normalize(values[i][0])===target) return i;
+  }
+  return -1;
+}
+
+// === مزامنة جميع العقارات إلى الاشتراكات ===
+function syncAllPropertiesToSubscriptions(){
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const dataSheet = ss.getSheetByName("بيانات العقارات");
+  const subsSheet = ss.getSheetByName("الاشتراكات");
+  const dataValues = dataSheet.getDataRange().getValues();
+  const subsValues = subsSheet.getDataRange().getValues();
+  const existingPropNumbers = subsValues.slice(1).map(r=>String(r[0]).trim());
+  const newRows=[];
+  for(let i=1;i<dataValues.length;i++){
+    const row=dataValues[i];
+    const propNum=String(row[0]).trim();
+    if(!existingPropNumbers.includes(propNum)){
+      const subscriptionType=row[15]||"عادي";
+      newRows.push([propNum,row[1]||"",row[2]||"","",subscriptionType,"","","",""]);
+    }
+  }
+  if(newRows.length>0){
+    subsSheet.getRange(subsSheet.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+  }
+}
+
+// === جلب بيانات جميع العقارات كـ JSON ===
+function getDataAsJson(){
+  const sheetId = "1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ";
+  const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("بيانات العقارات");
+  const dataValues = sheet.getDataRange().getValues();
+  const headers = dataValues[0];
+  const rows = dataValues.slice(1);
+  const result = rows.map(row=>{
+    const obj={};
+    headers.forEach((h,i)=>obj[h]=row[i]);
+    return obj;
+  });
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// === جلب الصور من Drive مع كاش ===
+function getImagesFromDriveAPI(propertyId){
+  const parentId='169jrXmGGQ27mtjkubu-i762xwQQ3e1uE';
+  const folders=DriveApp.getFolderById(parentId).getFoldersByName(propertyId);
+  const imageUrls=[];
+  if(folders.hasNext()){
+    const folder=folders.next();
+    const folderId=folder.getId();
+    const response=Drive.Files.list({
+      q:`'${folderId}' in parents and mimeType contains 'image/' and trashed = false`,
+      fields:'files(id,thumbnailLink)',
+      maxResults:10
+    });
+    const files=response.files;
+    if(files && files.length>0){
+      for(let i=0;i<files.length;i++){
+        imageUrls.push(files[i].thumbnailLink.replace('=s220','=s800'));
+      }
+    }
+  }
+  return imageUrls;
+}
+
+function getCachedImages(propertyId){
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(propertyId);
+  if(cached) return JSON.parse(cached);
+  const imgs = getImagesFromDriveAPI(propertyId);
+  cache.put(propertyId,JSON.stringify(imgs),900);
+  return imgs;
+}
+
+// === إدارة الأعمدة ===
+const PROP_COLUMNS_VISIBILITY='columnsVisibility';
+function getColumnsVisibility(){
+  const userProps=PropertiesService.getUserProperties();
+  const json=userProps.getProperty(PROP_COLUMNS_VISIBILITY);
+  return json?JSON.parse(json):{};
+}
+function setColumnsVisibility(settings){
+  const userProps=PropertiesService.getUserProperties();
+  userProps.setProperty(PROP_COLUMNS_VISIBILITY,JSON.stringify(settings));
+}
+
+
+function onEdit(e){
+  const sheet=e.range.getSheet();
+  if(sheet.getName()!=='بيانات العقارات') return;
+  const headers=sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  const editableFields=[
+    '🏡 اسم العقار','📞 رقم الجوال','📍 الموقع','📍 المنطقة',
+    '🧭 الاتجاه','🏠 النوع','🔹 المرافق',
+    '💰 سعر العرض','💰 سعر وسط الأسبوع','💰 سعر نهاية الأسبوع',
+    '💰 سعر المبيت','💰 سعر خاص (اختياري)','💰 سعر الاجازات'
+  ];
+  const editedCol=e.range.getColumn();
+  const editedHeader=headers[editedCol-1];
+  if(editableFields.includes(editedHeader)){
+    const lastUpdateCol=headers.indexOf('🕒 آخر تحديث')+1;
+    if(lastUpdateCol>0 && e.range.getRow()>1){
+      sheet.getRange(e.range.getRow(),lastUpdateCol).setValue(new Date());
+    }
+  }
+}
+
+// === رفع الملفات (عقارات جديدة أو تحديث) ===
+function uploadFiles(data){
+  try{
+    const parentFolderId="169jrXmGGQ27mtjkubu-i762xwQQ3e1uE";
+    const sheetId="1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ";
+    const sheet=SpreadsheetApp.openById(sheetId).getSheetByName("بيانات العقارات");
+    const values=sheet.getDataRange().getValues();
+    const propertyNumber=(data.propertyNumber||"").trim().replace(/\s+/g,""); // ✅ تطبيع الرقم
+
+    // تحقق من رقم العقار
+if(data.requestType==="جديد" && !/^\d{5}$/.test(propertyNumber)) 
+  return {status:"error", message:"❌ رقم العقار الجديد يجب أن يتكون من 5 أرقام فقط."};
+
+if(data.requestType==="تحديث" && !/^\d{5}$/.test(propertyNumber)) 
+  return {status:"error", message:"❌ رقم العقار في التحديث يجب أن يتكون 5 أرقام فقط."};
+
+    // تحقق من الأسعار
+    const priceFields=[
+      {key:"offerPrice", label:"سعر العرض"},
+      {key:"midweekPrice", label:"سعر وسط الأسبوع"},
+      {key:"weekendPrice", label:"سعر نهاية الأسبوع"},
+      {key:"overnightPrice", label:"سعر المبيت"},
+      {key:"specialPrice", label:"سعر خاص"},
+      {key:"holidayPrice", label:"سعر الإجازات"}
+    ];
+    for(const field of priceFields){
+      if(data[field.key] && isNaN(data[field.key])){
+        return {status:"error", message:`❌ ${field.label} يجب أن يكون رقمًا.`};
+      }
+    }
+
+    if(data.requestType==="جديد" && (!data.myFiles || data.myFiles.length===0)){
+      return {status:"error", message:"❌ يجب رفع صور عند إضافة عقار جديد."};
+    }
+
+    // البحث عن الصف
+    const rowIndex=values.findIndex((row,i)=>i>0 && (row[0]||"").toString().replace(/\s+/g,"") === propertyNumber);
+
+    if(data.requestType==="جديد" && rowIndex!==-1){
+      return {status:"error", message:"❌ رقم العقار مكرر."};
+    }
+
+    if(data.requestType==="تحديث" && rowIndex===-1){
+      return {status:"error", message:"⚠️ رقم العقار غير موجود.\n\n👉 إذا كان العقار جديد اختر (جديد) من نوع الطلب.\n👉 إذا كان مسجل مسبقًا تأكد من كتابة الرقم الصحيح."};
+    }
+
+    // الآن آمن نقرأ العمود 15
+    const subscriptionType=data.requestType==="جديد" ? "عادي" : values[rowIndex][15];
+
+    const parentFolder=DriveApp.getFolderById(parentFolderId);
+    let folder;
+    const folders=parentFolder.getFoldersByName(propertyNumber);
+    if(folders.hasNext()) folder=folders.next();
+    else folder=parentFolder.createFolder(propertyNumber);
+
+    // رفع الملفات
+    if(data.myFiles && data.myFiles.length>0){
+      data.myFiles.forEach(file=>{
+        const blob=Utilities.newBlob(Utilities.base64Decode(file.data),file.type,file.name);
+        folder.createFile(blob);
+      });
+    }
+
+    const facilitiesString=Array.isArray(data.facilities)?data.facilities.join(", "):"";
+
+    const inputData={
+      name:data.propertyName||"",
+      phone:data.phoneNumber||"",
+      location:data.location||"",
+      region:data.region||"",
+      direction:data.direction||"",
+      type:data.type||"",
+      facilities:facilitiesString,
+      imageLink:folder.getUrl(),
+      offerPrice:data.offerPrice||"",
+      midweekPrice:data.midweekPrice||"",
+      weekendPrice:data.weekendPrice||"",
+      overnightPrice:data.overnightPrice||"",
+      specialPrice:data.specialPrice||"",
+      holidayPrice:data.holidayPrice||"",
+      subscriptionType:subscriptionType,
+      updatedAt:new Date()
+    };
+
+    if(data.requestType==="تحديث"){
+      const oldRow=values[rowIndex];
+      const updatedRow=[
+        propertyNumber,
+        inputData.name||oldRow[1],
+        inputData.phone||oldRow[2],
+        inputData.location||oldRow[3],
+        inputData.region||oldRow[4],
+        inputData.direction||oldRow[5],
+        inputData.type||oldRow[6],
+        inputData.facilities||oldRow[7],
+        inputData.imageLink||oldRow[8],
+        inputData.offerPrice||oldRow[9],
+        inputData.midweekPrice||oldRow[10],
+        inputData.weekendPrice||oldRow[11],
+        inputData.overnightPrice||oldRow[12],
+        inputData.specialPrice||oldRow[13],
+        inputData.holidayPrice||oldRow[14],
+        inputData.subscriptionType||oldRow[15],
+        inputData.updatedAt
+      ];
+      sheet.getRange(rowIndex+1,1,1,updatedRow.length).setValues([updatedRow]);
+      return {status:"success", folderUrl:folder.getUrl(), message:"✅ تم التحديث بنجاح."};
+    }
+
+    if(data.requestType==="جديد"){
+      const newRow=[
+        propertyNumber,
+        inputData.name,
+        inputData.phone,
+        inputData.location,
+        inputData.region,
+        inputData.direction,
+        inputData.type,
+        inputData.facilities,
+        inputData.imageLink,
+        inputData.offerPrice,
+        inputData.midweekPrice,
+        inputData.weekendPrice,
+        inputData.overnightPrice,
+        inputData.specialPrice,
+        inputData.holidayPrice,
+        inputData.subscriptionType,
+        inputData.updatedAt
+      ];
+      sheet.appendRow(newRow);
+      return {status:"success", folderUrl:folder.getUrl(), message:"✅ تم الإضافة بنجاح."};
+    }
+
+  }catch(err){
+    return {status:"error", message:"⚠️ خطأ: "+err.message};
+  }
+}
+
+function checkDuplicateProperty(propertyNumber) {
+  const sheetId = "1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ"; // ضع ID الشيت
+  const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("بيانات العقارات");
+  const values = sheet.getDataRange().getValues();
+  const rowIndex = values.findIndex((row, i) => i > 0 && row[0] == propertyNumber);
+  return { exists: rowIndex !== -1 };
+}
+
+
+function logPropertyRequest(propertyId, propertyName) {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  let sheet = ss.getSheetByName("الطلبات");
+  if (!sheet) {
+    sheet = ss.insertSheet("الطلبات");
+    sheet.appendRow(["رقم العقار", "اسم العقار", "عدد الطلبات", "اليوم", "الشهر", "السنة", "الوقت"]);
+  }
+
+  const now = new Date();
+  const day = now.getDate();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const time = Utilities.formatDate(now, "Asia/Riyadh", "HH:mm:ss");
+
+  const formattedPropertyId = String(propertyId).padStart(5, '0');
+
+  // جلب كل البيانات
+  const data = sheet.getDataRange().getValues();
+  let rowIndex = null;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowPropertyId = row[0];
+    const rowDay = row[3];
+    const rowMonth = row[4];
+    const rowYear = row[5];
+
+    // إذا نفس العقار ونفس اليوم
+    if (rowPropertyId == formattedPropertyId && rowDay == day && rowMonth == month && rowYear == year) {
+      rowIndex = i + 1; // الصف في GAS يبدأ من 1
+      break;
+    }
+  }
+
+  let count = 1;
+
+  if (rowIndex) {
+    // زيادة عدد الطلبات بنفس الصف
+    count = sheet.getRange(rowIndex, 3).getValue() || 0;
+    count++;
+    sheet.getRange(rowIndex, 3).setValue(count);
+    sheet.getRange(rowIndex, 7).setValue(time); // تحديث الوقت لآخر طلب
+  } else {
+    // إنشاء صف جديد لليوم
+    sheet.appendRow([formattedPropertyId, propertyName, count, day, month, year, time]);
+  }
+
+  // الكود المختصر للواتساب
+  const whatsappCode = `${formattedPropertyId}-${count}`;
+  return whatsappCode;
+}
+
+function getPropertyData(propertyNumber) {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const sheet = ss.getSheetByName("بيانات العقارات");
+  const data = sheet.getDataRange().getValues();
+  const target = String(propertyNumber).trim();
+  const headers = data[0];
+
+  for (let i = 1; i < data.length; i++) {
+    const rowNum = String(data[i][0] || "").trim();
+    if (rowNum === target) {
+      const row = data[i];
+      const result = {};
+      headers.forEach((h, idx) => result[h] = row[idx]);
+
+      const propertyData = {
+        propertyNumber: rowNum,
+        propertyName: result["🏡 اسم العقار"] || "",
+        phoneNumber: result["📞 رقم الجوال"] || "",
+        location: result["📍 الموقع"] || "",
+        region: result["📍 المنطقة"] || "",
+        direction: result["🧭 الاتجاه"] || "",
+        type: result["🏠 النوع"] || "",
+        facilities: (result["🔹 المرافق"] || "").toString().split(/[،,]/).map(x=>x.trim()),
+        offerPrice: result["💰 سعر العرض"] || "",
+        midweekPrice: result["💰 سعر وسط الأسبوع"] || "",
+        weekendPrice: result["💰 سعر نهاية الأسبوع"] || "",
+        overnightPrice: result["💰 سعر المبيت"] || "",
+        specialPrice: result["💰 سعر خاص (اختياري)"] || "",
+        holidayPrice: result["💰 سعر الإجازات"] || ""
+      };
+
+      return { exists: true, data: propertyData };
+    }
+  }
+  return { exists: false };
+}
+
+function maskPhone(phone) {
+  // تأكد أن الرقم على شكل نص
+  phone = String(phone);
+  const last5 = phone.slice(-5);          // آخر 5 أرقام
+  const masked = '*'.repeat(phone.length - 5) + last5;  // باقي الأرقام *
+  return masked;
+}
+
