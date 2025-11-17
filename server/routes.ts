@@ -284,15 +284,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'العقار غير موجود' });
       }
 
-      // Create Drive folder if it doesn't exist
-      let driveFolderId = property.driveFolderId;
-      if (!driveFolderId) {
-        console.log(`Creating Drive folder for property ${req.propertyNumber}...`);
-        driveFolderId = await googleDriveService.createPropertyFolder(req.propertyNumber);
-        await storage.updateProperty(req.propertyNumber, { driveFolderId });
-        console.log(`Drive folder created: ${driveFolderId}`);
-      }
-
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: 'لم يتم رفع أي صور' });
@@ -306,16 +297,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Upload images to Google Drive
+      // Upload images to Replit Object Storage
+      const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
+      if (!bucketId) {
+        throw new Error('Object storage not configured');
+      }
+
+      const { mkdir, writeFile } = await import('node:fs/promises');
+      const publicDirPath = `${bucketId}/public/properties/${req.propertyNumber}`;
+      
+      // Ensure directory exists
+      try {
+        await mkdir(publicDirPath, { recursive: true });
+      } catch (err) {
+        // Directory might already exist, ignore error
+      }
+
       const imageUrls: string[] = [];
       for (const file of files) {
-        const filename = `${Date.now()}-${file.originalname}`;
-        const url = await googleDriveService.uploadImage(
-          driveFolderId,
-          file.buffer,
-          filename
-        );
-        imageUrls.push(url);
+        const fileExtension = file.mimetype.split('/')[1] || 'jpg';
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExtension}`;
+        const fullPath = `${publicDirPath}/${fileName}`;
+        
+        // Write file to object storage
+        await writeFile(fullPath, file.buffer);
+        
+        // Generate public URL
+        const publicUrl = `/public/properties/${req.propertyNumber}/${fileName}`;
+        imageUrls.push(publicUrl);
       }
 
       // Update property with new image URLs
@@ -323,6 +332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageUrls: [...property.imageUrls, ...imageUrls].slice(0, 15), // Max 15 images
       });
 
+      console.log(`✅ Uploaded ${imageUrls.length} images for property ${req.propertyNumber}`);
       res.json({ imageUrls: updatedProperty.imageUrls });
     } catch (error) {
       console.error('Error uploading images:', error);
