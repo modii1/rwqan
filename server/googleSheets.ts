@@ -35,22 +35,84 @@ const SHEETS = {
   ANALYTICS: 'الإحصائيات',
 };
 
-class GoogleSheetsService {
-  private sheets: any;
+// Connection helper for Replit Google Sheets integration
+let connectionSettings: any;
 
-  constructor() {
-    const auth = new google.auth.GoogleAuth({
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    
-    this.sheets = google.sheets({ version: 'v4', auth });
+async function getAccessToken() {
+  // Check if cached token is still valid
+  if (connectionSettings?.settings?.expires_at && 
+      connectionSettings?.settings?.access_token &&
+      new Date(connectionSettings.settings.expires_at).getTime() > Date.now()) {
+    return connectionSettings.settings.access_token;
+  }
+  
+  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+  const xReplitToken = process.env.REPL_IDENTITY 
+    ? 'repl ' + process.env.REPL_IDENTITY 
+    : process.env.WEB_REPL_RENEWAL 
+    ? 'depl ' + process.env.WEB_REPL_RENEWAL 
+    : null;
+
+  if (!xReplitToken || !hostname) {
+    throw new Error('X_REPLIT_TOKEN or hostname not found for repl/depl');
+  }
+
+  const response = await fetch(
+    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet',
+    {
+      headers: {
+        'Accept': 'application/json',
+        'X_REPLIT_TOKEN': xReplitToken
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch connection settings: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  connectionSettings = data.items?.[0];
+
+  if (!connectionSettings?.settings) {
+    throw new Error('Google Sheet not connected or settings missing');
+  }
+
+  // Try to get access token from multiple possible locations
+  const accessToken = 
+    connectionSettings.settings.access_token || 
+    connectionSettings.settings.oauth?.credentials?.access_token;
+
+  if (!accessToken) {
+    throw new Error('Access token not found in connection settings');
+  }
+
+  return accessToken;
+}
+
+// Get fresh Google Sheets client with Replit connection
+async function getGoogleSheetClient() {
+  const accessToken = await getAccessToken();
+
+  const oauth2Client = new google.auth.OAuth2();
+  oauth2Client.setCredentials({
+    access_token: accessToken
+  });
+
+  return google.sheets({ version: 'v4', auth: oauth2Client });
+}
+
+class GoogleSheetsService {
+  private async getSheets() {
+    return await getGoogleSheetClient();
   }
 
   // Initialize sheets with headers if they don't exist
   async initializeSheets() {
     try {
+      const sheets = await this.getSheets();
       // Check if required sheets exist
-      const response = await this.sheets.spreadsheets.get({
+      const response = await sheets.spreadsheets.get({
         spreadsheetId: SHEET_ID,
       });
 
@@ -74,7 +136,8 @@ class GoogleSheetsService {
 
   private async createSheet(title: string) {
     try {
-      await this.sheets.spreadsheets.batchUpdate({
+      const sheets = await this.getSheets();
+      await sheets.spreadsheets.batchUpdate({
         spreadsheetId: SHEET_ID,
         requestBody: {
           requests: [{
@@ -133,14 +196,15 @@ class GoogleSheetsService {
     for (const [sheetName, headerRow] of Object.entries(headers)) {
       try {
         // Check if sheet has data
-        const response = await this.sheets.spreadsheets.values.get({
+        const sheets = await this.getSheets();
+        const response = await sheets.spreadsheets.values.get({
           spreadsheetId: SHEET_ID,
           range: `${sheetName}!A1:Z1`,
         });
 
         // If no data, add headers
         if (!response.data.values || response.data.values.length === 0) {
-          await this.sheets.spreadsheets.values.update({
+          await sheets.spreadsheets.values.update({
             spreadsheetId: SHEET_ID,
             range: `${sheetName}!A1`,
             valueInputOption: 'RAW',
@@ -159,7 +223,8 @@ class GoogleSheetsService {
   // Helper method to read all rows from a sheet
   async readSheet(sheetName: string): Promise<any[][]> {
     try {
-      const response = await this.sheets.spreadsheets.values.get({
+      const sheets = await this.getSheets();
+      const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SHEET_ID,
         range: `${sheetName}!A2:Z`,
       });
@@ -174,7 +239,8 @@ class GoogleSheetsService {
   // Helper method to append rows to a sheet
   async appendToSheet(sheetName: string, values: any[][]) {
     try {
-      await this.sheets.spreadsheets.values.append({
+      const sheets = await this.getSheets();
+      await sheets.spreadsheets.values.append({
         spreadsheetId: SHEET_ID,
         range: `${sheetName}!A:Z`,
         valueInputOption: 'RAW',
@@ -191,7 +257,8 @@ class GoogleSheetsService {
   // Helper method to update a specific row
   async updateRow(sheetName: string, rowIndex: number, values: any[]) {
     try {
-      await this.sheets.spreadsheets.values.update({
+      const sheets = await this.getSheets();
+      await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
         range: `${sheetName}!A${rowIndex}:Z${rowIndex}`,
         valueInputOption: 'RAW',
@@ -209,7 +276,8 @@ class GoogleSheetsService {
   async deleteRow(sheetName: string, rowIndex: number) {
     try {
       const sheetId = await this.getSheetId(sheetName);
-      await this.sheets.spreadsheets.batchUpdate({
+      const sheets = await this.getSheets();
+      await sheets.spreadsheets.batchUpdate({
         spreadsheetId: SHEET_ID,
         requestBody: {
           requests: [{
@@ -232,7 +300,8 @@ class GoogleSheetsService {
 
   // Helper to get sheet ID by name
   private async getSheetId(sheetName: string): Promise<number> {
-    const response = await this.sheets.spreadsheets.get({
+    const sheets = await this.getSheets();
+    const response = await sheets.spreadsheets.get({
       spreadsheetId: SHEET_ID,
     });
 
