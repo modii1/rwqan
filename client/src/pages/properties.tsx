@@ -170,18 +170,6 @@ export default function PropertiesPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-card shadow-sm border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="text-2xl font-bold text-primary">🏡</div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">
-              مودي الذكي - العقارات
-            </h1>
-          </div>
-        </div>
-      </header>
-
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Filters */}
         <Card className="p-4 md:p-6 mb-6 bg-muted/30">
