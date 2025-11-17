@@ -277,7 +277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Upload images
-  app.post("/api/owner/images", requireOwnerAuth, upload.array('images', 10), async (req: any, res) => {
+  app.post("/api/owner/images", requireOwnerAuth, upload.array('images', 15), async (req: any, res) => {
     try {
       const property = await storage.getPropertyByNumber(req.propertyNumber);
       if (!property || !property.driveFolderId) {
@@ -287,6 +287,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: 'لم يتم رفع أي صور' });
+      }
+
+      // Check total images count (current + new)
+      const totalImages = property.imageUrls.length + files.length;
+      if (totalImages > 15) {
+        return res.status(400).json({ 
+          error: `الحد الأقصى 15 صورة. لديك ${property.imageUrls.length} صورة، يمكنك إضافة ${15 - property.imageUrls.length} صورة فقط` 
+        });
       }
 
       // Upload images to Google Drive
@@ -303,7 +311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update property with new image URLs
       const updatedProperty = await storage.updateProperty(req.propertyNumber, {
-        imageUrls: [...property.imageUrls, ...imageUrls].slice(0, 10), // Max 10 images
+        imageUrls: [...property.imageUrls, ...imageUrls].slice(0, 15), // Max 15 images
       });
 
       res.json({ imageUrls: updatedProperty.imageUrls });
