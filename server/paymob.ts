@@ -1,176 +1,128 @@
 import crypto from 'crypto';
 
-const API_KEY = process.env.PAYMOB_API_KEY!;
+const SECRET_KEY = process.env.PAYMOB_SECRET_KEY || process.env.PAYMOB_API_KEY!;
 const PUBLIC_KEY = process.env.PAYMOB_PUBLIC_KEY!;
 const HMAC_SECRET = process.env.PAYMOB_HMAC_SECRET!;
-const INTEGRATION_ID_CARDS = process.env.PAYMOB_INTEGRATION_ID_CARDS!;
-const INTEGRATION_ID_APPLEPAY = process.env.PAYMOB_INTEGRATION_ID_APPLEPAY!;
-const IFRAME_ID_CARDS = process.env.PAYMOB_IFRAME_ID_CARDS || '869748'; // Default iframe ID
-const IFRAME_ID_APPLEPAY = process.env.PAYMOB_IFRAME_ID_APPLEPAY || '869749'; // Default iframe ID
+const INTEGRATION_ID_CARDS = parseInt(process.env.PAYMOB_INTEGRATION_ID_CARDS || '15650');
+const INTEGRATION_ID_APPLEPAY = parseInt(process.env.PAYMOB_INTEGRATION_ID_APPLEPAY || '15649');
 
-const PAYMOB_API_URL = 'https://ksa.paymob.com/api';
+const PAYMOB_API_URL = 'https://ksa.paymob.com';
 
-interface PaymobAuthResponse {
-  token: string;
-}
-
-interface PaymobOrderResponse {
-  id: number;
+interface IntentionResponse {
+  client_secret: string;
+  id: string;
   [key: string]: any;
 }
 
-interface PaymobPaymentKeyResponse {
-  token: string;
-}
-
 export class PaymobService {
-  private authToken: string | null = null;
-  private tokenExpiry: number = 0;
-
-  async getAuthToken(): Promise<string> {
-    // Reuse token if still valid (expires in 1 hour, refresh after 55 mins)
-    if (this.authToken && Date.now() < this.tokenExpiry) {
-      return this.authToken;
-    }
-
-    const response = await fetch(`${PAYMOB_API_URL}/auth/tokens`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: API_KEY }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Paymob auth error:', errorText);
-      throw new Error(`فشل في المصادقة مع Paymob: ${response.status}`);
-    }
-
-    const data: PaymobAuthResponse = await response.json();
-    
-    if (!data.token) {
-      console.error('No token in response:', data);
-      throw new Error('لم يتم الحصول على رمز المصادقة من Paymob');
-    }
-
-    this.authToken = data.token;
-    this.tokenExpiry = Date.now() + 55 * 60 * 1000; // 55 minutes
-
-    return this.authToken;
-  }
-
-  async createOrder(
+  async createIntention(
     amount: number,
     propertyNumber: string,
-    items: any[] = []
-  ): Promise<number> {
-    const token = await this.getAuthToken();
-
-    const response = await fetch(`${PAYMOB_API_URL}/ecommerce/orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        auth_token: token,
-        delivery_needed: 'false',
-        amount_cents: Math.round(amount * 100), // Convert to cents
-        currency: 'SAR',
-        merchant_order_id: `PROP-${propertyNumber}-${Date.now()}`,
-        items: items.length > 0 ? items : [{
-          name: 'اشتراك عقار',
-          amount_cents: Math.round(amount * 100),
-          description: `اشتراك عقار رقم ${propertyNumber}`,
-          quantity: 1,
-        }],
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Paymob create order error:', errorText);
-      throw new Error(`فشل في إنشاء طلب الدفع: ${response.status}`);
-    }
-
-    const data: PaymobOrderResponse = await response.json();
-    
-    if (!data.id) {
-      console.error('No order ID in response:', data);
-      throw new Error('لم يتم الحصول على معرف الطلب من Paymob');
-    }
-
-    return data.id;
-  }
-
-  async createPaymentKey(
-    orderId: number,
-    amount: number,
-    propertyNumber: string,
+    propertyName: string,
+    phone: string,
+    packageName: string,
+    packageDays: number,
     paymentMethod: 'cards' | 'applepay' = 'cards'
-  ): Promise<string> {
-    const token = await this.getAuthToken();
+  ): Promise<{ clientSecret: string; intentionId: string; checkoutUrl: string }> {
     const integrationId = paymentMethod === 'applepay' 
       ? INTEGRATION_ID_APPLEPAY 
       : INTEGRATION_ID_CARDS;
 
-    const response = await fetch(`${PAYMOB_API_URL}/acceptance/payment_keys`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        auth_token: token,
-        amount_cents: Math.round(amount * 100),
-        expiration: 3600, // 1 hour
-        order_id: orderId,
-        billing_data: {
-          apartment: 'NA',
-          email: `property${propertyNumber}@moddy.sa`,
-          floor: 'NA',
-          first_name: 'عقار',
-          street: 'NA',
-          building: 'NA',
-          phone_number: '0500000000',
-          shipping_method: 'NA',
-          postal_code: 'NA',
-          city: 'القصيم',
-          country: 'SA',
-          last_name: propertyNumber,
-          state: 'SA',
+    let itemName = `${packageName} للعقار ${propertyName}`;
+    if (itemName.length > 50) {
+      itemName = itemName.slice(0, 50);
+    }
+
+    const amountCents = Math.round(amount * 100);
+
+    const payload = {
+      amount: amountCents,
+      currency: 'SAR',
+      payment_methods: [integrationId],
+      items: [
+        {
+          name: itemName,
+          amount: amountCents,
+          description: 'الاشتراك يبدأ من تاريخ التفعيل مباشرة وبشكل آلي.',
+          quantity: 1,
         },
-        currency: 'SAR',
-        integration_id: integrationId,
-        lock_order_when_paid: 'true',
-      }),
+      ],
+      billing_data: {
+        first_name: propertyName || 'عميل',
+        last_name: 'N/A',
+        email: `${phone}@example.com`,
+        phone_number: phone,
+        country: 'KSA',
+      },
+      customer: {
+        first_name: propertyName || 'عميل',
+        last_name: 'N/A',
+        email: `${phone}@example.com`,
+      },
+      special_reference: `${propertyNumber}-${Date.now()}`,
+      extras: {
+        creation_extras: {
+          propertyNumber,
+          packageName,
+          days: packageDays,
+          price: amount,
+        },
+      },
+    };
+
+    const response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SECRET_KEY}`,
+      },
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Paymob create payment key error:', errorText);
-      throw new Error(`فشل في إنشاء مفتاح الدفع: ${response.status}`);
+      console.error('Paymob Intention API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      });
+      throw new Error(`فشل في إنشاء طلب الدفع: ${response.status} - ${errorText}`);
     }
 
-    const data: PaymobPaymentKeyResponse = await response.json();
-    
-    if (!data.token) {
-      console.error('No payment token in response:', data);
-      throw new Error('لم يتم الحصول على رمز الدفع من Paymob');
+    const data: IntentionResponse = await response.json();
+
+    if (!data.client_secret) {
+      console.error('No client_secret in response:', data);
+      throw new Error('لم يتم الحصول على client_secret من Paymob');
     }
 
-    return data.token;
+    const checkoutUrl = `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${data.client_secret}`;
+
+    return {
+      clientSecret: data.client_secret,
+      intentionId: data.id,
+      checkoutUrl,
+    };
   }
 
   async initiatePayment(
     amount: number,
     propertyNumber: string,
+    propertyName: string = 'عقار',
+    phone: string = '0500000000',
+    packageName: string = 'باقة عامة',
+    packageDays: number = 30,
     paymentMethod: 'cards' | 'applepay' = 'cards'
-  ): Promise<{ orderId: number; paymentToken: string; iframeUrl: string }> {
-    const orderId = await this.createOrder(amount, propertyNumber);
-    const paymentToken = await this.createPaymentKey(orderId, amount, propertyNumber, paymentMethod);
-
-    const iframeId = paymentMethod === 'applepay' ? IFRAME_ID_APPLEPAY : IFRAME_ID_CARDS;
-    const iframeUrl = `https://ksa.paymob.com/api/acceptance/iframes/${iframeId}?payment_token=${paymentToken}`;
-
-    return {
-      orderId,
-      paymentToken,
-      iframeUrl,
-    };
+  ): Promise<{ clientSecret: string; intentionId: string; checkoutUrl: string }> {
+    return this.createIntention(
+      amount,
+      propertyNumber,
+      propertyName,
+      phone,
+      packageName,
+      packageDays,
+      paymentMethod
+    );
   }
 
   verifyWebhookSignature(data: any): boolean {
@@ -210,7 +162,7 @@ export class PaymobService {
   extractPaymentInfo(data: any) {
     return {
       transactionId: data.obj.id,
-      orderId: data.obj.order.id,
+      orderId: data.obj.order?.id,
       amount: data.obj.amount_cents / 100,
       currency: data.obj.currency,
       success: data.obj.success,
@@ -218,6 +170,8 @@ export class PaymobService {
       errorOccured: data.obj.error_occured,
       paymentMethod: data.obj.source_data_type,
       createdAt: data.obj.created_at,
+      propertyNumber: data.obj.order?.shipping_data?.phone_number || '',
+      extras: data.obj.payment_key_claims?.extra?.creation_extras || {},
     };
   }
 }

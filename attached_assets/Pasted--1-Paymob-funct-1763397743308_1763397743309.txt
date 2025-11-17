@@ -1,0 +1,211 @@
+// =========================
+// 1️⃣ إنشاء رابط الدفع مع Paymob
+// =========================
+function createPaymobCheckout(subscriptionData, packageData, method = "CARDS") {
+  const packageName = packageData?.name || "باقة عامة";
+  const packagePrice = packageData?.price || 0;
+  const packageDays = packageData?.days || 1;
+
+  let itemName = `${packageName} للعقار ${subscriptionData.name}`;
+  if(itemName.length > 50) itemName = itemName.slice(0,50);
+
+  const amount = packagePrice * 100;
+
+  // نحدد الانتقريشن حسب نوع الدفع
+  const integrationId = (method === "APPLEPAY") 
+      ? PAYMOB_INTEGRATION_ID_APPLEPAY 
+      : PAYMOB_INTEGRATION_ID_CARDS;
+
+  const payload = {
+    amount: amount,
+    currency: "SAR",
+    payment_methods: [integrationId],
+    items: [
+      {
+        name: itemName,
+        amount: amount,
+        description: "الاشتراك يبدأ من تاريخ التفعيل مباشرة وبشكل آلي.",
+        quantity: 1
+      }
+    ],
+    billing_data: {
+      first_name: subscriptionData.name || "عميل",
+      last_name: "N/A",
+      email: subscriptionData.phone + "@example.com",
+      phone_number: subscriptionData.phone,
+      country: "KSA"
+    },
+    customer: {
+      first_name: subscriptionData.name || "عميل",
+      last_name: "N/A",
+      email: subscriptionData.phone + "@example.com"
+    },
+    special_reference: subscriptionData.propertyNumber + "-" + Date.now(),
+    extras: {
+      creation_extras: {
+        propertyNumber: subscriptionData.propertyNumber,
+        packageName: packageName,
+        days: packageDays,
+        price: packagePrice
+      }
+    },
+    notification_url: "https://script.google.com/macros/s/AKfycbzfNOTODQD2EG53U0X8dIjA7J_C5kDz9WYYxGjfVGbvtOz9XXE-YWhP7fY0sznMLvp5/exec",
+    redirect_url: "https://www.example.com/after-payment"
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "Authorization": "Bearer " + PAYMOB_API_KEY },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch("https://ksa.paymob.com/v1/intention/", options);
+    const data = JSON.parse(response.getContentText());
+
+    if (response.getResponseCode() === 200 || response.getResponseCode() === 201) {
+      return `https://ksa.paymob.com/unifiedcheckout/?publicKey=${PAYMOB_PUBLIC_KEY}&clientSecret=${data.client_secret}`;
+    } else {
+      throw new Error("خطأ في إنشاء Intention: " + response.getContentText());
+    }
+  } catch (err) {
+    Logger.log("ERROR createPaymobCheckout: " + err);
+    return null;
+  }
+}
+
+
+// =========================
+// 2️⃣ Webhook لمعالجة الدفع (Paymob POST)
+// =========================
+
+const PRICES_SHEET = "الأسعار"; // اسم ورقة الأسعار
+
+
+
+function doPost(e) {
+  try {
+    if (!e.postData || !e.postData.contents)
+      throw new Error("لم تُرسل بيانات Webhook");
+
+    const data = JSON.parse(e.postData.contents);
+    const transaction = data.obj;
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // =========== ورقة المدفوعات ===========
+    const paymentsSheet = ss.getSheetByName("المدفوعات");
+    const shipping = transaction.order.shipping_data || {};
+    const phone = shipping.phone_number || "";
+
+    // حفظ بيانات الدفع
+    paymentsSheet.appendRow([
+      transaction.id || "", // رقم العملية
+      (transaction.amount_cents || 0) / 100, // المبلغ
+      transaction.success ? "نجحت" : "فشلت", // الحالة
+      shipping.first_name || "", // اسم العميل
+      shipping.email || "", // البريد الإلكتروني
+      phone, // رقم الهاتف
+      transaction.created_at || new Date(), // تاريخ العملية
+    ]);
+
+    // =========== ورقة الأسعار ===========
+    const pricesSheet = ss.getSheetByName("الأسعار");
+    const pricesData = pricesSheet.getDataRange().getValues();
+
+    // رابط الإيصال
+    let receiptLink = "";
+    if (transaction.payment_key_claims && transaction.payment_key_claims.redirect_url) {
+      const token = transaction.payment_key_claims.redirect_url.split("payment_token=")[1];
+      if (token)
+        receiptLink = `https://ksa.paymob.com/unifiedcheckout/payment-status?payment_token=${token}`;
+    }
+
+    if (phone) {
+      // آخر 5 أرقام من رقم الهاتف
+      const last5 = phone.replace(/\D/g, "").slice(-5);
+
+      // =========== ورقة الاشتراكات ===========
+      const subsSheet = ss.getSheetByName("الاشتراكات");
+      const subsData = subsSheet.getDataRange().getValues();
+
+      for (let i = 1; i < subsData.length; i++) {
+        const propertyNumber = String(subsData[i][0]).replace(/\D/g, "").slice(-5); // رقم العقار بعد تنظيفه
+        const propertyName = subsData[i][1]; // اسم العقار
+
+        if (propertyNumber === last5) {
+          // مدة الباقة واسمها
+          let durationDays = transaction.payment_key_claims?.extra?.creation_extras?.days || 30;
+          let subscriptionName = "مميز";
+
+          const startDate = new Date();
+          const endDate = new Date();
+          endDate.setDate(startDate.getDate() + durationDays);
+          const remainingDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+
+          // تحديث الاشتراك في الورقة
+          subsSheet.getRange(i + 1, 4).setValue((transaction.amount_cents || 0) / 100); // المبلغ
+          subsSheet.getRange(i + 1, 5).setValue(subscriptionName); // نوع الاشتراك
+          subsSheet.getRange(i + 1, 6).setValue(startDate); // بداية
+          subsSheet.getRange(i + 1, 7).setValue(endDate); // نهاية
+          subsSheet.getRange(i + 1, 8).setValue(remainingDays); // الأيام المتبقية
+          subsSheet.getRange(i + 1, 9).setValue(receiptLink || ""); // رابط الإيصال
+
+          // كتابة نص الدفع
+          const formattedDate = Utilities.formatDate(startDate, "Asia/Riyadh", "yyyy/MM/dd");
+          subsSheet.getRange(i + 1, 9).setValue(`تم الدفع بتاريخ ${formattedDate} باسم ${propertyName} عبر البوابة`);
+
+
+          // =========== تحديث بيانات العقارات ===========
+          const propertiesSheet = ss.getSheetByName("بيانات العقارات");
+          const propData = propertiesSheet.getDataRange().getValues();
+
+          for (let j = 1; j < propData.length; j++) {
+            const propNumber = String(propData[j][0]).replace(/\D/g, "").slice(-5);
+            if (propNumber === propertyNumber) {
+              propertiesSheet.getRange(j + 1, 16).setValue(subscriptionName); // نوع الاشتراك
+              propertiesSheet.getRange(j + 1, 17).setValue(new Date()).setNumberFormat("yyyy/MM/dd HH:mm:ss"); // آخر تحديث
+              propertiesSheet.getRange(j + 1, 18).setValue(startDate).setNumberFormat("yyyy/MM/dd"); // بداية الاشتراك
+              break;
+            }
+          }
+
+          break; // خروج بعد تحديث الاشتراك
+        }
+      }
+    }
+
+    return ContentService.createTextOutput(
+      JSON.stringify({
+        status: "success",
+        message: "تم تسجيل الدفع وربطه بالاشتراك",
+        transaction_id: transaction.id,
+      })
+    ).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    Logger.log("Webhook Error: " + err);
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: "error", message: err.message })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+
+
+
+
+
+
+
+// =========================
+// 3️⃣ التحقق من HMAC
+// =========================
+function verifyPaymobHMAC(data, receivedHmac) {
+  const secret = PAYMOB_HMAC_SECRET;
+  const payload = JSON.stringify(data);
+  const signatureBytes = Utilities.computeHmacSha512Signature(payload, secret, Utilities.Charset.UTF_8);
+  const signatureBase64 = Utilities.base64Encode(signatureBytes);
+  return signatureBase64 === receivedHmac;
+}
+
