@@ -279,39 +279,41 @@ export default function PropertiesPage() {
                   </Badge>
                 )}
 
-                <div className="p-4">
-                  {/* Images */}
-                  {property.imageUrls.length > 0 && (
-                    <div className="mb-4 overflow-x-auto">
-                      <div className="flex gap-2">
-                        {property.imageUrls.map((url, idx) => (
-                          <img
-                            key={`${property.propertyNumber}-img-${idx}`}
-                            src={url}
-                            alt={`${property.name} - ${idx + 1}`}
-                            className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
-                            onClick={() => setSelectedImage({ url, index: idx, total: property.imageUrls.length })}
-                            data-testid={`img-property-${property.propertyNumber}-${idx}`}
-                          />
-                        ))}
+                <div className="p-4 flex flex-col h-full">
+                  {/* Content wrapper - takes available space */}
+                  <div className="flex-1">
+                    {/* Images */}
+                    {property.imageUrls.length > 0 && (
+                      <div className="mb-4 overflow-x-auto">
+                        <div className="flex gap-2">
+                          {property.imageUrls.map((url, idx) => (
+                            <img
+                              key={`${property.propertyNumber}-img-${idx}`}
+                              src={url}
+                              alt={`${property.name} - ${idx + 1}`}
+                              className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
+                              onClick={() => setSelectedImage({ url, index: idx, total: property.imageUrls.length })}
+                              data-testid={`img-property-${property.propertyNumber}-${idx}`}
+                            />
+                          ))}
+                        </div>
                       </div>
+                    )}
+
+                    {/* Title */}
+                    <h3 className="text-lg font-bold text-foreground mb-2">{property.name}</h3>
+
+                    {/* Info */}
+                    <div className="flex gap-2 mb-3 text-sm text-muted-foreground">
+                      <span>{property.city}</span>
+                      <span>•</span>
+                      <span>{property.direction}</span>
+                      <span>•</span>
+                      <span>{property.type}</span>
                     </div>
-                  )}
 
-                  {/* Title */}
-                  <h3 className="text-lg font-bold text-foreground mb-2">{property.name}</h3>
-
-                  {/* Info */}
-                  <div className="flex gap-2 mb-3 text-sm text-muted-foreground">
-                    <span>{property.city}</span>
-                    <span>•</span>
-                    <span>{property.direction}</span>
-                    <span>•</span>
-                    <span>{property.type}</span>
-                  </div>
-
-                  {/* Prices */}
-                  <div className="price-box rounded-lg p-3 mb-4 space-y-1 text-sm">
+                    {/* Prices */}
+                    <div className="price-box rounded-lg p-3 mb-4 space-y-1 text-sm">
                     {/* Always show: Weekday and Weekend */}
                     {property.prices.weekday && (
                       <div className="flex justify-between">
@@ -410,9 +412,10 @@ export default function PropertiesPage() {
                       )}
                     </div>
                   </div>
+                  </div>
 
-                  {/* Actions */}
-                  <div className="flex gap-2 pt-3 border-t border-border">
+                  {/* Actions - Always at bottom */}
+                  <div className="flex gap-2 pt-3 border-t border-border mt-auto">
                     {(property.imagesFolderUrl || property.driveFolderId) && (
                       <Button
                         variant="secondary"
