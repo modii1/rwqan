@@ -41,14 +41,12 @@ export default function SubscriptionPage() {
     if (!discountCode) return;
 
     try {
-      const response = await apiRequest('/api/discount/validate', {
-        method: 'POST',
-        body: JSON.stringify({ code: discountCode }),
-      });
-      setValidatedDiscount(response);
+      const response = await apiRequest('POST', '/api/discount/validate', { code: discountCode });
+      const data = await response.json();
+      setValidatedDiscount(data);
       toast({
         title: "كود الخصم صالح",
-        description: `سيتم خصم ${response.type === 'نسبة' ? response.value + '%' : response.value + ' ريال'}`,
+        description: `سيتم خصم ${data.type === 'نسبة' ? data.value + '%' : data.value + ' ريال'}`,
       });
     } catch (error: any) {
       toast({
@@ -86,17 +84,16 @@ export default function SubscriptionPage() {
 
     setIsProcessing(true);
     try {
-      const response = await apiRequest('/api/owner/payment/initiate', {
-        method: 'POST',
-        body: JSON.stringify({
-          packageId: selectedPackage,
-          discountCode: validatedDiscount?.code,
-          paymentMethod: 'cards',
-        }),
+      const response = await apiRequest('POST', '/api/owner/payment/initiate', {
+        packageId: selectedPackage,
+        discountCode: validatedDiscount?.code,
+        paymentMethod: 'cards',
       });
+      
+      const data = await response.json();
 
       // Open Paymob iframe
-      window.open(response.iframeUrl, '_blank');
+      window.open(data.iframeUrl, '_blank');
       
       toast({
         title: "جاري معالجة الدفع",
@@ -167,17 +164,14 @@ export default function SubscriptionPage() {
         reader.readAsDataURL(receiptFile);
       });
 
-      const response = await apiRequest('/api/owner/payment/bank-transfer', {
-        method: 'POST',
-        body: JSON.stringify({
-          packageId: selectedPackage,
-          discountCode: validatedDiscount?.code,
-          receiptFile: {
-            name: receiptFile.name,
-            type: receiptFile.type,
-            data: base64,
-          },
-        }),
+      await apiRequest('POST', '/api/owner/payment/bank-transfer', {
+        packageId: selectedPackage,
+        discountCode: validatedDiscount?.code,
+        receiptFile: {
+          name: receiptFile.name,
+          type: receiptFile.type,
+          data: base64,
+        },
       });
 
       toast({
