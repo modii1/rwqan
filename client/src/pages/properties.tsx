@@ -284,7 +284,7 @@ export default function PropertiesPage() {
                       <div className="flex gap-2">
                         {property.imageUrls.map((url, idx) => (
                           <img
-                            key={idx}
+                            key={`${property.propertyNumber}-img-${idx}`}
                             src={url}
                             alt={`${property.name} - ${idx + 1}`}
                             className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity flex-shrink-0"
@@ -340,7 +340,7 @@ export default function PropertiesPage() {
                   <div className="mb-4">
                     <div className="flex flex-wrap gap-1">
                       {property.facilities.slice(0, 6).map((facility, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-xs">
+                        <Badge key={`${property.propertyNumber}-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
                           {facility}
                         </Badge>
                       ))}
