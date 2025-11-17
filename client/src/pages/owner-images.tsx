@@ -159,11 +159,13 @@ export default function OwnerImagesPage() {
                   onChange={handleFileSelect}
                   className="hidden"
                   disabled={uploadMutation.isPending}
+                  data-testid="input-select-images"
                 />
                 <Button
                   type="button"
                   className="bg-[#b88d2b] hover:bg-[#a07d25]"
                   disabled={uploadMutation.isPending}
+                  data-testid="button-select-images"
                 >
                   اختر الصور
                 </Button>
@@ -185,6 +187,7 @@ export default function OwnerImagesPage() {
                       <button
                         onClick={() => removeFile(idx)}
                         className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                        data-testid={`button-remove-image-${idx}`}
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -199,6 +202,7 @@ export default function OwnerImagesPage() {
                   onClick={handleUpload}
                   disabled={uploadMutation.isPending}
                   className="w-full bg-[#b88d2b] hover:bg-[#a07d25]"
+                  data-testid="button-upload-images"
                 >
                   {uploadMutation.isPending ? 'جاري الرفع...' : `رفع ${selectedFiles.length} صورة`}
                 </Button>
