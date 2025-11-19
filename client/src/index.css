@@ -285,3 +285,41 @@
 .gradient-golden:hover {
   background: linear-gradient(135deg, #a27b20, #c49325);
 }
+
+/* Golden Outline Button */
+.btn-gold-outline {
+  @apply font-bold px-5 h-11 text-base rounded-xl
+         flex items-center gap-2
+         border transition-all duration-200
+         shadow-sm;
+
+  border-color: hsl(var(--primary));       /* الذهبي */
+  color: hsl(var(--primary));               /* النص ذهبي */
+  background-color: white;
+}
+
+.btn-gold-outline:hover {
+  background-color: #fff9ec; /* خلفية ذهبية فاتحة */
+  border-color: #d4a035;     /* ذهبي أدكن */
+  color: #a57619;
+}
+
+/* Filled Golden Button */
+.btn-gold-filled {
+  @apply font-bold px-5 h-11 text-base rounded-xl 
+         flex items-center gap-2 
+         transition-all duration-200 shadow;
+
+  background: linear-gradient(135deg, #b88d2b, #d4a035);
+  color: white;
+}
+
+.btn-gold-filled:hover {
+  background: linear-gradient(135deg, #a27b20, #c49325);
+}
+
+/* Icon Style */
+.btn-icon {
+  @apply w-5 h-5;
+  stroke: currentColor;
+}

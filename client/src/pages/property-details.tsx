@@ -18,6 +18,8 @@ export default function PropertyDetailsPage() {
 
   const property = properties.find(p => p.propertyNumber === params?.id);
 
+  
+
   if (!property) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -31,7 +33,13 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  const isVerified = property.subscriptionType === "موثوق";
+  function isVerified(property: Property) {
+    return property.subscriptionType?.trim().includes("موثوق") ||
+           property.subscriptionType?.trim().includes("مميز");
+  }
+
+
+  
   const images = property.imageUrls || [];
 
   // إخفاء اسم العقار لغير المشتركين
@@ -139,32 +147,49 @@ export default function PropertyDetailsPage() {
             </Card>
 
             {/* ===== التفاصيل ===== */}
-            <Card className="p-6">
-              <h2 className="text-xl font-bold text-primary mb-4">تفاصيل العقار</h2>
+<Card className="p-6">
+  <h2 className="text-xl font-bold text-primary mb-4">تفاصيل العقار</h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-5 h-5 text-primary" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">المدينة</p>
-                    <p className="font-semibold">{property.city || "غير محدد"}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Compass className="w-5 h-5 text-primary" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">الاتجاه</p>
-                    <p className="font-semibold">{property.direction || "غير محدد"}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Home className="w-5 h-5 text-primary" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">النوع</p>
-                    <p className="font-semibold">{property.type || "غير محدد"}</p>
-                  </div>
-                </div>
-              </div>
+  <div className="flex flex-wrap items-center gap-6 mb-6">
+    
+    
+    <div className="flex items-center gap-2">
+      <MapPin className="w-5 h-5 text-primary" />
+      <div>
+        <p className="text-xs text-muted-foreground">المدينة</p>
+        <p className="font-semibold">{property.city || "غير محدد"}</p>
+      </div>
+    </div>
+
+    <div className="flex items-center gap-2">
+      <Compass className="w-5 h-5 text-primary" />
+      <div>
+        <p className="text-xs text-muted-foreground">الاتجاه</p>
+        <p className="font-semibold">{property.direction || "غير محدد"}</p>
+      </div>
+    </div>
+
+    <div className="flex items-center gap-2">
+      <Home className="w-5 h-5 text-primary" />
+      <div>
+        <p className="text-xs text-muted-foreground">النوع</p>
+        <p className="font-semibold">{property.type || "غير محدد"}</p>
+      </div>
+    </div>
+
+    {/* ===== الموقع / الحي ===== */}
+    <div className="flex items-center gap-2">
+      <MapPin className="w-5 h-5 text-primary" />
+      <div>
+        <p className="text-xs text-muted-foreground">الموقع</p>
+        <p className="font-semibold">{property.location || property.neighborhood || "غير محدد"}</p>
+      </div>
+    </div>
+
+  </div>
+
+
+
 
               {property.facilities?.length > 0 && (
                 <div>
@@ -245,17 +270,7 @@ export default function PropertyDetailsPage() {
               </Button>
             </Card>
 
-            {/* شارة موثوق */}
-            {isVerified && (
-              <Card className="p-6 bg-primary/5 border-primary/20">
-                <div className="text-center">
-                  <Badge className="bg-primary text-white mb-2">موثوق</Badge>
-                  <p className="text-sm text-muted-foreground">
-                    هذا العقار تم التحقق منه وهو عضو مميز في مودي الذكي
-                  </p>
-                </div>
-              </Card>
-            )}
+            
 
           </div>
         </div>

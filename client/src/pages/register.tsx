@@ -23,6 +23,7 @@ export default function RegisterPage() {
     city: "",
     direction: "",
     type: "",
+    location: "",
     whatsappNumber: "",
   });
   const [facilities, setFacilities] = useState<string[]>([]);
@@ -33,6 +34,8 @@ export default function RegisterPage() {
     holidays: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [facilitySearch, setFacilitySearch] = useState("");
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,12 +88,13 @@ export default function RegisterPage() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
               <div>
                 <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
                 <Input
                   placeholder="00123"
                   value={formData.propertyNumber}
-                  onChange={(e) => setFormData({...formData, propertyNumber: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, propertyNumber: e.target.value })}
                   maxLength={5}
                   required
                   data-testid="input-property-number"
@@ -100,9 +104,9 @@ export default function RegisterPage() {
               <div>
                 <label className="block text-sm font-semibold mb-2">اسم العقار</label>
                 <Input
-                  placeholder="استراحة الفردوس"
+                  placeholder="شالية مودي"
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
                   data-testid="input-name"
                 />
@@ -114,7 +118,7 @@ export default function RegisterPage() {
                   type="password"
                   placeholder="اختر رقماً سرياً"
                   value={formData.pin}
-                  onChange={(e) => setFormData({...formData, pin: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
                   required
                   data-testid="input-pin"
                 />
@@ -126,7 +130,7 @@ export default function RegisterPage() {
                   type="tel"
                   placeholder="966XXXXXXXXX"
                   value={formData.whatsappNumber}
-                  onChange={(e) => setFormData({...formData, whatsappNumber: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
                   required
                   data-testid="input-whatsapp"
                 />
@@ -134,7 +138,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-semibold mb-2">المدينة</label>
-                <Select value={formData.city} onValueChange={(v) => setFormData({...formData, city: v})}>
+                <Select value={formData.city} onValueChange={(v) => setFormData({ ...formData, city: v })}>
                   <SelectTrigger data-testid="select-city">
                     <SelectValue placeholder="اختر المدينة" />
                   </SelectTrigger>
@@ -148,7 +152,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-semibold mb-2">الاتجاه</label>
-                <Select value={formData.direction} onValueChange={(v) => setFormData({...formData, direction: v})}>
+                <Select value={formData.direction} onValueChange={(v) => setFormData({ ...formData, direction: v })}>
                   <SelectTrigger data-testid="select-direction">
                     <SelectValue placeholder="اختر الاتجاه" />
                   </SelectTrigger>
@@ -162,7 +166,7 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-semibold mb-2">النوع</label>
-                <Select value={formData.type} onValueChange={(v) => setFormData({...formData, type: v})}>
+                <Select value={formData.type} onValueChange={(v) => setFormData({ ...formData, type: v })}>
                   <SelectTrigger data-testid="select-type">
                     <SelectValue placeholder="اختر النوع" />
                   </SelectTrigger>
@@ -173,7 +177,22 @@ export default function RegisterPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* الموقع / الحي — نفس الحقول بدون أي ستايل إضافي */}
+              <div>
+                <label className="block text-sm font-semibold mb-2">الموقع / الحي</label>
+                <Input
+                  placeholder="اكتب اسم الحي أو الموقع"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  data-testid="input-location"
+                />
+              </div>
+
             </div>
+
+
+
 
             {/* Prices */}
             <div>
@@ -230,20 +249,40 @@ export default function RegisterPage() {
             {/* Facilities */}
             <div>
               <h3 className="text-lg font-bold text-primary mb-3">المرافق</h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-4 bg-muted/30 rounded-lg">
-                {FACILITIES.map(facility => (
-                  <div key={facility} className="flex items-center gap-2">
-                    <Checkbox
-                      checked={facilities.includes(facility)}
-                      onCheckedChange={() => toggleFacility(facility)}
-                      id={facility}
-                      data-testid={`checkbox-facility-${facility}`}
-                    />
-                    <label htmlFor={facility} className="text-sm cursor-pointer">
-                      {facility}
-                    </label>
-                  </div>
-                ))}
+
+              {/* صندوق كامل للمرافق مع البحث */}
+              <div className="p-4 bg-muted/30 rounded-lg max-h-96 overflow-y-auto">
+
+                {/* حقل البحث */}
+                <div className="mb-4">
+                  <Input
+                    placeholder="ابحث عن مرفق..."
+                    value={facilitySearch}
+                    onChange={(e) => setFacilitySearch(e.target.value)}
+                    className="bg-white"
+                  />
+                </div>
+
+                {/* شبكة المرافق */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {FACILITIES
+                    .filter(f =>
+                      f.toLowerCase().includes(facilitySearch.toLowerCase())
+                    )
+                    .map(facility => (
+                      <div key={facility} className="flex items-center gap-2">
+                        <Checkbox
+                          checked={facilities.includes(facility)}
+                          onCheckedChange={() => toggleFacility(facility)}
+                          id={facility}
+                        />
+                        <label htmlFor={facility} className="text-sm cursor-pointer">
+                          {facility}
+                        </label>
+                      </div>
+                    ))}
+                </div>
+
               </div>
             </div>
 
