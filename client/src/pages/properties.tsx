@@ -262,7 +262,7 @@ export default function PropertiesPage() {
         </Card>
 
         {/* Filters */}
-        <Card className="p-4 md:p-6 mb-6 bg-muted/30">
+          <Card id="filters-section" className="p-4 md:p-6 mb-6 bg-muted/30">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-primary">الفلاتر</h2>
             <Button
@@ -406,6 +406,10 @@ export default function PropertiesPage() {
                     const touch = e.touches[0];
                     (e.currentTarget as any).touchStartX = touch.clientX;
                   }}
+
+                
+
+                  
                   onTouchEnd={(e) => {
                     if (property.imageUrls.length <= 1) return;
                     const touch = e.changedTouches[0];
@@ -432,7 +436,11 @@ export default function PropertiesPage() {
                         className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
                           imageTransitioning.has(property.propertyNumber) ? 'opacity-0' : 'opacity-100'
                         }`}
-                        onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                        onClick={() => {
+                          sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                          setLocation(`/property/${property.propertyNumber}`);
+                        }}
+
                         data-testid={`img-property-${property.propertyNumber}-current`}
                       />
                       
@@ -447,30 +455,34 @@ export default function PropertiesPage() {
                       {/* Navigation Arrows (Desktop only) */}
                       {property.imageUrls.length > 1 && (
                         <>
+                          {/* التالي (يمين) */}
                           <Button
                             variant="secondary"
                             size="icon"
-                            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                             onClick={(e) => {
                               e.stopPropagation();
                               nextImage(property.propertyNumber, property.imageUrls.length);
                             }}
                             data-testid={`button-next-image-${property.propertyNumber}`}
                           >
-                            <ChevronRight className="h-5 w-5" />
+                            <ChevronLeft className="h-5 w-5" />
                           </Button>
+
+                          {/* السابق (يسار) */}
                           <Button
                             variant="secondary"
                             size="icon"
-                            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg bg-white/90 hover:bg-white"
+                            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                             onClick={(e) => {
                               e.stopPropagation();
                               prevImage(property.propertyNumber, property.imageUrls.length);
                             }}
                             data-testid={`button-prev-image-${property.propertyNumber}`}
                           >
-                            <ChevronLeft className="h-5 w-5" />
+                            <ChevronRight className="h-5 w-5" />
                           </Button>
+
                         </>
                       )}
 
@@ -499,7 +511,11 @@ export default function PropertiesPage() {
                   {(property.subscriptionType === 'موثوق' || property.subscriptionType === 'مميز') && (
                     <h3 
                       className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                      onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                      onClick={() => {
+                        sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                        setLocation(`/property/${property.propertyNumber}`);
+                      }}
+
                     >
                       {property.name}
                     </h3>
@@ -534,7 +550,11 @@ export default function PropertiesPage() {
                     {/* CTA Button - Fixed at bottom */}
                     <Button 
                       className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                      onClick={() => setLocation(`/property/${property.propertyNumber}`)}
+                      onClick={() => {
+                        sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                        setLocation(`/property/${property.propertyNumber}`);
+                      }}
+
                       data-testid={`button-details-${property.propertyNumber}`}
                     >
                       عرض التفاصيل
@@ -697,3 +717,22 @@ export default function PropertiesPage() {
     </div>
   );
 }
+
+{/* زر تصفية ثابت أسفل الصفحة */}
+<button
+  onClick={() => {
+    const filterSection = document.getElementById("filters-section");
+    if (filterSection) {
+      filterSection.scrollIntoView({ behavior: "smooth" });
+    }
+  }}
+  className="
+    fixed bottom-6 right-6 z-50 
+    bg-[#b88d2b] hover:bg-[#a07c25]
+    text-white font-bold
+    shadow-xl rounded-full
+    px-6 py-3 text-lg
+  "
+>
+  تصفية
+</button>
