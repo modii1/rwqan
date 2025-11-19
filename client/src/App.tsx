@@ -1,10 +1,10 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { AppSidebar } from "@/components/app-sidebar";
+import { Button } from "@/components/ui/button";
+
 import NotFound from "@/pages/not-found";
 import PropertiesPage from "@/pages/properties";
 import PropertyDetailsPage from "@/pages/property-details";
@@ -14,6 +14,8 @@ import OwnerImagesPage from "@/pages/owner-images";
 import SubscriptionPage from "@/pages/subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
+
+import { useSessionQuery } from "@/hooks/use-session";
 
 function Router() {
   return (
@@ -32,31 +34,88 @@ function Router() {
 }
 
 export default function App() {
-  const style = {
-    "--sidebar-width": "20rem",
-    "--sidebar-width-icon": "4rem",
+  const [, setLocation] = useLocation();
+  const { data: session } = useSessionQuery();
+
+  const user = session?.user;
+  const isLogged = !!user;
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/";
   };
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <SidebarProvider style={style as React.CSSProperties}>
-          <div className="flex h-screen w-full">
-            <AppSidebar />
-            <div className="flex flex-col flex-1 min-w-0">
-              <header className="flex items-center justify-between p-3 border-b border-border bg-card sticky top-0 z-10">
-                <div className="flex items-center gap-3">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <h1 className="text-lg font-bold text-primary">مودي الذكي - العقارات</h1>
-                </div>
-              </header>
-              <main className="flex-1 overflow-auto">
-                <Router />
-              </main>
+        <div className="min-h-screen flex flex-col bg-background">
+
+          {/* ================= HEADER ================= */}
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+
+              {/* Logo */}
+              <h1
+                className="text-xl font-bold text-primary cursor-pointer"
+                onClick={() => setLocation("/")}
+              >
+                مودي الذكي - العقارات
+              </h1>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+
+                {!isLogged && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => setLocation("/owner/login")}
+                      className="font-bold"
+                    >
+                      تسجيل الدخول
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => setLocation("/")}
+                      className="font-bold"
+                    >
+                      الصفحة الرئيسية
+                    </Button>
+                  </>
+                )}
+
+                {isLogged && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setLocation("/owner/dashboard")}
+                      className="font-bold"
+                    >
+                      لوحة التحكم
+                    </Button>
+
+                    <Button
+                      variant="destructive"
+                      onClick={logout}
+                      className="font-bold"
+                    >
+                      تسجيل خروج
+                    </Button>
+                  </>
+                )}
+
+              </div>
             </div>
-          </div>
-        </SidebarProvider>
-        <Toaster />
+          </header>
+          {/* ================ END HEADER ================ */}
+
+          <main className="flex-1 overflow-auto">
+            <Router />
+          </main>
+
+          <Toaster />
+        </div>
       </TooltipProvider>
     </QueryClientProvider>
   );

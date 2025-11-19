@@ -31,32 +31,54 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  const isVerified = property.subscriptionType === 'موثوق';
+  const isVerified = property.subscriptionType === "موثوق";
   const images = property.imageUrls || [];
 
+  // إخفاء اسم العقار لغير المشتركين
+  const displayName = isVerified ? property.name : "";
+
+  // الواتساب بدون اسم للعقارات غير الموثوقة
   const handleWhatsApp = () => {
-    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber} - ${property.name}`;
+    const nameText = isVerified ? ` - ${property.name}` : "";
+    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
     const url = `https://wa.me/${property.whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
+    window.open(url, "_blank");
   };
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+
+      {/* ===== Header ===== */}
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setLocation('/')}
-            data-testid="button-back-header"
-          >
+
+          {/* زر الرجوع */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                const pos = sessionStorage.getItem("scrollPosition"); // جلب آخر مكان
+                setLocation("/"); // رجوع للرئيسية
+
+                // بعد الرجوع بوقت بسيط، ارجع للمكان بالضبط
+                setTimeout(() => {
+                  if (pos) window.scrollTo(0, Number(pos));
+                }, 50);
+              }}
+            >
+
             <ArrowRight className="w-5 h-5" />
           </Button>
+
+          {/* الاسم + الرقم */}
           <div className="flex-1">
-            <h1 className="text-lg font-bold text-primary truncate">{property.name}</h1>
-            <p className="text-xs text-muted-foreground">عقار رقم {property.propertyNumber}</p>
+            <h1 className="text-lg font-bold text-primary truncate">{displayName}</h1>
+            <p className="text-xs text-muted-foreground">
+              عقار رقم {property.propertyNumber}
+            </p>
           </div>
+
+          {/* شارة موثوق */}
           {isVerified && (
             <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
               موثوق
@@ -65,9 +87,11 @@ export default function PropertyDetailsPage() {
         </div>
       </header>
 
+      {/* ===== Content ===== */}
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Image Gallery */}
+
+          {/* ===== الصور ===== */}
           <div className="lg:col-span-2 space-y-4">
             <Card className={`overflow-hidden ${isVerified ? 'ring-2 ring-primary/20' : ''}`}>
               {images.length > 0 ? (
@@ -75,11 +99,12 @@ export default function PropertyDetailsPage() {
                   <div className="relative aspect-video bg-muted">
                     <img
                       src={images[selectedImage]}
-                      alt={`${property.name} - صورة ${selectedImage + 1}`}
+                      alt={`صورة ${selectedImage + 1}`}
                       className="w-full h-full object-cover"
                       data-testid="img-main"
                     />
                   </div>
+
                   {images.length > 1 && (
                     <div className="p-4 bg-muted/30 flex gap-2 overflow-x-auto">
                       {images.map((img, idx) => (
@@ -88,8 +113,8 @@ export default function PropertyDetailsPage() {
                           onClick={() => setSelectedImage(idx)}
                           className={`flex-shrink-0 w-20 h-20 rounded-md overflow-hidden transition-all ${
                             selectedImage === idx
-                              ? 'ring-2 ring-primary'
-                              : 'opacity-60 hover:opacity-100'
+                              ? "ring-2 ring-primary"
+                              : "opacity-60 hover:opacity-100"
                           }`}
                           data-testid={`button-thumbnail-${idx}`}
                         >
@@ -113,36 +138,35 @@ export default function PropertyDetailsPage() {
               )}
             </Card>
 
-            {/* Description & Details */}
+            {/* ===== التفاصيل ===== */}
             <Card className="p-6">
               <h2 className="text-xl font-bold text-primary mb-4">تفاصيل العقار</h2>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">المدينة</p>
-                    <p className="font-semibold">{property.city || 'غير محدد'}</p>
+                    <p className="font-semibold">{property.city || "غير محدد"}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Compass className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">الاتجاه</p>
-                    <p className="font-semibold">{property.direction || 'غير محدد'}</p>
+                    <p className="font-semibold">{property.direction || "غير محدد"}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Home className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">النوع</p>
-                    <p className="font-semibold">{property.type || 'غير محدد'}</p>
+                    <p className="font-semibold">{property.type || "غير محدد"}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Facilities */}
-              {property.facilities && property.facilities.length > 0 && (
+              {property.facilities?.length > 0 && (
                 <div>
                   <h3 className="font-bold mb-3">المرافق</h3>
                   <div className="flex flex-wrap gap-2">
@@ -162,40 +186,52 @@ export default function PropertyDetailsPage() {
             </Card>
           </div>
 
-          {/* Pricing & Contact */}
+          {/* ===== الأسعار + التواصل ===== */}
           <div className="space-y-4">
-            {/* Pricing Card */}
+
+            {/* الأسعار */}
             <Card className="p-6">
               <h3 className="text-lg font-bold text-primary mb-4">الأسعار</h3>
               <div className="space-y-3">
                 {property.prices?.weekday && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">وسط الأسبوع</span>
-                    <span className="font-bold text-primary">{property.prices.weekday} ر.س</span>
+                    <span className="font-bold text-primary">
+                      {property.prices.weekday} ر.س
+                    </span>
                   </div>
                 )}
+
                 {property.prices?.weekend && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">نهاية الأسبوع</span>
-                    <span className="font-bold text-primary">{property.prices.weekend} ر.س</span>
+                    <span className="font-bold text-primary">
+                      {property.prices.weekend} ر.س
+                    </span>
                   </div>
                 )}
+
                 {property.prices?.overnight && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">مبيت</span>
-                    <span className="font-bold text-primary">{property.prices.overnight} ر.س</span>
+                    <span className="font-bold text-primary">
+                      {property.prices.overnight} ر.س
+                    </span>
                   </div>
                 )}
+
                 {property.prices?.holidays && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">إجازات</span>
-                    <span className="font-bold text-primary">{property.prices.holidays} ر.س</span>
+                    <span className="font-bold text-primary">
+                      {property.prices.holidays} ر.س
+                    </span>
                   </div>
                 )}
               </div>
             </Card>
 
-            {/* Contact Card */}
+            {/* التواصل */}
             <Card className="p-6">
               <h3 className="text-lg font-bold text-primary mb-4">التواصل</h3>
               <Button
@@ -209,7 +245,7 @@ export default function PropertyDetailsPage() {
               </Button>
             </Card>
 
-            {/* Verified Badge */}
+            {/* شارة موثوق */}
             {isVerified && (
               <Card className="p-6 bg-primary/5 border-primary/20">
                 <div className="text-center">
@@ -220,6 +256,7 @@ export default function PropertyDetailsPage() {
                 </div>
               </Card>
             )}
+
           </div>
         </div>
       </div>
