@@ -305,7 +305,7 @@ export default function OwnerImagesPage() {
             ملاحظات هامة:
           </h3>
           <ul className="list-disc list-inside space-y-1 text-sm text-[#5b4a1f]">
-            <li>يمكنك رفع حتى 10 صور للعقار</li>
+            <li>يمكنك رفع حتى 15 صور للعقار</li>
             <li>الصور المدعومة: JPG, PNG, JPEG</li>
             <li>يتم رفع الصور مباشرة إلى Google Drive</li>
             <li>سيتم عرض الصور في صفحة العقار تلقائياً</li>
