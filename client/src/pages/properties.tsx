@@ -70,8 +70,36 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
-    queryKey: ["/api/properties"],
+    queryKey: ["properties"],
+    queryFn: async () => {
+      const res = await fetch(
+        "https://script.google.com/macros/s/AKfycbzfNOTODQD2EG53U0X8dIjA7J_C5kDz9WYYxGjfVGbvtOz9XXE-YWhP7fY0sznMLvp5/exec?page=getData"
+      );
+
+      const raw = await res.json();
+
+      // تحويل البيانات القادمة من Google Sheets إلى شكل Property
+      return raw.map((row: any) => ({
+        propertyNumber: String(row["رقم العقار"] || ""),
+        name: row["🏡 اسم العقار"] || "",
+        city: row["📍 المنطقة"] || "",
+        direction: row["🧭 الاتجاه"] || "",
+        type: row["🏠 النوع"] || "",
+        facilities: (row["🔹 المرافق"] || "").split(/[,،]/).map((f: string) => f.trim()),
+        prices: {
+          weekday: row["💰 سعر وسط الأسبوع"] || "",
+          weekend: row["💰 سعر نهاية الأسبوع"] || "",
+          overnight: row["💰 سعر المبيت"] || "",
+          holidays: row["💰 سعر الإجازات"] || "",
+        },
+        imagesFolderUrl: row["🔗 رابط الصور"] || row["📎 رابط الصور"] || "",
+        imageUrls: [], // تترك فارغة لأنك تجلبها من Google Drive لاحقاً
+        subscriptionType: row["نوع الاشتراك"] || row["🟡 نوع الاشتراك"] || "عادي",
+        whatsappNumber: row["📞 رقم الجوال"] || "",
+      }));
+    },
   });
+
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار العائمة
   useEffect(() => {
