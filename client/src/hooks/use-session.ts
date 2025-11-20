@@ -4,39 +4,33 @@ export function useSessionQuery() {
   return useQuery({
     queryKey: ["owner-session"],
     queryFn: async () => {
-      // 1) نجيب حالة الجلسة
-      const res = await fetch("/api/owner/session");
+      const res = await fetch("/api/owner/session", {
+        credentials: "include",
+        cache: "no-store",
+      });
+
       if (!res.ok) return null;
 
-      const data = await res.json();
-      if (!data.isLoggedIn || !data.propertyNumber) {
-        return null;
-      }
+      const session = await res.json();
 
-      // 2) نجيب بيانات العقار عشان الاسم
-      const propRes = await fetch("/api/owner/property");
-      if (!propRes.ok) {
-        // نرجع أقل شيء رقم العقار
-        return {
-          user: { propertyNumber: data.propertyNumber },
-        };
-      }
+      if (!session.isLoggedIn || !session.propertyNumber) return null;
 
-      const property = await propRes.json();
-
-      // الشكل اللي الهيدر يفهمه
       return {
+        isLoggedIn: true,
         user: {
-          propertyNumber: data.propertyNumber,
-          name: property.name,
+          propertyNumber: session.propertyNumber,
         },
       };
     },
+
     staleTime: 0,
-    cacheTime: 0,
+    gcTime: 0,
+
     refetchOnMount: true,
-    refetchOnReconnect: true,
     refetchOnWindowFocus: true,
-    refetchInterval: 2000, // يحدث كل ثانيتين
+    refetchOnReconnect: true,
+
+    // 🔥 تحديث فوري
+    refetchInterval: 500,
   });
 }
