@@ -43,11 +43,11 @@ export default function PropertyDetailsPage() {
   const images = property.imageUrls || [];
 
   // إخفاء اسم العقار لغير المشتركين
-  const displayName = isVerified ? property.name : "";
+  const displayName = isVerified(property) ? property.name : "";
 
   // الواتساب بدون اسم للعقارات غير الموثوقة
   const handleWhatsApp = () => {
-    const nameText = isVerified ? ` - ${property.name}` : "";
+    const nameText = isVerified(property) ? ` - ${property.name}` : "";
     const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
     const url = `https://wa.me/${property.whatsappNumber}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
@@ -87,8 +87,8 @@ export default function PropertyDetailsPage() {
           </div>
 
           {/* شارة موثوق */}
-          {isVerified && (
-            <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
+                {isVerified(property) && (
+                  <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
               موثوق
             </Badge>
           )}
@@ -101,7 +101,8 @@ export default function PropertyDetailsPage() {
 
           {/* ===== الصور ===== */}
           <div className="lg:col-span-2 space-y-4">
-            <Card className={`overflow-hidden ${isVerified ? 'ring-2 ring-primary/20' : ''}`}>
+              <Card className={`overflow-hidden ${isVerified(property) ? 'ring-2 ring-primary/20' : ''}`}>
+
               {images.length > 0 ? (
                 <>
                   <div className="relative aspect-video bg-muted">
