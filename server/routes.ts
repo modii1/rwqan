@@ -7,6 +7,8 @@ import { paymobService } from "./paymob";
 import { insertPropertySchema, insertSuggestionSchema, insertDiscountCodeSchema, insertPackageSchema } from "@shared/schema";
 import session from "express-session";
 import multer from "multer";
+import * as https from "https";
+
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -731,6 +733,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'فشل في تحديث كود الخصم' });
     }
   });
+
+  // ================================
+  // ADVANCED GOOGLE DRIVE IMAGE PROXY (NO EXTRA LIBS)
+  // ================================
+
+  // دالة عامة تجيب لنا أي رابط كـ Buffer وتتعامل مع الـ Redirect
+  function getBufferFromUrl(
+    url: string
+  ): Promise<{ data: Buffer; contentType?: string }> {
+    return new Promise((resolve, reject) => {
+      https
+        .get(url, (resp) => {
+          // لو فيه تحويل 3xx نتابع للرابط الجديد
+          if (
+            resp.statusCode &&
+            resp.statusCode >= 300 &&
+            resp.statusCode < 400 &&
+            resp.headers.location
+          ) {
+            const loc = resp.headers.location.startsWith("http")
+              ? resp.headers.location
+              : "https://drive.google.com" + resp.headers.location;
+            resp.resume(); // نرمي البودي القديم
+            getBufferFromUrl(loc).then(resolve).catch(reject);
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          resp.on("data", (chunk) => chunks.push(chunk as Buffer));
+          resp.on("end", () => {
+            const buffer = Buffer.concat(chunks);
+            resolve({
+              data: buffer,
+              contentType: resp.headers["content-type"] as
+                | string
+                | undefined,
+            });
+          });
+        })
+        .on("error", (err) => reject(err));
+    });
+  }
+
+  // دالة خاصة بـ Google Drive: تتعامل مع صفحة الـ preview و confirm
+  async function fetchDriveImage(
+    fileId: string
+  ): Promise<{ data: Buffer; contentType?: string }> {
+    const baseUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+    // الطلب الأول
+    let first = await getBufferFromUrl(baseUrl);
+
+    // لو رجعنا HTML (preview) نحاول نطلع رابط confirm
+    if (first.contentType && first.contentType.startsWith("text/html")) {
+      const html = first.data.toString("utf8");
+      const match = html.match(/href="(\/uc\?export=download[^"]+)"/);
+
+      if (match && match[1]) {
+        let confirmPath = match[1].replace(/&amp;/g, "&");
+        const confirmUrl = `https://drive.google.com${confirmPath}`;
+        const second = await getBufferFromUrl(confirmUrl);
+        return second;
+      }
+    }
+
+    // في الحالة العادية يكون هذا هو الملف نفسه
+    return first;
+  }
+
+  // الراوت اللي يستدعيه الريآكت
+  app.get("/proxy/drive/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).send("Missing file id");
+      }
+
+      const { data, contentType } = await fetchDriveImage(id);
+
+      if (contentType) {
+        res.setHeader("Content-Type", contentType);
+      } else {
+        res.setHeader("Content-Type", "image/jpeg");
+      }
+
+      res.send(data);
+    } catch (err) {
+      console.error("Drive proxy error:", err);
+      res.status(500).send("Drive proxy error");
+    }
+  });
+
 
   const httpServer = createServer(app);
 
