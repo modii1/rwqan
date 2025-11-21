@@ -15,6 +15,9 @@ import OwnerImagesPage from "@/pages/owner-images";
 import SubscriptionPage from "@/pages/subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
+import TestImages from "@/pages/test-images";
+
+
 
 // Icons
 import { Home, LogIn, LogOut, Settings } from "lucide-react";
@@ -33,6 +36,7 @@ function Router() {
       <Route path="/owner/subscription" component={SubscriptionPage} />
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
+      <Route path="/test-images" component={TestImages} />
       <Route component={NotFound} />
     </Switch>
   );
