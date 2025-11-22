@@ -3,56 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Search,
-  X,
-  ExternalLink,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
-  Star,
-} from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
-
-function extractDriveId(url: string): string | null {
-  if (!url) return null;
-
-  // شكل: /d/ID/
-  const dMatch = url.match(/\/d\/([^/]+)/);
-  if (dMatch) return dMatch[1];
-
-  // شكل: ?id=ID
-  const idParam = url.match(/[?&]id=([^&]+)/);
-  if (idParam) return idParam[1];
-
-  // شكل: uc?export=view&id=ID
-  const ucMatch = url.match(/\/uc\?export=.+?id=([^&]+)/);
-  if (ucMatch) return ucMatch[1];
-
-  // شكل googleusercontent (Image CDN)
-  const googleUser = url.match(/googleusercontent\.com\/([^=]+)/);
-  if (googleUser) return googleUser[1];
-
-  return null;
-}
-
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 
-// تطابق ذكي للمرافق
+// Smart filters mapping - تطابق ذكي للمرافق
 const SMART_FILTERS = {
   مبيت: ["غرف نوم", "غرفة نوم", "نوم", "مبيت"],
   شتاء: ["خيمة", "مشب", "تدفئة", "شتاء", "شتوية"],
@@ -74,52 +37,32 @@ const PRIORITY_FACILITIES = [
   "واي فاي",
 ];
 
-// توحيد النص للمقارنة
+// Normalize text for smart filtering (remove Arabic & Latin diacritics, normalize variants)
 const normalizeText = (text: string): string => {
   return text
     .toLowerCase()
     .trim()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f\u064b-\u0652\u0670\u06d6-\u06ed]/g, "")
-    .replace(/\u0640/g, "")
-    .replace(/[إأٱآ]/g, "ا")
-    .replace(/[ؤئ]/g, "و")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه");
+    .replace(/[\u0300-\u036f\u064b-\u0652\u0670\u06d6-\u06ed]/g, "") // Remove Latin & Arabic diacritics
+    .replace(/\u0640/g, "") // Remove tatweel
+    .replace(/[إأٱآ]/g, "ا") // All alef forms to simple alef
+    .replace(/[ؤئ]/g, "و") // Hamza on waw/ya to waw
+    .replace(/ى/g, "ي") // Alef maqsura to yaa
+    .replace(/ة/g, "ه"); // Taa marbuta to haa
 };
-
-const SCRIPT_BASE =
-  "https://script.google.com/macros/s/AKfycbzfNOTODQD2EG53U0X8dIjA7J_C5kDz9WYYxGjfVGbvtOz9XXE-YWhP7fY0sznMLvp5/exec";
 
 export default function PropertiesPage() {
   const [, setLocation] = useLocation();
-
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedDirection, setSelectedDirection] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 5000]);
-
-  const [selectedImage, setSelectedImage] = useState<{
-    url: string;
-    index: number;
-    total: number;
-  } | null>(null);
-
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
-    null
-  );
-
-  const [currentImageIndex, setCurrentImageIndex] = useState<
-    Map<string, number>
-  >(new Map());
-  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(
-    new Set()
-  );
-
-  // خريطة الصور لكل عقار
-  const [imagesMap, setImagesMap] = useState<Record<string, string[]>>({});
+  const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
+  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
 
   // لزر التصفية الثابت وزر الصعود للأعلى
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -127,47 +70,15 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
-    queryKey: ["properties"],
-    queryFn: async () => {
-      const res = await fetch(`${SCRIPT_BASE}?page=getData`);
-      if (!res.ok) {
-        console.error("❌ API Error:", res.status, await res.text());
-        return [];
-      }
-
-      const raw = await res.json();
-
-      // تحويل البيانات القادمة من Google Sheets إلى شكل Property
-      return raw.map((row: any) => ({
-        propertyNumber: String(row["رقم العقار"] || ""),
-        name: row["🏡 اسم العقار"] || "",
-        city: row["📍 المنطقة"] || "",
-        direction: row["🧭 الاتجاه"] || "",
-        type: row["🏠 النوع"] || "",
-        facilities: (row["🔹 المرافق"] || "")
-          .split(/[,،]/)
-          .map((f: string) => f.trim())
-          .filter(Boolean),
-        prices: {
-          weekday: row["💰 سعر وسط الأسبوع"] || "",
-          weekend: row["💰 سعر نهاية الأسبوع"] || "",
-          overnight: row["💰 سعر المبيت"] || "",
-          holidays: row["💰 سعر الإجازات"] || "",
-        },
-        imagesFolderUrl: row["🔗 رابط الصور"] || row["📎 رابط الصور"] || "",
-        imageUrls: [], // سيتم تعبئتها لاحقاً من Google Script
-        subscriptionType: row["نوع الاشتراك"] || row["🟡 نوع الاشتراك"] || "عادي",
-        whatsappNumber: row["📞 رقم الجوال"] || "",
-      }));
-    },
+    queryKey: ["/api/properties"],
   });
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار العائمة
   useEffect(() => {
     const onScroll = () => {
       const y = window.scrollY || window.pageYOffset;
-      setShowFilterFab(y > 200);
-      setShowScrollTop(y > 400);
+      setShowFilterFab(y > 200); // يظهر زر التصفية بعد نزول بسيط
+      setShowScrollTop(y > 400); // يظهر زر السهم بعد نزول أكثر
     };
 
     onScroll();
@@ -177,67 +88,11 @@ export default function PropertiesPage() {
 
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
-      prev.includes(facility)
-        ? prev.filter((f) => f !== facility)
-        : [...prev, facility]
+      prev.includes(facility) ? prev.filter((f) => f !== facility) : [...prev, facility]
     );
   };
 
-  // جلب الصور من Google Apps Script لكل عقار
-  useEffect(() => {
-    if (!properties.length) return;
-
-    const loadImages = async () => {
-      for (const p of properties) {
-        if (!p.propertyNumber) continue;
-        if (imagesMap[p.propertyNumber]) continue;
-
-        try {
-          const res = await fetch(
-            `${SCRIPT_BASE}?page=images&propertyId=${encodeURIComponent(p.propertyNumber)}&t=${Date.now()}`
-          );
-
-
-          const imgs = await res.json();
-
-          if (Array.isArray(imgs)) {
-            setImagesMap((prev) => ({
-              ...prev,
-              [p.propertyNumber]: imgs.map((rawUrl: string) => {
-                const id = extractDriveId(rawUrl);
-                return `/proxy/drive/${id}`;
-              }),
-            }));
-
-          }
-        } catch (err) {
-          console.error("Image load error for", p.propertyNumber, err);
-        }
-      }
-    };
-
-    loadImages();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [properties]);
-
-  // دمج الصور مع سجلات العقارات
-  const enhancedProperties = properties.map((p) => {
-    const rawImages = imagesMap[p.propertyNumber] || [];
-
-    const proxiedImages = rawImages.map((url) => {
-      const id = extractDriveId(url);
-      return id ? `/proxy/drive/${id}` : url;
-
-    });
-
-    return {
-      ...p,
-      imageUrls: proxiedImages,
-    };
-  });
-
-
-  const filteredProperties = enhancedProperties
+  const filteredProperties = properties
     .filter((property) => {
       // Search query
       if (searchQuery) {
@@ -246,9 +101,7 @@ export default function PropertiesPage() {
           property.name.toLowerCase().includes(query) ||
           property.propertyNumber.includes(query) ||
           property.city.includes(query) ||
-          property.facilities.some((f) =>
-            f.toLowerCase().includes(query)
-          );
+          property.facilities.some((f) => f.toLowerCase().includes(query));
         if (!matchesSearch) return false;
       }
 
@@ -258,11 +111,7 @@ export default function PropertiesPage() {
       }
 
       // Direction filter
-      if (
-        selectedDirection &&
-        selectedDirection !== "" &&
-        selectedDirection !== "all"
-      ) {
+      if (selectedDirection && selectedDirection !== "" && selectedDirection !== "all") {
         if (property.direction !== selectedDirection) return false;
       }
 
@@ -273,34 +122,23 @@ export default function PropertiesPage() {
 
       // Facilities filter with smart matching and normalization
       if (selectedFacilities.length > 0) {
-        const hasAllFacilities = selectedFacilities.every(
-          (selectedFacility) => {
-            // تطابق مباشر
-            if (
-              property.facilities.some((f) =>
-                normalizeText(f).includes(normalizeText(selectedFacility))
-              )
-            ) {
-              return true;
-            }
-
-            // تطابق ذكي
-            const smartKeywords =
-              SMART_FILTERS[
-                selectedFacility as keyof typeof SMART_FILTERS
-              ];
-            if (smartKeywords) {
-              return property.facilities.some((facility) => {
-                const normalizedFacility = normalizeText(facility);
-                return smartKeywords.some((keyword) =>
-                  normalizedFacility.includes(normalizeText(keyword))
-                );
-              });
-            }
-
-            return false;
+        const hasAllFacilities = selectedFacilities.every((selectedFacility) => {
+          // Direct match
+          if (property.facilities.includes(selectedFacility)) {
+            return true;
           }
-        );
+
+          // Smart match using SMART_FILTERS with normalization
+          const smartKeywords = SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
+          if (smartKeywords) {
+            return property.facilities.some((facility) => {
+              const normalizedFacility = normalizeText(facility);
+              return smartKeywords.some((keyword) => normalizedFacility.includes(normalizeText(keyword)));
+            });
+          }
+
+          return false;
+        });
         if (!hasAllFacilities) return false;
       }
 
@@ -314,18 +152,15 @@ export default function PropertiesPage() {
       const validPrices = prices.filter((p) => p > 0);
       if (validPrices.length > 0) {
         const minPrice = Math.min(...validPrices);
-        if (minPrice < priceRange[0] || minPrice > priceRange[1]) {
-          return false;
-        }
+        if (minPrice < priceRange[0] || minPrice > priceRange[1]) return false;
       }
 
       return true;
     })
     .sort((a, b) => {
-      const aIsVerified =
-        a.subscriptionType === "موثوق" || a.subscriptionType === "مميز";
-      const bIsVerified =
-        b.subscriptionType === "موثوق" || b.subscriptionType === "مميز";
+      // Sort: verified (موثوق/مميز) properties first, then free (عادي)
+      const aIsVerified = a.subscriptionType === "موثوق" || a.subscriptionType === "مميز";
+      const bIsVerified = b.subscriptionType === "موثوق" || b.subscriptionType === "مميز";
       if (aIsVerified && !bIsVerified) return -1;
       if (!aIsVerified && bIsVerified) return 1;
       return 0;
@@ -343,17 +178,10 @@ export default function PropertiesPage() {
       const whatsappNumber = property.whatsappNumber || DEFAULT_WHATSAPP;
 
       const message = property.whatsappNumber
-        ? encodeURIComponent(
-            `مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`
-          )
-        : encodeURIComponent(
-            `استفسار عن رقم العقار ${property.propertyNumber}`
-          );
+        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`)
+        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}`);
 
-      window.open(
-        `https://wa.me/${whatsappNumber}?text=${message}`,
-        "_blank"
-      );
+      window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank");
     } catch (error) {
       console.error("Error creating WhatsApp request:", error);
     }
@@ -377,9 +205,7 @@ export default function PropertiesPage() {
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
       const next = (current + 1) % totalImages;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, next))
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -392,11 +218,8 @@ export default function PropertiesPage() {
     setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
-      const prev =
-        current === 0 ? totalImages - 1 : current - 1;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, prev))
-      );
+      const prev = current === 0 ? totalImages - 1 : current - 1;
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -408,9 +231,7 @@ export default function PropertiesPage() {
   const goToImage = (propertyNumber: string, index: number) => {
     setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
     setTimeout(() => {
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, index))
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -422,7 +243,7 @@ export default function PropertiesPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* شريط الاشتراك */}
+        {/* Subscribe CTA Banner */}
         <Card className="p-6 mb-6 bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 border-primary/20">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-center md:text-right flex-1">
@@ -447,11 +268,8 @@ export default function PropertiesPage() {
           </div>
         </Card>
 
-        {/* الفلاتر */}
-        <Card
-          id="filters-section"
-          className="p-4 md:p-6 mb-6 bg-muted/30"
-        >
+        {/* Filters */}
+        <Card id="filters-section" className="p-4 md:p-6 mb-6 bg-muted/30">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-primary">الفلاتر</h2>
             <Button
@@ -467,7 +285,7 @@ export default function PropertiesPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            {/* بحث */}
+            {/* Search */}
             <div className="relative">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -479,11 +297,8 @@ export default function PropertiesPage() {
               />
             </div>
 
-            {/* المدينة */}
-            <Select
-              value={selectedCity}
-              onValueChange={setSelectedCity}
-            >
+            {/* City */}
+            <Select value={selectedCity} onValueChange={setSelectedCity}>
               <SelectTrigger data-testid="select-city">
                 <SelectValue placeholder="المدينة" />
               </SelectTrigger>
@@ -497,11 +312,8 @@ export default function PropertiesPage() {
               </SelectContent>
             </Select>
 
-            {/* الاتجاه */}
-            <Select
-              value={selectedDirection}
-              onValueChange={setSelectedDirection}
-            >
+            {/* Direction */}
+            <Select value={selectedDirection} onValueChange={setSelectedDirection}>
               <SelectTrigger data-testid="select-direction">
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
@@ -515,11 +327,8 @@ export default function PropertiesPage() {
               </SelectContent>
             </Select>
 
-            {/* النوع */}
-            <Select
-              value={selectedType}
-              onValueChange={setSelectedType}
-            >
+            {/* Type */}
+            <Select value={selectedType} onValueChange={setSelectedType}>
               <SelectTrigger data-testid="select-type">
                 <SelectValue placeholder="النوع" />
               </SelectTrigger>
@@ -534,16 +343,14 @@ export default function PropertiesPage() {
             </Select>
           </div>
 
-          {/* نطاق السعر */}
+          {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
               نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
             </label>
             <Slider
               value={priceRange}
-              onValueChange={(value) =>
-                setPriceRange(value as [number, number])
-              }
+              onValueChange={(value) => setPriceRange(value as [number, number])}
               min={0}
               max={5000}
               step={50}
@@ -552,27 +359,22 @@ export default function PropertiesPage() {
             />
           </div>
 
-          {/* المرافق */}
+          {/* Priority Facilities */}
           <div>
-            <label className="block text-sm font-semibold mb-2 text-foreground">
-              المرافق
-            </label>
+            <label className="block text-sm font-semibold mb-2 text-foreground">المرافق</label>
             <div className="flex flex-wrap gap-2">
               {PRIORITY_FACILITIES.map((facility) => (
                 <Badge
                   key={facility}
-                  variant={
-                    selectedFacilities.includes(facility)
-                      ? "default"
-                      : "outline"
-                  }
+                  variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                   className="
                     cursor-pointer hover-elevate active-elevate-2
-                    text-base
-                    px-4 py-2
-                    rounded-lg
-                    font-semibold
+                    text-base        /* حجم النص */
+                    px-4 py-2        /* تكبير حجم الكبسولة */
+                    rounded-lg       /* تدوير أجمل */
+                    font-semibold    /* سُمك الخط */
                   "
+
                   onClick={() => toggleFacility(facility)}
                   data-testid={`badge-facility-${facility}`}
                 >
@@ -583,78 +385,61 @@ export default function PropertiesPage() {
           </div>
         </Card>
 
-        {/* عدد النتائج */}
+        {/* Results */}
         <div className="mb-4">
           <p className="text-sm text-muted-foreground">
-            عدد النتائج:{" "}
-            <span className="font-bold text-foreground">
-              {filteredProperties.length}
-            </span>
+            عدد النتائج: <span className="font-bold text-foreground">{filteredProperties.length}</span>
           </p>
         </div>
 
-        {/* النتائج */}
+        {/* Properties Grid */}
         {isLoading ? (
           <div className="text-center py-12">
             <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <p className="mt-4 text-muted-foreground">
-              جاري التحميل...
-            </p>
+            <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
           </div>
         ) : filteredProperties.length === 0 ? (
           <Card className="p-12 text-center">
-            <p className="text-lg text-muted-foreground">
-              لا توجد عقارات تطابق البحث
-            </p>
+            <p className="text-lg text-muted-foreground">لا توجد عقارات تطابق البحث</p>
           </Card>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {filteredProperties.map((property) => {
-              const mainPrice =
-                property.prices.weekend ||
-                property.prices.weekday ||
-                "0";
-              const topFacilities =
-                property.facilities.slice(0, 3);
+              const mainPrice = property.prices.weekend || property.prices.weekday || "0";
+              const topFacilities = property.facilities.slice(0, 3);
 
               return (
                 <Card
                   key={property.propertyNumber}
                   className={`flex flex-col relative overflow-hidden ${
-                    property.subscriptionType === "موثوق" ||
-                    property.subscriptionType === "مميز"
+                    property.subscriptionType === "موثوق" || property.subscriptionType === "مميز"
                       ? "property-card-premium"
                       : "property-card-standard"
                   }`}
                   data-testid={`card-property-${property.propertyNumber}`}
                 >
-                  {/* الصور */}
+                  {/* Image Section - Full width at top with swipe support */}
                   <div
                     className="relative group touch-pan-y"
                     onTouchStart={(e) => {
                       if (property.imageUrls.length <= 1) return;
                       const touch = e.touches[0];
-                      (e.currentTarget as any).touchStartX =
-                        touch.clientX;
+                      (e.currentTarget as any).touchStartX = touch.clientX;
                     }}
                     onTouchEnd={(e) => {
                       if (property.imageUrls.length <= 1) return;
                       const touch = e.changedTouches[0];
-                      const startX = (e.currentTarget as any)
-                        .touchStartX;
+                      const startX = (e.currentTarget as any).touchStartX;
                       const diff = startX - touch.clientX;
 
+                      // Swipe threshold: 50px
                       if (Math.abs(diff) > 50) {
                         if (diff > 0) {
-                          prevImage(
-                            property.propertyNumber,
-                            property.imageUrls.length
-                          );
+                          // Swipe left (next image in RTL)
+                          prevImage(property.propertyNumber, property.imageUrls.length);
                         } else {
-                          nextImage(
-                            property.propertyNumber,
-                            property.imageUrls.length
-                          );
+                          // Swipe right (previous image in RTL)
+                          nextImage(property.propertyNumber, property.imageUrls.length);
                         }
                       }
                     }}
@@ -662,73 +447,51 @@ export default function PropertiesPage() {
                     {property.imageUrls.length > 0 && (
                       <>
                         <img
-                          src={
-                            property.imageUrls[
-                              getCurrentImageIndex(
-                                property.propertyNumber
-                              )
-                            ]
-                          }
+                          src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
                           alt={property.name}
                           className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
-                            imageTransitioning.has(
-                              property.propertyNumber
-                            )
-                              ? "opacity-0"
-                              : "opacity-100"
+                            imageTransitioning.has(property.propertyNumber) ? "opacity-0" : "opacity-100"
                           }`}
                           onClick={() => {
-                            sessionStorage.setItem(
-                              "scrollPosition",
-                              String(window.scrollY)
-                            );
-                            setLocation(
-                              `/property/${property.propertyNumber}`
-                            );
+                            sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                            setLocation(`/property/${property.propertyNumber}`);
                           }}
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
 
-                        {/* شارة موثوق */}
-                        {(property.subscriptionType === "موثوق" ||
-                          property.subscriptionType === "مميز") && (
+                        {/* Trusted Badge - Top Right Corner on Image */}
+                        {(property.subscriptionType === "موثوق" || property.subscriptionType === "مميز") && (
                           <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
                             <Star className="w-4 h-4 md:w-5 md:h-5 text-yellow-600 fill-yellow-600" />
-                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">
-                              موثوق
-                            </span>
+                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">موثوق</span>
                           </div>
                         )}
 
-                        {/* الأسهم (ديسكتوب) */}
+                        {/* Navigation Arrows (Desktop only) */}
                         {property.imageUrls.length > 1 && (
                           <>
+                            {/* التالي (يمين) */}
                             <Button
                               variant="secondary"
                               size="icon"
                               className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                nextImage(
-                                  property.propertyNumber,
-                                  property.imageUrls.length
-                                );
+                                nextImage(property.propertyNumber, property.imageUrls.length);
                               }}
                               data-testid={`button-next-image-${property.propertyNumber}`}
                             >
                               <ChevronLeft className="h-5 w-5" />
                             </Button>
 
+                            {/* السابق (يسار) */}
                             <Button
                               variant="secondary"
                               size="icon"
                               className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                prevImage(
-                                  property.propertyNumber,
-                                  property.imageUrls.length
-                                );
+                                prevImage(property.propertyNumber, property.imageUrls.length);
                               }}
                               data-testid={`button-prev-image-${property.propertyNumber}`}
                             >
@@ -737,17 +500,14 @@ export default function PropertiesPage() {
                           </>
                         )}
 
-                        {/* نقاط (جوال) */}
+                        {/* Image Dots Indicator (Mobile only) */}
                         {property.imageUrls.length > 1 && (
                           <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
                             {property.imageUrls.map((_, idx) => (
                               <div
                                 key={idx}
                                 className={`h-1.5 rounded-full transition-all ${
-                                  idx ===
-                                  getCurrentImageIndex(
-                                    property.propertyNumber
-                                  )
+                                  idx === getCurrentImageIndex(property.propertyNumber)
                                     ? "w-4 bg-white"
                                     : "w-1.5 bg-white/50"
                                 }`}
@@ -759,77 +519,57 @@ export default function PropertiesPage() {
                     )}
                   </div>
 
-                  {/* المحتوى */}
+                  {/* Content Section - Flexible grow */}
                   <div className="flex flex-col flex-1 p-3 md:p-5">
-                    {(property.subscriptionType === "موثوق" ||
-                      property.subscriptionType === "مميز") && (
+                    {/* Title - Only show for verified properties */}
+                    {(property.subscriptionType === "موثوق" || property.subscriptionType === "مميز") && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
                         onClick={() => {
-                          sessionStorage.setItem(
-                            "scrollPosition",
-                            String(window.scrollY)
-                          );
-                          setLocation(
-                            `/property/${property.propertyNumber}`
-                          );
+                          sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                          setLocation(`/property/${property.propertyNumber}`);
                         }}
                       >
                         {property.name}
                       </h3>
                     )}
 
+                    {/* Location */}
                     <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
-                      <svg
-                        className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
+                      <svg className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                         <path
                           fillRule="evenodd"
                           d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span className="font-semibold truncate">
-                        {property.city}
-                      </span>
+                      <span className="font-semibold truncate">{property.city}</span>
                     </div>
 
+                    {/* Top Facilities - Hidden on small mobile */}
                     <div className="hidden md:flex items-center gap-4 lg:gap-6 mb-4 lg:mb-6 text-sm text-[#b88d2b]">
                       {topFacilities.map((facility, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center gap-2"
-                        >
+                        <div key={idx} className="flex items-center gap-2">
                           <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
-                          <span className="font-semibold text-xs">
-                            {facility}
-                          </span>
+                          <span className="font-semibold text-xs">{facility}</span>
                         </div>
                       ))}
                     </div>
 
+                    {/* Price and CTA - Always at bottom */}
                     <div className="mt-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4">
+                      {/* Price */}
                       <div className="flex items-baseline gap-1">
-                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">
-                          {mainPrice}
-                        </span>
-                        <span className="text-xs md:text-sm text-muted-foreground">
-                          ريال
-                        </span>
+                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
+                        <span className="text-xs md:text-sm text-muted-foreground">ريال</span>
                       </div>
 
+                      {/* CTA Button - Fixed at bottom */}
                       <Button
                         className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
                         onClick={() => {
-                          sessionStorage.setItem(
-                            "scrollPosition",
-                            String(window.scrollY)
-                          );
-                          setLocation(
-                            `/property/${property.propertyNumber}`
-                          );
+                          sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                          setLocation(`/property/${property.propertyNumber}`);
                         }}
                         data-testid={`button-details-${property.propertyNumber}`}
                       >
@@ -842,10 +582,9 @@ export default function PropertiesPage() {
             })}
           </div>
         )}
-
       </div>
 
-      {/* زر تصفية عائم */}
+      {/* زر تصفية عائم شفاف في الوسط */}
       {showFilterFab && (
         <button
           type="button"
@@ -867,9 +606,7 @@ export default function PropertiesPage() {
         <button
           type="button"
           id="scrollTopBtn"
-          onClick={() =>
-            window.scrollTo({ top: 0, behavior: "smooth" })
-          }
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           className="
             fixed bottom-6 right-6 z-50
             bg-[#b88d2b] hover:bg-[#a07c25]
@@ -881,41 +618,28 @@ export default function PropertiesPage() {
         </button>
       )}
 
-      {/* دIALOG التفاصيل (نفس بيانات البطاقة، اختياري تستخدمه لاحقاً) */}
-      <Dialog
-        open={!!selectedProperty}
-        onOpenChange={(open) => !open && setSelectedProperty(null)}
-      >
+      {/* Property Details Dialog */}
+      <Dialog open={!!selectedProperty} onOpenChange={(open) => !open && setSelectedProperty(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           {selectedProperty && (
             <div className="space-y-6">
-              <DialogTitle className="sr-only">
-                {selectedProperty.name}
-              </DialogTitle>
-
+              <DialogTitle className="sr-only">{selectedProperty.name}</DialogTitle>
+              {/* Image Gallery */}
               {selectedProperty.imageUrls.length > 0 && (
                 <div className="relative">
                   <img
-                    src={
-                      selectedProperty.imageUrls[
-                        getCurrentImageIndex(
-                          selectedProperty.propertyNumber
-                        )
-                      ]
-                    }
+                    src={selectedProperty.imageUrls[getCurrentImageIndex(selectedProperty.propertyNumber)]}
                     alt={selectedProperty.name}
                     className="w-full h-96 object-cover rounded-lg"
                     data-testid="img-dialog-current"
                   />
 
+                  {/* Navigation Arrows */}
                   {selectedProperty.imageUrls.length > 1 && (
                     <>
                       <button
                         onClick={() =>
-                          prevImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length
-                          )
+                          prevImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-prev-image"
@@ -924,10 +648,7 @@ export default function PropertiesPage() {
                       </button>
                       <button
                         onClick={() =>
-                          nextImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length
-                          )
+                          nextImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-next-image"
@@ -937,25 +658,18 @@ export default function PropertiesPage() {
                     </>
                   )}
 
+                  {/* Slide Dots */}
                   {selectedProperty.imageUrls.length > 1 && (
                     <div className="flex justify-center gap-2 mt-4">
                       {selectedProperty.imageUrls.map((_, idx) => (
                         <button
                           key={idx}
                           className={`h-2 rounded-full transition-all ${
-                            idx ===
-                            getCurrentImageIndex(
-                              selectedProperty.propertyNumber
-                            )
+                            idx === getCurrentImageIndex(selectedProperty.propertyNumber)
                               ? "w-8 bg-[#b88d2b]"
                               : "w-2 bg-muted-foreground/30"
                           }`}
-                          onClick={() =>
-                            goToImage(
-                              selectedProperty.propertyNumber,
-                              idx
-                            )
-                          }
+                          onClick={() => goToImage(selectedProperty.propertyNumber, idx)}
                           data-testid={`button-slide-${idx}`}
                         />
                       ))}
@@ -964,79 +678,60 @@ export default function PropertiesPage() {
                 </div>
               )}
 
+              {/* Details */}
               <div>
-                <h2 className="text-2xl font-bold text-foreground mb-2">
-                  {selectedProperty.name}
-                </h2>
+                <h2 className="text-2xl font-bold text-foreground mb-2">{selectedProperty.name}</h2>
                 <p className="text-muted-foreground mb-4">
-                  {selectedProperty.city} •{" "}
-                  {selectedProperty.direction} •{" "}
-                  {selectedProperty.type}
+                  {selectedProperty.city} • {selectedProperty.direction} • {selectedProperty.type}
                 </p>
 
+                {/* All Prices */}
                 <div className="price-box rounded-lg p-4 mb-4 space-y-2">
                   {selectedProperty.prices.weekday && (
                     <div className="flex justify-between">
                       <span>وسط الأسبوع:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.weekday} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekday} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.weekend && (
                     <div className="flex justify-between">
                       <span>نهاية الأسبوع:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.weekend} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekend} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.overnight && (
                     <div className="flex justify-between">
                       <span>مبيت:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.overnight} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.overnight} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.holidays && (
                     <div className="flex justify-between">
                       <span>إجازات:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.holidays} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.holidays} ريال</span>
                     </div>
                   )}
                 </div>
 
+                {/* All Facilities */}
                 <div className="mb-6">
                   <h4 className="font-semibold mb-2">المرافق:</h4>
                   <div className="flex flex-wrap gap-2">
-                    {selectedProperty.facilities.map(
-                      (facility, idx) => (
-                        <Badge
-                          key={`dialog-facility-${idx}-${facility}`}
-                          variant="secondary"
-                          className="text-xs"
-                        >
-                          {facility}
-                        </Badge>
-                      )
-                    )}
+                    {selectedProperty.facilities.map((facility, idx) => (
+                      <Badge key={`dialog-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
+                        {facility}
+                      </Badge>
+                    ))}
                   </div>
                 </div>
 
+                {/* Actions */}
                 <div className="flex gap-3">
                   {selectedProperty.imagesFolderUrl && (
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() =>
-                        window.open(
-                          selectedProperty.imagesFolderUrl,
-                          "_blank"
-                        )
-                      }
+                      onClick={() => window.open(selectedProperty.imagesFolderUrl, "_blank")}
                     >
                       <ExternalLink className="w-4 h-4 ml-2" />
                       فتح ملف العقار
@@ -1053,129 +748,95 @@ export default function PropertiesPage() {
             </div>
           )}
         </DialogContent>
-
-        {/* فلتر في مودال للجوال */}
-        <Dialog
-          open={showFiltersModal}
-          onOpenChange={setShowFiltersModal}
-        >
+        <Dialog open={showFiltersModal} onOpenChange={setShowFiltersModal}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-6 rounded-xl">
-            <DialogTitle className="text-xl font-bold text-primary mb-4">
-              تصفية العقارات
-            </DialogTitle>
+            <DialogTitle className="text-xl font-bold text-primary mb-4">تصفية العقارات</DialogTitle>
 
+            {/* Search */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-1 block">
-                بحث
-              </label>
+              <label className="text-sm font-semibold mb-1 block">بحث</label>
               <div className="relative">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   placeholder="بحث شامل..."
                   value={searchQuery}
-                  onChange={(e) =>
-                    setSearchQuery(e.target.value)
-                  }
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className="pr-10"
                 />
               </div>
             </div>
 
+            {/* City */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                ال
-                مدينة
-              </label>
-              <Select
-                value={selectedCity}
-                onValueChange={setSelectedCity}
-              >
+              <label className="text-sm font-semibold mb-2 block">المدينة</label>
+              <Select value={selectedCity} onValueChange={setSelectedCity}>
                 <SelectTrigger>
                   <SelectValue placeholder="المدينة" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {CITIES.map((city) => (
-                    <SelectItem key={city} value={city}>
-                      {city}
-                    </SelectItem>
+                    <SelectItem key={city} value={city}>{city}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Direction */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                الاتجاه
-              </label>
-              <Select
-                value={selectedDirection}
-                onValueChange={setSelectedDirection}
-              >
+              <label className="text-sm font-semibold mb-2 block">الاتجاه</label>
+              <Select value={selectedDirection} onValueChange={setSelectedDirection}>
                 <SelectTrigger>
                   <SelectValue placeholder="الاتجاه" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {DIRECTIONS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
+                    <SelectItem key={d} value={d}>{d}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Type */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                نوع العقار
-              </label>
-              <Select
-                value={selectedType}
-                onValueChange={setSelectedType}
-              >
+              <label className="text-sm font-semibold mb-2 block">نوع العقار</label>
+              <Select value={selectedType} onValueChange={setSelectedType}>
                 <SelectTrigger>
                   <SelectValue placeholder="النوع" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+            
 
+            {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
                 نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
               </label>
               <Slider
                 value={priceRange}
-                onValueChange={(v) =>
-                  setPriceRange(v as [number, number])
-                }
+                onValueChange={(v) => setPriceRange(v as [number, number])}
                 min={0}
                 max={5000}
                 step={50}
               />
             </div>
 
+            {/* Facilities */}
             <div className="mb-6">
-              <label className="text-sm font-semibold mb-2 block">
-                المرافق
-              </label>
+              <label className="text-sm font-semibold mb-2 block">المرافق</label>
               <div className="flex flex-wrap gap-2">
                 {PRIORITY_FACILITIES.map((facility) => (
                   <Badge
                     key={facility}
-                    variant={
-                      selectedFacilities.includes(facility)
-                        ? "default"
-                        : "outline"
-                    }
+                    variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                     className="cursor-pointer"
                     onClick={() => toggleFacility(facility)}
                   >
@@ -1185,6 +846,7 @@ export default function PropertiesPage() {
               </div>
             </div>
 
+            {/* Buttons */}
             <div className="flex gap-3 mt-6">
               <Button
                 variant="outline"
@@ -1206,27 +868,18 @@ export default function PropertiesPage() {
             </div>
           </DialogContent>
         </Dialog>
+
       </Dialog>
 
-      {/* مودال عرض صورة واحدة (لو حاب تستخدمه لاحقاً) */}
-      <Dialog
-        open={!!selectedImage}
-        onOpenChange={() => setSelectedImage(null)}
-      >
+      {/* Image Modal */}
+      <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
         <DialogContent className="max-w-4xl p-0">
           {selectedImage && (
             <div className="relative">
-              <DialogTitle className="sr-only">
-                صورة العقار
-              </DialogTitle>
-              <img
-                src={selectedImage.url}
-                alt="صورة العقار"
-                className="w-full h-auto rounded-lg"
-              />
+              <DialogTitle className="sr-only">صورة العقار</DialogTitle>
+              <img src={selectedImage.url} alt="صورة العقار" className="w-full h-auto rounded-lg" />
               <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1 rounded">
-                {selectedImage.index + 1} /{" "}
-                {selectedImage.total}
+                {selectedImage.index + 1} / {selectedImage.total}
               </div>
             </div>
           )}
