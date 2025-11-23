@@ -33,28 +33,33 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  function isVerified(property: Property) {
-    return property.subscriptionType?.trim().includes("موثوق") ||
-           property.subscriptionType?.trim().includes("مميز");
-  }
+      function isVerified(property: Property) {
+        return (
+          property.subscriptionType?.trim().includes("موثوق") ||
+          property.subscriptionType?.trim().includes("مميز")
+        );
+      }
 
+      // 🔥 بناء روابط صور R2 بدل Google Drive
+      const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
-  
-  const images = property.imageUrls || [];
+      const images = Array.from({ length: 20 }) // حد أقصى 20 صورة
+        .map((_, i) => `${r2Base}/${property.propertyNumber}/${i + 1}.jpg`);
 
-  // إخفاء اسم العقار لغير المشتركين
-  const displayName = isVerified(property) ? property.name : "";
+      // إخفاء اسم العقار لغير المشتركين
+      const displayName = isVerified(property) ? property.name : "";
 
-  // الواتساب بدون اسم للعقارات غير الموثوقة
-  const handleWhatsApp = () => {
-    const nameText = isVerified(property) ? ` - ${property.name}` : "";
-    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
-    const url = `https://wa.me/${property.whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
-  };
+      // الواتساب بدون اسم للعقارات غير الموثوقة
+      const handleWhatsApp = () => {
+        const nameText = isVerified(property) ? ` - ${property.name}` : "";
+        const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
+        const url = `https://wa.me/${property.whatsappNumber}?text=${encodeURIComponent(message)}`;
+        window.open(url, "_blank");
+      };
 
-  return (
-    <div className="min-h-screen bg-background">
+      return (
+        <div className="min-h-screen bg-background">
+
 
       {/* ===== Header ===== */}
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">

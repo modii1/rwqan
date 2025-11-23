@@ -405,6 +405,10 @@ export default function PropertiesPage() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {filteredProperties.map((property) => {
+            const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+            property.imageUrls = [
+              `${r2Base}/${property.propertyNumber}/1.jpg`
+            ]
               const mainPrice = property.prices.weekend || property.prices.weekday || "0";
               const topFacilities = property.facilities.slice(0, 3);
 

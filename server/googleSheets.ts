@@ -329,38 +329,59 @@ class GoogleSheetsService {
   }
 
   // Properties methods
-  async getProperties(): Promise<Property[]> {
-    const rows = await this.readSheet(SHEETS.PROPERTIES);
-    // Filter out empty rows (no property number)
-    const validRows = rows.filter(row => row[0] && row[0].trim());
-    const properties = validRows.map(row => this.rowToProperty(row));
-    
-    // Use imageUrls from Google Sheets as the source of truth
-    // If imageUrls is empty in Sheets, fetch from Drive as fallback
-    const { googleDriveService } = await import('./googleDrive');
-    const propertiesWithImages = await Promise.all(
-      properties.map(async (property) => {
-        try {
-          // Only fetch from Drive if imageUrls is empty in Sheets
-          if (!property.imageUrls || property.imageUrls.length === 0) {
-            const images = await googleDriveService.getPropertyFolderImages(property.propertyNumber);
-            return {
-              ...property,
-              imageUrls: images,
-            };
-          }
-          // Otherwise, use imageUrls from Sheets (source of truth)
-          return property;
-        } catch (error) {
-          console.error(`Error fetching images for property ${property.propertyNumber}:`, error);
-          return property;
-        }
-      })
-    );
-    
-    return propertiesWithImages;
-  }
+async getProperties(): Promise<Property[]> {
+  const rows = await this.readSheet(SHEETS.PROPERTIES);
 
+  const validRows = rows.filter(row => row[0] && row[0].trim());
+
+  const properties = validRows.map(row => {
+    console.log("DEBUG ROW:", row[0], row[8]);
+    return {
+      propertyNumber: row[0] || "",    // 🏷 رقم العقار
+      name: row[1] || "",              // 🏡 اسم العقار
+      whatsappNumber: row[2] || "",    // 📞 رقم الجوال
+      location: row[3] || "",          // 📍 الموقع
+      city: row[4] || "",              // 📍 المنطقة
+      direction: row[5] || "",         // 🧭 الاتجاه
+      type: row[6] || "",              // 🏠 النوع
+
+      facilities: row[7]
+        ? row[7].split(",").map(s => s.trim())
+        : [],                           // 🔹 المرافق
+
+imagesFolderUrl: row[8] || "",      // العمود القديم
+["🔗 رابط الصور"]: row[8] || "",    // العمود اللي يعتمد عليه سكربت R2
+folderUrl: row[8] || "",            // اسم بديل احتياطي
+
+      prices: {
+        display: row[9] || "",          // 💰 سعر العرض
+        weekday: row[10] || "",         // 💰 سعر وسط الأسبوع
+        weekend: row[11] || "",         // 💰 سعر نهاية الأسبوع
+        overnight: row[12] || "",       // 💰 سعر المبيت
+        special: row[13] || "",         // 💰 سعر خاص
+        holidays: row[14] || "",        // 💰 سعر الإجازات
+      },
+
+      subscriptionType: row[15] || "عادي",   // نوع الاشتراك
+      lastUpdate: row[16] || "",             // 🕒 آخر تحديث
+      subscriptionDate: row[17] || "",       // تاريخ الاشتراك
+      pin: row[18] || "",                    // الرقم السري
+
+      // هذه الأعمدة غير موجودة لديك فعلياً → نخليها فارغة
+      driveFolderId: "",
+      imageUrls: [],
+
+      createdAt: "", 
+      updatedAt: "",
+    };
+  });
+
+  return properties;
+}
+
+
+    
+    
   async getPropertyByNumber(propertyNumber: string): Promise<Property | null> {
     const properties = await this.getProperties();
     return properties.find(p => p.propertyNumber === propertyNumber) || null;
@@ -381,120 +402,40 @@ class GoogleSheetsService {
   }
 
   async updateProperty(propertyNumber: string, updates: Partial<Property>): Promise<Property> {
-    const rows = await this.readSheet(SHEETS.PROPERTIES);
-    const rowIndex = rows.findIndex(row => row[0] === propertyNumber);
+  const rows = await this.readSheet(SHEETS.PROPERTIES);
+  const rowIndex = rows.findIndex(row => row[0] === propertyNumber);
 
-    if (rowIndex === -1) {
-      throw new Error('Property not found');
-    }
-
-    const currentProperty = this.rowToProperty(rows[rowIndex]);
-    const updatedProperty: Property = {
-      ...currentProperty,
-      ...updates,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const row = this.propertyToRow(updatedProperty);
-    await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, row);
-
-    return updatedProperty;
+  if (rowIndex === -1) {
+    throw new Error('Property not found');
   }
 
-  async deleteProperty(propertyNumber: string): Promise<void> {
-    const rows = await this.readSheet(SHEETS.PROPERTIES);
-    const rowIndex = rows.findIndex(row => row[0] === propertyNumber);
+  const currentProperty = this.rowToProperty(rows[rowIndex]);
+  const updatedProperty: Property = {
+    ...currentProperty,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
 
-    if (rowIndex === -1) {
-      throw new Error('Property not found');
-    }
+  const updatedRow = this.propertyToRow(updatedProperty);
 
-    await this.deleteRow(SHEETS.PROPERTIES, rowIndex + 2);
+  await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, updatedRow);
+
+  return updatedProperty;
+} // ← انتهت الدالة تماماً
+
+
+async deleteProperty(propertyNumber: string): Promise<void> {
+  const rows = await this.readSheet(SHEETS.PROPERTIES);
+  const rowIndex = rows.findIndex(row => row[0] === propertyNumber);
+
+  if (rowIndex === -1) {
+    throw new Error('Property not found');
   }
 
-  // Conversion methods
-  private rowToProperty(row: any[]): Property {
-    // Helper to safely parse JSON or comma-separated text
-    const safeJSONParse = (value: any, fallback: any = []) => {
-      if (!value) return fallback;
-      if (typeof value !== 'string') return fallback;
-      
-      const trimmed = value.trim();
-      
-      // Check if it looks like JSON (starts with [ or {)
-      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-        try {
-          return JSON.parse(value);
-        } catch (error) {
-          // Silent fallback for invalid JSON
-          return fallback;
-        }
-      }
-      
-      // Otherwise, treat as comma-separated text
-      // Split by comma and clean up whitespace
-      return trimmed
-        .split(',')
-        .map(item => item.trim())
-        .filter(item => item.length > 0);
-    };
+  await this.deleteRow(SHEETS.PROPERTIES, rowIndex + 2);
+}
 
-    return {
-      propertyNumber: row[0] || '',
-      name: row[1] || '',
-      whatsappNumber: row[2] || '',
-      location: row[3] || undefined,
-      city: row[4] as any,
-      direction: row[5] as any,
-      type: row[6] as any,
-      facilities: safeJSONParse(row[7], []),
-      imagesFolderUrl: row[8] || undefined,
-      prices: {
-        display: row[9] || undefined,
-        weekday: row[10] || '',
-        weekend: row[11] || '',
-        overnight: row[12] || '',
-        special: row[13] || undefined,
-        holidays: row[14] || '',
-      },
-      subscriptionType: row[15] as any || 'عادي',
-      lastUpdate: row[16] || undefined,
-      subscriptionDate: row[17] || undefined,
-      pin: row[18] || undefined,
-      driveFolderId: row[19] || undefined,
-      imageUrls: safeJSONParse(row[20], []),
-      createdAt: row[21] || '',
-      updatedAt: row[22] || '',
-    };
-  }
 
-  private propertyToRow(property: Property): any[] {
-    return [
-      property.propertyNumber,
-      property.name,
-      property.whatsappNumber,
-      property.location || '',
-      property.city,
-      property.direction,
-      property.type,
-      JSON.stringify(property.facilities),
-      property.imagesFolderUrl || '',
-      property.prices.display || '',
-      property.prices.weekday,
-      property.prices.weekend,
-      property.prices.overnight,
-      property.prices.special || '',
-      property.prices.holidays,
-      property.subscriptionType,
-      property.lastUpdate || '',
-      property.subscriptionDate || '',
-      property.pin || '',
-      property.driveFolderId || '',
-      JSON.stringify(property.imageUrls),
-      property.createdAt || '',
-      property.updatedAt || '',
-    ];
-  }
 
   // Similar methods for other entities will be added in the next implementation
   // For now, returning placeholder methods
@@ -800,4 +741,7 @@ class GoogleSheetsService {
   }
 }
 
+
+
 export const googleSheetsService = new GoogleSheetsService();
+
