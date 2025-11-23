@@ -1,14 +1,18 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { setupVite, log } from "./vite";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 
+// ===== إعدادات JSON =====
 declare module 'http' {
   interface IncomingMessage {
     rawBody: unknown
   }
 }
+
 app.use(express.json({
   verify: (req, _res, buf) => {
     req.rawBody = buf;
@@ -16,15 +20,16 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false }));
 
-// Serve Object Storage files
+// ===== Object Storage =====
 const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
 if (bucketId) {
   app.use('/public', express.static(`${bucketId}/public`));
 }
 
+// ===== Logging =====
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
+  const pathReq = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
   const originalResJson = res.json;
@@ -35,16 +40,12 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+    if (pathReq.startsWith("/api")) {
+      let logLine = `${req.method} ${pathReq} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
+      if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
       log(logLine);
     }
   });
@@ -55,6 +56,7 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
+  // ===== Error handler =====
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
@@ -63,25 +65,39 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // ====== تشغيل Vite في التطوير ======
   if (app.get("env") === "development") {
     await setupVite(app, server);
-  } else {
-    serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
+  // ====== تقديم React Build ======
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  const reactPublicPath = path.join(__dirname, "../public");
+
+  // تقديم ملفات React (assets, css, js)
+  app.use(express.static(reactPublicPath));
+
+  // أي Route غير API يرجع React index.html
+  app.get("*", (req, res) => {
+    if (!req.path.startsWith("/api")) {
+      return res.sendFile(path.join(reactPublicPath, "index.html"));
+    }
+    res.status(404).json({ error: "API Route Not Found" });
   });
+
+  // ====== تشغيل السيرفر ======
+  const port = parseInt(process.env.PORT || "5000", 10);
+
+  server.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`Serving on port ${port}`);
+    }
+  );
 })();
