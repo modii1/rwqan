@@ -81,6 +81,7 @@ export default function PropertiesPage() {
 
     // تحويل البيانات العربية إلى شكل Property الصحيح
     return raw.map((item: any) => {
+      const subscriptionType = item["اسم العقار"] ? "مميز" : "عادي";
       const propertyNumber = String(item["رقم العقار"] || "");
       const name = item["اسم العقار"] || "";
       const city = item["المنطقة"] || "";
@@ -108,6 +109,7 @@ export default function PropertiesPage() {
         type,
         facilities,
         prices,
+        subscriptionType,
         imageUrls: [
           `${r2Base}/${propertyNumber}/1.jpg`,
           `${r2Base}/${propertyNumber}/2.jpg`,
