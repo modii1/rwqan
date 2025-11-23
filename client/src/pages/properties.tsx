@@ -70,8 +70,55 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
-    queryKey: ["/api/properties"],
-  });
+  queryKey: ["properties"],
+  queryFn: async () => {
+    const res = await fetch(
+      "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
+    );
+    if (!res.ok) return [];
+
+    const raw = await res.json();
+
+    // تحويل البيانات العربية إلى شكل Property الصحيح
+    return raw.map((item: any) => {
+      const propertyNumber = String(item["رقم العقار"] || "");
+      const name = item["اسم العقار"] || "";
+      const city = item["المنطقة"] || "";
+      const direction = item["الاتجاه"] || "";
+      const type = item["النوع"] || "";
+      const facilities = (item["المرافق"] || "")
+        .split(",")
+        .map((f: string) => f.trim());
+
+      const prices = {
+        weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
+        weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
+        overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
+        holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
+      };
+
+      // صور R2 الأساسية
+      const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+
+      return {
+        propertyNumber,
+        name,
+        city,
+        direction,
+        type,
+        facilities,
+        prices,
+        imageUrls: [
+          `${r2Base}/${propertyNumber}/1.jpg`,
+          `${r2Base}/${propertyNumber}/2.jpg`,
+          `${r2Base}/${propertyNumber}/3.jpg`,
+        ],
+      };
+    });
+  },
+});
+
+
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار العائمة
   useEffect(() => {
