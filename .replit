@@ -8,7 +8,7 @@ channel = "stable-24_05"
 [deployment]
 deploymentTarget = "scheduled"
 build = ["npm", "run", "build"]
-run = ["sh", "-c", "dist/public"]
+run = ["sh", "-c", "npm start"]
 
 [[ports]]
 localPort = 5000
