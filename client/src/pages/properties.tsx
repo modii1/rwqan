@@ -69,71 +69,59 @@ export default function PropertiesPage() {
   const [showFilterFab, setShowFilterFab] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
+  // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
+  const [visibleCount, setVisibleCount] = useState(24);
+
   const { data: properties = [], isLoading } = useQuery<Property[]>({
-  queryKey: ["properties"],
-  queryFn: async () => {
-    const res = await fetch(
-      "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
-    );
-    if (!res.ok) return [];
+    queryKey: ["properties"],
+    queryFn: async () => {
+      const res = await fetch(
+        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
+      );
+      if (!res.ok) return [];
 
-    const raw = await res.json();
+      const raw = await res.json();
 
-    // تحويل البيانات العربية إلى شكل Property الصحيح
-    return raw.map((item: any) => {
-      const subscriptionType = item["اسم العقار"] ? "مميز" : "عادي";
-      const propertyNumber = String(item["رقم العقار"] || "");
-      const name = item["اسم العقار"] || "";
-      const city = item["المنطقة"] || "";
-      const direction = item["الاتجاه"] || "";
-      const type = item["النوع"] || "";
-      const facilities = (item["المرافق"] || "")
-        .split(",")
-        .map((f: string) => f.trim());
+      // تحويل البيانات العربية إلى شكل Property الصحيح
+      return raw.map((item: any) => {
+        const subscriptionType = item["اسم العقار"] ? "مميز" : "عادي";
+        const propertyNumber = String(item["رقم العقار"] || "");
+        const name = item["اسم العقار"] || "";
+        const city = item["المنطقة"] || "";
+        const direction = item["الاتجاه"] || "";
+        const type = item["النوع"] || "";
+        const facilities = (item["المرافق"] || "")
+          .split(",")
+          .map((f: string) => f.trim());
 
-      const prices = {
-        weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
-        weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
-        overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
-        holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
-      };
+        const prices = {
+          weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
+          weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
+          overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
+          holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
+        };
 
-      // صور R2 الأساسية
-      const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+        // صور R2 الأساسية
+        const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
-      return {
-        propertyNumber,
-        name,
-        city,
-        direction,
-        type,
-        facilities,
-        prices,
-        subscriptionType,
-        imageUrls: [
-          `${r2Base}/${propertyNumber}/1.jpg`,
-          `${r2Base}/${propertyNumber}/2.jpg`,
-          `${r2Base}/${propertyNumber}/3.jpg`,
-        ],
-      };
-    });
-  },
-});
-
-
-
-  // مراقبة السكرول لإظهار/إخفاء الأزرار العائمة
-  useEffect(() => {
-    const onScroll = () => {
-      const y = window.scrollY || window.pageYOffset;
-      setShowFilterFab(y > 200); // يظهر زر التصفية بعد نزول بسيط
-      setShowScrollTop(y > 400); // يظهر زر السهم بعد نزول أكثر
-    };
-
-    onScroll();
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+        return {
+          propertyNumber,
+          name,
+          city,
+          direction,
+          type,
+          facilities,
+          prices,
+          subscriptionType,
+          imageUrls: [
+            `${r2Base}/${propertyNumber}/1.jpg`,
+            `${r2Base}/${propertyNumber}/2.jpg`,
+            `${r2Base}/${propertyNumber}/3.jpg`,
+          ],
+        };
+      });
+    },
+  });
 
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
@@ -214,6 +202,39 @@ export default function PropertiesPage() {
       if (!aIsVerified && bIsVerified) return 1;
       return 0;
     });
+
+  // قائمة العقارات الظاهرة حالياً فقط
+  const visibleProperties = filteredProperties.slice(0, visibleCount);
+
+  // إعادة ضبط العدد الظاهر عند تغيير الفلاتر/البيانات
+  useEffect(() => {
+    setVisibleCount(24);
+  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange, properties]);
+
+  // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY || window.pageYOffset;
+      setShowFilterFab(y > 200); // يظهر زر التصفية بعد نزول بسيط
+      setShowScrollTop(y > 400); // يظهر زر السهم بعد نزول أكثر
+
+      // تحميل المزيد تلقائياً عند الاقتراب من أسفل الصفحة
+      const doc = document.documentElement;
+      const scrollHeight = doc.scrollHeight;
+      const clientHeight = doc.clientHeight;
+
+      if (y + clientHeight >= scrollHeight - 400) {
+        setVisibleCount((prev) => {
+          if (prev >= filteredProperties.length) return prev;
+          return Math.min(prev + 20, filteredProperties.length); // حمّل 20 عقار إضافي
+        });
+      }
+    };
+
+    onScroll();
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [filteredProperties.length]);
 
   const handleWhatsApp = async (property: Property) => {
     try {
@@ -418,12 +439,11 @@ export default function PropertiesPage() {
                   variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                   className="
                     cursor-pointer hover-elevate active-elevate-2
-                    text-base        /* حجم النص */
-                    px-4 py-2        /* تكبير حجم الكبسولة */
-                    rounded-lg       /* تدوير أجمل */
-                    font-semibold    /* سُمك الخط */
+                    text-base
+                    px-4 py-2
+                    rounded-lg
+                    font-semibold
                   "
-
                   onClick={() => toggleFacility(facility)}
                   data-testid={`badge-facility-${facility}`}
                 >
@@ -453,11 +473,15 @@ export default function PropertiesPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-            {filteredProperties.map((property) => {
-            const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
-            property.imageUrls = [
-              `${r2Base}/${property.propertyNumber}/1.jpg`
-            ]
+            {visibleProperties.map((property) => {
+              // لو حاب ترجع لصورة واحدة فقط لكل عقار، غيّر المصفوفة هنا
+              const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+              const imageUrls = [
+                `${r2Base}/${property.propertyNumber}/1.jpg`,
+                `${r2Base}/${property.propertyNumber}/2.jpg`,
+                `${r2Base}/${property.propertyNumber}/3.jpg`,
+              ];
+
               const mainPrice = property.prices.weekend || property.prices.weekday || "0";
               const topFacilities = property.facilities.slice(0, 3);
 
@@ -475,12 +499,12 @@ export default function PropertiesPage() {
                   <div
                     className="relative group touch-pan-y"
                     onTouchStart={(e) => {
-                      if (property.imageUrls.length <= 1) return;
+                      if (imageUrls.length <= 1) return;
                       const touch = e.touches[0];
                       (e.currentTarget as any).touchStartX = touch.clientX;
                     }}
                     onTouchEnd={(e) => {
-                      if (property.imageUrls.length <= 1) return;
+                      if (imageUrls.length <= 1) return;
                       const touch = e.changedTouches[0];
                       const startX = (e.currentTarget as any).touchStartX;
                       const diff = startX - touch.clientX;
@@ -489,19 +513,20 @@ export default function PropertiesPage() {
                       if (Math.abs(diff) > 50) {
                         if (diff > 0) {
                           // Swipe left (next image in RTL)
-                          prevImage(property.propertyNumber, property.imageUrls.length);
+                          prevImage(property.propertyNumber, imageUrls.length);
                         } else {
                           // Swipe right (previous image in RTL)
-                          nextImage(property.propertyNumber, property.imageUrls.length);
+                          nextImage(property.propertyNumber, imageUrls.length);
                         }
                       }
                     }}
                   >
-                    {property.imageUrls.length > 0 && (
+                    {imageUrls.length > 0 && (
                       <>
                         <img
-                          src={property.imageUrls[getCurrentImageIndex(property.propertyNumber)]}
+                          src={imageUrls[getCurrentImageIndex(property.propertyNumber)]}
                           alt={property.name}
+                          loading="lazy"
                           className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
                             imageTransitioning.has(property.propertyNumber) ? "opacity-0" : "opacity-100"
                           }`}
@@ -521,7 +546,7 @@ export default function PropertiesPage() {
                         )}
 
                         {/* Navigation Arrows (Desktop only) */}
-                        {property.imageUrls.length > 1 && (
+                        {imageUrls.length > 1 && (
                           <>
                             {/* التالي (يمين) */}
                             <Button
@@ -530,7 +555,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                nextImage(property.propertyNumber, property.imageUrls.length);
+                                nextImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-next-image-${property.propertyNumber}`}
                             >
@@ -544,7 +569,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                prevImage(property.propertyNumber, property.imageUrls.length);
+                                prevImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-prev-image-${property.propertyNumber}`}
                             >
@@ -554,9 +579,9 @@ export default function PropertiesPage() {
                         )}
 
                         {/* Image Dots Indicator (Mobile only) */}
-                        {property.imageUrls.length > 1 && (
+                        {imageUrls.length > 1 && (
                           <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-                            {property.imageUrls.map((_, idx) => (
+                            {imageUrls.map((_, idx) => (
                               <div
                                 key={idx}
                                 className={`h-1.5 rounded-full transition-all ${
@@ -801,6 +826,8 @@ export default function PropertiesPage() {
             </div>
           )}
         </DialogContent>
+
+        {/* فلتر الموبايل (نفس السابق) */}
         <Dialog open={showFiltersModal} onOpenChange={setShowFiltersModal}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-6 rounded-xl">
             <DialogTitle className="text-xl font-bold text-primary mb-4">تصفية العقارات</DialogTitle>
@@ -829,7 +856,9 @@ export default function PropertiesPage() {
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {CITIES.map((city) => (
-                    <SelectItem key={city} value={city}>{city}</SelectItem>
+                    <SelectItem key={city} value={city}>
+                      {city}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -845,7 +874,9 @@ export default function PropertiesPage() {
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {DIRECTIONS.map((d) => (
-                    <SelectItem key={d} value={d}>{d}</SelectItem>
+                    <SelectItem key={d} value={d}>
+                      {d}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -861,12 +892,13 @@ export default function PropertiesPage() {
                 <SelectContent>
                   <SelectItem value="all">الكل</SelectItem>
                   {TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            
 
             {/* Price Range */}
             <div className="mb-6">
@@ -921,7 +953,6 @@ export default function PropertiesPage() {
             </div>
           </DialogContent>
         </Dialog>
-
       </Dialog>
 
       {/* Image Modal */}
