@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -16,8 +17,6 @@ import SubscriptionPage from "@/pages/subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
-
-
 
 // Icons
 import { Home, LogIn, LogOut, Settings } from "lucide-react";
@@ -46,6 +45,33 @@ export default function App() {
   const [, setLocation] = useLocation();
   const { data: session } = useSessionQuery();
 
+  // ⭐ إصلاح صفحة بيضاء (Loader)
+  const [appReady, setAppReady] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setAppReady(true), 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!appReady) {
+    return (
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "22px",
+          color: "#b88d2b",
+          fontFamily: "Cairo",
+        }}
+      >
+        جاري التحميل...
+      </div>
+    );
+  }
+  // ⭐ نهاية شاشة التحميل
+
   // login check
   const isLogged = !!session?.user;
 
@@ -54,7 +80,6 @@ export default function App() {
     window.location.href = "/";
   };
 
-  // 🔥 نمط موحد لكل الأيقونات
   const iconStyle =
     "p-2 h-10 w-10 rounded-xl border border-gray-300 text-[#555] bg-white hover:bg-gray-100 flex items-center justify-center transition";
 
@@ -67,7 +92,6 @@ export default function App() {
           <header className="bg-white border-b shadow-sm sticky top-0 z-50">
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
 
-              {/* Logo */}
               <h1
                 onClick={() => setLocation("/")}
                 className="text-lg md:text-xl font-bold text-primary cursor-pointer"
@@ -75,18 +99,14 @@ export default function App() {
                 مودي الذكي - العقارات
               </h1>
 
-              {/* Icons */}
               <div className="flex items-center gap-3">
 
                 {/* الصفحة الرئيسية */}
-                <Button
-                  onClick={() => setLocation("/")}
-                  className={iconStyle}
-                >
+                <Button onClick={() => setLocation("/")} className={iconStyle}>
                   <Home className="w-5 h-5" />
                 </Button>
 
-                {/* غير مسجل دخول */}
+                {/* زر تسجيل الدخول */}
                 {!isLogged && (
                   <Button
                     onClick={() => setLocation("/owner/login")}
@@ -96,10 +116,8 @@ export default function App() {
                   </Button>
                 )}
 
-                {/* مسجل دخول */}
                 {isLogged && (
                   <>
-                    {/* الإعدادات */}
                     <Button
                       onClick={() => setLocation("/owner/dashboard")}
                       className={iconStyle}
@@ -107,11 +125,7 @@ export default function App() {
                       <Settings className="w-5 h-5" />
                     </Button>
 
-                    {/* تسجيل خروج */}
-                    <Button
-                      onClick={logout}
-                      className={iconStyle}
-                    >
+                    <Button onClick={logout} className={iconStyle}>
                       <LogOut className="w-5 h-5" />
                     </Button>
                   </>
@@ -119,8 +133,6 @@ export default function App() {
               </div>
             </div>
           </header>
-
-          {/* ================= END HEADER ================= */}
 
           <main className="flex-1 overflow-auto">
             <Router />
