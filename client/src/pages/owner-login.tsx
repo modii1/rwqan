@@ -4,8 +4,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Home, Info } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { Home } from "lucide-react";
 
 export default function OwnerLogin() {
   const [, setLocation] = useLocation();
@@ -19,21 +19,24 @@ export default function OwnerLogin() {
     setIsLoading(true);
 
     try {
-      await apiRequest('POST', '/api/owner/login', { propertyNumber, pin });
-
-      // Invalidate session query to update sidebar
-      queryClient.invalidateQueries({ queryKey: ['/api/owner/session'] });
+      // ⬇ الاتصال بالباك-إند للتحقق من الشيت مباشرة
+      await apiRequest("POST", "/api/owner/login", {
+        propertyNumber,
+        pin,
+      });
 
       toast({
-        title: "تم تسجيل الدخول بنجاح",
+        title: "تم تسجيل الدخول",
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      setLocation('/owner/dashboard');
+      // ⬇ تحسين: ننتقل مباشرة للوحة المالك
+      setLocation("/owner/dashboard");
+
     } catch (error: any) {
       toast({
-        title: "خطأ في تسجيل الدخول",
-        description: error.message || "رقم العقار أو الرقم السري غير صحيح",
+        title: "فشل تسجيل الدخول",
+        description: error?.message || "رقم العقار أو الرقم السري غير صحيح",
         variant: "destructive",
       });
     } finally {
@@ -56,15 +59,13 @@ export default function OwnerLogin() {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
+            <label className="block text-sm font-semibold mb-2">رقم العقار</label>
             <Input
               type="text"
               placeholder="00123"
               value={propertyNumber}
               onChange={(e) => setPropertyNumber(e.target.value)}
-              maxLength={5}
               required
-              data-testid="input-property-number"
             />
           </div>
 
@@ -76,17 +77,11 @@ export default function OwnerLogin() {
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               required
-              data-testid="input-pin"
             />
           </div>
 
-          <Button
-            type="submit"
-            className="w-full gradient-golden"
-            disabled={isLoading}
-            data-testid="button-login"
-          >
-            {isLoading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
+          <Button type="submit" className="w-full gradient-golden" disabled={isLoading}>
+            {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
           </Button>
         </form>
 
@@ -94,9 +89,8 @@ export default function OwnerLogin() {
           <p>ليس لديك حساب؟</p>
           <Button
             variant="link"
-            onClick={() => setLocation('/register')}
+            onClick={() => setLocation("/register")}
             className="text-primary"
-            data-testid="link-register"
           >
             سجل عقارك الآن
           </Button>
