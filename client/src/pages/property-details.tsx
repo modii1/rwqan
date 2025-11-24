@@ -4,7 +4,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import type { TouchEvent } from "react";
 
 // نوع داخلي لبيانات التفاصيل (مستقل عن @shared/schema)
 interface PropertyDetails {
@@ -36,9 +37,11 @@ function isVerified(property: PropertyDetails) {
 }
 
 export default function PropertyDetailsPage() {
-  const [, params] = useRoute("/property/:id");
+  const [, params] = useRoute<{ id: string }>("/property/:id");
   const [, setLocation] = useLocation();
+
   const [selectedImage, setSelectedImage] = useState<number>(0);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   const propertyId = params?.id ?? "";
 
@@ -57,6 +60,8 @@ export default function PropertyDetailsPage() {
       }
 
       const raw = await res.json();
+
+      if (!Array.isArray(raw)) return [];
 
       return raw.map((item: any): PropertyDetails => {
         const propertyNumber = String(item["رقم العقار"] || "");
@@ -148,6 +153,28 @@ export default function PropertyDetailsPage() {
 
   const property = properties.find((p) => p.propertyNumber === propertyId);
 
+  // ✅ إعادة تعيين الصورة المختارة عند تغيّر العقار
+  useEffect(() => {
+    if (!property) return;
+    setSelectedImage(0);
+  }, [property?.propertyNumber]);
+
+  // نحسب الصور من R2 بشكل آمن
+  let images: string[] = [];
+  if (property && property.imageCount && property.imageCount > 0) {
+    images = Array.from({ length: property.imageCount }, (_, i) => {
+      return `${R2_BASE}/${property.propertyNumber}/${i + 1}.jpg`;
+    });
+  }
+
+  // ✅ Preload للصورة التالية لتسريع التصفح
+  useEffect(() => {
+    if (!images || images.length === 0) return;
+    const nextIndex = (selectedImage + 1) % images.length;
+    const img = new Image();
+    img.src = images[nextIndex];
+  }, [images, selectedImage]);
+
   // ===== حالات التحميل / الخطأ / غير موجود =====
 
   if (isLoading) {
@@ -201,11 +228,30 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  // ===== الصور من R2 بعد حساب العدد الحقيقي =====
-  const images: string[] = Array.from(
-    { length: Math.max(property.imageCount || 1, 1) },
-    (_, i) => `${R2_BASE}/${property.propertyNumber}/${i + 1}.jpg`
-  );
+  // ===== سحب باللمس (Swipe) =====
+  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: TouchEvent<HTMLDivElement>) => {
+    if (touchStartX == null) return;
+    const diff = e.changedTouches[0].clientX - touchStartX;
+    const threshold = 40;
+
+    if (diff > threshold) {
+      // سحب لليمين => الصورة السابقة
+      setSelectedImage((prev) =>
+        images.length ? (prev - 1 + images.length) % images.length : prev
+      );
+    } else if (diff < -threshold) {
+      // سحب لليسار => الصورة التالية
+      setSelectedImage((prev) =>
+        images.length ? (prev + 1) % images.length : prev
+      );
+    }
+
+    setTouchStartX(null);
+  };
 
   // إخفاء اسم العقار لغير المشتركين
   const displayName = isVerified(property) ? property.name : "";
@@ -271,7 +317,20 @@ export default function PropertyDetailsPage() {
             >
               {images.length > 0 ? (
                 <>
-                  <div className="relative aspect-video bg-muted">
+                  <div
+                    className="relative aspect-video bg-muted select-none"
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                  >
+                    {/* Preload للصورة التالية */}
+                    {images.length > 1 && (
+                      <link
+                        rel="preload"
+                        as="image"
+                        href={images[(selectedImage + 1) % images.length]}
+                      />
+                    )}
+
                     <img
                       src={images[selectedImage]}
                       alt={`صورة ${selectedImage + 1}`}
@@ -279,7 +338,37 @@ export default function PropertyDetailsPage() {
                       loading="eager"
                       decoding="async"
                       data-testid="img-main"
+                      draggable={false}
                     />
+
+                    {images.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedImage(
+                              (prev) =>
+                                (prev - 1 + images.length) % images.length
+                            )
+                          }
+                          className="absolute inset-y-0 right-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
+                        >
+                          ‹
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedImage(
+                              (prev) => (prev + 1) % images.length
+                            )
+                          }
+                          className="absolute inset-y-0 left-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
+                        >
+                          ›
+                        </button>
+                      </>
+                    )}
                   </div>
 
                   {images.length > 1 && (
@@ -294,6 +383,7 @@ export default function PropertyDetailsPage() {
                               : "opacity-60 hover:opacity-100"
                           }`}
                           data-testid={`button-thumbnail-${idx}`}
+                          type="button"
                         >
                           <img
                             src={img}
@@ -301,6 +391,7 @@ export default function PropertyDetailsPage() {
                             className="w-full h-full object-cover"
                             loading="lazy"
                             decoding="async"
+                            draggable={false}
                           />
                         </button>
                       ))}
