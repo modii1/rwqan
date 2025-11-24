@@ -1,5 +1,5 @@
 {
   "redirects": [
-    { "source": "/**", "destination": "/", "status": 200 }
+    { "source": "/(.*)", "destination": "/", "statusCode": 200 }
   ]
 }
