@@ -4,7 +4,6 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import { Home } from "lucide-react";
 
 export default function OwnerLogin() {
@@ -19,24 +18,48 @@ export default function OwnerLogin() {
     setIsLoading(true);
 
     try {
-      // ⬇ الاتصال بالباك-إند للتحقق من الشيت مباشرة
-      await apiRequest("POST", "/api/owner/login", {
+      // ❗ إرسال البيانات بصيغة x-www-form-urlencoded (بدون JSON)
+      const body = new URLSearchParams({
+        action: "login",
         propertyNumber,
         pin,
-      });
+      }).toString();
+
+      const res = await fetch(
+        "https://script.google.com/macros/s/AKfycbwG5-ghrmzgLqUW60_eFR1kp9F8KiHpJ9L_ntPrvmeHjiXrMNykrTEmjcfME7Q8Liy2/exec",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          },
+          body,
+        }
+      );
+
+      const data = await res.json();
+
+      if (data.error === "invalid") {
+        toast({
+          title: "فشل تسجيل الدخول",
+          description: "رقم العقار أو الرقم السري غير صحيح",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // حفظ الجلسة
+      localStorage.setItem("ownerSession", JSON.stringify(data));
 
       toast({
         title: "تم تسجيل الدخول",
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      // ⬇ تحسين: ننتقل مباشرة للوحة المالك
       setLocation("/owner/dashboard");
-
-    } catch (error: any) {
+    } catch (error) {
       toast({
-        title: "فشل تسجيل الدخول",
-        description: error?.message || "رقم العقار أو الرقم السري غير صحيح",
+        title: "خطأ غير متوقع",
+        description: "تعذر الاتصال بالخادم",
         variant: "destructive",
       });
     } finally {
@@ -80,7 +103,11 @@ export default function OwnerLogin() {
             />
           </div>
 
-          <Button type="submit" className="w-full gradient-golden" disabled={isLoading}>
+          <Button
+            type="submit"
+            className="w-full gradient-golden"
+            disabled={isLoading}
+          >
             {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
           </Button>
         </form>
