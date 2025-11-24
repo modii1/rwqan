@@ -12,52 +12,62 @@ export default function PropertyDetailsPage() {
   const [, setLocation] = useLocation();
   const [selectedImage, setSelectedImage] = useState<number>(0);
 
-  const { data: properties = [] } = useQuery<Property[]>({
-    queryKey: ["property-details"],
-    queryFn: async () => {
-      const res = await fetch(
-        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
-      );
-      if (!res.ok) return [];
+  const { data: properties = [], isLoading } = useQuery<Property[]>({
+  queryKey: ["property-details"],
+  queryFn: async () => {
+    const res = await fetch(
+      "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
+    );
+    if (!res.ok) return [];
+    const raw = await res.json();
 
-      const raw = await res.json();
+    return raw.map((item: any) => {
+      const propertyNumber = String(item["رقم العقار"] || "");
+      const name = item["اسم العقار"] || "";
+      const city = item["المنطقة"] || "";
+      const direction = item["الاتجاه"] || "";
+      const location = item["الموقع"] || "";
+      const type = item["النوع"] || "";
+      const facilities = (item["المرافق"] || "")
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((f: string) => f.replace(/"/g, "").trim());
 
-      return raw.map((item: any) => {
-        const propertyNumber = String(item["رقم العقار"] || "");
-        const name = item["اسم العقار"] || "";
-        const city = item["المنطقة"] || "";
-        const direction = item["الاتجاه"] || "";
-        const location = item["الموقع"] || "";
-        const type = item["النوع"] || "";
-        const facilities = (item["المرافق"] || "")
-          .replace(/^\[|\]$/g, "")
-          .split(",")
-          .map((f: string) => f.replace(/"/g, "").trim());
+      const prices = {
+        weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
+        weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
+        overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
+        holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
+      };
 
-        const prices = {
-          weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
-          weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
-          overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
-          holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
-        };
+      const subscriptionType = item["اسم العقار"] ? "مميز" : "عادي";
 
-        // 🔥 قاعدة الاشتراك: إذا فيه اسم عقار = مميز، إذا ما فيه = عادي
-        const subscriptionType = item["اسم العقار"] ? "مميز" : "عادي";
+      return {
+        propertyNumber,
+        name,
+        city,
+        direction,
+        type,
+        location,
+        facilities,
+        prices,
+        subscriptionType,
+        whatsappNumber: item["رقم الجوال"] || "",
+      };
+    });
+  },
+});
 
-        return {
-          propertyNumber,
-          name,
-          city,
-          direction,
-          type,
-          location,
-          facilities,
-          prices,
-          subscriptionType,
-        };
-      });
-    },
-  });
+// 👇👇👇 أضف هذا
+if (isLoading) {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <Card className="p-6 text-center">
+        <h2 className="text-lg font-bold text-primary">جاري تحميل العقار...</h2>
+      </Card>
+    </div>
+  );
+}
 
 
   const property = properties.find(p => p.propertyNumber === params?.id);
