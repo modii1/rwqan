@@ -9,12 +9,12 @@ import { Button } from "@/components/ui/button";
 // Pages
 import NotFound from "@/pages/not-found";
 import PropertiesPage from "@/pages/properties";
-    import PropertyDetailsPage from "@/pages/property-details";;
+import PropertyDetailsPage from "@/pages/property-details";
 import OwnerLogin from "@/pages/owner-login";
 import OwnerDashboard from "@/pages/owner-dashboard";
 import OwnerImagesPage from "@/pages/owner-images";
 import SubscriptionPage from "@/pages/subscription";
-import SuggestPage from "@/pages/suggest"
+import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
 
@@ -27,12 +27,10 @@ import { useSessionQuery } from "@/hooks/use-session";
 function Router() {
   return (
     <Switch>
-                                  <Route path="/" component={PropertiesPage} />
+      <Route path="/" component={PropertiesPage} />
       <Route path="/property/:id" component={PropertyDetailsPage} />
-                                 <Route path="/owner/login" component={OwnerLogin} />
-     
-     
-                                  <Route path="/owner/dashboard" component={OwnerDashboard} />
+      <Route path="/owner/login" component={OwnerLogin} />
+      <Route path="/owner/dashboard" component={OwnerDashboard} />
       <Route path="/owner/images" component={OwnerImagesPage} />
       <Route path="/owner/subscription" component={SubscriptionPage} />
       <Route path="/suggest" component={SuggestPage} />
@@ -44,10 +42,20 @@ function Router() {
 }
 
 export default function App() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { data: session } = useSessionQuery();
-  // ⭐ إصلاح صفحة بيضاء (Loader)
   const [appReady, setAppReady] = useState(false);
+
+  // SPA Redirect Handler for static deployment
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const redirect = params.get('redirect');
+    if (redirect) {
+      const decodedPath = decodeURIComponent(redirect);
+      window.history.replaceState(null, '', decodedPath);
+      setLocation(decodedPath);
+    }
+  }, [setLocation]);
 
   useEffect(() => {
     const t = setTimeout(() => setAppReady(true), 300);
