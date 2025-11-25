@@ -70,27 +70,29 @@ app.use((req, res, next) => {
     await setupVite(app, server);
   }
 
-  // ====== تقديم React Build ======
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
+  // ====== تقديم React Build (للإنتاج فقط) ======
+  // في التطوير Vite يقدم الملفات، وفي الإنتاج نحن نقدمها
+  if (app.get("env") !== "development") {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
 
-  // في الإنتاج: dist/index.js -> dist/public
-  // في التطوير: server/index.ts -> dist/public
-  const isProduction = app.get("env") === "production";
-  const reactPublicPath = isProduction 
-    ? path.join(__dirname, "public")  // dist/public
-    : path.join(__dirname, "../dist/public");  // من server/ إلى dist/public
+    // في الإنتاج: dist/index.js موجود في dist/
+    // الملفات الثابتة في dist/public/
+    const reactPublicPath = path.join(__dirname, "public");
 
-  // تقديم ملفات React (assets, css, js)
-  app.use(express.static(reactPublicPath));
+    console.log("Production mode - serving static files from:", reactPublicPath);
 
-  // أي Route غير API يرجع React index.html
-  app.get("*", (req, res) => {
-    if (!req.path.startsWith("/api")) {
-      return res.sendFile(path.join(reactPublicPath, "index.html"));
-    }
-    res.status(404).json({ error: "API Route Not Found" });
-  });
+    // تقديم ملفات React (assets, css, js)
+    app.use(express.static(reactPublicPath));
+
+    // أي Route غير API يرجع React index.html
+    app.get("*", (req, res) => {
+      if (!req.path.startsWith("/api")) {
+        return res.sendFile(path.join(reactPublicPath, "index.html"));
+      }
+      res.status(404).json({ error: "API Route Not Found" });
+    });
+  }
 
   // ====== تشغيل السيرفر ======
   const port = parseInt(process.env.PORT || "5000", 10);

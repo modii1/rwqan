@@ -11,12 +11,12 @@ build = ["npm", "run", "build"]
 run = ["sh", "-c", "node dist/index.js"]
 
 [[ports]]
-localPort = 5000
-externalPort = 80
+localPort = 3333
+externalPort = 3001
 
 [[ports]]
-localPort = 40847
-externalPort = 3001
+localPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 42221
@@ -48,3 +48,8 @@ waitForPort = 5000
 
 [agent]
 integrations = ["google-sheet:1.0.0", "javascript_object_storage:1.0.0", "javascript_google_analytics:1.0.0", "google-drive:1.0.0"]
+
+[userenv]
+
+[userenv.production]
+NODE_ENV = "production"
