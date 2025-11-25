@@ -74,7 +74,12 @@ app.use((req, res, next) => {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
 
-  const reactPublicPath = path.join(__dirname, "../public");
+  // في الإنتاج: dist/index.js -> dist/public
+  // في التطوير: server/index.ts -> dist/public
+  const isProduction = app.get("env") === "production";
+  const reactPublicPath = isProduction 
+    ? path.join(__dirname, "public")  // dist/public
+    : path.join(__dirname, "../dist/public");  // من server/ إلى dist/public
 
   // تقديم ملفات React (assets, css, js)
   app.use(express.static(reactPublicPath));
