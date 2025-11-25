@@ -31,6 +31,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Session management
+  const isProduction = process.env.NODE_ENV === "production";
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "moddy-secret-key-2025",
@@ -39,7 +40,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       cookie: {
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         httpOnly: true,
-        secure: false, // Set to true in production with HTTPS
+        secure: isProduction, // HTTPS in production
+        sameSite: isProduction ? "lax" : "lax", // Allow cross-site requests
       },
     }),
   );
