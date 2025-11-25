@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Property } from "@shared/schema";
@@ -13,20 +13,26 @@ export default function OwnerDashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const { data: property, isLoading } = useQuery<Property>({
-    queryKey: ['/api/owner/property'],
-  });
+  // نتحقق أولاً من الجلسة قبل جلب البيانات
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   useEffect(() => {
-    // Check if logged in
     fetch('/api/owner/session')
       .then(res => {
         if (!res.ok) {
           setLocation('/owner/login');
+        } else {
+          setSessionChecked(true);
         }
       })
       .catch(() => setLocation('/owner/login'));
   }, [setLocation]);
+
+  // بعد التأكد من الجلسة — نبدأ جلب بيانات العقار
+  const { data: property, isLoading } = useQuery<Property>({
+    queryKey: ['/api/owner/property'],
+    enabled: sessionChecked, // << الحل الأساسي
+  });
 
   const handleLogout = async () => {
     try {
@@ -41,7 +47,7 @@ export default function OwnerDashboard() {
     }
   };
 
-  if (isLoading) {
+  if (!sessionChecked || isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -53,7 +59,11 @@ export default function OwnerDashboard() {
   }
 
   if (!property) {
-    return null;
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">
+        لم يتم العثور على بيانات العقار
+      </div>
+    );
   }
 
   return (
@@ -68,9 +78,12 @@ export default function OwnerDashboard() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-primary">لوحة التحكم</h1>
-              <p className="text-sm text-muted-foreground">عقار رقم {property.propertyNumber}</p>
+              <p className="text-sm text-muted-foreground">
+                عقار رقم {property.propertyNumber}
+              </p>
             </div>
           </div>
+
           <Button
             variant="outline"
             size="sm"
@@ -84,8 +97,9 @@ export default function OwnerDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
+
+        {/* معلومات العقار */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {/* Property Info */}
           <Card className="p-6">
             <h2 className="text-lg font-bold text-primary mb-4">معلومات العقار</h2>
             <div className="space-y-3">
@@ -114,7 +128,7 @@ export default function OwnerDashboard() {
             </div>
           </Card>
 
-          {/* Subscription Status */}
+          {/* حالة الاشتراك */}
           <Card className="p-6">
             <h2 className="text-lg font-bold text-primary mb-4">حالة الاشتراك</h2>
             <div className="space-y-4">
@@ -122,12 +136,14 @@ export default function OwnerDashboard() {
                 <>
                   <div>
                     <span className="text-sm text-muted-foreground">تاريخ الانتهاء:</span>
-                    <p className="font-semibold">{new Date(property.subscriptionEndDate).toLocaleDateString('ar-SA')}</p>
+                    <p className="font-semibold">
+                      {new Date(property.subscriptionEndDate).toLocaleDateString("ar-SA")}
+                    </p>
                   </div>
+
                   <Button
                     className="w-full"
                     onClick={() => setLocation('/owner/subscription')}
-                    data-testid="button-manage-subscription"
                   >
                     <CreditCard className="w-4 h-4 ml-2" />
                     إدارة الاشتراك
@@ -139,7 +155,6 @@ export default function OwnerDashboard() {
                   <Button
                     className="w-full gradient-golden"
                     onClick={() => setLocation('/owner/subscription')}
-                    data-testid="button-subscribe"
                   >
                     اشترك الآن
                   </Button>
@@ -149,13 +164,12 @@ export default function OwnerDashboard() {
           </Card>
         </div>
 
-        {/* Quick Actions */}
+        {/* إجراءات سريعة */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Button
             variant="outline"
             className="h-20"
             onClick={() => setLocation('/owner/subscription')}
-            data-testid="button-subscription"
           >
             <CreditCard className="w-6 h-6 ml-3" />
             <div className="text-right">
@@ -168,7 +182,6 @@ export default function OwnerDashboard() {
             variant="outline"
             className="h-20"
             onClick={() => setLocation('/owner/images')}
-            data-testid="button-images"
           >
             <ImageIcon className="w-6 h-6 ml-3" />
             <div className="text-right">
@@ -178,10 +191,13 @@ export default function OwnerDashboard() {
           </Button>
         </div>
 
-        {/* Property Images */}
-        {property.imageUrls.length > 0 && (
+        {/* صور العقار */}
+        {property.imageUrls && property.imageUrls.length > 0 && (
           <Card className="p-6 mt-6">
-            <h2 className="text-lg font-bold text-primary mb-4">صور العقار ({property.imageUrls.length})</h2>
+            <h2 className="text-lg font-bold text-primary mb-4">
+              صور العقار ({property.imageUrls.length})
+            </h2>
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {property.imageUrls.map((url, idx) => (
                 <img
@@ -194,6 +210,7 @@ export default function OwnerDashboard() {
             </div>
           </Card>
         )}
+
       </div>
     </div>
   );
