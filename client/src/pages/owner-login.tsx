@@ -18,37 +18,25 @@ export default function OwnerLogin() {
     setIsLoading(true);
 
     try {
-      // ❗ إرسال البيانات بصيغة x-www-form-urlencoded (بدون JSON)
-      const body = new URLSearchParams({
-        action: "login",
-        propertyNumber,
-        pin,
-      }).toString();
-
-      const res = await fetch(
-        "https://script.google.com/macros/s/AKfycbwG5-ghrmzgLqUW60_eFR1kp9F8KiHpJ9L_ntPrvmeHjiXrMNykrTEmjcfME7Q8Liy2/exec",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          },
-          body,
-        }
-      );
+      const res = await fetch("/api/owner/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ propertyNumber, pin }),
+      });
 
       const data = await res.json();
 
-      if (data.error === "invalid") {
+      if (!res.ok) {
         toast({
           title: "فشل تسجيل الدخول",
-          description: "رقم العقار أو الرقم السري غير صحيح",
+          description: data.error || "رقم العقار أو الرقم السري غير صحيح",
           variant: "destructive",
         });
         return;
       }
-
-      // حفظ الجلسة
-      localStorage.setItem("ownerSession", JSON.stringify(data));
 
       toast({
         title: "تم تسجيل الدخول",
