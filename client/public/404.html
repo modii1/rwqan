@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>جاري التحويل...</title>
+    <script>
+        // SPA Redirect for static hosting
+        // Redirect all 404s to index.html with the path as a query parameter
+        const path = window.location.pathname + window.location.search + window.location.hash;
+        window.location.replace('/' + '?redirect=' + encodeURIComponent(path));
+    </script>
+</head>
+<body>
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;">
+        <p>جاري التحويل...</p>
+    </div>
+</body>
+</html>
