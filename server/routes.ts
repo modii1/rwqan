@@ -30,18 +30,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error("❌ Error initializing Google Sheets:", error);
   }
 
+  // Trust proxy for Replit (required for secure cookies behind proxy)
+  app.set("trust proxy", 1);
+
   // Session management
   const isProduction = process.env.NODE_ENV === "production";
+  console.log("Session config - isProduction:", isProduction);
+  
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "moddy-secret-key-2025",
       resave: false,
       saveUninitialized: false,
+      proxy: true, // Trust the reverse proxy
       cookie: {
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         httpOnly: true,
         secure: isProduction, // HTTPS in production
-        sameSite: isProduction ? "lax" : "lax", // Allow cross-site requests
+        sameSite: "lax",
       },
     }),
   );
