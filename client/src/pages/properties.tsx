@@ -70,9 +70,27 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
+  
+  // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
   const [visibleCount, setVisibleCount] = useState(24);
 
+  // Load saved filters when page opens
+  useEffect(() => {
+    const saved = sessionStorage.getItem("propertyFilters");
+    if (saved) {
+      const f = JSON.parse(saved);
+      setSearchQuery(f.searchQuery || "");
+      setSelectedCity(f.selectedCity || "");
+      setSelectedDirection(f.selectedDirection || "");
+      setSelectedType(f.selectedType || "");
+      setSelectedFacilities(f.selectedFacilities || []);
+      setPriceRange(f.priceRange || [0, 5000]);
+    }
+  }, []);
+
   const { data: properties = [], isLoading } = useQuery<Property[]>({
+    // ...
+
     queryKey: ["properties"],
     queryFn: async () => {
       const res = await fetch(
@@ -212,6 +230,26 @@ export default function PropertiesPage() {
   useEffect(() => {
     setVisibleCount(24);
   }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange, properties]);
+  // Save filters whenever changed
+  useEffect(() => {
+    const filters = {
+      searchQuery,
+      selectedCity,
+      selectedDirection,
+      selectedType,
+      selectedFacilities,
+      priceRange,
+    };
+    sessionStorage.setItem("propertyFilters", JSON.stringify(filters));
+  }, [
+    searchQuery,
+    selectedCity,
+    selectedDirection,
+    selectedType,
+    selectedFacilities,
+    priceRange
+  ]);
+
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
   useEffect(() => {
