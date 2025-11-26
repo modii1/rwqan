@@ -54,10 +54,8 @@ export default function OwnerLogin() {
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      // Small delay to ensure session is set
-      setTimeout(() => {
-        setLocation("/owner/dashboard");
-      }, 100);
+      // Use full page redirect for production compatibility
+      window.location.href = "/owner/dashboard";
       
     } catch (error) {
       console.error("Login error:", error);
