@@ -128,7 +128,7 @@ export default function PropertyDetailsPage() {
 
         // لو ما قدرنا نطلع العدد الحقيقي، نستعمل 3 صور مثل الرئيسية
         if (!imageCount) {
-          imageCount = 4;
+          imageCount = 15;
         }
 
         return {

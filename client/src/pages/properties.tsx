@@ -117,6 +117,8 @@ export default function PropertiesPage() {
             `${r2Base}/${propertyNumber}/1.jpg`,
             `${r2Base}/${propertyNumber}/2.jpg`,
             `${r2Base}/${propertyNumber}/3.jpg`,
+            `${r2Base}/${propertyNumber}/4.jpg`,
+            `${r2Base}/${propertyNumber}/5.jpg`,
           ],
         };
       });
