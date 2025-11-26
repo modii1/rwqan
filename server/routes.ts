@@ -185,10 +185,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "رقم العقار أو الرقم السري غير صحيح" });
       }
 
-      // Set session
+      // Set session and save it explicitly
       (req.session as any).propertyNumber = propertyNumber;
-
-      res.json({ message: "تم تسجيل الدخول بنجاح", propertyNumber });
+      
+      // Save session before responding
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          return res.status(500).json({ error: "فشل في حفظ الجلسة" });
+        }
+        console.log("✅ Session saved for property:", propertyNumber);
+        res.json({ message: "تم تسجيل الدخول بنجاح", propertyNumber });
+      });
     } catch (error) {
       console.error("Error logging in:", error);
       res.status(500).json({ error: "فشل في تسجيل الدخول" });
