@@ -15,10 +15,20 @@ export default function OwnerLogin() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!propertyNumber || !pin) {
+      toast({
+        title: "خطأ",
+        description: "الرجاء إدخال رقم العقار والرقم السري",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
-      const res = await fetch("/api/owner/login", {
+      const response = await fetch("/api/owner/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -27,14 +37,15 @@ export default function OwnerLogin() {
         body: JSON.stringify({ propertyNumber, pin }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok) {
+      if (!response.ok) {
         toast({
           title: "فشل تسجيل الدخول",
           description: data.error || "رقم العقار أو الرقم السري غير صحيح",
           variant: "destructive",
         });
+        setIsLoading(false);
         return;
       }
 
@@ -43,14 +54,18 @@ export default function OwnerLogin() {
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      setLocation("/owner/dashboard");
+      // Small delay to ensure session is set
+      setTimeout(() => {
+        setLocation("/owner/dashboard");
+      }, 100);
+      
     } catch (error) {
+      console.error("Login error:", error);
       toast({
         title: "خطأ غير متوقع",
         description: "تعذر الاتصال بالخادم",
         variant: "destructive",
       });
-    } finally {
       setIsLoading(false);
     }
   };
@@ -64,7 +79,9 @@ export default function OwnerLogin() {
               <Home className="w-8 h-8 text-primary" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-primary mb-2">مودي الذكي</h1>
+          <h1 className="text-2xl font-bold text-primary mb-2" data-testid="text-login-title">
+            مودي الذكي
+          </h1>
           <p className="text-muted-foreground">تسجيل دخول أصحاب العقارات</p>
         </div>
 
@@ -77,6 +94,8 @@ export default function OwnerLogin() {
               value={propertyNumber}
               onChange={(e) => setPropertyNumber(e.target.value)}
               required
+              disabled={isLoading}
+              data-testid="input-property-number"
             />
           </div>
 
@@ -88,6 +107,8 @@ export default function OwnerLogin() {
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               required
+              disabled={isLoading}
+              data-testid="input-pin"
             />
           </div>
 
@@ -95,6 +116,7 @@ export default function OwnerLogin() {
             type="submit"
             className="w-full gradient-golden"
             disabled={isLoading}
+            data-testid="button-login"
           >
             {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
           </Button>
@@ -106,6 +128,7 @@ export default function OwnerLogin() {
             variant="link"
             onClick={() => setLocation("/register")}
             className="text-primary"
+            data-testid="link-register"
           >
             سجل عقارك الآن
           </Button>

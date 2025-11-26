@@ -1,74 +1,121 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, CreditCard, Image as ImageIcon } from "lucide-react";
+import { LogOut, CreditCard, Image as ImageIcon, Home } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 
 export default function OwnerDashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  const { data: property, isLoading } = useQuery<Property>({
-    queryKey: ['/api/owner/property'],
+  // Check session first
+  const { data: sessionData, isLoading: isSessionLoading } = useQuery<{ isLoggedIn: boolean; propertyNumber?: string }>({
+    queryKey: ['/api/owner/session'],
+    retry: false,
+    refetchOnWindowFocus: false,
   });
 
+  // Only fetch property if authenticated
+  const { data: property, isLoading: isPropertyLoading, error: propertyError } = useQuery<Property>({
+    queryKey: ['/api/owner/property'],
+    enabled: sessionData?.isLoggedIn === true,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Handle authentication redirect
   useEffect(() => {
-    // Check if logged in
-    fetch('/api/owner/session')
-      .then(res => {
-        if (!res.ok) {
-          setLocation('/owner/login');
-        }
-      })
-      .catch(() => setLocation('/owner/login'));
-  }, [setLocation]);
+    if (!isSessionLoading && sessionData) {
+      if (!sessionData.isLoggedIn) {
+        setLocation('/owner/login');
+      } else {
+        setIsAuthenticated(true);
+      }
+    }
+  }, [sessionData, isSessionLoading, setLocation]);
 
   const handleLogout = async () => {
     try {
-      await apiRequest('POST', '/api/owner/logout');
-      toast({
-        title: "تم تسجيل الخروج",
-        description: "نراك قريباً!",
+      const response = await fetch('/api/owner/logout', {
+        method: 'POST',
+        credentials: 'include',
       });
-      setLocation('/owner/login');
+      
+      if (response.ok) {
+        toast({
+          title: "تم تسجيل الخروج",
+          description: "نراك قريباً!",
+        });
+        setLocation('/owner/login');
+      }
     } catch (error) {
       console.error('Logout error:', error);
     }
   };
 
-  if (isLoading) {
+  // Show loading while checking session
+  if (isSessionLoading || isAuthenticated === null) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
+          <p className="mt-4 text-muted-foreground">جاري التحقق من الجلسة...</p>
         </div>
       </div>
     );
   }
 
-  if (!property) {
-    return null;
+  // Show loading while fetching property
+  if (isPropertyLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <p className="mt-4 text-muted-foreground">جاري تحميل بيانات العقار...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error if property fetch failed
+  if (propertyError || !property) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md p-8 text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
+            <Home className="w-8 h-8 text-red-500" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">خطأ في تحميل البيانات</h2>
+          <p className="text-muted-foreground mb-4">تعذر تحميل بيانات العقار</p>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => window.location.reload()} data-testid="button-retry">
+              إعادة المحاولة
+            </Button>
+            <Button variant="outline" onClick={() => setLocation('/owner/login')} data-testid="button-go-login">
+              تسجيل الدخول
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-card border-b border-border shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"></path>
-              </svg>
+              <Home className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-primary">لوحة التحكم</h1>
-              <p className="text-sm text-muted-foreground">عقار رقم {property.propertyNumber}</p>
+              <h1 className="text-xl font-bold text-primary" data-testid="text-dashboard-title">لوحة التحكم</h1>
+              <p className="text-sm text-muted-foreground" data-testid="text-property-number">عقار رقم {property.propertyNumber}</p>
             </div>
           </div>
           <Button
@@ -91,23 +138,26 @@ export default function OwnerDashboard() {
             <div className="space-y-3">
               <div>
                 <span className="text-sm text-muted-foreground">الاسم:</span>
-                <p className="font-semibold">{property.name}</p>
+                <p className="font-semibold" data-testid="text-property-name">{property.name}</p>
               </div>
               <div>
                 <span className="text-sm text-muted-foreground">المدينة:</span>
-                <p className="font-semibold">{property.city}</p>
+                <p className="font-semibold" data-testid="text-property-city">{property.city}</p>
               </div>
               <div>
                 <span className="text-sm text-muted-foreground">الاتجاه:</span>
-                <p className="font-semibold">{property.direction}</p>
+                <p className="font-semibold" data-testid="text-property-direction">{property.direction}</p>
               </div>
               <div>
                 <span className="text-sm text-muted-foreground">النوع:</span>
-                <p className="font-semibold">{property.type}</p>
+                <p className="font-semibold" data-testid="text-property-type">{property.type}</p>
               </div>
               <div>
                 <span className="text-sm text-muted-foreground">نوع الاشتراك:</span>
-                <Badge variant={property.subscriptionType === 'موثوق' ? 'default' : 'secondary'}>
+                <Badge 
+                  variant={property.subscriptionType === 'موثوق' ? 'default' : 'secondary'}
+                  data-testid="badge-subscription-type"
+                >
                   {property.subscriptionType}
                 </Badge>
               </div>
@@ -122,7 +172,9 @@ export default function OwnerDashboard() {
                 <>
                   <div>
                     <span className="text-sm text-muted-foreground">تاريخ البدء:</span>
-                    <p className="font-semibold">{new Date(property.subscriptionDate).toLocaleDateString('ar-SA')}</p>
+                    <p className="font-semibold" data-testid="text-subscription-date">
+                      {new Date(property.subscriptionDate).toLocaleDateString('ar-SA')}
+                    </p>
                   </div>
                   <Button
                     className="w-full"
@@ -135,11 +187,13 @@ export default function OwnerDashboard() {
                 </>
               ) : (
                 <>
-                  <p className="text-muted-foreground">اشتراك مجاني (نسبة 10% من الحجز)</p>
+                  <p className="text-muted-foreground" data-testid="text-free-subscription">
+                    اشتراك مجاني (نسبة 10% من الحجز)
+                  </p>
                   <Button
                     className="w-full gradient-golden"
                     onClick={() => setLocation('/owner/subscription')}
-                    data-testid="button-subscribe"
+                    data-testid="button-upgrade-subscription"
                   >
                     ترقية الاشتراك
                   </Button>
@@ -155,7 +209,7 @@ export default function OwnerDashboard() {
             variant="outline"
             className="h-20"
             onClick={() => setLocation('/owner/subscription')}
-            data-testid="button-subscription"
+            data-testid="button-subscription-action"
           >
             <CreditCard className="w-6 h-6 ml-3" />
             <div className="text-right">
@@ -168,7 +222,7 @@ export default function OwnerDashboard() {
             variant="outline"
             className="h-20"
             onClick={() => setLocation('/owner/images')}
-            data-testid="button-images"
+            data-testid="button-images-action"
           >
             <ImageIcon className="w-6 h-6 ml-3" />
             <div className="text-right">
@@ -179,9 +233,11 @@ export default function OwnerDashboard() {
         </div>
 
         {/* Property Images */}
-        {property.imageUrls.length > 0 && (
+        {property.imageUrls && property.imageUrls.length > 0 && (
           <Card className="p-6 mt-6">
-            <h2 className="text-lg font-bold text-primary mb-4">صور العقار ({property.imageUrls.length})</h2>
+            <h2 className="text-lg font-bold text-primary mb-4">
+              صور العقار ({property.imageUrls.length})
+            </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {property.imageUrls.map((url, idx) => (
                 <img
@@ -189,6 +245,7 @@ export default function OwnerDashboard() {
                   src={url}
                   alt={`صورة ${idx + 1}`}
                   className="w-full h-32 object-cover rounded-lg"
+                  data-testid={`img-property-${idx}`}
                 />
               ))}
             </div>
