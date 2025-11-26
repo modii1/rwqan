@@ -203,15 +203,7 @@ export default function PropertyDetailsPage() {
   if (!property) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="p-8 text-center">
-          <h2 className="text-xl font-bold mb-2">العقار غير موجود</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            قد يكون رقم العقار غير صحيح أو تم إزالته.
-          </p>
-          <Button onClick={() => setLocation("/")} data-testid="button-back">
-            العودة للرئيسية
-          </Button>
-        </Card>
+       
       </div>
     );
   }
