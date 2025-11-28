@@ -200,14 +200,7 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  if (!property) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-       
-      </div>
-    );
-  }
-
+  
   // ===== سحب باللمس (Swipe) =====
   const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     setTouchStartX(e.touches[0].clientX);
