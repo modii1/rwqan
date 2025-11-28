@@ -4,48 +4,52 @@ import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { queryClient } from "@/lib/queryClient";
-import { Property } from "@shared/schema";
-import { Upload, X, ExternalLink, Trash2 } from "lucide-react";
+import { ExternalLink, Trash2, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function OwnerImagesPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ─────────────────────────────
-  // حماية الصفحة
-  // ─────────────────────────────
-  useEffect(() => {
-    fetch("/api/owner/session")
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data.isLoggedIn) setLocation("/owner/login");
-      })
-      .catch(() => setLocation("/owner/login"));
-  }, [setLocation]);
-
-  // ─────────────────────────────
-  // بيانات العقار
-  // ─────────────────────────────
-  const { data: property, isLoading } = useQuery<Property>({
-    queryKey: ["/api/owner/property"],
+  /** ==========================================================
+   * 1) التحقق من الجلسة
+   ============================================================*/
+  const { data: sessionData, isLoading: sessionLoading } = useQuery({
+    queryKey: ["/api/owner/session"],
   });
 
-  // تأمين imageUrls بحيث تكون دائمًا Array
-  const imageUrls: string[] = Array.isArray(property?.imageUrls)
-    ? property!.imageUrls
-    : [];
+  useEffect(() => {
+    if (!sessionLoading && !sessionData?.isLoggedIn) {
+      setLocation("/owner/login");
+    }
+  }, [sessionLoading, sessionData, setLocation]);
 
-  const imagesCount = imageUrls.length;
-  const maxImages = 15;
+  /** ==========================================================
+   * 2) جلب العقار
+   ============================================================*/
+  const { data: property, isLoading: loadingProperty } = useQuery({
+    queryKey: sessionData?.propertyNumber
+      ? ["/api/properties/" + sessionData.propertyNumber]
+      : [],
+    enabled: !!sessionData?.propertyNumber,
+  });
 
-  // ─────────────────────────────
-  // رفع الصور
-  // ─────────────────────────────
+  /** ==========================================================
+   * 3) استخراج صور R2 من imagesLink
+   ============================================================*/
+  const r2Images =
+    property?.r2Images ||
+    property?.imageUrls ||
+    property?.images ||
+    [];
+
+  /** ==========================================================
+   * 4) رفع الصور
+   ============================================================*/
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
@@ -57,40 +61,30 @@ export default function OwnerImagesPage() {
         credentials: "include",
       });
 
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || "فشل رفع الصور");
-      }
-
+      if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "تم رفع الصور بنجاح" });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/properties/" + sessionData?.propertyNumber],
+      });
       setSelectedFiles([]);
       setPreviewUrls([]);
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+
+      toast({ title: "تم رفع الصور بنجاح" });
     },
     onError: (err: any) => {
-      toast({
-        title: "خطأ في رفع الصور",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
     },
   });
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) =>
-      f.type.startsWith("image/")
-    );
+  const handleSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
 
-    const current = imagesCount;
-    const incoming = files.length;
-
-    if (current + incoming > maxImages) {
+    if (r2Images.length + files.length > 15) {
       toast({
         title: "تجاوز الحد",
-        description: `لديك ${current} صورة، الحد الأقصى 15 صورة.`,
+        description: `الحد الأقصى 15 صورة`,
         variant: "destructive",
       });
       return;
@@ -100,128 +94,96 @@ export default function OwnerImagesPage() {
     setPreviewUrls(files.map((f) => URL.createObjectURL(f)));
   };
 
-  const removeFile = (idx: number) => {
-    URL.revokeObjectURL(previewUrls[idx]);
-    setPreviewUrls((p) => p.filter((_, i) => i !== idx));
-    setSelectedFiles((f) => f.filter((_, i) => i !== idx));
-  };
-
-  const handleUpload = () => {
-    if (selectedFiles.length > 0) uploadMutation.mutate(selectedFiles);
-  };
-
-  // ─────────────────────────────
-  // حذف صورة
-  // ─────────────────────────────
+  /** ==========================================================
+   * 5) حذف صورة
+   ============================================================*/
   const deleteMutation = useMutation({
-    mutationFn: async (imageUrl: string) => {
+    mutationFn: async (url: string) => {
       const res = await fetch("/api/owner/images/delete", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl }),
+        body: JSON.stringify({ imageUrl: url }),
       });
 
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || "فشل حذف الصورة");
-      }
-
+      if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "تم حذف الصورة بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/properties/" + sessionData?.propertyNumber],
+      });
+      toast({ title: "تم حذف الصورة" });
     },
     onError: (err: any) => {
-      toast({
-        title: "خطأ في حذف الصورة",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
     },
   });
 
-  const handleDeleteImage = (e: any, url: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (window.confirm("هل أنت متأكد من حذف الصورة؟")) {
+  const handleDelete = (url: string) => {
+    if (confirm("هل تريد حذف هذه الصورة؟")) {
       deleteMutation.mutate(url);
     }
   };
 
-  // ─────────────────────────────
-  // واجهة المستخدم
-  // ─────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="min-h-screen grid place-items-center text-lg">
-        جاري التحميل...
-      </div>
-    );
-  }
+  /** ==========================================================
+   *  واجهة الصفحة
+   ============================================================*/
+  if (sessionLoading || loadingProperty)
+    return <div className="p-6 text-center">جاري التحميل…</div>;
 
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* عنوان */}
-        <div>
-          <h1 className="text-3xl font-bold mb-2">إدارة الصور</h1>
-          <p className="text-muted-foreground">رفع وإدارة صور العقار</p>
-        </div>
+        <h1 className="text-3xl font-bold text-[#4a3b2a]">إدارة الصور</h1>
 
-        {/* الصور الحالية */}
+        {/* ========== الصور الحالية ========== */}
         <Card className="p-6">
           <h2 className="text-xl font-bold mb-4">
-            الصور الحالية ({imagesCount}/{maxImages})
+            الصور الحالية ({r2Images.length}/15)
           </h2>
 
-          {imagesCount === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              لا توجد صور مرفوعة حالياً
-            </div>
-          ) : (
+          {r2Images.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {imageUrls.map((url, idx) => (
-                <div key={idx} className="relative group">
+              {r2Images.map((url: string, i: number) => (
+                <div key={i} className="relative group">
                   <img
                     src={url}
                     className="w-full h-48 object-cover rounded-lg"
                   />
 
-                  <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-3">
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 rounded-lg transition">
                     <a
                       href={url}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 bg-blue-600 text-white rounded-full"
+                      className="p-2 bg-blue-500 text-white rounded-full"
                     >
-                      <ExternalLink className="w-5 h-5" />
+                      <ExternalLink />
                     </a>
 
                     <button
-                      onClick={(e) => handleDeleteImage(e, url)}
-                      className="p-2 bg-red-600 text-white rounded-full"
+                      className="p-2 bg-red-500 text-white rounded-full"
+                      onClick={() => handleDelete(url)}
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="py-10 text-center text-muted-foreground">
+              لا توجد صور مرفوعة
+            </div>
           )}
         </Card>
 
-        {/* رفع صور جديدة */}
+        {/* ========== رفع صور جديدة ========== */}
         <Card className="p-6">
           <h2 className="text-xl font-bold mb-4">رفع صور جديدة</h2>
 
-          <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
-            <Upload className="w-12 h-12 mx-auto mb-4" />
-
-            <p className="font-semibold mb-2">اختر الصور للرفع</p>
-            <p className="text-xs mb-4">حتى {maxImages} صورة</p>
+          <div className="border-2 border-dashed p-8 text-center rounded-lg">
+            <Upload className="w-12 h-12 mx-auto mb-3 text-[#b88d2b]" />
 
             <input
               ref={fileInputRef}
@@ -229,32 +191,37 @@ export default function OwnerImagesPage() {
               multiple
               accept="image/*"
               className="hidden"
-              onChange={handleFileSelect}
+              onChange={handleSelectFiles}
             />
 
-            <Button onClick={() => fileInputRef.current?.click()}>
+            <Button
+              className="bg-[#b88d2b]"
+              onClick={() => fileInputRef.current?.click()}
+            >
               اختر الصور
             </Button>
           </div>
 
-          {/* معاينة الصور */}
           {previewUrls.length > 0 && (
-            <div className="mt-6 space-y-4">
-              <h3 className="font-semibold">
+            <>
+              <h3 className="mt-4 font-semibold">
                 الصور المختارة ({previewUrls.length})
               </h3>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {previewUrls.map((url, idx) => (
-                  <div key={idx} className="relative">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-2">
+                {previewUrls.map((url, i) => (
+                  <div key={i} className="relative">
                     <img
                       src={url}
                       className="w-full h-48 object-cover rounded-lg"
                     />
-
                     <button
-                      onClick={() => removeFile(idx)}
-                      className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1"
+                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1"
+                      onClick={() => {
+                        URL.revokeObjectURL(url);
+                        setPreviewUrls((p) => p.filter((_, x) => x !== i));
+                        setSelectedFiles((p) => p.filter((_, x) => x !== i));
+                      }}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -263,15 +230,12 @@ export default function OwnerImagesPage() {
               </div>
 
               <Button
-                onClick={handleUpload}
-                disabled={uploadMutation.isPending}
-                className="w-full"
+                className="w-full mt-4 bg-[#b88d2b]"
+                onClick={() => uploadMutation.mutate(selectedFiles)}
               >
-                {uploadMutation.isPending
-                  ? "جاري الرفع..."
-                  : `رفع ${previewUrls.length} صورة`}
+                رفع {selectedFiles.length} صورة
               </Button>
-            </div>
+            </>
           )}
         </Card>
       </div>
