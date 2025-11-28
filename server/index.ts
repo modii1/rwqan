@@ -1,4 +1,4 @@
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, log } from "./vite";
 import path from "path";
@@ -6,105 +6,51 @@ import { fileURLToPath } from "url";
 
 const app = express();
 
-// ===== إعدادات JSON =====
-declare module 'http' {
-  interface IncomingMessage {
-    rawBody: unknown
-  }
-}
+// JSON settings
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-app.use(express.json({
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-app.use(express.urlencoded({ extended: false }));
-
-// ===== Object Storage =====
+// Object Storage public assets (Replit)
 const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
 if (bucketId) {
-  app.use('/public', express.static(`${bucketId}/public`));
+  app.use("/public", express.static(`${bucketId}/public`));
 }
 
-// ===== Logging =====
-app.use((req, res, next) => {
-  const start = Date.now();
-  const pathReq = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (pathReq.startsWith("/api")) {
-      let logLine = `${req.method} ${pathReq} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-      if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
-      log(logLine);
-    }
-  });
-
-  next();
-});
-
 (async () => {
+  // Register all API routes
   const server = await registerRoutes(app);
 
-  // ===== Error handler =====
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
+  // Error Handler
+  app.use((err, req, res, next) => {
+    console.error("SERVER ERROR:", err);
+    res.status(500).json({ message: "Server Error" });
   });
 
-  // ====== تشغيل Vite في التطوير ======
+  // ====== Development: Vite ======
   if (app.get("env") === "development") {
     await setupVite(app, server);
   }
 
-  // ====== تقديم React Build (للإنتاج فقط) ======
-  // في التطوير Vite يقدم الملفات، وفي الإنتاج نحن نقدمها
+  // ====== Production: React Build ======
   if (app.get("env") !== "development") {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
+    const publicPath = path.join(__dirname, "public");
 
-    // في الإنتاج: dist/index.js موجود في dist/
-    // الملفات الثابتة في dist/public/
-    const reactPublicPath = path.join(__dirname, "public");
+    app.use(express.static(publicPath));
 
-    console.log("Production mode - serving static files from:", reactPublicPath);
-
-    // تقديم ملفات React (assets, css, js)
-    app.use(express.static(reactPublicPath));
-
-    // أي Route غير API يرجع React index.html
+    // Any non-API route returns React index.html
     app.get("*", (req, res) => {
-      if (!req.path.startsWith("/api")) {
-        return res.sendFile(path.join(reactPublicPath, "index.html"));
-      }
+      if (!req.path.startsWith("/api"))
+        return res.sendFile(path.join(publicPath, "index.html"));
+
       res.status(404).json({ error: "API Route Not Found" });
     });
   }
 
-  // ====== تشغيل السيرفر ======
+  // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
-
-  server.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`Serving on port ${port}`);
-    }
+  server.listen({ port, host: "0.0.0.0" }, () =>
+    console.log(`🚀 Server running on port ${port}`)
   );
 })();
