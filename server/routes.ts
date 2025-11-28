@@ -262,7 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { propertyNumber } = req.params;
       const body = req.body;
-      
+
       console.log("📝 Admin Update Request:", propertyNumber, body);
 
       // Convert Arabic keys to English
@@ -342,6 +342,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: err?.message || "فشل في الحذف" });
     }
   });
+
+  // ======================
+  // OWNER SESSION CHECK
+  // ======================
+  app.get("/api/owner/session", (req, res) => {
+    const isLoggedIn = Boolean(req.session.propertyNumber);
+
+    res.json({
+      isLoggedIn,
+      propertyNumber: req.session.propertyNumber || null,
+    });
+  });
+
 
   // ======================
   // DONE

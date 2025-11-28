@@ -323,19 +323,7 @@ export default function PropertyDetailsPage() {
 
                     {images.length > 1 && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSelectedImage(
-                              (prev) =>
-                                (prev - 1 + images.length) % images.length
-                            )
-                          }
-                          className="absolute inset-y-0 right-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
-                        >
-                          ‹
-                        </button>
-
+                        {/* الزر على اليمين — الآن يروح للصورة "التالية" — والشكل سهم احترافي */}
                         <button
                           type="button"
                           onClick={() =>
@@ -343,9 +331,42 @@ export default function PropertyDetailsPage() {
                               (prev) => (prev + 1) % images.length
                             )
                           }
+                          className="absolute inset-y-0 right-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
+                        >
+                          {/* شكل جديد للسهم ← للداخل (Next) */}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+
+                        {/* الزر على اليسار — الآن يروح للصورة "السابقة" — والشكل سهم احترافي */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedImage(
+                              (prev) => (prev - 1 + images.length) % images.length
+                            )
+                          }
                           className="absolute inset-y-0 left-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
                         >
-                          ›
+                          {/* شكل جديد للسهم → للخارج (Prev) */}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-5 h-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
                         </button>
                       </>
                     )}
