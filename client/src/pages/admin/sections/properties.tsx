@@ -14,6 +14,8 @@ const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'ا�
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
 const TYPES = ['قسم', 'قسمين'] as const;
 
+const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+
 interface PropertyData {
   propertyNumber: string;
   name: string;
@@ -25,6 +27,7 @@ interface PropertyData {
   whatsappNumber: string;
   facilities: string[] | string;
   imagesFolderUrl?: string;
+  imagesLink?: string;
   subscriptionType: string;
   subscriptionDate?: string | null;
   imageUrls?: string[];
@@ -34,6 +37,37 @@ interface PropertyData {
     overnight?: string;
     holidays?: string;
   };
+}
+
+function getImageInfo(imagesLink?: string): { type: 'r2' | 'drive' | 'none'; count: number; driveUrl?: string } {
+  if (!imagesLink) return { type: 'none', count: 0 };
+  const trimmed = imagesLink.trim();
+  
+  if (trimmed.startsWith("[")) {
+    try {
+      const arr = JSON.parse(trimmed);
+      return { type: 'r2', count: Array.isArray(arr) ? arr.length : 0 };
+    } catch {
+      return { type: 'none', count: 0 };
+    }
+  }
+  
+  if (trimmed.includes('drive.google.com')) {
+    return { type: 'drive', count: 1, driveUrl: trimmed };
+  }
+  
+  return { type: 'none', count: 0 };
+}
+
+function getR2Images(propertyNumber: string, count: number): string[] {
+  return Array.from({ length: count }, (_, i) => 
+    `${R2_BASE}/${propertyNumber}/${i + 1}.jpg`
+  );
+}
+
+function hasImages(imagesLink?: string): boolean {
+  const info = getImageInfo(imagesLink);
+  return info.type !== 'none';
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -279,7 +313,7 @@ export default function PropertiesSection() {
                   <Td>{p.type}</Td>
                   <Td>
                     <span className={`px-2 py-0.5 rounded text-xs ${
-                      p.subscriptionType === "موثوق" ? "bg-primary/20 text-primary" : "bg-muted"
+                      (p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"
                     }`}>
                       {p.subscriptionType}
                     </span>
@@ -296,7 +330,7 @@ export default function PropertiesSection() {
                         <Pencil className="w-4 h-4" />
                       </Button>
 
-                      {p.imageUrls && p.imageUrls.length > 0 && (
+                      {hasImages(p.imagesLink) && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -308,7 +342,7 @@ export default function PropertiesSection() {
                         </Button>
                       )}
 
-                      {p.subscriptionType === "موثوق" && (
+                      {(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -496,7 +530,7 @@ export default function PropertiesSection() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="عادي">عادي</SelectItem>
-                        <SelectItem value="موثوق">موثوق</SelectItem>
+                        <SelectItem value="مميز">مميز (موثوق)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -603,28 +637,54 @@ export default function PropertiesSection() {
               </div>
 
               {/* Current Images */}
-              {editing.imageUrls && editing.imageUrls.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-                    الصور الحالية ({editing.imageUrls.length})
-                  </h3>
-                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                    {editing.imageUrls.slice(0, 12).map((url, i) => (
-                      <img
-                        key={i}
-                        src={url}
-                        alt={`صورة ${i + 1}`}
-                        className="w-full h-16 object-cover rounded border"
-                      />
-                    ))}
-                    {editing.imageUrls.length > 12 && (
-                      <div className="w-full h-16 bg-muted rounded border flex items-center justify-center text-xs">
-                        +{editing.imageUrls.length - 12}
-                      </div>
-                    )}
+              {(() => {
+                const info = getImageInfo(editing.imagesLink);
+                if (info.type === 'none') return null;
+                
+                if (info.type === 'drive') {
+                  return (
+                    <div>
+                      <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
+                        الصور (Google Drive)
+                      </h3>
+                      <a 
+                        href={info.driveUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
+                      >
+                        <Image className="w-4 h-4" />
+                        فتح مجلد الصور في Google Drive
+                      </a>
+                    </div>
+                  );
+                }
+                
+                const images = getR2Images(editing.propertyNumber, info.count);
+                return (
+                  <div>
+                    <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
+                      الصور الحالية ({info.count})
+                    </h3>
+                    <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                      {images.slice(0, 12).map((url, i) => (
+                        <img
+                          key={i}
+                          src={url}
+                          alt={`صورة ${i + 1}`}
+                          className="w-full h-16 object-cover rounded border"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ))}
+                      {info.count > 12 && (
+                        <div className="w-full h-16 bg-muted rounded border flex items-center justify-center text-xs">
+                          +{info.count - 12}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Buttons */}
               <div className="flex justify-end gap-2 pt-4 border-t">
@@ -655,18 +715,45 @@ export default function PropertiesSection() {
               عرض جميع صور العقار رقم {showImages?.propertyNumber}
             </DialogDescription>
           </DialogHeader>
-          {showImages?.imageUrls && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto">
-              {showImages.imageUrls.map((url, i) => (
-                <img
-                  key={i}
-                  src={url}
-                  alt={`صورة ${i + 1}`}
-                  className="w-full h-32 object-cover rounded-lg border"
-                />
-              ))}
-            </div>
-          )}
+          {showImages && (() => {
+            const info = getImageInfo(showImages.imagesLink);
+            
+            if (info.type === 'none') {
+              return <p className="text-muted-foreground text-center py-4">لا توجد صور</p>;
+            }
+            
+            if (info.type === 'drive') {
+              return (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">الصور مخزنة في Google Drive</p>
+                  <a 
+                    href={info.driveUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+                  >
+                    <Image className="w-5 h-5" />
+                    فتح مجلد الصور
+                  </a>
+                </div>
+              );
+            }
+            
+            const images = getR2Images(showImages.propertyNumber, info.count);
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto">
+                {images.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`صورة ${i + 1}`}
+                    className="w-full h-32 object-cover rounded-lg border"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ))}
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
