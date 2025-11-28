@@ -1,3 +1,5 @@
+import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 
@@ -18,6 +20,18 @@ import {
 } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+const r2 = new S3Client({
+  region: process.env.R2_REGION,
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
+
+const R2_BUCKET = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL;
 
 // ==========================
 // Mapping Google Sheet Columns
@@ -355,6 +369,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // ======================================================
+  // 🔵 جلب صور العقار من R2
+  // ======================================================
+  app.get("/api/owner/r2-images", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = req.session.propertyNumber;
+
+      const list = await r2.send(
+        new ListObjectsV2Command({
+          Bucket: R2_BUCKET,
+          Prefix: `${propertyNumber}/`,
+        })
+      );
+
+      let images =
+        list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
+
+      // ترتيب حسب رقم الصورة 1,2,3...
+      images.sort((a, b) => {
+        const na = parseInt(a.split("/").pop().replace(".jpg", ""));
+        const nb = parseInt(b.split("/").pop().replace(".jpg", ""));
+        return na - nb;
+      });
+
+      res.json({ images });
+
+    } catch (err) {
+      console.error("R2 LIST ERROR:", err);
+      res.status(500).json({ error: "Failed to list R2 images" });
+    }
+  });
+
+  // ======================================================
+  // 🟢 رفع صور المالك إلى R2
+  // ======================================================
+  app.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
+    try {
+      const propertyNumber = req.session.propertyNumber;
+
+      // عدد الصور الحالية
+      const list = await r2.send(
+        new ListObjectsV2Command({
+          Bucket: R2_BUCKET,
+          Prefix: `${propertyNumber}/`,
+        })
+      );
+
+      let index = (list.Contents?.length || 0) + 1;
+
+      for (const file of req.files) {
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: `${propertyNumber}/${index}.jpg`,
+            Body: file.buffer,
+            ContentType: "image/jpeg",
+          })
+        );
+        index++;
+      }
+
+      res.json({ ok: true });
+
+    } catch (err) {
+      console.error("R2 UPLOAD ERROR:", err);
+      res.status(500).json({ error: "Upload failed" });
+    }
+  });
+
+  
+  
 
   // ======================
   // DONE
