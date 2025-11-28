@@ -5,6 +5,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import AdminDashboard from "@/pages/admin";
+
 
 // Pages
 import NotFound from "@/pages/not-found";
@@ -27,19 +29,34 @@ import { useSessionQuery } from "@/hooks/use-session";
 function Router() {
   return (
     <Switch>
+      {/* الصفحات العامة */}
       <Route path="/" component={PropertiesPage} />
       <Route path="/property/:id" component={PropertyDetailsPage} />
+
+      {/* صفحات المالك */}
       <Route path="/owner/login" component={OwnerLogin} />
       <Route path="/owner/dashboard" component={OwnerDashboard} />
       <Route path="/owner/images" component={OwnerImagesPage} />
       <Route path="/owner/subscription" component={SubscriptionPage} />
+
+      {/* صفحات عامة */}
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/test-images" component={TestImages} />
+
+      {/* ======================= */}
+      {/* صفحات الأدمن الجديدة */}
+      {/* ======================= */}
+
+      <Route path="/admin" component={AdminDashboard} />
+
+
+      {/* صفحة 404 */}
       <Route component={NotFound} />
     </Switch>
   );
 }
+
 
 export default function App() {
   const [location, setLocation] = useLocation();

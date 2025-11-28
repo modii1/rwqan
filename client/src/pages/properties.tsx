@@ -70,9 +70,11 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
+  
+  // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
   const [visibleCount, setVisibleCount] = useState(24);
 
-  // تحميل الفلاتر المحفوظة عند فتح الصفحة
+  // Load saved filters when page opens
   useEffect(() => {
     const saved = sessionStorage.getItem("propertyFilters");
     if (saved) {
@@ -86,23 +88,9 @@ export default function PropertiesPage() {
     }
   }, []);
 
-  // تحميل عدد العناصر الظاهرة المحفوظ عند الرجوع من صفحة التفاصيل
-  useEffect(() => {
-    const savedVisible = sessionStorage.getItem("visibleCount");
-    if (savedVisible) {
-      const n = Number(savedVisible);
-      if (!Number.isNaN(n) && n > 0) {
-        setVisibleCount(n);
-      }
-    }
-  }, []);
-
-  // حفظ عدد العناصر الظاهرة في sessionStorage عند تغيّره
-  useEffect(() => {
-    sessionStorage.setItem("visibleCount", String(visibleCount));
-  }, [visibleCount]);
-
   const { data: properties = [], isLoading } = useQuery<Property[]>({
+    // ...
+
     queryKey: ["properties"],
     queryFn: async () => {
       const res = await fetch(
@@ -238,7 +226,11 @@ export default function PropertiesPage() {
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
 
-  // حفظ الفلاتر في sessionStorage عند تغييرها
+  // إعادة ضبط العدد الظاهر عند تغيير الفلاتر/البيانات
+  useEffect(() => {
+    setVisibleCount(24);
+  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange, properties]);
+  // Save filters whenever changed
   useEffect(() => {
     const filters = {
       searchQuery,
@@ -249,7 +241,15 @@ export default function PropertiesPage() {
       priceRange,
     };
     sessionStorage.setItem("propertyFilters", JSON.stringify(filters));
-  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange]);
+  }, [
+    searchQuery,
+    selectedCity,
+    selectedDirection,
+    selectedType,
+    selectedFacilities,
+    priceRange
+  ]);
+
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
   useEffect(() => {
@@ -348,12 +348,6 @@ export default function PropertiesPage() {
         setImageTransitioning(newSet);
       }, 50);
     }, 150);
-  };
-
-  const handleCardClick = (propertyNumber: string) => {
-    // حفظ موضع السكرول قبل الانتقال + visibleCount (يحفظ تلقائياً من useEffect فوق)
-    sessionStorage.setItem("scrollPosition", String(window.scrollY));
-    setLocation(`/property/${propertyNumber}`);
   };
 
   return (
@@ -520,6 +514,7 @@ export default function PropertiesPage() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {visibleProperties.map((property) => {
+              // لو حاب ترجع لصورة واحدة فقط لكل عقار، غيّر المصفوفة هنا
               const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
               const imageUrls = [
                 `${r2Base}/${property.propertyNumber}/1.jpg`,
@@ -575,7 +570,10 @@ export default function PropertiesPage() {
                           className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
                             imageTransitioning.has(property.propertyNumber) ? "opacity-0" : "opacity-100"
                           }`}
-                          onClick={() => handleCardClick(property.propertyNumber)}
+                          onClick={() => {
+                            sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                            setLocation(`/property/${property.propertyNumber}`);
+                          }}
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
 
@@ -645,7 +643,10 @@ export default function PropertiesPage() {
                     {(property.subscriptionType === "موثوق" || property.subscriptionType === "مميز") && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                        onClick={() => handleCardClick(property.propertyNumber)}
+                        onClick={() => {
+                          sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                          setLocation(`/property/${property.propertyNumber}`);
+                        }}
                       >
                         {property.name}
                       </h3>
@@ -684,7 +685,10 @@ export default function PropertiesPage() {
                       {/* CTA Button - Fixed at bottom */}
                       <Button
                         className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                        onClick={() => handleCardClick(property.propertyNumber)}
+                        onClick={() => {
+                          sessionStorage.setItem("scrollPosition", String(window.scrollY));
+                          setLocation(`/property/${property.propertyNumber}`);
+                        }}
                         data-testid={`button-details-${property.propertyNumber}`}
                       >
                         عرض التفاصيل
