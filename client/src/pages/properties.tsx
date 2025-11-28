@@ -1,32 +1,16 @@
-
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Search,
-  X,
-  ExternalLink,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
-  Star,
-} from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
 
-const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
@@ -75,20 +59,10 @@ export default function PropertiesPage() {
   const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 5000]);
-  const [selectedImage, setSelectedImage] = useState<{
-    url: string;
-    index: number;
-    total: number;
-  } | null>(null);
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
-    null,
-  );
-  const [currentImageIndex, setCurrentImageIndex] = useState<
-    Map<string, number>
-  >(new Map());
-  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(
-    new Set(),
-  );
+  const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
+  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
 
   // لزر التصفية الثابت وزر الصعود للأعلى
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -96,11 +70,9 @@ export default function PropertiesPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
-
-  // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
   const [visibleCount, setVisibleCount] = useState(24);
 
-  // Load saved filters when page opens
+  // تحميل الفلاتر المحفوظة عند فتح الصفحة
   useEffect(() => {
     const saved = sessionStorage.getItem("propertyFilters");
     if (saved) {
@@ -114,13 +86,27 @@ export default function PropertiesPage() {
     }
   }, []);
 
-  const { data: properties = [], isLoading } = useQuery<Property[]>({
-    // ...
+  // تحميل عدد العناصر الظاهرة المحفوظ عند الرجوع من صفحة التفاصيل
+  useEffect(() => {
+    const savedVisible = sessionStorage.getItem("visibleCount");
+    if (savedVisible) {
+      const n = Number(savedVisible);
+      if (!Number.isNaN(n) && n > 0) {
+        setVisibleCount(n);
+      }
+    }
+  }, []);
 
+  // حفظ عدد العناصر الظاهرة في sessionStorage عند تغيّره
+  useEffect(() => {
+    sessionStorage.setItem("visibleCount", String(visibleCount));
+  }, [visibleCount]);
+
+  const { data: properties = [], isLoading } = useQuery<Property[]>({
     queryKey: ["properties"],
     queryFn: async () => {
       const res = await fetch(
-        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData",
+        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
       );
       if (!res.ok) return [];
 
@@ -139,17 +125,13 @@ export default function PropertiesPage() {
           .map((f: string) => f.trim());
 
         const prices = {
-          weekday: item["سعر وسط الأسبوع"]
-            ? String(item["سعر وسط الأسبوع"])
-            : "",
-          weekend: item["سعر نهاية الأسبوع"]
-            ? String(item["سعر نهاية الأسبوع"])
-            : "",
+          weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
+          weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
           overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
           holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
         };
 
-        // رابط مجلد R2 فقط (الصور يتم قراءتها حسب الموجود فعلاً)
+        // صور R2 الأساسية
         const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
         return {
@@ -161,7 +143,13 @@ export default function PropertiesPage() {
           facilities,
           prices,
           subscriptionType,
-          r2Folder: `${r2Base}/${propertyNumber}/`,
+          imageUrls: [
+            `${r2Base}/${propertyNumber}/1.jpg`,
+            `${r2Base}/${propertyNumber}/2.jpg`,
+            `${r2Base}/${propertyNumber}/3.jpg`,
+            `${r2Base}/${propertyNumber}/4.jpg`,
+            `${r2Base}/${propertyNumber}/5.jpg`,
+          ],
         };
       });
     },
@@ -169,9 +157,7 @@ export default function PropertiesPage() {
 
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
-      prev.includes(facility)
-        ? prev.filter((f) => f !== facility)
-        : [...prev, facility],
+      prev.includes(facility) ? prev.filter((f) => f !== facility) : [...prev, facility]
     );
   };
 
@@ -194,11 +180,7 @@ export default function PropertiesPage() {
       }
 
       // Direction filter
-      if (
-        selectedDirection &&
-        selectedDirection !== "" &&
-        selectedDirection !== "all"
-      ) {
+      if (selectedDirection && selectedDirection !== "" && selectedDirection !== "all") {
         if (property.direction !== selectedDirection) return false;
       }
 
@@ -209,28 +191,23 @@ export default function PropertiesPage() {
 
       // Facilities filter with smart matching and normalization
       if (selectedFacilities.length > 0) {
-        const hasAllFacilities = selectedFacilities.every(
-          (selectedFacility) => {
-            // Direct match
-            if (property.facilities.includes(selectedFacility)) {
-              return true;
-            }
+        const hasAllFacilities = selectedFacilities.every((selectedFacility) => {
+          // Direct match
+          if (property.facilities.includes(selectedFacility)) {
+            return true;
+          }
 
-            // Smart match using SMART_FILTERS with normalization
-            const smartKeywords =
-              SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
-            if (smartKeywords) {
-              return property.facilities.some((facility) => {
-                const normalizedFacility = normalizeText(facility);
-                return smartKeywords.some((keyword) =>
-                  normalizedFacility.includes(normalizeText(keyword)),
-                );
-              });
-            }
+          // Smart match using SMART_FILTERS with normalization
+          const smartKeywords = SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
+          if (smartKeywords) {
+            return property.facilities.some((facility) => {
+              const normalizedFacility = normalizeText(facility);
+              return smartKeywords.some((keyword) => normalizedFacility.includes(normalizeText(keyword)));
+            });
+          }
 
-            return false;
-          },
-        );
+          return false;
+        });
         if (!hasAllFacilities) return false;
       }
 
@@ -251,10 +228,8 @@ export default function PropertiesPage() {
     })
     .sort((a, b) => {
       // Sort: verified (موثوق/مميز) properties first, then free (عادي)
-      const aIsVerified =
-        a.subscriptionType === "موثوق" || a.subscriptionType === "مميز";
-      const bIsVerified =
-        b.subscriptionType === "موثوق" || b.subscriptionType === "مميز";
+      const aIsVerified = a.subscriptionType === "موثوق" || a.subscriptionType === "مميز";
+      const bIsVerified = b.subscriptionType === "موثوق" || b.subscriptionType === "مميز";
       if (aIsVerified && !bIsVerified) return -1;
       if (!aIsVerified && bIsVerified) return 1;
       return 0;
@@ -263,19 +238,7 @@ export default function PropertiesPage() {
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
 
-  // إعادة ضبط العدد الظاهر عند تغيير الفلاتر/البيانات
-  useEffect(() => {
-    setVisibleCount(24);
-  }, [
-    searchQuery,
-    selectedCity,
-    selectedDirection,
-    selectedType,
-    selectedFacilities,
-    priceRange,
-    properties,
-  ]);
-  // Save filters whenever changed
+  // حفظ الفلاتر في sessionStorage عند تغييرها
   useEffect(() => {
     const filters = {
       searchQuery,
@@ -286,14 +249,7 @@ export default function PropertiesPage() {
       priceRange,
     };
     sessionStorage.setItem("propertyFilters", JSON.stringify(filters));
-  }, [
-    searchQuery,
-    selectedCity,
-    selectedDirection,
-    selectedType,
-    selectedFacilities,
-    priceRange,
-  ]);
+  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange]);
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
   useEffect(() => {
@@ -332,12 +288,8 @@ export default function PropertiesPage() {
       const whatsappNumber = property.whatsappNumber || DEFAULT_WHATSAPP;
 
       const message = property.whatsappNumber
-        ? encodeURIComponent(
-            `مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`,
-          )
-        : encodeURIComponent(
-            `استفسار عن رقم العقار ${property.propertyNumber}`,
-          );
+        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`)
+        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}`);
 
       window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank");
     } catch (error) {
@@ -363,9 +315,7 @@ export default function PropertiesPage() {
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
       const next = (current + 1) % totalImages;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, next)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -379,9 +329,7 @@ export default function PropertiesPage() {
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
       const prev = current === 0 ? totalImages - 1 : current - 1;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, prev)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -393,15 +341,19 @@ export default function PropertiesPage() {
   const goToImage = (propertyNumber: string, index: number) => {
     setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
     setTimeout(() => {
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, index)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
         setImageTransitioning(newSet);
       }, 50);
     }, 150);
+  };
+
+  const handleCardClick = (propertyNumber: string) => {
+    // حفظ موضع السكرول قبل الانتقال + visibleCount (يحفظ تلقائياً من useEffect فوق)
+    sessionStorage.setItem("scrollPosition", String(window.scrollY));
+    setLocation(`/property/${propertyNumber}`);
   };
 
   return (
@@ -477,10 +429,7 @@ export default function PropertiesPage() {
             </Select>
 
             {/* Direction */}
-            <Select
-              value={selectedDirection}
-              onValueChange={setSelectedDirection}
-            >
+            <Select value={selectedDirection} onValueChange={setSelectedDirection}>
               <SelectTrigger data-testid="select-direction">
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
@@ -517,9 +466,7 @@ export default function PropertiesPage() {
             </label>
             <Slider
               value={priceRange}
-              onValueChange={(value) =>
-                setPriceRange(value as [number, number])
-              }
+              onValueChange={(value) => setPriceRange(value as [number, number])}
               min={0}
               max={5000}
               step={50}
@@ -530,18 +477,12 @@ export default function PropertiesPage() {
 
           {/* Priority Facilities */}
           <div>
-            <label className="block text-sm font-semibold mb-2 text-foreground">
-              المرافق
-            </label>
+            <label className="block text-sm font-semibold mb-2 text-foreground">المرافق</label>
             <div className="flex flex-wrap gap-2">
               {PRIORITY_FACILITIES.map((facility) => (
                 <Badge
                   key={facility}
-                  variant={
-                    selectedFacilities.includes(facility)
-                      ? "default"
-                      : "outline"
-                  }
+                  variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                   className="
                     cursor-pointer hover-elevate active-elevate-2
                     text-base
@@ -562,10 +503,7 @@ export default function PropertiesPage() {
         {/* Results */}
         <div className="mb-4">
           <p className="text-sm text-muted-foreground">
-            عدد النتائج:{" "}
-            <span className="font-bold text-foreground">
-              {filteredProperties.length}
-            </span>
+            عدد النتائج: <span className="font-bold text-foreground">{filteredProperties.length}</span>
           </p>
         </div>
 
@@ -577,29 +515,26 @@ export default function PropertiesPage() {
           </div>
         ) : filteredProperties.length === 0 ? (
           <Card className="p-12 text-center">
-            <p className="text-lg text-muted-foreground">
-              لا توجد عقارات تطابق البحث
-            </p>
+            <p className="text-lg text-muted-foreground">لا توجد عقارات تطابق البحث</p>
           </Card>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {visibleProperties.map((property) => {
-              // لو حاب ترجع لصورة واحدة فقط لكل عقار، غيّر المصفوفة هنا
-              const imageUrls = Array.from(
-                { length: 15 },
-                (_, i) => `${r2Base}/${property.propertyNumber}/${i + 1}.jpg`,
-              );
+              const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+              const imageUrls = [
+                `${r2Base}/${property.propertyNumber}/1.jpg`,
+                `${r2Base}/${property.propertyNumber}/2.jpg`,
+                `${r2Base}/${property.propertyNumber}/3.jpg`,
+              ];
 
-              const mainPrice =
-                property.prices.weekend || property.prices.weekday || "0";
+              const mainPrice = property.prices.weekend || property.prices.weekday || "0";
               const topFacilities = property.facilities.slice(0, 3);
 
               return (
                 <Card
                   key={property.propertyNumber}
                   className={`flex flex-col relative overflow-hidden ${
-                    property.subscriptionType === "موثوق" ||
-                    property.subscriptionType === "مميز"
+                    property.subscriptionType === "موثوق" || property.subscriptionType === "مميز"
                       ? "property-card-premium"
                       : "property-card-standard"
                   }`}
@@ -634,36 +569,21 @@ export default function PropertiesPage() {
                     {imageUrls.length > 0 && (
                       <>
                         <img
-                          src={
-                            imageUrls[
-                              getCurrentImageIndex(property.propertyNumber)
-                            ]
-                          }
+                          src={imageUrls[getCurrentImageIndex(property.propertyNumber)]}
                           alt={property.name}
                           loading="lazy"
                           className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
-                            imageTransitioning.has(property.propertyNumber)
-                              ? "opacity-0"
-                              : "opacity-100"
+                            imageTransitioning.has(property.propertyNumber) ? "opacity-0" : "opacity-100"
                           }`}
-                          onClick={() => {
-                            sessionStorage.setItem(
-                              "scrollPosition",
-                              String(window.scrollY),
-                            );
-                            setLocation(`/property/${property.propertyNumber}`);
-                          }}
+                          onClick={() => handleCardClick(property.propertyNumber)}
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
 
                         {/* Trusted Badge - Top Right Corner on Image */}
-                        {(property.subscriptionType === "موثوق" ||
-                          property.subscriptionType === "مميز") && (
+                        {(property.subscriptionType === "موثوق" || property.subscriptionType === "مميز") && (
                           <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
                             <Star className="w-4 h-4 md:w-5 md:h-5 text-yellow-600 fill-yellow-600" />
-                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">
-                              موثوق
-                            </span>
+                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">موثوق</span>
                           </div>
                         )}
 
@@ -677,10 +597,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                nextImage(
-                                  property.propertyNumber,
-                                  imageUrls.length,
-                                );
+                                nextImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-next-image-${property.propertyNumber}`}
                             >
@@ -694,10 +611,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                prevImage(
-                                  property.propertyNumber,
-                                  imageUrls.length,
-                                );
+                                prevImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-prev-image-${property.propertyNumber}`}
                             >
@@ -713,8 +627,7 @@ export default function PropertiesPage() {
                               <div
                                 key={idx}
                                 className={`h-1.5 rounded-full transition-all ${
-                                  idx ===
-                                  getCurrentImageIndex(property.propertyNumber)
+                                  idx === getCurrentImageIndex(property.propertyNumber)
                                     ? "w-4 bg-white"
                                     : "w-1.5 bg-white/50"
                                 }`}
@@ -729,17 +642,10 @@ export default function PropertiesPage() {
                   {/* Content Section - Flexible grow */}
                   <div className="flex flex-col flex-1 p-3 md:p-5">
                     {/* Title - Only show for verified properties */}
-                    {(property.subscriptionType === "موثوق" ||
-                      property.subscriptionType === "مميز") && (
+                    {(property.subscriptionType === "موثوق" || property.subscriptionType === "مميز") && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                        onClick={() => {
-                          sessionStorage.setItem(
-                            "scrollPosition",
-                            String(window.scrollY),
-                          );
-                          setLocation(`/property/${property.propertyNumber}`);
-                        }}
+                        onClick={() => handleCardClick(property.propertyNumber)}
                       >
                         {property.name}
                       </h3>
@@ -747,20 +653,14 @@ export default function PropertiesPage() {
 
                     {/* Location */}
                     <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
-                      <svg
-                        className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
+                      <svg className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                         <path
                           fillRule="evenodd"
                           d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span className="font-semibold truncate">
-                        {property.city}
-                      </span>
+                      <span className="font-semibold truncate">{property.city}</span>
                     </div>
 
                     {/* Top Facilities - Hidden on small mobile */}
@@ -768,9 +668,7 @@ export default function PropertiesPage() {
                       {topFacilities.map((facility, idx) => (
                         <div key={idx} className="flex items-center gap-2">
                           <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
-                          <span className="font-semibold text-xs">
-                            {facility}
-                          </span>
+                          <span className="font-semibold text-xs">{facility}</span>
                         </div>
                       ))}
                     </div>
@@ -779,24 +677,14 @@ export default function PropertiesPage() {
                     <div className="mt-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4">
                       {/* Price */}
                       <div className="flex items-baseline gap-1">
-                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">
-                          {mainPrice}
-                        </span>
-                        <span className="text-xs md:text-sm text-muted-foreground">
-                          ريال
-                        </span>
+                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
+                        <span className="text-xs md:text-sm text-muted-foreground">ريال</span>
                       </div>
 
                       {/* CTA Button - Fixed at bottom */}
                       <Button
                         className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                        onClick={() => {
-                          sessionStorage.setItem(
-                            "scrollPosition",
-                            String(window.scrollY),
-                          );
-                          setLocation(`/property/${property.propertyNumber}`);
-                        }}
+                        onClick={() => handleCardClick(property.propertyNumber)}
                         data-testid={`button-details-${property.propertyNumber}`}
                       >
                         عرض التفاصيل
@@ -845,25 +733,16 @@ export default function PropertiesPage() {
       )}
 
       {/* Property Details Dialog */}
-      <Dialog
-        open={!!selectedProperty}
-        onOpenChange={(open) => !open && setSelectedProperty(null)}
-      >
+      <Dialog open={!!selectedProperty} onOpenChange={(open) => !open && setSelectedProperty(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           {selectedProperty && (
             <div className="space-y-6">
-              <DialogTitle className="sr-only">
-                {selectedProperty.name}
-              </DialogTitle>
+              <DialogTitle className="sr-only">{selectedProperty.name}</DialogTitle>
               {/* Image Gallery */}
               {selectedProperty.imageUrls.length > 0 && (
                 <div className="relative">
                   <img
-                    src={
-                      selectedProperty.imageUrls[
-                        getCurrentImageIndex(selectedProperty.propertyNumber)
-                      ]
-                    }
+                    src={selectedProperty.imageUrls[getCurrentImageIndex(selectedProperty.propertyNumber)]}
                     alt={selectedProperty.name}
                     className="w-full h-96 object-cover rounded-lg"
                     data-testid="img-dialog-current"
@@ -874,10 +753,7 @@ export default function PropertiesPage() {
                     <>
                       <button
                         onClick={() =>
-                          prevImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length,
-                          )
+                          prevImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-prev-image"
@@ -886,10 +762,7 @@ export default function PropertiesPage() {
                       </button>
                       <button
                         onClick={() =>
-                          nextImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length,
-                          )
+                          nextImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-next-image"
@@ -906,16 +779,11 @@ export default function PropertiesPage() {
                         <button
                           key={idx}
                           className={`h-2 rounded-full transition-all ${
-                            idx ===
-                            getCurrentImageIndex(
-                              selectedProperty.propertyNumber,
-                            )
+                            idx === getCurrentImageIndex(selectedProperty.propertyNumber)
                               ? "w-8 bg-[#b88d2b]"
                               : "w-2 bg-muted-foreground/30"
                           }`}
-                          onClick={() =>
-                            goToImage(selectedProperty.propertyNumber, idx)
-                          }
+                          onClick={() => goToImage(selectedProperty.propertyNumber, idx)}
                           data-testid={`button-slide-${idx}`}
                         />
                       ))}
@@ -926,12 +794,9 @@ export default function PropertiesPage() {
 
               {/* Details */}
               <div>
-                <h2 className="text-2xl font-bold text-foreground mb-2">
-                  {selectedProperty.name}
-                </h2>
+                <h2 className="text-2xl font-bold text-foreground mb-2">{selectedProperty.name}</h2>
                 <p className="text-muted-foreground mb-4">
-                  {selectedProperty.city} • {selectedProperty.direction} •{" "}
-                  {selectedProperty.type}
+                  {selectedProperty.city} • {selectedProperty.direction} • {selectedProperty.type}
                 </p>
 
                 {/* All Prices */}
@@ -939,33 +804,25 @@ export default function PropertiesPage() {
                   {selectedProperty.prices.weekday && (
                     <div className="flex justify-between">
                       <span>وسط الأسبوع:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.weekday} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekday} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.weekend && (
                     <div className="flex justify-between">
                       <span>نهاية الأسبوع:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.weekend} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.weekend} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.overnight && (
                     <div className="flex justify-between">
                       <span>مبيت:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.overnight} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.overnight} ريال</span>
                     </div>
                   )}
                   {selectedProperty.prices.holidays && (
                     <div className="flex justify-between">
                       <span>إجازات:</span>
-                      <span className="font-bold text-green-600">
-                        {selectedProperty.prices.holidays} ريال
-                      </span>
+                      <span className="font-bold text-green-600">{selectedProperty.prices.holidays} ريال</span>
                     </div>
                   )}
                 </div>
@@ -975,11 +832,7 @@ export default function PropertiesPage() {
                   <h4 className="font-semibold mb-2">المرافق:</h4>
                   <div className="flex flex-wrap gap-2">
                     {selectedProperty.facilities.map((facility, idx) => (
-                      <Badge
-                        key={`dialog-facility-${idx}-${facility}`}
-                        variant="secondary"
-                        className="text-xs"
-                      >
+                      <Badge key={`dialog-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
                         {facility}
                       </Badge>
                     ))}
@@ -992,9 +845,7 @@ export default function PropertiesPage() {
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() =>
-                        window.open(selectedProperty.imagesFolderUrl, "_blank")
-                      }
+                      onClick={() => window.open(selectedProperty.imagesFolderUrl, "_blank")}
                     >
                       <ExternalLink className="w-4 h-4 ml-2" />
                       فتح ملف العقار
@@ -1015,9 +866,7 @@ export default function PropertiesPage() {
         {/* فلتر الموبايل (نفس السابق) */}
         <Dialog open={showFiltersModal} onOpenChange={setShowFiltersModal}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-6 rounded-xl">
-            <DialogTitle className="text-xl font-bold text-primary mb-4">
-              تصفية العقارات
-            </DialogTitle>
+            <DialogTitle className="text-xl font-bold text-primary mb-4">تصفية العقارات</DialogTitle>
 
             {/* Search */}
             <div className="mb-4">
@@ -1035,9 +884,7 @@ export default function PropertiesPage() {
 
             {/* City */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                المدينة
-              </label>
+              <label className="text-sm font-semibold mb-2 block">المدينة</label>
               <Select value={selectedCity} onValueChange={setSelectedCity}>
                 <SelectTrigger>
                   <SelectValue placeholder="المدينة" />
@@ -1055,13 +902,8 @@ export default function PropertiesPage() {
 
             {/* Direction */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                الاتجاه
-              </label>
-              <Select
-                value={selectedDirection}
-                onValueChange={setSelectedDirection}
-              >
+              <label className="text-sm font-semibold mb-2 block">الاتجاه</label>
+              <Select value={selectedDirection} onValueChange={setSelectedDirection}>
                 <SelectTrigger>
                   <SelectValue placeholder="الاتجاه" />
                 </SelectTrigger>
@@ -1078,9 +920,7 @@ export default function PropertiesPage() {
 
             {/* Type */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                نوع العقار
-              </label>
+              <label className="text-sm font-semibold mb-2 block">نوع العقار</label>
               <Select value={selectedType} onValueChange={setSelectedType}>
                 <SelectTrigger>
                   <SelectValue placeholder="النوع" />
@@ -1112,18 +952,12 @@ export default function PropertiesPage() {
 
             {/* Facilities */}
             <div className="mb-6">
-              <label className="text-sm font-semibold mb-2 block">
-                المرافق
-              </label>
+              <label className="text-sm font-semibold mb-2 block">المرافق</label>
               <div className="flex flex-wrap gap-2">
                 {PRIORITY_FACILITIES.map((facility) => (
                   <Badge
                     key={facility}
-                    variant={
-                      selectedFacilities.includes(facility)
-                        ? "default"
-                        : "outline"
-                    }
+                    variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                     className="cursor-pointer"
                     onClick={() => toggleFacility(facility)}
                   >
@@ -1158,19 +992,12 @@ export default function PropertiesPage() {
       </Dialog>
 
       {/* Image Modal */}
-      <Dialog
-        open={!!selectedImage}
-        onOpenChange={() => setSelectedImage(null)}
-      >
+      <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
         <DialogContent className="max-w-4xl p-0">
           {selectedImage && (
             <div className="relative">
               <DialogTitle className="sr-only">صورة العقار</DialogTitle>
-              <img
-                src={selectedImage.url}
-                alt="صورة العقار"
-                className="w-full h-auto rounded-lg"
-              />
+              <img src={selectedImage.url} alt="صورة العقار" className="w-full h-auto rounded-lg" />
               <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1 rounded">
                 {selectedImage.index + 1} / {selectedImage.total}
               </div>
