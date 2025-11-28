@@ -15,9 +15,9 @@ export default function OwnerImagesPage() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
 
-  /** ==========================================================
-   * 1) التحقق من الجلسة
-   ============================================================*/
+  /* ==========================================================
+     1) التحقق من الجلسة
+  ============================================================*/
   const { data: sessionData, isLoading: sessionLoading } = useQuery({
     queryKey: ["/api/owner/session"],
   });
@@ -28,28 +28,25 @@ export default function OwnerImagesPage() {
     }
   }, [sessionLoading, sessionData, setLocation]);
 
-  /** ==========================================================
-   * 2) جلب العقار
-   ============================================================*/
-  const { data: property, isLoading: loadingProperty } = useQuery({
-    queryKey: sessionData?.propertyNumber
-      ? ["/api/properties/" + sessionData.propertyNumber]
-      : [],
-    enabled: !!sessionData?.propertyNumber,
+  /* ==========================================================
+     2) جلب صور R2 مباشرة
+  ============================================================*/
+  const { data: r2Data, isLoading: r2Loading } = useQuery({
+    queryKey: ["/api/owner/r2-images"],
+    queryFn: async () => {
+      const res = await fetch("/api/owner/r2-images", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to load images");
+      return res.json();
+    },
   });
 
-  /** ==========================================================
-   * 3) استخراج صور R2 من imagesLink
-   ============================================================*/
-  const r2Images =
-    property?.r2Images ||
-    property?.imageUrls ||
-    property?.images ||
-    [];
+  const r2Images = r2Data?.images || [];
 
-  /** ==========================================================
-   * 4) رفع الصور
-   ============================================================*/
+  /* ==========================================================
+     3) رفع الصور
+  ============================================================*/
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
@@ -65,12 +62,9 @@ export default function OwnerImagesPage() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/properties/" + sessionData?.propertyNumber],
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
       setSelectedFiles([]);
       setPreviewUrls([]);
-
       toast({ title: "تم رفع الصور بنجاح" });
     },
     onError: (err: any) => {
@@ -94,42 +88,55 @@ export default function OwnerImagesPage() {
     setPreviewUrls(files.map((f) => URL.createObjectURL(f)));
   };
 
-  /** ==========================================================
-   * 5) حذف صورة
-   ============================================================*/
+  /* ==========================================================
+     4) حذف صورة (المسار الصحيح DELETE /api/owner/images/:index)
+  ============================================================*/
   const deleteMutation = useMutation({
-    mutationFn: async (url: string) => {
-      const res = await fetch("/api/owner/images/delete", {
-        method: "POST",
+    mutationFn: async (index: number) => {
+      const res = await fetch(`/api/owner/images/${index}`, {
+        method: "DELETE",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: url }),
       });
 
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/properties/" + sessionData?.propertyNumber],
-      });
-      toast({ title: "تم حذف الصورة" });
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
+      toast({ title: "تم حذف الصورة بنجاح" });
     },
     onError: (err: any) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+      toast({
+        title: "خطأ",
+        description: err.message,
+        variant: "destructive",
+      });
     },
   });
 
+  // استخراج رقم الصورة ثم الحذف
   const handleDelete = (url: string) => {
-    if (confirm("هل تريد حذف هذه الصورة؟")) {
-      deleteMutation.mutate(url);
+    if (!confirm("هل تريد حذف هذه الصورة؟")) return;
+
+    const fileName = url.split("/").pop(); // 3.jpg
+    const index = Number(fileName?.replace(".jpg", ""));
+
+    if (isNaN(index)) {
+      toast({
+        title: "خطأ",
+        description: "تعذر تحديد رقم الصورة",
+        variant: "destructive",
+      });
+      return;
     }
+
+    deleteMutation.mutate(index);
   };
 
-  /** ==========================================================
-   *  واجهة الصفحة
-   ============================================================*/
-  if (sessionLoading || loadingProperty)
+  /* ==========================================================
+     واجهة الصفحة
+  ============================================================*/
+  if (sessionLoading || r2Loading)
     return <div className="p-6 text-center">جاري التحميل…</div>;
 
   return (

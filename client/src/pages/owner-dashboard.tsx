@@ -466,7 +466,7 @@ function AnalyticsBox({
     <div className="p-4 rounded-xl bg-muted/15 border border-border/40">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className="text-xl font-bold text-primary mb-1">{value}</p>
-      {note && <p className="text-muted-foreground text-[12px]">{note}</p>}
+      {note && <p className="text-[11px] text-muted-foreground">{note}</p>}
     </div>
   );
 }

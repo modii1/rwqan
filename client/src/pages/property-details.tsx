@@ -7,6 +7,18 @@ import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
 
+// ⭐ مؤشر السحب الذهبي في منتصف الشاشة (لا يلمس أي شيء من تصميمك)
+// ⭐ مؤشر السحب المتدرّج (مجموعة أسهم)
+function EdgeSwipeIndicator() {
+  return (
+    <div className="edge-swipe-arrows">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  );
+}
+
 // نوع داخلي لبيانات التفاصيل (مستقل عن @shared/schema)
 interface PropertyDetails {
   propertyNumber: string;
@@ -126,7 +138,7 @@ export default function PropertyDetailsPage() {
           }
         }
 
-        // لو ما قدرنا نطلع العدد الحقيقي، نستعمل 3 صور مثل الرئيسية
+        // لو ما قدرنا نطلع العدد الحقيقي، نستعمل 15 صورة افتراضيًا
         if (!imageCount) {
           imageCount = 15;
         }
@@ -147,7 +159,6 @@ export default function PropertyDetailsPage() {
       });
     },
 
-    
     staleTime: 1000 * 60, // دقيقة
     retry: 1,
     refetchOnWindowFocus: false,
@@ -179,8 +190,6 @@ export default function PropertyDetailsPage() {
 
   // ===== حالات التحميل / الخطأ / غير موجود =====
 
-  
-
   if (isError) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -203,7 +212,7 @@ export default function PropertyDetailsPage() {
   if (!property) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-       
+
       </div>
     );
   }
@@ -248,6 +257,9 @@ export default function PropertyDetailsPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* ⭐ مؤشر السحب في منتصف الشاشة (لا يغيّر شيء من تصميمك) */}
+      <EdgeSwipeIndicator />
+
       {/* ===== Header ===== */}
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
