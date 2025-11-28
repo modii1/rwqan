@@ -1,4 +1,5 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import cors from "cors";
 
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -20,6 +21,7 @@ import {
 } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
 
 const r2 = new S3Client({
   region: process.env.R2_REGION,
@@ -59,6 +61,24 @@ const SHEET_MAP: Record<string, string> = {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   console.log("⚙️ Registering backend routes...");
+
+  // ======================
+  // CORS FIX
+  // ======================
+  app.use(
+    cors({
+      origin: true,          // يسمح للمتصفح يرسل الكوكيز من modiy.replit.app
+      credentials: true,     // ضروري للجلسة
+    })
+  );
+
+  app.post("/api/owner/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ ok: true });
+    });
+  });
+
+
 
   // ======================
   // Google Sheets Init
@@ -438,7 +458,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  
+  // ======================================================
+  // 🔴 حذف صورة واحدة من R2 حسب رقمها
+  // ======================================================
+  app.delete("/api/owner/images/:index", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = req.session.propertyNumber;
+      const index = req.params.index;
+
+      const key = `${propertyNumber}/${index}.jpg`;
+
+      await r2.send(
+        new DeleteObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: key,
+        })
+      );
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("R2 DELETE ERROR:", err);
+      res.status(500).json({ error: "Delete failed" });
+    }
+  });
+
   
 
   // ======================
