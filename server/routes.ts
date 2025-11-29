@@ -482,6 +482,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+  app.get("/api/packages", async (_req, res) => {
+    try {
+      const rows = await googleSheetsService.readSheet("الباقات");
+
+      if (!rows || rows.length <= 1) {
+        return res.json([]);
+      }
+
+      const packages = rows.slice(1).map((row) => ({
+        id: row[0],
+        name: row[1],
+        duration: Number(row[2]),
+        price: Number(row[3]),
+        type: row[4],
+        features: parseFeatures(row[5]),
+        isActive: String(row[6]).toLowerCase() === "true",
+        createdAt: row[7] || "",
+      }));
+
+      res.json(packages.filter((p) => p.isActive));
+    } catch (error) {
+      console.error("❌ /api/packages error:", error);
+      res.status(500).json({ error: "failed to load packages" });
+    }
+  });
+
+  function parseFeatures(val) {
+    if (!val) return [];
+    try {
+      if (val.trim().startsWith("[")) return JSON.parse(val);
+    } catch {}
+    return String(val).split("\n");
+  }
+
+
+
+  // ================================
+  // 🟢 REGISTER NEW PROPERTY (Public)
+  // ================================
+  app.post("/api/properties/register", async (req, res) => {
+    try {
+      const data = req.body;
+
+      // Check duplicate property number
+      const exists = await storage.getPropertyByNumber(data.propertyNumber);
+      if (exists) {
+        return res.status(400).json({ error: "رقم العقار مستخدم بالفعل" });
+      }
+
+      // تحويل الأسعار لنسخة متوافقة مع الشيت
+      const prices = {
+        display: "",                     // سعر العرض (فارغ دائماً)
+        weekday: data.prices.weekday || "",
+        weekend: data.prices.weekend || "",
+        overnight: data.prices.overnight || "",
+        special: "",                     // سعر خاص (اختياري)
+        holidays: data.prices.holidays || "",
+      };
+
+      // تجهيز البيانات كما يتوقعه propertyToRow
+      const newProperty = {
+        propertyNumber: data.propertyNumber,
+        name: data.name,
+        whatsappNumber: data.whatsappNumber,
+        location: data.location,
+        city: data.city,
+        direction: data.direction,
+        type: data.type,
+        facilities: data.facilities || [],
+        imagesLink: "",                  // عمود الشيت
+        prices,
+        subscriptionType: "عادي",
+        lastUpdate: "",
+        subscriptionDate: "",
+        pin: data.pin,
+        imagesFolderUrl: "",
+        driveFolderId: "",
+        imageUrls: [],
+      };
+
+      const created = await storage.createProperty(newProperty);
+
+      res.json(created);
+
+    } catch (error) {
+      console.error("❌ Register error:", error);
+      res.status(500).json({ error: "خطأ أثناء تسجيل العقار" });
+    }
+  });
+
+
+// ======================================================
+// 🟣 ADMIN — إدارة صور العقار من R2 (جلب + رفع + حذف)
+// ======================================================
+
+// جلب جميع صور عقار من R2
+app.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
+  try {
+    const propertyNumber = req.params.propertyNumber;
+
+    const list = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: `${propertyNumber}/`,
+      })
+    );
+
+    const images =
+      list.Contents?.map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
+
+    res.json({ images });
+  } catch (err) {
+    console.error("ADMIN R2 LIST ERROR:", err);
+    res.status(500).json({ error: "Failed to list R2 images" });
+  }
+});
+
+// رفع صور جديدة لعقار من لوحة التحكم
+app.post(
+  "/api/admin/r2-images/:propertyNumber",
+  upload.array("images"),
+  async (req, res) => {
+    try {
+      const propertyNumber = req.params.propertyNumber;
+
+      // عد الصور الحالية لتحديد البداية
+      const list = await r2.send(
+        new ListObjectsV2Command({
+          Bucket: R2_BUCKET,
+          Prefix: `${propertyNumber}/`,
+        })
+      );
+
+      let index = (list.Contents?.length || 0) + 1;
+
+      for (const file of req.files) {
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: `${propertyNumber}/${index}.jpg`,
+            Body: file.buffer,
+            ContentType: "image/jpeg",
+          })
+        );
+        index++;
+      }
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("ADMIN R2 UPLOAD ERROR:", err);
+      res.status(500).json({ error: "Admin upload failed" });
+    }
+  }
+);
+
+// حذف صورة معينة من R2
+app.delete(
+  "/api/admin/r2-images/:propertyNumber/:index",
+  async (req, res) => {
+    try {
+      const { propertyNumber, index } = req.params;
+
+      await r2.send(
+        new DeleteObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: `${propertyNumber}/${index}.jpg`,
+        })
+      );
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("ADMIN R2 DELETE ERROR:", err);
+      res.status(500).json({ error: "Admin delete failed" });
+    }
+  }
+);
+
   
 
   // ======================
