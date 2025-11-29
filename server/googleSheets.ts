@@ -434,37 +434,37 @@ class GoogleSheetsService {
   }
 
   private propertyToRow(property: Property): any[] {
-    const p: any = property;
+  const p: any = property;
 
-    const facilities =
-      Array.isArray(p.facilities)
-        ? p.facilities.join(", ")
-        : typeof p.facilities === "string"
-        ? p.facilities
-        : "";
+  const facilities =
+    Array.isArray(p.facilities)
+      ? p.facilities.join(", ")
+      : typeof p.facilities === "string"
+      ? p.facilities
+      : "";
 
-    return [
-      p.propertyNumber || "",
-      p.name || "",
-      p.whatsappNumber || "",
-      p.location || "",
-      p.city || "",
-      p.direction || "",
-      p.type || "",
-      facilities,
-      p.imagesLink || "",
-      p.prices?.display || "",
-      p.prices?.weekday || "",
-      p.prices?.weekend || "",
-      p.prices?.overnight || "",
-      p.prices?.special || "",
-      p.prices?.holidays || "",
-      p.subscriptionType || "عادي",
-      p.lastUpdate || "",
-      p.subscriptionDate || "",
-      p.pin || "",
-    ];
-  }
+  return [
+    p.propertyNumber || "",
+    p.name || "",
+    p.whatsappNumber || "",
+    p.location || "",
+    p.city || "",
+    p.direction || "",
+    p.type || "",
+    facilities,
+    p.imagesLink || "",
+    p.prices?.display || "",
+    p.prices?.weekday || "",
+    p.prices?.weekend || "",
+    p.prices?.overnight || "",
+    p.prices?.special || "",
+    p.prices?.holidays || "",
+    p.subscriptionType || "عادي",
+    p.lastUpdate || "",
+    p.subscriptionDate || "",
+    p.pin || "",
+  ];
+}
 
   // ================== العقارات ==================
 

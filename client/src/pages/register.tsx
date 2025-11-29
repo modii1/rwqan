@@ -25,7 +25,9 @@ export default function RegisterPage() {
     type: "",
     location: "",
     whatsappNumber: "",
+    imagesFolderUrl: "",   // ← الحل هنا
   });
+
   const [facilities, setFacilities] = useState<string[]>([]);
   const [prices, setPrices] = useState({
     weekday: "",

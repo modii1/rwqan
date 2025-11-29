@@ -14,6 +14,7 @@ export const propertySchema = z.object({
   type: z.enum(['قسم', 'قسمين']),
   facilities: z.array(z.string()), // 100 مرفق
   imagesFolderUrl: z.string().optional(), // رابط مجلد الصور
+  imagesLink: z.string().optional(),  // رابط الصور كما هو في Google Sheet
   prices: z.object({
     display: z.string().optional(), // سعر العرض
     weekday: z.string(), // وسط الأسبوع
