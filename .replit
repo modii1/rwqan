@@ -39,10 +39,6 @@ localPort = 42221
 externalPort = 3000
 
 [[ports]]
-localPort = 43273
-externalPort = 6800
-
-[[ports]]
 localPort = 45135
 externalPort = 6000
 
@@ -81,3 +77,6 @@ integrations = ["google-sheet:1.0.0", "javascript_object_storage:1.0.0", "javasc
 
 [userenv.production]
 NODE_ENV = "production"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-a1429ce2-49c1-4128-a9c7-ee7a94b0bd33"
