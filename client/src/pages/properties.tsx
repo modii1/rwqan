@@ -639,7 +639,7 @@ export default function PropertiesPage() {
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span className="font-semibold truncate">{property.city}</span>
+                      <span className="font-semibold truncate">{property.location || property.city}</span>
                     </div>
 
                     {/* Top Facilities - Hidden on small mobile */}
