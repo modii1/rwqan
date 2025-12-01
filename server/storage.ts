@@ -18,6 +18,8 @@ import type {
   Analytics,
   Backup,
   InsertBackup,
+  CodeBackup,
+  InsertCodeBackup,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -78,6 +80,12 @@ export interface IStorage {
   updateBackup(id: string, backup: Partial<Backup>): Promise<Backup>;
   deleteBackup(id: string): Promise<void>;
   restoreBackup(id: string): Promise<void>;
+
+  // Code Backups (نسخ احتياطية الأكواد)
+  getCodeBackups(): Promise<CodeBackup[]>;
+  getCodeBackupById(id: string): Promise<CodeBackup | null>;
+  createCodeBackup(backup: InsertCodeBackup): Promise<CodeBackup>;
+  deleteCodeBackup(id: string): Promise<void>;
 }
 
 import { googleSheetsService } from './googleSheets';
@@ -321,6 +329,34 @@ export class GoogleSheetsStorage implements IStorage {
     backup.status = 'استعادة';
     backup.restoredAt = new Date().toISOString();
     this.backups.set(id, backup);
+  }
+
+  // ===== Code Backup Implementation (In-Memory) =====
+  private codeBackups: Map<string, CodeBackup> = new Map();
+
+  async getCodeBackups(): Promise<CodeBackup[]> {
+    return Array.from(this.codeBackups.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async getCodeBackupById(id: string): Promise<CodeBackup | null> {
+    return this.codeBackups.get(id) || null;
+  }
+
+  async createCodeBackup(backup: InsertCodeBackup): Promise<CodeBackup> {
+    const id = `CODE-BACKUP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newBackup: CodeBackup = {
+      id,
+      ...backup,
+      createdAt: new Date().toISOString(),
+    };
+    this.codeBackups.set(id, newBackup);
+    return newBackup;
+  }
+
+  async deleteCodeBackup(id: string): Promise<void> {
+    this.codeBackups.delete(id);
   }
 }
 

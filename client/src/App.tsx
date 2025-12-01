@@ -25,6 +25,7 @@ import AdminDashboard from "@/pages/admin";
 import AdminImagesPage from "@/pages/admin/admin-images";
 import AdminAnalytics from "@/pages/admin/admin-analytics";
 import AdminBackup from "@/pages/admin/admin-backup";
+import AdminCodeBackup from "@/pages/admin/admin-code-backup";
 
 function Router() {
   return (
@@ -50,6 +51,7 @@ function Router() {
       <Route path="/admin" component={AdminDashboard} />
       <Route path="/admin/analytics" component={AdminAnalytics} />
       <Route path="/admin/backup" component={AdminBackup} />
+      <Route path="/admin/code-backup" component={AdminCodeBackup} />
       <Route path="/admin/images/:propertyNumber" component={AdminImagesPage} />
 
       {/* صفحة 404 */}
