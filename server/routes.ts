@@ -1456,8 +1456,85 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   }
 });
 
+  // ================================
+  // 🎯 PUBLIC: التحقق من العقار والاشتراك السريع
+  // ================================
+
+  // التحقق من رقم العقار والرقم السري
+  app.post("/api/public/verify-property", async (req, res) => {
+    try {
+      const { propertyNumber, pin } = req.body;
+      
+      if (!propertyNumber || !pin) {
+        return res.status(400).json({ error: "رقم العقار والرقم السري مطلوبان" });
+      }
+
+      const property = await storage.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      if (property.pin !== pin) {
+        return res.status(401).json({ error: "الرقم السري غير صحيح" });
+      }
+
+      res.json({
+        propertyNumber: property.propertyNumber,
+        name: property.name,
+        city: property.city,
+        type: property.type,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "خطأ في التحقق" });
+    }
+  });
+
+  // الاشتراك السريع (بدون دخول)
+  app.post("/api/public/subscribe", async (req, res) => {
+    try {
+      const { propertyNumber, packageId } = req.body;
+      
+      if (!propertyNumber || !packageId) {
+        return res.status(400).json({ error: "البيانات المطلوبة ناقصة" });
+      }
+
+      const property = await storage.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      const newPackage = await storage.getPackageById(packageId);
+      if (!newPackage) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+
+      const today = new Date();
+      const endDate = new Date(today.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
+
+      const newSubscription = await storage.createSubscription({
+        propertyNumber,
+        packageId,
+        startDate: today.toISOString(),
+        endDate: endDate.toISOString(),
+        status: 'نشط',
+      });
+
+      await storage.updateProperty(propertyNumber, {
+        subscriptionType: newPackage.type,
+      });
+
+      res.json({
+        ok: true,
+        message: "تم الاشتراك بنجاح",
+        subscription: newSubscription,
+      });
+    } catch (err: any) {
+      console.error("Public subscribe error:", err);
+      res.status(500).json({ error: err?.message || "فشل الاشتراك" });
+    }
+  });
+
   // ======================
   // DONE
   // ======================
   return createServer(app);
-}
