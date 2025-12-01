@@ -1,0 +1,179 @@
+ccept Dashboard
+Profile
+Payment Integrations
+Orders
+Transactions
+Checkout Customization
+API Checkout Experience
+Basics of API
+POST
+
+API Setup - (Secret and Public Key)
+POST
+
+Unified Intention API Experience
+Pixel (Native Payment Experience)
+Split Payment Feature
+E-Commerce Plugins
+Shopify
+WordPress (WooCommerce)
+Prerequisites Before Installation of Plugin
+Steps to Install the Paymob Plugin from WordPress Market Place
+Steps to Install the Paymob Plugin from WooCommerce Marketplace:
+Setting Up the Main Configuration
+Payment Integrations
+Card Embedded Settings
+WooCommerce Subscription
+OpenCart
+Odoo
+Odoo Enterprise
+Magento
+WHMCS
+Cs-Cart
+PrestaShop
+Joomla
+ZenCart
+OsCommerce
+Laravel-Bagisto
+Drupal
+Subscriptions
+POST
+
+Authentication Request (Generate Token)
+POST
+
+Create Subscription plan
+POST
+
+Create Subscriptions
+POST
+
+Suspend Subscription Plan
+POST
+
+Resume Subscription plan
+PUT
+
+Update Subscription Plan
+GET
+
+List Subscription Plans
+POST
+
+Suspend Subscription
+POST
+
+Resume Subscription
+POST
+
+Cancel Subscription
+PUT
+
+Update Subscription
+GET
+
+List Subscription Cards
+POST
+
+Change Subscription Primary card
+POST
+
+Delete Secondary Card
+GET
+
+List Subscription Details
+GET
+
+Transaction ID Subscriptions
+GET
+
+Last Transaction Subscription
+GET
+
+List Subscription Transactions
+Webhook
+POST
+
+Webhook-New Subscription Plan
+POST
+
+Webhook-Existing Subscription (Register Webhook)
+HMAC Calculation for Subscription Callback
+Mobile SDKs
+Mobile SDKs V2
+IOS SDK
+Android SDK
+Flutter SDK
+React Native SDK
+Test Credentials
+Payment Types
+3D Secure (3DS)
+Auth and Capture
+Card Verification
+Pay With Saved Card Token
+POST
+
+Pay With Saved Card Token-Normal Moto Integration Flow
+POST
+
+Pay With Saved Card Token- 3DS Integration Flow through Unified Checkout.
+Generating a Saved Card Token
+Generating a Payment Key
+Payment Links
+Payment Link (Quick Link)
+Payment Link (API)
+POST
+
+Login
+POST
+
+Create Payment Link
+Payment Actions
+Dashboard
+Refund Transaction Through Dashboard
+Void Transaction Through Dashboard
+Auth-Capture Transaction Through Dashboard
+API Level
+POST
+
+Refund Transaction Through API
+POST
+
+Void Transaction Through API
+POST
+
+Auth-Capture Transaction Through API
+Payment Methods
+Card/MADA
+Tabby
+Tamara
+Google Pay
+Apple Pay
+StcPay
+Transaction Inquiry API
+POST
+
+Authentication Request (Generate Token)
+POST
+
+Retrieve Transaction With Order ID
+Retreive Transaction With Transaction ID
+POST
+
+Retrieve Transaction With Merchant Order ID (Special Reference Number)
+Manage Callback
+Transaction Callbacks
+HMAC
+HMAC Processed Callback
+HMAC Redirection Callback
+HMAC Card Token Object
+Error Description
+MIGS
+Tabby
+Tamara
+Apple Pay
+Google Pay
+STCPay
+Frequently Asked Questions (FAQs)
+Frequently Asked Questions (FAQs)
+Troubleshooting
