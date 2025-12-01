@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  LogOut,
   CreditCard,
   Image as ImageIcon,
   Home,
@@ -152,7 +151,7 @@ export default function OwnerDashboard() {
             : "bg-card")
         }
       >
-        <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 md:py-4 flex items-center justify-between gap-2 md:gap-3">
+        <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 md:py-4">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <div
               className={
@@ -181,11 +180,6 @@ export default function OwnerDashboard() {
               </p>
             </div>
           </div>
-
-          <Button variant="outline" size="sm" onClick={handleLogout} className="flex-shrink-0">
-            <LogOut className="w-4 h-4" />
-            <span className="hidden md:inline ml-2">خروج</span>
-          </Button>
         </div>
       </header>
 
