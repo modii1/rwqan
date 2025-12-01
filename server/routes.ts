@@ -19,6 +19,7 @@ import {
   insertSuggestionSchema,
   insertDiscountCodeSchema,
   insertPackageSchema,
+  type InsertProperty,
 } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -224,10 +225,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
 
   const requireOwner = (req: Request, res: Response, next: NextFunction) => {
-    if (!req.session.propertyNumber)
+    if (!(req.session as any).propertyNumber)
       return res.status(401).json({ error: "Login Required" });
 
-    (req as any).propertyNumber = req.session.propertyNumber;
+    (req as any).propertyNumber = (req.session as any).propertyNumber;
     next();
   };
 
@@ -238,7 +239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!p || p.pin !== pin)
       return res.status(401).json({ error: "Invalid Credentials" });
 
-    req.session.propertyNumber = propertyNumber;
+    (req.session as any).propertyNumber = propertyNumber;
     req.session.save(() => {});
     res.json({ ok: true });
   });
@@ -376,11 +377,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // OWNER SESSION CHECK
   // ======================
   app.get("/api/owner/session", (req, res) => {
-    const isLoggedIn = Boolean(req.session.propertyNumber);
+    const isLoggedIn = Boolean((req.session as any).propertyNumber);
 
     res.json({
       isLoggedIn,
-      propertyNumber: req.session.propertyNumber || null,
+      propertyNumber: (req.session as any).propertyNumber || null,
     });
   });
 
@@ -389,7 +390,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================================================
   app.get("/api/owner/r2-images", requireOwner, async (req, res) => {
     try {
-      const propertyNumber = req.session.propertyNumber;
+      const propertyNumber = (req.session as any).propertyNumber;
 
       const list = await r2.send(
         new ListObjectsV2Command({
@@ -413,7 +414,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ images });
 
     } catch (err) {
-      console.error("R2 LIST ERROR:", err);
       res.status(500).json({ error: "Failed to list R2 images" });
     }
   });
@@ -423,7 +423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================================================
   app.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
     try {
-      const propertyNumber = req.session.propertyNumber;
+      const propertyNumber = (req.session as any).propertyNumber || "";
 
       // عدد الصور الحالية
       const list = await r2.send(
@@ -435,7 +435,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let index = (list.Contents?.length || 0) + 1;
 
-      for (const file of req.files) {
+      const files = Array.isArray(req.files) ? req.files : [];
+      for (const file of files) {
         await r2.send(
           new PutObjectCommand({
             Bucket: R2_BUCKET,
@@ -450,7 +451,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true });
 
     } catch (err) {
-      console.error("R2 UPLOAD ERROR:", err);
       res.status(500).json({ error: "Upload failed" });
     }
   });
@@ -460,7 +460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================================================
   app.delete("/api/owner/images/:index", requireOwner, async (req, res) => {
     try {
-      const propertyNumber = req.session.propertyNumber;
+      const propertyNumber = (req.session as any).propertyNumber || "";
       const index = req.params.index;
 
       const key = `${propertyNumber}/${index}.jpg`;
@@ -474,7 +474,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ ok: true });
     } catch (err) {
-      console.error("R2 DELETE ERROR:", err);
       res.status(500).json({ error: "Delete failed" });
     }
   });
@@ -500,8 +499,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
 
       res.json(packages.filter((p) => p.isActive));
-    } catch (error) {
-      console.error("❌ /api/packages error:", error);
+    } catch {
       res.status(500).json({ error: "failed to load packages" });
     }
   });
@@ -540,23 +538,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // تجهيز البيانات كما يتوقعه propertyToRow
-      const newProperty = {
-        propertyNumber: data.propertyNumber,
-        name: data.name,
-        whatsappNumber: data.whatsappNumber,
-        location: data.location,
-        city: data.city,
-        direction: data.direction,
-        type: data.type,
-        facilities: data.facilities || [],
-        imagesLink: "",                  // عمود الشيت
+      const newProperty: InsertProperty = {
+        propertyNumber: String(data.propertyNumber || ""),
+        name: String(data.name || ""),
+        whatsappNumber: String(data.whatsappNumber || ""),
+        location: String(data.location || ""),
+        city: (data.city as any) || "بريدة",
+        direction: (data.direction as any) || "شمال",
+        type: (data.type as any) || "قسم",
+        facilities: Array.isArray(data.facilities) ? data.facilities : [],
+        imagesLink: "",
         prices,
         subscriptionType: "عادي",
-        lastUpdate: "",
         subscriptionDate: "",
-        pin: data.pin,
-        imagesFolderUrl: "",
-        driveFolderId: "",
+        pin: String(data.pin || ""),
         imageUrls: [],
       };
 
