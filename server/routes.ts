@@ -392,6 +392,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const propertyNumber = (req.session as any).propertyNumber;
 
+      if (!propertyNumber || !R2_BUCKET) {
+        return res.json({ images: [] });
+      }
+
       const list = await r2.send(
         new ListObjectsV2Command({
           Bucket: R2_BUCKET,
@@ -406,15 +410,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       images.sort((a, b) => {
         const aParts = a.split("/").pop() || "";
         const bParts = b.split("/").pop() || "";
-        const na = parseInt(aParts.replace(".jpg", ""));
-        const nb = parseInt(bParts.replace(".jpg", ""));
+        const na = parseInt(aParts.replace(".jpg", "")) || 0;
+        const nb = parseInt(bParts.replace(".jpg", "")) || 0;
         return na - nb;
       });
 
       res.json({ images });
 
     } catch (err) {
-      res.status(500).json({ error: "Failed to list R2 images" });
+      res.json({ images: [] });
     }
   });
 
@@ -424,6 +428,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber || "";
+      
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property number not found in session" });
+      }
+
+      if (!R2_BUCKET) {
+        return res.status(500).json({ error: "R2 bucket not configured" });
+      }
 
       // عدد الصور الحالية
       const list = await r2.send(
@@ -436,6 +448,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let index = (list.Contents?.length || 0) + 1;
 
       const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
       for (const file of files) {
         await r2.send(
           new PutObjectCommand({
@@ -448,10 +464,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         index++;
       }
 
-      res.json({ ok: true });
+      res.json({ ok: true, count: files.length });
 
-    } catch (err) {
-      res.status(500).json({ error: "Upload failed" });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Upload failed" });
     }
   });
 
