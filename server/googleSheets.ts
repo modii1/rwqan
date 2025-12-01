@@ -854,15 +854,15 @@ class GoogleSheetsService {
     try {
       const rows = await this.readSheet(SHEETS.REQUESTS);
       if (!rows || rows.length <= 1) return [];
-      return rows.slice(1).map((row) => ({
-        id: row[0] || "",
-        propertyNumber: row[1] || "",
-        requestCode: row[2] || "",
-        timestamp: row[3] || "",
-        ipAddress: row[4] || "",
-        dayOfWeek: row[5] || "",
-        hourOfDay: Number(row[6]) || 0,
-        createdAt: row[7] || "",
+      return rows.slice(1).map((row, idx) => ({
+        id: `REQ-${idx}`,
+        propertyNumber: row[0] || "",
+        requestCode: "",
+        timestamp: `${row[4] || "2025"}-${row[5] || "12"}-${row[3] || "01"}T${row[6] || "00:00"}:00Z`,
+        ipAddress: "",
+        dayOfWeek: "",
+        hourOfDay: 0,
+        createdAt: new Date().toISOString(),
       }));
     } catch (err) {
       console.error("getRequests error:", err);
@@ -871,26 +871,45 @@ class GoogleSheetsService {
   }
 
   async createRequest(request: InsertRequest): Promise<Request> {
-    const id = `REQ-${Date.now()}`;
-    const newRequest: Request = {
-      id,
-      ...request,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const now = new Date();
+      const propertyName = (await this.getPropertyByNumber(request.propertyNumber))?.name || "";
+      
+      // الحصول على عدد الطلبات الحالية
+      const allRequests = await this.getRequests();
+      const propertyRequests = allRequests.filter(r => r.propertyNumber === request.propertyNumber);
+      const requestCount = propertyRequests.length + 1;
+      
+      // استخراج التاريخ والوقت
+      const day = now.getDate();
+      const month = now.getMonth() + 1;
+      const year = now.getFullYear();
+      const hours = String(now.getHours()).padStart(2, "0");
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const time = `${hours}:${minutes}`;
 
-    const row = [
-      newRequest.id,
-      newRequest.propertyNumber,
-      newRequest.requestCode,
-      newRequest.timestamp,
-      newRequest.ipAddress,
-      newRequest.dayOfWeek,
-      String(newRequest.hourOfDay),
-      newRequest.createdAt,
-    ];
+      // صف الشيت بالترتيب الصحيح
+      const row = [
+        request.propertyNumber,
+        propertyName,
+        String(requestCount),
+        String(day),
+        String(month),
+        String(year),
+        time,
+      ];
 
-    await this.appendToSheet(SHEETS.REQUESTS, [row]);
-    return newRequest;
+      await this.appendToSheet(SHEETS.REQUESTS, [row]);
+      
+      return {
+        id: `REQ-${Date.now()}`,
+        ...request,
+        createdAt: now.toISOString(),
+      };
+    } catch (err) {
+      console.error("createRequest error:", err);
+      throw err;
+    }
   }
 }
 
