@@ -183,6 +183,23 @@ export const analyticsSchema = z.object({
 export type Analytics = z.infer<typeof analyticsSchema>;
 
 // =========================
+// Property Analytics Schema (إحصائيات العقار)
+// =========================
+export const propertyAnalyticsSchema = z.object({
+  propertyNumber: z.string(),
+  monthlyWhatsappRequests: z.number().default(0),
+  previousMonthGrowth: z.number().default(0),
+  averageDailyRequests: z.number().default(0),
+  highestDemandDay: z.string().default("الجمعة"),
+  engagementRate: z.string().default("متوسط"),
+  peakRequestPeriod: z.string().default("المساء"),
+  visibilityStatus: z.string().default("عادي"),
+  previousMonthRequests: z.number().default(0),
+});
+
+export type PropertyAnalytics = z.infer<typeof propertyAnalyticsSchema>;
+
+// =========================
 // 100 Facilities List (قائمة المرافق)
 // =========================
 export const FACILITIES = [

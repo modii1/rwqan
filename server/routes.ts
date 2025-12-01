@@ -502,6 +502,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================================================
+  // 📊 جلب إحصائيات العقار
+  // ======================================================
+  app.get("/api/owner/analytics", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property not found in session" });
+      }
+
+      // قراءة بيانات الطلبات لحساب الإحصائيات
+      const requestsSheet = await googleSheetsService.readSheet("الطلبات");
+      const allProperties = await googleSheetsService.readSheet("بيانات العقارات");
+      
+      // حساب الإحصائيات
+      const thisMonth = new Date();
+      const lastMonth = new Date(thisMonth.getTime() - 30 * 24 * 60 * 60 * 1000);
+      
+      const thisMonthRequests = requestsSheet?.slice(1).filter((row: any) => {
+        const reqDate = new Date(row[2] || "");
+        return row[1] === propertyNumber && reqDate >= lastMonth;
+      }).length || 0;
+      
+      const previousMonthRequests = requestsSheet?.slice(1).filter((row: any) => {
+        const reqDate = new Date(row[2] || "");
+        return row[1] === propertyNumber && reqDate < lastMonth && reqDate >= new Date(lastMonth.getTime() - 30 * 24 * 60 * 60 * 1000);
+      }).length || 0;
+      
+      const growth = previousMonthRequests > 0 
+        ? Math.round(((thisMonthRequests - previousMonthRequests) / previousMonthRequests) * 100)
+        : 0;
+
+      // حساب أفضل يوم
+      const dayStats: Record<string, number> = {};
+      requestsSheet?.slice(1).forEach((row: any) => {
+        if (row[1] === propertyNumber) {
+          const reqDate = new Date(row[2] || "");
+          const day = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][reqDate.getDay()];
+          dayStats[day] = (dayStats[day] || 0) + 1;
+        }
+      });
+
+      const highestDemandDay = Object.entries(dayStats).sort((a, b) => b[1] - a[1])[0]?.[0] || "الجمعة";
+      const averageDailyRequests = Math.round(thisMonthRequests / 30);
+
+      res.json({
+        monthlyWhatsappRequests: thisMonthRequests,
+        previousMonthGrowth: growth,
+        averageDailyRequests,
+        highestDemandDay,
+        engagementRate: thisMonthRequests > 5 ? "مرتفع" : thisMonthRequests > 0 ? "متوسط" : "منخفض",
+        peakRequestPeriod: "المساء",
+        visibilityStatus: "ظهور عادي",
+        previousMonthRequests,
+        totalPropertiesInSystem: allProperties?.length - 1 || 0,
+      });
+    } catch (err: any) {
+      console.error("Analytics error:", err?.message);
+      res.json({
+        monthlyWhatsappRequests: 0,
+        previousMonthGrowth: 0,
+        averageDailyRequests: 0,
+        highestDemandDay: "الجمعة",
+        engagementRate: "متوسط",
+        peakRequestPeriod: "المساء",
+        visibilityStatus: "عادي",
+        previousMonthRequests: 0,
+        totalPropertiesInSystem: 0,
+      });
+    }
+  });
+
+  // ======================================================
   // 🔴 حذف صورة من R2 باستخدام URL
   // ======================================================
   app.post("/api/owner/images/delete", requireOwner, async (req, res) => {

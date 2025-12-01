@@ -47,6 +47,17 @@ export default function OwnerDashboard() {
     refetchOnWindowFocus: false,
   });
 
+  // 3) جلب الإحصائيات
+  const {
+    data: analytics,
+    isLoading: analyticsLoading,
+  } = useQuery<any>({
+    queryKey: ["/api/owner/analytics"],
+    enabled: sessionData?.isLoggedIn === true,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
   useEffect(() => {
     if (!isSessionLoading && sessionData) {
       if (!sessionData.isLoggedIn) {
@@ -248,26 +259,25 @@ export default function OwnerDashboard() {
                 تجريبي
               </Badge>
             </div>
-            {/* TODO: اربط الأرقام الحقيقية من الباك إند */}
-            <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
               <StatCard
                 label="معدل التفاعل"
-                value="مرتفـع"
+                value={analytics?.engagementRate || "متوسط"}
                 icon={<Activity className="w-4 h-4" />}
               />
               <StatCard
                 label="الأكثر طلباً"
-                value="فترة المساء"
+                value={analytics?.peakRequestPeriod || "فترة المساء"}
                 icon={<BarChart2 className="w-4 h-4" />}
               />
               <StatCard
                 label="نمو عن الشهر الماضي"
-                value="+18%"
+                value={`+${analytics?.previousMonthGrowth || 0}%`}
                 icon={<TrendingUpIcon />}
               />
               <StatCard
                 label="حالة الظهور"
-                value={isVip ? "بارز في القائمة" : "ظهور عادي"}
+                value={isVip ? "بارز في القائمة" : (analytics?.visibilityStatus || "ظهور عادي")}
                 icon={<Eye className="w-4 h-4" />}
               />
             </div>
@@ -283,26 +293,25 @@ export default function OwnerDashboard() {
             </Badge>
           </div>
 
-          {/* TODO: عدّل هذه القيم عندما توفر API للأناليتكس */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <AnalyticsBox
               label="طلبات واتساب هذا الشهر"
-              value="76"
-              note="نمو +32% عن الشهر الماضي"
+              value={analytics?.monthlyWhatsappRequests || 0}
+              note={`نمو +${analytics?.previousMonthGrowth || 0}% عن الشهر الماضي`}
             />
             <AnalyticsBox
               label="إجمالي الشاليهات في النظام"
-              value="31"
+              value={analytics?.totalPropertiesInSystem || 0}
               note="موقعك بين الأعلى طلباً"
             />
             <AnalyticsBox
               label="متوسط الطلبات يومياً"
-              value="4"
+              value={analytics?.averageDailyRequests || 0}
               note="معدل ثابت وجيد"
             />
             <AnalyticsBox
               label="اليوم الأعلى طلباً"
-              value="الجمعة"
+              value={analytics?.highestDemandDay || "الجمعة"}
               note="ركّز عروضك في نهاية الأسبوع"
             />
           </div>
