@@ -18,17 +18,17 @@ export default function OwnerSubscriptionPage() {
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
 
   // جلب بيانات المالك
-  const { data: property } = useQuery<Property>({
+  const { data: property, isLoading: propertyLoading, error: propertyError } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
   });
 
   // جلب الاشتراك الحالي
-  const { data: currentSubscription } = useQuery<Subscription>({
+  const { data: currentSubscription, isLoading: subscriptionLoading, error: subscriptionError } = useQuery<Subscription>({
     queryKey: ["/api/owner/current-subscription"],
   });
 
   // جلب جميع الباقات
-  const { data: packages = [] } = useQuery<Package[]>({
+  const { data: packages = [], isLoading: packagesLoading } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
@@ -41,6 +41,8 @@ export default function OwnerSubscriptionPage() {
     : 0;
 
   const isSubscriptionActive = daysRemaining > 0;
+  const isLoading = propertyLoading || subscriptionLoading || packagesLoading;
+  const error = propertyError || subscriptionError;
 
   // تحضير معلومات الدفع
   const prepareMutation = useMutation({
@@ -93,7 +95,22 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
-  if (!property || !currentSubscription) {
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="p-8 max-w-md text-center border-red-300">
+          <h2 className="text-xl font-bold text-red-600 mb-2">خطأ</h2>
+          <p className="text-muted-foreground mb-4">{error?.message || 'حدث خطأ في تحميل البيانات'}</p>
+          <p className="text-sm text-muted-foreground mb-4">قد تحتاج إلى تسجيل الدخول أولاً</p>
+          <Button onClick={() => setLocation('/owner/login')} className="w-full">
+            الذهاب لتسجيل الدخول
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (isLoading || !property || !currentSubscription) {
     return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
   }
 
