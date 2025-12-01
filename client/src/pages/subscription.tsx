@@ -342,6 +342,13 @@ export default function SubscriptionPage() {
                         <div className="font-semibold">تحويل بنكي</div>
                         <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
                       </div>
+                      <div
+                        onClick={() => setPaymentMethod('wallet')}
+                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'wallet' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                      >
+                        <div className="font-semibold">محفظة رقمية</div>
+                        <p className="text-sm text-muted-foreground">تحويل عبر تطبيق المحفظة</p>
+                      </div>
 
                       {/* Discount Code */}
                       <div className="mt-4 p-4 bg-muted/30 rounded-lg">
@@ -355,10 +362,10 @@ export default function SubscriptionPage() {
                         )}
                       </div>
 
-                      {/* Bank Receipt */}
-                      {paymentMethod === 'bank' && (
+                      {/* Bank/Wallet Receipt */}
+                      {(paymentMethod === 'bank' || paymentMethod === 'wallet') && (
                         <div className="p-4 bg-muted/30 rounded-lg">
-                          <label className="block text-sm font-semibold mb-2">إيصال التحويل البنكي</label>
+                          <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
                           <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
                           <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
                             <Upload className="w-4 h-4" />
