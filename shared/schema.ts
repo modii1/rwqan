@@ -23,7 +23,7 @@ export const propertySchema = z.object({
     special: z.string().optional(), // سعر خاص
     holidays: z.string(), // إجازات
   }),
-  subscriptionType: z.enum(['عادي', 'مميز']), // نوع الاشتراك
+  subscriptionType: z.enum(['عادي', 'موثوق']), // نوع الاشتراك
   lastUpdate: z.string().optional(), // آخر تحديث
   subscriptionDate: z.string().optional(), // تاريخ الاشتراك
   pin: z.string().optional(), // رقم سري للدخول (للنظام القديم)
@@ -63,7 +63,7 @@ export const packageSchema = z.object({
   name: z.string(),
   duration: z.number(), // بالأيام
   price: z.number(), // بالريال
-  type: z.enum(['عادي', 'مميز']),
+  type: z.enum(['عادي', 'موثوق']),
   features: z.array(z.string()).default([]),
   description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),

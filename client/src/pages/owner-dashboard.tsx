@@ -119,7 +119,7 @@ export default function OwnerDashboard() {
 
   // ================== من هنا يبدأ الذكاء البصري للوحة ==================
 
-  const isVip = property.subscriptionType === "مميز";
+  const isVip = property.subscriptionType === "موثوق";
 
   // Calculate subscription progress
   const totalDays = 90;
