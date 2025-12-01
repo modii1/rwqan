@@ -349,7 +349,7 @@ export default function PropertiesPage() {
                 سجّل عقارك الآن واحصل على عرض مميز في منصة مودي الذكي
               </p>
             </div>
-            <Link href="/owner/subscription">
+            <Link href="/subscription">
               <Button
                 size="lg"
                 className="gradient-golden min-w-48 text-base font-bold shadow-lg"
