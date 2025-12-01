@@ -18,7 +18,7 @@ export function PriceDisplay({
   amount,
   showSymbol = true,
   size = 'md',
-  textColor = 'text-[#1f2937]',
+  textColor = 'text-[#434040]',
 }: PriceDisplayProps) {
   const sizeClass = sizeMap[size];
 
