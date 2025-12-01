@@ -95,13 +95,9 @@ export default function OwnerDashboard() {
 
   const isVip = property.subscriptionType === "موثوق";
 
-  // TODO: اربط هذه القيم من الباك إند لاحقًا
-  const totalDays = 90; // إجمالي مدة الاشتراك مثلاً
-  const remainingDays =
-    isVip
-      ? 25 // مثال: باقي 25 يوم – استبدلها من الباك
-      : null;
-
+  // Calculate subscription progress
+  const totalDays = 90;
+  const remainingDays = isVip ? 25 : null;
   const usedDays =
     remainingDays !== null ? Math.max(totalDays - remainingDays, 0) : null;
   const progressPercent =

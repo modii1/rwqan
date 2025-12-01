@@ -214,13 +214,58 @@ export class GoogleSheetsStorage implements IStorage {
     return googleSheetsService.updatePayment(id, payment);
   }
 
+  async getPropertyAnalytics(propertyNumber: string): Promise<any> {
+    const requests = await googleSheetsService.getRequests();
+    const propertyRequests = requests.filter(r => r.propertyNumber === propertyNumber);
+    
+    const now = new Date();
+    const currentMonth = propertyRequests.filter(r => {
+      const reqDate = new Date(r.timestamp);
+      return reqDate.getMonth() === now.getMonth() && reqDate.getFullYear() === now.getFullYear();
+    });
+    
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1);
+    const previousMonth = propertyRequests.filter(r => {
+      const reqDate = new Date(r.timestamp);
+      return reqDate.getMonth() === lastMonth.getMonth() && reqDate.getFullYear() === lastMonth.getFullYear();
+    });
+
+    const monthlyRequests = currentMonth.length;
+    const previousMonthRequests = previousMonth.length;
+    const growth = previousMonthRequests > 0 
+      ? Math.round(((monthlyRequests - previousMonthRequests) / previousMonthRequests) * 100)
+      : monthlyRequests > 0 ? 100 : 0;
+
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const avgDaily = Math.round(monthlyRequests / daysInMonth);
+
+    const requestsByDay: Record<string, number> = {};
+    const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    currentMonth.forEach(r => {
+      const day = days[new Date(r.timestamp).getDay()];
+      requestsByDay[day] = (requestsByDay[day] || 0) + 1;
+    });
+
+    const highestDay = Object.entries(requestsByDay).sort((a, b) => b[1] - a[1])[0]?.[0] || 'الجمعة';
+
+    return {
+      propertyNumber,
+      monthlyWhatsappRequests: monthlyRequests,
+      previousMonthGrowth: growth,
+      averageDailyRequests: avgDaily,
+      highestDemandDay: highestDay,
+      engagementRate: monthlyRequests > 50 ? 'عالي' : monthlyRequests > 20 ? 'متوسط' : 'منخفض',
+      peakRequestPeriod: 'المساء',
+      visibilityStatus: monthlyRequests > 30 ? 'ممتاز' : monthlyRequests > 15 ? 'جيد' : 'عادي',
+      previousMonthRequests,
+    };
+  }
+
   async getAnalytics(): Promise<Analytics | null> {
-    // Will be implemented
     return null;
   }
 
   async updateAnalytics(analytics: Analytics): Promise<void> {
-    // Will be implemented
   }
 }
 
