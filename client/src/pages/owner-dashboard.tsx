@@ -499,7 +499,7 @@ function PropertyActionsButton({
             </div>
           </div>
           <div>
-            <div className="font-bold text-sm mb-1">طلبات واتساب</div>
+            <div className="font-bold text-sm mb-1">إدارة العقار</div>
             <div className="text-[11px] text-muted-foreground leading-relaxed">
               عرض وإدارة العقار
             </div>
