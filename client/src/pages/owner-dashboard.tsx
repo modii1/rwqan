@@ -112,10 +112,9 @@ export default function OwnerDashboard() {
     }
   };
 
-  if (isSessionLoading || isAuthenticated === null)
-    return <Loader text="جاري التحقق من الجلسة..." />;
-  if (isPropertyLoading) return <Loader text="جاري تحميل بيانات العقار..." />;
-  if (propertyError || !property) return <ErrorView setLocation={setLocation} />;
+  if (isSessionLoading || isAuthenticated === null) return null;
+  if (isPropertyLoading) return null;
+  if (propertyError || !property) return null;
 
   // ================== من هنا يبدأ الذكاء البصري للوحة ==================
 
@@ -466,39 +465,6 @@ export default function OwnerDashboard() {
 }
 
 /* ================== مكوّنات مساعدة ================== */
-
-function Loader({ text }: { text: string }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center text-center">
-      <div>
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="mt-4 text-muted-foreground">{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <Card className="w-full max-w-md p-8 text-center">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
-          <AlertTriangle className="w-8 h-8 text-red-500" />
-        </div>
-        <h2 className="text-xl font-bold mb-2">خطأ في تحميل البيانات</h2>
-        <p className="text-muted-foreground mb-4">
-          تعذر تحميل بيانات العقار، حاول مرة أخرى.
-        </p>
-        <div className="flex gap-2 justify-center">
-          <Button onClick={() => window.location.reload()}>إعادة المحاولة</Button>
-          <Button variant="outline" onClick={() => setLocation("/owner/login")}>
-            تسجيل الدخول
-          </Button>
-        </div>
-      </Card>
-    </div>
-  );
-}
 
 function Info({ title, value }: { title: string; value: React.ReactNode }) {
   return (
