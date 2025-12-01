@@ -1465,6 +1465,63 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
 });
 
   // ======================
+  // MISSING ENDPOINTS FOR SUBSCRIPTION PAGE
+  // ======================
+  
+  // GET owner's property data
+  app.get("/api/owner/property", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property not found in session" });
+      }
+      
+      const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "Property not found" });
+      }
+      
+      res.json(property);
+    } catch (err: any) {
+      console.error("Get property error:", err?.message);
+      res.status(500).json({ error: "Failed to load property" });
+    }
+  });
+
+  // GET owner's current subscription
+  app.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property not found in session" });
+      }
+      
+      const subscriptions = await googleSheetsService.getSubscriptions();
+      const subscription = subscriptions.find(s => s.propertyNumber === propertyNumber);
+      
+      if (!subscription) {
+        return res.status(404).json({ error: "No subscription found" });
+      }
+      
+      res.json(subscription);
+    } catch (err: any) {
+      console.error("Get subscription error:", err?.message);
+      res.status(500).json({ error: "Failed to load subscription" });
+    }
+  });
+
+  // GET all available packages
+  app.get("/api/packages", async (req, res) => {
+    try {
+      const packages = await googleSheetsService.getPackages();
+      res.json(packages);
+    } catch (err: any) {
+      console.error("Get packages error:", err?.message);
+      res.status(500).json({ error: "Failed to load packages" });
+    }
+  });
+
+  // ======================
   // DONE
   // ======================
   return createServer(app);
