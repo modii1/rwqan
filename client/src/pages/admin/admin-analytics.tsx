@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye } from "lucide-react";
+import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye, Eye as EyeIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AdminAnalytics() {
@@ -93,7 +93,7 @@ export default function AdminAnalytics() {
                   {analyticsData?.uniqueVisitors || 0}
                 </p>
               </div>
-              <Users className="w-8 h-8 text-purple-400 opacity-70" />
+              <Eye className="w-8 h-8 text-purple-400 opacity-70" />
             </div>
           </Card>
           <Card className="p-6 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800">
