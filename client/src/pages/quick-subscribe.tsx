@@ -1,364 +1,339 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Package } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Package } from "@shared/schema";
-import { CheckCircle, AlertCircle } from "lucide-react";
+import { useLocation } from "wouter";
+import { ChevronRight, Upload, CheckCircle2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
-type Step = 'verify' | 'select' | 'payment' | 'success';
+type Step = 1 | 2 | 3;
 
 export default function QuickSubscribePage() {
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [step, setStep] = useState<Step>('verify');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [currentStep, setCurrentStep] = useState<Step>(1);
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [packageToView, setPackageToView] = useState<Package | null>(null);
+
+  // Step 1: Verify
   const [propertyNumber, setPropertyNumber] = useState("");
   const [pin, setPin] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifiedProperty, setVerifiedProperty] = useState<any>(null);
 
-  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
-  const [paymentInfo, setPaymentInfo] = useState<any>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  // Step 3: Payment
+  const [discountCode, setDiscountCode] = useState("");
+  const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
   const selectedPackage = packages.find(p => p.id === selectedPackageId);
+  const isFreePackage = selectedPackage?.price === 0;
 
-  // التحقق من العقار والرقم السري
+  // Verify property
   const handleVerify = async () => {
     if (!propertyNumber || !pin) {
-      toast({
-        title: "خطأ",
-        description: "أدخل رقم العقار والرقم السري",
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: "أدخل رقم العقار والرقم السري", variant: "destructive" });
       return;
     }
-
     setIsVerifying(true);
     try {
-      const response = await apiRequest('POST', '/api/public/verify-property', {
-        propertyNumber,
-        pin,
-      });
+      const response = await apiRequest('POST', '/api/public/verify-property', { propertyNumber, pin });
       const data = await response.json();
       setVerifiedProperty(data);
-      setStep('select');
-      toast({
-        title: "تم التحقق بنجاح",
-        description: `مرحباً بك ${data.name}`,
-      });
+      setCurrentStep(2);
+      toast({ title: "تم التحقق بنجاح", description: `مرحباً بك ${data.name}` });
     } catch (error: any) {
-      toast({
-        title: "خطأ في التحقق",
-        description: error.message || "رقم العقار أو الرقم السري غير صحيح",
-        variant: "destructive",
-      });
+      toast({ title: "خطأ في التحقق", description: error.message || "رقم العقار أو الرقم السري غير صحيح", variant: "destructive" });
     } finally {
       setIsVerifying(false);
     }
   };
 
-  // اختيار الباقة والدفع
-  const handleSelectPackage = async () => {
-    if (!selectedPackageId) {
-      toast({
-        title: "خطأ",
-        description: "اختر باقة",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const pkg = packages.find(p => p.id === selectedPackageId);
-    if (!pkg) return;
-
-    // إذا كانت الباقة مجانية
-    if (pkg.price === 0) {
-      setIsProcessing(true);
-      try {
-        await apiRequest('POST', '/api/public/subscribe', {
-          propertyNumber,
-          packageId: selectedPackageId,
-        });
-        setStep('success');
-        toast({
-          title: "نجح",
-          description: "تم تفعيل اشتراكك بنجاح",
-        });
-      } catch (error: any) {
-        toast({
-          title: "خطأ",
-          description: error.message,
-          variant: "destructive",
-        });
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      // عرض خيارات الدفع
-      setPaymentInfo({
-        packageId: selectedPackageId,
-        packageName: pkg.name,
-        price: pkg.price,
-        duration: pkg.duration,
-      });
-      setStep('payment');
-    }
-  };
-
-  // تأكيد الدفع والاشتراك
-  const handleConfirmPayment = async () => {
-    if (!selectedPaymentMethod) {
-      toast({
-        title: "خطأ",
-        description: "اختر طريقة دفع",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsProcessing(true);
+  const validateDiscount = async () => {
+    if (!discountCode) return;
     try {
-      toast({
-        title: "جاري الدفع",
-        description: `سيتم توجيهك لـ ${selectedPaymentMethod}...`,
-      });
-
-      // محاكاة الدفع
-      setTimeout(() => {
-        // بعد الدفع الناجح
-        handleConfirmSubscription();
-      }, 1000);
+      const response = await apiRequest('POST', '/api/discount/validate', { code: discountCode });
+      const data = await response.json();
+      setValidatedDiscount(data);
+      toast({ title: "كود الخصم صالح", description: `سيتم خصم ${data.type === 'نسبة' ? data.value + '%' : data.value + ' ريال'}` });
     } catch (error: any) {
-      toast({
-        title: "خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
-      setIsProcessing(false);
+      toast({ title: "كود الخصم غير صالح", description: error.message, variant: "destructive" });
+      setValidatedDiscount(null);
     }
   };
 
-  const handleConfirmSubscription = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPackageId) return;
+
+    setIsSubmitting(true);
     try {
-      await apiRequest('POST', '/api/public/subscribe', {
+      const subscribeResponse = await apiRequest('POST', '/api/public/subscribe', {
         propertyNumber,
         packageId: selectedPackageId,
       });
-      setStep('success');
-      toast({
-        title: "نجح",
-        description: "تم تفعيل اشتراكك بنجاح",
-      });
+      const subscribeData = await subscribeResponse.json();
+
+      if (isFreePackage) {
+        toast({ title: "نجح", description: "تم تفعيل اشتراكك بنجاح" });
+        setTimeout(() => setLocation('/'), 1500);
+      } else {
+        if (paymentMethod === 'online') {
+          try {
+            const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
+              propertyNumber,
+              packageId: selectedPackageId,
+              discountCode: validatedDiscount?.code,
+              paymentMethod: 'cards',
+            });
+            const paymentData = await paymentResponse.json();
+            if (paymentData.checkoutUrl) {
+              window.location.href = paymentData.checkoutUrl;
+            } else {
+              throw new Error("لم يتم الحصول على رابط الدفع");
+            }
+          } catch (err: any) {
+            toast({ title: "خطأ في الدفع الإلكتروني", description: err.message, variant: "destructive" });
+            throw err;
+          }
+        } else if (paymentMethod === 'bank' && receiptFile) {
+          const formDataUpload = new FormData();
+          formDataUpload.append('propertyNumber', propertyNumber);
+          formDataUpload.append('packageId', selectedPackageId);
+          formDataUpload.append('receipt', receiptFile);
+          if (validatedDiscount?.code) {
+            formDataUpload.append('discountCode', validatedDiscount.code);
+          }
+          await fetch('/api/owner/payment/bank-transfer', { method: 'POST', body: formDataUpload });
+          toast({ title: "تم استقبال طلبك", description: "سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي" });
+          setTimeout(() => setLocation('/'), 1500);
+        }
+      }
     } catch (error: any) {
-      toast({
-        title: "خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: error.message || "حدث خطأ غير متوقع", variant: "destructive" });
     } finally {
-      setIsProcessing(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <header className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-[#434040] mb-2">اشترك الآن</h1>
-          <p className="text-muted-foreground">ارقِ عقارك بدون تسجيل دخول</p>
-        </header>
+    <div className="min-h-screen bg-background">
+      <header className="bg-card border-b border-border shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <h1 className="text-2xl font-bold text-[#434040]">ترقية الاشتراك</h1>
+          <p className="text-sm text-muted-foreground">بدون تسجيل دخول</p>
+        </div>
+      </header>
 
-        {/* Step 1: التحقق */}
-        {step === 'verify' && (
-          <Card className="p-8 border-[#e0c97b]">
-            <h2 className="text-2xl font-bold text-[#434040] mb-6">تحقق من عقارك</h2>
-            <div className="space-y-4 max-w-md mx-auto">
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Progress Bar - 3 Steps */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 1 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                {currentStep > 1 ? '✓' : '1'}
+              </div>
+              <p className="text-xs mt-2 text-center font-semibold">التحقق</p>
+            </div>
+            <div className={`flex-1 h-1 ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                {currentStep > 2 ? '✓' : '2'}
+              </div>
+              <p className="text-xs mt-2 text-center font-semibold">اختيار الباقة</p>
+            </div>
+            <div className={`flex-1 h-1 ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                3
+              </div>
+              <p className="text-xs mt-2 text-center font-semibold">طريقة الدفع</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Step 1: Verify */}
+        {currentStep === 1 && (
+          <Card className="p-8">
+            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: تحقق من عقارك</h2>
+            <div className="max-w-md mx-auto space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
-                <Input
-                  placeholder="00123"
-                  value={propertyNumber}
-                  onChange={(e) => setPropertyNumber(e.target.value.slice(0, 5))}
-                  maxLength={5}
-                  data-testid="input-property-number"
-                />
+                <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام) *</label>
+                <Input placeholder="00123" value={propertyNumber} onChange={(e) => setPropertyNumber(e.target.value.slice(0, 5))} maxLength={5} required />
               </div>
               <div>
-                <label className="block text-sm font-semibold mb-2">الرقم السري</label>
-                <Input
-                  type="password"
-                  placeholder="أدخل الرقم السري"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  data-testid="input-pin"
-                />
+                <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
+                <Input type="password" placeholder="أدخل الرقم السري" value={pin} onChange={(e) => setPin(e.target.value)} required />
               </div>
-              <Button
-                onClick={handleVerify}
-                disabled={isVerifying || !propertyNumber || !pin}
-                className="w-full"
-                data-testid="button-verify"
-              >
-                {isVerifying ? 'جاري التحقق...' : 'متابعة'}
+              <Button onClick={handleVerify} disabled={isVerifying || !propertyNumber || !pin} className="w-full">
+                {isVerifying ? 'جاري التحقق...' : 'التالي: اختيار الباقة'}
               </Button>
             </div>
           </Card>
         )}
 
-        {/* Step 2: اختيار الباقة */}
-        {step === 'select' && verifiedProperty && (
-          <Card className="p-8 border-[#e0c97b] bg-gradient-to-r from-[#fffdf0] to-background mb-6">
+        {/* Step 2: Select Package */}
+        {currentStep === 2 && verifiedProperty && (
+          <Card className="p-8">
             <div className="flex items-center gap-3 mb-6">
-              <CheckCircle className="w-6 h-6 text-green-600" />
+              <CheckCircle2 className="w-6 h-6 text-green-600" />
               <div>
                 <h2 className="text-xl font-bold text-[#434040]">{verifiedProperty.name}</h2>
                 <p className="text-sm text-muted-foreground">رقم العقار: {propertyNumber}</p>
               </div>
             </div>
+            <h3 className="text-lg font-bold text-[#434040] mb-6">الخطوة 2: اختر باقة الاشتراك</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {packages.map((pkg) => (
+                <div
+                  key={pkg.id}
+                  className={`p-5 rounded-lg border-2 transition-all cursor-pointer ${
+                    selectedPackageId === pkg.id
+                      ? 'ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]'
+                      : 'border-border hover:border-[#434040]/50'
+                  }`}
+                  onClick={() => setSelectedPackageId(pkg.id)}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h4 className="font-bold">{pkg.name}</h4>
+                      <p className="text-2xl font-bold text-[#434040]">{pkg.price === 0 ? 'مجاني' : `${pkg.price} ر.س`}</p>
+                    </div>
+                    {selectedPackageId === pkg.id && (
+                      <Badge className="bg-[#434040] text-white">مختار</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
+                  {pkg.type === 'موثوق' && (
+                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9]">موثوق</Badge>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setPackageToView(pkg)} className="flex-1">
+                      التفاصيل
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => setSelectedPackageId(pkg.id)} className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}>
+                      اختيار
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 pt-6 border-t">
+              <Button type="button" variant="outline" onClick={() => { setCurrentStep(1); setVerifiedProperty(null); }} className="gap-2">
+                <ChevronRight className="w-4 h-4" />
+                السابق
+              </Button>
+              <Button onClick={() => setCurrentStep(3)} disabled={!selectedPackageId} className="flex-1">
+                التالي: طريقة الدفع
+              </Button>
+            </div>
+          </Card>
+        )}
 
-            <div>
-              <h3 className="text-lg font-bold text-[#434040] mb-4">اختر الباقة</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                {packages.map(pkg => (
-                  <div
-                    key={pkg.id}
-                    onClick={() => setSelectedPackageId(pkg.id)}
-                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                      selectedPackageId === pkg.id
-                        ? 'border-[#b88d2b] bg-[#fffdf0]'
-                        : 'border-border hover:border-[#b88d2b]'
-                    }`}
-                    data-testid={`card-package-${pkg.id}`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-bold text-[#434040]">{pkg.name}</h4>
-                      {pkg.type === 'موثوق' && (
-                        <Badge className="bg-[#b88d2b] text-white text-xs">موثوق</Badge>
+        {/* Step 3: Payment */}
+        {currentStep === 3 && selectedPackageId && (
+          <Card className="p-8">
+            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 3: طريقة الدفع</h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {!isFreePackage && (
+                <div>
+                  <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
+                  <div className="space-y-3">
+                    <div onClick={() => setPaymentMethod('online')} className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}>
+                      <div className="font-semibold">الدفع الإلكتروني</div>
+                      <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
+                    </div>
+                    <div onClick={() => setPaymentMethod('bank')} className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}>
+                      <div className="font-semibold">تحويل بنكي</div>
+                      <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
+                    </div>
+
+                    {/* Discount Code */}
+                    <div className="mt-4 p-4 bg-muted/30 rounded-lg">
+                      <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
+                      <div className="flex gap-2">
+                        <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
+                        <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
+                      </div>
+                      {validatedDiscount && (
+                        <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ﷼'}</p>
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground mb-2">{pkg.duration} يوم</p>
-                    <p className="text-2xl font-bold text-[#b88d2b]">
-                      {pkg.price === 0 ? 'مجاني' : `${pkg.price} ر.س`}
-                    </p>
+
+                    {/* Bank Receipt */}
+                    {paymentMethod === 'bank' && (
+                      <div className="p-4 bg-muted/30 rounded-lg">
+                        <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
+                        <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
+                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
+                          <Upload className="w-4 h-4" />
+                          {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
 
-              <div className="flex gap-3">
-                <Button
-                  onClick={handleSelectPackage}
-                  disabled={!selectedPackageId || isProcessing}
-                  className="flex-1"
-                  data-testid="button-select-package"
-                >
-                  {isProcessing ? 'جاري المعالجة...' : 'متابعة'}
+              {isFreePackage && (
+                <div className="p-4 bg-muted/30 rounded-lg">
+                  <p className="text-sm font-semibold">هذه باقة مجانية - سيتم تفعيل العقار مباشرة</p>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-6 border-t">
+                <Button type="button" variant="outline" onClick={() => setCurrentStep(2)} className="gap-2">
+                  <ChevronRight className="w-4 h-4" />
+                  السابق
                 </Button>
-                <Button
-                  onClick={() => {
-                    setStep('verify');
-                    setSelectedPackageId(null);
-                    setVerifiedProperty(null);
-                  }}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  إلغاء
+                <Button type="submit" disabled={isSubmitting || (!isFreePackage && !paymentMethod)} className="flex-1">
+                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
                 </Button>
               </div>
-            </div>
+            </form>
           </Card>
         )}
 
-        {/* Step 3: طريقة الدفع */}
-        {step === 'payment' && paymentInfo && (
-          <Card className="p-8 border-[#b88d2b] bg-[#fffdf0]">
-            <h2 className="text-2xl font-bold text-[#434040] mb-6">معلومات الدفع</h2>
-
-            <div className="bg-white p-4 rounded-lg mb-6 border border-[#e0c97b]">
-              <div className="flex justify-between mb-3">
-                <span className="text-muted-foreground">الباقة:</span>
-                <span className="font-bold text-[#434040]">{paymentInfo.packageName}</span>
+        {/* Package Details Modal */}
+        <Dialog open={!!packageToView} onOpenChange={() => setPackageToView(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-[#434040]">{packageToView?.name}</DialogTitle>
+              <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
+            </DialogHeader>
+            {packageToView && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">السعر</p>
+                  <p className="text-2xl font-bold text-[#434040]">{packageToView.price === 0 ? 'مجاني' : `${packageToView.price} ريال`}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">المدة</p>
+                  <p className="text-lg font-bold text-[#434040]">{packageToView.duration} يوم</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">النوع</p>
+                  <Badge className={packageToView.type === 'موثوق' ? 'bg-[#c9951d]' : 'bg-gray-400'}>
+                    {packageToView.type}
+                  </Badge>
+                </div>
               </div>
-              <div className="flex justify-between mb-3">
-                <span className="text-muted-foreground">المدة:</span>
-                <span className="font-bold text-[#434040]">{paymentInfo.duration} يوم</span>
-              </div>
-              <div className="flex justify-between border-t pt-3">
-                <span className="text-lg font-bold text-[#434040]">الإجمالي:</span>
-                <span className="text-2xl font-bold text-[#b88d2b]">{paymentInfo.price} ر.س</span>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <h3 className="text-lg font-bold mb-3 text-[#434040]">اختر طريقة الدفع:</h3>
-              <div className="space-y-2">
-                {['بطاقة', 'Apple Pay', 'تحويل بنكي'].map(method => (
-                  <label
-                    key={method}
-                    className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
-                    data-testid={`payment-method-${method}`}
-                  >
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value={method}
-                      checked={selectedPaymentMethod === method}
-                      onChange={(e) => setSelectedPaymentMethod(e.target.value)}
-                    />
-                    <span className="font-medium">{method}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                onClick={handleConfirmPayment}
-                disabled={!selectedPaymentMethod || isProcessing}
-                className="flex-1"
-                data-testid="button-confirm-payment"
-              >
-                {isProcessing ? 'جاري الدفع...' : 'تأكيد الدفع'}
-              </Button>
-              <Button
-                onClick={() => {
-                  setStep('select');
-                  setPaymentInfo(null);
-                  setSelectedPaymentMethod(null);
-                }}
-                variant="outline"
-                className="flex-1"
-              >
-                إلغاء
-              </Button>
-            </div>
-          </Card>
-        )}
-
-        {/* Step 4: النجاح */}
-        {step === 'success' && (
-          <Card className="p-8 text-center border-green-300 bg-green-50">
-            <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-green-700 mb-2">نجح!</h2>
-            <p className="text-green-600 mb-6">تم تفعيل اشتراكك بنجاح</p>
-            <Button
-              onClick={() => window.location.href = '/'}
-              className="w-full md:w-auto"
-              data-testid="button-back-home"
-            >
-              العودة للصفحة الرئيسية
-            </Button>
-          </Card>
-        )}
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
