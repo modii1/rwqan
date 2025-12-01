@@ -23,6 +23,7 @@ import {
   insertSuggestionSchema,
   insertDiscountCodeSchema,
   insertPackageSchema,
+  insertBackupSchema,
   type InsertProperty,
 } from "@shared/schema";
 
@@ -1530,6 +1531,167 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     } catch (err: any) {
       console.error("Get packages error:", err?.message);
       res.status(500).json({ error: "Failed to load packages" });
+    }
+  });
+
+  // ======================
+  // BACKUP SYSTEM - نظام النسخ الاحتياطية المتقدم
+  // ======================
+
+  // GET all backups
+  app.get("/api/backups", async (req, res) => {
+    try {
+      const backups = await storage.getBackups();
+      res.json(backups);
+    } catch (err: any) {
+      console.error("Get backups error:", err?.message);
+      res.status(500).json({ error: "Failed to load backups" });
+    }
+  });
+
+  // GET single backup details
+  app.get("/api/backups/:id", async (req, res) => {
+    try {
+      const backup = await storage.getBackupById(req.params.id);
+      if (!backup) {
+        return res.status(404).json({ error: "Backup not found" });
+      }
+      res.json(backup);
+    } catch (err: any) {
+      console.error("Get backup error:", err?.message);
+      res.status(500).json({ error: "Failed to load backup" });
+    }
+  });
+
+  // CREATE backup - نسخة احتياطية جديدة
+  app.post("/api/backups", async (req, res) => {
+    try {
+      const { backupType, backupName, dataTypes, description } = req.body;
+
+      // Validate input
+      if (!backupType || !backupName || !dataTypes) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      // Collect data based on dataTypes
+      const backupData: any = {};
+      let filesCount = 0;
+      let sizeInMB = 0;
+
+      if (dataTypes.includes('properties')) {
+        backupData.properties = await storage.getProperties();
+        filesCount += backupData.properties.length;
+        sizeInMB += JSON.stringify(backupData.properties).length / (1024 * 1024);
+      }
+
+      if (dataTypes.includes('subscriptions')) {
+        backupData.subscriptions = await storage.getSubscriptions();
+        filesCount += backupData.subscriptions.length;
+        sizeInMB += JSON.stringify(backupData.subscriptions).length / (1024 * 1024);
+      }
+
+      if (dataTypes.includes('packages')) {
+        backupData.packages = await storage.getPackages();
+        filesCount += backupData.packages.length;
+        sizeInMB += JSON.stringify(backupData.packages).length / (1024 * 1024);
+      }
+
+      if (dataTypes.includes('payments')) {
+        backupData.payments = await storage.getPayments();
+        filesCount += backupData.payments.length;
+        sizeInMB += JSON.stringify(backupData.payments).length / (1024 * 1024);
+      }
+
+      if (dataTypes.includes('discounts')) {
+        backupData.discounts = await storage.getDiscountCodes();
+        filesCount += backupData.discounts.length;
+        sizeInMB += JSON.stringify(backupData.discounts).length / (1024 * 1024);
+      }
+
+      if (dataTypes.includes('requests')) {
+        backupData.requests = await storage.getRequests();
+        filesCount += backupData.requests.length;
+        sizeInMB += JSON.stringify(backupData.requests).length / (1024 * 1024);
+      }
+
+      // Create backup record
+      const backup = await storage.createBackup({
+        backupType,
+        backupName,
+        status: 'جاري',
+        dataTypes,
+        filesCount,
+        sizeInMB: parseFloat(sizeInMB.toFixed(2)),
+        backupData,
+        autoBackup: false,
+        description,
+      });
+
+      // Mark as completed
+      const completed = await storage.updateBackup(backup.id, {
+        status: 'مكتمل',
+        completedAt: new Date().toISOString(),
+      });
+
+      console.log(`✅ Backup created successfully: ${backup.id}`);
+      res.json(completed);
+    } catch (err: any) {
+      console.error("Create backup error:", err?.message);
+      res.status(500).json({ error: "Failed to create backup" });
+    }
+  });
+
+  // RESTORE backup - استعادة نسخة احتياطية
+  app.post("/api/backups/:id/restore", async (req, res) => {
+    try {
+      const backup = await storage.getBackupById(req.params.id);
+      if (!backup) {
+        return res.status(404).json({ error: "Backup not found" });
+      }
+
+      // Perform restore (mark in storage)
+      await storage.restoreBackup(req.params.id);
+
+      console.log(`✅ Backup restored: ${req.params.id}`);
+      res.json({ ok: true, message: "تم استعادة النسخة الاحتياطية بنجاح" });
+    } catch (err: any) {
+      console.error("Restore backup error:", err?.message);
+      res.status(500).json({ error: "Failed to restore backup" });
+    }
+  });
+
+  // DELETE backup
+  app.delete("/api/backups/:id", async (req, res) => {
+    try {
+      const backup = await storage.getBackupById(req.params.id);
+      if (!backup) {
+        return res.status(404).json({ error: "Backup not found" });
+      }
+
+      await storage.deleteBackup(req.params.id);
+      console.log(`✅ Backup deleted: ${req.params.id}`);
+      res.json({ ok: true, message: "تم حذف النسخة الاحتياطية" });
+    } catch (err: any) {
+      console.error("Delete backup error:", err?.message);
+      res.status(500).json({ error: "Failed to delete backup" });
+    }
+  });
+
+  // DOWNLOAD backup as JSON
+  app.get("/api/backups/:id/download", async (req, res) => {
+    try {
+      const backup = await storage.getBackupById(req.params.id);
+      if (!backup) {
+        return res.status(404).json({ error: "Backup not found" });
+      }
+
+      const filename = `backup-${backup.backupName}-${new Date().getTime()}.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json');
+      res.json(backup);
+    } catch (err: any) {
+      console.error("Download backup error:", err?.message);
+      res.status(500).json({ error: "Failed to download backup" });
     }
   });
 

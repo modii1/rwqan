@@ -204,6 +204,29 @@ export const propertyAnalyticsSchema = z.object({
 export type PropertyAnalytics = z.infer<typeof propertyAnalyticsSchema>;
 
 // =========================
+// Backup Schema (النسخ الاحتياطية)
+// =========================
+export const backupSchema = z.object({
+  id: z.string(),
+  backupType: z.enum(['كامل', 'جزئي', 'يومي', 'أسبوعي', 'شهري']),
+  backupName: z.string(),
+  status: z.enum(['جاري', 'مكتمل', 'فشل', 'استعادة']),
+  dataTypes: z.array(z.string()), // ['properties', 'subscriptions', 'packages', 'payments', ...]
+  filesCount: z.number(),
+  sizeInMB: z.number(),
+  backupData: z.record(z.any()).optional(), // البيانات المحفوظة
+  createdAt: z.string(),
+  completedAt: z.string().optional(),
+  restoredAt: z.string().optional(),
+  autoBackup: z.boolean().default(false),
+  description: z.string().optional(),
+});
+
+export type Backup = z.infer<typeof backupSchema>;
+export const insertBackupSchema = backupSchema.omit({ id: true, createdAt: true, completedAt: true, restoredAt: true });
+export type InsertBackup = z.infer<typeof insertBackupSchema>;
+
+// =========================
 // 100 Facilities List (قائمة المرافق)
 // =========================
 export const FACILITIES = [

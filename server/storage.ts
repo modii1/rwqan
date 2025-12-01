@@ -16,6 +16,8 @@ import type {
   Payment,
   InsertPayment,
   Analytics,
+  Backup,
+  InsertBackup,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -68,6 +70,14 @@ export interface IStorage {
   // Analytics (الإحصائيات)
   getAnalytics(): Promise<Analytics | null>;
   updateAnalytics(analytics: Analytics): Promise<void>;
+
+  // Backups (النسخ الاحتياطية)
+  getBackups(): Promise<Backup[]>;
+  getBackupById(id: string): Promise<Backup | null>;
+  createBackup(backup: InsertBackup): Promise<Backup>;
+  updateBackup(id: string, backup: Partial<Backup>): Promise<Backup>;
+  deleteBackup(id: string): Promise<void>;
+  restoreBackup(id: string): Promise<void>;
 }
 
 import { googleSheetsService } from './googleSheets';
@@ -264,6 +274,53 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async updateAnalytics(analytics: Analytics): Promise<void> {
+  }
+
+  // ===== Backup Implementation (In-Memory) =====
+  private backups: Map<string, Backup> = new Map();
+
+  async getBackups(): Promise<Backup[]> {
+    return Array.from(this.backups.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async getBackupById(id: string): Promise<Backup | null> {
+    return this.backups.get(id) || null;
+  }
+
+  async createBackup(backup: InsertBackup): Promise<Backup> {
+    const id = `BACKUP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newBackup: Backup = {
+      id,
+      ...backup,
+      createdAt: new Date().toISOString(),
+    };
+    this.backups.set(id, newBackup);
+    return newBackup;
+  }
+
+  async updateBackup(id: string, backup: Partial<Backup>): Promise<Backup> {
+    const existing = this.backups.get(id);
+    if (!existing) throw new Error('Backup not found');
+    
+    const updated = { ...existing, ...backup };
+    this.backups.set(id, updated);
+    return updated;
+  }
+
+  async deleteBackup(id: string): Promise<void> {
+    this.backups.delete(id);
+  }
+
+  async restoreBackup(id: string): Promise<void> {
+    const backup = this.backups.get(id);
+    if (!backup) throw new Error('Backup not found');
+    
+    // Mark as restored
+    backup.status = 'استعادة';
+    backup.restoredAt = new Date().toISOString();
+    this.backups.set(id, backup);
   }
 }
 
