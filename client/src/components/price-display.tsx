@@ -18,7 +18,7 @@ export function PriceDisplay({
   amount,
   showSymbol = true,
   size = 'md',
-  textColor = 'text-[#b88d2b]',
+  textColor = 'text-[#1f2937]',
 }: PriceDisplayProps) {
   const sizeClass = sizeMap[size];
 
@@ -32,10 +32,9 @@ export function PriceDisplay({
       <img
         src={riyal}
         alt="ريال سعودي"
-        className={`${sizeClass.img} inline-block brightness-0 invert-0`}
+        className={`${sizeClass.img} inline-block`}
         style={{
-          filter: 'brightness(0) saturate(100%)',
-          opacity: 0.8,
+          opacity: 0.85,
         }}
       />
     </div>
