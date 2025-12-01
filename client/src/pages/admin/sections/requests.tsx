@@ -13,7 +13,7 @@ type AdminRequest = {
 };
 
 export default function RequestsSection() {
-  const { data, isLoading } = useQuery<AdminRequest[]>({
+  const { data, isLoading } = useQuery<any>({
     queryKey: ["admin-requests"],
     queryFn: async () => {
       const res = await fetch("/api/admin/requests");
@@ -22,13 +22,15 @@ export default function RequestsSection() {
     },
   });
 
+  const requests = data?.recentRequests || [];
+
   return (
     <section className="space-y-3">
       {/* ================= عنوان ================= */}
       <div>
-        <h2 className="text-lg font-semibold">طلبات العملاء</h2>
+        <h2 className="text-lg font-semibold">طلبات واتساب</h2>
         <p className="text-xs text-muted-foreground">
-          عرض جميع الطلبات والاقتراحات الواردة من العملاء.
+          إجمالي الطلبات: {data?.totalRequests || 0} | العقارات: {data?.totalProperties || 0}
         </p>
       </div>
 
@@ -43,26 +45,24 @@ export default function RequestsSection() {
           <table className="w-full text-xs md:text-sm">
             <thead className="bg-muted/50 text-right">
               <tr>
-                <Th>الاسم</Th>
-                <Th>رقم الجوال</Th>
-                <Th>الرسالة</Th>
-                <Th>التاريخ</Th>
+                <Th>رقم العقار</Th>
+                <Th>كود الطلب</Th>
+                <Th>التاريخ والوقت</Th>
               </tr>
             </thead>
 
             <tbody>
-              {(data || []).map((req) => (
-                <tr key={req.id} className="border-t hover:bg-muted/40">
-                  <Td>{req.name}</Td>
-                  <Td>{req.phone}</Td>
-                  <Td>{req.message}</Td>
-                  <Td>{req.createdAt}</Td>
-                </tr>
-              ))}
-
-              {(data || []).length === 0 && (
+              {requests && requests.length > 0 ? (
+                requests.map((req: any, idx: number) => (
+                  <tr key={idx} className="border-t hover:bg-muted/40">
+                    <Td>{req.propertyNumber}</Td>
+                    <Td className="font-mono">{req.requestCode || req.id}</Td>
+                    <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}</Td>
+                  </tr>
+                ))
+              ) : (
                 <tr>
-                  <Td colSpan={4}>
+                  <Td colSpan={3}>
                     <div className="p-4 text-center text-xs text-muted-foreground">
                       لا توجد طلبات حالياً.
                     </div>
