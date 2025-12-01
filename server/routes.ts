@@ -1406,6 +1406,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       }
       
       const subscriptionData = {
+        packageId: packageId,
         price: pkg.price,
         subscriptionType: pkg.type,
         startDate: startDate.toISOString().split('T')[0],
@@ -1506,6 +1507,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       }
       
       const subscriptionData = {
+        packageId: packageId,
         price: pkg.price,
         subscriptionType: pkg.type,
         startDate: startDate.toISOString().split('T')[0],
