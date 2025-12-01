@@ -133,14 +133,9 @@ export default function PropertyDetailsPage() {
                 imageCount = arr.length;
               }
             } catch {
-              // تجاهل الخطأ ونستعمل افتراضي
+              // تجاهل الخطأ
             }
           }
-        }
-
-        // لو ما قدرنا نطلع العدد الحقيقي، نستعمل 15 صورة افتراضيًا
-        if (!imageCount) {
-          imageCount = 15;
         }
 
         return {
@@ -172,13 +167,30 @@ export default function PropertyDetailsPage() {
     setSelectedImage(0);
   }, [property?.propertyNumber]);
 
-  // نحسب الصور من R2 بشكل آمن
-  let images: string[] = [];
-  if (property && property.imageCount && property.imageCount > 0) {
-    images = Array.from({ length: property.imageCount }, (_, i) => {
-      return `${R2_BASE}/${property.propertyNumber}/${i + 1}.jpg`;
-    });
-  }
+  // نحسب الصور من R2 - استخدم fetch للتحقق من الصور الفعلية
+  const [r2Images, setR2Images] = useState<string[]>([]);
+  
+  useEffect(() => {
+    if (!property) return;
+    
+    const fetchR2Images = async () => {
+      try {
+        const res = await fetch(`/api/owner/r2-images?propertyNumber=${property.propertyNumber}`, {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setR2Images(data.images || []);
+        }
+      } catch {
+        setR2Images([]);
+      }
+    };
+    
+    fetchR2Images();
+  }, [property?.propertyNumber]);
+  
+  let images = r2Images;
 
   // ✅ Preload للصورة التالية لتسريع التصفح
   useEffect(() => {
