@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
+import { Home, Lightbulb, UserPlus, LogIn, LogOut } from "lucide-react";
 
 // Pages
 import NotFound from "@/pages/not-found";
@@ -97,57 +98,63 @@ export default function App() {
               >
                 مودي الذكي
               </a>
-              <nav className="flex items-center gap-4">
+              <nav className="flex items-center gap-2">
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => setLocation("/")}
-                  className="text-base"
+                  title="الرئيسية"
                 >
-                  الرئيسية
+                  <Home className="w-5 h-5" />
                 </Button>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => setLocation("/suggest")}
-                  className="text-base"
+                  title="اقترح لنا"
                 >
-                  اقترح لنا
+                  <Lightbulb className="w-5 h-5" />
                 </Button>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => setLocation("/register")}
-                  className="text-base"
+                  title="اشترك معنا"
                 >
-                  اشترك معنا
+                  <UserPlus className="w-5 h-5" />
                 </Button>
                 
                 {session?.user ? (
                   <>
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       onClick={() => setLocation("/owner/dashboard")}
-                      className="text-base text-primary"
+                      title="لوحة التحكم"
+                      className="text-primary"
                     >
-                      لوحة التحكم
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4z"></path>
+                        <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6z" clipRule="evenodd"></path>
+                      </svg>
                     </Button>
                     <Button
                       variant="outline"
-                      size="sm"
+                      size="icon"
                       onClick={handleLogout}
+                      title="تسجيل الخروج"
                     >
-                      تسجيل الخروج
+                      <LogOut className="w-5 h-5" />
                     </Button>
                   </>
                 ) : (
                   <Button
                     variant="default"
-                    size="sm"
+                    size="icon"
                     onClick={() => setLocation("/owner/login")}
+                    title="تسجيل الدخول"
                   >
-                    تسجيل الدخول
+                    <LogIn className="w-5 h-5" />
                   </Button>
                 )}
               </nav>
