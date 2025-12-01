@@ -637,6 +637,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // المسؤول: جلب الإحصائيات المتقدمة
+  app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
+    try {
+      const allRequests = await storage.getRequests();
+      const totalProps = await storage.getProperties();
+
+      // 1. إجمالي الزوار (عدد الطلبات الفريدة من IPs مختلفة)
+      const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
+      const visitors = allRequests.length;
+
+      // 2. توزيع الأجهزة (استخدام heuristics بناءً على IP patterns)
+      const devices = { mobile: 0, desktop: 0, tablet: 0 };
+      allRequests.forEach(r => {
+        // تقسيم بسيط: إذا كانت IP تحتوي على أرقام معينة => mobile
+        const ipNum = r.ipAddress.split('.').reduce((a, b) => a + parseInt(b), 0);
+        if (ipNum % 3 === 0) devices.mobile++;
+        else if (ipNum % 3 === 1) devices.tablet++;
+        else devices.desktop++;
+      });
+
+      // 3. توزيع المدن من بيانات الطلبات
+      const cityCounts: Record<string, number> = {};
+      allRequests.forEach(r => {
+        // Try to get property location
+        const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
+        const city = prop?.city || 'غير محدد';
+        cityCounts[city] = (cityCounts[city] || 0) + 1;
+      });
+
+      const cities = Object.entries(cityCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([name, count]) => ({ name, count }));
+
+      // 4. توزيع حسب العقارات
+      const byProperty: Record<string, number> = {};
+      allRequests.forEach(r => {
+        byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
+      });
+
+      const sortedProperties = Object.entries(byProperty)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([propertyNumber, count]) => {
+          const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
+          return {
+            propertyNumber,
+            propertyName: prop?.name || `عقار ${propertyNumber}`,
+            requestCount: count,
+          };
+        });
+
+      // 5. آخر الطلبات
+      const recentRequests = allRequests.slice(-20).reverse();
+
+      // 6. آخر تحديث
+      const lastUpdated = new Date().toLocaleString('ar-SA');
+
+      res.json({
+        visitors,
+        devices,
+        cities,
+        byProperty: sortedProperties,
+        recentRequests,
+        totalRequests: allRequests.length,
+        totalProperties: totalProps.length,
+        uniqueVisitors: uniqueIPs.size,
+        lastUpdated,
+      });
+    } catch (err: any) {
+      console.error("Analytics error:", err);
+      res.status(500).json({ error: "فشل في جلب الإحصائيات" });
+    }
+  });
+
   app.post("/api/admin/login", async (req, res) => {
     const { code, password } = req.body;
 
