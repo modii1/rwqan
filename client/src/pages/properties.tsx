@@ -241,12 +241,12 @@ export default function PropertiesPage() {
 
       if (!response.ok) {
         // إذا حدث خطأ (مثل التكرار)
-        if (result.remainingSeconds) {
+        if (result.remainingTimeFormatted) {
           const { useToast } = await import("@/hooks/use-toast");
           const { toast } = useToast();
           toast({
-            title: "انتظر قليلاً",
-            description: `يمكنك إرسال طلب آخر خلال ${result.remainingSeconds} ثانية`,
+            title: "⏱️ انتظر قليلاً",
+            description: `يمكنك إرسال طلب آخر خلال: ${result.remainingTimeFormatted}`,
             variant: "destructive",
           });
         }

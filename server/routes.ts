@@ -380,9 +380,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // تحقق من التكرار في آخر 30 دقيقة
       if (lastRequest && now - lastRequest.timestamp < thirtyMinutes && lastRequest.propertyNumber === propertyNumber) {
+        const remainingMs = thirtyMinutes - (now - lastRequest.timestamp);
+        const remainingSeconds = Math.ceil(remainingMs / 1000);
+        
+        // تحويل إلى صيغة أجمل (دقائق وثواني)
+        const minutes = Math.floor(remainingSeconds / 60);
+        const seconds = remainingSeconds % 60;
+        let timeDisplay = "";
+        if (minutes > 0) {
+          timeDisplay = `${minutes} دقيقة`;
+          if (seconds > 0) timeDisplay += ` و${seconds} ثانية`;
+        } else {
+          timeDisplay = `${seconds} ثانية`;
+        }
+        
         return res.status(429).json({
           error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
-          remainingSeconds: Math.ceil((thirtyMinutes - (now - lastRequest.timestamp)) / 1000),
+          remainingSeconds,
+          remainingTimeFormatted: timeDisplay,
         });
       }
 
