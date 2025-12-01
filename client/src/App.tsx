@@ -70,6 +70,13 @@ export default function App() {
     return () => clearTimeout(t);
   }, []);
 
+  const handleHome = () => {
+    // Clear all filters from sessionStorage
+    sessionStorage.removeItem("propertyFilters");
+    sessionStorage.removeItem("visibleCount");
+    setLocation("/");
+  };
+
   const handleLogout = async () => {
     try {
       await fetch("/api/owner/logout", {
@@ -120,8 +127,9 @@ export default function App() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setLocation("/")}
-                  title="الرئيسية"
+                  onClick={handleHome}
+                  title="الرئيسية - مسح الفلاتر"
+                  data-testid="button-home-clear-filters"
                 >
                   <Home className="w-5 h-5" />
                 </Button>
