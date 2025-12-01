@@ -17,6 +17,7 @@ import OwnerDashboard from "@/pages/owner-dashboard";
 import OwnerImagesPage from "@/pages/owner-images";
 import OwnerUpdateProperty from "@/pages/owner-update-property";
 import SubscriptionPage from "@/pages/subscription";
+import OwnerSubscriptionPage from "@/pages/owner-subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
@@ -36,7 +37,7 @@ function Router() {
       <Route path="/owner/dashboard" component={OwnerDashboard} />
       <Route path="/owner/images" component={OwnerImagesPage} />
       <Route path="/owner/update-property" component={OwnerUpdateProperty} />
-      <Route path="/owner/subscription" component={SubscriptionPage} />
+      <Route path="/owner/subscription" component={OwnerSubscriptionPage} />
 
       {/* صفحات عامة */}
       <Route path="/subscription" component={SubscriptionPage} />
