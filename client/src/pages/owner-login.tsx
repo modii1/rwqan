@@ -4,16 +4,25 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Home } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Home, Lock } from "lucide-react";
 
 export default function OwnerLogin() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [mode, setMode] = useState<"owner" | "admin">("owner");
+  
+  // Owner fields
   const [propertyNumber, setPropertyNumber] = useState("");
   const [pin, setPin] = useState("");
+  
+  // Admin fields
+  const [adminCode, setAdminCode] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleOwnerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!propertyNumber || !pin) {
@@ -30,9 +39,7 @@ export default function OwnerLogin() {
     try {
       const response = await fetch("/api/owner/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ propertyNumber, pin }),
       });
@@ -54,11 +61,60 @@ export default function OwnerLogin() {
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      // Use full page redirect for production compatibility
       window.location.href = "/owner/dashboard";
-      
     } catch (error) {
       console.error("Login error:", error);
+      toast({
+        title: "خطأ غير متوقع",
+        description: "تعذر الاتصال بالخادم",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+    }
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!adminCode || !adminPassword) {
+      toast({
+        title: "خطأ",
+        description: "الرجاء إدخال كود الأدمن وكلمة المرور",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ code: adminCode, password: adminPassword }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast({
+          title: "فشل تسجيل الدخول",
+          description: data.error || "كود الأدمن أو كلمة المرور غير صحيحة",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      toast({
+        title: "تم تسجيل الدخول",
+        description: "مرحباً بك في لوحة الإدارة",
+      });
+
+      window.location.href = "/admin";
+    } catch (error) {
+      console.error("Admin login error:", error);
       toast({
         title: "خطأ غير متوقع",
         description: "تعذر الاتصال بالخادم",
@@ -80,57 +136,111 @@ export default function OwnerLogin() {
           <h1 className="text-2xl font-bold text-primary mb-2" data-testid="text-login-title">
             مودي الذكي
           </h1>
-          <p className="text-muted-foreground">تسجيل دخول أصحاب العقارات</p>
+          <p className="text-muted-foreground">تسجيل دخول آمن</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold mb-2">رقم العقار</label>
-            <Input
-              type="text"
-              placeholder="00123"
-              value={propertyNumber}
-              onChange={(e) => setPropertyNumber(e.target.value)}
-              required
-              disabled={isLoading}
-              data-testid="input-property-number"
-            />
-          </div>
+        <Tabs value={mode} onValueChange={(v) => setMode(v as "owner" | "admin")} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-6">
+            <TabsTrigger value="owner" className="gap-2">
+              <Home className="w-4 h-4" />
+              <span className="hidden sm:inline">صاحب العقار</span>
+              <span className="sm:hidden">ملاك</span>
+            </TabsTrigger>
+            <TabsTrigger value="admin" className="gap-2">
+              <Lock className="w-4 h-4" />
+              <span className="hidden sm:inline">المسؤول</span>
+              <span className="sm:hidden">أدمن</span>
+            </TabsTrigger>
+          </TabsList>
 
-          <div>
-            <label className="block text-sm font-semibold mb-2">الرقم السري</label>
-            <Input
-              type="password"
-              placeholder="••••••"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              required
-              disabled={isLoading}
-              data-testid="input-pin"
-            />
-          </div>
+          {/* Owner Login Tab */}
+          <TabsContent value="owner">
+            <form onSubmit={handleOwnerLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2">رقم العقار</label>
+                <Input
+                  type="text"
+                  placeholder="00123"
+                  value={propertyNumber}
+                  onChange={(e) => setPropertyNumber(e.target.value)}
+                  disabled={isLoading}
+                  data-testid="input-property-number"
+                />
+              </div>
 
-          <Button
-            type="submit"
-            className="w-full gradient-golden"
-            disabled={isLoading}
-            data-testid="button-login"
-          >
-            {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
-          </Button>
-        </form>
+              <div>
+                <label className="block text-sm font-semibold mb-2">الرقم السري</label>
+                <Input
+                  type="password"
+                  placeholder="••••••"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  disabled={isLoading}
+                  data-testid="input-pin"
+                />
+              </div>
 
-        <div className="mt-6 text-center text-sm text-muted-foreground">
-          <p>ليس لديك حساب؟</p>
-          <Button
-            variant="link"
-            onClick={() => setLocation("/owner/subscription")}
-            className="text-primary"
-            data-testid="link-register"
-          >
-            سجل عقارك الآن
-          </Button>
-        </div>
+              <Button
+                type="submit"
+                className="w-full gradient-golden"
+                disabled={isLoading}
+                data-testid="button-login"
+              >
+                {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center text-sm text-muted-foreground">
+              <p>ليس لديك حساب؟</p>
+              <Button
+                variant="link"
+                onClick={() => setLocation("/owner/subscription")}
+                className="text-primary"
+                data-testid="link-register"
+              >
+                سجل عقارك الآن
+              </Button>
+            </div>
+          </TabsContent>
+
+          {/* Admin Login Tab */}
+          <TabsContent value="admin">
+            <form onSubmit={handleAdminLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2">كود المسؤول</label>
+                <Input
+                  type="text"
+                  placeholder="أدخل كود المسؤول"
+                  value={adminCode}
+                  onChange={(e) => setAdminCode(e.target.value)}
+                  disabled={isLoading}
+                  data-testid="input-admin-code"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">كلمة المرور</label>
+                <Input
+                  type="password"
+                  placeholder="••••••"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  disabled={isLoading}
+                  data-testid="input-admin-password"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full gradient-golden"
+                disabled={isLoading}
+                data-testid="button-admin-login"
+              >
+                {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+              </Button>
+            </form>
+          </TabsContent>
+        </Tabs>
       </Card>
     </div>
   );
