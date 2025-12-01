@@ -13,6 +13,8 @@ import {
   TrendingUp,
   Users,
   Zap,
+  HardDrive,
+  Code2,
 } from "lucide-react";
 
 import PropertiesSection from "./sections/properties";
@@ -22,6 +24,8 @@ import DiscountsSection from "./sections/discounts";
 import RequestsSection from "./sections/requests";
 import PaymentsSection from "./sections/payments";
 import AdminAnalytics from "./admin-analytics";
+import AdminBackup from "./admin-backup";
+import AdminCodeBackup from "./admin-code-backup";
 
 type AdminSection =
   | ""
@@ -31,7 +35,9 @@ type AdminSection =
   | "discounts"
   | "requests"
   | "payments"
-  | "analytics";
+  | "analytics"
+  | "backup"
+  | "code-backup";
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
@@ -107,6 +113,22 @@ export default function AdminDashboard() {
           active={activeSection === "analytics"}
           onClick={() => setActiveSection("analytics")}
         />
+
+        <div className="hidden md:block h-px bg-border my-2" />
+
+        <SidebarButton
+          icon={<HardDrive className="w-4 h-4" />}
+          label="النسخ الاحتياطية"
+          active={activeSection === "backup"}
+          onClick={() => setActiveSection("backup")}
+        />
+
+        <SidebarButton
+          icon={<Code2 className="w-4 h-4" />}
+          label="نسخ الأكواس"
+          active={activeSection === "code-backup"}
+          onClick={() => setActiveSection("code-backup")}
+        />
       </aside>
 
       {/* المحتوى */}
@@ -124,6 +146,8 @@ export default function AdminDashboard() {
         {activeSection === "discounts" && <DiscountsSection />}
         {activeSection === "requests" && <RequestsSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
+        {activeSection === "backup" && <AdminBackup />}
+        {activeSection === "code-backup" && <AdminCodeBackup />}
       </main>
     </div>
   );
