@@ -38,6 +38,7 @@ function Router() {
       <Route path="/owner/subscription" component={SubscriptionPage} />
 
       {/* صفحات عامة */}
+      <Route path="/subscription" component={SubscriptionPage} />
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/test-images" component={TestImages} />
