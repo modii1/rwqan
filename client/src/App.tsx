@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
-import { Home, Lightbulb, LogIn, LogOut } from "lucide-react";
+import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
 
 // Pages
 import NotFound from "@/pages/not-found";
@@ -126,10 +126,7 @@ export default function App() {
                       title="لوحة التحكم"
                       className="text-primary"
                     >
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4z"></path>
-                        <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6z" clipRule="evenodd"></path>
-                      </svg>
+                      <LayoutDashboard className="w-5 h-5" />
                     </Button>
                     <Button
                       variant="outline"
