@@ -797,7 +797,163 @@ app.delete(
   }
 );
 
+// ======================
+// 💳 PAYMENT ENDPOINTS
+// ======================
 
+// 1. التحقق من كود الخصم
+app.post("/api/discount/validate", async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: "كود مطلوب" });
+
+    const discount = await storage.getDiscountCodeByCode(code);
+    if (!discount || !discount.isActive) {
+      return res.status(404).json({ error: "كود غير صالح" });
+    }
+
+    const expiryDate = new Date(discount.expiryDate || "2099-12-31");
+    if (expiryDate < new Date()) {
+      return res.status(400).json({ error: "انتهت صلاحية الكود" });
+    }
+
+    res.json(discount);
+  } catch (err) {
+    res.status(500).json({ error: "خطأ في التحقق من الكود" });
+  }
+});
+
+// 2. بدء عملية الدفع الإلكتروني
+app.post("/api/owner/payment/initiate", async (req, res) => {
+  try {
+    const { packageId, discountCode, paymentMethod = "cards" } = req.body;
+
+    // جلب بيانات العقار من السيشن
+    const propertyNumber = req.session?.propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
+    }
+
+    // جلب بيانات الباقة
+    const pkg = await storage.getPackageById(packageId);
+    if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
+
+    // جلب بيانات العقار
+    const property = await storage.getPropertyByNumber(propertyNumber);
+    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
+
+    // حساب السعر النهائي
+    let finalAmount = pkg.price;
+    if (discountCode) {
+      const discount = await storage.getDiscountCodeByCode(discountCode);
+      if (discount && discount.isActive) {
+        if (discount.type === "نسبة") {
+          finalAmount -= (pkg.price * discount.value) / 100;
+        } else {
+          finalAmount -= discount.value;
+        }
+      }
+    }
+
+    // إنشاء طلب دفع مع Paymob
+    const paymobResult = await paymobService.createIntention(
+      finalAmount,
+      propertyNumber,
+      property.name || "عقار",
+      property.whatsappNumber,
+      pkg.name,
+      pkg.duration,
+      paymentMethod as "cards" | "applepay"
+    );
+
+    // إنشاء سجل الدفع
+    const payment = await storage.createPayment({
+      propertyNumber,
+      packageId,
+      amount: pkg.price,
+      discountCode: discountCode || "",
+      discountAmount: pkg.price - finalAmount,
+      finalAmount,
+      paymobOrderId: paymobResult.intentionId,
+      status: "قيد الانتظار",
+      paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة ائتمان",
+    });
+
+    res.json({
+      checkoutUrl: paymobResult.checkoutUrl,
+      paymentId: payment.id,
+    });
+  } catch (err: any) {
+    console.error("Payment initiate error:", err);
+    res.status(500).json({ error: err.message || "خطأ في بدء الدفع" });
+  }
+});
+
+// 3. التحويل البنكي مع رفع الإيصال
+app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
+  try {
+    const { packageId, discountCode } = req.body;
+    const propertyNumber = req.session?.propertyNumber;
+
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "الإيصال مطلوب" });
+    }
+
+    // جلب بيانات الباقة والعقار
+    const pkg = await storage.getPackageById(packageId);
+    if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
+
+    // حساب السعر النهائي
+    let finalAmount = pkg.price;
+    if (discountCode) {
+      const discount = await storage.getDiscountCodeByCode(discountCode);
+      if (discount && discount.isActive) {
+        if (discount.type === "نسبة") {
+          finalAmount -= (pkg.price * discount.value) / 100;
+        } else {
+          finalAmount -= discount.value;
+        }
+      }
+    }
+
+    // رفع الإيصال إلى R2
+    let receiptUrl = "";
+    if (req.file && R2_BUCKET) {
+      const receiptKey = `receipts/${propertyNumber}-${Date.now()}.jpg`;
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: receiptKey,
+          Body: req.file.buffer,
+          ContentType: "image/jpeg",
+        })
+      );
+      receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+    }
+
+    // إنشاء سجل الدفع
+    const payment = await storage.createPayment({
+      propertyNumber,
+      packageId,
+      amount: pkg.price,
+      discountCode: discountCode || "",
+      discountAmount: pkg.price - finalAmount,
+      finalAmount,
+      status: "قيد التحقق",
+      paymentMethod: "تحويل بنكي",
+      receiptUrl,
+    });
+
+    res.json({ ok: true, paymentId: payment.id });
+  } catch (err: any) {
+    console.error("Bank transfer error:", err);
+    res.status(500).json({ error: "خطأ في معالجة التحويل البنكي" });
+  }
+});
 
   // ======================
   // DONE
