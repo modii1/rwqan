@@ -122,7 +122,7 @@ export default function OwnerSubscriptionPage() {
             <p className="text-muted-foreground">عقار: {property.name} ({property.propertyNumber})</p>
           </div>
           <Button
-            onClick={() => setLocation("/subscription")}
+            onClick={() => setLocation("/owner/subscription")}
             variant="outline"
             className="flex items-center gap-2"
             data-testid="button-view-all-packages"
