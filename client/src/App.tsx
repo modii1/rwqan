@@ -4,7 +4,6 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Toaster as SonnerToaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
@@ -163,7 +162,6 @@ export default function App() {
             <Router />
           </main>
           <Toaster />
-          <SonnerToaster />
         </div>
       </TooltipProvider>
     </QueryClientProvider>
