@@ -417,45 +417,46 @@ export default function SubscriptionPage() {
               {!isFreePackage && (
                 <div>
                   <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
-                    <div className="space-y-3">
-                      <div
-                        onClick={() => setPaymentMethod('online')}
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
-                      >
-                        <div className="font-semibold">الدفع الإلكتروني</div>
-                        <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
-                      </div>
-                      <div
-                        onClick={() => setPaymentMethod('bank')}
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
-                      >
-                        <div className="font-semibold">تحويل بنكي</div>
-                        <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
-                      </div>
+                  <div className="space-y-3">
+                    <div
+                      onClick={() => setPaymentMethod('online')}
+                      className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                    >
+                      <div className="font-semibold">الدفع الإلكتروني</div>
+                      <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
+                    </div>
+                    <div
+                      onClick={() => setPaymentMethod('bank')}
+                      className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                    >
+                      <div className="font-semibold">تحويل بنكي</div>
+                      <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
+                    </div>
 
-                      {/* Discount Code */}
-                      <div className="mt-4 p-4 bg-muted/30 rounded-lg">
-                        <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
-                        <div className="flex gap-2">
-                          <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
-                          <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
-                        </div>
-                        {validatedDiscount && (
-                          <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ﷼'}</p>
-                        )}
+                    {/* Discount Code */}
+                    <div className="mt-4 p-4 bg-muted/30 rounded-lg">
+                      <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
+                      <div className="flex gap-2">
+                        <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
+                        <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
                       </div>
-
-                      {/* Bank Receipt */}
-                      {paymentMethod === 'bank' && (
-                        <div className="p-4 bg-muted/30 rounded-lg">
-                          <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
-                          <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
-                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
-                            <Upload className="w-4 h-4" />
-                            {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
-                          </Button>
-                        </div>
+                      {validatedDiscount && (
+                        <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ﷼'}</p>
                       )}
+                    </div>
+
+                    {/* Bank Receipt */}
+                    {paymentMethod === 'bank' && (
+                      <div className="p-4 bg-muted/30 rounded-lg">
+                        <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
+                        <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
+                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
+                          <Upload className="w-4 h-4" />
+                          {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
