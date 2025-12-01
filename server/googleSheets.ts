@@ -875,10 +875,18 @@ class GoogleSheetsService {
       const now = new Date();
       const propertyName = (await this.getPropertyByNumber(request.propertyNumber))?.name || "";
       
-      // الحصول على عدد الطلبات الحالية
-      const allRequests = await this.getRequests();
-      const propertyRequests = allRequests.filter(r => r.propertyNumber === request.propertyNumber);
-      const requestCount = propertyRequests.length + 1;
+      // اقرأ الشيت الفعلي وعد الصفوف للعقار هذا
+      const rows = await this.readSheet(SHEETS.REQUESTS);
+      let requestCount = 1;
+      
+      if (rows && rows.length > 1) {
+        // عد عدد الصفوف للعقار هذا (بدء من الصف الثاني لتخطي الرأس)
+        for (let i = 1; i < rows.length; i++) {
+          if (rows[i][0] === request.propertyNumber) {
+            requestCount++;
+          }
+        }
+      }
       
       // استخراج التاريخ والوقت
       const day = now.getDate();
