@@ -147,43 +147,6 @@ export default function SubscriptionPage() {
         </div>
       </header>
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Packages Strip at Top */}
-        <div className="mb-8 pb-8 border-b">
-          <h2 className="text-lg font-bold mb-4">الباقات المتاحة</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {packages.map((pkg) => (
-              <Card
-                key={pkg.id}
-                onClick={() => setSelectedPackageId(pkg.id)}
-                className={`p-5 cursor-pointer transition-all ${
-                  selectedPackageId === pkg.id
-                    ? 'ring-2 ring-[#434040] bg-[#434040]/5 shadow-md'
-                    : 'hover:shadow-md'
-                }`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-bold">{pkg.name}</h3>
-                    {pkg.price === 0 ? (
-                      <p className="text-2xl font-bold text-[#434040]">مجاني</p>
-                    ) : (
-                      <PriceDisplay amount={pkg.price} size="lg" />
-                    )}
-                  </div>
-                  {selectedPackageId === pkg.id && (
-                    <Badge className="bg-[#434040] text-white">مختار</Badge>
-                  )}
-                </div>
-                <p className="text-muted-foreground mb-2 text-[14px]">{pkg.duration} يوم</p>
-                {pkg.type === 'موثوق' && (
-                  <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9]">موثوق</Badge>
-                )}
-              </Card>
-            ))}
-          </div>
-        </div>
-
-
         {/* Step 1: Select Package */}
         {currentStep === 1 && (
           <Card className="p-8">
