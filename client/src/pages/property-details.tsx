@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
+import { PriceDisplay } from "@/components/price-display";
 
 // ⭐ مؤشر السحب الذهبي في منتصف الشاشة (لا يلمس أي شيء من تصميمك)
 // ⭐ مؤشر السحب المتدرّج (مجموعة أسهم)
@@ -502,36 +503,28 @@ export default function PropertyDetailsPage() {
                 {property.prices?.weekday && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">وسط الأسبوع</span>
-                    <span className="font-bold text-[#b88d2b]">
-                      {property.prices.weekday} ﷼
-                    </span>
+                    <PriceDisplay amount={property.prices.weekday} size="md" />
                   </div>
                 )}
 
                 {property.prices?.weekend && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">نهاية الأسبوع</span>
-                    <span className="font-bold text-[#b88d2b]">
-                      {property.prices.weekend} ﷼
-                    </span>
+                    <PriceDisplay amount={property.prices.weekend} size="md" />
                   </div>
                 )}
 
                 {property.prices?.overnight && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">مبيت</span>
-                    <span className="font-bold text-[#b88d2b]">
-                      {property.prices.overnight} ﷼
-                    </span>
+                    <PriceDisplay amount={property.prices.overnight} size="md" />
                   </div>
                 )}
 
                 {property.prices?.holidays && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">إجازات</span>
-                    <span className="font-bold text-[#b88d2b]">
-                      {property.prices.holidays} ﷼
-                    </span>
+                    <PriceDisplay amount={property.prices.holidays} size="md" />
                   </div>
                 )}
               </div>

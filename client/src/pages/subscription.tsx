@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { ChevronRight, Upload } from "lucide-react";
+import { PriceDisplay } from "@/components/price-display";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -163,9 +164,11 @@ export default function SubscriptionPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold">{pkg.name}</h3>
-                    <p className="text-2xl font-bold text-primary flex items-center gap-1">
-                      {pkg.price === 0 ? 'مجاني' : <><span>{pkg.price}</span><span className="text-[#b88d2b]">﷼</span></>}
-                    </p>
+                    {pkg.price === 0 ? (
+                      <p className="text-2xl font-bold text-primary">مجاني</p>
+                    ) : (
+                      <PriceDisplay amount={pkg.price} size="lg" />
+                    )}
                   </div>
                   {selectedPackageId === pkg.id && (
                     <Badge className="bg-primary">مختار</Badge>

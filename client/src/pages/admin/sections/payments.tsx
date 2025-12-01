@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { Th, Td } from "../components/Table";
+import { PriceDisplay } from "@/components/price-display";
 
 type Payment = {
   id: string;
@@ -63,8 +64,8 @@ export default function PaymentsSection() {
                   <Td>{p.id}</Td>
                   <Td>{p.propertyNumber}</Td>
                   <Td>{p.name}</Td>
-                  <Td className="font-semibold text-[#b88d2b]">
-                    {p.amount} ﷼
+                  <Td>
+                    <PriceDisplay amount={p.amount} size="sm" />
                   </Td>
                   <Td>{p.method}</Td>
                   <Td>
