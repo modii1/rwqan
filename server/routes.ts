@@ -719,9 +719,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // المسؤول: جلب الإحصائيات المتقدمة
+  // المسؤول: جلب الإحصائيات من Google Sheets
   app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     try {
+      // أولاً: جرب قراءة من Google Sheets مباشرة
+      const analyticsFromSheet = await googleSheetsService.getAnalyticsFromSheet();
+      
+      if (analyticsFromSheet) {
+        // إذا وجدنا بيانات في Google Sheets، استخدمها
+        const allRequests = await storage.getRequests();
+        const totalProps = await storage.getProperties();
+
+        // توزيع حسب العقارات (للحصول على أفضل العقارات)
+        const byProperty: Record<string, number> = {};
+        allRequests.forEach(r => {
+          byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
+        });
+
+        const sortedProperties = Object.entries(byProperty)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 15)
+          .map(([propertyNumber, count]) => {
+            const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
+            return {
+              propertyNumber,
+              propertyName: prop?.name || `عقار ${propertyNumber}`,
+              requestCount: count,
+            };
+          });
+
+        // تحويل سلسلة المدن إلى مصفوفة
+        const cities = analyticsFromSheet.cities
+          .split(" | ")
+          .map(item => {
+            const [name, count] = item.split(": ");
+            return { name, count: parseInt(count, 10) };
+          })
+          .filter(c => c.name && !isNaN(c.count));
+
+        const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
+
+        return res.json({
+          visitors: analyticsFromSheet.visitors,
+          devices: {
+            mobile: analyticsFromSheet.mobile,
+            desktop: analyticsFromSheet.desktop,
+            tablet: analyticsFromSheet.tablet,
+          },
+          cities,
+          byProperty: sortedProperties,
+          recentRequests: allRequests.slice(-20).reverse(),
+          totalRequests: allRequests.length,
+          totalProperties: totalProps.length,
+          uniqueVisitors: uniqueIPs.size,
+          lastUpdated: analyticsFromSheet.lastUpdated,
+        });
+      }
+
+      // إذا لم نجد في Google Sheets، احسبها ديناميكياً
       const allRequests = await storage.getRequests();
       const totalProps = await storage.getProperties();
 
@@ -740,7 +795,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 3. توزيع المدن من بيانات الطلبات
       const cityCounts: Record<string, number> = {};
       allRequests.forEach(r => {
-        // Try to get property location
         const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
         const city = prop?.city || 'غير محدد';
         cityCounts[city] = (cityCounts[city] || 0) + 1;

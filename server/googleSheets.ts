@@ -1148,6 +1148,28 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     }
   }
 
+  async getAnalyticsFromSheet() {
+    try {
+      const analyticsRows = await this.readSheet(SHEETS.ANALYTICS);
+      if (!analyticsRows || analyticsRows.length === 0) return null;
+      
+      // قراءة آخر صف (أحدث إحصائيات)
+      const lastRow = analyticsRows[analyticsRows.length - 1];
+      
+      return {
+        visitors: parseInt(lastRow[0] || "0", 10),
+        mobile: parseInt(lastRow[1] || "0", 10),
+        desktop: parseInt(lastRow[2] || "0", 10),
+        tablet: parseInt(lastRow[3] || "0", 10),
+        cities: lastRow[4] || "لا توجد بيانات",
+        lastUpdated: lastRow[5] || "لم يتم التحديث",
+      };
+    } catch (err) {
+      console.error("getAnalyticsFromSheet error:", err);
+      return null;
+    }
+  }
+
   async updateAnalytics() {
     try {
       const allRequestsRows = await this.readSheet(SHEETS.REQUESTS);
