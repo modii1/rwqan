@@ -4,7 +4,6 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ToastProvider } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
@@ -103,69 +102,67 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <ToastProvider>
-          <div className="min-h-screen flex flex-col bg-background">
-            {/* Header */}
-            <header className="bg-white border-b shadow-sm sticky top-0 z-50">
-              <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-                <a
-                  href="/"
-                  className="text-xl font-bold text-primary hover:opacity-80 transition"
+        <div className="min-h-screen flex flex-col bg-background">
+          {/* Header */}
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+              <a
+                href="/"
+                className="text-xl font-bold text-primary hover:opacity-80 transition"
+              >
+                مودي الذكي
+              </a>
+              <nav className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setLocation("/")}
+                  title="الرئيسية"
                 >
-                  مودي الذكي
-                </a>
-                <nav className="flex items-center gap-2">
+                  <Home className="w-5 h-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setLocation("/suggest")}
+                  title="اقترح لنا"
+                >
+                  <Lightbulb className="w-5 h-5" />
+                </Button>
+                
+                {session?.user && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => setLocation("/")}
-                    title="الرئيسية"
+                    onClick={() => setLocation("/owner/dashboard")}
+                    title="لوحة التحكم"
+                    className="text-primary"
                   >
-                    <Home className="w-5 h-5" />
+                    <LayoutDashboard className="w-5 h-5" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setLocation("/suggest")}
-                    title="اقترح لنا"
-                  >
-                    <Lightbulb className="w-5 h-5" />
-                  </Button>
-                  
-                  {session?.user && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setLocation("/owner/dashboard")}
-                      title="لوحة التحكم"
-                      className="text-primary"
-                    >
-                      <LayoutDashboard className="w-5 h-5" />
-                    </Button>
+                )}
+
+                <Button
+                  variant={session?.user ? "outline" : "default"}
+                  size="icon"
+                  onClick={session?.user ? handleLogout : () => setLocation("/owner/login")}
+                  title={session?.user ? "تسجيل الخروج" : "تسجيل الدخول"}
+                >
+                  {session?.user ? (
+                    <LogOut className="w-5 h-5" />
+                  ) : (
+                    <LogIn className="w-5 h-5" />
                   )}
+                </Button>
+              </nav>
+            </div>
+          </header>
 
-                  <Button
-                    variant={session?.user ? "outline" : "default"}
-                    size="icon"
-                    onClick={session?.user ? handleLogout : () => setLocation("/owner/login")}
-                    title={session?.user ? "تسجيل الخروج" : "تسجيل الدخول"}
-                  >
-                    {session?.user ? (
-                      <LogOut className="w-5 h-5" />
-                    ) : (
-                      <LogIn className="w-5 h-5" />
-                    )}
-                  </Button>
-                </nav>
-              </div>
-            </header>
-
-            <main className="flex-1">
-              <Router />
-            </main>
-            <Toaster />
-          </div>
-        </ToastProvider>
+          <main className="flex-1">
+            <Router />
+          </main>
+          <Toaster />
+        </div>
       </TooltipProvider>
     </QueryClientProvider>
   );
