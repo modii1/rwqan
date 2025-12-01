@@ -872,7 +872,10 @@ class GoogleSheetsService {
 
   async createRequest(request: InsertRequest): Promise<Request> {
     try {
-      const now = new Date();
+      // الحصول على وقت الرياض (UTC+3)
+      const utcNow = new Date();
+      const now = new Date(utcNow.getTime() + (3 * 60 * 60 * 1000));
+      
       const propertyName = (await this.getPropertyByNumber(request.propertyNumber))?.name || "";
       
       // اقرأ الشيت الفعلي وعد الصفوف للعقار هذا
@@ -891,12 +894,12 @@ class GoogleSheetsService {
       // أضف 1 للطلب الجديد (فإذا كان 0 = يكون 1، إذا كان 1 = يكون 2)
       requestCount++;
       
-      // استخراج التاريخ والوقت
-      const day = now.getDate();
-      const month = now.getMonth() + 1;
-      const year = now.getFullYear();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
+      // استخراج التاريخ والوقت بتوقيت الرياض
+      const day = now.getUTCDate();
+      const month = now.getUTCMonth() + 1;
+      const year = now.getUTCFullYear();
+      const hours = String(now.getUTCHours()).padStart(2, "0");
+      const minutes = String(now.getUTCMinutes()).padStart(2, "0");
       const time = `${hours}:${minutes}`;
 
       // صف الشيت بالترتيب الصحيح
@@ -915,7 +918,7 @@ class GoogleSheetsService {
       return {
         id: `REQ-${Date.now()}`,
         ...request,
-        createdAt: now.toISOString(),
+        createdAt: utcNow.toISOString(),
       };
     } catch (err) {
       console.error("createRequest error:", err);

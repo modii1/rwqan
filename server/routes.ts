@@ -358,6 +358,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
   // SMART REQUESTS SYSTEM
   // ======================
+  // دالة للحصول على وقت الرياض (UTC+3)
+  const getRiyadhTime = () => {
+    const now = new Date();
+    const riyadhTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+    return riyadhTime;
+  };
+
   // في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة)
   const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
 
@@ -403,12 +410,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // احسب معلومات الوقت
-      const now_date = new Date();
+      // احسب معلومات الوقت بتوقيت الرياض
+      const now_date = getRiyadhTime();
       const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      const dayOfWeek = daysAr[now_date.getDay()];
-      const hourOfDay = now_date.getHours();
-      const minutes = now_date.getMinutes();
+      const dayOfWeek = daysAr[now_date.getUTCDay()];
+      const hourOfDay = now_date.getUTCHours();
+      const minutes = now_date.getUTCMinutes();
       
       // تحويل الساعة من 24 ساعة إلى 12 ساعة مع AM/PM
       const hour12 = hourOfDay % 12 || 12;
