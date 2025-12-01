@@ -574,9 +574,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentId: paymentId,
       });
 
-      await storage.updateProperty(propertyNumber, {
-        subscriptionType: newPackage.type,
-      });
+      await googleSheetsService.updateProperty(propertyNumber, {
+  subscriptionType: newPackage.type,
+  subscriptionDate: newSubscription.startDate.split("T")[0],
+  lastUpdate: new Date().toISOString(),
+});
+
 
       res.json({
         ok: true,
