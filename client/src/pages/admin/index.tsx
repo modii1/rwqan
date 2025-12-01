@@ -31,16 +31,25 @@ export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
 
   return (
-    <div className="flex min-h-screen bg-muted/30" dir="rtl">
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-background border-l md:border-l-0 md:border-r px-3 py-4 flex md:flex-col gap-2 sticky top-0 h-fit md:h-screen">
-        <div className="flex items-center gap-2 mb-3 px-2">
+    <div className="flex flex-col md:flex-row min-h-screen bg-background" dir="rtl">
+      {/* Header للموبايل */}
+      <div className="md:hidden border-b border-border bg-card p-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
           <LayoutDashboard className="w-5 h-5 text-primary" />
           <div>
-            <h2 className="text-sm font-bold text-primary">لوحة تحكم مودي الذكي</h2>
-            <p className="text-[11px] text-muted-foreground">
-              إدارة العقارات والاشتراكات
-            </p>
+            <h2 className="text-sm font-bold text-primary">لوحة التحكم</h2>
+            <p className="text-[10px] text-muted-foreground">إدارة العقارات</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Sidebar */}
+      <aside className="w-full md:w-56 bg-card border-b md:border-b-0 md:border-l px-2 md:px-4 py-3 md:py-6 flex md:flex-col gap-1 md:gap-2 overflow-x-auto md:overflow-visible md:sticky md:top-0 md:h-screen md:border-l">
+        <div className="hidden md:flex items-center gap-2 mb-3 px-2">
+          <LayoutDashboard className="w-5 h-5 text-primary" />
+          <div>
+            <h2 className="text-sm font-bold text-primary">لوحة التحكم</h2>
+            <p className="text-[11px] text-muted-foreground">إدارة الموارد</p>
           </div>
         </div>
 
@@ -59,7 +68,7 @@ export default function AdminDashboard() {
         />
 
         <SidebarButton
-          icon={<DollarSign className="w-4 h-4" />} // << أيقونة المدفوعات
+          icon={<DollarSign className="w-4 h-4" />}
           label="المدفوعات"
           active={activeSection === "payments"}
           onClick={() => setActiveSection("payments")}
@@ -74,40 +83,31 @@ export default function AdminDashboard() {
 
         <SidebarButton
           icon={<Gift className="w-4 h-4" />}
-          label="الأكواد والخصومات"
+          label="الخصومات"
           active={activeSection === "discounts"}
           onClick={() => setActiveSection("discounts")}
         />
 
         <SidebarButton
           icon={<Inbox className="w-4 h-4" />}
-          label="الطلبات والاقتراحات"
+          label="الطلبات"
           active={activeSection === "requests"}
           onClick={() => setActiveSection("requests")}
         />
 
         <SidebarButton
           icon={<BarChart3 className="w-4 h-4" />}
-          label="إحصائيات متقدمة"
+          label="إحصائيات"
           active={activeSection === "analytics"}
           onClick={() => window.open("/admin/analytics", "_blank")}
         />
-
-        <div className="mt-auto hidden md:block">
-          <SidebarButton
-            icon={<Settings className="w-4 h-4" />}
-            label="إعدادات (لاحقاً)"
-            active={false}
-            onClick={() => {}}
-          />
-        </div>
       </aside>
 
       {/* المحتوى */}
-      <main className="flex-1 p-4 md:p-6 max-w-6xl mx-auto space-y-4">
+      <main className="flex-1 p-3 md:p-6 space-y-4 overflow-auto">
         {activeSection === "" && (
-          <div className="text-center text-muted-foreground text-sm mt-20">
-            اختر قسم من القائمة الجانبية لبدء الإدارة
+          <div className="text-center text-muted-foreground text-sm mt-10 md:mt-20">
+            اختر قسم من القائمة لبدء الإدارة
           </div>
         )}
 
@@ -126,14 +126,14 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
   return (
     <button
       onClick={onClick}
-      className={`flex-1 md:flex-none flex items-center justify-center md:justify-start gap-2 px-2 py-2 rounded-lg text-xs md:text-sm border transition ${
+      className={`flex-shrink-0 flex items-center justify-center md:justify-start gap-2 px-2 md:px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm whitespace-nowrap md:whitespace-normal border transition ${
         active
           ? "bg-primary/10 text-primary border-primary/40"
-          : "bg-background text-muted-foreground hover:bg-muted/60 border-transparent"
+          : "bg-transparent text-muted-foreground hover:bg-muted/50 border-transparent hover:text-foreground"
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="hidden md:inline">{label}</span>
     </button>
   );
 }
