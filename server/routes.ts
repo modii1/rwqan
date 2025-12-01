@@ -365,8 +365,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return riyadhTime;
   };
 
-  // في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة)
+  // في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة) وعدد طلبات كل IP لكل عقار
   const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
+  const ipPropertyCounter = new Map<string, Map<string, number>>();
 
   app.post("/api/requests/smart", async (req, res) => {
     try {
@@ -424,7 +425,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // أنشئ كود طلب فريد
       const requestCode = `REQ${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
-      // احفظ الطلب
+      // احسب عدد الطلبات من هذا IP للعقار هذا
+      if (!ipPropertyCounter.has(ipAddress)) {
+        ipPropertyCounter.set(ipAddress, new Map());
+      }
+      const propertyMap = ipPropertyCounter.get(ipAddress)!;
+      const currentCount = propertyMap.get(propertyNumber) || 0;
+      const newCount = currentCount + 1;
+      propertyMap.set(propertyNumber, newCount);
+
+      // احفظ الطلب مع العدد من IP
       const request = await storage.createRequest({
         propertyNumber,
         requestCode,
@@ -432,11 +442,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress,
         dayOfWeek,
         hourOfDay,
-      });
+      }, newCount);
 
       // حدّث المتتبع
       requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
-      console.log(`✅ Request tracked - IP: ${ipAddress}, Property: ${propertyNumber}`);
+      console.log(`✅ Request tracked - IP: ${ipAddress}, Property: ${propertyNumber}, Count: ${newCount}`);
 
       // نظّف الطلبات القديمة (أكثر من ساعة)
       const keysToDelete: string[] = [];
