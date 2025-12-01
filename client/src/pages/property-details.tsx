@@ -175,9 +175,7 @@ export default function PropertyDetailsPage() {
     
     const fetchR2Images = async () => {
       try {
-        const res = await fetch(`/api/owner/r2-images?propertyNumber=${property.propertyNumber}`, {
-          credentials: "include",
-        });
+        const res = await fetch(`/api/admin/r2-images/${property.propertyNumber}`);
         if (res.ok) {
           const data = await res.json();
           setR2Images(data.images || []);
