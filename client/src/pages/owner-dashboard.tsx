@@ -190,83 +190,6 @@ export default function OwnerDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-6 md:py-8 space-y-6 md:space-y-8">
-        {/* ===== كرت حالة الاشتراك + Progress Bar ===== */}
-        <Card className="p-4 md:p-6 !border-primary/15 bg-primary/5">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6">
-            <div className="space-y-2 flex-1">
-              <h2 className="font-bold text-base md:text-lg text-primary">حالة الاشتراك</h2>
-              <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-                <Badge
-                  variant={isVip ? "default" : "secondary"}
-                  className="text-xs md:text-sm px-3 md:px-4 py-1"
-                >
-                  {property.subscriptionType}
-                </Badge>
-                {property.subscriptionDate && (
-                  <span className="text-xs text-muted-foreground">
-                    منذ {new Date(property.subscriptionDate).toLocaleDateString("ar-SA")}
-                  </span>
-                )}
-              </div>
-
-              {remainingDays !== null && (
-                <div className="mt-3 space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>التقدم</span>
-                    <span>
-                      باقي <span className="font-bold text-primary">{remainingDays}</span> يوم
-                    </span>
-                  </div>
-                  <ProgressBar value={progressPercent ?? 0} />
-                </div>
-              )}
-            </div>
-
-            <Button
-              className="w-full md:w-auto h-10 md:h-12 text-sm md:text-base font-bold gap-2 bg-primary text-white hover:bg-primary/90 flex-shrink-0"
-              onClick={() => setLocation("/owner/subscription")}
-            >
-              <CreditCard className="w-4 md:w-5 h-4 md:h-5" />
-              <span className="hidden md:inline">{subscriptionButtonLabel}</span>
-              <span className="md:hidden">إدارة</span>
-            </Button>
-          </div>
-        </Card>
-
-        {/* ===== جدول الطلبات الحديثة ===== */}
-        <Card className="p-6">
-          <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
-            <MessageCircle className="w-5 h-5" />
-            آخر طلبات واتساب
-          </h2>
-          {requestsLoading ? (
-            <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
-          ) : requestsData?.requests?.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">لا توجد طلبات حتى الآن</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-border">
-                  <tr className="text-muted-foreground">
-                    <th className="text-right p-3">الكود</th>
-                    <th className="text-right p-3">التاريخ والوقت</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requestsData?.requests?.slice(0, 10)?.map((req: any, idx: number) => (
-                    <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
-                      <td className="p-3 font-mono">{req.requestCode || req.id}</td>
-                      <td className="p-3 text-muted-foreground">
-                        {req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-
         {/* ===== معلومات العقار + أداء العقار ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* معلومات العقار */}
@@ -361,12 +284,6 @@ export default function OwnerDashboard() {
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <BigActionButton
-              icon={<CreditCard className="w-6 h-6" />}
-              title="إدارة الاشتراك"
-              desc="عرض الباقات والتجديد"
-              onClick={() => setLocation("/owner/subscription")}
-            />
-            <BigActionButton
               icon={<ImageIcon className="w-6 h-6" />}
               title="إدارة الصور"
               desc="رفع وتحديث صور العقار"
@@ -397,6 +314,40 @@ export default function OwnerDashboard() {
               onClick={handleComingSoon}
             />
           </div>
+        </Card>
+
+        {/* ===== جدول الطلبات الحديثة (في الأسفل) ===== */}
+        <Card className="p-6">
+          <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+            <MessageCircle className="w-5 h-5" />
+            آخر طلبات واتساب
+          </h2>
+          {requestsLoading ? (
+            <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
+          ) : requestsData?.requests?.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">لا توجد طلبات حتى الآن</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border">
+                  <tr className="text-muted-foreground">
+                    <th className="text-right p-3">الكود</th>
+                    <th className="text-right p-3">التاريخ والوقت</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requestsData?.requests?.slice(0, 10)?.map((req: any, idx: number) => (
+                    <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
+                      <td className="p-3 font-mono">{req.requestCode || req.id}</td>
+                      <td className="p-3 text-muted-foreground">
+                        {req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
 
         {/* ===== صور العقار ===== */}
