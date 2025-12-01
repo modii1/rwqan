@@ -42,15 +42,15 @@ export default function AdminAnalytics() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border shadow-sm bg-card">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full flex items-center justify-center bg-primary/10">
-              <BarChart3 className="w-6 h-6 text-primary" />
+      <header className="border-b border-border shadow-sm bg-gradient-to-r from-primary/5 to-primary/10">
+        <div className="max-w-7xl mx-auto px-4 py-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-lg flex items-center justify-center bg-gradient-to-br from-primary to-primary/70 shadow-lg">
+              <BarChart3 className="w-8 h-8 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-primary">إحصائيات الطلبات</h1>
-              <p className="text-sm text-muted-foreground">لوحة الإدارة</p>
+              <h1 className="text-3xl font-bold text-primary">لوحة الإحصائيات</h1>
+              <p className="text-sm text-muted-foreground">إدارة شاملة للزيارات والطلبات</p>
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={handleLogout}>
