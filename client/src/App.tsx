@@ -18,7 +18,6 @@ import OwnerImagesPage from "@/pages/owner-images";
 import OwnerUpdateProperty from "@/pages/owner-update-property";
 import SubscriptionPage from "@/pages/subscription";
 import OwnerSubscriptionPage from "@/pages/owner-subscription";
-import QuickSubscribePage from "@/pages/quick-subscribe";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
@@ -42,7 +41,6 @@ function Router() {
 
       {/* صفحات عامة */}
       <Route path="/subscription" component={SubscriptionPage} />
-      <Route path="/subscribe" component={QuickSubscribePage} />
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/test-images" component={TestImages} />
