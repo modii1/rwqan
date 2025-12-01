@@ -1534,7 +1534,5 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
-  // ======================
-  // DONE
-  // ======================
   return createServer(app);
+}
