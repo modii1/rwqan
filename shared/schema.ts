@@ -65,6 +65,7 @@ export const packageSchema = z.object({
   price: z.number(), // بالريال
   type: z.enum(['عادي', 'موثوق']),
   features: z.array(z.string()).default([]),
+  description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),
   createdAt: z.string().optional(),
 });
