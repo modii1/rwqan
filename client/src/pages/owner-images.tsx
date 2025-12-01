@@ -71,15 +71,12 @@ export default function OwnerImagesPage() {
     onSuccess: (data) => {
       // إضافة الصور المرفوعة مباشرة إلى البيانات المعروضة
       if (data.urls && r2Images) {
+        // نضيف الصور الجديدة وحفظها بشكل دائم في الـ cache
+        const newImages = [...r2Images, ...data.urls];
         queryClient.setQueryData(["/api/owner/r2-images"], {
-          images: [...r2Images, ...data.urls]
+          images: newImages
         });
       }
-      
-      // ثم نعيد الجلب من الخادم بعد ثانيتين للتأكد
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
-      }, 2000);
       
       setSelectedFiles([]);
       setPreviewUrls([]);
