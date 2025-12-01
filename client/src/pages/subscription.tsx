@@ -21,8 +21,6 @@ export default function SubscriptionPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
-  // تحديد إذا كان المالك جديد أم يسجل عقار موجود
-  const [registrationMode, setRegistrationMode] = useState<'new' | 'existing' | null>(null);
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [packageToView, setPackageToView] = useState<Package | null>(null);
@@ -163,46 +161,11 @@ export default function SubscriptionPage() {
     }
   };
 
-  // عرض صفحة الاختيار في البداية
-  if (!registrationMode) {
-    return (
-      <div className="min-h-screen bg-background">
-        <header className="bg-card border-b border-border shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4">
-            <h1 className="text-2xl font-bold text-[#434040]">اشترك معنا</h1>
-            <p className="text-sm text-muted-foreground">اختر نوع الاشتراك</p>
-          </div>
-        </header>
-        <div className="max-w-6xl mx-auto px-4 py-16">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl mx-auto">
-            {/* عقار جديد */}
-            <Card className="p-8 text-center hover:shadow-lg transition-shadow cursor-pointer border-[#e0c97b]" onClick={() => { setRegistrationMode('new'); setCurrentStep(1); }}>
-              <h3 className="text-xl font-bold text-[#434040] mb-3">عقار جديد</h3>
-              <p className="text-muted-foreground mb-6">سجل عقارك الآن واشترك بباقة</p>
-              <Button className="w-full" onClick={() => { setRegistrationMode('new'); setCurrentStep(1); }}>
-                تسجيل عقار جديد
-              </Button>
-            </Card>
-
-            {/* عقار موجود يريد ترقية */}
-            <Card className="p-8 text-center hover:shadow-lg transition-shadow cursor-pointer border-[#e0c97b]" onClick={() => setLocation('/owner/login')}>
-              <h3 className="text-xl font-bold text-[#434040] mb-3">عقار موجود</h3>
-              <p className="text-muted-foreground mb-6">لديك عقار وتريد الترقية أو التمديد</p>
-              <Button className="w-full" onClick={() => setLocation('/owner/login')}>
-                دخول حسابك
-              </Button>
-            </Card>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background">
       <header className="bg-card border-b border-border shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-[#434040]">تسجيل عقار جديد</h1>
+          <h1 className="text-2xl font-bold text-[#434040]">اشترك معنا</h1>
           <p className="text-sm text-muted-foreground">اختر باقة واملأ بيانات عقارك</p>
         </div>
       </header>
