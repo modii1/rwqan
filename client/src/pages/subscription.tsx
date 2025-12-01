@@ -141,7 +141,7 @@ export default function SubscriptionPage() {
     <div className="min-h-screen bg-background">
       <header className="bg-card border-b border-border shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-primary">اشترك معنا</h1>
+          <h1 className="text-2xl font-bold text-[#434040]">اشترك معنا</h1>
           <p className="text-sm text-muted-foreground">اختر باقة واملأ بيانات عقارك</p>
         </div>
       </header>
@@ -157,7 +157,7 @@ export default function SubscriptionPage() {
                 onClick={() => setSelectedPackageId(pkg.id)}
                 className={`p-5 cursor-pointer transition-all ${
                   selectedPackageId === pkg.id
-                    ? 'ring-2 ring-primary bg-primary/5 shadow-md'
+                    ? 'ring-2 ring-[#434040] bg-[#434040]/5 shadow-md'
                     : 'hover:shadow-md'
                 }`}
               >
@@ -165,18 +165,18 @@ export default function SubscriptionPage() {
                   <div>
                     <h3 className="font-bold">{pkg.name}</h3>
                     {pkg.price === 0 ? (
-                      <p className="text-2xl font-bold text-primary">مجاني</p>
+                      <p className="text-2xl font-bold text-[#434040]">مجاني</p>
                     ) : (
                       <PriceDisplay amount={pkg.price} size="lg" />
                     )}
                   </div>
                   {selectedPackageId === pkg.id && (
-                    <Badge className="bg-primary">مختار</Badge>
+                    <Badge className="bg-[#434040] text-white">مختار</Badge>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">{pkg.duration} يوم</p>
                 {pkg.type === 'موثوق' && (
-                  <Badge className="bg-primary/20 text-primary border-0 text-xs">موثوق</Badge>
+                  <Badge className="bg-[#434040]/20 text-[#434040] border-0 text-xs">موثوق</Badge>
                 )}
               </Card>
             ))}
@@ -191,11 +191,11 @@ export default function SubscriptionPage() {
           <>
             {/* Progress Bar */}
             <div className="flex items-center gap-4 mb-8">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-primary">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-[#434040]">
                 ✓
               </div>
-              <div className="flex-1 h-1 bg-primary"></div>
-              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-primary">
+              <div className="flex-1 h-1 bg-[#434040]"></div>
+              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-[#434040]">
                 2
               </div>
             </div>
@@ -203,7 +203,7 @@ export default function SubscriptionPage() {
             {/* Registration Form */}
             <Card className="p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
-                <h2 className="text-xl font-bold">تفاصيل العقار</h2>
+                <h2 className="text-xl font-bold text-[#434040]">تفاصيل العقار</h2>
 
                 {/* Property Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -331,14 +331,14 @@ export default function SubscriptionPage() {
                     <div className="space-y-3">
                       <div
                         onClick={() => setPaymentMethod('online')}
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}
+                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
                       >
                         <div className="font-semibold">الدفع الإلكتروني</div>
                         <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
                       </div>
                       <div
                         onClick={() => setPaymentMethod('bank')}
-                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}
+                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
                       >
                         <div className="font-semibold">تحويل بنكي</div>
                         <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
