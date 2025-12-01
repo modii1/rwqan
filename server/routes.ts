@@ -1340,7 +1340,7 @@ app.post("/api/discount/validate", async (req, res) => {
 // 2. بدء عملية الدفع الإلكتروني
 app.post("/api/owner/payment/initiate", async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode, paymentMethod = "cards" } = req.body;
+    const { propertyNumber, packageId, discountCode, paymentMethod = "cards", action } = req.body;
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
@@ -1391,6 +1391,33 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
     });
 
+    // حفظ البيانات للاشتراك/التمديد/الترقية
+    if (action === 'extend' || action === 'upgrade') {
+      const today = new Date();
+      const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
+      
+      let startDate = today;
+      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      
+      // إذا كان التمديد وهناك اشتراك حالي، ابدأ من تاريخ انتهاء الاشتراك الحالي
+      if (action === 'extend' && currentSubscription && new Date(currentSubscription.endDate) > today) {
+        startDate = new Date(currentSubscription.endDate);
+        endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      }
+      
+      const subscriptionData = {
+        price: pkg.price,
+        subscriptionType: pkg.type,
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+        paymentId: payment.id,
+      };
+      
+      // حفظ الاشتراك إلى ورقة الاشتراكات
+      await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property);
+      console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
+    }
+
     console.log(`✅ Payment created: ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
 
     res.json({
@@ -1406,7 +1433,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 // 3. التحويل البنكي مع رفع الإيصال
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode } = req.body;
+    const { propertyNumber, packageId, discountCode, action } = req.body;
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
@@ -1419,6 +1446,9 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     // جلب بيانات الباقة والعقار
     const pkg = await storage.getPackageById(packageId);
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
+
+    const property = await storage.getPropertyByNumber(propertyNumber);
+    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
 
     // حساب السعر النهائي
     let finalAmount = pkg.price;
@@ -1460,6 +1490,33 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       paymentMethod: "تحويل بنكي",
       receiptUrl,
     });
+
+    // حفظ البيانات للاشتراك/التمديد/الترقية
+    if (action === 'extend' || action === 'upgrade' || !action) {
+      const today = new Date();
+      const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
+      
+      let startDate = today;
+      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      
+      // إذا كان التمديد وهناك اشتراك حالي، ابدأ من تاريخ انتهاء الاشتراك الحالي
+      if ((action === 'extend' || !action) && currentSubscription && new Date(currentSubscription.endDate) > today) {
+        startDate = new Date(currentSubscription.endDate);
+        endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      }
+      
+      const subscriptionData = {
+        price: pkg.price,
+        subscriptionType: pkg.type,
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+        paymentId: payment.id,
+      };
+      
+      // حفظ الاشتراك إلى ورقة الاشتراكات
+      await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property, receiptUrl);
+      console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
+    }
 
     res.json({ ok: true, paymentId: payment.id });
   } catch (err: any) {
