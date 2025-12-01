@@ -1028,36 +1028,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/packages", async (_req, res) => {
     try {
-      const rows = await googleSheetsService.readSheet("الباقات");
-
-      if (!rows || rows.length <= 1) {
-        return res.json([]);
-      }
-
-      const packages = rows.slice(1).map((row) => ({
-        id: row[0],
-        name: row[1],
-        duration: Number(row[2]),
-        price: Number(row[3]),
-        type: row[4],
-        features: parseFeatures(row[5]),
-        isActive: String(row[6]).toLowerCase() === "true",
-        createdAt: row[7] || "",
-      }));
-
-      res.json(packages.filter((p) => p.isActive));
-    } catch {
-      res.status(500).json({ error: "failed to load packages" });
+      const packages = await storage.getPackages();
+      res.json(packages);
+    } catch (err: any) {
+      res.status(500).json({ error: "فشل في جلب الباقات" });
     }
   });
-
-  function parseFeatures(val: any): string[] {
-    if (!val) return [];
-    try {
-      if (String(val).trim().startsWith("[")) return JSON.parse(val);
-    } catch {}
-    return String(val).split("\n");
-  }
 
 
 
