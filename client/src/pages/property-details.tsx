@@ -270,10 +270,9 @@ export default function PropertyDetailsPage() {
 
       if (!response.ok) {
         // إذا حدث خطأ (مثل التكرار)
-        if (result.remainingSeconds) {
+        if (result.remainingTimeFormatted) {
           // إظهار تنبيه للمستخدم
-          const secondsLeft = result.remainingSeconds;
-          alert(`انتظر ${secondsLeft} ثانية قبل إرسال طلب آخر لنفس العقار`);
+          alert(`⏱️ انتظر: ${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`);
         }
         return;
       }
