@@ -539,10 +539,12 @@ class GoogleSheetsService {
   
   // قراءة من ورقة الاشتراكات الفعلية
   // الأعمدة: رقم العقار(0), اسم العقار(1), رقم الجوال(2), رسوم الاشتراك(3), نوع الاشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6), الأيام المتبقية(7), رابط الإيصال(8), علم انتهاء(9), علم إشعار(10), آخر دورة(11), رمز التحديث(12)
-  private rowToSubscriptionFromSheet(row: any[]): Subscription {
+  private rowToSubscriptionFromSheet(row: any[]): Subscription & { price?: number; subscriptionType?: string } {
     const startDate = row[5] ? String(row[5]) : "";
     const endDate = row[6] ? String(row[6]) : "";
     const packageId = row[12] ? String(row[12]) : "pkg-free";  // قراءة packageId من العمود 12
+    const price = row[3] ? parseFloat(String(row[3])) : 0;  // قراءة السعر من العمود 3
+    const subscriptionType = row[4] ? String(row[4]) : "عادي";  // قراءة نوع الاشتراك من العمود 4
     
     // حساب الحالة تلقائياً من تاريخ الانتهاء
     let status = "نشط";
@@ -562,6 +564,8 @@ class GoogleSheetsService {
       startDate,
       endDate,
       status: status as any,
+      price,  // إضافة السعر
+      subscriptionType,  // إضافة نوع الاشتراك
     };
   }
 

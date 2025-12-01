@@ -1349,17 +1349,24 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       
       let startDate = today;
       let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      let price = pkg.price;
+      let subscriptionType = pkg.type;
       
-      // إذا كان التمديد وهناك اشتراك حالي، ابدأ من تاريخ انتهاء الاشتراك الحالي
-      if (action === 'extend' && currentSubscription && new Date(currentSubscription.endDate) > today) {
-        startDate = new Date(currentSubscription.endDate);
-        endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
+      if (action === 'extend' && currentSubscription) {
+        if (new Date(currentSubscription.endDate) > today) {
+          startDate = new Date(currentSubscription.endDate);
+          endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+        }
+        // احتفظ بالسعر والنوع الحالي
+        price = (currentSubscription as any).price || pkg.price;
+        subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
       
       const subscriptionData = {
         packageId: packageId,
-        price: pkg.price,
-        subscriptionType: pkg.type,
+        price: price,
+        subscriptionType: subscriptionType,
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         paymentId: payment.id,
@@ -1450,17 +1457,24 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       
       let startDate = today;
       let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      let price = pkg.price;
+      let subscriptionType = pkg.type;
       
-      // إذا كان التمديد وهناك اشتراك حالي، ابدأ من تاريخ انتهاء الاشتراك الحالي
-      if ((action === 'extend' || !action) && currentSubscription && new Date(currentSubscription.endDate) > today) {
-        startDate = new Date(currentSubscription.endDate);
-        endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
+      if ((action === 'extend' || !action) && currentSubscription) {
+        if (new Date(currentSubscription.endDate) > today) {
+          startDate = new Date(currentSubscription.endDate);
+          endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+        }
+        // احتفظ بالسعر والنوع الحالي
+        price = (currentSubscription as any).price || pkg.price;
+        subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
       
       const subscriptionData = {
         packageId: packageId,
-        price: pkg.price,
-        subscriptionType: pkg.type,
+        price: price,
+        subscriptionType: subscriptionType,
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         paymentId: payment.id,
