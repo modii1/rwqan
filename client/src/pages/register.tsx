@@ -56,7 +56,7 @@ export default function RegisterPage() {
         description: "يمكنك الآن تسجيل الدخول وإدارة عقارك",
       });
 
-      setLocation('/owner/login');
+      setLocation('/register-with-package');
     } catch (error: any) {
       toast({
         title: "خطأ في التسجيل",
