@@ -230,20 +230,46 @@ export default function PropertiesPage() {
 
   const handleWhatsApp = async (property: Property) => {
     try {
-      await fetch("/api/requests", {
+      // تسجيل الطلب في النظام الذكي
+      const response = await fetch("/api/requests/smart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ propertyNumber: property.propertyNumber }),
       });
 
+      const result = await response.json();
+
+      if (!response.ok) {
+        // إذا حدث خطأ (مثل التكرار)
+        if (result.remainingSeconds) {
+          const { useToast } = await import("@/hooks/use-toast");
+          const { toast } = useToast();
+          toast({
+            title: "انتظر قليلاً",
+            description: `يمكنك إرسال طلب آخر خلال ${result.remainingSeconds} ثانية`,
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      // إذا نجح: افتح واتساب
       const DEFAULT_WHATSAPP = "966533220646";
       const whatsappNumber = property.whatsappNumber || DEFAULT_WHATSAPP;
 
       const message = property.whatsappNumber
-        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}`)
-        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}`);
+        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}\n\nكود الطلب: ${result.requestCode}`)
+        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}\n\nكود الطلب: ${result.requestCode}`);
 
       window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank");
+
+      // إظهار رسالة النجاح
+      const { useToast } = await import("@/hooks/use-toast");
+      const { toast } = useToast();
+      toast({
+        title: "تم تسجيل طلبك",
+        description: `${result.requestTime}`,
+      });
     } catch (error) {
       console.error("Error creating WhatsApp request:", error);
     }

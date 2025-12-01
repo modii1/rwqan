@@ -117,6 +117,9 @@ export const requestSchema = z.object({
   propertyNumber: z.string(),
   requestCode: z.string(), // كود قصير
   timestamp: z.string(),
+  ipAddress: z.string(), // IP العميل
+  dayOfWeek: z.string(), // يوم الأسبوع (الجمعة، السبت، إلخ)
+  hourOfDay: z.number(), // الساعة (0-23)
   createdAt: z.string().optional(),
 });
 
