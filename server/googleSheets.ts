@@ -637,10 +637,23 @@ class GoogleSheetsService {
     };
   }
 
-  // إضافة اشتراك جديد إلى ورقة الاشتراكات
+  // إضافة أو تحديث اشتراك في ورقة الاشتراكات
   async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
-    const row = this.subscriptionToRow(propertyNumber, subscriptionData, property, receiptUrl);
-    await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [row]);
+    const newRow = this.subscriptionToRow(propertyNumber, subscriptionData, property, receiptUrl);
+    
+    // البحث عن صف موجود بنفس رقم العقار
+    const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+    const existingRowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+    
+    if (existingRowIndex !== -1) {
+      // تحديث الصف الموجود (الصف في Sheet هو rowIndex + 2 بسبب header)
+      console.log(`🔄 Updating existing subscription for property ${propertyNumber}`);
+      await this.updateRow(SHEETS.SUBSCRIPTIONS, existingRowIndex + 2, newRow);
+    } else {
+      // إضافة صف جديد
+      console.log(`✨ Creating new subscription row for property ${propertyNumber}`);
+      await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [newRow]);
+    }
   }
 
   async updateSubscription(
