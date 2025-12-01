@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
-import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
+import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard, UserPlus } from "lucide-react";
 
 // Pages
 import NotFound from "@/pages/not-found";
@@ -129,6 +129,17 @@ export default function App() {
                 >
                   <Lightbulb className="w-5 h-5" />
                 </Button>
+
+                {!session?.user && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setLocation("/subscription")}
+                    title="اشترك معنا"
+                  >
+                    <UserPlus className="w-5 h-5" />
+                  </Button>
+                )}
                 
                 {session?.user && (
                   <Button
