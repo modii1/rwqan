@@ -829,7 +829,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     const { packageId, discountCode, paymentMethod = "cards" } = req.body;
 
     // جلب بيانات العقار من السيشن
-    const propertyNumber = req.session?.propertyNumber;
+    const propertyNumber = (req.session as any)?.propertyNumber;
     if (!propertyNumber) {
       return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
     }
@@ -875,8 +875,8 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       discountAmount: pkg.price - finalAmount,
       finalAmount,
       paymobOrderId: paymobResult.intentionId,
-      status: "قيد الانتظار",
-      paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة ائتمان",
+      status: "قيد المراجعة",
+      paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
     });
 
     res.json({
@@ -893,7 +893,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
     const { packageId, discountCode } = req.body;
-    const propertyNumber = req.session?.propertyNumber;
+    const propertyNumber = (req.session as any)?.propertyNumber;
 
     if (!propertyNumber) {
       return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
@@ -943,7 +943,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       discountCode: discountCode || "",
       discountAmount: pkg.price - finalAmount,
       finalAmount,
-      status: "قيد التحقق",
+      status: "قيد المراجعة",
       paymentMethod: "تحويل بنكي",
       receiptUrl,
     });
