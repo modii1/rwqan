@@ -1,7 +1,8 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
+import type { CorsOptions } from "cors";
 
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 
 import { storage } from "./storage";
@@ -24,11 +25,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 
 const r2 = new S3Client({
-  region: process.env.R2_REGION,
-  endpoint: process.env.R2_ENDPOINT,
+  region: process.env.R2_REGION || "",
+  endpoint: process.env.R2_ENDPOINT || "",
   credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
   },
 });
 
@@ -59,18 +60,24 @@ const SHEET_MAP: Record<string, string> = {
   "الرقم السري": "pin",
 };
 
-export async function registerRoutes(app: Express): Promise<Server> {
-  console.log("⚙️ Registering backend routes...");
+// Session type augmentation
+declare global {
+  namespace Express {
+    interface Session {
+      propertyNumber?: string;
+    }
+  }
+}
 
+export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
   // CORS FIX
   // ======================
-  app.use(
-    cors({
-      origin: true,          // يسمح للمتصفح يرسل الكوكيز من modiy.replit.app
-      credentials: true,     // ضروري للجلسة
-    })
-  );
+  const corsOptions: CorsOptions = {
+    origin: true,
+    credentials: true,
+  };
+  app.use(cors(corsOptions));
 
   app.post("/api/owner/logout", (req, res) => {
     req.session.destroy(() => {
@@ -85,9 +92,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
   try {
     await googleSheetsService.initializeSheets();
-    console.log("✅ Google Sheets OK");
   } catch (err) {
-    console.error("❌ Sheets Init Error:", err);
+    console.error("Sheets Init Error:", err);
   }
 
   // ======================
@@ -217,11 +223,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // OWNER AUTH
   // ======================
 
-  const requireOwner = (req: any, res: any, next: any) => {
+  const requireOwner = (req: Request, res: Response, next: NextFunction) => {
     if (!req.session.propertyNumber)
       return res.status(401).json({ error: "Login Required" });
 
-    req.propertyNumber = req.session.propertyNumber;
+    (req as any).propertyNumber = req.session.propertyNumber;
     next();
   };
 
@@ -297,8 +303,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { propertyNumber } = req.params;
       const body = req.body;
 
-      console.log("📝 Admin Update Request:", propertyNumber, body);
-
       // Convert Arabic keys to English
       const updates: any = {};
       for (const [key, value] of Object.entries(body)) {
@@ -311,10 +315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log("📝 Mapped updates:", updates);
-
       const updated = await storage.updateProperty(propertyNumber, updates);
-      console.log("✅ Property updated:", propertyNumber);
       res.json(updated);
     } catch (err: any) {
       console.error("❌ Admin update error:", err);
@@ -326,7 +327,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/properties", async (req, res) => {
     try {
       const body = req.body;
-      console.log("📝 Admin Create Request:", body);
 
       // Convert Arabic keys to English
       const data: any = {};
@@ -357,10 +357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageUrls: [],
       });
 
-      console.log("✅ Property created:", created.propertyNumber);
       res.json(created);
     } catch (err: any) {
-      console.error("❌ Admin create error:", err);
       res.status(500).json({ error: err?.message || "فشل في الإنشاء" });
     }
   });
@@ -369,10 +367,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/admin/properties/:propertyNumber", async (req, res) => {
     try {
       await storage.deleteProperty(req.params.propertyNumber);
-      console.log("✅ Property deleted:", req.params.propertyNumber);
       res.json({ ok: true });
     } catch (err: any) {
-      console.error("❌ Admin delete error:", err);
       res.status(500).json({ error: err?.message || "فشل في الحذف" });
     }
   });
@@ -408,8 +404,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ترتيب حسب رقم الصورة 1,2,3...
       images.sort((a, b) => {
-        const na = parseInt(a.split("/").pop().replace(".jpg", ""));
-        const nb = parseInt(b.split("/").pop().replace(".jpg", ""));
+        const aParts = a.split("/").pop() || "";
+        const bParts = b.split("/").pop() || "";
+        const na = parseInt(aParts.replace(".jpg", ""));
+        const nb = parseInt(bParts.replace(".jpg", ""));
         return na - nb;
       });
 

@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, log } from "./vite";
 import path from "path";
@@ -21,10 +21,10 @@ if (bucketId) {
   const server = await registerRoutes(app);
 
   // Error Handler
-  app.use((err, req, res, next) => {
-    console.error("SERVER ERROR:", err);
+  const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(500).json({ message: "Server Error" });
-  });
+  };
+  app.use(errorHandler);
 
   // ====== Development: Vite ======
   if (app.get("env") === "development") {
@@ -50,7 +50,5 @@ if (bucketId) {
 
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({ port, host: "0.0.0.0" }, () =>
-    console.log(`🚀 Server running on port ${port}`)
-  );
+  server.listen({ port, host: "0.0.0.0" }, () => {});  // Silent startup in production
 })();
