@@ -569,27 +569,38 @@ class GoogleSheetsService {
     };
   }
 
-  private subscriptionToRow(propertyNumber: string, subscription: any, property: any, receiptUrl?: string): any[] {
-    const endDate = new Date(subscription.endDate);
-    const now = new Date();
-    const daysRemaining = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    
-    return [
-      propertyNumber,                                          // 0: رقم العقار
-      property?.name || "",                                   // 1: اسم العقار
-      property?.whatsappNumber || "",                         // 2: رقم الجوال
-      subscription.price || "",                               // 3: رسوم الاشتراك
-      subscription.subscriptionType || "عادي",                 // 4: نوع الاشتراك
-      subscription.startDate?.split('T')[0] || "",            // 5: تاريخ البداية
-      subscription.endDate?.split('T')[0] || "",              // 6: تاريخ الانتهاء
-      Math.max(daysRemaining, 0),                             // 7: الأيام المتبقية
-      receiptUrl || "",                                        // 8: رابط الإيصال
-      "",                                                      // 9: علم انتهاء الاشتراك
-      "",                                                      // 10: علم إشعار الإيصال
-      new Date().toISOString().split('T')[0],                 // 11: آخر دورة
-      subscription.packageId || "",                            // 12: رمز التحديث (packageId)
-    ];
-  }
+private subscriptionToRow(propertyNumber: string, subscription: any, property: any, receiptUrl?: string): any[] {
+  const endDate = new Date(subscription.endDate);
+  const now = new Date();
+  const daysRemaining = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  // منطق تحديد نوع الاشتراك
+  const isPremium =
+    subscription.packageType === "مميز" ||
+    subscription.packageId?.includes("premium") ||
+    subscription.packageId === "pkg-trusted" ||
+    (subscription.price && Number(subscription.price) > 0);
+
+  const subscriptionType = isPremium ? "مميز" : "عادي";
+
+  return [
+    propertyNumber,                              // 0 رقم العقار
+    property?.name || "",                        // 1 اسم العقار
+    property?.whatsappNumber || "",              // 2 رقم الجوال
+    subscription.price || "",                    // 3 رسوم الاشتراك
+    subscriptionType,                            // 4 نوع الاشتراك
+    subscription.startDate?.split("T")[0] || "", // 5 تاريخ البداية
+    subscription.endDate?.split("T")[0] || "",   // 6 تاريخ الانتهاء
+    Math.max(daysRemaining, 0),                  // 7 الأيام المتبقية
+    receiptUrl || "",                            // 8 رابط الإيصال
+    "",                                          // 9 علم انتهاء الاشتراك
+    "",                                          // 10 علم إشعار الإيصال
+    "",                                          // 11 آخر دورة ← تم حذف التاريخ
+    subscription.packageId || "",                // 12 رمز التحديث (packageId)
+  ];
+}
+
+
 
   async getSubscriptions(): Promise<Subscription[]> {
     // قراءة من ورقة الاشتراكات
@@ -615,10 +626,7 @@ class GoogleSheetsService {
     return propertySubscriptions[0] || null;
   }
 
-  async createSubscription(
-    subscription: InsertSubscription,
-  ): Promise<Subscription> {
-    // تحديث بيانات الاشتراك في صف العقار
+  async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
     const rows = await this.readSheet(SHEETS.PROPERTIES);
     const rowIndex = rows.findIndex((row) => row[0] === subscription.propertyNumber);
 
@@ -627,39 +635,83 @@ class GoogleSheetsService {
     }
 
     const propertyRow = rows[rowIndex];
-    
-    // تحديث الأعمدة: نوع اشتراك(15), تاريخ البداية(17), تاريخ الانتهاء(18)
-    const subscriptionType = subscription.packageId === "pkg-trusted" ? "مميز" : "عادي";
-    propertyRow[15] = subscriptionType;
-    propertyRow[17] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
-    propertyRow[18] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
-    
+
+    // 👌 تحديد إذا كانت الباقة مميزة
+    const isPremium =
+      subscription.packageId?.includes("premium") ||
+      subscription.packageId === "pkg-trusted" ||
+      (subscription.price && Number(subscription.price) > 0);
+
+    // 🟡 15 = نوع الاشتراك
+    propertyRow[15] = isPremium ? "مميز" : "عادي";
+
+    // 🟡 16 = آخر تحديث
+    propertyRow[16] = new Date().toISOString().split("T")[0];
+
+    // 🟡 17 = تاريخ الاشتراك
+    propertyRow[17] = subscription.startDate.split("T")[0];
+
+    // الرقم السري لا نلمسه (18)
+
     await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
-    
+
     return {
       id: `SUB-${subscription.propertyNumber}`,
       ...subscription,
     };
   }
 
+
+
   // إضافة أو تحديث اشتراك في ورقة الاشتراكات
-  async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
-    const newRow = this.subscriptionToRow(propertyNumber, subscriptionData, property, receiptUrl);
-    
-    // البحث عن صف موجود بنفس رقم العقار
-    const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
-    const existingRowIndex = rows.findIndex((row) => row[0] === propertyNumber);
-    
-    if (existingRowIndex !== -1) {
-      // تحديث الصف الموجود (الصف في Sheet هو rowIndex + 2 بسبب header)
-      console.log(`🔄 Updating existing subscription for property ${propertyNumber}`);
-      await this.updateRow(SHEETS.SUBSCRIPTIONS, existingRowIndex + 2, newRow);
-    } else {
-      // إضافة صف جديد
-      console.log(`✨ Creating new subscription row for property ${propertyNumber}`);
-      await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [newRow]);
-    }
+ async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
+
+  const newRow = this.subscriptionToRow(propertyNumber, subscriptionData, property, receiptUrl);
+
+  // تحديث / إنشاء صف الاشتراكات
+  const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+  const existingRowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+
+  if (existingRowIndex !== -1) {
+    console.log(`🔄 Updating existing subscription for property ${propertyNumber}`);
+    await this.updateRow(SHEETS.SUBSCRIPTIONS, existingRowIndex + 2, newRow);
+  } else {
+    console.log(`✨ Creating new subscription row for property ${propertyNumber}`);
+    await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [newRow]);
   }
+
+
+  // ============================
+  // ⭐ تحديث ورقة "بيانات العقارات"
+  // ============================
+
+  const props = await this.readSheet(SHEETS.PROPERTIES);
+  const propIndex = props.findIndex(r => r[0] === propertyNumber);
+
+  if (propIndex !== -1) {
+    const propRow = props[propIndex];
+
+    // 15 = نوع الاشتراك
+    propRow[15] = "مميز";
+
+    // 16 = آخر تحديث
+    propRow[16] = new Date().toISOString().split("T")[0];
+
+    // 17 = تاريخ الاشتراك
+    try {
+      propRow[17] = subscriptionData.startDate.split("T")[0];
+    } catch {
+      propRow[17] = subscriptionData.startDate || "";
+    }
+
+    await this.updateRow(SHEETS.PROPERTIES, propIndex + 2, propRow);
+
+    console.log(`⭐ Updated property subscriptionType → مميز for ${propertyNumber}`);
+  } else {
+    console.log(`⚠️ Property ${propertyNumber} not found in main sheet`);
+  }
+}
+
 
   async updateSubscription(
     id: string,
@@ -674,32 +726,43 @@ class GoogleSheetsService {
     }
 
     const propertyRow = rows[rowIndex];
-    
+
+    const isPremium =
+      updates.packageId?.includes("premium") ||
+      updates.packageId === "pkg-trusted" ||
+      (updates.price && Number(updates.price) > 0);
+
+    // 🟡 نوع الاشتراك
     if (updates.packageId) {
-      propertyRow[4] = updates.packageId === "pkg-trusted" ? "مميز" : "عادي";
+      propertyRow[15] = isPremium ? "مميز" : "عادي";
     }
+
+    // 🟡 آخر تحديث
+    propertyRow[16] = new Date().toISOString().split("T")[0];
+
+    // 🟡 تاريخ الاشتراك
     if (updates.startDate) {
-      propertyRow[5] = updates.startDate.split('T')[0];
+      propertyRow[17] = updates.startDate.split("T")[0];
     }
-    if (updates.endDate) {
-      propertyRow[6] = updates.endDate.split('T')[0];
-    }
-    
+
+    // ❌ نترك الرقم السري كما هو (18)
+
     await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
-    
-    // إرجاع الاشتراك المحدث
-    const endDate = propertyRow[6] ? String(propertyRow[6]) : "";
+
+    const endDate = updates.endDate || "";
     const status = endDate && new Date(endDate) > new Date() ? "نشط" : "منتهي";
-    
+
     return {
       id: `SUB-${propertyNumber}`,
       propertyNumber,
-      packageId: propertyRow[4] === "مميز" ? "pkg-trusted" : "pkg-free",
-      startDate: propertyRow[5] ? String(propertyRow[5]) : "",
-      endDate,
+      packageId: isPremium ? "pkg-trusted" : "pkg-free",
+      startDate: propertyRow[17] || "",
+      endDate: endDate,
       status: status as any,
     };
   }
+
+
 
   // ================== الباقات ==================
   
