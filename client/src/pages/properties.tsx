@@ -617,7 +617,6 @@ export default function PropertiesPage() {
                       </>
                     )}
                   </div>
-
                   {/* Content Section - Flexible grow */}
                   <div className="flex flex-col flex-1 p-3 md:p-5">
                     {/* Title - Only show for verified properties */}
@@ -639,7 +638,7 @@ export default function PropertiesPage() {
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span className="font-semibold truncate">{property.location || property.city}</span>
+                      <span className="font-semibold truncate text-[13px]">{property.location || property.city}</span>
                     </div>
 
                     {/* Top Facilities - Hidden on small mobile */}
@@ -673,7 +672,6 @@ export default function PropertiesPage() {
           </div>
         )}
       </div>
-
       {/* زر تصفية عائم شفاف في الوسط */}
       {showFilterFab && (
         <button
@@ -690,7 +688,6 @@ export default function PropertiesPage() {
           تصفية
         </button>
       )}
-
       {/* زر الصعود للأعلى */}
       {showScrollTop && (
         <button
@@ -707,7 +704,6 @@ export default function PropertiesPage() {
           ↑
         </button>
       )}
-
       {/* Property Details Dialog */}
       <Dialog open={!!selectedProperty} onOpenChange={(open) => !open && setSelectedProperty(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -966,7 +962,6 @@ export default function PropertiesPage() {
           </DialogContent>
         </Dialog>
       </Dialog>
-
       {/* Image Modal */}
       <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
         <DialogContent className="max-w-4xl p-0">
