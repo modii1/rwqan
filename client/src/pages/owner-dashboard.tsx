@@ -344,7 +344,7 @@ export default function OwnerDashboard() {
               icon={<Edit3 className="w-6 h-6" />}
               title="تحديث بيانات العقار"
               desc="الاسم – المدينة – الوصف"
-              onClick={handleComingSoon}
+              onClick={() => setLocation("/owner/update-property")}
             />
             <BigActionButton
               icon={<MessageCircle className="w-6 h-6" />}
