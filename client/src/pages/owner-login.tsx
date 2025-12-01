@@ -124,7 +124,7 @@ export default function OwnerLogin() {
           <p>ليس لديك حساب؟</p>
           <Button
             variant="link"
-            onClick={() => setLocation("/register")}
+            onClick={() => setLocation("/owner/subscription")}
             className="text-primary"
             data-testid="link-register"
           >
