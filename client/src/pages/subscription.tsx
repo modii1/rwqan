@@ -11,6 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { ChevronRight, Upload } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -22,6 +23,7 @@ export default function SubscriptionPage() {
 
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [packageToView, setPackageToView] = useState<Package | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
@@ -190,8 +192,7 @@ export default function SubscriptionPage() {
               {packages.map((pkg) => (
                 <div
                   key={pkg.id}
-                  onClick={() => setSelectedPackageId(pkg.id)}
-                  className={`p-5 cursor-pointer transition-all rounded-lg border-2 ${
+                  className={`p-5 rounded-lg border-2 transition-all ${
                     selectedPackageId === pkg.id
                       ? 'ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]'
                       : 'border-border hover:border-[#434040]/50'
@@ -210,10 +211,29 @@ export default function SubscriptionPage() {
                       <Badge className="bg-[#434040] text-white">مختار</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mb-2">{pkg.duration} يوم</p>
+                  <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
                   {pkg.type === 'موثوق' && (
-                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9]">موثوق</Badge>
+                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">موثوق</Badge>
                   )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPackageToView(pkg)}
+                      className="flex-1"
+                    >
+                      التفاصيل
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setSelectedPackageId(pkg.id)}
+                      className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}
+                    >
+                      اختيار
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -453,6 +473,60 @@ export default function SubscriptionPage() {
             </form>
           </Card>
         )}
+
+        {/* Package Details Modal */}
+        <Dialog open={!!packageToView} onOpenChange={() => setPackageToView(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-[#434040]">{packageToView?.name}</DialogTitle>
+            </DialogHeader>
+            {packageToView && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">السعر</p>
+                  {packageToView.price === 0 ? (
+                    <p className="text-2xl font-bold text-[#434040]">مجاني</p>
+                  ) : (
+                    <PriceDisplay amount={packageToView.price} size="lg" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">مدة الاشتراك</p>
+                  <p className="font-semibold">{packageToView.durationDays} يوم</p>
+                </div>
+                {packageToView.description && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">الوصف</p>
+                    <p className="font-semibold">{packageToView.description}</p>
+                  </div>
+                )}
+                {packageToView.type === 'موثوق' && (
+                  <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] w-fit">
+                    موثوق
+                  </Badge>
+                )}
+                <div className="flex gap-2 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setPackageToView(null)}
+                    className="flex-1"
+                  >
+                    إغلاق
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setSelectedPackageId(packageToView.id);
+                      setPackageToView(null);
+                    }}
+                    className="flex-1 bg-[#434040]"
+                  >
+                    اختيار
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
