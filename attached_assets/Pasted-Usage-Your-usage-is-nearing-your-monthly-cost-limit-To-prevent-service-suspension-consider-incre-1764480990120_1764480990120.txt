@@ -1,0 +1,172 @@
+Usage
+Your usage is nearing your monthly cost limit.
+To prevent service suspension, consider increasing your limit or reducing usage.
+Learn more
+Billing overview
+Your plan
+Replit Core
+$25.00 month
+Manage
+Total available credits
+$0 remaining
+
+View breakdown
+Monthly credits reset
+in 17 days
+Credit used this month
+$25 used
+
+View breakdown
+Additional usage
+$77.63 spent
+Usage alert: $15
+Usage budget: $100
+Manage
+Payment method
+4638
+Expires 6/2027
+Manage
+Credits
+Updates take up to 1 hour and may not reflect the latest usage data. Purchase credit pack.
+No credit packs or promotional credits available
+Resource usage
+Updates take up to 1 hour and may not reflect the latest usage data. See previous invoices.
+AI
+Usage Total
+Unit Price
+Cost Accrued
+
+Agent Usage
+‏١٠١٫٢١ US$
+Variable	
+$101.21
+Replit AI Integrations
+‏٠٫٠٠ US$
+Variable	
+$0.00
+Assistant
+(Edit requests)
+٠
+$0.05 / edit request	
+$0.00
+Workspace Development
+Quota Used
+Core Quota
+Usage Total
+Unit Price
+Cost Accrued
+Apps
+Unlimited
+١
+-	-
+Collaborators
+3
+٠
+-	-
+Development Time
+(Minutes)
+٠%
+-
+٠
+-	-
+Published Apps
+Quota Used
+Core Quota
+Usage Total
+Unit Price
+Cost Accrued
+
+Outbound Data Transfer
+(GiB)
+١%
+100
+0.61 GiB
+$0.1 / GiB	
+$0.00
+Reserved VM Deployment
+(Compute hours)
+-
+٠
+-	
+$0.00
+
+Autoscale Deployment
+(Deployments)
+-
+٩
+$0.033 / day	
+$0.30
+
+Autoscale Deployment
+(Compute units)
+-
+٣٢٧٬٤٩٧
+$3.20 / 1 million	
+$1.05
+
+Autoscale Deployment
+(Requests)
+-
+٣٣٬١٥٢
+$1.20 / 1 million	
+$0.04
+
+Scheduled Deployment
+(Deployments)
+-
+١
+$0.033 / day	
+$0.03
+Scheduled Deployment
+(Compute units)
+-
+٠
+$3.20 / 1 million	
+$0.00
+Static Deployment
+(Count)
+٠%
+٢٠٠
+٠
+-	
+$0.00
+PostgreSQL Storage
+(GiB)
+-
+0.00 GiB
+$1.5 / GiB	
+$0.00
+PostgreSQL Compute
+(Hours)
+-
+٠
+$0.16 / hour	
+$0.00
+
+App Storage
+(GiB-months)
+-
+0.00
+$0.03 / GiB / month	
+$0.00
+
+App Storage Data Transfer
+(GiB)
+-
+<٠٫٠١ GiB
+$0.1 / GiB	
+$0.00
+
+App Storage Basic Operations
+(Requests)
+-
+٢
+$0.0006 / 1K	
+$0.00
+
+App Storage Advanced Operations
+(Requests)
+-
+٤
+$0.0075 / 1K	
+$0.00
