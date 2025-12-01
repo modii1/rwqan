@@ -776,29 +776,29 @@ export default function PropertiesPage() {
                 </p>
 
                 {/* All Prices */}
-                <div className="price-box rounded-lg p-4 mb-4 space-y-2">
+                <div className="price-box rounded-lg p-4 mb-4 space-y-3">
                   {selectedProperty.prices.weekday && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span>وسط الأسبوع:</span>
-                      <span className="font-bold text-green-600">{selectedProperty.prices.weekday} ريال</span>
+                      <PriceDisplay amount={selectedProperty.prices.weekday} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.weekend && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span>نهاية الأسبوع:</span>
-                      <span className="font-bold text-green-600">{selectedProperty.prices.weekend} ريال</span>
+                      <PriceDisplay amount={selectedProperty.prices.weekend} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.overnight && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span>مبيت:</span>
-                      <span className="font-bold text-green-600">{selectedProperty.prices.overnight} ريال</span>
+                      <PriceDisplay amount={selectedProperty.prices.overnight} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.holidays && (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span>إجازات:</span>
-                      <span className="font-bold text-green-600">{selectedProperty.prices.holidays} ريال</span>
+                      <PriceDisplay amount={selectedProperty.prices.holidays} size="md" textColor="text-green-600" />
                     </div>
                   )}
                 </div>
