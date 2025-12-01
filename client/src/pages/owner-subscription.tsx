@@ -44,6 +44,11 @@ export default function OwnerSubscriptionPage() {
     ? Math.ceil((new Date(currentSubscription.endDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
     : 0;
 
+  // حساب مدة الاشتراك من البيانات
+  const subscriptionDuration = currentSubscription && currentSubscription.startDate && currentSubscription.endDate
+    ? Math.ceil((new Date(currentSubscription.endDate).getTime() - new Date(currentSubscription.startDate).getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
   const isSubscriptionActive = daysRemaining > 0;
 
   // تحضير معلومات الدفع
@@ -165,11 +170,11 @@ export default function OwnerSubscriptionPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div>
               <p className="text-sm text-muted-foreground">السعر الشهري</p>
-              <p className="text-2xl font-bold text-[#434040]">{currentPackage?.price} ر.س</p>
+              <p className="text-2xl font-bold text-[#434040]">{(currentSubscription as any)?.price || currentPackage?.price || 0} ر.س</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">المدة</p>
-              <p className="text-2xl font-bold text-[#434040]">{currentPackage?.duration} يوم</p>
+              <p className="text-2xl font-bold text-[#434040]">{subscriptionDuration || currentPackage?.duration || 0} يوم</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">الأيام المتبقية</p>
