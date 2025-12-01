@@ -129,36 +129,30 @@ export default function App() {
                   <Lightbulb className="w-5 h-5" />
                 </Button>
                 
-                {session?.user ? (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setLocation("/owner/dashboard")}
-                      title="لوحة التحكم"
-                      className="text-primary"
-                    >
-                      <LayoutDashboard className="w-5 h-5" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleLogout}
-                      title="تسجيل الخروج"
-                    >
-                      <LogOut className="w-5 h-5" />
-                    </Button>
-                  </>
-                ) : (
+                {session?.user && (
                   <Button
-                    variant="default"
+                    variant="ghost"
                     size="icon"
-                    onClick={() => setLocation("/owner/login")}
-                    title="تسجيل الدخول"
+                    onClick={() => setLocation("/owner/dashboard")}
+                    title="لوحة التحكم"
+                    className="text-primary"
                   >
-                    <LogIn className="w-5 h-5" />
+                    <LayoutDashboard className="w-5 h-5" />
                   </Button>
                 )}
+
+                <Button
+                  variant={session?.user ? "outline" : "default"}
+                  size="icon"
+                  onClick={session?.user ? handleLogout : () => setLocation("/owner/login")}
+                  title={session?.user ? "تسجيل الخروج" : "تسجيل الدخول"}
+                >
+                  {session?.user ? (
+                    <LogOut className="w-5 h-5" />
+                  ) : (
+                    <LogIn className="w-5 h-5" />
+                  )}
+                </Button>
               </nav>
             </div>
           </header>
