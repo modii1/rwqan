@@ -1,21 +1,25 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Property, Package, Subscription } from "@shared/schema";
-import { CalendarDays, Crown, TrendingUp, Check, ExternalLink } from "lucide-react";
+import { CalendarDays, Crown, TrendingUp, Check, ExternalLink, Upload } from "lucide-react";
 
 export default function OwnerSubscriptionPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedAction, setSelectedAction] = useState<'extend' | 'upgrade' | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'online' | 'bank' | null>(null);
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   // جلب بيانات المالك
   const { data: property } = useQuery<Property>({
@@ -280,48 +284,98 @@ export default function OwnerSubscriptionPage() {
 
             <div className="mb-6">
               <h3 className="text-lg font-bold mb-3 text-[#434040]">اختر طريقة الدفع:</h3>
-              <div className="space-y-2">
-                {paymentInfo.paymentMethods?.map((method: string) => (
-                  <label key={method} className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50" data-testid={`payment-method-${method}`}>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value={method}
-                      checked={selectedPaymentMethod === method}
-                      onChange={(e) => setSelectedPaymentMethod(e.target.value)}
-                    />
-                    <span className="font-medium">{method}</span>
-                  </label>
-                ))}
+              <div className="space-y-3">
+                <div
+                  onClick={() => { setSelectedPaymentMethod('online'); setReceiptFile(null); }}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedPaymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                  data-testid="payment-method-online"
+                >
+                  <div className="font-semibold">الدفع الإلكتروني</div>
+                  <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
+                </div>
+                <div
+                  onClick={() => setSelectedPaymentMethod('bank')}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedPaymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                  data-testid="payment-method-bank"
+                >
+                  <div className="font-semibold">تحويل بنكي</div>
+                  <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
+                </div>
               </div>
+
+              {/* Bank Receipt Upload */}
+              {selectedPaymentMethod === 'bank' && (
+                <div className="p-4 bg-muted/30 rounded-lg mt-3">
+                  <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
+                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
+                    <Upload className="w-4 h-4" />
+                    {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3">
               <Button
-                onClick={() => {
-                  if (selectedPaymentMethod) {
-                    // هنا يتم توجيه المستخدم للدفع الفعلي
-                    // بعد الدفع الناجح، يتم استدعاء confirmMutation
+                onClick={async () => {
+                  if (!selectedPaymentMethod) return;
+                  setIsSubmittingPayment(true);
+                  try {
+                    const propertyNumber = property?.propertyNumber;
+                    if (selectedPaymentMethod === 'online') {
+                      const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
+                        propertyNumber,
+                        packageId: paymentInfo.packageId,
+                        action: paymentInfo.action,
+                        paymentMethod: 'cards',
+                      });
+                      const paymentData = await paymentResponse.json();
+                      if (paymentData.checkoutUrl) {
+                        window.location.href = paymentData.checkoutUrl;
+                      } else {
+                        throw new Error('لم يتم الحصول على رابط الدفع');
+                      }
+                    } else if (selectedPaymentMethod === 'bank' && receiptFile) {
+                      const formData = new FormData();
+                      formData.append('propertyNumber', propertyNumber || '');
+                      formData.append('packageId', paymentInfo.packageId);
+                      formData.append('receipt', receiptFile);
+                      formData.append('action', paymentInfo.action);
+                      await fetch('/api/owner/payment/bank-transfer', {
+                        method: 'POST',
+                        body: formData,
+                      });
+                      toast({
+                        title: 'تم استقبال طلبك',
+                        description: 'سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي',
+                      });
+                      queryClient.invalidateQueries({ queryKey: ['/api/owner/current-subscription'] });
+                      setPaymentInfo(null);
+                      setSelectedPaymentMethod(null);
+                      setReceiptFile(null);
+                    }
+                  } catch (err: any) {
                     toast({
-                      title: "💳 الدفع",
-                      description: `سيتم توجيهك لـ ${selectedPaymentMethod} للدفع...`,
+                      title: 'خطأ في الدفع',
+                      description: err.message || 'حدث خطأ غير متوقع',
+                      variant: 'destructive',
                     });
-                    // يمكن إضافة معالجة الدفع الفعلية هنا
-                    setTimeout(() => {
-                      confirmMutation.mutate({ paymentId: `PAY-${Date.now()}` });
-                    }, 1000);
+                  } finally {
+                    setIsSubmittingPayment(false);
                   }
                 }}
-                disabled={!selectedPaymentMethod || confirmMutation.isPending}
+                disabled={!selectedPaymentMethod || isSubmittingPayment || (selectedPaymentMethod === 'bank' && !receiptFile)}
                 className="flex-1"
                 data-testid="button-confirm-payment"
               >
-                {confirmMutation.isPending ? 'جاري الدفع...' : 'تأكيد الدفع'}
+                {isSubmittingPayment ? 'جاري الدفع...' : 'تأكيد الدفع'}
               </Button>
               <Button
                 onClick={() => {
                   setPaymentInfo(null);
                   setSelectedPaymentMethod(null);
+                  setReceiptFile(null);
                 }}
                 variant="outline"
                 className="flex-1"
