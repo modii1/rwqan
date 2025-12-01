@@ -22,6 +22,7 @@ import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
 import AdminDashboard from "@/pages/admin";
 import AdminImagesPage from "@/pages/admin/admin-images";
+import AdminAnalytics from "@/pages/admin/admin-analytics";
 
 function Router() {
   return (
@@ -45,6 +46,7 @@ function Router() {
 
       {/* صفحات الأدمن */}
       <Route path="/admin" component={AdminDashboard} />
+      <Route path="/admin/analytics" component={AdminAnalytics} />
       <Route path="/admin/images/:propertyNumber" component={AdminImagesPage} />
 
       {/* صفحة 404 */}

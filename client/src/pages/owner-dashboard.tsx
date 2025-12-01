@@ -246,7 +246,7 @@ export default function OwnerDashboard() {
         {/* ===== جدول الطلبات الحديثة ===== */}
         <Card className="p-6">
           <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
+            <MessageCircle className="w-5 h-5" />
             آخر طلبات واتساب
           </h2>
           {requestsLoading ? (
