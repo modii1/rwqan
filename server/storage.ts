@@ -116,8 +116,7 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getPackageById(id: string): Promise<Package | null> {
-    const packages = await googleSheetsService.getPackages();
-    return packages.find(p => p.id === id) || null;
+    return googleSheetsService.getPackageById(id);
   }
 
   async createPackage(pkg: InsertPackage): Promise<Package> {
