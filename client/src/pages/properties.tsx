@@ -267,8 +267,8 @@ export default function PropertiesPage() {
       const { useToast } = await import("@/hooks/use-toast");
       const { toast } = useToast();
       toast({
-        title: "تم تسجيل طلبك",
-        description: `${result.requestTime}`,
+        title: "✅ تم تسجيل طلبك",
+        description: `في ${result.requestTime}`,
       });
     } catch (error) {
       console.error("Error creating WhatsApp request:", error);

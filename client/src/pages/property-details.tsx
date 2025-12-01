@@ -286,7 +286,7 @@ export default function PropertyDetailsPage() {
       window.open(url, "_blank");
 
       // إظهار رسالة النجاح
-      alert(`✅ تم تسجيل طلبك في ${result.requestTime}`);
+      alert(`✅ تم تسجيل طلبك\nفي ${result.requestTime}`);
     } catch (error) {
       console.error("Error creating WhatsApp request:", error);
     }
