@@ -66,7 +66,14 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    await fetch("/api/logout", { method: "POST" });
+    try {
+      await fetch("/api/owner/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
     window.location.href = "/";
   };
 
