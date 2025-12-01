@@ -1129,12 +1129,43 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   }
 
   // ================== تحديث الإحصائيات ==================
+  async clearOldAnalyticsData() {
+    try {
+      const sheets = await this.getSheets();
+      // مسح الطلبات القديمة
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.REQUESTS}!A2:K1000`,
+      });
+      // مسح الإحصائيات القديمة
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.ANALYTICS}!A2:F1000`,
+      });
+      console.log("🧹 Cleared old analytics data");
+    } catch (err) {
+      console.error("clearOldAnalyticsData error:", err);
+    }
+  }
+
   async updateAnalytics() {
     try {
-      const allRequests = await this.getRequests();
+      const allRequestsRows = await this.readSheet(SHEETS.REQUESTS);
+      
+      // تحويل الصفوف إلى كائنات Request مع التصفية
+      const allRequests = allRequestsRows
+        .map((row, idx) => {
+          const deviceType = row[10] as 'mobile' | 'desktop' | 'tablet' || 'desktop';
+          return {
+            propertyNumber: row[0] || "",
+            deviceType,
+          };
+        })
+        .filter(r => r.propertyNumber); // اترك الصفوف الفارغة
+
       const totalProps = await this.getProperties();
 
-      // 1. إجمالي الزوار
+      // 1. إجمالي الزوار (فقط التي لها propertyNumber)
       const visitors = allRequests.length;
 
       // 2. توزيع الأجهزة من البيانات الحقيقية
@@ -1147,8 +1178,10 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       // 3. توزيع المدن
       const cityCounts: Record<string, number> = {};
-      allRequests.forEach(r => {
-        const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
+      allRequestsRows.forEach(row => {
+        const propertyNumber = row[0];
+        if (!propertyNumber) return;
+        const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
         const city = prop?.city || 'غير محدد';
         cityCounts[city] = (cityCounts[city] || 0) + 1;
       });
@@ -1173,7 +1206,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       ];
 
       await this.appendToSheet(SHEETS.ANALYTICS, [analyticsRow]);
-      console.log(`📊 Analytics updated: ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
+      console.log(`📊 Analytics: ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
     } catch (err) {
       console.error("updateAnalytics error:", err);
     }
