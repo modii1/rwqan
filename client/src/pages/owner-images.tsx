@@ -69,10 +69,13 @@ export default function OwnerImagesPage() {
       return data;
     },
     onSuccess: (data) => {
-      // إضافة الصور المرفوعة مباشرة إلى البيانات المعروضة
-      if (data.urls && r2Images) {
-        // نضيف الصور الجديدة وحفظها بشكل دائم في الـ cache
-        const newImages = [...r2Images, ...data.urls];
+      // الحصول على البيانات الحالية من الـ cache (أكثر دقة من r2Images)
+      const currentData = queryClient.getQueryData<{images: string[]}>(["/api/owner/r2-images"]);
+      const currentImages = currentData?.images || r2Images || [];
+      
+      if (data.urls) {
+        // إضافة الصور الجديدة وحفظها بشكل دائم
+        const newImages = [...currentImages, ...data.urls];
         queryClient.setQueryData(["/api/owner/r2-images"], {
           images: newImages
         });

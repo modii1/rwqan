@@ -466,22 +466,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "لا توجد صور تم رفعها" });
       }
 
-      // عدد الصور الحالية
-      const list = await r2.send(
-        new ListObjectsV2Command({
-          Bucket: R2_BUCKET,
-          Prefix: `${propertyNumber}/`,
-        })
-      );
-
-      const currentCount = list.Contents?.length || 0;
-      console.log(`✅ [UPLOAD] Current images for ${propertyNumber}: ${currentCount}`);
-
-      let index = currentCount + 1;
       const uploadedKeys: string[] = [];
+      const timestamp = Date.now();
 
-      for (const file of files) {
-        const key = `${propertyNumber}/${index}.jpg`;
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        // استخدام timestamp + index لتجنب التكرار
+        const key = `${propertyNumber}/${timestamp}-${i}.jpg`;
         
         console.log(`⬆️ [UPLOAD] Uploading ${key} (${file.size} bytes)`);
         
@@ -496,7 +487,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         console.log(`✅ [UPLOAD] Uploaded ${key}`);
         uploadedKeys.push(key);
-        index++;
       }
 
       // تحويل keys إلى URLs مباشرة
