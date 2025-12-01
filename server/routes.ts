@@ -93,7 +93,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // جلب جميع الطلبات للعقار من الشهر الحالي
-      const allRequests = await googleSheetsService.getAllRequests();
+      const allRequests = await googleSheetsService.getRequests();
       const propertyRequests = allRequests.filter(r => r.propertyNumber === propertyNumber);
       
       const now = new Date();
@@ -161,7 +161,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      const allRequests = await googleSheetsService.getAllRequests();
+      const allRequests = await googleSheetsService.getRequests();
       const propertyRequests = allRequests
         .filter(r => r.propertyNumber === propertyNumber)
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -177,7 +177,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin - All Requests & Analytics
   app.get("/api/admin/requests", async (req, res) => {
     try {
-      const allRequests = await googleSheetsService.getAllRequests();
+      const allRequests = await googleSheetsService.getRequests();
       const allProperties = await googleSheetsService.getProperties();
       
       const byProperty: Record<string, number> = {};
@@ -394,6 +394,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           timeDisplay = `${seconds} ثانية`;
         }
         
+        console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
+        
         return res.status(429).json({
           error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
           remainingSeconds,
@@ -427,13 +429,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // حدّث المتتبع
       requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
+      console.log(`✅ Request tracked - IP: ${ipAddress}, Property: ${propertyNumber}`);
 
       // نظّف الطلبات القديمة (أكثر من ساعة)
-      for (const [ip, data] of requestTracker.entries()) {
+      const keysToDelete: string[] = [];
+      requestTracker.forEach((data, ip) => {
         if (now - data.timestamp > 60 * 60 * 1000) {
-          requestTracker.delete(ip);
+          keysToDelete.push(ip);
         }
-      }
+      });
+      keysToDelete.forEach(ip => requestTracker.delete(ip));
 
       res.json({
         ok: true,
