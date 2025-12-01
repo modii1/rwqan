@@ -619,19 +619,19 @@ class GoogleSheetsService {
     {
       id: "pkg-free",
       name: "باقة مجانية",
-      duration: 30,
+      duration: 0,
       price: 0,
       type: "عادي",
-      features: [],
+      features: ["نسبة 10% من الحجز", "بدون تفاصيل العقار"],
       isActive: true,
     },
     {
       id: "pkg-trusted",
-      name: "باقة مميزة",
+      name: "اشتراك شهر",
       duration: 30,
       price: 35,
       type: "مميز",
-      features: ["عرض مميز", "أولوية في البحث"],
+      features: ["عرض مميز بتصميم ذهبي", "شارة مميز", "أولوية في البحث"],
       isActive: true,
     },
   ];
