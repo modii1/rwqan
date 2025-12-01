@@ -1,4 +1,4 @@
-import riyal from '@assets/riyal-symbol.png';
+import riyal from './riyal-symbol.png';
 
 interface PriceDisplayProps {
   amount: string | number;
