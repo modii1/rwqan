@@ -827,6 +827,79 @@ app.delete(
 // 💳 PAYMENT ENDPOINTS
 // ======================
 
+// 0. حساب تفاصيل الدفع الكاملة (الباقة + السعر + الخصم + العمولة)
+app.post("/api/payment/calculate", async (req, res) => {
+  try {
+    const { packageId, discountCode } = req.body;
+
+    if (!packageId) {
+      return res.status(400).json({ error: "معرف الباقة مطلوب" });
+    }
+
+    // جلب بيانات الباقة
+    const pkg = await storage.getPackageById(packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    // السعر الأساسي
+    let basePrice = pkg.price;
+    let discountAmount = 0;
+    let discountInfo: any = null;
+
+    // حساب الخصم إن وجد
+    if (discountCode) {
+      const discount = await storage.getDiscountCodeByCode(discountCode);
+      if (discount && discount.isActive) {
+        discountInfo = discount;
+        if (discount.type === "نسبة") {
+          discountAmount = (basePrice * discount.value) / 100;
+        } else {
+          discountAmount = discount.value;
+        }
+      }
+    }
+
+    // السعر بعد الخصم
+    const priceAfterDiscount = Math.max(0, basePrice - discountAmount);
+
+    // عمولة Paymob (2.5% من السعر النهائي تقريباً)
+    const PAYMOB_FEE_PERCENTAGE = 0.025; // 2.5%
+    const paymobFee = Math.round(priceAfterDiscount * PAYMOB_FEE_PERCENTAGE * 100) / 100;
+
+    // السعر الكلي المطلوب من العميل (يتحمل العمولة)
+    const totalWithFee = priceAfterDiscount + paymobFee;
+
+    res.json({
+      package: {
+        id: pkg.id,
+        name: pkg.name,
+        duration: pkg.duration,
+        type: pkg.type,
+      },
+      pricing: {
+        basePrice,
+        discountCode: discountCode || null,
+        discountInfo,
+        discountAmount: Math.round(discountAmount * 100) / 100,
+        priceAfterDiscount: Math.round(priceAfterDiscount * 100) / 100,
+        paymobFee: paymobFee,
+        total: Math.round(totalWithFee * 100) / 100,
+      },
+      breakdown: {
+        "السعر الأساسي": `${basePrice} ر.س`,
+        "الخصم": discountAmount > 0 ? `-${Math.round(discountAmount * 100) / 100} ر.س` : "لا يوجد",
+        "السعر بعد الخصم": `${Math.round(priceAfterDiscount * 100) / 100} ر.س`,
+        "عمولة Paymob (2.5%)": `${paymobFee} ر.س`,
+        "الإجمالي": `${Math.round(totalWithFee * 100) / 100} ر.س`,
+      },
+    });
+  } catch (err) {
+    console.error("Payment calculation error:", err);
+    res.status(500).json({ error: "خطأ في حساب الدفع" });
+  }
+});
+
 // 1. التحقق من كود الخصم
 app.post("/api/discount/validate", async (req, res) => {
   try {
