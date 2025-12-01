@@ -193,7 +193,7 @@ export default function OwnerLogin() {
             <div className="mt-6 text-center text-sm text-muted-foreground">
               <p>ليس لديك حساب؟</p>
               <Button
-                variant="link"
+                variant="ghost"
                 onClick={() => setLocation("/owner/subscription")}
                 className="text-primary"
                 data-testid="link-register"
