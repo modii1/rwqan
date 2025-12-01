@@ -245,8 +245,13 @@ export default function OwnerDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <Info title="اسم العقار" value={property.name} />
               <Info title="المدينة" value={property.city} />
+              <Info title="الموقع" value={property.location} />
               <Info title="الاتجاه" value={property.direction} />
               <Info title="النوع" value={property.type} />
+              <Info title="سعر وسط الأسبوع" value={property.prices?.weekday ? `${property.prices.weekday} ر.س` : "غير محدد"} />
+              <Info title="سعر نهاية الأسبوع" value={property.prices?.weekend ? `${property.prices.weekend} ر.س` : "غير محدد"} />
+              <Info title="سعر المبيت" value={property.prices?.overnight ? `${property.prices.overnight} ر.س` : "غير محدد"} />
+              <Info title="سعر الإجازات" value={property.prices?.holidays ? `${property.prices.holidays} ر.س` : "غير محدد"} />
             </div>
           </Card>
 
