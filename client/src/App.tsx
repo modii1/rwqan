@@ -6,7 +6,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
-import { LogIn, LogOut } from "lucide-react";
 
 // Pages
 import NotFound from "@/pages/not-found";
@@ -138,9 +137,7 @@ export default function App() {
                       variant="outline"
                       size="sm"
                       onClick={handleLogout}
-                      className="gap-2"
                     >
-                      <LogOut className="w-4 h-4" />
                       تسجيل الخروج
                     </Button>
                   </>
@@ -149,9 +146,7 @@ export default function App() {
                     variant="default"
                     size="sm"
                     onClick={() => setLocation("/owner/login")}
-                    className="gap-2"
                   >
-                    <LogIn className="w-4 h-4" />
                     تسجيل الدخول
                   </Button>
                 )}
