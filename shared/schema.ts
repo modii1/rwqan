@@ -227,6 +227,23 @@ export const insertBackupSchema = backupSchema.omit({ id: true, createdAt: true,
 export type InsertBackup = z.infer<typeof insertBackupSchema>;
 
 // =========================
+// Code Backup Schema (نسخ احتياطية الأكواد)
+// =========================
+export const codeBackupSchema = z.object({
+  id: z.string(),
+  backupName: z.string(),
+  timestamp: z.string(),
+  files: z.record(z.string()), // { fileName: fileContent }
+  fileCount: z.number(),
+  totalSize: z.number(),
+  createdAt: z.string(),
+});
+
+export type CodeBackup = z.infer<typeof codeBackupSchema>;
+export const insertCodeBackupSchema = codeBackupSchema.omit({ id: true, createdAt: true });
+export type InsertCodeBackup = z.infer<typeof insertCodeBackupSchema>;
+
+// =========================
 // 100 Facilities List (قائمة المرافق)
 // =========================
 export const FACILITIES = [
