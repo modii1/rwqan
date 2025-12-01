@@ -52,7 +52,7 @@ export interface IStorage {
 
   // Requests (الطلبات)
   getRequests(): Promise<Request[]>;
-  createRequest(request: InsertRequest): Promise<Request>;
+  createRequest(request: InsertRequest, requestCountFromIP?: number): Promise<Request>;
 
   // Suggestions (الاقتراحات)
   getSuggestions(): Promise<Suggestion[]>;
@@ -179,8 +179,8 @@ export class GoogleSheetsStorage implements IStorage {
     return googleSheetsService.getRequests();
   }
 
-  async createRequest(request: InsertRequest): Promise<Request> {
-    return googleSheetsService.createRequest(request);
+  async createRequest(request: InsertRequest, requestCountFromIP?: number): Promise<Request> {
+    return googleSheetsService.createRequest(request, requestCountFromIP);
   }
 
   async getSuggestions(): Promise<Suggestion[]> {

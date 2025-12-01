@@ -435,14 +435,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       propertyMap.set(propertyNumber, newCount);
 
       // احفظ الطلب مع العدد من IP
-      const request = await storage.createRequest({
-        propertyNumber,
-        requestCode,
-        timestamp: now_date.toISOString(),
-        ipAddress,
-        dayOfWeek,
-        hourOfDay,
-      }, newCount);
+      const request = await storage.createRequest(
+        {
+          propertyNumber,
+          requestCode,
+          timestamp: now_date.toISOString(),
+          ipAddress,
+          dayOfWeek,
+          hourOfDay,
+        },
+        newCount
+      );
 
       // حدّث المتتبع
       requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
@@ -500,6 +503,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/owner/property", requireOwner, async (req: any, res) => {
     const p = await storage.getPropertyByNumber(req.propertyNumber);
     res.json(p);
+  });
+
+  // ======================
+  // OWNER SUBSCRIPTION MANAGEMENT
+  // ======================
+  
+  // جلب الاشتراك الحالي للمالك
+  app.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      const subscriptions = await storage.getSubscriptionsByProperty(propertyNumber);
+      
+      const activeSubscription = subscriptions.find(
+        s => s.status === 'نشط' && new Date(s.endDate) > new Date()
+      );
+      
+      if (!activeSubscription) {
+        return res.status(404).json({ error: "لا يوجد اشتراك نشط" });
+      }
+      
+      res.json(activeSubscription);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "فشل في جلب الاشتراك" });
+    }
+  });
+
+  // ترقية أو تمديد الاشتراك
+  app.post("/api/owner/subscription/update", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      const { action, packageId } = req.body;
+      
+      if (!['extend', 'upgrade'].includes(action)) {
+        return res.status(400).json({ error: "إجراء غير صالح" });
+      }
+
+      const newPackage = await storage.getPackageById(packageId);
+      if (!newPackage) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+
+      const subscriptions = await storage.getSubscriptionsByProperty(propertyNumber);
+      const currentSubscription = subscriptions.find(
+        s => s.status === 'نشط' && new Date(s.endDate) > new Date()
+      );
+
+      if (!currentSubscription) {
+        return res.status(404).json({ error: "لا يوجد اشتراك نشط" });
+      }
+
+      const today = new Date();
+      let newStartDate = today;
+      let newEndDate = new Date();
+
+      if (action === 'extend') {
+        newStartDate = new Date(currentSubscription.endDate);
+        newEndDate = new Date(newStartDate.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
+      } else if (action === 'upgrade') {
+        newEndDate = new Date(today.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
+      }
+
+      const newSubscription = await storage.createSubscription({
+        propertyNumber,
+        packageId,
+        startDate: newStartDate.toISOString(),
+        endDate: newEndDate.toISOString(),
+        status: 'نشط',
+      });
+
+      await storage.updateProperty(propertyNumber, {
+        subscriptionType: newPackage.type,
+      });
+
+      res.json({
+        ok: true,
+        message: `تم ${action === 'extend' ? 'التمديد' : 'الترقية'} بنجاح`,
+        subscription: newSubscription,
+        endDate: newEndDate,
+      });
+    } catch (err: any) {
+      console.error("Subscription update error:", err);
+      res.status(500).json({ error: err?.message || "فشل في التحديث" });
+    }
   });
 
   // ======================
