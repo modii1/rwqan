@@ -176,8 +176,7 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getRequests(): Promise<Request[]> {
-    // Will be implemented
-    return [];
+    return googleSheetsService.getRequests();
   }
 
   async createRequest(request: InsertRequest): Promise<Request> {
