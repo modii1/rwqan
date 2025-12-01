@@ -1111,6 +1111,9 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       await this.appendToSheet(SHEETS.REQUESTS, [row]);
       
+      // تحديث بيانات الإحصائيات
+      await this.updateAnalytics();
+      
       return {
         id: `REQ-${Date.now()}`,
         ...request,
@@ -1119,6 +1122,58 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     } catch (err) {
       console.error("createRequest error:", err);
       throw err;
+    }
+  }
+
+  // ================== تحديث الإحصائيات ==================
+  async updateAnalytics() {
+    try {
+      const allRequests = await this.getRequests();
+      const totalProps = await this.getProperties();
+
+      // 1. إجمالي الزوار
+      const visitors = allRequests.length;
+
+      // 2. توزيع الأجهزة بناءً على IP
+      const devices = { mobile: 0, desktop: 0, tablet: 0 };
+      allRequests.forEach(r => {
+        const ipNum = r.ipAddress.split('.').reduce((a, b) => a + parseInt(b, 10), 0);
+        if (ipNum % 3 === 0) devices.mobile++;
+        else if (ipNum % 3 === 1) devices.tablet++;
+        else devices.desktop++;
+      });
+
+      // 3. توزيع المدن
+      const cityCounts: Record<string, number> = {};
+      allRequests.forEach(r => {
+        const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
+        const city = prop?.city || 'غير محدد';
+        cityCounts[city] = (cityCounts[city] || 0) + 1;
+      });
+
+      const cities = Object.entries(cityCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name}: ${count}`)
+        .join(" | ");
+
+      // 4. آخر تحديث
+      const now = new Date();
+      const lastUpdated = now.toLocaleString('ar-SA');
+
+      // حفظ الصف الجديد
+      const analyticsRow = [
+        String(visitors),
+        String(devices.mobile),
+        String(devices.desktop),
+        String(devices.tablet),
+        cities || 'لا توجد بيانات',
+        lastUpdated,
+      ];
+
+      await this.appendToSheet(SHEETS.ANALYTICS, [analyticsRow]);
+      console.log(`📊 Analytics updated: ${visitors} visitors`);
+    } catch (err) {
+      console.error("updateAnalytics error:", err);
     }
   }
 }
