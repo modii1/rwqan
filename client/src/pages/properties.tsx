@@ -441,7 +441,7 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              نطاق السعر: {priceRange[0]} - {priceRange[1]} ﷼
+              نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
             </label>
             <Slider
               value={priceRange}
