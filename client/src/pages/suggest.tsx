@@ -22,7 +22,10 @@ export default function SuggestPage() {
     setIsSubmitting(true);
 
     try {
-      await apiRequest('POST', '/api/suggestions', { name, phone, city, suggestion });
+      await apiRequest('/api/suggestions', {
+        method: 'POST',
+        body: JSON.stringify({ name, phone, city, suggestion }),
+      });
 
       toast({
         title: "تم إرسال الاقتراح بنجاح ✓",
