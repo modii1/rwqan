@@ -1488,7 +1488,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
-  // GET owner's current subscription
+  // GET owner's current subscription from الاشتراكات sheet
   app.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber;
@@ -1496,13 +1496,25 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         return res.status(400).json({ error: "Property not found in session" });
       }
       
-      const subscriptions = await googleSheetsService.getSubscriptions();
-      const subscription = subscriptions.find(s => s.propertyNumber === propertyNumber);
+      console.log(`🔍 Looking for subscription for property: ${propertyNumber}`);
+      
+      // استخدام الدالة الجديدة للبحث عن الاشتراك
+      const subscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
       
       if (!subscription) {
-        return res.status(404).json({ error: "No subscription found" });
+        console.log(`❌ No subscription found for property: ${propertyNumber}`);
+        // إرجاع اشتراك افتراضي مجاني إذا لم يوجد
+        return res.json({
+          id: `SUB-${propertyNumber}`,
+          propertyNumber,
+          packageId: "pkg-free",
+          startDate: new Date().toISOString(),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          status: "نشط",
+        });
       }
       
+      console.log(`✅ Found subscription for ${propertyNumber}:`, subscription);
       res.json(subscription);
     } catch (err: any) {
       console.error("Get subscription error:", err?.message);
