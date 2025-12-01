@@ -850,6 +850,21 @@ class GoogleSheetsService {
     return newSuggestion;
   }
 
+  async getAllRequests(): Promise<Request[]> {
+    try {
+      const rows = await this.readSheet(SHEETS.REQUESTS);
+      return rows.map((row) => ({
+        id: row[0] || "",
+        propertyNumber: row[1] || "",
+        requestCode: row[2] || "",
+        timestamp: row[3] || "",
+        createdAt: row[4] || "",
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   async createRequest(request: InsertRequest): Promise<Request> {
     const id = `REQ-${Date.now()}`;
     const newRequest: Request = {
