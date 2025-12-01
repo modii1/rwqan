@@ -11,8 +11,12 @@ import { googleDriveService } from "./googleDrive";
 import { paymobService } from "./paymob";
 
 import session from "express-session";
+import MemoryStore from "memorystore";
 import multer from "multer";
 import * as https from "https";
+
+// Create memory store for sessions
+const memoryStore = new (MemoryStore(session))();
 
 import {
   insertPropertySchema,
@@ -106,6 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use(
     session({
+      store: memoryStore,
       secret: process.env.SESSION_SECRET || "moddy-secret-key",
       resave: false,
       saveUninitialized: false,
@@ -240,8 +245,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(401).json({ error: "Invalid Credentials" });
 
     (req.session as any).propertyNumber = propertyNumber;
-    req.session.save(() => {});
-    res.json({ ok: true });
+    req.session.save((err: any) => {
+      if (err) {
+        return res.status(500).json({ error: "Session save failed" });
+      }
+      res.json({ ok: true });
+    });
   });
 
   app.get("/api/owner/property", requireOwner, async (req: any, res) => {
@@ -437,6 +446,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "R2 bucket not configured" });
       }
 
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
       // عدد الصور الحالية
       const list = await r2.send(
         new ListObjectsV2Command({
@@ -447,16 +461,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let index = (list.Contents?.length || 0) + 1;
 
-      const files = Array.isArray(req.files) ? req.files : [];
-      if (files.length === 0) {
-        return res.status(400).json({ error: "No files uploaded" });
-      }
-
       for (const file of files) {
+        const key = `${propertyNumber}/${index}.jpg`;
         await r2.send(
           new PutObjectCommand({
             Bucket: R2_BUCKET,
-            Key: `${propertyNumber}/${index}.jpg`,
+            Key: key,
             Body: file.buffer,
             ContentType: "image/jpeg",
           })
@@ -467,7 +477,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true, count: files.length });
 
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Upload failed" });
+      const errorMsg = err?.message || "Upload failed";
+      res.status(500).json({ error: errorMsg });
     }
   });
 
