@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
@@ -161,7 +160,6 @@ export default function App() {
           <main className="flex-1">
             <Router />
           </main>
-          <Toaster />
         </div>
       </TooltipProvider>
     </QueryClientProvider>
