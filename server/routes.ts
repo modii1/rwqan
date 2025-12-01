@@ -389,6 +389,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================
+  // ADMIN AUTH
+  // ======================
+
+  const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+    if (!(req.session as any).isAdmin)
+      return res.status(401).json({ error: "Admin Login Required" });
+    next();
+  };
+
+  // Admin credentials - يمكن تغييرها من env variables
+  const ADMIN_CODE = process.env.ADMIN_CODE || "admin";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+  app.post("/api/admin/login", async (req, res) => {
+    const { code, password } = req.body;
+
+    if (code !== ADMIN_CODE || password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ error: "Invalid Admin Credentials" });
+    }
+
+    (req.session as any).isAdmin = true;
+    req.session.save((err: any) => {
+      if (err) {
+        return res.status(500).json({ error: "Session save failed" });
+      }
+      res.json({ ok: true });
+    });
+  });
+
+  // ======================
   // GOOGLE DRIVE PROXY
   // ======================
 
