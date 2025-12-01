@@ -502,6 +502,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================================================
+  // 🔄 تحديث بيانات العقار من طرف المالك
+  // ======================================================
+  app.put("/api/owner/property", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property not found in session" });
+      }
+
+      const updates = req.body;
+      const updated = await storage.updateProperty(propertyNumber, updates);
+      res.json(updated);
+    } catch (err: any) {
+      console.error("Update property error:", err?.message);
+      res.status(500).json({ error: err?.message || "فشل في تحديث البيانات" });
+    }
+  });
+
+  // ======================================================
   // 📊 جلب إحصائيات العقار
   // ======================================================
   app.get("/api/owner/analytics", requireOwner, async (req, res) => {
