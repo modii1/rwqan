@@ -92,7 +92,7 @@ export default function PackagesSection() {
             <thead className="bg-muted/50 text-right">
               <tr>
                 <Th>اسم الباقة</Th>
-                <Th>السعر (ر.س)</Th>
+                <Th>السعر (﷼)</Th>
                 <Th>مدة الاشتراك (يوم)</Th>
                 <Th>الوصف</Th>
                 <Th>تحكم</Th>
@@ -161,7 +161,7 @@ export default function PackagesSection() {
               {/* السعر */}
               <div>
                 <label className="block text-[11px] font-semibold text-muted-foreground">
-                  السعر (ر.س)
+                  السعر (﷼)
                 </label>
                 <Input
                   type="number"

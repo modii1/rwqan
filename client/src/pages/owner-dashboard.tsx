@@ -248,10 +248,10 @@ export default function OwnerDashboard() {
               <Info title="الموقع" value={property.location} />
               <Info title="الاتجاه" value={property.direction} />
               <Info title="النوع" value={property.type} />
-              <Info title="سعر وسط الأسبوع" value={property.prices?.weekday ? `${property.prices.weekday} ر.س` : "غير محدد"} />
-              <Info title="سعر نهاية الأسبوع" value={property.prices?.weekend ? `${property.prices.weekend} ر.س` : "غير محدد"} />
-              <Info title="سعر المبيت" value={property.prices?.overnight ? `${property.prices.overnight} ر.س` : "غير محدد"} />
-              <Info title="سعر الإجازات" value={property.prices?.holidays ? `${property.prices.holidays} ر.س` : "غير محدد"} />
+              <Info title="سعر وسط الأسبوع" value={property.prices?.weekday ? `${property.prices.weekday} ﷼` : "غير محدد"} />
+              <Info title="سعر نهاية الأسبوع" value={property.prices?.weekend ? `${property.prices.weekend} ﷼` : "غير محدد"} />
+              <Info title="سعر المبيت" value={property.prices?.overnight ? `${property.prices.overnight} ﷼` : "غير محدد"} />
+              <Info title="سعر الإجازات" value={property.prices?.holidays ? `${property.prices.holidays} ﷼` : "غير محدد"} />
             </div>
           </Card>
 

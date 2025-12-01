@@ -163,8 +163,8 @@ export default function SubscriptionPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold">{pkg.name}</h3>
-                    <p className="text-2xl font-bold text-primary">
-                      {pkg.price === 0 ? 'مجاني' : `${pkg.price} ر.س`}
+                    <p className="text-2xl font-bold text-primary flex items-center gap-1">
+                      {pkg.price === 0 ? 'مجاني' : <><span>{pkg.price}</span><span className="text-[#b88d2b]">﷼</span></>}
                     </p>
                   </div>
                   {selectedPackageId === pkg.id && (
@@ -300,7 +300,7 @@ export default function SubscriptionPage() {
 
                 {/* Prices */}
                 <div className="border-t pt-6">
-                  <h3 className="text-lg font-bold mb-4">الأسعار (ريال) *</h3>
+                  <h3 className="text-lg font-bold mb-4">الأسعار (﷼) *</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
@@ -349,7 +349,7 @@ export default function SubscriptionPage() {
                           <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
                         </div>
                         {validatedDiscount && (
-                          <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ريال'}</p>
+                          <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ﷼'}</p>
                         )}
                       </div>
 
