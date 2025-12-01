@@ -404,30 +404,29 @@ class GoogleSheetsService {
       propertyNumber: row[0] || "",
       name: row[1] || "",
       whatsappNumber: row[2] || "",
-      location: row[3] || "",
-      city: row[4] || "",
-      direction: row[5] || "",
-      type: row[6] || "",
-      // المرافق كنص → مصفوفة
-      facilities: row[7]
-        ? String(row[7])
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
-      imagesLink: row[8] || "",
+      // row[3] = رسوم الاشتراك (subscription fees)
+      subscriptionType: row[4] || "عادي",
+      subscriptionDate: row[5] || "",
+      // row[6] = تاريخ الانتهاء (endDate)
+      // row[7] = الأيام المتبقية (calculated)
+      // row[8] = رابط الإيصال (receipt link)
+      // Fill in missing fields with defaults
+      location: "",
+      city: "",
+      direction: "",
+      type: "",
+      facilities: [],
+      imagesLink: "",
       prices: {
-        display: row[9] || "",
-        weekday: row[10] || "",
-        weekend: row[11] || "",
-        overnight: row[12] || "",
-        special: row[13] || "",
-        holidays: row[14] || "",
+        display: "",
+        weekday: "",
+        weekend: "",
+        overnight: "",
+        special: "",
+        holidays: "",
       },
-      subscriptionType: row[15] || "عادي",
-      lastUpdate: row[16] || "",
-      subscriptionDate: row[17] || "",
-      pin: row[18] || "",
+      lastUpdate: "",
+      pin: "",
     };
 
     return p as Property;
@@ -436,33 +435,20 @@ class GoogleSheetsService {
   private propertyToRow(property: Property): any[] {
   const p: any = property;
 
-  const facilities =
-    Array.isArray(p.facilities)
-      ? p.facilities.join(", ")
-      : typeof p.facilities === "string"
-      ? p.facilities
-      : "";
-
   return [
     p.propertyNumber || "",
     p.name || "",
     p.whatsappNumber || "",
-    p.location || "",
-    p.city || "",
-    p.direction || "",
-    p.type || "",
-    facilities,
-    p.imagesLink || "",
-    p.prices?.display || "",
-    p.prices?.weekday || "",
-    p.prices?.weekend || "",
-    p.prices?.overnight || "",
-    p.prices?.special || "",
-    p.prices?.holidays || "",
+    "", // رسوم الاشتراك
     p.subscriptionType || "عادي",
-    p.lastUpdate || "",
     p.subscriptionDate || "",
-    p.pin || "",
+    "", // تاريخ الانتهاء
+    "", // الأيام المتبقية
+    "", // رابط الإيصال
+    "", // علم انتهاء الاشتراك
+    "", // علم إشعار الإيصال
+    "", // آخر دورة
+    "", // رمز التحديث
   ];
 }
 
