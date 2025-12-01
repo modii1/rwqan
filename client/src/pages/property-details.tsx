@@ -502,8 +502,8 @@ export default function PropertyDetailsPage() {
                 {property.prices?.weekday && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">وسط الأسبوع</span>
-                    <span className="font-bold text-primary">
-                      {property.prices.weekday} ر.س
+                    <span className="font-bold text-[#b88d2b]">
+                      {property.prices.weekday} ﷼
                     </span>
                   </div>
                 )}
@@ -511,8 +511,8 @@ export default function PropertyDetailsPage() {
                 {property.prices?.weekend && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">نهاية الأسبوع</span>
-                    <span className="font-bold text-primary">
-                      {property.prices.weekend} ر.س
+                    <span className="font-bold text-[#b88d2b]">
+                      {property.prices.weekend} ﷼
                     </span>
                   </div>
                 )}
@@ -520,8 +520,8 @@ export default function PropertyDetailsPage() {
                 {property.prices?.overnight && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">مبيت</span>
-                    <span className="font-bold text-primary">
-                      {property.prices.overnight} ر.س
+                    <span className="font-bold text-[#b88d2b]">
+                      {property.prices.overnight} ﷼
                     </span>
                   </div>
                 )}
@@ -529,8 +529,8 @@ export default function PropertyDetailsPage() {
                 {property.prices?.holidays && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">إجازات</span>
-                    <span className="font-bold text-primary">
-                      {property.prices.holidays} ر.س
+                    <span className="font-bold text-[#b88d2b]">
+                      {property.prices.holidays} ﷼
                     </span>
                   </div>
                 )}

@@ -413,7 +413,7 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
+              نطاق السعر: {priceRange[0]} - {priceRange[1]} ﷼
             </label>
             <Slider
               value={priceRange}
@@ -629,7 +629,7 @@ export default function PropertiesPage() {
                       {/* Price */}
                       <div className="flex items-baseline gap-1">
                         <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
-                        <span className="text-xs md:text-sm text-muted-foreground">ريال</span>
+                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">﷼</span>
                       </div>
 
                       {/* CTA Button - Fixed at bottom */}

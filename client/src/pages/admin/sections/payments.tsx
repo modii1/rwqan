@@ -63,8 +63,8 @@ export default function PaymentsSection() {
                   <Td>{p.id}</Td>
                   <Td>{p.propertyNumber}</Td>
                   <Td>{p.name}</Td>
-                  <Td className="font-semibold text-green-700">
-                    {p.amount} ريال
+                  <Td className="font-semibold text-[#b88d2b]">
+                    {p.amount} ﷼
                   </Td>
                   <Td>{p.method}</Td>
                   <Td>
