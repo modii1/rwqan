@@ -16,7 +16,7 @@ import multer from "multer";
 import * as https from "https";
 
 // Create memory store for sessions
-const memoryStore = new (MemoryStore(session))();
+const memoryStore = new (MemoryStore(session))({});
 
 import {
   insertPropertySchema,
