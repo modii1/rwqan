@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock } from "lucide-react";
+import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AdminAnalytics() {
@@ -13,6 +13,12 @@ export default function AdminAnalytics() {
 
   const { data: analyticsData, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/analytics"],
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: visitorsData } = useQuery<any>({
+    queryKey: ["/api/admin/visitors"],
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -205,6 +211,58 @@ export default function AdminAnalytics() {
                 </Badge>
               </div>
             ))}
+          </div>
+        </Card>
+
+        {/* Visitor Details */}
+        <Card className="p-6 border-2 border-primary/20">
+          <div className="mb-6">
+            <h2 className="text-xl font-bold text-primary mb-2 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Eye className="w-6 h-6 text-primary" />
+              </div>
+              تفاصيل الزوار
+            </h2>
+            <p className="text-sm text-muted-foreground">آخر {Math.min(visitorsData?.visitors?.length || 0, 100)} زائر</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b-2 border-primary/20 bg-primary/5">
+                  <th className="text-right p-4 font-semibold text-primary">اسم العقار</th>
+                  <th className="text-right p-4 font-semibold text-primary">الجهاز</th>
+                  <th className="text-right p-4 font-semibold text-primary">IP العميل</th>
+                  <th className="text-right p-4 font-semibold text-primary">اليوم والساعة</th>
+                  <th className="text-right p-4 font-semibold text-primary">التاريخ والوقت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visitorsData?.visitors?.slice(0, 50)?.map((visitor: any, idx: number) => (
+                  <tr key={idx} className="border-b border-border/50 hover:bg-primary/5 transition-colors">
+                    <td className="p-4 font-semibold text-foreground">{visitor.propertyName}</td>
+                    <td className="p-4">
+                      <Badge variant="outline" className="flex w-fit gap-1">
+                        {visitor.deviceType === 'mobile' && <Smartphone className="w-3 h-3" />}
+                        {visitor.deviceType === 'desktop' && <Monitor className="w-3 h-3" />}
+                        {visitor.deviceType === 'tablet' && <Tablet className="w-3 h-3" />}
+                        <span>{
+                          visitor.deviceType === 'mobile' ? 'جوال' :
+                          visitor.deviceType === 'tablet' ? 'تابلت' :
+                          'سطح المكتب'
+                        }</span>
+                      </Badge>
+                    </td>
+                    <td className="p-4 font-mono text-muted-foreground text-xs">{visitor.ipAddress}</td>
+                    <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
+                    <td className="p-4 text-muted-foreground">
+                      {visitor.timestamp
+                        ? new Date(visitor.timestamp).toLocaleString("ar-SA")
+                        : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
 
