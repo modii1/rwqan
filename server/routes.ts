@@ -542,8 +542,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ترقية أو تمديد الاشتراك
-  app.post("/api/owner/subscription/update", requireOwner, async (req, res) => {
+  // تحضير معلومات الدفع للترقية/التمديد (بدون دفع فوري)
+  app.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber;
       const { action, packageId } = req.body;
@@ -551,6 +551,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!['extend', 'upgrade'].includes(action)) {
         return res.status(400).json({ error: "إجراء غير صالح" });
       }
+
+      const newPackage = await storage.getPackageById(packageId);
+      if (!newPackage) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+
+      // إرجاع معلومات الدفع المطلوبة
+      res.json({
+        ok: true,
+        paymentRequired: true,
+        action,
+        packageId,
+        packageName: newPackage.name,
+        price: newPackage.price,
+        duration: newPackage.duration,
+        paymentMethods: ["بطاقة", "Apple Pay", "تحويل بنكي"],
+        message: `يجب إتمام الدفع للقيام بـ ${action === 'extend' ? 'التمديد' : 'الترقية'}`
+      });
+    } catch (err: any) {
+      console.error("Subscription prepare payment error:", err);
+      res.status(500).json({ error: err?.message || "فشل في التحضير" });
+    }
+  });
+
+  // تأكيد الاشتراك بعد الدفع الناجح
+  app.post("/api/owner/subscription/confirm", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      const { action, packageId, paymentId } = req.body;
 
       const newPackage = await storage.getPackageById(packageId);
       if (!newPackage) {
@@ -567,11 +596,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let newEndDate = new Date();
 
       if (action === 'extend' && currentSubscription) {
-        // التمديد: يبدأ من انتهاء الاشتراك الحالي
         newStartDate = new Date(currentSubscription.endDate);
         newEndDate = new Date(newStartDate.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
       } else {
-        // الترقية أو التحديث الأولي: يبدأ من اليوم
         newEndDate = new Date(today.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
       }
 
@@ -581,6 +608,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startDate: newStartDate.toISOString(),
         endDate: newEndDate.toISOString(),
         status: 'نشط',
+        paymentId: paymentId,
       });
 
       await storage.updateProperty(propertyNumber, {
@@ -594,8 +622,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endDate: newEndDate,
       });
     } catch (err: any) {
-      console.error("Subscription update error:", err);
-      res.status(500).json({ error: err?.message || "فشل في التحديث" });
+      console.error("Subscription confirm error:", err);
+      res.status(500).json({ error: err?.message || "فشل في التأكيد" });
     }
   });
 
@@ -1028,12 +1056,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/packages", async (_req, res) => {
     try {
-      const packages = await storage.getPackages();
-      res.json(packages);
-    } catch (err: any) {
-      res.status(500).json({ error: "فشل في جلب الباقات" });
+      const rows = await googleSheetsService.readSheet("الباقات");
+
+      if (!rows || rows.length <= 1) {
+        return res.json([]);
+      }
+
+      const packages = rows.slice(1).map((row) => ({
+        id: row[0],
+        name: row[1],
+        duration: Number(row[2]),
+        price: Number(row[3]),
+        type: row[4],
+        features: parseFeatures(row[5]),
+        isActive: String(row[6]).toLowerCase() === "true",
+        createdAt: row[7] || "",
+      }));
+
+      res.json(packages.filter((p) => p.isActive));
+    } catch {
+      res.status(500).json({ error: "failed to load packages" });
     }
   });
+
+  function parseFeatures(val: any): string[] {
+    if (!val) return [];
+    try {
+      if (String(val).trim().startsWith("[")) return JSON.parse(val);
+    } catch {}
+    return String(val).split("\n");
+  }
 
 
 
