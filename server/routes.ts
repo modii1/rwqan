@@ -84,17 +84,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   app.use(cors(corsOptions));
 
-  app.post("/api/owner/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ error: "Logout failed" });
-      }
-      // Clear session cookie
-      res.clearCookie("connect.sid");
-      res.json({ ok: true });
-    });
-  });
-
   // Owner Analytics - بيانات حقيقية من Google Sheets
   app.get("/api/owner/analytics", async (req, res) => {
     try {
@@ -248,6 +237,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       },
     })
   );
+
+  // ======================
+  // OWNER LOGOUT (MUST BE AFTER SESSION MIDDLEWARE)
+  // ======================
+  app.post("/api/owner/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Logout error:", err);
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      // Clear session cookie
+      res.clearCookie("connect.sid");
+      console.log("✅ Logout successful");
+      res.json({ ok: true });
+    });
+  });
 
   // ======================
   // PUBLIC API
