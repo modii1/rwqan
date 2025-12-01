@@ -84,6 +84,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   app.use(cors(corsOptions));
 
+  // ======================
+  // SESSION MIDDLEWARE
+  // ======================
+  app.use(
+    session({
+      store: memoryStore,
+      secret: process.env.SESSION_SECRET || "dev-secret-key",
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      },
+    })
+  );
+
   // Owner Analytics - بيانات حقيقية من Google Sheets
   app.get("/api/owner/analytics", async (req, res) => {
     try {
