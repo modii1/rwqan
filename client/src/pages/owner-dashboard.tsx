@@ -424,7 +424,7 @@ function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
 
 function Info({ title, value }: { title: string; value: React.ReactNode }) {
   return (
-    <div className="p-3 rounded-lg bg-muted/20">
+    <div className="p-3 rounded-lg bg-[#e6e4e026]">
       <p className="text-xs text-muted-foreground">{title}</p>
       <div className="font-semibold text-base truncate">{value || "---"}</div>
     </div>
