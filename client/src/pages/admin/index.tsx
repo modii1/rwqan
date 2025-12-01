@@ -8,6 +8,7 @@ import {
   Inbox,
   Settings,
   DollarSign,
+  BarChart3,
 } from "lucide-react";
 
 import PropertiesSection from "./sections/properties";
@@ -83,6 +84,13 @@ export default function AdminDashboard() {
           label="الطلبات والاقتراحات"
           active={activeSection === "requests"}
           onClick={() => setActiveSection("requests")}
+        />
+
+        <SidebarButton
+          icon={<BarChart3 className="w-4 h-4" />}
+          label="إحصائيات متقدمة"
+          active={activeSection === "analytics"}
+          onClick={() => window.open("/admin/analytics", "_blank")}
         />
 
         <div className="mt-auto hidden md:block">

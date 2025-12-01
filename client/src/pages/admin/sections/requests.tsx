@@ -62,11 +62,9 @@ export default function RequestsSection() {
                 ))
               ) : (
                 <tr>
-                  <Td colSpan={3}>
-                    <div className="p-4 text-center text-xs text-muted-foreground">
-                      لا توجد طلبات حالياً.
-                    </div>
-                  </Td>
+                  <td colSpan={3} className="p-4 text-center text-xs text-muted-foreground">
+                    لا توجد طلبات حالياً.
+                  </td>
                 </tr>
               )}
             </tbody>
