@@ -3,28 +3,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, ExternalLink, X } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
+import { useLocation } from "wouter"
 
-const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"] as const;
-const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"] as const;
-const TYPES = ["قسم", "قسمين"] as const;
+const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'] as const;
+const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
+const TYPES = ['قسم', 'قسمين'] as const;
+
+const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+
 
 interface PropertyData {
   propertyNumber: string;
@@ -49,6 +41,37 @@ interface PropertyData {
   };
 }
 
+function getImageInfo(imagesLink?: string): { type: 'r2' | 'drive' | 'none'; count: number; driveUrl?: string } {
+  if (!imagesLink) return { type: 'none', count: 0 };
+  const trimmed = imagesLink.trim();
+  
+  if (trimmed.startsWith("[")) {
+    try {
+      const arr = JSON.parse(trimmed);
+      return { type: 'r2', count: Array.isArray(arr) ? arr.length : 0 };
+    } catch {
+      return { type: 'none', count: 0 };
+    }
+  }
+  
+  if (trimmed.includes('drive.google.com')) {
+    return { type: 'drive', count: 1, driveUrl: trimmed };
+  }
+  
+  return { type: 'none', count: 0 };
+}
+
+function getR2Images(propertyNumber: string, count: number): string[] {
+  return Array.from({ length: count }, (_, i) => 
+    `${R2_BASE}/${propertyNumber}/${i + 1}.jpg`
+  );
+}
+
+function hasImages(imagesLink?: string): boolean {
+  const info = getImageInfo(imagesLink);
+  return info.type !== 'none';
+}
+
 const FIELD_LABELS: Record<string, string> = {
   propertyNumber: "رقم العقار",
   name: "اسم العقار",
@@ -71,18 +94,14 @@ const FIELD_LABELS: Record<string, string> = {
 export default function PropertiesSection() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [, setLocation] = useLocation()
 
   const [editing, setEditing] = useState<PropertyData | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [filter, setFilter] = useState("");
   const [facilitySearch, setFacilitySearch] = useState("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-  const [prices, setPrices] = useState({
-    weekday: "",
-    weekend: "",
-    overnight: "",
-    holidays: "",
-  });
+  const [prices, setPrices] = useState({ weekday: "", weekend: "", overnight: "", holidays: "" });
   const [showImages, setShowImages] = useState<PropertyData | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
 
@@ -97,12 +116,9 @@ export default function PropertiesSection() {
 
   const mutation = useMutation({
     mutationFn: async (payload: PropertyData) => {
-      const facilitiesStr =
-        Array.isArray(selectedFacilities) && selectedFacilities.length > 0
-          ? JSON.stringify(selectedFacilities)
-          : typeof payload.facilities === "string"
-          ? payload.facilities
-          : JSON.stringify(payload.facilities || []);
+      const facilitiesStr = Array.isArray(selectedFacilities) && selectedFacilities.length > 0
+        ? JSON.stringify(selectedFacilities)
+        : typeof payload.facilities === 'string' ? payload.facilities : JSON.stringify(payload.facilities || []);
 
       const body = {
         propertyNumber: payload.propertyNumber,
@@ -142,46 +158,28 @@ export default function PropertiesSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      toast({
-        title: "تم الحفظ ✓",
-        description: isNew
-          ? "تمت إضافة العقار بنجاح"
-          : "تم تحديث العقار بنجاح",
-      });
+      toast({ title: "تم الحفظ ✓", description: isNew ? "تمت إضافة العقار بنجاح" : "تم تحديث العقار بنجاح" });
       setEditing(null);
       resetForm();
     },
     onError: (error: Error) => {
-      toast({
-        title: "خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (propertyNumber: string) => {
-      const res = await fetch(`/api/admin/properties/${propertyNumber}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/admin/properties/${propertyNumber}`, { method: "DELETE" });
       if (!res.ok) throw new Error("فشل في حذف العقار");
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      toast({
-        title: "تم الحذف ✓",
-        description: "تم حذف العقار بنجاح",
-      });
+      toast({ title: "تم الحذف ✓", description: "تم حذف العقار بنجاح" });
       setDeleteConfirm(null);
     },
     onError: (error: Error) => {
-      toast({
-        title: "خطأ في الحذف",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ في الحذف", description: error.message, variant: "destructive" });
     },
   });
 
@@ -197,17 +195,10 @@ export default function PropertiesSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      toast({
-        title: "تم إيقاف الاشتراك ✓",
-        description: "تم تحويل الاشتراك إلى عادي",
-      });
+      toast({ title: "تم إيقاف الاشتراك ✓", description: "تم تحويل الاشتراك إلى عادي" });
     },
     onError: (error: Error) => {
-      toast({
-        title: "خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
     },
   });
 
@@ -230,10 +221,7 @@ export default function PropertiesSection() {
           const parsed = JSON.parse(p.facilities);
           facs = Array.isArray(parsed) ? parsed : [];
         } catch {
-          facs = p.facilities
-            .split(",")
-            .map((s: string) => s.trim())
-            .filter(Boolean);
+          facs = p.facilities.split(",").map((s: string) => s.trim()).filter(Boolean);
         }
       }
     }
@@ -268,18 +256,14 @@ export default function PropertiesSection() {
   };
 
   const toggleFacility = (facility: string) => {
-    setSelectedFacilities((prev) =>
-      prev.includes(facility)
-        ? prev.filter((f) => f !== facility)
-        : [...prev, facility]
+    setSelectedFacilities(prev =>
+      prev.includes(facility) ? prev.filter(f => f !== facility) : [...prev, facility]
     );
   };
 
   const items = (data || []).filter((p) =>
     filter
-      ? p.name?.includes(filter) ||
-        p.propertyNumber?.includes(filter) ||
-        (p.city || "").includes(filter)
+      ? p.name?.includes(filter) || p.propertyNumber?.includes(filter) || (p.city || "").includes(filter)
       : true
   );
 
@@ -288,9 +272,7 @@ export default function PropertiesSection() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">إدارة العقارات</h2>
-          <p className="text-xs text-muted-foreground">
-            عرض وتعديل وحذف جميع العقارات
-          </p>
+          <p className="text-xs text-muted-foreground">عرض وتعديل وحذف جميع العقارات</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -301,11 +283,7 @@ export default function PropertiesSection() {
             className="w-56"
             data-testid="input-search-properties"
           />
-          <Button
-            onClick={startNew}
-            size="sm"
-            data-testid="button-add-property"
-          >
+          <Button onClick={startNew} size="sm" data-testid="button-add-property">
             <Plus className="w-4 h-4 ml-1" /> عقار جديد
           </Button>
         </div>
@@ -331,23 +309,15 @@ export default function PropertiesSection() {
             </thead>
             <tbody>
               {items.map((p) => (
-                <tr
-                  key={p.propertyNumber}
-                  className="border-t hover:bg-muted/40"
-                >
+                <tr key={p.propertyNumber} className="border-t hover:bg-muted/40">
                   <Td>{p.propertyNumber}</Td>
                   <Td>{p.name}</Td>
                   <Td>{p.city}</Td>
                   <Td>{p.type}</Td>
                   <Td>
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs ${
-                        p.subscriptionType === "موثوق" ||
-                        p.subscriptionType === "مميز"
-                          ? "bg-primary/20 text-primary"
-                          : "bg-muted"
-                      }`}
-                    >
+                    <span className={`px-2 py-0.5 rounded text-xs ${
+                      (p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"
+                    }`}>
                       {p.subscriptionType}
                     </span>
                   </Td>
@@ -363,25 +333,23 @@ export default function PropertiesSection() {
                         <Pencil className="w-4 h-4" />
                       </Button>
 
-                      {/* زر الصور يظهر دائماً – يفتح مودال إدارة صور R2 */}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setShowImages(p)}
+                      {hasImages(p.imagesLink) && (
+                        <Button
+                         size="icon"
+                         variant="ghost"
+                        onClick={() => setLocation(`/admin/images/${p.propertyNumber}`)}
                         title="إدارة الصور (R2)"
                         data-testid={`button-images-${p.propertyNumber}`}
-                      >
+                        >
                         <Image className="w-4 h-4 text-blue-500" />
-                      </Button>
+                        </Button>
+                      )}
 
-                      {(p.subscriptionType === "موثوق" ||
-                        p.subscriptionType === "مميز") && (
+                      {(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") && (
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() =>
-                            stopSubscriptionMutation.mutate(p.propertyNumber)
-                          }
+                          onClick={() => stopSubscriptionMutation.mutate(p.propertyNumber)}
                           title="إيقاف الاشتراك (تحويل إلى عادي)"
                           disabled={stopSubscriptionMutation.isPending}
                           data-testid={`button-stop-sub-${p.propertyNumber}`}
@@ -407,9 +375,7 @@ export default function PropertiesSection() {
               {items.length === 0 && (
                 <tr>
                   <Td colSpan={6}>
-                    <div className="p-4 text-center text-xs text-muted-foreground">
-                      لا توجد عقارات.
-                    </div>
+                    <div className="p-4 text-center text-xs text-muted-foreground">لا توجد عقارات.</div>
                   </Td>
                 </tr>
               )}
@@ -419,22 +385,12 @@ export default function PropertiesSection() {
       </Card>
 
       {/* Edit/Add Dialog */}
-      <Dialog
-        open={!!editing}
-        onOpenChange={() => {
-          setEditing(null);
-          resetForm();
-        }}
-      >
+      <Dialog open={!!editing} onOpenChange={() => { setEditing(null); resetForm(); }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {isNew ? "إضافة عقار جديد" : "تعديل العقار"}
-            </DialogTitle>
+            <DialogTitle>{isNew ? "إضافة عقار جديد" : "تعديل العقار"}</DialogTitle>
             <DialogDescription>
-              {isNew
-                ? "أدخل بيانات العقار الجديد"
-                : `تعديل بيانات العقار رقم ${editing?.propertyNumber}`}
+              {isNew ? "أدخل بيانات العقار الجديد" : `تعديل بيانات العقار رقم ${editing?.propertyNumber}`}
             </DialogDescription>
           </DialogHeader>
 
@@ -442,9 +398,7 @@ export default function PropertiesSection() {
             <div className="space-y-6">
               {/* Basic Info */}
               <div>
-                <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-                  البيانات الأساسية
-                </h3>
+                <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">البيانات الأساسية</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground mb-1 block">
@@ -452,12 +406,7 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.propertyNumber}
-                      onChange={(e) =>
-                        setEditing({
-                          ...editing,
-                          propertyNumber: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setEditing({ ...editing, propertyNumber: e.target.value })}
                       placeholder="مثال: 88115"
                       maxLength={5}
                       disabled={!isNew}
@@ -471,9 +420,7 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.name}
-                      onChange={(e) =>
-                        setEditing({ ...editing, name: e.target.value })
-                      }
+                      onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                       placeholder="اسم العقار"
                       data-testid="input-name"
                     />
@@ -485,9 +432,7 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.pin || ""}
-                      onChange={(e) =>
-                        setEditing({ ...editing, pin: e.target.value })
-                      }
+                      onChange={(e) => setEditing({ ...editing, pin: e.target.value })}
                       placeholder="الرقم السري"
                       type="password"
                       data-testid="input-pin"
@@ -500,12 +445,7 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.whatsappNumber || ""}
-                      onChange={(e) =>
-                        setEditing({
-                          ...editing,
-                          whatsappNumber: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setEditing({ ...editing, whatsappNumber: e.target.value })}
                       placeholder="966XXXXXXXXX"
                       data-testid="input-whatsapp"
                     />
@@ -517,18 +457,14 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.city || ""}
-                      onValueChange={(v) =>
-                        setEditing({ ...editing, city: v })
-                      }
+                      onValueChange={(v) => setEditing({ ...editing, city: v })}
                     >
                       <SelectTrigger data-testid="select-city">
                         <SelectValue placeholder="اختر المدينة" />
                       </SelectTrigger>
                       <SelectContent>
-                        {CITIES.map((city) => (
-                          <SelectItem key={city} value={city}>
-                            {city}
-                          </SelectItem>
+                        {CITIES.map(city => (
+                          <SelectItem key={city} value={city}>{city}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -540,18 +476,14 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.direction || ""}
-                      onValueChange={(v) =>
-                        setEditing({ ...editing, direction: v })
-                      }
+                      onValueChange={(v) => setEditing({ ...editing, direction: v })}
                     >
                       <SelectTrigger data-testid="select-direction">
                         <SelectValue placeholder="اختر الاتجاه" />
                       </SelectTrigger>
                       <SelectContent>
-                        {DIRECTIONS.map((dir) => (
-                          <SelectItem key={dir} value={dir}>
-                            {dir}
-                          </SelectItem>
+                        {DIRECTIONS.map(dir => (
+                          <SelectItem key={dir} value={dir}>{dir}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -563,18 +495,14 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.type || ""}
-                      onValueChange={(v) =>
-                        setEditing({ ...editing, type: v })
-                      }
+                      onValueChange={(v) => setEditing({ ...editing, type: v })}
                     >
                       <SelectTrigger data-testid="select-type">
                         <SelectValue placeholder="اختر النوع" />
                       </SelectTrigger>
                       <SelectContent>
-                        {TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {type}
-                          </SelectItem>
+                        {TYPES.map(type => (
+                          <SelectItem key={type} value={type}>{type}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -586,9 +514,7 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.location || ""}
-                      onChange={(e) =>
-                        setEditing({ ...editing, location: e.target.value })
-                      }
+                      onChange={(e) => setEditing({ ...editing, location: e.target.value })}
                       placeholder="اسم الحي أو الموقع"
                       data-testid="input-location"
                     />
@@ -600,9 +526,7 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.subscriptionType || "عادي"}
-                      onValueChange={(v) =>
-                        setEditing({ ...editing, subscriptionType: v })
-                      }
+                      onValueChange={(v) => setEditing({ ...editing, subscriptionType: v })}
                     >
                       <SelectTrigger data-testid="select-subscription">
                         <SelectValue />
@@ -620,13 +544,8 @@ export default function PropertiesSection() {
                     </label>
                     <Input
                       value={editing.imagesFolderUrl || ""}
-                      onChange={(e) =>
-                        setEditing({
-                          ...editing,
-                          imagesFolderUrl: e.target.value,
-                        })
-                      }
-                      placeholder="رابط مجلد الصور (اختياري)"
+                      onChange={(e) => setEditing({ ...editing, imagesFolderUrl: e.target.value })}
+                      placeholder="رابط مجلد الصور"
                       data-testid="input-imagesFolderUrl"
                     />
                   </div>
@@ -635,9 +554,7 @@ export default function PropertiesSection() {
 
               {/* Prices */}
               <div>
-                <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-                  الأسعار
-                </h3>
+                <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">الأسعار</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground mb-1 block">
@@ -646,9 +563,7 @@ export default function PropertiesSection() {
                     <Input
                       type="number"
                       value={prices.weekday}
-                      onChange={(e) =>
-                        setPrices({ ...prices, weekday: e.target.value })
-                      }
+                      onChange={(e) => setPrices({ ...prices, weekday: e.target.value })}
                       placeholder="500"
                       data-testid="input-price-weekday"
                     />
@@ -660,9 +575,7 @@ export default function PropertiesSection() {
                     <Input
                       type="number"
                       value={prices.weekend}
-                      onChange={(e) =>
-                        setPrices({ ...prices, weekend: e.target.value })
-                      }
+                      onChange={(e) => setPrices({ ...prices, weekend: e.target.value })}
                       placeholder="800"
                       data-testid="input-price-weekend"
                     />
@@ -674,9 +587,7 @@ export default function PropertiesSection() {
                     <Input
                       type="number"
                       value={prices.overnight}
-                      onChange={(e) =>
-                        setPrices({ ...prices, overnight: e.target.value })
-                      }
+                      onChange={(e) => setPrices({ ...prices, overnight: e.target.value })}
                       placeholder="1200"
                       data-testid="input-price-overnight"
                     />
@@ -688,9 +599,7 @@ export default function PropertiesSection() {
                     <Input
                       type="number"
                       value={prices.holidays}
-                      onChange={(e) =>
-                        setPrices({ ...prices, holidays: e.target.value })
-                      }
+                      onChange={(e) => setPrices({ ...prices, holidays: e.target.value })}
                       placeholder="1000"
                       data-testid="input-price-holidays"
                     />
@@ -712,36 +621,77 @@ export default function PropertiesSection() {
                     data-testid="input-facility-search"
                   />
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
-                    {FACILITIES.filter((f) =>
-                      f.toLowerCase().includes(facilitySearch.toLowerCase())
-                    ).map((facility) => (
-                      <div key={facility} className="flex items-center gap-2">
-                        <Checkbox
-                          checked={selectedFacilities.includes(facility)}
-                          onCheckedChange={() => toggleFacility(facility)}
-                          id={`fac-${facility}`}
-                        />
-                        <label
-                          htmlFor={`fac-${facility}`}
-                          className="text-xs cursor-pointer"
-                        >
-                          {facility}
-                        </label>
-                      </div>
-                    ))}
+                    {FACILITIES
+                      .filter(f => f.toLowerCase().includes(facilitySearch.toLowerCase()))
+                      .map(facility => (
+                        <div key={facility} className="flex items-center gap-2">
+                          <Checkbox
+                            checked={selectedFacilities.includes(facility)}
+                            onCheckedChange={() => toggleFacility(facility)}
+                            id={`fac-${facility}`}
+                          />
+                          <label htmlFor={`fac-${facility}`} className="text-xs cursor-pointer">
+                            {facility}
+                          </label>
+                        </div>
+                      ))}
                   </div>
                 </div>
               </div>
 
+              {/* Current Images */}
+              {(() => {
+                const info = getImageInfo(editing.imagesLink);
+                if (info.type === 'none') return null;
+                
+                if (info.type === 'drive') {
+                  return (
+                    <div>
+                      <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
+                        الصور (Google Drive)
+                      </h3>
+                      <a 
+                        href={info.driveUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
+                      >
+                        <Image className="w-4 h-4" />
+                        فتح مجلد الصور في Google Drive
+                      </a>
+                    </div>
+                  );
+                }
+                
+                const images = getR2Images(editing.propertyNumber, info.count);
+                return (
+                  <div>
+                    <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
+                      الصور الحالية ({info.count})
+                    </h3>
+                    <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
+                      {images.slice(0, 12).map((url, i) => (
+                        <img
+                          key={i}
+                          src={url}
+                          alt={`صورة ${i + 1}`}
+                          className="w-full h-16 object-cover rounded border"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ))}
+                      {info.count > 12 && (
+                        <div className="w-full h-16 bg-muted rounded border flex items-center justify-center text-xs">
+                          +{info.count - 12}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Buttons */}
               <div className="flex justify-end gap-2 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setEditing(null);
-                    resetForm();
-                  }}
-                >
+                <Button variant="outline" onClick={() => { setEditing(null); resetForm(); }}>
                   إلغاء
                 </Button>
                 <Button
@@ -750,9 +700,7 @@ export default function PropertiesSection() {
                   className="gradient-golden"
                   data-testid="button-save"
                 >
-                  {mutation.isPending && (
-                    <Loader2 className="w-4 h-4 ml-1 animate-spin" />
-                  )}
+                  {mutation.isPending && <Loader2 className="w-4 h-4 ml-1 animate-spin" />}
                   حفظ
                 </Button>
               </div>
@@ -761,55 +709,77 @@ export default function PropertiesSection() {
         </DialogContent>
       </Dialog>
 
-      {/* Images Modal (R2) */}
+      {/* Images Modal */}
       <Dialog open={!!showImages} onOpenChange={() => setShowImages(null)}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>صور العقار: {showImages?.name}</DialogTitle>
             <DialogDescription>
-              إدارة صور R2 للعقار رقم {showImages?.propertyNumber}
+              عرض جميع صور العقار رقم {showImages?.propertyNumber}
             </DialogDescription>
           </DialogHeader>
-
-          {showImages && (
-            <AdminImagesManager property={showImages} />
-          )}
+          {showImages && (() => {
+            const info = getImageInfo(showImages.imagesLink);
+            
+            if (info.type === 'none') {
+              return <p className="text-muted-foreground text-center py-4">لا توجد صور</p>;
+            }
+            
+            if (info.type === 'drive') {
+              return (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">الصور مخزنة في Google Drive</p>
+                  <a 
+                    href={info.driveUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
+                  >
+                    <Image className="w-5 h-5" />
+                    فتح مجلد الصور
+                  </a>
+                </div>
+              );
+            }
+            
+            const images = getR2Images(showImages.propertyNumber, info.count);
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto">
+                {images.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`صورة ${i + 1}`}
+                    className="w-full h-32 object-cover rounded-lg border"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ))}
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation */}
-      <Dialog
-        open={!!deleteConfirm}
-        onOpenChange={() => setDeleteConfirm(null)}
-      >
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="text-red-600">تأكيد الحذف</DialogTitle>
             <DialogDescription>
-              هل أنت متأكد من حذف العقار "{deleteConfirm?.name}" رقم{" "}
-              {deleteConfirm?.propertyNumber}؟
+              هل أنت متأكد من حذف العقار "{deleteConfirm?.name}" رقم {deleteConfirm?.propertyNumber}؟
               <br />
-              <span className="text-red-500 font-bold">
-                هذا الإجراء لا يمكن التراجع عنه!
-              </span>
+              <span className="text-red-500 font-bold">هذا الإجراء لا يمكن التراجع عنه!</span>
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
-              إلغاء
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>إلغاء</Button>
             <Button
               variant="destructive"
-              onClick={() =>
-                deleteConfirm &&
-                deleteMutation.mutate(deleteConfirm.propertyNumber)
-              }
+              onClick={() => deleteConfirm && deleteMutation.mutate(deleteConfirm.propertyNumber)}
               disabled={deleteMutation.isPending}
               data-testid="button-confirm-delete"
             >
-              {deleteMutation.isPending && (
-                <Loader2 className="w-4 h-4 ml-1 animate-spin" />
-              )}
+              {deleteMutation.isPending && <Loader2 className="w-4 h-4 ml-1 animate-spin" />}
               نعم، احذف
             </Button>
           </div>
@@ -819,254 +789,10 @@ export default function PropertiesSection() {
   );
 }
 
-/* ============ Component: إدارة صور R2 داخل المودال ============ */
-
-function AdminImagesManager({ property }: { property: PropertyData }) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-
-  const {
-    data,
-    isLoading,
-  } = useQuery<{ images: string[] }>({
-    queryKey: ["admin-r2-images", property.propertyNumber],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/admin/r2-images/${property.propertyNumber}`
-      );
-      if (!res.ok) throw new Error("فشل في جلب صور R2");
-      return res.json();
-    },
-  });
-
-  const images = data?.images || [];
-
-  const uploadMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      files.forEach((f) => formData.append("images", f));
-
-      const res = await fetch(
-        `/api/admin/r2-images/${property.propertyNumber}`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "فشل في رفع الصور");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["admin-r2-images", property.propertyNumber],
-      });
-      setSelectedFiles([]);
-      setPreviewUrls([]);
-      toast({ title: "تم رفع الصور بنجاح" });
-    },
-    onError: (err: any) => {
-      toast({
-        title: "خطأ",
-        description: err.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (url: string) => {
-      const fileName = url.split("/").pop() || "";
-      const index = fileName.replace(".jpg", "");
-
-      const res = await fetch(
-        `/api/admin/r2-images/${property.propertyNumber}/${index}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "فشل في حذف الصورة");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["admin-r2-images", property.propertyNumber],
-      });
-      toast({ title: "تم حذف الصورة بنجاح" });
-    },
-    onError: (err: any) => {
-      toast({
-        title: "خطأ",
-        description: err.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    setSelectedFiles(files);
-    setPreviewUrls(files.map((f) => URL.createObjectURL(f)));
-  };
-
-  const handleRemovePreview = (idx: number) => {
-    const url = previewUrls[idx];
-    URL.revokeObjectURL(url);
-    setPreviewUrls((prev) => prev.filter((_, i) => i !== idx));
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* الصور الحالية */}
-      <div>
-        <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-          الصور الحالية ({images.length})
-        </h3>
-
-        {isLoading ? (
-          <div className="py-6 flex items-center gap-2 text-muted-foreground text-sm">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            جاري تحميل الصور من R2...
-          </div>
-        ) : images.length === 0 ? (
-          <div className="py-6 text-center text-sm text-muted-foreground">
-            لا توجد صور مرفوعة لهذا العقار حتى الآن.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {images.map((url, i) => (
-              <div key={i} className="relative group">
-                <img
-                  src={url}
-                  alt={`صورة ${i + 1}`}
-                  className="w-full h-40 object-cover rounded-lg border"
-                />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2 rounded-lg transition">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 rounded-full bg-blue-500 text-white"
-                    title="فتح في تبويب جديد"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                  <button
-                    type="button"
-                    className="p-2 rounded-full bg-red-500 text-white"
-                    title="حذف الصورة"
-                    onClick={() => {
-                      if (confirm("هل تريد حذف هذه الصورة؟")) {
-                        deleteMutation.mutate(url);
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* رفع صور جديدة */}
-      <div>
-        <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-          رفع صور جديدة
-        </h3>
-        <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center">
-          <p className="text-xs text-muted-foreground mb-2">
-            اختر صورة أو أكثر لرفعها إلى مجلد العقار في R2
-          </p>
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            className="hidden"
-            id="admin-r2-upload-input"
-            onChange={handleSelectFiles}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              document.getElementById("admin-r2-upload-input")?.click()
-            }
-          >
-            اختر الصور
-          </Button>
-        </div>
-
-        {previewUrls.length > 0 && (
-          <>
-            <h4 className="mt-4 text-xs font-semibold text-muted-foreground">
-              الصور المختارة ({previewUrls.length})
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-2">
-              {previewUrls.map((url, i) => (
-                <div key={i} className="relative">
-                  <img
-                    src={url}
-                    alt={`صورة جديدة ${i + 1}`}
-                    className="w-full h-32 object-cover rounded-lg border"
-                  />
-                  <button
-                    type="button"
-                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1"
-                    onClick={() => handleRemovePreview(i)}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <Button
-              className="w-full mt-3"
-              disabled={uploadMutation.isPending || selectedFiles.length === 0}
-              onClick={() => uploadMutation.mutate(selectedFiles)}
-            >
-              {uploadMutation.isPending && (
-                <Loader2 className="w-4 h-4 ml-1 animate-spin" />
-              )}
-              رفع {selectedFiles.length} صورة
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ============ عناصر الجدول المساعدة ============ */
-
 function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-[11px] md:text-xs font-bold">{children}</th>
-  );
+  return <th className="px-3 py-2 text-[11px] md:text-xs font-bold">{children}</th>;
 }
 
-function Td({
-  children,
-  colSpan,
-}: {
-  children: React.ReactNode;
-  colSpan?: number;
-}) {
-  return (
-    <td colSpan={colSpan} className="px-3 py-2 whitespace-nowrap">
-      {children}
-    </td>
-  );
+function Td({ children, colSpan }: { children: React.ReactNode; colSpan?: number }) {
+  return <td colSpan={colSpan} className="px-3 py-2 whitespace-nowrap">{children}</td>;
 }

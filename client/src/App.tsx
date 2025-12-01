@@ -19,6 +19,9 @@ import SubscriptionPage from "@/pages/subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
+import AdminImagesPage from "@/pages/admin/admin-images";
+
+
 
 // Icons
 import { Home, LogIn, LogOut, Settings } from "lucide-react";
@@ -49,6 +52,9 @@ function Router() {
       {/* ======================= */}
 
       <Route path="/admin" component={AdminDashboard} />
+      <Route path="/admin/images/:propertyNumber" component={AdminImagesPage} />
+
+
 
 
       {/* صفحة 404 */}
