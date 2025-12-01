@@ -161,6 +161,25 @@ export default function PropertyDetailsPage() {
 
   const property = properties.find((p) => p.propertyNumber === propertyId);
 
+  // ✅ تتبع الزيارات
+  useEffect(() => {
+    if (!propertyId) return;
+    
+    const trackView = async () => {
+      try {
+        await fetch("/api/track-pageview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ propertyNumber: propertyId }),
+        });
+      } catch (err) {
+        console.log("Failed to track page view:", err);
+      }
+    };
+    
+    trackView();
+  }, [propertyId]);
+
   // ✅ إعادة تعيين الصورة المختارة عند تغيّر العقار
   useEffect(() => {
     if (!property) return;

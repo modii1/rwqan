@@ -476,6 +476,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // تتبع زيارات الصفحات (Page Views)
+  app.post("/api/track-pageview", async (req, res) => {
+    try {
+      const { propertyNumber } = req.body;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "رقم العقار مطلوب" });
+      }
+
+      const now_date = getRiyadhTime();
+      const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+      const dayOfWeek = daysAr[now_date.getUTCDay()];
+      const hourOfDay = now_date.getUTCHours();
+
+      // احفظ الزيارة كطلب
+      const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+
+      // احصل على IP العميل من الطلب
+      const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
+                       req.socket.remoteAddress || 
+                       'unknown';
+
+      await storage.createRequest({
+        propertyNumber,
+        requestCode: viewCode,
+        timestamp: now_date.toISOString(),
+        ipAddress,
+        dayOfWeek,
+        hourOfDay,
+      });
+
+      res.json({ ok: true, viewCode });
+    } catch (err: any) {
+      console.error("Page view tracking error:", err);
+      res.status(500).json({ error: "خطأ في تسجيل الزيارة" });
+    }
+  });
+
   // ======================
   // OWNER AUTH
   // ======================
