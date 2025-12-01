@@ -331,32 +331,93 @@ export class GoogleSheetsStorage implements IStorage {
     this.backups.set(id, backup);
   }
 
-  // ===== Code Backup Implementation (In-Memory) =====
-  private codeBackups: Map<string, CodeBackup> = new Map();
+  // ===== Code Backup Implementation (Persistent Filesystem) =====
+  private codeBackupDir = ".backup-history";
+
+  private ensureBackupDir() {
+    const fs = require("fs");
+    if (!fs.existsSync(this.codeBackupDir)) {
+      fs.mkdirSync(this.codeBackupDir, { recursive: true });
+    }
+  }
+
+  private getBackupFilePath(id: string): string {
+    const path = require("path");
+    return path.join(this.codeBackupDir, `${id}.json`);
+  }
 
   async getCodeBackups(): Promise<CodeBackup[]> {
-    return Array.from(this.codeBackups.values()).sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      
+      this.ensureBackupDir();
+      const files = fs.readdirSync(this.codeBackupDir).filter((f: string) => f.endsWith(".json"));
+      
+      const backups: CodeBackup[] = [];
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(this.codeBackupDir, file), "utf-8");
+          const backup = JSON.parse(content);
+          backups.push(backup);
+        } catch (e) {}
+      }
+      
+      return backups.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    } catch (e) {
+      return [];
+    }
   }
 
   async getCodeBackupById(id: string): Promise<CodeBackup | null> {
-    return this.codeBackups.get(id) || null;
+    try {
+      const fs = require("fs");
+      const filePath = this.getBackupFilePath(id);
+      
+      if (!fs.existsSync(filePath)) {
+        return null;
+      }
+      
+      const content = fs.readFileSync(filePath, "utf-8");
+      return JSON.parse(content);
+    } catch (e) {
+      return null;
+    }
   }
 
   async createCodeBackup(backup: InsertCodeBackup): Promise<CodeBackup> {
-    const id = `CODE-BACKUP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const newBackup: CodeBackup = {
-      id,
-      ...backup,
-      createdAt: new Date().toISOString(),
-    };
-    this.codeBackups.set(id, newBackup);
-    return newBackup;
+    try {
+      const fs = require("fs");
+      const id = `CODE-BACKUP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newBackup: CodeBackup = {
+        id,
+        ...backup,
+        createdAt: new Date().toISOString(),
+      };
+      
+      this.ensureBackupDir();
+      const filePath = this.getBackupFilePath(id);
+      fs.writeFileSync(filePath, JSON.stringify(newBackup, null, 2), "utf-8");
+      
+      return newBackup;
+    } catch (e) {
+      throw new Error(`Failed to create code backup: ${e}`);
+    }
   }
 
   async deleteCodeBackup(id: string): Promise<void> {
-    this.codeBackups.delete(id);
+    try {
+      const fs = require("fs");
+      const filePath = this.getBackupFilePath(id);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (e) {
+      throw new Error(`Failed to delete code backup: ${e}`);
+    }
   }
 }
 
