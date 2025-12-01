@@ -189,14 +189,19 @@ class GoogleSheetsService {
         "الرقم السري",
       ],
       [SHEETS.SUBSCRIPTIONS]: [
-        "المعرف",
         "رقم العقار",
-        "معرف الباقة",
-        "تاريخ البدء",
+        "اسم العقار",
+        "رقم الجوال",
+        "رسوم الاشتراك",
+        "نوع الاشتراك",
+        "تاريخ البداية",
         "تاريخ الانتهاء",
-        "الحالة",
-        "معرف الدفع",
-        "تاريخ الإنشاء",
+        "الأيام المتبقية",
+        "رابط الإيصال",
+        "علم انتهاء الاشتراك",
+        "علم إشعار الإيصال",
+        "آخر دورة",
+        "رمز التحديث",
       ],
       [SHEETS.PACKAGES]: [
         "المعرف",
@@ -533,13 +538,13 @@ class GoogleSheetsService {
   // ================== الاشتراكات ==================
   
   // قراءة من ورقة الاشتراكات الفعلية
-  // الأعمدة: المعرف(0), رقم العقار(1), معرف الباقة(2), تاريخ البدء(3), تاريخ الانتهاء(4), الحالة(5), معرف الدفع(6), تاريخ الإنشاء(7)
+  // الأعمدة: رقم العقار(0), اسم العقار(1), رقم الجوال(2), رسوم الاشتراك(3), نوع الاشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6), الأيام المتبقية(7), رابط الإيصال(8), علم انتهاء(9), علم إشعار(10), آخر دورة(11), رمز التحديث(12)
   private rowToSubscriptionFromSheet(row: any[]): Subscription {
-    const startDate = row[3] ? String(row[3]) : "";
-    const endDate = row[4] ? String(row[4]) : "";
+    const startDate = row[5] ? String(row[5]) : "";
+    const endDate = row[6] ? String(row[6]) : "";
     
     // حساب الحالة تلقائياً من تاريخ الانتهاء
-    let status = row[5] || "نشط";
+    let status = "نشط";
     if (endDate) {
       try {
         const endDateObj = new Date(endDate);
@@ -550,15 +555,35 @@ class GoogleSheetsService {
     }
     
     return {
-      id: row[0] || `SUB-${row[1]}`,
-      propertyNumber: row[1] || "",
-      packageId: row[2] || "pkg-free",
+      id: `SUB-${row[0]}`,
+      propertyNumber: row[0] || "",
+      packageId: row[4] === "مميز" ? "pkg-trusted" : "pkg-free",
       startDate,
       endDate,
       status: status as any,
-      paymentId: row[6] || undefined,
-      createdAt: row[7] || undefined,
     };
+  }
+
+  private subscriptionToRow(propertyNumber: string, subscription: any, property: any, receiptUrl?: string): any[] {
+    const endDate = new Date(subscription.endDate);
+    const now = new Date();
+    const daysRemaining = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    return [
+      propertyNumber,
+      property?.name || "",
+      property?.whatsappNumber || "",
+      subscription.price || "",
+      subscription.subscriptionType || "عادي",
+      subscription.startDate?.split('T')[0] || "",
+      subscription.endDate?.split('T')[0] || "",
+      Math.max(daysRemaining, 0),
+      receiptUrl || "",
+      "",
+      "",
+      new Date().toISOString().split('T')[0],
+      subscription.paymentId || "",
+    ];
   }
 
   async getSubscriptions(): Promise<Subscription[]> {
@@ -598,11 +623,11 @@ class GoogleSheetsService {
 
     const propertyRow = rows[rowIndex];
     
-    // تحديث الأعمدة: نوع اشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6)
+    // تحديث الأعمدة: نوع اشتراك(15), تاريخ البداية(17), تاريخ الانتهاء(18)
     const subscriptionType = subscription.packageId === "pkg-trusted" ? "مميز" : "عادي";
-    propertyRow[4] = subscriptionType;
-    propertyRow[5] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
-    propertyRow[6] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
+    propertyRow[15] = subscriptionType;
+    propertyRow[17] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
+    propertyRow[18] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
     
     await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
     
@@ -610,6 +635,12 @@ class GoogleSheetsService {
       id: `SUB-${subscription.propertyNumber}`,
       ...subscription,
     };
+  }
+
+  // إضافة اشتراك جديد إلى ورقة الاشتراكات
+  async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
+    const row = this.subscriptionToRow(propertyNumber, subscriptionData, property, receiptUrl);
+    await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [row]);
   }
 
   async updateSubscription(
