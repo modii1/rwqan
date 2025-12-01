@@ -689,6 +689,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // المسؤول: جلب تفاصيل الزوار الفرديين
+  app.get("/api/admin/visitors", requireAdmin, async (req, res) => {
+    try {
+      const allRequests = await storage.getRequests();
+      const totalProps = await storage.getProperties();
+
+      const visitors = allRequests
+        .slice(-100) // آخر 100 زائر
+        .reverse()
+        .map(req => {
+          const prop = totalProps.find(p => p.propertyNumber === req.propertyNumber);
+          return {
+            propertyNumber: req.propertyNumber,
+            propertyName: prop?.name || `عقار ${req.propertyNumber}`,
+            requestCode: req.requestCode,
+            deviceType: req.deviceType || 'desktop',
+            ipAddress: req.ipAddress,
+            timestamp: req.timestamp,
+            dayOfWeek: req.dayOfWeek,
+            hourOfDay: req.hourOfDay,
+          };
+        });
+
+      res.json({ visitors });
+    } catch (err: any) {
+      console.error("Visitors error:", err);
+      res.status(500).json({ error: "فشل في جلب بيانات الزوار" });
+    }
+  });
+
   // المسؤول: جلب الإحصائيات المتقدمة
   app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     try {
@@ -699,13 +729,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
       const visitors = allRequests.length;
 
-      // 2. توزيع الأجهزة (استخدام heuristics بناءً على IP patterns)
+      // 2. توزيع الأجهزة (من البيانات الحقيقية deviceType)
       const devices = { mobile: 0, desktop: 0, tablet: 0 };
       allRequests.forEach(r => {
-        // تقسيم بسيط: إذا كانت IP تحتوي على أرقام معينة => mobile
-        const ipNum = r.ipAddress.split('.').reduce((a, b) => a + parseInt(b), 0);
-        if (ipNum % 3 === 0) devices.mobile++;
-        else if (ipNum % 3 === 1) devices.tablet++;
+        if (r.deviceType === 'mobile') devices.mobile++;
+        else if (r.deviceType === 'tablet') devices.tablet++;
         else devices.desktop++;
       });
 
