@@ -159,6 +159,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Owner Requests - جدول الطلبات للعقار
+  app.get("/api/owner/requests", async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any)?.propertyNumber;
+      if (!propertyNumber) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const allRequests = await googleSheetsService.getAllRequests();
+      const propertyRequests = allRequests
+        .filter(r => r.propertyNumber === propertyNumber)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 100);
+
+      res.json({ requests: propertyRequests });
+    } catch (err) {
+      console.error("Requests error:", err);
+      res.status(500).json({ error: "Failed to load requests" });
+    }
+  });
+
+  // Admin - All Requests & Analytics
+  app.get("/api/admin/requests", async (req, res) => {
+    try {
+      const allRequests = await googleSheetsService.getAllRequests();
+      const allProperties = await googleSheetsService.getProperties();
+      
+      const byProperty: Record<string, number> = {};
+      allRequests.forEach(r => {
+        byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
+      });
+
+      const sorted = Object.entries(byProperty)
+        .sort((a, b) => b[1] - a[1])
+        .map(([propNum, count]) => {
+          const prop = allProperties.find(p => p.propertyNumber === propNum);
+          return { propertyNumber: propNum, propertyName: prop?.name || 'غير معروف', requestCount: count };
+        });
+
+      res.json({ 
+        totalRequests: allRequests.length,
+        totalProperties: sorted.length,
+        byProperty: sorted,
+        recentRequests: allRequests.slice(-20).reverse()
+      });
+    } catch (err) {
+      console.error("Admin requests error:", err);
+      res.status(500).json({ error: "Failed to load admin requests" });
+    }
+  });
+
 
 
   // ======================
