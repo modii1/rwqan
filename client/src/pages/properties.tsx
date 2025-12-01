@@ -592,10 +592,14 @@ export default function PropertiesPage() {
 
                   {/* Content Section - Flexible grow */}
                   <div className="flex flex-col flex-1 p-3 md:p-5">
-                    {/* Title - Only show for verified properties */}
-                    {property.subscriptionType === "موثوق" && (
+                    {/* Title - Show for all properties with name */}
+                    {property.name && (
                       <h3
-                        className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
+                        className={`text-base md:text-xl font-bold mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors ${
+                          property.subscriptionType === "موثوق" 
+                            ? "text-[#4a3b2a]" 
+                            : "text-muted-foreground"
+                        }`}
                         onClick={() => handleCardClick(property.propertyNumber)}
                       >
                         {property.name}
