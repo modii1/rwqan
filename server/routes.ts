@@ -401,7 +401,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const propertyNumber = (req.session as any).propertyNumber;
 
+      console.log(`🔍 [FETCH] Getting images for property ${propertyNumber}`);
+
       if (!propertyNumber || !R2_BUCKET) {
+        console.error("❌ [FETCH] Missing propertyNumber or R2_BUCKET");
         return res.json({ images: [] });
       }
 
@@ -409,8 +412,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         new ListObjectsV2Command({
           Bucket: R2_BUCKET,
           Prefix: `${propertyNumber}/`,
+          MaxKeys: 100,
         })
       );
+
+      const count = list.Contents?.length || 0;
+      console.log(`✅ [FETCH] Found ${count} images for ${propertyNumber}`);
+      console.log(`📊 [FETCH] Objects:`, list.Contents?.map(o => o.Key));
 
       let images =
         list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
@@ -424,9 +432,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return na - nb;
       });
 
+      console.log(`✅ [FETCH] Returning ${images.length} image URLs`);
       res.json({ images });
 
-    } catch (err) {
+    } catch (err: any) {
+      console.error("❌ [FETCH] Error:", err?.message);
       res.json({ images: [] });
     }
   });
@@ -438,16 +448,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const propertyNumber = (req.session as any).propertyNumber || "";
       
+      console.log(`📸 [UPLOAD] Property ${propertyNumber}, Files:`, req.files?.length);
+      
       if (!propertyNumber) {
+        console.error("❌ [UPLOAD] No property number in session");
         return res.status(400).json({ error: "Property number not found in session" });
       }
 
       if (!R2_BUCKET) {
+        console.error("❌ [UPLOAD] R2_BUCKET not configured");
         return res.status(500).json({ error: "R2 bucket not configured" });
       }
 
       const files = (req.files as any) || [];
       if (!files || files.length === 0) {
+        console.error("❌ [UPLOAD] No files received");
         return res.status(400).json({ error: "لا توجد صور تم رفعها" });
       }
 
@@ -459,11 +474,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
 
-      let index = (list.Contents?.length || 0) + 1;
+      const currentCount = list.Contents?.length || 0;
+      console.log(`✅ [UPLOAD] Current images for ${propertyNumber}: ${currentCount}`);
+
+      let index = currentCount + 1;
       const uploadedKeys: string[] = [];
 
       for (const file of files) {
         const key = `${propertyNumber}/${index}.jpg`;
+        
+        console.log(`⬆️ [UPLOAD] Uploading ${key} (${file.size} bytes)`);
         
         await r2.send(
           new PutObjectCommand({
@@ -474,13 +494,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ACL: "public-read",
           })
         );
+        console.log(`✅ [UPLOAD] Uploaded ${key}`);
         uploadedKeys.push(key);
         index++;
       }
 
+      console.log(`✅ [UPLOAD] Done! Uploaded ${files.length} images. Keys:`, uploadedKeys);
       res.json({ ok: true, count: files.length, uploaded: uploadedKeys });
 
     } catch (err: any) {
+      console.error("❌ [UPLOAD] Error:", err?.message);
       const errorMsg = err?.message || "فشل الرفع";
       res.status(500).json({ error: errorMsg });
     }
