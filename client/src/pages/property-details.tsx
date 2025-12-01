@@ -44,7 +44,7 @@ const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
 function isVerified(property: PropertyDetails) {
   return (
-    property.subscriptionType?.trim().includes("موثوق")
+    property.subscriptionType?.trim().includes("مميز")
   );
 }
 
