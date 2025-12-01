@@ -489,6 +489,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const ADMIN_CODE = process.env.ADMIN_CODE || "admin";
   const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
+  // ======================
+  // GET REQUESTS ENDPOINTS
+  // ======================
+  // المالك: جلب طلبات عقاره
+  app.get("/api/owner/requests", requireOwner, async (req: any, res) => {
+    try {
+      const propertyNumber = req.propertyNumber;
+      const allRequests = await storage.getRequests();
+      const propertyRequests = allRequests.filter(r => r.propertyNumber === propertyNumber);
+      res.json(propertyRequests);
+    } catch (err) {
+      res.status(500).json({ error: "فشل في جلب الطلبات" });
+    }
+  });
+
+  // المسؤول: جلب جميع الطلبات
+  app.get("/api/admin/requests", requireAdmin, async (req, res) => {
+    try {
+      const allRequests = await storage.getRequests();
+      const totalProps = await storage.getProperties();
+      res.json({
+        recentRequests: allRequests.slice(-100), // آخر 100 طلب
+        totalRequests: allRequests.length,
+        totalProperties: totalProps.length,
+      });
+    } catch (err) {
+      res.status(500).json({ error: "فشل في جلب الطلبات" });
+    }
+  });
+
   app.post("/api/admin/login", async (req, res) => {
     const { code, password } = req.body;
 
