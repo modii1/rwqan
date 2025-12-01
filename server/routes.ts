@@ -85,7 +85,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(cors(corsOptions));
 
   app.post("/api/owner/logout", (req, res) => {
-    req.session.destroy(() => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      // Clear session cookie
+      res.clearCookie("connect.sid");
       res.json({ ok: true });
     });
   });
