@@ -4,7 +4,6 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ToastProvider } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
@@ -102,9 +101,8 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <TooltipProvider>
-          <div className="min-h-screen flex flex-col bg-background">
+      <TooltipProvider>
+        <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
           <header className="bg-white border-b shadow-sm sticky top-0 z-50">
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -165,8 +163,7 @@ export default function App() {
           </main>
           <Toaster />
         </div>
-        </TooltipProvider>
-      </ToastProvider>
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
