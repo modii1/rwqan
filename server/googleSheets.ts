@@ -870,7 +870,7 @@ class GoogleSheetsService {
     }
   }
 
-  async createRequest(request: InsertRequest): Promise<Request> {
+  async createRequest(request: InsertRequest, requestCountFromIP?: number): Promise<Request> {
     try {
       // الحصول على وقت الرياض (UTC+3)
       const utcNow = new Date();
@@ -878,21 +878,21 @@ class GoogleSheetsService {
       
       const propertyName = (await this.getPropertyByNumber(request.propertyNumber))?.name || "";
       
-      // اقرأ الشيت الفعلي وعد الصفوف للعقار هذا
-      const rows = await this.readSheet(SHEETS.REQUESTS);
-      let requestCount = 0;
+      // استخدم العدد المُمرّر من IP (حسب نفس IP)
+      // أو احسبه من الشيت إذا لم يُمرّ
+      let requestCount = requestCountFromIP || 0;
       
-      if (rows && rows.length > 1) {
-        // عد عدد الصفوف الموجودة للعقار هذا (بدء من الصف الثاني لتخطي الرأس)
-        for (let i = 1; i < rows.length; i++) {
-          if (rows[i][0] === request.propertyNumber) {
-            requestCount++;
+      if (!requestCountFromIP) {
+        const rows = await this.readSheet(SHEETS.REQUESTS);
+        if (rows && rows.length > 1) {
+          for (let i = 1; i < rows.length; i++) {
+            if (rows[i][0] === request.propertyNumber) {
+              requestCount++;
+            }
           }
         }
+        requestCount++;
       }
-      
-      // أضف 1 للطلب الجديد (فإذا كان 0 = يكون 1، إذا كان 1 = يكون 2)
-      requestCount++;
       
       // استخراج التاريخ والوقت بتوقيت الرياض
       const day = now.getUTCDate();
