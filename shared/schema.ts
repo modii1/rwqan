@@ -118,6 +118,7 @@ export const requestSchema = z.object({
   requestCode: z.string(), // كود قصير
   timestamp: z.string(),
   ipAddress: z.string(), // IP العميل
+  deviceType: z.enum(['mobile', 'desktop', 'tablet']).default('desktop'), // نوع الجهاز
   dayOfWeek: z.string(), // يوم الأسبوع (الجمعة، السبت، إلخ)
   hourOfDay: z.number(), // الساعة (0-23)
   createdAt: z.string().optional(),
