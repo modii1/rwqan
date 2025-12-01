@@ -541,7 +541,7 @@ class GoogleSheetsService {
     return {
       id: `SUB-${propertyNumber}`,
       propertyNumber,
-      packageId: row[4] === "مميز" ? "pkg-trusted" : "pkg-free", // نوع الاشتراك
+      packageId: row[4] === "موثوق" ? "pkg-trusted" : "pkg-free", // نوع الاشتراك
       startDate,
       endDate,
       status: status as any,
@@ -570,7 +570,7 @@ class GoogleSheetsService {
     const propertyRow = rows[rowIndex];
     
     // تحديث الأعمدة: نوع اشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6)
-    const subscriptionType = subscription.packageId === "pkg-trusted" ? "مميز" : "عادي";
+    const subscriptionType = subscription.packageId === "pkg-trusted" ? "موثوق" : "عادي";
     propertyRow[4] = subscriptionType;
     propertyRow[5] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
     propertyRow[6] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
@@ -598,7 +598,7 @@ class GoogleSheetsService {
     const propertyRow = rows[rowIndex];
     
     if (updates.packageId) {
-      propertyRow[4] = updates.packageId === "pkg-trusted" ? "مميز" : "عادي";
+      propertyRow[4] = updates.packageId === "pkg-trusted" ? "موثوق" : "عادي";
     }
     if (updates.startDate) {
       propertyRow[5] = updates.startDate.split('T')[0];
@@ -614,7 +614,7 @@ class GoogleSheetsService {
 
   // ================== الباقات ==================
   
-  // الباقات الثابتة - نوعان فقط: عادي ومميز
+  // الباقات الثابتة - نوعان فقط: عادي وموثوق
   private readonly PACKAGES: Package[] = [
     {
       id: "pkg-free",
@@ -627,11 +627,11 @@ class GoogleSheetsService {
     },
     {
       id: "pkg-trusted",
-      name: "باقة مميزة",
+      name: "باقة موثوقة",
       duration: 30,
       price: 35,
-      type: "مميز",
-      features: ["عرض مميز", "أولوية في البحث"],
+      type: "موثوق",
+      features: ["عرض موثوق", "أولوية في البحث"],
       isActive: true,
     },
   ];
