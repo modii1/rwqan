@@ -94,15 +94,7 @@ export default function OwnerSubscriptionPage() {
   });
 
   if (!property || !currentSubscription) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Card className="p-8 text-center">
-          <div className="inline-block w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-lg font-semibold text-foreground">جاري تحميل البيانات...</p>
-          <p className="text-sm text-muted-foreground mt-2">يرجى الانتظار قليلاً</p>
-        </Card>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
   }
 
   const availablePackages = packages.filter(p => {
@@ -122,11 +114,7 @@ export default function OwnerSubscriptionPage() {
         </header>
 
         {/* الاشتراك الحالي */}
-        <Card className={`mb-8 p-6 border-2 transition-all ${
-          currentPackage?.type === 'مميز' && isSubscriptionActive
-            ? 'border-green-500 bg-gradient-to-r from-green-50 to-background dark:from-green-950/20'
-            : 'border-[#e0c97b] bg-gradient-to-r from-[#fffdf0] to-background'
-        }`}>
+        <Card className="mb-8 p-6 border-[#e0c97b] bg-gradient-to-r from-[#fffdf0] to-background">
           <div className="flex items-start justify-between mb-6">
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -135,16 +123,9 @@ export default function OwnerSubscriptionPage() {
               </div>
               <p className="text-lg font-semibold text-[#b88d2b]">{currentPackage?.name || 'بدون اشتراك'}</p>
             </div>
-            <div className="flex gap-2 items-center">
-              {currentPackage?.type === 'مميز' && isSubscriptionActive && (
-                <Badge className="bg-green-500 text-white animate-pulse">
-                  ✓ مفعلة
-                </Badge>
-              )}
-              <Badge className={isSubscriptionActive ? "bg-green-500" : "bg-red-500"}>
-                {isSubscriptionActive ? '✓ نشط' : '✗ منتهي'}
-              </Badge>
-            </div>
+            <Badge className={isSubscriptionActive ? "bg-green-500" : "bg-red-500"}>
+              {isSubscriptionActive ? '✓ نشط' : '✗ منتهي'}
+            </Badge>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -165,7 +146,7 @@ export default function OwnerSubscriptionPage() {
             <div>
               <p className="text-sm text-muted-foreground">انتهاء الاشتراك</p>
               <p className="text-lg font-bold text-[#434040]">
-                {new Date(currentSubscription.endDate).toLocaleDateString('en-US')}
+                {new Date(currentSubscription.endDate).toLocaleDateString('ar-SA')}
               </p>
             </div>
           </div>
