@@ -20,6 +20,7 @@ export default function SubscriptionPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -182,27 +183,93 @@ export default function SubscriptionPage() {
           </div>
         </div>
 
-        {!selectedPackageId ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <p className="text-lg">اختر باقة من الأعلى لبدء التسجيل</p>
-          </div>
-        ) : (
-          <>
-            {/* Progress Bar */}
-            <div className="flex items-center gap-4 mb-8">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-[#434040]">
-                ✓
+        {/* Progress Bar - 3 Steps */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            {/* Step 1 */}
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 1 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                {currentStep > 1 ? '✓' : '1'}
               </div>
-              <div className="flex-1 h-1 bg-[#434040]"></div>
-              <div className="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold bg-[#434040]">
-                2
-              </div>
+              <p className="text-xs mt-2 text-center font-semibold">اختيار الباقة</p>
             </div>
+            
+            {/* Line 1-2 */}
+            <div className={`flex-1 h-1 ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            
+            {/* Step 2 */}
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                {currentStep > 2 ? '✓' : '2'}
+              </div>
+              <p className="text-xs mt-2 text-center font-semibold">بيانات العقار</p>
+            </div>
+            
+            {/* Line 2-3 */}
+            <div className={`flex-1 h-1 ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            
+            {/* Step 3 */}
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}>
+                3
+              </div>
+              <p className="text-xs mt-2 text-center font-semibold">طريقة الدفع</p>
+            </div>
+          </div>
+        </div>
 
-            {/* Registration Form */}
-            <Card className="p-8">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <h2 className="text-xl font-bold text-[#434040]">تفاصيل العقار</h2>
+        {/* Step 1: Select Package */}
+        {currentStep === 1 && (
+          <Card className="p-8">
+            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {packages.map((pkg) => (
+                <div
+                  key={pkg.id}
+                  onClick={() => setSelectedPackageId(pkg.id)}
+                  className={`p-5 cursor-pointer transition-all rounded-lg border-2 ${
+                    selectedPackageId === pkg.id
+                      ? 'ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]'
+                      : 'border-border hover:border-[#434040]/50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h3 className="font-bold">{pkg.name}</h3>
+                      {pkg.price === 0 ? (
+                        <p className="text-2xl font-bold text-[#434040]">مجاني</p>
+                      ) : (
+                        <PriceDisplay amount={pkg.price} size="lg" />
+                      )}
+                    </div>
+                    {selectedPackageId === pkg.id && (
+                      <Badge className="bg-[#434040] text-white">مختار</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">{pkg.duration} يوم</p>
+                  {pkg.type === 'موثوق' && (
+                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9]">موثوق</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end pt-6 border-t">
+              <Button
+                onClick={() => setCurrentStep(2)}
+                disabled={!selectedPackageId}
+                className="flex-1 md:flex-none"
+              >
+                التالي: بيانات العقار
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Step 2: Property Details */}
+        {currentStep === 2 && selectedPackageId && (
+          <Card className="p-8">
+            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 2: بيانات العقار</h2>
+            <form onSubmit={(e) => { e.preventDefault(); setCurrentStep(3); }} className="space-y-6">
 
                 {/* Property Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -323,10 +390,33 @@ export default function SubscriptionPage() {
                   </div>
                 </div>
 
-                {/* Payment Section - Only for paid packages */}
-                {!isFreePackage && (
-                  <div className="border-t pt-6">
-                    <h3 className="text-lg font-bold mb-4">طريقة الدفع</h3>
+                {/* Submit */}
+                <div className="flex gap-3 pt-6 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCurrentStep(1)}
+                    className="gap-2"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    السابق
+                  </Button>
+                  <Button type="submit" className="flex-1">
+                    التالي: طريقة الدفع
+                  </Button>
+                </div>
+              </form>
+            </Card>
+        )}
+
+        {/* Step 3: Payment Method */}
+        {currentStep === 3 && selectedPackageId && (
+          <Card className="p-8">
+            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 3: طريقة الدفع</h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {!isFreePackage && (
+                <div>
+                  <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
                     <div className="space-y-3">
                       <div
                         onClick={() => setPaymentMethod('online')}
@@ -366,23 +456,37 @@ export default function SubscriptionPage() {
                           </Button>
                         </div>
                       )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Submit */}
-                <div className="flex gap-3 pt-6 border-t">
-                  <Button type="button" variant="outline" onClick={() => setSelectedPackageId(null)} className="gap-2">
-                    <ChevronRight className="w-4 h-4" />
-                    اختر باقة أخرى
-                  </Button>
-                  <Button type="submit" disabled={isSubmitting || (!isFreePackage && !paymentMethod)} className="flex-1">
-                    {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'تسجيل مجاني' : 'متابعة الدفع'}
-                  </Button>
                 </div>
-              </form>
-            </Card>
-          </>
+              )}
+
+              {/* Free Package Message */}
+              {isFreePackage && (
+                <div className="p-4 bg-muted/30 rounded-lg">
+                  <p className="text-sm font-semibold">هذه باقة مجانية - سيتم تفعيل العقار مباشرة</p>
+                </div>
+              )}
+
+              {/* Submit */}
+              <div className="flex gap-3 pt-6 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCurrentStep(2)}
+                  className="gap-2"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  السابق
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
+                  className="flex-1"
+                >
+                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
+                </Button>
+              </div>
+            </form>
+          </Card>
         )}
       </div>
     </div>
