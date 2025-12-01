@@ -541,7 +541,7 @@ class GoogleSheetsService {
     return {
       id: `SUB-${propertyNumber}`,
       propertyNumber,
-      packageId: row[4] === "مميز" ? "pkg-premium" : "pkg-free", // نوع الاشتراك
+      packageId: row[4] === "مميز" ? "pkg-trusted" : "pkg-free", // نوع الاشتراك
       startDate,
       endDate,
       status: status as any,
@@ -570,7 +570,7 @@ class GoogleSheetsService {
     const propertyRow = rows[rowIndex];
     
     // تحديث الأعمدة: نوع اشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6)
-    const subscriptionType = subscription.packageId === "pkg-premium" ? "مميز" : "عادي";
+    const subscriptionType = subscription.packageId === "pkg-trusted" ? "مميز" : "عادي";
     propertyRow[4] = subscriptionType;
     propertyRow[5] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
     propertyRow[6] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
@@ -598,7 +598,7 @@ class GoogleSheetsService {
     const propertyRow = rows[rowIndex];
     
     if (updates.packageId) {
-      propertyRow[4] = updates.packageId === "pkg-premium" ? "مميز" : "عادي";
+      propertyRow[4] = updates.packageId === "pkg-trusted" ? "مميز" : "عادي";
     }
     if (updates.startDate) {
       propertyRow[5] = updates.startDate.split('T')[0];
@@ -626,7 +626,7 @@ class GoogleSheetsService {
       isActive: true,
     },
     {
-      id: "pkg-premium",
+      id: "pkg-trusted",
       name: "باقة مميزة",
       duration: 30,
       price: 35,
