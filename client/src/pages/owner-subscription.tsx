@@ -18,17 +18,17 @@ export default function OwnerSubscriptionPage() {
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
 
   // جلب بيانات المالك
-  const { data: property } = useQuery<Property>({
+  const { data: property, isLoading: propertyLoading } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
   });
 
   // جلب الاشتراك الحالي
-  const { data: currentSubscription } = useQuery<Subscription>({
+  const { data: currentSubscription, isLoading: subscriptionLoading } = useQuery<Subscription>({
     queryKey: ["/api/owner/current-subscription"],
   });
 
   // جلب جميع الباقات
-  const { data: packages = [] } = useQuery<Package[]>({
+  const { data: packages = [], isLoading: packagesLoading } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
@@ -93,8 +93,12 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
+  if (propertyLoading || subscriptionLoading || packagesLoading) {
+    return <div className="min-h-screen flex items-center justify-center text-lg text-muted-foreground">جاري التحميل...</div>;
+  }
+
   if (!property || !currentSubscription) {
-    return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
+    return <div className="min-h-screen flex items-center justify-center text-red-500">حدث خطأ في تحميل البيانات</div>;
   }
 
   const availablePackages = packages.filter(p => {
