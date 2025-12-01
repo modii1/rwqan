@@ -121,26 +121,9 @@ export default function OwnerDashboard() {
 
   const isVip = property.subscriptionType === "مميز";
 
-  // Calculate subscription progress from actual subscription data
-  const calculateRemainingDays = () => {
-    if (!property.subscriptionType || property.subscriptionType === "عادي") {
-      return null;
-    }
-    
-    // From subscriptionDate field
-    if (property.subscriptionDate) {
-      const endDate = new Date(property.subscriptionDate);
-      const now = new Date();
-      const diffTime = endDate.getTime() - now.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return Math.max(0, diffDays);
-    }
-    
-    return null;
-  };
-
-  const remainingDays = calculateRemainingDays();
-  const totalDays = 30; // مدة الاشتراك الأساسية
+  // Calculate subscription progress
+  const totalDays = 90;
+  const remainingDays = isVip ? 25 : null;
   const usedDays =
     remainingDays !== null ? Math.max(totalDays - remainingDays, 0) : null;
   const progressPercent =
@@ -149,7 +132,7 @@ export default function OwnerDashboard() {
       : null;
 
   const isNearExpiry =
-    remainingDays !== null && remainingDays <= 7 && remainingDays > 0;
+    remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
   const subscriptionButtonLabel = isVip ? "إدارة الاشتراك" : "ترقية الاشتراك";
@@ -258,7 +241,7 @@ export default function OwnerDashboard() {
                 {isVip && (
                   <Badge className="bg-amber-500 text-white flex items-center gap-1 px-2 md:px-3 py-0.5 md:py-1 text-xs md:text-sm flex-shrink-0">
                     <Crown className="w-3 h-3" />
-                    <span className="hidden md:inline">مميز</span>
+                    <span className="hidden md:inline">موثوق</span>
                   </Badge>
                 )}
               </div>
@@ -285,7 +268,7 @@ export default function OwnerDashboard() {
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">
-                    منذ {new Date(property.subscriptionDate).toLocaleDateString("en-US")}
+                    منذ {new Date(property.subscriptionDate).toLocaleDateString("ar-SA")}
                   </span>
                 )}
               </div>
