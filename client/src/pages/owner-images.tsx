@@ -69,9 +69,18 @@ export default function OwnerImagesPage() {
       return data;
     },
     onSuccess: (data) => {
+      // إضافة الصور المرفوعة مباشرة إلى البيانات المعروضة
+      if (data.urls && r2Images) {
+        queryClient.setQueryData(["/api/owner/r2-images"], {
+          images: [...r2Images, ...data.urls]
+        });
+      }
+      
+      // ثم نعيد الجلب من الخادم بعد ثانيتين للتأكد
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
-      }, 1000);
+      }, 2000);
+      
       setSelectedFiles([]);
       setPreviewUrls([]);
       toast({ 
