@@ -90,7 +90,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Owner Analytics
+  // Owner Analytics - بيانات حقيقية من Google Sheets
   app.get("/api/owner/analytics", async (req, res) => {
     try {
       const propertyNumber = (req.session as any)?.propertyNumber;
@@ -98,17 +98,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      // Return safe default analytics
+      // جلب جميع الطلبات للعقار من الشهر الحالي
+      const allRequests = await googleSheetsService.getAllRequests();
+      const propertyRequests = allRequests.filter(r => r.propertyNumber === propertyNumber);
+      
+      const now = new Date();
+      const currentMonth = propertyRequests.filter(r => {
+        try {
+          const reqDate = new Date(r.timestamp);
+          return reqDate.getMonth() === now.getMonth() && reqDate.getFullYear() === now.getFullYear();
+        } catch {
+          return false;
+        }
+      });
+      
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1);
+      const previousMonth = propertyRequests.filter(r => {
+        try {
+          const reqDate = new Date(r.timestamp);
+          return reqDate.getMonth() === lastMonth.getMonth() && reqDate.getFullYear() === lastMonth.getFullYear();
+        } catch {
+          return false;
+        }
+      });
+
+      const monthlyRequests = currentMonth.length;
+      const previousMonthRequests = previousMonth.length;
+      const growth = previousMonthRequests > 0 
+        ? Math.round(((monthlyRequests - previousMonthRequests) / previousMonthRequests) * 100)
+        : monthlyRequests > 0 ? 100 : 0;
+
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const avgDaily = Math.round(monthlyRequests / daysInMonth);
+
+      const requestsByDay: Record<string, number> = {};
+      const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      currentMonth.forEach(r => {
+        try {
+          const day = days[new Date(r.timestamp).getDay()];
+          requestsByDay[day] = (requestsByDay[day] || 0) + 1;
+        } catch {}
+      });
+
+      const highestDay = Object.entries(requestsByDay).sort((a, b) => b[1] - a[1])[0]?.[0] || 'الجمعة';
+
       res.json({
         propertyNumber,
-        monthlyWhatsappRequests: 0,
-        previousMonthGrowth: 0,
-        averageDailyRequests: 0,
-        highestDemandDay: 'الجمعة',
-        engagementRate: 'متوسط',
+        monthlyWhatsappRequests: monthlyRequests,
+        previousMonthGrowth: growth,
+        averageDailyRequests: avgDaily,
+        highestDemandDay: highestDay,
+        engagementRate: monthlyRequests > 50 ? 'عالي' : monthlyRequests > 20 ? 'متوسط' : 'منخفض',
         peakRequestPeriod: 'المساء',
-        visibilityStatus: 'عادي',
-        previousMonthRequests: 0,
+        visibilityStatus: monthlyRequests > 30 ? 'ممتاز' : monthlyRequests > 15 ? 'جيد' : 'عادي',
+        previousMonthRequests,
       });
     } catch (err) {
       console.error("Analytics error:", err);
