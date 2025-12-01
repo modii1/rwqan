@@ -18,17 +18,17 @@ export default function OwnerSubscriptionPage() {
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
 
   // جلب بيانات المالك
-  const { data: property, isLoading: propertyLoading } = useQuery<Property>({
+  const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
   });
 
   // جلب الاشتراك الحالي
-  const { data: currentSubscription, isLoading: subscriptionLoading } = useQuery<Subscription>({
+  const { data: currentSubscription } = useQuery<Subscription>({
     queryKey: ["/api/owner/current-subscription"],
   });
 
   // جلب جميع الباقات
-  const { data: packages = [], isLoading: packagesLoading } = useQuery<Package[]>({
+  const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
@@ -93,12 +93,8 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
-  if (propertyLoading || subscriptionLoading || packagesLoading) {
-    return <div className="min-h-screen flex items-center justify-center text-lg text-muted-foreground">جاري التحميل...</div>;
-  }
-
   if (!property || !currentSubscription) {
-    return <div className="min-h-screen flex items-center justify-center text-red-500">حدث خطأ في تحميل البيانات</div>;
+    return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
   }
 
   const availablePackages = packages.filter(p => {
@@ -328,7 +324,7 @@ export default function OwnerSubscriptionPage() {
                     ))}
                   </ul>
                 </div>
-                <Badge className={pkg.type === 'مميز' ? 'bg-[#b88d2b]' : 'bg-gray-400'}>
+                <Badge className={pkg.type === 'موثوق' ? 'bg-[#b88d2b]' : 'bg-gray-400'}>
                   {pkg.type}
                 </Badge>
               </Card>
