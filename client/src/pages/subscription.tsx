@@ -12,6 +12,7 @@ import { useLocation } from "wouter";
 import { ChevronRight, Upload } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -67,7 +68,7 @@ export default function SubscriptionPage() {
       setValidatedDiscount(data);
       toast({
         title: "كود الخصم صالح",
-        description: `سيتم خصم ${data.type === 'نسبة' ? data.value + '%' : data.value + ' ريال'}`,
+        description: `سيتم خصم ${formatDiscount(data.value, data.type)}`,
       });
     } catch (error: any) {
       toast({
@@ -374,7 +375,7 @@ export default function SubscriptionPage() {
 
                 {/* Prices */}
                 <div className="border-t pt-6">
-                  <h3 className="text-lg font-bold mb-4">الأسعار (﷼) *</h3>
+                  <h3 className="text-lg font-bold mb-4">الأسعار {getCurrencyLabel()} *</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
@@ -446,7 +447,7 @@ export default function SubscriptionPage() {
                         <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
                       </div>
                       {validatedDiscount && (
-                        <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {validatedDiscount.type === 'نسبة' ? validatedDiscount.value + '%' : validatedDiscount.value + ' ﷼'}</p>
+                        <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
                       )}
                     </div>
 

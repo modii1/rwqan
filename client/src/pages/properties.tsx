@@ -11,6 +11,7 @@ import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } fr
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
 import { PriceDisplay } from "@/components/price-display";
+import { getCurrencyLabel } from "@/lib/currency";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
