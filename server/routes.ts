@@ -356,6 +356,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================
+  // SMART REQUESTS SYSTEM
+  // ======================
+  // في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة)
+  const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
+
+  app.post("/api/requests/smart", async (req, res) => {
+    try {
+      const { propertyNumber } = req.body;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "رقم العقار مطلوب" });
+      }
+
+      // احصل على IP العميل (يدعم proxies و localhost)
+      const ipAddress =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+        req.socket.remoteAddress ||
+        "unknown";
+
+      const now = Date.now();
+      const thirtyMinutes = 30 * 60 * 1000;
+      const lastRequest = requestTracker.get(ipAddress);
+
+      // تحقق من التكرار في آخر 30 دقيقة
+      if (lastRequest && now - lastRequest.timestamp < thirtyMinutes && lastRequest.propertyNumber === propertyNumber) {
+        return res.status(429).json({
+          error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
+          remainingSeconds: Math.ceil((thirtyMinutes - (now - lastRequest.timestamp)) / 1000),
+        });
+      }
+
+      // احسب معلومات الوقت
+      const now_date = new Date();
+      const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+      const dayOfWeek = daysAr[now_date.getDay()];
+      const hourOfDay = now_date.getHours();
+
+      // أنشئ كود طلب فريد
+      const requestCode = `REQ${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+
+      // احفظ الطلب
+      const request = await storage.createRequest({
+        propertyNumber,
+        requestCode,
+        timestamp: now_date.toISOString(),
+        ipAddress,
+        dayOfWeek,
+        hourOfDay,
+      });
+
+      // حدّث المتتبع
+      requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
+
+      // نظّف الطلبات القديمة (أكثر من ساعة)
+      for (const [ip, data] of requestTracker.entries()) {
+        if (now - data.timestamp > 60 * 60 * 1000) {
+          requestTracker.delete(ip);
+        }
+      }
+
+      res.json({
+        ok: true,
+        message: "تم تسجيل طلبك بنجاح ✅",
+        requestCode,
+        requestTime: `${dayOfWeek} - الساعة ${String(hourOfDay).padStart(2, "0")}:00`,
+      });
+    } catch (err: any) {
+      console.error("Smart request error:", err);
+      res.status(500).json({ error: "خطأ في معالجة الطلب" });
+    }
+  });
+
+  // ======================
   // OWNER AUTH
   // ======================
 

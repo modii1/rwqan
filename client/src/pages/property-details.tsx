@@ -257,13 +257,40 @@ export default function PropertyDetailsPage() {
   const displayName = isVerified(property) ? property.name : "";
 
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
-  const handleWhatsApp = () => {
-    const DEFAULT_WHATSAPP = "966533220646";
-    const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
-    const nameText = isVerified(property) ? ` - ${property.name}` : "";
-    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
-    const url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+  const handleWhatsApp = async () => {
+    try {
+      // تسجيل الطلب في النظام الذكي
+      const response = await fetch("/api/requests/smart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyNumber: property.propertyNumber }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        // إذا حدث خطأ (مثل التكرار)
+        if (result.remainingSeconds) {
+          // إظهار تنبيه للمستخدم
+          const secondsLeft = result.remainingSeconds;
+          alert(`انتظر ${secondsLeft} ثانية قبل إرسال طلب آخر لنفس العقار`);
+        }
+        return;
+      }
+
+      // إذا نجح: افتح واتساب
+      const DEFAULT_WHATSAPP = "966533220646";
+      const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
+      const nameText = isVerified(property) ? ` - ${property.name}` : "";
+      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
+      const url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+      window.open(url, "_blank");
+
+      // إظهار رسالة النجاح
+      alert(`✅ تم تسجيل طلبك في ${result.requestTime}`);
+    } catch (error) {
+      console.error("Error creating WhatsApp request:", error);
+    }
   };
 
   return (
