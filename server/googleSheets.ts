@@ -1045,12 +1045,14 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         const month = row[7] || "12";
         const year = row[8] || "2025";
         const time = row[9] || "00:00";
+        const deviceType = (row[10] || "desktop") as 'mobile' | 'desktop' | 'tablet';
         return {
           id: `REQ-${idx}`,
           propertyNumber: row[0] || "",
           requestCode: row[2] || "",
           timestamp: `${year}-${month}-${day}T${time}:00Z`,
           ipAddress: row[3] || "",
+          deviceType,
           dayOfWeek: row[4] || "",
           hourOfDay: parseInt(row[5] || "0", 10),
           createdAt: new Date().toISOString(),
@@ -1095,7 +1097,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const time = `${hours}:${minutes}`;
 
       // صف الشيت بالترتيب الصحيح
-      // A: propertyNumber, B: propertyName, C: requestCode, D: ipAddress, E: dayOfWeek, F: hourOfDay, G: day, H: month, I: year, J: time
+      // A: propertyNumber, B: propertyName, C: requestCode, D: ipAddress, E: dayOfWeek, F: hourOfDay, G: day, H: month, I: year, J: time, K: deviceType
       const row = [
         request.propertyNumber,
         propertyName,
@@ -1107,6 +1109,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         String(month),
         String(year),
         time,
+        request.deviceType || 'desktop',
       ];
 
       await this.appendToSheet(SHEETS.REQUESTS, [row]);
@@ -1134,12 +1137,11 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       // 1. إجمالي الزوار
       const visitors = allRequests.length;
 
-      // 2. توزيع الأجهزة بناءً على IP
+      // 2. توزيع الأجهزة من البيانات الحقيقية
       const devices = { mobile: 0, desktop: 0, tablet: 0 };
       allRequests.forEach(r => {
-        const ipNum = r.ipAddress.split('.').reduce((a, b) => a + parseInt(b, 10), 0);
-        if (ipNum % 3 === 0) devices.mobile++;
-        else if (ipNum % 3 === 1) devices.tablet++;
+        if (r.deviceType === 'mobile') devices.mobile++;
+        else if (r.deviceType === 'tablet') devices.tablet++;
         else devices.desktop++;
       });
 
@@ -1171,7 +1173,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       ];
 
       await this.appendToSheet(SHEETS.ANALYTICS, [analyticsRow]);
-      console.log(`📊 Analytics updated: ${visitors} visitors`);
+      console.log(`📊 Analytics updated: ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
     } catch (err) {
       console.error("updateAnalytics error:", err);
     }

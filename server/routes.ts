@@ -476,6 +476,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // دالة تحديد نوع الجهاز من User-Agent
+  function detectDeviceType(userAgent: string): 'mobile' | 'desktop' | 'tablet' {
+    if (!userAgent) return 'desktop';
+    const ua = userAgent.toLowerCase();
+    
+    if (/ipad|android(?!.*mobile)|kindle|playbook|silk/.test(ua)) return 'tablet';
+    if (/mobile|android|iphone|ipod|blackberry|iemobile|opera mini|windows phone/.test(ua)) return 'mobile';
+    return 'desktop';
+  }
+
   // تتبع زيارات الصفحات (Page Views)
   app.post("/api/track-pageview", async (req, res) => {
     try {
@@ -497,11 +507,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                        req.socket.remoteAddress || 
                        'unknown';
 
+      // احصل على User-Agent وحدد نوع الجهاز
+      const userAgent = req.headers['user-agent'] || '';
+      const deviceType = detectDeviceType(userAgent);
+
       await storage.createRequest({
         propertyNumber,
         requestCode: viewCode,
         timestamp: now_date.toISOString(),
         ipAddress,
+        deviceType,
         dayOfWeek,
         hourOfDay,
       });
