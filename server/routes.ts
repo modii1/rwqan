@@ -501,8 +501,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/owner/property", requireOwner, async (req: any, res) => {
-    const p = await storage.getPropertyByNumber(req.propertyNumber);
-    res.json(p);
+    try {
+      const p = await storage.getPropertyByNumber(req.propertyNumber);
+      if (!p) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+      res.json(p);
+    } catch (err: any) {
+      console.error("Error fetching property:", err);
+      res.status(500).json({ error: err?.message || "خطأ في جلب بيانات العقار" });
+    }
   });
 
   // ======================
