@@ -542,8 +542,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // تحضير معلومات الدفع للترقية/التمديد (بدون دفع فوري)
-  app.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
+  // ترقية أو تمديد الاشتراك
+  app.post("/api/owner/subscription/update", requireOwner, async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber;
       const { action, packageId } = req.body;
@@ -551,35 +551,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!['extend', 'upgrade'].includes(action)) {
         return res.status(400).json({ error: "إجراء غير صالح" });
       }
-
-      const newPackage = await storage.getPackageById(packageId);
-      if (!newPackage) {
-        return res.status(404).json({ error: "الباقة غير موجودة" });
-      }
-
-      // إرجاع معلومات الدفع المطلوبة
-      res.json({
-        ok: true,
-        paymentRequired: true,
-        action,
-        packageId,
-        packageName: newPackage.name,
-        price: newPackage.price,
-        duration: newPackage.duration,
-        paymentMethods: ["بطاقة", "Apple Pay", "تحويل بنكي"],
-        message: `يجب إتمام الدفع للقيام بـ ${action === 'extend' ? 'التمديد' : 'الترقية'}`
-      });
-    } catch (err: any) {
-      console.error("Subscription prepare payment error:", err);
-      res.status(500).json({ error: err?.message || "فشل في التحضير" });
-    }
-  });
-
-  // تأكيد الاشتراك بعد الدفع الناجح
-  app.post("/api/owner/subscription/confirm", requireOwner, async (req, res) => {
-    try {
-      const propertyNumber = (req.session as any).propertyNumber;
-      const { action, packageId, paymentId } = req.body;
 
       const newPackage = await storage.getPackageById(packageId);
       if (!newPackage) {
@@ -596,9 +567,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let newEndDate = new Date();
 
       if (action === 'extend' && currentSubscription) {
+        // التمديد: يبدأ من انتهاء الاشتراك الحالي
         newStartDate = new Date(currentSubscription.endDate);
         newEndDate = new Date(newStartDate.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
       } else {
+        // الترقية أو التحديث الأولي: يبدأ من اليوم
         newEndDate = new Date(today.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
       }
 
@@ -608,7 +581,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startDate: newStartDate.toISOString(),
         endDate: newEndDate.toISOString(),
         status: 'نشط',
-        paymentId: paymentId,
       });
 
       await storage.updateProperty(propertyNumber, {
@@ -622,8 +594,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endDate: newEndDate,
       });
     } catch (err: any) {
-      console.error("Subscription confirm error:", err);
-      res.status(500).json({ error: err?.message || "فشل في التأكيد" });
+      console.error("Subscription update error:", err);
+      res.status(500).json({ error: err?.message || "فشل في التحديث" });
     }
   });
 
@@ -1456,83 +1428,8 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   }
 });
 
-  // ================================
-  // 🎯 PUBLIC: التحقق من العقار والاشتراك السريع
-  // ================================
-
-  // التحقق من رقم العقار والرقم السري
-  app.post("/api/public/verify-property", async (req, res) => {
-    try {
-      const { propertyNumber, pin } = req.body;
-      
-      if (!propertyNumber || !pin) {
-        return res.status(400).json({ error: "رقم العقار والرقم السري مطلوبان" });
-      }
-
-      const property = await storage.getPropertyByNumber(propertyNumber);
-      if (!property) {
-        return res.status(404).json({ error: "العقار غير موجود" });
-      }
-
-      if (property.pin !== pin) {
-        return res.status(401).json({ error: "الرقم السري غير صحيح" });
-      }
-
-      res.json({
-        propertyNumber: property.propertyNumber,
-        name: property.name,
-        city: property.city,
-        type: property.type,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "خطأ في التحقق" });
-    }
-  });
-
-  // الاشتراك السريع (بدون دخول)
-  app.post("/api/public/subscribe", async (req, res) => {
-    try {
-      const { propertyNumber, packageId } = req.body;
-      
-      if (!propertyNumber || !packageId) {
-        return res.status(400).json({ error: "البيانات المطلوبة ناقصة" });
-      }
-
-      const property = await storage.getPropertyByNumber(propertyNumber);
-      if (!property) {
-        return res.status(404).json({ error: "العقار غير موجود" });
-      }
-
-      const newPackage = await storage.getPackageById(packageId);
-      if (!newPackage) {
-        return res.status(404).json({ error: "الباقة غير موجودة" });
-      }
-
-      const today = new Date();
-      const endDate = new Date(today.getTime() + newPackage.duration * 24 * 60 * 60 * 1000);
-
-      const newSubscription = await storage.createSubscription({
-        propertyNumber,
-        packageId,
-        startDate: today.toISOString(),
-        endDate: endDate.toISOString(),
-        status: 'نشط',
-      });
-
-      await storage.updateProperty(propertyNumber, {
-        subscriptionType: newPackage.type,
-      });
-
-      res.json({
-        ok: true,
-        message: "تم الاشتراك بنجاح",
-        subscription: newSubscription,
-      });
-    } catch (err: any) {
-      console.error("Public subscribe error:", err);
-      res.status(500).json({ error: err?.message || "فشل الاشتراك" });
-    }
-  });
-
+  // ======================
+  // DONE
+  // ======================
   return createServer(app);
 }

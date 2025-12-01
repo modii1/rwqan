@@ -14,21 +14,19 @@ export default function OwnerSubscriptionPage() {
   const { toast } = useToast();
   const [selectedAction, setSelectedAction] = useState<'extend' | 'upgrade' | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
-  const [paymentInfo, setPaymentInfo] = useState<any>(null);
 
   // جلب بيانات المالك
-  const { data: property, isLoading: propertyLoading, error: propertyError } = useQuery<Property>({
+  const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
   });
 
   // جلب الاشتراك الحالي
-  const { data: currentSubscription, isLoading: subscriptionLoading, error: subscriptionError } = useQuery<Subscription>({
+  const { data: currentSubscription } = useQuery<Subscription>({
     queryKey: ["/api/owner/current-subscription"],
   });
 
   // جلب جميع الباقات
-  const { data: packages = [], isLoading: packagesLoading } = useQuery<Package[]>({
+  const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
@@ -41,50 +39,23 @@ export default function OwnerSubscriptionPage() {
     : 0;
 
   const isSubscriptionActive = daysRemaining > 0;
-  const isLoading = propertyLoading || subscriptionLoading || packagesLoading;
-  const error = propertyError || subscriptionError;
 
-  // تحضير معلومات الدفع
-  const prepareMutation = useMutation({
+  // عملية الترقية/التمديد
+  const upgradeMutation = useMutation({
     mutationFn: async ({ action, packageId }: { action: 'extend' | 'upgrade'; packageId: string }) => {
-      const response = await apiRequest('POST', '/api/owner/subscription/prepare-payment', {
+      const response = await apiRequest('POST', '/api/owner/subscription/update', {
         action,
         packageId,
       });
       return response.json();
     },
     onSuccess: (data) => {
-      setPaymentInfo(data);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "❌ خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  // تأكيد الدفع والاشتراك
-  const confirmMutation = useMutation({
-    mutationFn: async ({ paymentId }: { paymentId: string }) => {
-      const response = await apiRequest('POST', '/api/owner/subscription/confirm', {
-        action: paymentInfo?.action,
-        packageId: paymentInfo?.packageId,
-        paymentId,
-      });
-      return response.json();
-    },
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
       toast({
         title: "✅ تم بنجاح",
-        description: `تم ${paymentInfo?.action === 'extend' ? 'التمديد' : 'الترقية'} بنجاح وتم استقطاع المبلغ`,
+        description: `تم ${selectedAction === 'extend' ? 'تمديد' : 'ترقية'} اشتراكك`,
       });
-      setSelectedAction(null);
-      setPaymentInfo(null);
-      setSelectedPackageId(null);
-      setSelectedPaymentMethod(null);
+      setTimeout(() => setSelectedAction(null), 1000);
     },
     onError: (error: any) => {
       toast({
@@ -95,22 +66,7 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="p-8 max-w-md text-center border-red-300">
-          <h2 className="text-xl font-bold text-red-600 mb-2">خطأ</h2>
-          <p className="text-muted-foreground mb-4">{error?.message || 'حدث خطأ في تحميل البيانات'}</p>
-          <p className="text-sm text-muted-foreground mb-4">قد تحتاج إلى تسجيل الدخول أولاً</p>
-          <Button onClick={() => setLocation('/owner/login')} className="w-full">
-            الذهاب لتسجيل الدخول
-          </Button>
-        </Card>
-      </div>
-    );
-  }
-
-  if (isLoading || !property || !currentSubscription) {
+  if (!property || !currentSubscription) {
     return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
   }
 
@@ -222,94 +178,20 @@ export default function OwnerSubscriptionPage() {
             <div className="flex gap-3">
               <Button
                 onClick={() => {
-                  if (selectedPackageId && selectedAction) {
-                    prepareMutation.mutate({ 
+                  if (selectedPackageId) {
+                    upgradeMutation.mutate({ 
                       action: selectedAction, 
                       packageId: selectedPackageId 
                     });
                   }
                 }}
-                disabled={!selectedPackageId || prepareMutation.isPending}
+                disabled={!selectedPackageId || upgradeMutation.isPending}
                 className="flex-1"
               >
-                {prepareMutation.isPending ? 'جاري التحضير...' : 'متابعة للدفع'}
+                {upgradeMutation.isPending ? 'جاري المعالجة...' : 'تأكيد'}
               </Button>
               <Button
                 onClick={() => setSelectedAction(null)}
-                variant="outline"
-                className="flex-1"
-              >
-                إلغاء
-              </Button>
-            </div>
-          </Card>
-        )}
-
-        {/* نموذج الدفع */}
-        {paymentInfo && (
-          <Card className="mb-8 p-6 border-[#b88d2b] bg-[#fffdf0]">
-            <h2 className="text-2xl font-bold text-[#434040] mb-6">معلومات الدفع</h2>
-            
-            <div className="bg-white p-4 rounded-lg mb-6 border border-[#e0c97b]">
-              <div className="flex justify-between mb-3">
-                <span className="text-muted-foreground">الباقة:</span>
-                <span className="font-bold text-[#434040]">{paymentInfo.packageName}</span>
-              </div>
-              <div className="flex justify-between mb-3">
-                <span className="text-muted-foreground">المدة:</span>
-                <span className="font-bold text-[#434040]">{paymentInfo.duration} يوم</span>
-              </div>
-              <div className="flex justify-between border-t pt-3">
-                <span className="text-lg font-bold text-[#434040]">الإجمالي:</span>
-                <span className="text-2xl font-bold text-[#b88d2b]">{paymentInfo.price} ر.س</span>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <h3 className="text-lg font-bold mb-3 text-[#434040]">اختر طريقة الدفع:</h3>
-              <div className="space-y-2">
-                {paymentInfo.paymentMethods?.map((method: string) => (
-                  <label key={method} className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50" data-testid={`payment-method-${method}`}>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value={method}
-                      checked={selectedPaymentMethod === method}
-                      onChange={(e) => setSelectedPaymentMethod(e.target.value)}
-                    />
-                    <span className="font-medium">{method}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                onClick={() => {
-                  if (selectedPaymentMethod) {
-                    // هنا يتم توجيه المستخدم للدفع الفعلي
-                    // بعد الدفع الناجح، يتم استدعاء confirmMutation
-                    toast({
-                      title: "💳 الدفع",
-                      description: `سيتم توجيهك لـ ${selectedPaymentMethod} للدفع...`,
-                    });
-                    // يمكن إضافة معالجة الدفع الفعلية هنا
-                    setTimeout(() => {
-                      confirmMutation.mutate({ paymentId: `PAY-${Date.now()}` });
-                    }, 1000);
-                  }
-                }}
-                disabled={!selectedPaymentMethod || confirmMutation.isPending}
-                className="flex-1"
-                data-testid="button-confirm-payment"
-              >
-                {confirmMutation.isPending ? 'جاري الدفع...' : 'تأكيد الدفع'}
-              </Button>
-              <Button
-                onClick={() => {
-                  setPaymentInfo(null);
-                  setSelectedPaymentMethod(null);
-                }}
                 variant="outline"
                 className="flex-1"
               >
