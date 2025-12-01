@@ -492,12 +492,19 @@ export default function SubscriptionPage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-1">مدة الاشتراك</p>
-                  <p className="font-semibold">{packageToView.durationDays} يوم</p>
+                  <p className="font-semibold">{packageToView.duration} يوم</p>
                 </div>
-                {packageToView.description && (
+                {packageToView.features && packageToView.features.length > 0 && (
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">الوصف</p>
-                    <p className="font-semibold">{packageToView.description}</p>
+                    <p className="text-sm text-muted-foreground mb-2">الميزات:</p>
+                    <ul className="space-y-1">
+                      {packageToView.features.map((feature, idx) => (
+                        <li key={idx} className="text-sm flex items-start gap-2">
+                          <span className="text-[#434040] font-bold mt-0.5">✓</span>
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
                 {packageToView.type === 'موثوق' && (
