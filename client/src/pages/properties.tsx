@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
+import { PriceDisplay } from "@/components/price-display";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -627,10 +628,7 @@ export default function PropertiesPage() {
                     {/* Price and CTA - Always at bottom */}
                     <div className="mt-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4">
                       {/* Price */}
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{mainPrice}</span>
-                        <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">﷼</span>
-                      </div>
+                      <PriceDisplay amount={mainPrice} size="xl" />
 
                       {/* CTA Button - Fixed at bottom */}
                       <Button

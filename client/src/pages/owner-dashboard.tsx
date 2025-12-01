@@ -19,6 +19,7 @@ import {
   Eye,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PriceDisplay } from "@/components/price-display";
 
 export default function OwnerDashboard() {
   const [, setLocation] = useLocation();
@@ -248,10 +249,10 @@ export default function OwnerDashboard() {
               <Info title="الموقع" value={property.location} />
               <Info title="الاتجاه" value={property.direction} />
               <Info title="النوع" value={property.type} />
-              <Info title="سعر وسط الأسبوع" value={property.prices?.weekday ? `${property.prices.weekday} ﷼` : "غير محدد"} />
-              <Info title="سعر نهاية الأسبوع" value={property.prices?.weekend ? `${property.prices.weekend} ﷼` : "غير محدد"} />
-              <Info title="سعر المبيت" value={property.prices?.overnight ? `${property.prices.overnight} ﷼` : "غير محدد"} />
-              <Info title="سعر الإجازات" value={property.prices?.holidays ? `${property.prices.holidays} ﷼` : "غير محدد"} />
+              <Info title="سعر وسط الأسبوع" value={property.prices?.weekday ? <PriceDisplay amount={property.prices.weekday} size="sm" /> : "غير محدد"} />
+              <Info title="سعر نهاية الأسبوع" value={property.prices?.weekend ? <PriceDisplay amount={property.prices.weekend} size="sm" /> : "غير محدد"} />
+              <Info title="سعر المبيت" value={property.prices?.overnight ? <PriceDisplay amount={property.prices.overnight} size="sm" /> : "غير محدد"} />
+              <Info title="سعر الإجازات" value={property.prices?.holidays ? <PriceDisplay amount={property.prices.holidays} size="sm" /> : "غير محدد"} />
             </div>
           </Card>
 
