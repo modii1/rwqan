@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Property, Package, Subscription } from "@shared/schema";
-import { CalendarDays, Crown, TrendingUp, Check } from "lucide-react";
+import { CalendarDays, Crown, TrendingUp, Check, ExternalLink } from "lucide-react";
 
 export default function OwnerSubscriptionPage() {
   const [, setLocation] = useLocation();
@@ -116,9 +116,20 @@ export default function OwnerSubscriptionPage() {
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold text-[#434040] mb-2">إدارة الاشتراك</h1>
-          <p className="text-muted-foreground">عقار: {property.name} ({property.propertyNumber})</p>
+        <header className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-[#434040] mb-2">إدارة الاشتراك</h1>
+            <p className="text-muted-foreground">عقار: {property.name} ({property.propertyNumber})</p>
+          </div>
+          <Button
+            onClick={() => setLocation("/subscription")}
+            variant="outline"
+            className="flex items-center gap-2"
+            data-testid="button-view-all-packages"
+          >
+            <span>اشترك معنا</span>
+            <ExternalLink className="w-4 h-4" />
+          </Button>
         </header>
 
         {/* الاشتراك الحالي */}
