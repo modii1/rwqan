@@ -19,7 +19,6 @@ import OwnerUpdateProperty from "@/pages/owner-update-property";
 import SubscriptionPage from "@/pages/subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
-import RegisterWithPackage from "@/pages/register-with-package";
 import TestImages from "@/pages/test-images";
 import AdminDashboard from "@/pages/admin";
 import AdminImagesPage from "@/pages/admin/admin-images";
@@ -41,7 +40,6 @@ function Router() {
       {/* صفحات عامة */}
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
-      <Route path="/register-with-package" component={RegisterWithPackage} />
       <Route path="/test-images" component={TestImages} />
 
       {/* صفحات الأدمن */}
