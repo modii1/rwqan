@@ -826,12 +826,10 @@ app.post("/api/discount/validate", async (req, res) => {
 // 2. بدء عملية الدفع الإلكتروني
 app.post("/api/owner/payment/initiate", async (req, res) => {
   try {
-    const { packageId, discountCode, paymentMethod = "cards" } = req.body;
+    const { propertyNumber, packageId, discountCode, paymentMethod = "cards" } = req.body;
 
-    // جلب بيانات العقار من السيشن
-    const propertyNumber = (req.session as any)?.propertyNumber;
     if (!propertyNumber) {
-      return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
     // جلب بيانات الباقة
@@ -892,11 +890,10 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 // 3. التحويل البنكي مع رفع الإيصال
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
-    const { packageId, discountCode } = req.body;
-    const propertyNumber = (req.session as any)?.propertyNumber;
+    const { propertyNumber, packageId, discountCode } = req.body;
 
     if (!propertyNumber) {
-      return res.status(401).json({ error: "يرجى تسجيل الدخول أولاً" });
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
     if (!req.file) {

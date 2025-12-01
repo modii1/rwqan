@@ -45,6 +45,7 @@ export default function SubscriptionPage() {
     holidays: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState<string | null>(null);
 
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
@@ -90,6 +91,10 @@ export default function SubscriptionPage() {
         prices,
         subscriptionType: selectedPackage?.type || 'عادي',
       });
+      
+      const registrationData = await registrationResponse.json();
+      const propertyNumber = registrationData.propertyNumber;
+      setRegisteredPropertyNumber(propertyNumber);
 
       toast({
         title: "تم تسجيل العقار بنجاح",
@@ -105,6 +110,7 @@ export default function SubscriptionPage() {
       } else {
         if (paymentMethod === 'online') {
           const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
+            propertyNumber,
             packageId: selectedPackageId,
             discountCode: validatedDiscount?.code,
             paymentMethod: 'cards',
@@ -113,6 +119,7 @@ export default function SubscriptionPage() {
           window.location.href = paymentData.checkoutUrl;
         } else if (paymentMethod === 'bank' && receiptFile) {
           const formDataUpload = new FormData();
+          formDataUpload.append('propertyNumber', propertyNumber);
           formDataUpload.append('packageId', selectedPackageId);
           formDataUpload.append('receipt', receiptFile);
           if (validatedDiscount?.code) {
