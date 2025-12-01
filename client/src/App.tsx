@@ -71,9 +71,12 @@ export default function App() {
         method: "POST",
         credentials: "include",
       });
+      // Clear all queries from cache
+      queryClient.clear();
     } catch (e) {
       console.error("Logout error:", e);
     }
+    // Force full page reload to clear all state
     window.location.href = "/";
   };
 

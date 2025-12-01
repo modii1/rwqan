@@ -90,9 +90,15 @@ export default function OwnerDashboard() {
         title: "تم تسجيل الخروج",
         description: "نراك قريباً!",
       });
-      setLocation("/owner/login");
+      // Force full page reload to clear all state
+      window.location.href = "/owner/login";
     } catch (e) {
       console.error(e);
+      toast({
+        title: "خطأ في تسجيل الخروج",
+        description: "حدث خطأ، يرجى المحاولة مرة أخرى",
+        variant: "destructive",
+      });
     }
   };
 
