@@ -183,40 +183,6 @@ export default function SubscriptionPage() {
           </div>
         </div>
 
-        {/* Progress Bar - 3 Steps */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between gap-2 mb-4">
-            {/* Step 1 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 1 ? 'bg-[#434040]' : 'bg-muted'}`}>
-                {currentStep > 1 ? '✓' : '1'}
-              </div>
-              <p className="text-xs mt-2 text-center font-semibold">اختيار الباقة</p>
-            </div>
-            
-            {/* Line 1-2 */}
-            <div className={`flex-1 h-1 ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
-            
-            {/* Step 2 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}>
-                {currentStep > 2 ? '✓' : '2'}
-              </div>
-              <p className="text-xs mt-2 text-center font-semibold">بيانات العقار</p>
-            </div>
-            
-            {/* Line 2-3 */}
-            <div className={`flex-1 h-1 ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
-            
-            {/* Step 3 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}>
-                3
-              </div>
-              <p className="text-xs mt-2 text-center font-semibold">طريقة الدفع</p>
-            </div>
-          </div>
-        </div>
 
         {/* Step 1: Select Package */}
         {currentStep === 1 && (
