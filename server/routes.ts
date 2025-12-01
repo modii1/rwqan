@@ -504,55 +504,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  app.get("/api/owner/property", requireOwner, async (req: any, res) => {
-    try {
-      const p = await storage.getPropertyByNumber(req.propertyNumber);
-      if (!p) {
-        return res.status(404).json({ error: "العقار غير موجود" });
-      }
-      res.json(p);
-    } catch (err: any) {
-      console.error("Error fetching property:", err);
-      res.status(500).json({ error: err?.message || "خطأ في جلب بيانات العقار" });
-    }
-  });
-
-  // ======================
-  // OWNER SUBSCRIPTION MANAGEMENT
-  // ======================
-  
-  // جلب الاشتراك الحالي للمالك
-  app.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
-    try {
-      const propertyNumber = (req.session as any).propertyNumber;
-      const subscriptions = await storage.getSubscriptionsByProperty(propertyNumber);
-      const packages = await storage.getPackages();
-      
-      const activeSubscription = subscriptions.find(
-        s => s.status === 'نشط' && new Date(s.endDate) > new Date()
-      );
-      
-      // إذا كان هناك اشتراك نشط، أرجعه
-      if (activeSubscription) {
-        return res.json(activeSubscription);
-      }
-      
-      // وإلا، أرجع اشتراك افتراضي مع الباقة المجانية أو الباقة الأولى
-      const freePackage = packages.find(p => p.type === 'عادي' && p.price === 0) || packages[0];
-      const defaultSubscription = {
-        id: 'default',
-        propertyNumber: propertyNumber,
-        packageId: freePackage?.id || 'pkg-1',
-        startDate: new Date().toISOString(),
-        endDate: new Date(Date.now() - 86400000).toISOString(), // أمس
-        status: 'منتهي' as const,
-      };
-      
-      res.json(defaultSubscription);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "فشل في جلب الاشتراك" });
-    }
-  });
 
   // تحضير معلومات الدفع للترقية/التمديد (بدون دفع فوري)
   app.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
