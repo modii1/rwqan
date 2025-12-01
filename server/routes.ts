@@ -406,6 +406,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
       const dayOfWeek = daysAr[now_date.getDay()];
       const hourOfDay = now_date.getHours();
+      const minutes = now_date.getMinutes();
+      
+      // تحويل الساعة من 24 ساعة إلى 12 ساعة مع AM/PM
+      const hour12 = hourOfDay % 12 || 12;
+      const ampm = hourOfDay >= 12 ? 'م' : 'ص';
 
       // أنشئ كود طلب فريد
       const requestCode = `REQ${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
@@ -434,7 +439,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ok: true,
         message: "تم تسجيل طلبك بنجاح ✅",
         requestCode,
-        requestTime: `${dayOfWeek} - الساعة ${String(hourOfDay).padStart(2, "0")}:00`,
+        requestTime: `يوم ${dayOfWeek} الساعة ${hour12}:${String(minutes).padStart(2, "0")} ${ampm}`,
       });
     } catch (err: any) {
       console.error("Smart request error:", err);
