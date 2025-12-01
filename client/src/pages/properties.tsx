@@ -178,9 +178,9 @@ export default function PropertiesPage() {
       return true;
     })
     .sort((a, b) => {
-      // Sort: verified (موثوق) properties first, then free (عادي)
-      const aIsVerified = a.subscriptionType === "موثوق";
-      const bIsVerified = b.subscriptionType === "موثوق";
+      // Sort: verified (مميز) properties first, then free (عادي)
+      const aIsVerified = a.subscriptionType === "مميز";
+      const bIsVerified = b.subscriptionType === "مميز";
       if (aIsVerified && !bIsVerified) return -1;
       if (!aIsVerified && bIsVerified) return 1;
       return 0;
