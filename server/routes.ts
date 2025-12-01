@@ -877,6 +877,8 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
     });
 
+    console.log(`✅ Payment created: ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
+
     res.json({
       checkoutUrl: paymobResult.checkoutUrl,
       paymentId: payment.id,

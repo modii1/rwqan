@@ -109,14 +109,28 @@ export default function SubscriptionPage() {
         setTimeout(() => setLocation('/owner/login'), 1500);
       } else {
         if (paymentMethod === 'online') {
-          const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
-            propertyNumber,
-            packageId: selectedPackageId,
-            discountCode: validatedDiscount?.code,
-            paymentMethod: 'cards',
-          });
-          const paymentData = await paymentResponse.json();
-          window.location.href = paymentData.checkoutUrl;
+          try {
+            const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
+              propertyNumber,
+              packageId: selectedPackageId,
+              discountCode: validatedDiscount?.code,
+              paymentMethod: 'cards',
+            });
+            const paymentData = await paymentResponse.json();
+            if (paymentData.checkoutUrl) {
+              window.location.href = paymentData.checkoutUrl;
+            } else {
+              throw new Error("لم يتم الحصول على رابط الدفع");
+            }
+          } catch (err: any) {
+            toast({
+              title: "خطأ في الدفع الإلكتروني",
+              description: "يرجى استخدام التحويل البنكي بدلاً من ذلك أو إعادة المحاولة لاحقاً",
+              variant: "destructive",
+            });
+            setPaymentMethod(null);
+            throw err;
+          }
         } else if (paymentMethod === 'bank' && receiptFile) {
           const formDataUpload = new FormData();
           formDataUpload.append('propertyNumber', propertyNumber);
