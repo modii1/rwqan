@@ -21,6 +21,8 @@ import type {
   CodeBackup,
   InsertCodeBackup,
 } from "@shared/schema";
+import fs from "fs";
+import path from "path";
 
 export interface IStorage {
   // Properties (العقارات)
@@ -335,22 +337,17 @@ export class GoogleSheetsStorage implements IStorage {
   private codeBackupDir = ".backup-history";
 
   private ensureBackupDir() {
-    const fs = require("fs");
     if (!fs.existsSync(this.codeBackupDir)) {
       fs.mkdirSync(this.codeBackupDir, { recursive: true });
     }
   }
 
   private getBackupFilePath(id: string): string {
-    const path = require("path");
     return path.join(this.codeBackupDir, `${id}.json`);
   }
 
   async getCodeBackups(): Promise<CodeBackup[]> {
     try {
-      const fs = require("fs");
-      const path = require("path");
-      
       this.ensureBackupDir();
       const files = fs.readdirSync(this.codeBackupDir).filter((f: string) => f.endsWith(".json"));
       
@@ -373,7 +370,6 @@ export class GoogleSheetsStorage implements IStorage {
 
   async getCodeBackupById(id: string): Promise<CodeBackup | null> {
     try {
-      const fs = require("fs");
       const filePath = this.getBackupFilePath(id);
       
       if (!fs.existsSync(filePath)) {
@@ -389,7 +385,6 @@ export class GoogleSheetsStorage implements IStorage {
 
   async createCodeBackup(backup: InsertCodeBackup): Promise<CodeBackup> {
     try {
-      const fs = require("fs");
       const id = `CODE-BACKUP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const newBackup: CodeBackup = {
         id,
@@ -409,7 +404,6 @@ export class GoogleSheetsStorage implements IStorage {
 
   async deleteCodeBackup(id: string): Promise<void> {
     try {
-      const fs = require("fs");
       const filePath = this.getBackupFilePath(id);
       
       if (fs.existsSync(filePath)) {
