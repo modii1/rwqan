@@ -324,7 +324,7 @@ export default function OwnerSubscriptionPage() {
                     ))}
                   </ul>
                 </div>
-                <Badge className={pkg.type === 'موثوق' ? 'bg-[#b88d2b]' : 'bg-gray-400'}>
+                <Badge className={pkg.type === 'مميز' ? 'bg-[#b88d2b]' : 'bg-gray-400'}>
                   {pkg.type}
                 </Badge>
               </Card>

@@ -233,8 +233,8 @@ export default function SubscriptionPage() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
-                  {pkg.type === 'موثوق' && (
-                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">موثوق</Badge>
+                  {pkg.type === 'مميز' && (
+                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
                   )}
                   <div className="flex gap-2">
                     <Button
@@ -529,9 +529,9 @@ export default function SubscriptionPage() {
                     </ul>
                   </div>
                 )}
-                {packageToView.type === 'موثوق' && (
+                {packageToView.type === 'مميز' && (
                   <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] w-fit">
-                    موثوق
+                    مميز
                   </Badge>
                 )}
                 <div className="flex gap-2 pt-4">
