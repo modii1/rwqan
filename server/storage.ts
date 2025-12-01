@@ -215,17 +215,17 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getPropertyAnalytics(propertyNumber: string): Promise<any> {
-    const requests = await googleSheetsService.getRequests();
-    const propertyRequests = requests.filter(r => r.propertyNumber === propertyNumber);
+    const requests = await storage.getRequests();
+    const propertyRequests = requests.filter((r: Request) => r.propertyNumber === propertyNumber);
     
     const now = new Date();
-    const currentMonth = propertyRequests.filter(r => {
+    const currentMonth = propertyRequests.filter((r: Request) => {
       const reqDate = new Date(r.timestamp);
       return reqDate.getMonth() === now.getMonth() && reqDate.getFullYear() === now.getFullYear();
     });
     
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1);
-    const previousMonth = propertyRequests.filter(r => {
+    const previousMonth = propertyRequests.filter((r: Request) => {
       const reqDate = new Date(r.timestamp);
       return reqDate.getMonth() === lastMonth.getMonth() && reqDate.getFullYear() === lastMonth.getFullYear();
     });
@@ -241,7 +241,7 @@ export class GoogleSheetsStorage implements IStorage {
 
     const requestsByDay: Record<string, number> = {};
     const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-    currentMonth.forEach(r => {
+    currentMonth.forEach((r: Request) => {
       const day = days[new Date(r.timestamp).getDay()];
       requestsByDay[day] = (requestsByDay[day] || 0) + 1;
     });
