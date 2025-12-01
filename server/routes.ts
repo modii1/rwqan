@@ -318,7 +318,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await storage.updateProperty(propertyNumber, updates);
       res.json(updated);
     } catch (err: any) {
-      console.error("❌ Admin update error:", err);
       res.status(500).json({ error: err?.message || "فشل في التحديث" });
     }
   });
@@ -507,10 +506,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  function parseFeatures(val) {
+  function parseFeatures(val: any): string[] {
     if (!val) return [];
     try {
-      if (val.trim().startsWith("[")) return JSON.parse(val);
+      if (String(val).trim().startsWith("[")) return JSON.parse(val);
     } catch {}
     return String(val).split("\n");
   }
@@ -566,7 +565,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(created);
 
     } catch (error) {
-      console.error("❌ Register error:", error);
       res.status(500).json({ error: "خطأ أثناء تسجيل العقار" });
     }
   });
@@ -616,10 +614,11 @@ app.post(
 
       let index = (list.Contents?.length || 0) + 1;
 
-      for (const file of req.files) {
+      const files = Array.isArray(req.files) ? req.files : [];
+      for (const file of files) {
         await r2.send(
           new PutObjectCommand({
-            Bucket: R2_BUCKET,
+            Bucket: R2_BUCKET || "",
             Key: `${propertyNumber}/${index}.jpg`,
             Body: file.buffer,
             ContentType: "image/jpeg",
@@ -630,7 +629,6 @@ app.post(
 
       res.json({ ok: true });
     } catch (err) {
-      console.error("ADMIN R2 UPLOAD ERROR:", err);
       res.status(500).json({ error: "Admin upload failed" });
     }
   }
@@ -663,6 +661,5 @@ app.delete(
   // ======================
   // DONE
   // ======================
-  console.log("✅ All API Routes Registered");
   return createServer(app);
 }
