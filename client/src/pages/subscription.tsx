@@ -176,7 +176,7 @@ export default function SubscriptionPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">{pkg.duration} يوم</p>
                 {pkg.type === 'موثوق' && (
-                  <Badge className="bg-[#434040]/20 text-[#434040] border-0 text-xs">موثوق</Badge>
+                  <Badge className="bg-[#434040]/20 text-[#c9951d] border-0 text-xs">موثوق</Badge>
                 )}
               </Card>
             ))}
