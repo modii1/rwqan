@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { ChevronRight, Upload } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -479,6 +479,7 @@ export default function SubscriptionPage() {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="text-[#434040]">{packageToView?.name}</DialogTitle>
+              <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
             </DialogHeader>
             {packageToView && (
               <div className="space-y-4">
