@@ -33,6 +33,7 @@ export default function OwnerDashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [showRequestsStats, setShowRequestsStats] = useState(false);
 
   // 1) Session check
   const { data: sessionData, isLoading: isSessionLoading } = useQuery<{
@@ -348,7 +349,10 @@ export default function OwnerDashboard() {
               desc="الاسم – المدينة – الوصف"
               onClick={() => setLocation("/owner/update-property")}
             />
-            <PropertyActionsButton handleComingSoon={handleComingSoon} />
+            <PropertyActionsButton 
+              propertyNumber={property.propertyNumber}
+              onShowRequests={() => setShowRequestsStats(true)}
+            />
             <BigActionButton
               icon={<BarChart2 className="w-6 h-6" />}
               title="الإحصائيات المفصلة"
@@ -375,6 +379,15 @@ export default function OwnerDashboard() {
               ))}
             </div>
           </Card>
+        )}
+
+        {/* ===== Modal إحصائيات الطلبات ===== */}
+        {showRequestsStats && (
+          <RequestsStatsModal
+            requestsData={requestsData}
+            requestsLoading={requestsLoading}
+            onClose={() => setShowRequestsStats(false)}
+          />
         )}
       </div>
     </div>
@@ -477,12 +490,22 @@ function AnalyticsBox({
 }
 
 function PropertyActionsButton({
-  handleComingSoon,
+  propertyNumber,
+  onShowRequests,
 }: {
-  handleComingSoon: () => void;
+  propertyNumber: string;
+  onShowRequests: () => void;
 }) {
   const [isVisible, setIsVisible] = useState(true);
   const { toast } = useToast();
+
+  const handleViewProperty = () => {
+    window.open(`/?property=${propertyNumber}`, '_blank');
+    toast({
+      title: "تم فتح صفحة العقار",
+      description: "سيتم فتح صفحة العقار في نافذة جديدة",
+    });
+  };
 
   return (
     <DropdownMenu>
@@ -508,14 +531,14 @@ function PropertyActionsButton({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuItem
-          onClick={handleComingSoon}
+          onClick={handleViewProperty}
           data-testid="menu-view-property"
         >
           <Home className="w-4 h-4 ml-2" />
           <span>عرض صفحة العقار</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={handleComingSoon}
+          onClick={onShowRequests}
           data-testid="menu-view-requests"
         >
           <BarChart2 className="w-4 h-4 ml-2" />
@@ -579,6 +602,74 @@ function BigActionButton({
         </div>
       </div>
     </button>
+  );
+}
+
+function RequestsStatsModal({
+  requestsData,
+  requestsLoading,
+  onClose,
+}: {
+  requestsData: any;
+  requestsLoading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div className="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+            <BarChart2 className="w-5 h-5" />
+            إحصائيات طلبات واتساب
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground"
+            data-testid="button-close-modal"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-6">
+          {requestsLoading ? (
+            <div className="text-center py-12 text-muted-foreground">
+              جاري التحميل...
+            </div>
+          ) : requestsData?.requests?.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              لا توجد طلبات حتى الآن
+            </div>
+          ) : (
+            <>
+              <div className="mb-6 p-4 bg-primary/5 rounded-lg border border-primary/15">
+                <p className="text-sm text-muted-foreground mb-2">إجمالي الطلبات</p>
+                <p className="text-2xl font-bold text-primary">{requestsData?.requests?.length || 0}</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-border">
+                    <tr className="text-muted-foreground">
+                      <th className="text-right p-3">الكود</th>
+                      <th className="text-right p-3">التاريخ والوقت</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requestsData?.requests?.map((req: any, idx: number) => (
+                      <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
+                        <td className="p-3 font-mono text-primary">{req.requestCode || req.id}</td>
+                        <td className="p-3 text-muted-foreground">
+                          {req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }
 
