@@ -422,11 +422,11 @@ function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
   );
 }
 
-function Info({ title, value }: { title: string; value: string | null | undefined }) {
+function Info({ title, value }: { title: string; value: React.ReactNode }) {
   return (
     <div className="p-3 rounded-lg bg-muted/20">
       <p className="text-xs text-muted-foreground">{title}</p>
-      <p className="font-semibold text-base truncate">{value || "---"}</p>
+      <div className="font-semibold text-base truncate">{value || "---"}</div>
     </div>
   );
 }
