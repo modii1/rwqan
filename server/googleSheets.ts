@@ -850,17 +850,22 @@ class GoogleSheetsService {
     return newSuggestion;
   }
 
-  async getAllRequests(): Promise<Request[]> {
+  async getRequests(): Promise<Request[]> {
     try {
       const rows = await this.readSheet(SHEETS.REQUESTS);
-      return rows.map((row) => ({
+      if (!rows || rows.length <= 1) return [];
+      return rows.slice(1).map((row) => ({
         id: row[0] || "",
         propertyNumber: row[1] || "",
         requestCode: row[2] || "",
         timestamp: row[3] || "",
-        createdAt: row[4] || "",
+        ipAddress: row[4] || "",
+        dayOfWeek: row[5] || "",
+        hourOfDay: Number(row[6]) || 0,
+        createdAt: row[7] || "",
       }));
-    } catch {
+    } catch (err) {
+      console.error("getRequests error:", err);
       return [];
     }
   }
@@ -878,6 +883,9 @@ class GoogleSheetsService {
       newRequest.propertyNumber,
       newRequest.requestCode,
       newRequest.timestamp,
+      newRequest.ipAddress,
+      newRequest.dayOfWeek,
+      String(newRequest.hourOfDay),
       newRequest.createdAt,
     ];
 
