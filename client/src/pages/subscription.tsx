@@ -145,7 +145,6 @@ export default function SubscriptionPage() {
           <p className="text-sm text-muted-foreground">اختر باقة واملأ بيانات عقارك</p>
         </div>
       </header>
-
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Packages Strip at Top */}
         <div className="mb-8 pb-8 border-b">
@@ -174,7 +173,7 @@ export default function SubscriptionPage() {
                     <Badge className="bg-[#434040] text-white">مختار</Badge>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground mb-2">{pkg.duration} يوم</p>
+                <p className="text-muted-foreground mb-2 text-[14px]">{pkg.duration} يوم</p>
                 {pkg.type === 'موثوق' && (
                   <Badge className="bg-[#434040]/20 text-[#c9951d] border-0 text-xs">موثوق</Badge>
                 )}
