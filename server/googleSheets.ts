@@ -531,121 +531,122 @@ class GoogleSheetsService {
   }
 
   // ================== الاشتراكات ==================
+  
+  private rowToSubscription(propertyNumber: string, row: any[]): Subscription {
+    // الأعمدة: رقم العقار(0), اسم(1), جوال(2), رسوم(3), نوع(4), بداية(5), نهاية(6), أيام(7), إيصال(8)...
+    const startDate = row[5] ? new Date(row[5]).toISOString() : "";
+    const endDate = row[6] ? new Date(row[6]).toISOString() : "";
+    const status = endDate && new Date(endDate) > new Date() ? "نشط" : "منتهي";
+    
+    return {
+      id: `SUB-${propertyNumber}`,
+      propertyNumber,
+      packageId: row[4] === "موثوق" ? "pkg-trusted" : "pkg-free", // نوع الاشتراك
+      startDate,
+      endDate,
+      status: status as any,
+      paymentId: undefined,
+    };
+  }
 
   async getSubscriptions(): Promise<Subscription[]> {
-    const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
-    return rows.map((row) => ({
-      id: row[0] || "",
-      propertyNumber: row[1] || "",
-      packageId: row[2] || "",
-      startDate: row[3] || "",
-      endDate: row[4] || "",
-      status: (row[5] as any) || "نشط",
-      paymentId: row[6] || undefined,
-      createdAt: row[7] || "",
-    }));
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    return rows
+      .filter(row => row[0] && row[0].trim()) // تحقق من وجود رقم عقار
+      .map((row) => this.rowToSubscription(row[0], row));
   }
 
   async createSubscription(
     subscription: InsertSubscription,
   ): Promise<Subscription> {
-    const id = `SUB-${Date.now()}`;
-    const newSubscription: Subscription = {
-      id,
+    // تحديث بيانات الاشتراك في صف العقار
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    const rowIndex = rows.findIndex((row) => row[0] === subscription.propertyNumber);
+
+    if (rowIndex === -1) {
+      throw new Error("Property not found");
+    }
+
+    const propertyRow = rows[rowIndex];
+    
+    // تحديث الأعمدة: نوع اشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6)
+    const subscriptionType = subscription.packageId === "pkg-trusted" ? "موثوق" : "عادي";
+    propertyRow[4] = subscriptionType;
+    propertyRow[5] = subscription.startDate.split('T')[0]; // YYYY-MM-DD
+    propertyRow[6] = subscription.endDate.split('T')[0]; // YYYY-MM-DD
+    
+    await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
+    
+    return {
+      id: `SUB-${subscription.propertyNumber}`,
       ...subscription,
-      createdAt: new Date().toISOString(),
     };
-
-    const row = [
-      newSubscription.id,
-      newSubscription.propertyNumber,
-      newSubscription.packageId,
-      newSubscription.startDate,
-      newSubscription.endDate,
-      newSubscription.status,
-      newSubscription.paymentId || "",
-      newSubscription.createdAt,
-    ];
-
-    await this.appendToSheet(SHEETS.SUBSCRIPTIONS, [row]);
-    return newSubscription;
   }
 
   async updateSubscription(
     id: string,
     updates: Partial<Subscription>,
   ): Promise<Subscription> {
-    const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
-    const rowIndex = rows.findIndex((row) => row[0] === id);
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    const propertyNumber = id.replace("SUB-", "");
+    const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
 
     if (rowIndex === -1) {
-      throw new Error("Subscription not found");
+      throw new Error("Property not found");
     }
 
-    const current = rows[rowIndex];
-    const updated: Subscription = {
-      id: current[0],
-      propertyNumber: updates.propertyNumber ?? current[1],
-      packageId: updates.packageId ?? current[2],
-      startDate: updates.startDate ?? current[3],
-      endDate: updates.endDate ?? current[4],
-      status: updates.status ?? (current[5] as any),
-      paymentId: updates.paymentId ?? current[6],
-      createdAt: current[7],
-    };
-
-    const row = [
-      updated.id,
-      updated.propertyNumber,
-      updated.packageId,
-      updated.startDate,
-      updated.endDate,
-      updated.status,
-      updated.paymentId || "",
-      updated.createdAt,
-    ];
-
-    await this.updateRow(SHEETS.SUBSCRIPTIONS, rowIndex + 2, row);
-    return updated;
+    const propertyRow = rows[rowIndex];
+    
+    if (updates.packageId) {
+      propertyRow[4] = updates.packageId === "pkg-trusted" ? "موثوق" : "عادي";
+    }
+    if (updates.startDate) {
+      propertyRow[5] = updates.startDate.split('T')[0];
+    }
+    if (updates.endDate) {
+      propertyRow[6] = updates.endDate.split('T')[0];
+    }
+    
+    await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
+    
+    return this.rowToSubscription(propertyNumber, propertyRow);
   }
 
   // ================== الباقات ==================
+  
+  // الباقات الثابتة - نوعان فقط: عادي وموثوق
+  private readonly PACKAGES: Package[] = [
+    {
+      id: "pkg-free",
+      name: "باقة مجانية",
+      duration: 30,
+      price: 0,
+      type: "عادي",
+      features: [],
+      isActive: true,
+    },
+    {
+      id: "pkg-trusted",
+      name: "باقة موثوقة",
+      duration: 30,
+      price: 35,
+      type: "موثوق",
+      features: ["عرض موثوق", "أولوية في البحث"],
+      isActive: true,
+    },
+  ];
 
   async getPackages(): Promise<Package[]> {
-    const rows = await this.readSheet(SHEETS.PACKAGES);
-    return rows.map((row) => ({
-      id: row[0] || "",
-      name: row[1] || "",
-      duration: parseInt(row[2]) || 0,
-      price: parseFloat(row[3]) || 0,
-      type: (row[4] as any) || "عادي",
-      features: row[5] ? JSON.parse(row[5]) : [],
-      isActive: row[6] === "true",
-      createdAt: row[7] || "",
-    }));
+    return this.PACKAGES;
+  }
+
+  async getPackageById(id: string): Promise<Package | null> {
+    return this.PACKAGES.find(p => p.id === id) || null;
   }
 
   async createPackage(pkg: InsertPackage): Promise<Package> {
-    const id = `PKG-${Date.now()}`;
-    const newPackage: Package = {
-      id,
-      ...pkg,
-      createdAt: new Date().toISOString(),
-    };
-
-    const row = [
-      newPackage.id,
-      newPackage.name,
-      newPackage.duration.toString(),
-      newPackage.price.toString(),
-      newPackage.type,
-      JSON.stringify(newPackage.features),
-      newPackage.isActive.toString(),
-      newPackage.createdAt,
-    ];
-
-    await this.appendToSheet(SHEETS.PACKAGES, [row]);
-    return newPackage;
+    // الباقات ثابتة - لا يمكن إضافة باقات جديدة
+    throw new Error("Packages are fixed - cannot create new ones");
   }
 
   // ================== أكواد الخصم ==================
