@@ -50,7 +50,9 @@ export default function OwnerImagesPage() {
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
-      files.forEach((f) => formData.append("images", f));
+      files.forEach((f) => {
+        formData.append("images", f);
+      });
 
       const res = await fetch("/api/owner/images", {
         method: "POST",
@@ -58,17 +60,31 @@ export default function OwnerImagesPage() {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
+    onSuccess: (data) => {
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
+      }, 1000);
       setSelectedFiles([]);
       setPreviewUrls([]);
-      toast({ title: "تم رفع الصور بنجاح" });
+      toast({ 
+        title: "نجح!", 
+        description: `تم رفع ${data.count} صورة بنجاح` 
+      });
     },
     onError: (err: any) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+      toast({ 
+        title: "خطأ في الرفع", 
+        description: err?.message || "فشل الرفع",
+        variant: "destructive" 
+      });
     },
   });
 
