@@ -502,14 +502,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================================================
-  // 🔴 حذف صورة واحدة من R2 حسب رقمها
+  // 🔴 حذف صورة من R2 باستخدام URL
   // ======================================================
-  app.delete("/api/owner/images/:index", requireOwner, async (req, res) => {
+  app.post("/api/owner/images/delete", requireOwner, async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber || "";
-      const index = req.params.index;
+      const { url } = req.body;
 
-      const key = `${propertyNumber}/${index}.jpg`;
+      if (!url) {
+        return res.status(400).json({ error: "URL مطلوبة" });
+      }
+
+      // استخراج الـ key من URL: https://.../{propertyNumber}/{fileName}
+      const key = `${propertyNumber}/${url.split("/").pop()}`;
+
+      console.log(`🔴 [DELETE] Deleting: ${key}`);
 
       await r2.send(
         new DeleteObjectCommand({
@@ -518,9 +525,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
 
+      console.log(`✅ [DELETE] Deleted: ${key}`);
       res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ error: "Delete failed" });
+    } catch (err: any) {
+      console.error("❌ [DELETE] Error:", err?.message);
+      res.status(500).json({ error: "فشل الحذف" });
     }
   });
 

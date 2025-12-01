@@ -113,17 +113,26 @@ export default function OwnerImagesPage() {
      4) حذف صورة (المسار الصحيح DELETE /api/owner/images/:index)
   ============================================================*/
   const deleteMutation = useMutation({
-    mutationFn: async (index: number) => {
-      const res = await fetch(`/api/owner/images/${index}`, {
-        method: "DELETE",
+    mutationFn: async (url: string) => {
+      const res = await fetch(`/api/owner/images/delete`, {
+        method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
       });
 
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/r2-images"] });
+      // إزالة الصورة من الـ cache مباشرة
+      const currentData = queryClient.getQueryData<{images: string[]}>(["/api/owner/r2-images"]);
+      if (currentData) {
+        const updatedImages = currentData.images.filter(img => img !== deleteMutation.variables);
+        queryClient.setQueryData(["/api/owner/r2-images"], {
+          images: updatedImages
+        });
+      }
       toast({ title: "تم حذف الصورة بنجاح" });
     },
     onError: (err: any) => {
@@ -135,23 +144,12 @@ export default function OwnerImagesPage() {
     },
   });
 
-  // استخراج رقم الصورة ثم الحذف
+  // حذف الصورة باستخدام الـ URL الكامل
   const handleDelete = (url: string) => {
     if (!confirm("هل تريد حذف هذه الصورة؟")) return;
 
-    const fileName = url.split("/").pop(); // 3.jpg
-    const index = Number(fileName?.replace(".jpg", ""));
-
-    if (isNaN(index)) {
-      toast({
-        title: "خطأ",
-        description: "تعذر تحديد رقم الصورة",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    deleteMutation.mutate(index);
+    // إرسال URL الكامل للحذف
+    deleteMutation.mutate(url);
   };
 
   /* ==========================================================
