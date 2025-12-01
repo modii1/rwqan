@@ -532,28 +532,57 @@ class GoogleSheetsService {
 
   // ================== الاشتراكات ==================
   
-  private rowToSubscription(propertyNumber: string, row: any[]): Subscription {
-    // الأعمدة: رقم العقار(0), اسم(1), جوال(2), رسوم(3), نوع(4), بداية(5), نهاية(6), أيام(7), إيصال(8)...
-    const startDate = row[5] ? new Date(row[5]).toISOString() : "";
-    const endDate = row[6] ? new Date(row[6]).toISOString() : "";
-    const status = endDate && new Date(endDate) > new Date() ? "نشط" : "منتهي";
+  // قراءة من ورقة الاشتراكات الفعلية
+  // الأعمدة: المعرف(0), رقم العقار(1), معرف الباقة(2), تاريخ البدء(3), تاريخ الانتهاء(4), الحالة(5), معرف الدفع(6), تاريخ الإنشاء(7)
+  private rowToSubscriptionFromSheet(row: any[]): Subscription {
+    const startDate = row[3] ? String(row[3]) : "";
+    const endDate = row[4] ? String(row[4]) : "";
+    
+    // حساب الحالة تلقائياً من تاريخ الانتهاء
+    let status = row[5] || "نشط";
+    if (endDate) {
+      try {
+        const endDateObj = new Date(endDate);
+        if (endDateObj < new Date()) {
+          status = "منتهي";
+        }
+      } catch (e) {}
+    }
     
     return {
-      id: `SUB-${propertyNumber}`,
-      propertyNumber,
-      packageId: row[4] === "مميز" ? "pkg-trusted" : "pkg-free", // نوع الاشتراك
+      id: row[0] || `SUB-${row[1]}`,
+      propertyNumber: row[1] || "",
+      packageId: row[2] || "pkg-free",
       startDate,
       endDate,
       status: status as any,
-      paymentId: undefined,
+      paymentId: row[6] || undefined,
+      createdAt: row[7] || undefined,
     };
   }
 
   async getSubscriptions(): Promise<Subscription[]> {
-    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    // قراءة من ورقة الاشتراكات
+    const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+    console.log(`📋 Read ${rows.length} subscription(s) from "${SHEETS.SUBSCRIPTIONS}"`);
+    
     return rows
-      .filter(row => row[0] && row[0].trim()) // تحقق من وجود رقم عقار
-      .map((row) => this.rowToSubscription(row[0], row));
+      .filter(row => row[0] && row[1]) // تحقق من وجود معرف ورقم عقار
+      .map((row) => this.rowToSubscriptionFromSheet(row));
+  }
+  
+  async getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null> {
+    const subscriptions = await this.getSubscriptions();
+    // البحث عن آخر اشتراك للعقار (الأحدث)
+    const propertySubscriptions = subscriptions
+      .filter(s => s.propertyNumber === propertyNumber)
+      .sort((a, b) => {
+        const dateA = new Date(a.endDate || 0).getTime();
+        const dateB = new Date(b.endDate || 0).getTime();
+        return dateB - dateA; // ترتيب تنازلي
+      });
+    
+    return propertySubscriptions[0] || null;
   }
 
   async createSubscription(
@@ -609,44 +638,88 @@ class GoogleSheetsService {
     
     await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, propertyRow);
     
-    return this.rowToSubscription(propertyNumber, propertyRow);
+    // إرجاع الاشتراك المحدث
+    const endDate = propertyRow[6] ? String(propertyRow[6]) : "";
+    const status = endDate && new Date(endDate) > new Date() ? "نشط" : "منتهي";
+    
+    return {
+      id: `SUB-${propertyNumber}`,
+      propertyNumber,
+      packageId: propertyRow[4] === "مميز" ? "pkg-trusted" : "pkg-free",
+      startDate: propertyRow[5] ? String(propertyRow[5]) : "",
+      endDate,
+      status: status as any,
+    };
   }
 
   // ================== الباقات ==================
   
-  // الباقات الثابتة - نوعان فقط: عادي ومميز
-  private readonly PACKAGES: Package[] = [
-    {
-      id: "pkg-free",
-      name: "باقة مجانية",
-      duration: 30,
-      price: 0,
-      type: "عادي",
-      features: [],
-      isActive: true,
-    },
-    {
-      id: "pkg-trusted",
-      name: "باقة مميزة",
-      duration: 30,
-      price: 35,
-      type: "مميز",
-      features: ["عرض مميز", "أولوية في البحث"],
-      isActive: true,
-    },
-  ];
+  // قراءة الباقات من ورقة الباقات
+  // الأعمدة: المعرف(0), الاسم(1), المدة(2), السعر(3), النوع(4), المميزات(5), نشط(6), تاريخ الإنشاء(7)
+  private rowToPackage(row: any[]): Package {
+    const featuresRaw = row[5] || "";
+    let features: string[] = [];
+    
+    if (featuresRaw) {
+      try {
+        // محاولة parse JSON أولاً
+        features = JSON.parse(featuresRaw);
+      } catch {
+        // إذا فشل، افصل بالفاصلة
+        features = String(featuresRaw).split(",").map(s => s.trim()).filter(Boolean);
+      }
+    }
+    
+    return {
+      id: row[0] || `pkg-${Date.now()}`,
+      name: row[1] || "",
+      duration: parseInt(row[2]) || 30,
+      price: parseFloat(row[3]) || 0,
+      type: (row[4] as any) || "عادي",
+      features,
+      isActive: row[6] !== "false" && row[6] !== "لا",
+      createdAt: row[7] || undefined,
+    };
+  }
 
   async getPackages(): Promise<Package[]> {
-    return this.PACKAGES;
+    const rows = await this.readSheet(SHEETS.PACKAGES);
+    console.log(`📦 Read ${rows.length} package(s) from "${SHEETS.PACKAGES}"`);
+    
+    return rows
+      .filter(row => row[0] && row[1]) // تحقق من وجود معرف واسم
+      .map((row) => this.rowToPackage(row))
+      .filter(pkg => pkg.isActive); // فقط الباقات النشطة
   }
 
   async getPackageById(id: string): Promise<Package | null> {
-    return this.PACKAGES.find(p => p.id === id) || null;
+    const packages = await this.getPackages();
+    return packages.find(p => p.id === id) || null;
   }
 
   async createPackage(pkg: InsertPackage): Promise<Package> {
-    // الباقات ثابتة - لا يمكن إضافة باقات جديدة
-    throw new Error("Packages are fixed - cannot create new ones");
+    const id = `pkg-${Date.now()}`;
+    const newPkg: Package = {
+      id,
+      ...pkg,
+      createdAt: new Date().toISOString(),
+    };
+    
+    const features = Array.isArray(newPkg.features) ? newPkg.features.join(", ") : "";
+    
+    const row = [
+      newPkg.id,
+      newPkg.name,
+      newPkg.duration.toString(),
+      newPkg.price.toString(),
+      newPkg.type,
+      features,
+      newPkg.isActive ? "نعم" : "لا",
+      newPkg.createdAt,
+    ];
+    
+    await this.appendToSheet(SHEETS.PACKAGES, [row]);
+    return newPkg;
   }
 
   // ================== أكواد الخصم ==================
