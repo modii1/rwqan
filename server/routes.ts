@@ -90,6 +90,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Owner Analytics
+  app.get("/api/owner/analytics", async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any)?.propertyNumber;
+      if (!propertyNumber) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const analytics = await storage.getPropertyAnalytics(propertyNumber);
+      res.json(analytics);
+    } catch (err) {
+      console.error("Analytics error:", err);
+      res.status(500).json({ error: "Failed to load analytics" });
+    }
+  });
+
 
 
   // ======================
