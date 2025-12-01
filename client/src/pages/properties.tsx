@@ -531,7 +531,7 @@ export default function PropertiesPage() {
                         />
 
                         {/* Trusted Badge - Top Right Corner on Image */}
-                        {property.subscriptionType === "موثوق" && (
+                        {property.subscriptionType === "مميز" && (
                           <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
                             <Star className="w-4 h-4 md:w-5 md:h-5 text-yellow-600 fill-yellow-600" />
                             <span className="text-[#b38b00] font-bold text-xs md:text-sm">موثوق</span>
@@ -593,7 +593,7 @@ export default function PropertiesPage() {
                   {/* Content Section - Flexible grow */}
                   <div className="flex flex-col flex-1 p-3 md:p-5">
                     {/* Title - Only show for verified properties */}
-                    {property.subscriptionType === "موثوق" && (
+                    {property.subscriptionType === "مميز" && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
                         onClick={() => handleCardClick(property.propertyNumber)}
