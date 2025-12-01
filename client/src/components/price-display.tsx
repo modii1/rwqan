@@ -28,7 +28,7 @@ export function PriceDisplay({
 
   return (
     <div className={`flex items-center gap-1 ${sizeClass.text} font-bold ${textColor}`}>
-      <span>{amount}</span>
+      <span className="text-[#434040]">{amount}</span>
       <img
         src={riyal}
         alt="ريال سعودي"
