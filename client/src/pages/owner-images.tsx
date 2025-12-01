@@ -18,7 +18,7 @@ export default function OwnerImagesPage() {
   /* ==========================================================
      1) التحقق من الجلسة
   ============================================================*/
-  const { data: sessionData, isLoading: sessionLoading } = useQuery({
+  const { data: sessionData, isLoading: sessionLoading } = useQuery<any>({
     queryKey: ["/api/owner/session"],
   });
 
