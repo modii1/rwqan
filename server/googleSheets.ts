@@ -542,6 +542,7 @@ class GoogleSheetsService {
   private rowToSubscriptionFromSheet(row: any[]): Subscription {
     const startDate = row[5] ? String(row[5]) : "";
     const endDate = row[6] ? String(row[6]) : "";
+    const packageId = row[12] ? String(row[12]) : "pkg-free";  // قراءة packageId من العمود 12
     
     // حساب الحالة تلقائياً من تاريخ الانتهاء
     let status = "نشط";
@@ -557,7 +558,7 @@ class GoogleSheetsService {
     return {
       id: `SUB-${row[0]}`,
       propertyNumber: row[0] || "",
-      packageId: row[4] === "مميز" ? "pkg-trusted" : "pkg-free",
+      packageId: packageId,  // استخدام packageId المخزن في العمود 12
       startDate,
       endDate,
       status: status as any,
@@ -570,19 +571,19 @@ class GoogleSheetsService {
     const daysRemaining = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     
     return [
-      propertyNumber,
-      property?.name || "",
-      property?.whatsappNumber || "",
-      subscription.price || "",
-      subscription.subscriptionType || "عادي",
-      subscription.startDate?.split('T')[0] || "",
-      subscription.endDate?.split('T')[0] || "",
-      Math.max(daysRemaining, 0),
-      receiptUrl || "",
-      "",
-      "",
-      new Date().toISOString().split('T')[0],
-      subscription.paymentId || "",
+      propertyNumber,                                          // 0: رقم العقار
+      property?.name || "",                                   // 1: اسم العقار
+      property?.whatsappNumber || "",                         // 2: رقم الجوال
+      subscription.price || "",                               // 3: رسوم الاشتراك
+      subscription.subscriptionType || "عادي",                 // 4: نوع الاشتراك
+      subscription.startDate?.split('T')[0] || "",            // 5: تاريخ البداية
+      subscription.endDate?.split('T')[0] || "",              // 6: تاريخ الانتهاء
+      Math.max(daysRemaining, 0),                             // 7: الأيام المتبقية
+      receiptUrl || "",                                        // 8: رابط الإيصال
+      "",                                                      // 9: علم انتهاء الاشتراك
+      "",                                                      // 10: علم إشعار الإيصال
+      new Date().toISOString().split('T')[0],                 // 11: آخر دورة
+      subscription.packageId || "",                            // 12: رمز التحديث (packageId)
     ];
   }
 
