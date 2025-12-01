@@ -877,16 +877,19 @@ class GoogleSheetsService {
       
       // اقرأ الشيت الفعلي وعد الصفوف للعقار هذا
       const rows = await this.readSheet(SHEETS.REQUESTS);
-      let requestCount = 1;
+      let requestCount = 0;
       
       if (rows && rows.length > 1) {
-        // عد عدد الصفوف للعقار هذا (بدء من الصف الثاني لتخطي الرأس)
+        // عد عدد الصفوف الموجودة للعقار هذا (بدء من الصف الثاني لتخطي الرأس)
         for (let i = 1; i < rows.length; i++) {
           if (rows[i][0] === request.propertyNumber) {
             requestCount++;
           }
         }
       }
+      
+      // أضف 1 للطلب الجديد (فإذا كان 0 = يكون 1، إذا كان 1 = يكون 2)
+      requestCount++;
       
       // استخراج التاريخ والوقت
       const day = now.getDate();
