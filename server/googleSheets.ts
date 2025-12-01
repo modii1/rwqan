@@ -1039,17 +1039,23 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   async getRequests(): Promise<Request[]> {
     try {
       const rows = await this.readSheet(SHEETS.REQUESTS);
-      if (!rows || rows.length <= 1) return [];
-      return rows.slice(1).map((row, idx) => ({
-        id: `REQ-${idx}`,
-        propertyNumber: row[0] || "",
-        requestCode: "",
-        timestamp: `${row[4] || "2025"}-${row[5] || "12"}-${row[3] || "01"}T${row[6] || "00:00"}:00Z`,
-        ipAddress: "",
-        dayOfWeek: "",
-        hourOfDay: 0,
-        createdAt: new Date().toISOString(),
-      }));
+      if (!rows || rows.length === 0) return [];
+      return rows.map((row, idx) => {
+        const day = row[6] || "01";
+        const month = row[7] || "12";
+        const year = row[8] || "2025";
+        const time = row[9] || "00:00";
+        return {
+          id: `REQ-${idx}`,
+          propertyNumber: row[0] || "",
+          requestCode: row[2] || "",
+          timestamp: `${year}-${month}-${day}T${time}:00Z`,
+          ipAddress: row[3] || "",
+          dayOfWeek: row[4] || "",
+          hourOfDay: parseInt(row[5] || "0", 10),
+          createdAt: new Date().toISOString(),
+        };
+      });
     } catch (err) {
       console.error("getRequests error:", err);
       return [];
@@ -1089,10 +1095,14 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const time = `${hours}:${minutes}`;
 
       // صف الشيت بالترتيب الصحيح
+      // A: propertyNumber, B: propertyName, C: requestCode, D: ipAddress, E: dayOfWeek, F: hourOfDay, G: day, H: month, I: year, J: time
       const row = [
         request.propertyNumber,
         propertyName,
-        String(requestCount),
+        request.requestCode,
+        request.ipAddress,
+        request.dayOfWeek,
+        String(request.hourOfDay),
         String(day),
         String(month),
         String(year),
