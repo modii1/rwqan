@@ -103,7 +103,7 @@ export default function PropertiesPage() {
   }, [visibleCount]);
 
   const { data: properties = [], isLoading } = useQuery<Property[]>({
-    queryKey: ["properties"],
+    queryKey: ["/api/properties"],
   });
 
   const toggleFacility = (facility: string) => {
