@@ -39,7 +39,7 @@ const r2 = new S3Client({
 });
 
 const R2_BUCKET = process.env.R2_BUCKET_NAME;
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
 // ==========================
 // Mapping Google Sheet Columns
@@ -446,9 +446,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: "R2 bucket not configured" });
       }
 
-      const files = Array.isArray(req.files) ? req.files : [];
-      if (files.length === 0) {
-        return res.status(400).json({ error: "No files uploaded" });
+      const files = (req.files as any) || [];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "لا توجد صور تم رفعها" });
       }
 
       // عدد الصور الحالية
@@ -460,24 +460,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       let index = (list.Contents?.length || 0) + 1;
+      const uploadedKeys: string[] = [];
 
       for (const file of files) {
         const key = `${propertyNumber}/${index}.jpg`;
+        
         await r2.send(
           new PutObjectCommand({
             Bucket: R2_BUCKET,
             Key: key,
             Body: file.buffer,
             ContentType: "image/jpeg",
+            ACL: "public-read",
           })
         );
+        uploadedKeys.push(key);
         index++;
       }
 
-      res.json({ ok: true, count: files.length });
+      res.json({ ok: true, count: files.length, uploaded: uploadedKeys });
 
     } catch (err: any) {
-      const errorMsg = err?.message || "Upload failed";
+      const errorMsg = err?.message || "فشل الرفع";
       res.status(500).json({ error: errorMsg });
     }
   });
