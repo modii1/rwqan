@@ -499,8 +499,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         index++;
       }
 
-      console.log(`✅ [UPLOAD] Done! Uploaded ${files.length} images. Keys:`, uploadedKeys);
-      res.json({ ok: true, count: files.length, uploaded: uploadedKeys });
+      // تحويل keys إلى URLs مباشرة
+      const uploadedUrls = uploadedKeys.map(key => `${R2_PUBLIC_URL}/${key}`);
+      console.log(`✅ [UPLOAD] Done! Uploaded ${files.length} images. URLs:`, uploadedUrls);
+      res.json({ ok: true, count: files.length, uploaded: uploadedKeys, urls: uploadedUrls });
 
     } catch (err: any) {
       console.error("❌ [UPLOAD] Error:", err?.message);
