@@ -160,7 +160,7 @@ export default function OwnerUpdateProperty() {
             </div>
 
             <div className="border-t pt-6">
-              <h2 className="text-lg font-bold mb-4">الأسعار (﷼)</h2>
+              <h2 className="text-lg font-bold mb-4">الأسعار (ريال)</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="weekday" className="text-base">سعر وسط الأسبوع</Label>
