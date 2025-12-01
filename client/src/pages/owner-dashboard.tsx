@@ -59,6 +59,17 @@ export default function OwnerDashboard() {
     refetchOnWindowFocus: false,
   });
 
+  // 4) جلب الطلبات
+  const {
+    data: requestsData,
+    isLoading: requestsLoading,
+  } = useQuery<any>({
+    queryKey: ["/api/owner/requests"],
+    enabled: sessionData?.isLoggedIn === true,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
   useEffect(() => {
     if (!isSessionLoading && sessionData) {
       if (!sessionData.isLoggedIn) {
@@ -230,6 +241,40 @@ export default function OwnerDashboard() {
               </Button>
             </div>
           </div>
+        </Card>
+
+        {/* ===== جدول الطلبات الحديثة ===== */}
+        <Card className="p-6">
+          <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" />
+            آخر طلبات واتساب
+          </h2>
+          {requestsLoading ? (
+            <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
+          ) : requestsData?.requests?.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">لا توجد طلبات حتى الآن</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border">
+                  <tr className="text-muted-foreground">
+                    <th className="text-right p-3">الكود</th>
+                    <th className="text-right p-3">التاريخ والوقت</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requestsData?.requests?.slice(0, 10)?.map((req: any, idx: number) => (
+                    <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
+                      <td className="p-3 font-mono">{req.requestCode || req.id}</td>
+                      <td className="p-3 text-muted-foreground">
+                        {req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
 
         {/* ===== معلومات العقار + أداء العقار ===== */}

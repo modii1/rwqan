@@ -1,0 +1,342 @@
+<!-- dashboard.html -->
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>لوحة الإحصائيات</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+:root{
+  --bg:#eef2f6; --card:#fff; --text:#0b1220; --muted:#6b7280;
+  --accent:#2563eb; --accent-2:#06b6d4;
+}
+body.dark { --bg:#0b1220; --card:#0f1724; --text:#e6eef6; --muted:#94a3b8; --accent:#60a5fa; --accent-2:#67e8f9; }
+body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);margin:0;padding:18px;transition:0.25s}
+.header{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.title{font-size:20px;font-weight:700}
+.controls{display:flex;gap:8px;align-items:center}
+.btn{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+.toggle{background:transparent;border:1px solid rgba(0,0,0,0.06);padding:8px;border-radius:8px;cursor:pointer}
+.container{display:grid;grid-template-columns:300px 1fr;gap:16px;margin-top:18px}
+@media(max-width:900px){ .container{grid-template-columns:1fr} }
+
+/* sidebar */
+.sidebar{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06)}
+.tab{display:block;padding:10px;border-radius:8px;color:var(--text);cursor:pointer;margin-bottom:6px}
+.tab.active{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:white;font-weight:700}
+
+/* main */
+.main{display:flex;flex-direction:column;gap:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06);transition:transform .25s}
+.card:hover{transform:translateY(-6px)}
+.card h3{margin:0;font-size:13px;color:var(--muted)}
+.card .num{font-size:22px;font-weight:700;color:var(--accent);}
+
+/* filters */
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+select,input{padding:8px;border-radius:8px;border:1px solid #e6eef6;background:transparent}
+
+/* charts */
+.panel{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06)}
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:900px){ .chart-row{grid-template-columns:1fr} }
+
+/* table */
+.table-wrap{overflow:auto;background:var(--card);border-radius:12px;padding:8px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:12px;text-align:right;border-bottom:1px solid #efefef}
+th{background:transparent;color:var(--muted);font-weight:700}
+
+/* print */
+@media print{
+  .sidebar, .controls, .tab { display:none }
+  body{background:#fff;color:#000}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">📊 لوحة إحصائيات الطلبات — الشاليهات</div>
+  <div class="controls">
+    <button class="btn" id="refreshBtn">تحديث</button>
+    <button class="toggle" id="themeBtn">وضع داكن</button>
+    <button class="toggle" id="exportCsvBtn">تصدير CSV</button>
+    <button class="toggle" id="printBtn">طباعة / حفظ PDF</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Sidebar (Tabs & Filters) -->
+  <aside class="sidebar">
+    <div class="tab active" data-tab="overview">🏠 نظرة عامة</div>
+    <div class="tab" data-tab="charts">📈 مخططات</div>
+    <div class="tab" data-tab="table">📋 جدول</div>
+
+    <hr style="margin:12px 0;border:none;border-top:1px solid #eee">
+
+    <div style="font-weight:700;margin-bottom:8px">فلترة</div>
+    <div class="filters">
+      <select id="filterDay"><option value="">اليوم</option></select>
+      <select id="filterMonth"><option value="">الشهر</option></select>
+      <select id="filterYear"><option value="">السنة</option></select>
+      <button class="btn" id="applyFilter">تطبيق</button>
+      <button class="toggle" id="resetFilter">إلغاء</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Overview -->
+    <section id="overview">
+      <div class="cards">
+        <div class="card"><h3>إجمالي الطلبات</h3><div class="num" id="totalRequests">0</div></div>
+        <div class="card"><h3>إجمالي الشاليهات</h3><div class="num" id="totalUnits">0</div></div>
+        <div class="card"><h3>الأكثر طلباً</h3><div class="num" id="topUnit">-</div></div>
+        <div class="card"><h3>نمو عن الشهر السابق</h3><div class="num" id="growthPerc">0%</div></div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section id="charts" style="display:none">
+      <div class="panel chart-row">
+        <div>
+          <h4>الطلبات حسب الشهر</h4>
+          <canvas id="monthsChart"></canvas>
+        </div>
+        <div>
+          <h4>أفضل 10 شاليهات</h4>
+          <canvas id="topChart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel chart-row" style="margin-top:12px">
+        <div>
+          <h4>توزيع الطلبات (دونات)</h4>
+          <canvas id="doughnutChart"></canvas>
+        </div>
+        <div>
+          <h4>ترند الطلبات (خط)</h4>
+          <canvas id="lineChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <section id="table" style="display:none">
+      <div class="table-wrap panel">
+        <table id="dataTable">
+          <thead><tr><th>رقم العقار</th><th>اسم العقار</th><th>عدد الطلبات</th><th>التاريخ</th><th>الوقت</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ====== إعدادات ====== */
+const API_URL = "https://script.google.com/macros/s/AKfycbwPeZKGJVdLRW3hGega8dOqtSMfQzJlNg7DWSSPcWiv3ko7JH220bE3FUTBeyUbbe5r/exec";
+
+/* حالة التخزين */
+let raw = [];
+let charts = {}; // نخزن مثيل Chart.js هنا
+
+/* ====== عناصر DOM ====== */
+const totalRequestsEl = document.getElementById('totalRequests');
+const totalUnitsEl = document.getElementById('totalUnits');
+const topUnitEl = document.getElementById('topUnit');
+const growthEl = document.getElementById('growthPerc');
+
+const filterDay = document.getElementById('filterDay');
+const filterMonth = document.getElementById('filterMonth');
+const filterYear = document.getElementById('filterYear');
+
+const tabs = document.querySelectorAll('.tab');
+tabs.forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  openSection(t.dataset.tab);
+}));
+
+document.getElementById('refreshBtn').addEventListener('click', loadAndRender);
+document.getElementById('themeBtn').addEventListener('click', ()=>document.body.classList.toggle('dark'));
+document.getElementById('applyFilter').addEventListener('click', applyFilters);
+document.getElementById('resetFilter').addEventListener('click', ()=>{ filterDay.value=''; filterMonth.value=''; filterYear.value=''; loadAndRender(); });
+document.getElementById('exportCsvBtn').addEventListener('click', exportCSV);
+document.getElementById('printBtn').addEventListener('click', ()=>window.print());
+
+/* ====== فتح تب ====== */
+function openSection(id){
+  document.getElementById('overview').style.display = id==='overview' ? 'block' : 'none';
+  document.getElementById('charts').style.display = id==='charts' ? 'block' : 'none';
+  document.getElementById('table').style.display = id==='table' ? 'block' : 'none';
+}
+
+/* ====== تحميل + عرض البيانات ====== */
+async function loadAndRender(){
+  try{
+    const res = await fetch(API_URL);
+    raw = await res.json();
+    // normalize: ensure numeric fields
+    raw = raw.map(r => ({
+      id: r["رقم العقار"],
+      name: (r["اسم العقار"]||'غير معروف').toString().trim(),
+      orders: Number(r["عدد الطلبات"]) || 0,
+      day: String(r["اليوم"]),
+      month: String(r["الشهر"]),
+      year: String(r["السنة"]),
+      time: r["الوقت"]
+    }));
+    renderAll(raw);
+    fillFilters(raw);
+  }catch(err){
+    console.error('Fetch error', err);
+    alert('خطأ في جلب البيانات. تأكد من وصول رابط JSON.');
+  }
+}
+
+/* ====== Fill Filters ====== */
+function fillFilters(data){
+  const days = Array.from(new Set(data.map(r=>r.day))).sort((a,b)=>a-b);
+  const months = Array.from(new Set(data.map(r=>r.month))).sort((a,b)=>a-b);
+  const years = Array.from(new Set(data.map(r=>r.year))).sort((a,b)=>a-b);
+
+  filterDay.innerHTML = '<option value=\"\">اليوم</option>' + days.map(d=>`<option value="${d}">${d}</option>`).join('');
+  filterMonth.innerHTML = '<option value=\"\">الشهر</option>' + months.map(m=>`<option value="${m}">${m}</option>`).join('');
+  filterYear.innerHTML = '<option value=\"\">السنة</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
+}
+
+/* ====== Apply Filters ====== */
+function applyFilters(){
+  const fday = filterDay.value;
+  const fmonth = filterMonth.value;
+  const fyear = filterYear.value;
+  const filtered = raw.filter(r=>{
+    return (!fday || r.day===fday) && (!fmonth || r.month===fmonth) && (!fyear || r.year===fyear);
+  });
+  renderAll(filtered);
+}
+
+/* ====== Render All (cards, charts, table) ====== */
+function renderAll(data){
+  // جمع عدد الطلبات الحقيقي per unit
+  const byUnit = {};
+  const byMonth = {};
+  data.forEach(r => {
+    byUnit[r.name] = (byUnit[r.name]||0) + (Number(r.orders)||0);
+    byMonth[r.month] = (byMonth[r.month]||0) + (Number(r.orders)||0);
+  });
+
+  // الكروت
+  const totalOrders = Object.values(byUnit).reduce((s,x)=>s+x,0);
+  totalRequestsEl.innerText = totalOrders;
+  totalUnitsEl.innerText = Object.keys(byUnit).length;
+  const sortedUnits = Object.entries(byUnit).sort((a,b)=>b[1]-a[1]);
+  topUnitEl.innerText = sortedUnits[0] ? `${sortedUnits[0][0]} (${sortedUnits[0][1]})` : '-';
+
+  // نمو حسب أشهر (نسبة نمو الشهر الأخير مقابل الذي قبله)
+  const monthsSorted = Object.keys(byMonth).map(m=>Number(m)).sort((a,b)=>a-b).map(String);
+  let growth = 0;
+  if(monthsSorted.length >= 2){
+    const last = byMonth[monthsSorted[monthsSorted.length-2]]||0;
+    const now = byMonth[monthsSorted[monthsSorted.length-1]]||0;
+    growth = last ? (((now - last) / last) * 100) : 100;
+  }
+  growthEl.innerText = `${growth===0?0:growth.toFixed(1)}%`;
+
+  // جداول
+  const tbody = document.querySelector('#dataTable tbody');
+  tbody.innerHTML = '';
+  // show each raw entry (not aggregated) so partner can inspect rows
+  data.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>A${r.id}</td><td>${r.name}</td><td>${r.orders}</td><td>${r.day}/${r.month}/${r.year}</td><td>${formatTime(r.time)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  // مخططات (أعد استخدامها إن وجدت)
+  // monthsChart
+  const monthsLabels = Object.keys(byMonth).sort((a,b)=>a-b);
+  const monthsValues = monthsLabels.map(k=>byMonth[k]||0);
+
+  if(charts.monthsChart) charts.monthsChart.destroy();
+  charts.monthsChart = new Chart(document.getElementById('monthsChart'), {
+    type:'bar',
+    data:{ labels: monthsLabels, datasets:[{ label:'طلبات', data: monthsValues, backgroundColor:'#2563eb' }] },
+    options:{ responsive:true, plugins:{ legend:{display:false} } }
+  });
+
+  // topChart - top 10 units
+  const top10 = sortedUnits.slice(0,10);
+  if(charts.topChart) charts.topChart.destroy();
+  charts.topChart = new Chart(document.getElementById('topChart'), {
+    type:'bar',
+    data:{ labels: top10.map(x=>x[0]), datasets:[{ label:'طلبات', data: top10.map(x=>x[1]), backgroundColor:'#06b6d4' }] },
+    options:{ indexAxis: 'y', responsive:true, plugins:{ legend:{display:false} } }
+  });
+
+  // doughnut
+  if(charts.doughnut) charts.doughnut.destroy();
+  charts.doughnut = new Chart(document.getElementById('doughnutChart'), {
+    type:'doughnut',
+    data:{ labels: top10.map(x=>x[0]), datasets:[{ data: top10.map(x=>x[1]), backgroundColor: generateColors(top10.length) }] },
+    options:{ responsive:true }
+  });
+
+  // line (trend)
+  if(charts.line) charts.line.destroy();
+  charts.line = new Chart(document.getElementById('lineChart'), {
+    type:'line',
+    data:{ labels: monthsLabels, datasets:[{ label:'ترند الطلب', data: monthsValues, borderColor:'#4c6ef5', fill:false, tension:0.3 }] },
+    options:{ responsive:true }
+  });
+}
+
+/* ====== Utilities ====== */
+function generateColors(n){
+  const palette = ['#06b6d4','#4c6ef5','#00b894','#ff7675','#ff9f1a','#845ef7','#2bcbba','#e76f51','#f9c74f','#90be6d'];
+  return Array.from({length:n}).map((_,i)=>palette[i % palette.length]);
+}
+function formatTime(t){
+  if(!t) return '';
+  try{ const d = new Date(t); return d.toLocaleTimeString(); }catch(e){ return t; }
+}
+
+/* ====== Export CSV (Excel) ====== */
+function exportCSV(){
+  // Build aggregated CSV by unit (sum of عدد الطلبات)
+  const byUnit = {};
+  raw.forEach(r => byUnit[r.name] = (byUnit[r.name]||0) + Number(r.orders || 0));
+  const rows = [['اسم العقار','عدد الطلبات']];
+  Object.entries(byUnit).forEach(([k,v])=> rows.push([k,v]));
+
+  const csv = rows.map(r => r.map(cell=>`"${(cell+'').replace(/"/g,'""')}"`).join(',')).join('\\n');
+  const blob = Utilities.newBlob ? Utilities.newBlob(csv, 'text/csv') : new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  // if Utilities not available (client-side) use download link:
+  if(typeof Utilities === 'undefined'){
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = 'requests_summary.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }else{
+    // this branch won't run in browser; kept for AppsScript server-side alternative
+  }
+}
+
+/* ====== Export PDF (print) ====== */
+function exportPDF(){
+  window.print();
+}
+
+/* ====== Init ====== */
+loadAndRender();
+</script>
+
+</body>
+</html>
