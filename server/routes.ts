@@ -497,7 +497,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return 'desktop';
   }
 
-  // تتبع زيارات الصفحات (Page Views) - بناءً على IP فقط
+  // تتبع زيارات الصفحات (Page Views) - تحديث الإحصائيات فقط (لا تسجل في الطلبات)
   app.post("/api/track-pageview", async (req, res) => {
     try {
       const { propertyNumber, userAgent: clientUA } = req.body;
@@ -513,7 +513,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const now_date = getRiyadhTime();
       const now_timestamp = now_date.getTime();
 
-      // تحقق من آخر زيارة من نفس IP لنفس العقار
+      // تحقق من آخر زيارة من نفس IP لنفس العقار (من جدول الطلبات فقط للتحقق من 24 ساعة)
       const allRequests = await storage.getRequests();
       const lastVisitFromIP = allRequests
         .filter(r => r.propertyNumber === propertyNumber && r.ipAddress === ipAddress)
@@ -525,38 +525,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const timeDifference = now_timestamp - lastVisitTime;
         const hoursDifference = timeDifference / (1000 * 60 * 60);
 
-        // إذا كانت أقل من 24 ساعة، لا تسجل زيارة جديدة
+        // إذا كانت أقل من 24 ساعة، لا تحدّث الإحصائيات
         if (hoursDifference < 24) {
           console.log(`⏭️ تم تخطي الزيارة: نفس IP من ${propertyNumber} في آخر 24 ساعة (${hoursDifference.toFixed(1)} ساعة)`);
           return res.json({ ok: true, skipped: true, message: "تم تسجيل زيارتك مسبقاً، يمكنك التصويت مجدداً بعد 24 ساعة" });
         }
       }
 
-      // سجل الزيارة الجديدة
-      const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      const dayOfWeek = daysAr[now_date.getUTCDay()];
-      const hourOfDay = now_date.getUTCHours();
+      // تحديث الإحصائيات فقط (بدون تسجيل في جدول الطلبات)
+      console.log(`📊 تحديث الإحصائيات: IP ${ipAddress} → ${propertyNumber}`);
+      await googleSheetsService.updateAnalyticsRow();
 
-      const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-
-      // احصل على User-Agent من body أولاً (من الأمام)، ثم من server header كـ fallback
-      const userAgent = clientUA || 
-                       req.headers['user-agent'] || 
-                       '';
-      const deviceType = detectDeviceType(userAgent);
-
-      await storage.createRequest({
-        propertyNumber,
-        requestCode: viewCode,
-        timestamp: now_date.toISOString(),
-        ipAddress,
-        deviceType,
-        dayOfWeek,
-        hourOfDay,
-      });
-
-      console.log(`✅ زيارة جديدة: IP ${ipAddress} → ${propertyNumber}`);
-      res.json({ ok: true, viewCode, recorded: true });
+      res.json({ ok: true, message: "تم تحديث الإحصائيات ✅" });
     } catch (err: any) {
       console.error("Page view tracking error:", err);
       res.status(500).json({ error: "خطأ في تسجيل الزيارة" });
