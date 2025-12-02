@@ -500,7 +500,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // تتبع زيارات الصفحات (Page Views) - بناءً على IP فقط
   app.post("/api/track-pageview", async (req, res) => {
     try {
-      const { propertyNumber } = req.body;
+      const { propertyNumber, userAgent: clientUA } = req.body;
       if (!propertyNumber) {
         return res.status(400).json({ error: "رقم العقار مطلوب" });
       }
@@ -539,8 +539,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
-      // احصل على User-Agent من الـ header الجديد (من الأمام) أو من الـ server header
-      const userAgent = (req.headers['x-client-ua'] as string) || 
+      // احصل على User-Agent من body أولاً (من الأمام)، ثم من server header كـ fallback
+      const userAgent = clientUA || 
                        req.headers['user-agent'] || 
                        '';
       const deviceType = detectDeviceType(userAgent);
