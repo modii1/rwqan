@@ -1130,74 +1130,105 @@ const request = await storage.createRequest(
   // ======================================================
   // 📊 جلب إحصائيات العقار
   // ======================================================
-  app.get("/api/owner/analytics", requireOwner, async (req, res) => {
-    try {
-      const propertyNumber = (req.session as any).propertyNumber;
-      if (!propertyNumber) {
-        return res.status(400).json({ error: "Property not found in session" });
+app.get("/api/owner/analytics", async (req, res) => {
+  try {
+    const propertyNumber = req.session.propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "NOT_LOGGED_IN" });
+    }
+
+    // --------------------------------------------------------
+    // 1) جلب الطلبات الحقيقية للعقار
+    // --------------------------------------------------------
+    const requests = await googleSheetsService.getRequests();
+    const propertyRequests = requests.filter(
+      (r) => r.propertyNumber === propertyNumber
+    );
+
+    // --------------------------------------------------------
+    // 2) جلب إحصائيات الزوار الفريدة
+    // --------------------------------------------------------
+    const analytics = await googleSheetsService.getAnalyticsFromSheet();
+
+    const visitors = analytics?.visitors || 0;
+    const mobile = analytics?.mobile || 0;
+    const desktop = analytics?.desktop || 0;
+    const tablet = analytics?.tablet || 0;
+    const cities = analytics?.cities || "لا توجد بيانات";
+
+    // --------------------------------------------------------
+    // 3) إجمالي الطلبات
+    // --------------------------------------------------------
+    const totalRequests = propertyRequests.length;
+
+    // --------------------------------------------------------
+    // 4) أعلى يوم طلب (Top Day)
+    // --------------------------------------------------------
+    let topDay = "لا يوجد";
+    if (propertyRequests.length > 0) {
+      const counter: Record<string, number> = {};
+      for (const r of propertyRequests) {
+        const day = r.dayOfWeek || "غير معروف";
+        counter[day] = (counter[day] || 0) + 1;
       }
 
-      // قراءة بيانات الطلبات لحساب الإحصائيات
-      const requestsSheet = await googleSheetsService.readSheet("الطلبات");
-      const allProperties = await googleSheetsService.readSheet("بيانات العقارات");
-      
-      // حساب الإحصائيات
-      const thisMonth = new Date();
-      const lastMonth = new Date(thisMonth.getTime() - 30 * 24 * 60 * 60 * 1000);
-      
-      const thisMonthRequests = requestsSheet?.slice(1).filter((row: any) => {
-        const reqDate = new Date(row[2] || "");
-        return row[1] === propertyNumber && reqDate >= lastMonth;
-      }).length || 0;
-      
-      const previousMonthRequests = requestsSheet?.slice(1).filter((row: any) => {
-        const reqDate = new Date(row[2] || "");
-        return row[1] === propertyNumber && reqDate < lastMonth && reqDate >= new Date(lastMonth.getTime() - 30 * 24 * 60 * 60 * 1000);
-      }).length || 0;
-      
-      const growth = previousMonthRequests > 0 
-        ? Math.round(((thisMonthRequests - previousMonthRequests) / previousMonthRequests) * 100)
-        : 0;
-
-      // حساب أفضل يوم
-      const dayStats: Record<string, number> = {};
-      requestsSheet?.slice(1).forEach((row: any) => {
-        if (row[1] === propertyNumber) {
-          const reqDate = new Date(row[2] || "");
-          const day = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][reqDate.getDay()];
-          dayStats[day] = (dayStats[day] || 0) + 1;
-        }
-      });
-
-      const highestDemandDay = Object.entries(dayStats).sort((a, b) => b[1] - a[1])[0]?.[0] || "الجمعة";
-      const averageDailyRequests = Math.round(thisMonthRequests / 30);
-
-      res.json({
-        monthlyWhatsappRequests: thisMonthRequests,
-        previousMonthGrowth: growth,
-        averageDailyRequests,
-        highestDemandDay,
-        engagementRate: thisMonthRequests > 5 ? "مرتفع" : thisMonthRequests > 0 ? "متوسط" : "منخفض",
-        peakRequestPeriod: "المساء",
-        visibilityStatus: "ظهور عادي",
-        previousMonthRequests,
-        totalPropertiesInSystem: allProperties?.length - 1 || 0,
-      });
-    } catch (err: any) {
-      console.error("Analytics error:", err?.message);
-      res.json({
-        monthlyWhatsappRequests: 0,
-        previousMonthGrowth: 0,
-        averageDailyRequests: 0,
-        highestDemandDay: "الجمعة",
-        engagementRate: "متوسط",
-        peakRequestPeriod: "المساء",
-        visibilityStatus: "عادي",
-        previousMonthRequests: 0,
-        totalPropertiesInSystem: 0,
-      });
+      topDay = Object.entries(counter).sort((a, b) => b[1] - a[1])[0][0];
     }
-  });
+
+    // --------------------------------------------------------
+    // 5) تحليل آخر 7 أيام لحساب النمو
+    // --------------------------------------------------------
+    const now = new Date();
+    const last7 = now.getTime() - 7 * 86400000;
+    const last14 = now.getTime() - 14 * 86400000;
+
+    const weekData = {
+      thisWeek: 0,
+      lastWeek: 0,
+    };
+
+    for (const r of propertyRequests) {
+      const t = new Date(r.timestamp).getTime();
+      if (t >= last7) weekData.thisWeek++;
+      else if (t >= last14) weekData.lastWeek++;
+    }
+
+    const growth =
+      weekData.lastWeek === 0
+        ? 100
+        : Math.round(
+            ((weekData.thisWeek - weekData.lastWeek) /
+              weekData.lastWeek) *
+              100,
+          );
+
+    // --------------------------------------------------------
+    // 6) حساب نسبة التفاعل
+    // --------------------------------------------------------
+    const engagement =
+      visitors === 0 ? 0 : Math.min(100, Math.round((totalRequests / visitors) * 100));
+
+    // --------------------------------------------------------
+    // 7) الرد النهائي
+    // --------------------------------------------------------
+    return res.json({
+      visitors,
+      mobile,
+      desktop,
+      tablet,
+      cities,
+      totalRequests,
+      topDay,
+      growth,
+      engagement,
+      lastUpdated: analytics?.lastUpdated || "",
+    });
+  } catch (error) {
+    console.error("❌ Owner analytics error:", error);
+    return res.status(500).json({ error: "SERVER_ERROR" });
+  }
+});
+
 
   // ======================================================
   // 🔴 حذف صورة من R2 باستخدام URL

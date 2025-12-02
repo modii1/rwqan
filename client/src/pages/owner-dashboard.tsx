@@ -35,6 +35,49 @@ export default function OwnerDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [showRequestsStats, setShowRequestsStats] = useState(false);
 
+
+  // ===================== دالة استخراج فترة الذروة =====================
+  function getPeakPeriod(requests: any[]) {
+    if (!requests || requests.length === 0) return "غير محدد";
+
+    const dayNames = [
+      "الأحد",
+      "الإثنين",
+      "الثلاثاء",
+      "الأربعاء",
+      "الخميس",
+      "الجمعة",
+      "السبت",
+    ];
+
+    const dayCount: Record<string, number> = {};
+    const hourCount: Record<number, number> = {};
+
+    requests.forEach((req) => {
+      const d = new Date(req.timestamp);
+      const day = dayNames[d.getDay()];
+      const hour = d.getHours();
+
+      dayCount[day] = (dayCount[day] || 0) + 1;
+      hourCount[hour] = (hourCount[hour] || 0) + 1;
+    });
+
+    const bestDay =
+      Object.entries(dayCount).sort(([, a], [, b]) => b - a)[0]?.[0] ||
+      "غير محدد";
+
+    const bestHour =
+      Number(
+        Object.entries(hourCount).sort(([, a], [, b]) => b - a)[0]?.[0]
+      ) || 0;
+
+    const suffix = bestHour >= 12 ? "مساءً" : "صباحاً";
+    const hour12 = bestHour % 12 || 12;
+
+    return `${bestDay} – ${hour12} ${suffix}`;
+  }
+
+  
   // 1) Session check
   const { data: sessionData, isLoading: isSessionLoading } = useQuery<{
     isLoggedIn: boolean;
@@ -162,56 +205,66 @@ export default function OwnerDashboard() {
   };
 
   // ===== حساب الإحصائيات من البيانات الفعلية =====
-  const calculateAnalytics = () => {
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+const calculateAnalytics = () => {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
 
-    if (!requestsData?.requests || requestsData.requests.length === 0) {
-      return {
-        monthlyRequests: 0,
-        dailyAverage: 0,
-        highestDemandDay: "الجمعة",
-        previousMonthGrowth: 0,
-        totalProperties: 1,
-      };
-    }
+  const allRequests = requestsData?.requests || [];
 
-    // طلبات هذا الشهر
-    const monthlyRequests = requestsData.requests.filter((req: any) => {
-      const reqDate = new Date(req.timestamp);
-      return reqDate.getMonth() === currentMonth && reqDate.getFullYear() === currentYear;
-    }).length;
+  // طلبات هذا الشهر
+  const monthlyRequestsArray = allRequests.filter((req: any) => {
+    const d = new Date(req.timestamp);
+    return (
+      d.getMonth() === currentMonth &&
+      d.getFullYear() === currentYear
+    );
+  });
 
-    // اليوم الأعلى طلباً (من هذا الشهر)
-    const dayCount: Record<string, number> = {};
-    const dayNames = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+  const monthlyRequests = monthlyRequestsArray.length;
 
-    requestsData.requests
-      .filter((req: any) => {
-        const reqDate = new Date(req.timestamp);
-        return reqDate.getMonth() === currentMonth && reqDate.getFullYear() === currentYear;
-      })
-      .forEach((req: any) => {
-        const day = dayNames[new Date(req.timestamp).getDay()];
-        dayCount[day] = (dayCount[day] || 0) + 1;
-      });
+  // اليوم الأعلى طلباً
+  const dayNames = [
+    "الأحد",
+    "الإثنين",
+    "الثلاثاء",
+    "الأربعاء",
+    "الخميس",
+    "الجمعة",
+    "السبت",
+  ];
 
-    const highestDemandDay =
-      Object.entries(dayCount).sort(([, a], [, b]) => b - a)[0]?.[0] || "الجمعة";
+  const dayCount: Record<string, number> = {};
 
-    // متوسط الطلبات يومياً
-    const uniqueDays = Object.keys(dayCount).length || 1;
-    const dailyAverage = Math.round(monthlyRequests / uniqueDays);
+  monthlyRequestsArray.forEach((req: any) => {
+    const d = new Date(req.timestamp);
+    const day = dayNames[d.getDay()];
+    dayCount[day] = (dayCount[day] || 0) + 1;
+  });
 
-    return {
-      monthlyRequests,
-      dailyAverage,
-      highestDemandDay,
-      previousMonthGrowth: 0,
-      totalProperties: 1,
-    };
+  const highestDemandDay =
+    Object.keys(dayCount).length
+      ? Object.entries(dayCount).sort(([, a], [, b]) => b - a)[0][0]
+      : "لا يوجد بيانات";
+
+  // متوسط الطلبات يومياً
+  const uniqueDays = Object.keys(dayCount).length || 1;
+  const dailyAverage = Math.round(monthlyRequests / uniqueDays);
+
+  // 🔥 هنا مكان peakPeriod الصحيح
+  const peakPeriod = getPeakPeriod(allRequests);
+
+  return {
+    monthlyRequests,
+    dailyAverage,
+    highestDemandDay,
+    previousMonthGrowth: 0,
+    totalProperties: 1,
+    peakPeriod, // ⬅ أعدناها هنا
   };
+};
+
+
 
   const stats = calculateAnalytics();
 
@@ -335,72 +388,85 @@ export default function OwnerDashboard() {
             </div>
           </Card>
 
-          {/* أداء العقار */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-primary">أداء العقار</h2>
-              <Badge variant="outline" className="flex items-center gap-1">
-                <Activity className="w-3 h-3" />
-                تجريبي
-              </Badge>
-            </div>
-              <div className="grid grid-cols-2 gap-4">
-              <StatCard
-                label="معدل التفاعل"
-                value={analytics?.engagementRate || "متوسط"}
-                icon={<Activity className="w-4 h-4" />}
-              />
-              <StatCard
-                label="الأكثر طلباً"
-                value={analytics?.peakRequestPeriod || "فترة المساء"}
-                icon={<BarChart2 className="w-4 h-4" />}
-              />
-              <StatCard
-                label="نمو عن الشهر الماضي"
-                value={`+${analytics?.previousMonthGrowth || 0}%`}
-                icon={<TrendingUpIcon />}
-              />
-              <StatCard
-                label="حالة الظهور"
-                value={isVip ? "بارز في القائمة" : (analytics?.visibilityStatus || "ظهور عادي")}
-                icon={<Eye className="w-4 h-4" />}
-              />
-            </div>
-          </Card>
+{/* ===== أداء العقار ===== */}
+<Card className="p-6">
+  <div className="flex items-center justify-between mb-4">
+    <h2 className="text-lg font-bold text-primary">أداء العقار</h2>
+    <Badge variant="outline" className="flex items-center gap-1">
+      <Activity className="w-3 h-3" />
+      تحليلات ذكية
+    </Badge>
+  </div>
+
+  <div className="grid grid-cols-2 gap-4">
+    {/* معدل التفاعل */}
+    <StatCard
+      label="معدل التفاعل"
+      value={analytics?.engagementRate || "متوسط"}
+      icon={<Activity className="w-4 h-4" />}
+    />
+
+    {/* فترة الذروة: يوم + ساعة */}
+    <StatCard
+      label="فترة الذروة"
+      value={stats.peakPeriod}
+      icon={<BarChart2 className="w-4 h-4" />}
+    />
+
+    {/* نسبة النمو */}
+    <StatCard
+      label="النمو الشهري"
+      value={`+${analytics?.previousMonthGrowth || 0}%`}
+      icon={<TrendingUpIcon />}
+    />
+
+    {/* حالة الظهور */}
+    <StatCard
+      label="حالة الظهور"
+      value={isVip ? "ظهور بارز" : analytics?.visibilityStatus || "ظهور عادي"}
+      icon={<Eye className="w-4 h-4" />}
+    />
+  </div>
+</Card>
+
         </div>
 
-        {/* ===== تحليلات المالك (Analytics) ===== */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-primary">تحليلات وملخص</h2>
-            <Badge variant="outline" className="text-xs">
-              بيانات حقيقية من طلبات واتساب
-            </Badge>
-          </div>
+{/* ===== تحليلات وملخص ===== */}
+<Card className="p-6">
+  <div className="flex items-center justify-between mb-4">
+    <h2 className="text-lg font-bold text-primary">تحليلات وملخص</h2>
+    <Badge variant="outline" className="text-xs">
+      بيانات حقيقية
+    </Badge>
+  </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <AnalyticsBox
-              label="طلبات واتساب هذا الشهر"
-              value={String(stats.monthlyRequests)}
-              note={`نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`}
-            />
-            <AnalyticsBox
-              label="إجمالي الشاليهات في النظام"
-              value={String(stats.totalProperties)}
-              note="موقعك بين الأعلى طلباً"
-            />
-            <AnalyticsBox
-              label="متوسط الطلبات يومياً"
-              value={String(stats.dailyAverage)}
-              note="معدل ثابت وجيد"
-            />
-            <AnalyticsBox
-              label="اليوم الأعلى طلباً"
-              value={stats.highestDemandDay}
-              note="ركّز عروضك في نهاية الأسبوع"
-            />
-          </div>
-        </Card>
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <AnalyticsBox
+      label="طلبات واتساب هذا الشهر"
+      value={String(stats.monthlyRequests)}
+      note={`نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`}
+    />
+
+    <AnalyticsBox
+      label="متوسط الطلبات يومياً"
+      value={String(stats.dailyAverage)}
+      note="معدل ثابت وجيد"
+    />
+
+    <AnalyticsBox
+      label="اليوم الأعلى طلباً"
+      value={stats.highestDemandDay}
+      note="ركز عروضك في أيام الذروة"
+    />
+
+    <AnalyticsBox
+      label="ترتيبك بين العقارات"
+      value={`#${stats.rank || 1}`}
+      note={`من أصل ${stats.totalProperties} عقار`}
+    />
+  </div>
+</Card>
+
 
         {/* ===== أزرار التحكم (أيقونات كبيرة) ===== */}
         <Card className="p-6">
