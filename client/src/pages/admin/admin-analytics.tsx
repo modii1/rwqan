@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye, Eye as EyeIcon } from "lucide-react";
+import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye, Dot } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AdminAnalytics() {
@@ -61,6 +61,23 @@ export default function AdminAnalytics() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+        {/* Active Users - Real-time */}
+        <Card className="p-6 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950 dark:to-red-900 border-red-200 dark:border-red-800 ring-2 ring-red-300 dark:ring-red-700">
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <p className="text-sm text-muted-foreground mb-2 font-medium">الزوار الحاليين (الآن)</p>
+              <p className="text-5xl font-bold text-red-600 dark:text-red-400">
+                {activeUsersData?.activeUsers ?? 0}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">يتحدث بشكل فوري كل 3 ثواني</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Dot className="w-6 h-6 text-red-500 animate-pulse" />
+              <span className="text-sm font-semibold text-red-600 dark:text-red-400">نشط</span>
+            </div>
+          </div>
+        </Card>
+
         {/* KPIs - Row 1 */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800">
@@ -214,55 +231,26 @@ export default function AdminAnalytics() {
           </div>
         </Card>
 
-        {/* Visitor Details */}
-        <Card className="p-6 border-2 border-primary/20">
-          <div className="mb-6">
-            <h2 className="text-xl font-bold text-primary mb-2 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Eye className="w-6 h-6 text-primary" />
+        {/* Active Users Status */}
+        <Card className="p-6 border-2 border-primary/20 bg-gradient-to-r from-green-50 to-transparent dark:from-green-950/30">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                <Users className="w-8 h-8 text-green-600 dark:text-green-400" />
               </div>
-              تفاصيل الزوار
-            </h2>
-            <p className="text-sm text-muted-foreground">آخر {Math.min(visitorsData?.visitors?.length || 0, 100)} زائر</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b-2 border-primary/20 bg-primary/5">
-                  <th className="text-right p-4 font-semibold text-primary">اسم العقار</th>
-                  <th className="text-right p-4 font-semibold text-primary">الجهاز</th>
-                  <th className="text-right p-4 font-semibold text-primary">IP العميل</th>
-                  <th className="text-right p-4 font-semibold text-primary">اليوم والساعة</th>
-                  <th className="text-right p-4 font-semibold text-primary">التاريخ والوقت</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visitorsData?.visitors?.slice(0, 50)?.map((visitor: any, idx: number) => (
-                  <tr key={idx} className="border-b border-border/50 hover:bg-primary/5 transition-colors">
-                    <td className="p-4 font-semibold text-foreground">{visitor.propertyName}</td>
-                    <td className="p-4">
-                      <Badge variant="outline" className="flex w-fit gap-1">
-                        {visitor.deviceType === 'mobile' && <Smartphone className="w-3 h-3" />}
-                        {visitor.deviceType === 'desktop' && <Monitor className="w-3 h-3" />}
-                        {visitor.deviceType === 'tablet' && <Tablet className="w-3 h-3" />}
-                        <span>{
-                          visitor.deviceType === 'mobile' ? 'جوال' :
-                          visitor.deviceType === 'tablet' ? 'تابلت' :
-                          'سطح المكتب'
-                        }</span>
-                      </Badge>
-                    </td>
-                    <td className="p-4 font-mono text-muted-foreground text-xs">{visitor.ipAddress}</td>
-                    <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
-                    <td className="p-4 text-muted-foreground">
-                      {visitor.timestamp
-                        ? new Date(visitor.timestamp).toLocaleString("ar-SA")
-                        : "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              <div>
+                <p className="font-semibold text-foreground">عدد الزوار النشطين الآن</p>
+                <p className="text-sm text-muted-foreground">يُحدّث كل 3 ثوان بشكل تلقائي</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-5xl font-bold text-green-600 dark:text-green-400">
+                {activeUsersData?.activeUsers ?? 0}
+              </p>
+              <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                {activeUsersData?.activeUsers ?? 0} شخص يشاهدون الآن
+              </p>
+            </div>
           </div>
         </Card>
 
