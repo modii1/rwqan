@@ -1114,8 +1114,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       await this.appendToSheet(SHEETS.REQUESTS, [row]);
       
-      // ملاحظة: لا نستدعي updateAnalytics هنا لتجنب صفوف مكررة
-      // الإحصائيات تُحسب على الطاير من /api/admin/analytics
+      // تحديث الإحصائيات بتحديث صف واحد فقط (بدون إضافة صفوف مكررة)
+      await this.updateAnalyticsRow();
       
       return {
         id: `REQ-${Date.now()}`,
@@ -1170,7 +1170,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     }
   }
 
-  async updateAnalytics() {
+  // تحديث صف الإحصائيات الواحد (بدون إضافة صفوف مكررة)
+  async updateAnalyticsRow() {
     try {
       const allRequestsRows = await this.readSheet(SHEETS.REQUESTS);
       const totalProps = await this.getProperties();
@@ -1206,7 +1207,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       });
 
       // 3. توزيع المدن (حسب الـ IPs الفريدة)
-      const cityCounts: Record<string, Set<string>> = {}; // استخدم Set للـ IPs الفريدة لكل مدينة
+      const cityCounts: Record<string, Set<string>> = {};
       uniqueRequests.forEach(r => {
         const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
         const city = prop?.city || 'غير محدد';
@@ -1226,7 +1227,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const now = new Date();
       const lastUpdated = now.toLocaleString('ar-SA');
 
-      // حفظ الصف الجديد
+      // تحديث صف واحد فقط (صف #2) بدلاً من إضافة صفوف جديدة
       const analyticsRow = [
         String(visitors),
         String(devices.mobile),
@@ -1236,11 +1237,23 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         lastUpdated,
       ];
 
-      await this.appendToSheet(SHEETS.ANALYTICS, [analyticsRow]);
+      const sheets = await this.getSheets();
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.ANALYTICS}!A2:F2`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [analyticsRow] },
+      });
+
       console.log(`📊 Analytics (Unique IPs): ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
     } catch (err) {
-      console.error("updateAnalytics error:", err);
+      console.error("updateAnalyticsRow error:", err);
     }
+  }
+
+  async updateAnalytics() {
+    // للتوافقية فقط - استدعاء updateAnalyticsRow
+    return this.updateAnalyticsRow();
   }
 }
 
