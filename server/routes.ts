@@ -478,11 +478,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // دالة تحديد نوع الجهاز من User-Agent
   function detectDeviceType(userAgent: string): 'mobile' | 'desktop' | 'tablet' {
-    if (!userAgent) return 'desktop';
+    if (!userAgent) {
+      console.log("⚠️ No User-Agent provided, defaulting to desktop");
+      return 'desktop';
+    }
     const ua = userAgent.toLowerCase();
+    console.log(`🔍 Detecting device from UA: ${ua.substring(0, 100)}...`);
     
-    if (/ipad|android(?!.*mobile)|kindle|playbook|silk/.test(ua)) return 'tablet';
-    if (/mobile|android|iphone|ipod|blackberry|iemobile|opera mini|windows phone/.test(ua)) return 'mobile';
+    if (/ipad|android(?!.*mobile)|kindle|playbook|silk/.test(ua)) {
+      console.log("📱 Detected: TABLET");
+      return 'tablet';
+    }
+    if (/mobile|android|iphone|ipod|blackberry|iemobile|opera mini|windows phone/.test(ua)) {
+      console.log("📱 Detected: MOBILE");
+      return 'mobile';
+    }
+    console.log("🖥️ Detected: DESKTOP");
     return 'desktop';
   }
 
@@ -528,8 +539,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
-      // احصل على User-Agent وحدد نوع الجهاز
-      const userAgent = req.headers['user-agent'] || '';
+      // احصل على User-Agent من الـ header الجديد (من الأمام) أو من الـ server header
+      const userAgent = (req.headers['x-client-ua'] as string) || 
+                       req.headers['user-agent'] || 
+                       '';
       const deviceType = detectDeviceType(userAgent);
 
       await storage.createRequest({
