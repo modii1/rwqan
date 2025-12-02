@@ -169,7 +169,10 @@ export default function PropertyDetailsPage() {
       try {
         await fetch("/api/track-pageview", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "X-Client-UA": navigator.userAgent,
+          },
           body: JSON.stringify({ propertyNumber: propertyId }),
         });
       } catch (err) {
