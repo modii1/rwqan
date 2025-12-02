@@ -7,6 +7,7 @@ import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
+import { useToast } from "@/hooks/use-toast";
 
 // ⭐ مؤشر السحب الذهبي في منتصف الشاشة (لا يلمس أي شيء من تصميمك)
 // ⭐ مؤشر السحب المتدرّج (مجموعة أسهم)
@@ -51,6 +52,7 @@ function isVerified(property: PropertyDetails) {
 export default function PropertyDetailsPage() {
   const [, params] = useRoute<{ id: string }>("/property/:id");
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -295,12 +297,16 @@ export default function PropertyDetailsPage() {
         // إذا حدث خطأ (مثل التكرار)
         if (result.remainingTimeFormatted) {
           // إظهار تنبيه للمستخدم
-          alert(`⏱️ انتظر: ${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`);
+          toast({
+            title: "⏱️ انتظر",
+            description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
+            variant: "destructive",
+          });
         }
         return;
       }
 
-      // إذا نجح: افتح واتساب
+      // إذا نجح: افتح واتساب فوراً بدون alert
       const DEFAULT_WHATSAPP = "966533220646";
       const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
       const nameText = isVerified(property) ? ` - ${property.name}` : "";
@@ -308,10 +314,18 @@ export default function PropertyDetailsPage() {
       const url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
       window.open(url, "_blank");
 
-      // إظهار رسالة النجاح
-      alert(`✅ تم تسجيل طلبك\nفي ${result.requestTime}`);
+      // إظهار رسالة النجاح بـ toast بدون حجب واجهة المستخدم
+      toast({
+        title: "✅ تم تسجيل طلبك",
+        description: `في ${result.requestTime}`,
+      });
     } catch (error) {
       console.error("Error creating WhatsApp request:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ عند تسجيل الطلب",
+        variant: "destructive",
+      });
     }
   };
 
