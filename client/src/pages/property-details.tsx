@@ -56,6 +56,7 @@ export default function PropertyDetailsPage() {
 
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [isSubmittingWhatsApp, setIsSubmittingWhatsApp] = useState(false);
 
   const propertyId = params?.id ?? "";
 
