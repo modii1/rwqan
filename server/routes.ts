@@ -208,41 +208,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Active Users - Session Tracking
-  app.post("/api/session/start", (req, res) => {
-    try {
-      const sessionId = req.body.sessionId || `session-${Date.now()}-${Math.random()}`;
-      storage.startSession(sessionId);
-      res.json({ sessionId, status: "started" });
-    } catch (err) {
-      console.error("Session start error:", err);
-      res.status(500).json({ error: "Failed to start session" });
-    }
-  });
-
-  app.post("/api/session/end", (req, res) => {
-    try {
-      const { sessionId } = req.body;
-      if (sessionId) {
-        storage.endSession(sessionId);
-      }
-      res.json({ status: "ended" });
-    } catch (err) {
-      console.error("Session end error:", err);
-      res.status(500).json({ error: "Failed to end session" });
-    }
-  });
-
-  app.get("/api/active-users", async (req, res) => {
-    try {
-      const count = await storage.getActiveSessions();
-      res.json({ activeUsers: count });
-    } catch (err) {
-      console.error("Active users error:", err);
-      res.status(500).json({ error: "Failed to get active users", activeUsers: 0 });
-    }
-  });
-
 
 
   // ======================
@@ -410,7 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/requests/smart", async (req, res) => {
     try {
-      const { propertyNumber, deviceType: clientDeviceType, userAgent: clientUA } = req.body;
+      const { propertyNumber } = req.body;
       if (!propertyNumber) {
         return res.status(400).json({ error: "رقم العقار مطلوب" });
       }
@@ -420,10 +385,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
         req.socket.remoteAddress ||
         "unknown";
-
-      // حدد نوع الجهاز: استخدم ما أرسله الـ client، أو استخرجه من User-Agent
-      let deviceType: 'mobile' | 'desktop' | 'tablet' = clientDeviceType || detectDeviceType(clientUA || String(req.headers['user-agent']));
-      console.log(`📱 Device Type - Client: ${clientDeviceType}, Detected: ${deviceType}, IP: ${ipAddress}`);
 
       const now = Date.now();
       const thirtyMinutes = 30 * 60 * 1000;
@@ -486,7 +447,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ipAddress,
           dayOfWeek,
           hourOfDay,
-          deviceType,
         },
         newCount
       );

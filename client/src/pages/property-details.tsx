@@ -56,6 +56,7 @@ export default function PropertyDetailsPage() {
 
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [isSubmittingWhatsApp, setIsSubmittingWhatsApp] = useState(false);
 
   const propertyId = params?.id ?? "";
 
@@ -282,17 +283,38 @@ export default function PropertyDetailsPage() {
   const displayName = isVerified(property) ? property.name : "";
 
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
-  const handleWhatsApp = async () => {
-    try {
-      // كشف نوع الجهاز
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isTablet = /iPad|Android(?!.*Mobile)|Kindle|PlayBook|Silk/.test(navigator.userAgent);
-      const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
-      
-      console.log(`📱 Device Type Detected: ${deviceType}, User-Agent: ${navigator.userAgent}`);
+  const handleWhatsApp = () => {
+    // منع التكرار إذا كان الطلب قيد الانتظار
+    if (isSubmittingWhatsApp) {
+      console.warn("⚠️ الطلب قيد الانتظار، منع التكرار");
+      return;
+    }
 
-      // تسجيل الطلب في النظام الذكي - مع إرسال deviceType
-      const response = await fetch("/api/requests/smart", {
+    setIsSubmittingWhatsApp(true);
+
+    try {
+      // فتح واتساب فوراً (سرعة)
+      const DEFAULT_WHATSAPP = "966533220646";
+      const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
+      const nameText = isVerified(property) ? ` - ${property.name}` : "";
+      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
+      
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        // على الجوال: استخدم whatsapp:// scheme
+        window.location.href = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+      } else {
+        // على سطح المكتب: استخدم wa.me للسرعة
+        window.location.href = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+      }
+
+      // تسجيل الطلب في الخلفية (async - بدون انتظار)
+      const isMobileDevice = isMobile;
+      const isTablet = /iPad|Android(?!.*Mobile)|Kindle|PlayBook|Silk/.test(navigator.userAgent);
+      const deviceType = isTablet ? 'tablet' : isMobileDevice ? 'mobile' : 'desktop';
+      
+      fetch("/api/requests/smart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -300,53 +322,39 @@ export default function PropertyDetailsPage() {
           deviceType: deviceType,
           userAgent: navigator.userAgent
         }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        // إذا حدث خطأ (مثل التكرار)
-        if (result.remainingTimeFormatted) {
-          // إظهار تنبيه للمستخدم
-          toast({
-            title: "⏱️ انتظر",
-            description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
-            variant: "destructive",
+      }).then(response => {
+        if (response.ok) {
+          response.json().then(result => {
+            toast({
+              title: "✅ تم تسجيل طلبك",
+              description: `في ${result.requestTime}`,
+            });
+          });
+        } else {
+          response.json().then(result => {
+            if (result.remainingTimeFormatted) {
+              toast({
+                title: "⏱️ انتظر",
+                description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر`,
+                variant: "destructive",
+              });
+            }
           });
         }
-        return;
-      }
-
-      // إذا نجح: افتح واتساب فوراً
-      const DEFAULT_WHATSAPP = "966533220646";
-      const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
-      const nameText = isVerified(property) ? ` - ${property.name}` : "";
-      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
-      
-      let url: string;
-      
-      if (isMobile) {
-        // على الجوال: استخدم whatsapp:// scheme
-        url = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-        window.location.href = url;
-      } else {
-        // على سطح المكتب: استخدم web.whatsapp.com
-        url = `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
-      }
-
-      // إظهار رسالة النجاح بـ toast بدون حجب واجهة المستخدم
-      toast({
-        title: "✅ تم تسجيل طلبك",
-        description: `في ${result.requestTime}`,
+      }).catch(error => {
+        console.error("Error tracking request:", error);
+      }).finally(() => {
+        setIsSubmittingWhatsApp(false);
       });
+
     } catch (error) {
-      console.error("Error creating WhatsApp request:", error);
+      console.error("Error opening WhatsApp:", error);
       toast({
         title: "خطأ",
-        description: "حدث خطأ عند تسجيل الطلب",
+        description: "حدث خطأ عند فتح الواتس",
         variant: "destructive",
       });
+      setIsSubmittingWhatsApp(false);
     }
   };
 
