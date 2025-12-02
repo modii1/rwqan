@@ -486,7 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return 'desktop';
   }
 
-  // تتبع زيارات الصفحات (Page Views)
+  // تتبع زيارات الصفحات (Page Views) - بناءً على IP فقط
   app.post("/api/track-pageview", async (req, res) => {
     try {
       const { propertyNumber } = req.body;
@@ -494,18 +494,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "رقم العقار مطلوب" });
       }
 
-      const now_date = getRiyadhTime();
-      const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      const dayOfWeek = daysAr[now_date.getUTCDay()];
-      const hourOfDay = now_date.getUTCHours();
-
-      // احفظ الزيارة كطلب
-      const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-
       // احصل على IP العميل من الطلب
       const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
                        req.socket.remoteAddress || 
                        'unknown';
+
+      const now_date = getRiyadhTime();
+      const now_timestamp = now_date.getTime();
+
+      // تحقق من آخر زيارة من نفس IP لنفس العقار
+      const allRequests = await storage.getRequests();
+      const lastVisitFromIP = allRequests
+        .filter(r => r.propertyNumber === propertyNumber && r.ipAddress === ipAddress)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+      // إذا كانت هناك زيارة سابقة من نفس IP، تحقق من الـ 24 ساعة
+      if (lastVisitFromIP) {
+        const lastVisitTime = new Date(lastVisitFromIP.timestamp).getTime();
+        const timeDifference = now_timestamp - lastVisitTime;
+        const hoursDifference = timeDifference / (1000 * 60 * 60);
+
+        // إذا كانت أقل من 24 ساعة، لا تسجل زيارة جديدة
+        if (hoursDifference < 24) {
+          console.log(`⏭️ تم تخطي الزيارة: نفس IP من ${propertyNumber} في آخر 24 ساعة (${hoursDifference.toFixed(1)} ساعة)`);
+          return res.json({ ok: true, skipped: true, message: "تم تسجيل زيارتك مسبقاً، يمكنك التصويت مجدداً بعد 24 ساعة" });
+        }
+      }
+
+      // سجل الزيارة الجديدة
+      const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+      const dayOfWeek = daysAr[now_date.getUTCDay()];
+      const hourOfDay = now_date.getUTCHours();
+
+      const viewCode = `VIEW${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
       // احصل على User-Agent وحدد نوع الجهاز
       const userAgent = req.headers['user-agent'] || '';
@@ -521,7 +542,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hourOfDay,
       });
 
-      res.json({ ok: true, viewCode });
+      console.log(`✅ زيارة جديدة: IP ${ipAddress} → ${propertyNumber}`);
+      res.json({ ok: true, viewCode, recorded: true });
     } catch (err: any) {
       console.error("Page view tracking error:", err);
       res.status(500).json({ error: "خطأ في تسجيل الزيارة" });
