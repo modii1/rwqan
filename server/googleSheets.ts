@@ -1114,8 +1114,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       await this.appendToSheet(SHEETS.REQUESTS, [row]);
       
-      // تحديث بيانات الإحصائيات
-      await this.updateAnalytics();
+      // ملاحظة: لا نستدعي updateAnalytics هنا لتجنب صفوف مكررة
+      // الإحصائيات تُحسب على الطاير من /api/admin/analytics
       
       return {
         id: `REQ-${Date.now()}`,
