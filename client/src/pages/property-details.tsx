@@ -49,6 +49,26 @@ function isVerified(property: PropertyDetails) {
   );
 }
 
+function detectDeviceType() {
+  const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+
+  // iPhone / iPad / iPod
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iphone";
+
+  // Android phones
+  if (/Android/i.test(ua)) return "android";
+
+  // Detect Facebook, Instagram, TikTok internal browsers
+  if (/FBAN|FBAV|Instagram|IG|TikTok|Snapchat|SCBrowser/i.test(ua))
+    return "inapp";
+
+  // Desktop Browsers
+  if (/Windows|Macintosh|Linux/i.test(ua)) return "desktop";
+
+  return "unknown";
+}
+
+
 export default function PropertyDetailsPage() {
   const [, params] = useRoute<{ id: string }>("/property/:id");
   const [, setLocation] = useLocation();
@@ -171,21 +191,25 @@ export default function PropertyDetailsPage() {
     if (!propertyId) return;
     
     const trackView = async () => {
-      try {
-        await fetch("/api/track-pageview", {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ 
-            propertyNumber: propertyId,
-            userAgent: navigator.userAgent 
-          }),
-        });
-      } catch (err) {
-        console.log("Failed to track page view:", err);
-      }
-    };
+  try {
+    const deviceType = detectDeviceType();
+
+    await fetch("/api/track-pageview", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ 
+        propertyNumber: propertyId,
+        userAgent: navigator.userAgent,
+        device: deviceType,
+      }),
+    });
+  } catch (err) {
+    console.log("Failed to track page view:", err);
+  }
+};
+
     
     trackView();
   }, [propertyId]);
