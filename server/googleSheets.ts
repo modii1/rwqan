@@ -1237,9 +1237,10 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         .map(([name, ips]) => `${name}: ${ips.size}`)
         .join(" | ");
 
-      // 4. آخر تحديث
-      const now = new Date();
-      const lastUpdated = now.toLocaleString('ar-SA');
+      // 4. آخر تحديث (بتوقيت الرياض +3)
+      const utcNow = new Date();
+      const riyadhTime = new Date(utcNow.getTime() + (3 * 60 * 60 * 1000));
+      const lastUpdated = riyadhTime.toLocaleString('ar-SA');
 
       // تحديث صف واحد فقط (صف #2) بدلاً من إضافة صفوف جديدة
       const analyticsRow = [
@@ -1312,8 +1313,10 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       // 4️⃣ إضافة صف إحصائيات فارغ في الصف 2 (جاهز للتحديث)
       console.log("📝 إضافة صف الإحصائيات الأول...");
+      const utcNow2 = new Date();
+      const riyadhTime2 = new Date(utcNow2.getTime() + (3 * 60 * 60 * 1000));
       const initialAnalytics = [
-        ["0", "0", "0", "0", "لا توجد بيانات", new Date().toLocaleString('ar-SA')],
+        ["0", "0", "0", "0", "لا توجد بيانات", riyadhTime2.toLocaleString('ar-SA')],
       ];
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
