@@ -1269,6 +1269,67 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     // للتوافقية فقط - استدعاء updateAnalyticsRow
     return this.updateAnalyticsRow();
   }
+
+  // ================== تنظيف وإصلاح الشيتات ==================
+  async fixAndCleanSheets() {
+    try {
+      console.log("🔧 بدء تنظيف وإصلاح الشيتات...");
+      const sheets = await this.getSheets();
+
+      // 1️⃣ تحديث رؤوس جدول الطلبات بالرؤوس الصحيحة
+      console.log("✏️ تحديث رؤوس جدول الطلبات...");
+      const requestsHeaders = [
+        ["رقم العقار", "اسم العقار", "كود الطلب", "عنوان IP", "يوم الأسبوع", "الساعة", "اليوم", "الشهر", "السنة", "الوقت", "نوع الجهاز"],
+      ];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.REQUESTS}!A1:K1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: requestsHeaders },
+      });
+      console.log("✅ تم تحديث رؤوس جدول الطلبات");
+
+      // 2️⃣ تحديث رؤوس جدول الإحصائيات بالرؤوس الصحيحة
+      console.log("✏️ تحديث رؤوس جدول الإحصائيات...");
+      const analyticsHeaders = [
+        ["الزوار", "الأجهزة المحمولة", "أجهزة سطح المكتب", "الأجهزة اللوحية", "المدن", "آخر تحديث"],
+      ];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.ANALYTICS}!A1:F1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: analyticsHeaders },
+      });
+      console.log("✅ تم تحديث رؤوس جدول الإحصائيات");
+
+      // 3️⃣ مسح بيانات جدول الإحصائيات (ترك الرؤوس فقط)
+      console.log("🗑️ مسح بيانات جدول الإحصائيات القديمة...");
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.ANALYTICS}!A2:F1000`,
+      });
+      console.log("✅ تم مسح بيانات الإحصائيات");
+
+      // 4️⃣ إضافة صف إحصائيات فارغ في الصف 2 (جاهز للتحديث)
+      console.log("📝 إضافة صف الإحصائيات الأول...");
+      const initialAnalytics = [
+        ["0", "0", "0", "0", "لا توجد بيانات", new Date().toLocaleString('ar-SA')],
+      ];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.ANALYTICS}!A2:F2`,
+        valueInputOption: 'RAW',
+        requestBody: { values: initialAnalytics },
+      });
+      console.log("✅ تم إضافة صف الإحصائيات");
+
+      console.log("✨ تم إصلاح وتنظيف الشيتات بنجاح!");
+      return { success: true, message: "✨ تم إصلاح وتنظيف الشيتات بنجاح!" };
+    } catch (err) {
+      console.error("❌ خطأ في إصلاح الشيتات:", err);
+      throw err;
+    }
+  }
 }
 
 export const googleSheetsService = new GoogleSheetsService();
