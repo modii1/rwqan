@@ -1,8 +1,11 @@
 import express, { type ErrorRequestHandler } from "express";
+import session from "express-session";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite, log } from "./vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import MemoryStore from "memorystore";
 
 const app = express();
 
@@ -10,7 +13,43 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Object Storage public assets (Replit)
+// ====================================
+// 🚀 CORS SETTINGS (مهم جداً)
+// ====================================
+app.use(
+  cors({
+    origin: true,          // يسمح لكل الدومينات
+    credentials: true,     // يرسل الكوكيز
+  })
+);
+
+// ====================================
+// 🚀 SESSION SETTINGS (المهم جداً لعدم ظهور 401)
+// ====================================
+const memoryStore = new (MemoryStore(session))({
+  checkPeriod: 86400000, // كل 24 ساعة
+});
+
+app.set("trust proxy", 1); // Replit uses reverse proxy
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "moddy-secret-key-2025",
+    resave: false,
+    saveUninitialized: false,
+    store: memoryStore,
+    cookie: {
+      httpOnly: true,
+      secure: true,        // Replit uses HTTPS
+      sameSite: "none",    // ضروري لأن front/back دومين مختلف
+      maxAge: 1000 * 60 * 60 * 24 * 7, // أسبوع
+    },
+  })
+);
+
+// =====================================
+// Static storage for Object Storage
+// =====================================
 const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
 if (bucketId) {
   app.use("/public", express.static(`${bucketId}/public`));
@@ -22,6 +61,7 @@ if (bucketId) {
 
   // Error Handler
   const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+    console.error("❌ SERVER ERROR:", err);
     res.status(500).json({ message: "Server Error" });
   };
   app.use(errorHandler);
@@ -50,5 +90,7 @@ if (bucketId) {
 
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({ port, host: "0.0.0.0" }, () => {});  // Silent startup in production
+  server.listen({ port, host: "0.0.0.0" }, () => {
+    console.log("🚀 Server running on port", port);
+  });
 })();
