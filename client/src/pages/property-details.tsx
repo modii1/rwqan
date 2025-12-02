@@ -306,13 +306,25 @@ export default function PropertyDetailsPage() {
         return;
       }
 
-      // إذا نجح: افتح واتساب فوراً بدون alert
+      // إذا نجح: افتح واتساب فوراً
       const DEFAULT_WHATSAPP = "966533220646";
       const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
       const nameText = isVerified(property) ? ` - ${property.name}` : "";
       const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
-      const url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-      window.open(url, "_blank");
+      
+      // اختر الرابط الصحيح حسب نوع الجهاز
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      let url: string;
+      
+      if (isMobile) {
+        // على الجوال: استخدم whatsapp:// scheme
+        url = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+      } else {
+        // على سطح المكتب: استخدم https://wa.me/
+        url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+      }
+      
+      window.location.href = url;
 
       // إظهار رسالة النجاح بـ toast بدون حجب واجهة المستخدم
       toast({
