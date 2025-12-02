@@ -319,12 +319,12 @@ export default function PropertyDetailsPage() {
       if (isMobile) {
         // على الجوال: استخدم whatsapp:// scheme
         url = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+        window.location.href = url;
       } else {
-        // على سطح المكتب: استخدم https://wa.me/
-        url = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+        // على سطح المكتب: استخدم web.whatsapp.com
+        url = `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+        window.open(url, '_blank');
       }
-      
-      window.location.href = url;
 
       // إظهار رسالة النجاح بـ toast بدون حجب واجهة المستخدم
       toast({
