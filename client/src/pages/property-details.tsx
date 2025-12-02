@@ -305,8 +305,8 @@ export default function PropertyDetailsPage() {
         // على الجوال: استخدم whatsapp:// scheme
         window.location.href = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
       } else {
-        // على سطح المكتب: استخدم wa.me للسرعة
-        window.location.href = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+        // على سطح المكتب: استخدم web.whatsapp.com مع window.open
+        window.open(`https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`, '_blank');
       }
 
       // تسجيل الطلب في الخلفية (async - بدون انتظار)
