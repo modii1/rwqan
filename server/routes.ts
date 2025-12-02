@@ -410,7 +410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/requests/smart", async (req, res) => {
     try {
-      const { propertyNumber } = req.body;
+      const { propertyNumber, deviceType: clientDeviceType, userAgent: clientUA } = req.body;
       if (!propertyNumber) {
         return res.status(400).json({ error: "رقم العقار مطلوب" });
       }
@@ -420,6 +420,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
         req.socket.remoteAddress ||
         "unknown";
+
+      // حدد نوع الجهاز: استخدم ما أرسله الـ client، أو استخرجه من User-Agent
+      let deviceType: 'mobile' | 'desktop' | 'tablet' = clientDeviceType || detectDeviceType(clientUA || String(req.headers['user-agent']));
+      console.log(`📱 Device Type - Client: ${clientDeviceType}, Detected: ${deviceType}, IP: ${ipAddress}`);
 
       const now = Date.now();
       const thirtyMinutes = 30 * 60 * 1000;
@@ -482,6 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ipAddress,
           dayOfWeek,
           hourOfDay,
+          deviceType,
         },
         newCount
       );
