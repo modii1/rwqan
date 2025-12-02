@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
 import { useToast } from "@/hooks/use-toast";
+import { trackEvent } from "@/lib/analytics";
 
 // ⭐ مؤشر السحب الذهبي في منتصف الشاشة (لا يلمس أي شيء من تصميمك)
 // ⭐ مؤشر السحب المتدرّج (مجموعة أسهم)
