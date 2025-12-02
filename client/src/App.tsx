@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
+import { useAnalytics } from "@/hooks/use-analytics";
+import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
 
 // Pages
@@ -28,6 +30,8 @@ import AdminBackup from "@/pages/admin/admin-backup";
 import AdminCodeBackup from "@/pages/admin/admin-code-backup";
 
 function Router() {
+  useAnalytics();
+  
   return (
     <Switch>
       {/* صفحات عامة */}
@@ -66,6 +70,12 @@ export default function App() {
   const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
+    // Initialize Google Analytics when app loads
+    if (!import.meta.env.VITE_GA_MEASUREMENT_ID) {
+      console.warn('Missing required Google Analytics key: VITE_GA_MEASUREMENT_ID');
+    } else {
+      initGA();
+    }
     const t = setTimeout(() => setAppReady(true), 300);
     return () => clearTimeout(t);
   }, []);

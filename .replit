@@ -82,5 +82,8 @@ integrations = ["google-sheet:1.0.0", "javascript_object_storage:1.0.0", "javasc
 [userenv.production]
 NODE_ENV = "production"
 
+[userenv.shared]
+VITE_GA_MEASUREMENT_ID = "G-ZVRF0RY5RB"
+
 [objectStorage]
 defaultBucketID = "replit-objstore-a1429ce2-49c1-4128-a9c7-ee7a94b0bd33"
