@@ -282,62 +282,79 @@ export default function PropertyDetailsPage() {
   const displayName = isVerified(property) ? property.name : "";
 
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
-  const handleWhatsApp = async () => {
+  const handleWhatsApp = () => {
+    // جمد الزر - ضغطة واحدة فقط
+    if (isSubmittingWhatsApp) {
+      console.warn("⚠️ الزر مجمد - ضغطة واحدة فقط");
+      return;
+    }
+
+    setIsSubmittingWhatsApp(true);
+
     try {
-      // تسجيل الطلب في النظام الذكي
-      const response = await fetch("/api/requests/smart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyNumber: property.propertyNumber }),
-      });
+      // كشف نوع الجهاز
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isTablet = /iPad|Android(?!.*Mobile)|Kindle|PlayBook|Silk/.test(navigator.userAgent);
+      const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+      
+      console.log(`📱 Device: ${deviceType}`);
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        // إذا حدث خطأ (مثل التكرار)
-        if (result.remainingTimeFormatted) {
-          // إظهار تنبيه للمستخدم
-          toast({
-            title: "⏱️ انتظر",
-            description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
-            variant: "destructive",
-          });
-        }
-        return;
-      }
-
-      // إذا نجح: افتح واتساب فوراً
+      // فتح واتساب مرة واحدة فقط
       const DEFAULT_WHATSAPP = "966533220646";
       const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
       const nameText = isVerified(property) ? ` - ${property.name}` : "";
-      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
-      
-      // اختر الرابط الصحيح حسب نوع الجهاز
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      let url: string;
+      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
       
       if (isMobile) {
         // على الجوال: استخدم whatsapp:// scheme
-        url = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-        window.location.href = url;
+        window.location.href = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
       } else {
         // على سطح المكتب: استخدم web.whatsapp.com
-        url = `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
+        window.open(`https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`, '_blank');
       }
 
-      // إظهار رسالة النجاح بـ toast بدون حجب واجهة المستخدم
-      toast({
-        title: "✅ تم تسجيل طلبك",
-        description: `في ${result.requestTime}`,
+      // تسجيل الطلب في الخلفية (بدون انتظار)
+      fetch("/api/requests/smart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          propertyNumber: property.propertyNumber,
+          deviceType: deviceType,
+          userAgent: navigator.userAgent
+        }),
+      }).then(response => {
+        if (response.ok) {
+          response.json().then(result => {
+            toast({
+              title: "✅ تم تسجيل طلبك",
+              description: `في ${result.requestTime}`,
+            });
+          });
+        } else {
+          response.json().then(result => {
+            if (result.remainingTimeFormatted) {
+              toast({
+                title: "⏱️ انتظر",
+                description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر`,
+                variant: "destructive",
+              });
+            }
+          });
+        }
+      }).catch(error => {
+        console.error("Error tracking request:", error);
+      }).finally(() => {
+        setIsSubmittingWhatsApp(false);
       });
+
     } catch (error) {
-      console.error("Error creating WhatsApp request:", error);
+      console.error("Error opening WhatsApp:", error);
       toast({
         title: "خطأ",
-        description: "حدث خطأ عند تسجيل الطلب",
+        description: "حدث خطأ عند فتح الواتس",
         variant: "destructive",
       });
+      setIsSubmittingWhatsApp(false);
     }
   };
 
