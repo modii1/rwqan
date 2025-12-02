@@ -88,6 +88,11 @@ export interface IStorage {
   getCodeBackupById(id: string): Promise<CodeBackup | null>;
   createCodeBackup(backup: InsertCodeBackup): Promise<CodeBackup>;
   deleteCodeBackup(id: string): Promise<void>;
+
+  // Active Sessions (الجلسات النشطة)
+  startSession(sessionId: string): Promise<void>;
+  endSession(sessionId: string): Promise<void>;
+  getActiveSessions(): Promise<number>;
 }
 
 import { googleSheetsService } from './googleSheets';
@@ -284,6 +289,21 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async updateAnalytics(analytics: Analytics): Promise<void> {
+  }
+
+  // ===== Active Sessions Implementation (In-Memory) =====
+  private activeSessions: Set<string> = new Set();
+
+  async startSession(sessionId: string): Promise<void> {
+    this.activeSessions.add(sessionId);
+  }
+
+  async endSession(sessionId: string): Promise<void> {
+    this.activeSessions.delete(sessionId);
+  }
+
+  async getActiveSessions(): Promise<number> {
+    return this.activeSessions.size;
   }
 
   // ===== Backup Implementation (In-Memory) =====

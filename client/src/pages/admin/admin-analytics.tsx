@@ -17,10 +17,10 @@ export default function AdminAnalytics() {
     refetchOnWindowFocus: false,
   });
 
-  const { data: visitorsData } = useQuery<any>({
-    queryKey: ["/api/admin/visitors"],
+  const { data: activeUsersData } = useQuery<any>({
+    queryKey: ["/api/active-users"],
     retry: false,
-    refetchOnWindowFocus: false,
+    refetchInterval: 3000, // تحديث كل 3 ثوان
   });
 
   const handleLogout = async () => {

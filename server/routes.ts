@@ -208,6 +208,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Active Users - Session Tracking
+  app.post("/api/session/start", (req, res) => {
+    try {
+      const sessionId = req.body.sessionId || `session-${Date.now()}-${Math.random()}`;
+      storage.startSession(sessionId);
+      res.json({ sessionId, status: "started" });
+    } catch (err) {
+      console.error("Session start error:", err);
+      res.status(500).json({ error: "Failed to start session" });
+    }
+  });
+
+  app.post("/api/session/end", (req, res) => {
+    try {
+      const { sessionId } = req.body;
+      if (sessionId) {
+        storage.endSession(sessionId);
+      }
+      res.json({ status: "ended" });
+    } catch (err) {
+      console.error("Session end error:", err);
+      res.status(500).json({ error: "Failed to end session" });
+    }
+  });
+
+  app.get("/api/active-users", async (req, res) => {
+    try {
+      const count = await storage.getActiveSessions();
+      res.json({ activeUsers: count });
+    } catch (err) {
+      console.error("Active users error:", err);
+      res.status(500).json({ error: "Failed to get active users", activeUsers: 0 });
+    }
+  });
+
 
 
   // ======================
