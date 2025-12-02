@@ -53,10 +53,12 @@ export default function PropertyDetailsPage() {
   const [, params] = useRoute<{ id: string }>("/property/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [isSending, setIsSending] = useState(false);
+  const [shake, setShake] = useState(false);
+
 
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
-  const [isSubmittingWhatsApp, setIsSubmittingWhatsApp] = useState(false);
 
   const propertyId = params?.id ?? "";
 
@@ -283,81 +285,71 @@ export default function PropertyDetailsPage() {
   const displayName = isVerified(property) ? property.name : "";
 
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
-  const handleWhatsApp = () => {
-    // جمد الزر - ضغطة واحدة فقط
-    if (isSubmittingWhatsApp) {
-      console.warn("⚠️ الزر مجمد - ضغطة واحدة فقط");
+  const handleWhatsApp = async () => {
+  // ⭐ عند الضغط المتكرر — اهتزاز فقط
+  if (isSending) {
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
+    return;
+  }
+
+  setIsSending(true);
+
+  try {
+    const response = await fetch("/api/requests/smart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyNumber: property.propertyNumber }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      if (result.remainingTimeFormatted) {
+        toast({
+          title: "⏱️ انتظر",
+          description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
+          variant: "destructive",
+        });
+      }
+      setIsSending(false);
       return;
     }
 
-    setIsSubmittingWhatsApp(true);
+    const DEFAULT_WHATSAPP = "966533220646";
+    const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
+    const nameText = isVerified(property) ? ` - ${property.name}` : "";
+    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
 
-    try {
-      // كشف نوع الجهاز
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isTablet = /iPad|Android(?!.*Mobile)|Kindle|PlayBook|Silk/.test(navigator.userAgent);
-      const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
-      
-      console.log(`📱 Device: ${deviceType}`);
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
 
-      // فتح واتساب مرة واحدة فقط
-      const DEFAULT_WHATSAPP = "966533220646";
-      const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
-      const nameText = isVerified(property) ? ` - ${property.name}` : "";
-      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}`;
-      
-      if (isMobile) {
-        // على الجوال: استخدم whatsapp:// scheme
-        window.location.href = `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-      } else {
-        // على سطح المكتب: استخدم web.whatsapp.com (مرة واحدة فقط)
-        window.location.href = `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-      }
+    const url = isMobile
+      ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
+      : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
 
-      // تسجيل الطلب في الخلفية (بدون انتظار)
-      fetch("/api/requests/smart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          propertyNumber: property.propertyNumber,
-          deviceType: deviceType,
-          userAgent: navigator.userAgent
-        }),
-      }).then(response => {
-        if (response.ok) {
-          response.json().then(result => {
-            toast({
-              title: "✅ تم تسجيل طلبك",
-              description: `في ${result.requestTime}`,
-            });
-          });
-        } else {
-          response.json().then(result => {
-            if (result.remainingTimeFormatted) {
-              toast({
-                title: "⏱️ انتظر",
-                description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر`,
-                variant: "destructive",
-              });
-            }
-          });
-        }
-      }).catch(error => {
-        console.error("Error tracking request:", error);
-      }).finally(() => {
-        setIsSubmittingWhatsApp(false);
-      });
+    window.open(url, "_blank");
 
-    } catch (error) {
-      console.error("Error opening WhatsApp:", error);
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ عند فتح الواتس",
-        variant: "destructive",
-      });
-      setIsSubmittingWhatsApp(false);
-    }
-  };
+    toast({
+      title: "✅ تم تسجيل طلبك",
+      description: `في ${result.requestTime}`,
+    });
+
+    // رجوع الزر بعد ثانيتين
+    setTimeout(() => setIsSending(false), 2000);
+
+  } catch (error) {
+    console.error("Error creating WhatsApp request:", error);
+    toast({
+      title: "خطأ",
+      description: "حدث خطأ عند تسجيل الطلب",
+      variant: "destructive",
+    });
+    setIsSending(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -627,14 +619,43 @@ export default function PropertyDetailsPage() {
             <Card className="p-6">
               <h3 className="text-lg font-bold text-primary mb-4">التواصل</h3>
               <Button
-                onClick={handleWhatsApp}
-                className="w-full bg-[#25D366] hover:bg-[#128C7E] text-white"
-                size="lg"
-                data-testid="button-whatsapp"
-              >
-                <Phone className="w-5 h-5 ml-2" />
-                تواصل عبر واتساب
-              </Button>
+  onClick={handleWhatsApp}
+  disabled={isSending}
+  className={`
+    w-full text-white 
+    ${isSending ? "bg-gray-400 cursor-not-allowed" : "bg-[#25D366] hover:bg-[#128C7E]"}
+    ${shake ? "animate-shake" : ""}
+  `}
+  size="lg"
+  data-testid="button-whatsapp"
+>
+  {isSending ? (
+    <span className="flex items-center gap-2">
+      <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24">
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        />
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+        />
+      </svg>
+      جاري التحميل...
+    </span>
+  ) : (
+    <>
+      <Phone className="w-5 h-5 ml-2" />
+      تواصل عبر واتساب
+    </>
+  )}
+</Button>
+
             </Card>
           </div>
         </div>
