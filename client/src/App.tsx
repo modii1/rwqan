@@ -76,8 +76,47 @@ export default function App() {
     } else {
       initGA();
     }
+
+    // Track active session
+    const sessionId = `session-${Date.now()}-${Math.random()}`;
+    sessionStorage.setItem('sessionId', sessionId);
+    
+    const startSession = async () => {
+      try {
+        await fetch("/api/session/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+      } catch (err) {
+        console.error("Failed to start session:", err);
+      }
+    };
+
+    startSession();
+
     const t = setTimeout(() => setAppReady(true), 300);
-    return () => clearTimeout(t);
+
+    // End session on page unload
+    const handleUnload = () => {
+      const sid = sessionStorage.getItem('sessionId');
+      if (sid) {
+        fetch("/api/session/end", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: sid }),
+          keepalive: true,
+        }).catch(err => console.error("Failed to end session:", err));
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('beforeunload', handleUnload);
+      handleUnload();
+    };
   }, []);
 
   const handleHome = () => {
