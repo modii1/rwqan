@@ -564,6 +564,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================
+  // ADMIN: إصلاح الشيتات
+  // ======================
+  app.post("/api/admin/fix-sheets", async (req, res) => {
+    try {
+      // تنظيف وإصلاح جدول الطلبات والإحصائيات
+      const result = await googleSheetsService.fixAndCleanSheets();
+      res.json(result);
+    } catch (err: any) {
+      console.error("Fix sheets error:", err);
+      res.status(500).json({ error: "خطأ في إصلاح الشيتات", details: err.message });
+    }
+  });
+
+  // ======================
   // OWNER AUTH
   // ======================
 
