@@ -741,107 +741,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // المسؤول: جلب الإحصائيات من Google Sheets
+  // المسؤول: جلب الإحصائيات - حساب الـ IPs الفريدة فقط
   app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     try {
-      // أولاً: جرب قراءة من Google Sheets مباشرة
-      const analyticsFromSheet = await googleSheetsService.getAnalyticsFromSheet();
-      
-      if (analyticsFromSheet) {
-        // إذا وجدنا بيانات في Google Sheets، استخدمها
-        const allRequests = await storage.getRequests();
-        const totalProps = await storage.getProperties();
-
-        // توزيع حسب العقارات (للحصول على أفضل العقارات)
-        const byProperty: Record<string, number> = {};
-        allRequests.forEach(r => {
-          byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
-        });
-
-        const sortedProperties = Object.entries(byProperty)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 15)
-          .map(([propertyNumber, count]) => {
-            const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
-            return {
-              propertyNumber,
-              propertyName: prop?.name || `عقار ${propertyNumber}`,
-              requestCount: count,
-            };
-          });
-
-        // تحويل سلسلة المدن إلى مصفوفة
-        const cities = analyticsFromSheet.cities
-          .split(" | ")
-          .map(item => {
-            const [name, count] = item.split(": ");
-            return { name, count: parseInt(count, 10) };
-          })
-          .filter(c => c.name && !isNaN(c.count));
-
-        const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
-
-        return res.json({
-          visitors: analyticsFromSheet.visitors,
-          devices: {
-            mobile: analyticsFromSheet.mobile,
-            desktop: analyticsFromSheet.desktop,
-            tablet: analyticsFromSheet.tablet,
-          },
-          cities,
-          byProperty: sortedProperties,
-          recentRequests: allRequests.slice(-20).reverse(),
-          totalRequests: allRequests.length,
-          totalProperties: totalProps.length,
-          uniqueVisitors: uniqueIPs.size,
-          lastUpdated: analyticsFromSheet.lastUpdated,
-        });
-      }
-
-      // إذا لم نجد في Google Sheets، احسبها ديناميكياً
       const allRequests = await storage.getRequests();
       const totalProps = await storage.getProperties();
 
-      // 1. إجمالي الزوار (عدد الطلبات الفريدة من IPs مختلفة)
-      const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
-      const visitors = allRequests.length;
-
-      // 2. توزيع الأجهزة (من البيانات الحقيقية deviceType)
-      const devices = { mobile: 0, desktop: 0, tablet: 0 };
+      // ===== حساب الـ IPs الفريدة فقط =====
+      // Map لتجميع الـ IPs الفريدة لكل عقار
+      const uniqueIPMap: Record<string, { ipAddress: string; deviceType: 'mobile' | 'desktop' | 'tablet' }> = {};
+      
       allRequests.forEach(r => {
+        const key = `${r.propertyNumber}:${r.ipAddress}`;
+        if (!uniqueIPMap[key]) {
+          uniqueIPMap[key] = {
+            ipAddress: r.ipAddress,
+            deviceType: r.deviceType || 'desktop',
+          };
+        }
+      });
+
+      const uniqueRequests = Object.values(uniqueIPMap);
+
+      // 1. إجمالي الزوار الفريدين (حسب IP - كل IP مرة واحدة)
+      const visitors = uniqueRequests.length;
+
+      // 2. توزيع الأجهزة الفريدة (كل IP يُحسب مرة واحدة فقط)
+      const devices = { mobile: 0, desktop: 0, tablet: 0 };
+      uniqueRequests.forEach(r => {
         if (r.deviceType === 'mobile') devices.mobile++;
         else if (r.deviceType === 'tablet') devices.tablet++;
         else devices.desktop++;
       });
 
-      // 3. توزيع المدن من بيانات الطلبات
-      const cityCounts: Record<string, number> = {};
+      // 3. توزيع المدن (حسب الـ IPs الفريدة)
+      const cityIPMap: Record<string, Set<string>> = {};
       allRequests.forEach(r => {
         const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
         const city = prop?.city || 'غير محدد';
-        cityCounts[city] = (cityCounts[city] || 0) + 1;
+        
+        if (!cityIPMap[city]) {
+          cityIPMap[city] = new Set();
+        }
+        cityIPMap[city].add(r.ipAddress);
       });
 
-      const cities = Object.entries(cityCounts)
-        .sort((a, b) => b[1] - a[1])
+      const cities = Object.entries(cityIPMap)
+        .sort((a, b) => b[1].size - a[1].size)
         .slice(0, 10)
-        .map(([name, count]) => ({ name, count }));
+        .map(([name, ips]) => ({ name, count: ips.size }));
 
-      // 4. توزيع حسب العقارات
-      const byProperty: Record<string, number> = {};
+      // 4. توزيع حسب العقارات (حسب الـ IPs الفريدة لكل عقار)
+      const propertyIPMap: Record<string, Set<string>> = {};
       allRequests.forEach(r => {
-        byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
+        if (!propertyIPMap[r.propertyNumber]) {
+          propertyIPMap[r.propertyNumber] = new Set();
+        }
+        propertyIPMap[r.propertyNumber].add(r.ipAddress);
       });
 
-      const sortedProperties = Object.entries(byProperty)
-        .sort((a, b) => b[1] - a[1])
+      const sortedProperties = Object.entries(propertyIPMap)
+        .sort((a, b) => b[1].size - a[1].size)
         .slice(0, 15)
-        .map(([propertyNumber, count]) => {
+        .map(([propertyNumber, ips]) => {
           const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
           return {
             propertyNumber,
             propertyName: prop?.name || `عقار ${propertyNumber}`,
-            requestCount: count,
+            requestCount: ips.size, // عدد الـ IPs الفريدة
           };
         });
 
@@ -851,8 +818,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 6. آخر تحديث
       const lastUpdated = new Date().toLocaleString('ar-SA');
 
+      const uniqueIPs = new Set(allRequests.map(r => r.ipAddress));
+
       res.json({
-        visitors,
+        visitors, // الـ IPs الفريدة الكلية
         devices,
         cities,
         byProperty: sortedProperties,

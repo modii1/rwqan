@@ -1173,44 +1173,53 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   async updateAnalytics() {
     try {
       const allRequestsRows = await this.readSheet(SHEETS.REQUESTS);
-      
-      // تحويل الصفوف إلى كائنات Request مع التصفية
-      const allRequests = allRequestsRows
-        .map((row, idx) => {
-          const deviceType = row[10] as 'mobile' | 'desktop' | 'tablet' || 'desktop';
-          return {
-            propertyNumber: row[0] || "",
-            deviceType,
-          };
-        })
-        .filter(r => r.propertyNumber); // اترك الصفوف الفارغة
-
       const totalProps = await this.getProperties();
 
-      // 1. إجمالي الزوار (فقط التي لها propertyNumber)
-      const visitors = allRequests.length;
+      // حساب الـ IPs الفريدة فقط
+      const uniqueIPMap: Record<string, { ipAddress: string; deviceType: 'mobile' | 'desktop' | 'tablet'; propertyNumber: string }> = {};
+      
+      allRequestsRows.forEach(row => {
+        const propertyNumber = row[0] || "";
+        const ipAddress = row[3] || "";
+        const deviceType = (row[10] as 'mobile' | 'desktop' | 'tablet') || 'desktop';
+        
+        if (!propertyNumber || !ipAddress) return;
+        
+        // استخدم IP كمفتاح - كل IP يُحسب مرة واحدة فقط
+        const key = `${propertyNumber}:${ipAddress}`;
+        if (!uniqueIPMap[key]) {
+          uniqueIPMap[key] = { ipAddress, deviceType, propertyNumber };
+        }
+      });
 
-      // 2. توزيع الأجهزة من البيانات الحقيقية
+      const uniqueRequests = Object.values(uniqueIPMap);
+      
+      // 1. إجمالي الزوار الفريدين (حسب IP)
+      const visitors = uniqueRequests.length;
+
+      // 2. توزيع الأجهزة الفريدة (كل IP يُحسب مرة واحدة)
       const devices = { mobile: 0, desktop: 0, tablet: 0 };
-      allRequests.forEach(r => {
+      uniqueRequests.forEach(r => {
         if (r.deviceType === 'mobile') devices.mobile++;
         else if (r.deviceType === 'tablet') devices.tablet++;
         else devices.desktop++;
       });
 
-      // 3. توزيع المدن
-      const cityCounts: Record<string, number> = {};
-      allRequestsRows.forEach(row => {
-        const propertyNumber = row[0];
-        if (!propertyNumber) return;
-        const prop = totalProps.find(p => p.propertyNumber === propertyNumber);
+      // 3. توزيع المدن (حسب الـ IPs الفريدة)
+      const cityCounts: Record<string, Set<string>> = {}; // استخدم Set للـ IPs الفريدة لكل مدينة
+      uniqueRequests.forEach(r => {
+        const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
         const city = prop?.city || 'غير محدد';
-        cityCounts[city] = (cityCounts[city] || 0) + 1;
+        
+        if (!cityCounts[city]) {
+          cityCounts[city] = new Set();
+        }
+        cityCounts[city].add(r.ipAddress);
       });
 
       const cities = Object.entries(cityCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => `${name}: ${count}`)
+        .sort((a, b) => b[1].size - a[1].size)
+        .map(([name, ips]) => `${name}: ${ips.size}`)
         .join(" | ");
 
       // 4. آخر تحديث
@@ -1228,7 +1237,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       ];
 
       await this.appendToSheet(SHEETS.ANALYTICS, [analyticsRow]);
-      console.log(`📊 Analytics: ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
+      console.log(`📊 Analytics (Unique IPs): ${visitors} visitors, Mobile: ${devices.mobile}, Desktop: ${devices.desktop}, Tablet: ${devices.tablet}`);
     } catch (err) {
       console.error("updateAnalytics error:", err);
     }
