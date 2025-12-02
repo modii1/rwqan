@@ -171,9 +171,11 @@ export default function PropertyDetailsPage() {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "X-Client-UA": navigator.userAgent,
           },
-          body: JSON.stringify({ propertyNumber: propertyId }),
+          body: JSON.stringify({ 
+            propertyNumber: propertyId,
+            userAgent: navigator.userAgent 
+          }),
         });
       } catch (err) {
         console.log("Failed to track page view:", err);
