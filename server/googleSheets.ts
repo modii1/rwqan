@@ -244,6 +244,7 @@ class GoogleSheetsService {
         "السنة",
         "الوقت",
         "نوع الجهاز",
+        "عدد الطلبات",
       ],
       [SHEETS.SUGGESTIONS]: [
         "المعرف",
@@ -1111,7 +1112,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const time = `${hours}:${minutes}`;
 
       // صف الشيت بالترتيب الصحيح
-      // A: propertyNumber, B: propertyName, C: requestCode, D: ipAddress, E: dayOfWeek, F: hourOfDay, G: day, H: month, I: year, J: time, K: deviceType
+      // A: propertyNumber, B: propertyName, C: requestCode, D: ipAddress, E: dayOfWeek, F: hourOfDay, G: day, H: month, I: year, J: time, K: deviceType, L: requestCount
       const row = [
         request.propertyNumber,
         propertyName,
@@ -1124,6 +1125,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         String(year),
         time,
         request.deviceType || 'desktop',
+        String(requestCount),
       ];
 
       await this.appendToSheet(SHEETS.REQUESTS, [row]);
