@@ -233,11 +233,17 @@ class GoogleSheetsService {
         "تاريخ الإنشاء",
       ],
       [SHEETS.REQUESTS]: [
-        "المعرف",
         "رقم العقار",
+        "اسم العقار",
         "كود الطلب",
-        "وقت الطلب",
-        "تاريخ الإنشاء",
+        "عنوان IP",
+        "يوم الأسبوع",
+        "الساعة",
+        "اليوم",
+        "الشهر",
+        "السنة",
+        "الوقت",
+        "نوع الجهاز",
       ],
       [SHEETS.SUGGESTIONS]: [
         "المعرف",
@@ -1041,17 +1047,25 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const rows = await this.readSheet(SHEETS.REQUESTS);
       if (!rows || rows.length === 0) return [];
       return rows.map((row, idx) => {
-        const day = row[6] || "01";
-        const month = row[7] || "12";
+        // row[0]: propertyNumber, row[3]: ipAddress, row[6]: day, row[7]: month, row[8]: year, row[9]: time, row[10]: deviceType
+        const propertyNumber = row[0] || "";
+        const requestCode = row[2] || "";
+        const ipAddress = row[3] || "";
+        const day = String(row[6] || "01").padStart(2, "0");
+        const month = String(row[7] || "01").padStart(2, "0");
         const year = row[8] || "2025";
         const time = row[9] || "00:00";
         const deviceType = (row[10] || "desktop") as 'mobile' | 'desktop' | 'tablet';
+        
+        // بناء ISO timestamp: YYYY-MM-DDTHH:mm:ssZ
+        const timestamp = `${year}-${month}-${day}T${time}:00Z`;
+        
         return {
           id: `REQ-${idx}`,
-          propertyNumber: row[0] || "",
-          requestCode: row[2] || "",
-          timestamp: `${year}-${month}-${day}T${time}:00Z`,
-          ipAddress: row[3] || "",
+          propertyNumber,
+          requestCode,
+          timestamp,
+          ipAddress,
           deviceType,
           dayOfWeek: row[4] || "",
           hourOfDay: parseInt(row[5] || "0", 10),
