@@ -329,7 +329,12 @@ export default function PropertyDetailsPage() {
       ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
       : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
 
-    window.open(url, "_blank");
+    if (isMobile) {
+  window.location.href = url; // الجوال
+} else {
+  window.open(url, "_blank"); // سطح المكتب
+}
+
 
     toast({
       title: "✅ تم تسجيل طلبك",
