@@ -284,11 +284,22 @@ export default function PropertyDetailsPage() {
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
   const handleWhatsApp = async () => {
     try {
-      // تسجيل الطلب في النظام الذكي
+      // كشف نوع الجهاز
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isTablet = /iPad|Android(?!.*Mobile)|Kindle|PlayBook|Silk/.test(navigator.userAgent);
+      const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+      
+      console.log(`📱 Device Type Detected: ${deviceType}, User-Agent: ${navigator.userAgent}`);
+
+      // تسجيل الطلب في النظام الذكي - مع إرسال deviceType
       const response = await fetch("/api/requests/smart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyNumber: property.propertyNumber }),
+        body: JSON.stringify({ 
+          propertyNumber: property.propertyNumber,
+          deviceType: deviceType,
+          userAgent: navigator.userAgent
+        }),
       });
 
       const result = await response.json();
@@ -312,8 +323,6 @@ export default function PropertyDetailsPage() {
       const nameText = isVerified(property) ? ` - ${property.name}` : "";
       const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
       
-      // اختر الرابط الصحيح حسب نوع الجهاز
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       let url: string;
       
       if (isMobile) {
