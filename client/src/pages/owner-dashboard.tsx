@@ -54,13 +54,13 @@ export default function OwnerDashboard() {
     const hourCount: Record<number, number> = {};
 
     requests.forEach((req) => {
-      const d = new Date(req.timestamp);
-      const day = dayNames[d.getDay()];
-      const hour = d.getHours();
+  const day = req.dayOfWeek || req.day || "غير محدد";
+  const hour = req.hourOfDay || req.hour || 0;
 
-      dayCount[day] = (dayCount[day] || 0) + 1;
-      hourCount[hour] = (hourCount[hour] || 0) + 1;
-    });
+  dayCount[day] = (dayCount[day] || 0) + 1;
+  hourCount[hour] = (hourCount[hour] || 0) + 1;
+});
+
 
     const bestDay =
       Object.entries(dayCount).sort(([, a], [, b]) => b - a)[0]?.[0] ||
@@ -112,15 +112,22 @@ export default function OwnerDashboard() {
   });
 
   // 4) جلب الطلبات
-  const {
-    data: requestsData,
-    isLoading: requestsLoading,
-  } = useQuery<any>({
-    queryKey: ["/api/owner/requests"],
-    enabled: sessionData?.isLoggedIn === true,
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
+  // 4) جلب الطلبات
+const {
+  data: requestsData,
+  isLoading: requestsLoading,
+} = useQuery<any>({
+  queryKey: ["/api/owner/requests"],
+  enabled: sessionData?.isLoggedIn === true,
+  retry: false,
+  refetchOnWindowFocus: false,
+});
+
+// ================= DEBUG LOGS =================
+console.log("🔍 requestsData:", requestsData);
+console.log("🔍 sessionData:", sessionData);
+console.log("🔍 isLoggedIn:", sessionData?.isLoggedIn);
+
 
   useEffect(() => {
     if (!isSessionLoading && sessionData) {
@@ -238,7 +245,7 @@ const calculateAnalytics = () => {
 
   monthlyRequestsArray.forEach((req: any) => {
     const d = new Date(req.timestamp);
-    const day = dayNames[d.getDay()];
+    const day = req.dayOfWeek || req.day || "غير محدد";
     dayCount[day] = (dayCount[day] || 0) + 1;
   });
 
@@ -486,10 +493,7 @@ const calculateAnalytics = () => {
               desc="الاسم – المدينة – الوصف"
               onClick={() => setLocation("/owner/update-property")}
             />
-            <PropertyActionsButton 
-              propertyNumber={property.propertyNumber}
-              onShowRequests={() => setShowRequestsStats(true)}
-            />
+            
             <BigActionButton
               icon={<BarChart2 className="w-6 h-6" />}
               title="الإحصائيات المفصلة"
@@ -626,89 +630,8 @@ function AnalyticsBox({
   );
 }
 
-function PropertyActionsButton({
-  propertyNumber,
-  onShowRequests,
-}: {
-  propertyNumber: string;
-  onShowRequests: () => void;
-}) {
-  const [isVisible, setIsVisible] = useState(true);
-  const { toast } = useToast();
 
-  const handleViewProperty = () => {
-    window.open(`/?property=${propertyNumber}`, '_blank');
-    toast({
-      title: "تم فتح صفحة العقار",
-      description: "سيتم فتح صفحة العقار في نافذة جديدة",
-    });
-  };
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="group rounded-xl border border-border bg-card hover:bg-primary/5 transition p-4 flex flex-col gap-2 text-right h-full w-full"
-          data-testid="button-property-actions"
-        >
-          <div className="flex items-center justify-between">
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition">
-              <MessageCircle className="w-6 h-6" />
-            </div>
-          </div>
-          <div>
-            <div className="font-bold text-sm mb-1">إدارة العقار</div>
-            <div className="text-[11px] text-muted-foreground leading-relaxed">
-              عرض وإدارة العقار
-            </div>
-          </div>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem
-          onClick={handleViewProperty}
-          data-testid="menu-view-property"
-        >
-          <Home className="w-4 h-4 ml-2" />
-          <span>عرض صفحة العقار</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={onShowRequests}
-          data-testid="menu-view-requests"
-        >
-          <BarChart2 className="w-4 h-4 ml-2" />
-          <span>عرض إحصائيات الطلبات</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            setIsVisible(!isVisible);
-            toast({
-              title: isVisible ? "تم إخفاء العقار" : "تم إظهار العقار",
-              description: isVisible
-                ? "لن يظهر العقار للعملاء"
-                : "سيظهر العقار للعملاء",
-            });
-          }}
-          data-testid="menu-toggle-visibility"
-        >
-          {isVisible ? (
-            <>
-              <EyeOff className="w-4 h-4 ml-2" />
-              <span>إخفاء العقار</span>
-            </>
-          ) : (
-            <>
-              <EyeIcon className="w-4 h-4 ml-2" />
-              <span>إظهار العقار</span>
-            </>
-          )}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 function BigActionButton({
   icon,
