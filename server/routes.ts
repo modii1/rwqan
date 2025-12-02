@@ -439,17 +439,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       propertyMap.set(propertyNumber, newCount);
 
       // احفظ الطلب مع العدد من IP
-      const request = await storage.createRequest(
-        {
-          propertyNumber,
-          requestCode,
-          timestamp: now_date.toISOString(),
-          ipAddress,
-          dayOfWeek,
-          hourOfDay,
-        },
-        newCount
-      );
+      const userAgent = req.headers["user-agent"] || "";
+const deviceType = detectDeviceType(userAgent); // ← دالة موجودة أصلاً
+
+const request = await storage.createRequest(
+  {
+    propertyNumber,
+    requestCode,
+    timestamp: now_date.toISOString(),
+    ipAddress,
+    dayOfWeek,
+    hourOfDay,
+    deviceType, // ← أضف هذا السطر فقط
+  },
+  newCount
+);
+
 
       // حدّث المتتبع
       requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
