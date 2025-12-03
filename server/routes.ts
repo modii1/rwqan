@@ -1001,6 +1001,19 @@ const request = await storage.createRequest(
     });
   });
 
+
+  // ======================
+  // ADMIN SESSION CHECK
+  // ======================
+  app.get("/api/admin/session", (req, res) => {
+    const isAdmin = Boolean((req.session as any).isAdmin);
+
+    res.json({
+      isAdmin,
+    });
+  });
+
+
   // ======================================================
   // 🔵 جلب صور العقار من R2
   // ======================================================
@@ -2125,6 +2138,8 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
+
+  
   // ======================
   // DONE
   // ======================

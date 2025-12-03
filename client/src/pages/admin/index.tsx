@@ -1,4 +1,5 @@
 // client/src/pages/admin/index.tsx
+import { useLocation } from "wouter";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -50,6 +51,34 @@ type AdminSection =
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
+
+  // تحقق جلسة الأدمن
+  const { data: adminSession, isLoading } = useQuery({
+    queryKey: ["/api/admin/session"],
+  });
+
+  // إعادة التوجيه إذا لم يكن أدمن
+  const [, setLocation] = useLocation();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Card className="p-8 text-center">
+          <div className="inline-block w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-lg font-semibold text-foreground">
+            جارٍ التحقق من الدخول...
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  // لو مو أدمن → رجوع لصفحة تسجيل الدخول
+  if (!adminSession?.isAdmin) {
+    setLocation("/owner/login");
+    return null;
+  }
+
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-background" dir="rtl">

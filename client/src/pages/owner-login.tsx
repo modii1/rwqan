@@ -160,7 +160,7 @@ export default function OwnerLogin() {
                 <label className="block text-sm font-semibold mb-2">رقم العقار</label>
                 <Input
                   type="text"
-                  placeholder="00123"
+                  placeholder="اخر 5 أرقام من جوالك"
                   value={propertyNumber}
                   onChange={(e) => setPropertyNumber(e.target.value)}
                   disabled={isLoading}

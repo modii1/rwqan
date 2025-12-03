@@ -417,7 +417,7 @@ export default function PropertyDetailsPage() {
           {/* شارة موثوق */}
           {isVerified(property) && (
             <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
-              موثوق
+              مميز
             </Badge>
           )}
         </div>
