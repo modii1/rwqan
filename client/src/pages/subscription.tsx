@@ -282,7 +282,7 @@ export default function SubscriptionPage() {
                   <div>
                     <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام) *</label>
                     <Input
-                      placeholder="00123"
+                      placeholder="أخر 5 أرقام من جوالك "
                       value={formData.propertyNumber}
                       onChange={(e) => setFormData({ ...formData, propertyNumber: e.target.value })}
                       maxLength={5}
