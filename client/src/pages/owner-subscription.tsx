@@ -50,6 +50,9 @@ export default function OwnerSubscriptionPage() {
     : 0;
 
   const isSubscriptionActive = daysRemaining > 0;
+  // هل يمكن التمديد؟
+  const canExtend = daysRemaining <= 10;
+
 
   // تحضير معلومات الدفع
   const prepareMutation = useMutation({
@@ -115,11 +118,19 @@ export default function OwnerSubscriptionPage() {
   }
 
   const availablePackages = packages.filter(p => {
-    if (selectedAction === 'upgrade') {
-      return p.price > (currentPackage?.price || 0);
-    }
-    return true;
-  });
+  if (selectedAction === 'upgrade') {
+    // الترقية: فقط باقات أعلى سعراً
+    return p.price > (currentPackage?.price || 0);
+  }
+
+  if (selectedAction === 'extend') {
+    // التمديد: ممنوع عرض الباقة المجانية
+    return p.price > 0;
+  }
+
+  return true;
+});
+
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -190,25 +201,37 @@ export default function OwnerSubscriptionPage() {
             </div>
           </div>
 
-          {/* أزرار الإجراءات */}
-          <div className="flex gap-3 flex-wrap">
-            <Button
-              onClick={() => setSelectedAction('extend')}
-              variant={selectedAction === 'extend' ? 'default' : 'outline'}
-              className="flex-1 md:flex-initial"
-            >
-              <CalendarDays className="w-4 h-4 ml-2" />
-              تمديد الاشتراك
-            </Button>
-            <Button
-              onClick={() => setSelectedAction('upgrade')}
-              variant={selectedAction === 'upgrade' ? 'default' : 'outline'}
-              className="flex-1 md:flex-initial"
-            >
-              <TrendingUp className="w-4 h-4 ml-2" />
-              الترقية إلى باقة أفضل
-            </Button>
-          </div>
+         {/* أزرار الإجراءات */}
+<div className="flex gap-3 flex-wrap">
+
+  {/* زر التمديد بشرط ≤ 10 أيام */}
+  {daysRemaining <= 10 ? (
+    <Button
+      onClick={() => setSelectedAction('extend')}
+      variant={selectedAction === 'extend' ? 'default' : 'outline'}
+      className="flex-1 md:flex-initial"
+    >
+      <CalendarDays className="w-4 h-4 ml-2" />
+      تمديد الاشتراك
+    </Button>
+  ) : (
+    <div className="flex-1 text-center text-red-600 font-semibold py-2">
+      يمكن تمديد الاشتراك فقط عندما يتبقى 10 أيام أو أقل
+    </div>
+  )}
+
+  {/* زر الترقية — بدون تعديل */}
+  <Button
+    onClick={() => setSelectedAction('upgrade')}
+    variant={selectedAction === 'upgrade' ? 'default' : 'outline'}
+    className="flex-1 md:flex-initial"
+  >
+    <TrendingUp className="w-4 h-4 ml-2" />
+    الترقية إلى باقة أفضل
+  </Button>
+
+</div>
+
         </Card>
 
         {/* اختيار الباقة */}
@@ -243,20 +266,31 @@ export default function OwnerSubscriptionPage() {
 
             <div className="flex gap-3">
               <Button
-                onClick={() => {
-                  if (selectedPackageId && selectedAction) {
-                    prepareMutation.mutate({ 
-                      action: selectedAction, 
-                      packageId: selectedPackageId 
-                    });
-                  }
-                }}
-                disabled={!selectedPackageId || prepareMutation.isPending}
-                className="flex-1"
-              >
-                {prepareMutation.isPending ? 'جاري التحضير...' : 'متابعة للدفع'}
-              </Button>
-              <Button
+  onClick={() => {
+
+    // ❌ منع التمديد إذا المتبقي أكثر من 10 أيام
+    if (selectedAction === "extend" && daysRemaining > 10) {
+      toast({
+        title: "لا يمكن التمديد",
+        description: "يمكن تمديد الاشتراك فقط عندما يتبقى 10 أيام أو أقل.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedPackageId && selectedAction) {
+      prepareMutation.mutate({ 
+        action: selectedAction, 
+        packageId: selectedPackageId 
+      });
+    }
+  }}
+  disabled={!selectedPackageId || prepareMutation.isPending}
+  className="flex-1"
+>
+  {prepareMutation.isPending ? 'جاري التحضير...' : 'متابعة للدفع'}
+</Button>
+<Button
                 onClick={() => setSelectedAction(null)}
                 variant="outline"
                 className="flex-1"
