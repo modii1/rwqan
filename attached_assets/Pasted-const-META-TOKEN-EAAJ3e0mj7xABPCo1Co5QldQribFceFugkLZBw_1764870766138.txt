@@ -1,0 +1,107 @@
+const META_TOKEN = "EAAJ3e0mj7xABPCo1Co5QldQribFceFugkLZBwT9Ii3cOJoqVJ3G2MMm6BiPWGfcjhdTXYXoX5CfZCqw3ZCpIs2nmZCZAmZBZBpACGQZDZD";
+const PHONE_NUMBER_ID = "602477526273771";
+const NOTIFY_NUMBER = "966533220646"; // رقمك الشخصي
+
+// === دالة إرسال رسالة واتساب ===
+function sendWhatsAppMessage(message) {
+  const url = `https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`;
+  const payload = {
+    messaging_product: "whatsapp",
+    to: NOTIFY_NUMBER,
+    type: "text",
+    text: { body: message }
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + META_TOKEN },
+    payload: JSON.stringify(payload)
+  };
+
+  UrlFetchApp.fetch(url, options);
+}
+
+// === دالة إنشاء رابط واتساب من رقم الجوال ===
+function generateWhatsAppLink(phone) {
+  if (!phone) return "";
+  let num = phone.toString().replace(/[^0-9]/g, "");
+  if (num.startsWith("0")) num = "966" + num.slice(1);
+  return `https://wa.me/${num}`;
+}
+
+// === دالة رئيسية للفحص والإشعارات ===
+function notifySubscriptionOrReceipt() {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const subsSheet = ss.getSheetByName("الاشتراكات");
+  const data = subsSheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const propertyNumber = row[0];
+    const propertyName = row[1];
+    const ownerPhone = row[2];
+    const ownerWhatsAppLink = generateWhatsAppLink(ownerPhone);
+
+    const endDate = row[6] instanceof Date ? new Date(row[6]) : null;
+    const remainingDays = row[7];
+    const receipt = row[8]; // رابط الإيصال
+    let notifiedEnd = row[9];     // علم انتهاء الاشتراك
+    let notifiedReceipt = row[10]; // علم إشعار الإيصال
+
+    // 📌 الحالة 1: الاشتراك انتهى (0 يوم متبقّي)
+    if (remainingDays === 0) {
+      if (!notifiedEnd) {
+        const msg = `⚠️ مرحباً شريكنا العزيز لقد انتهى الاشتراك للعقار  "${propertyName}" رقم ${propertyNumber}\nواتساب صاحب العقار: ${ownerWhatsAppLink}\nللتفعيل او إدارة الاشتراك عبر الرابط: https://is.gd/lLXZ8l`;
+        sendWhatsAppMessage(msg);
+
+        subsSheet.getRange(i + 1, 10).setValue(true);  // إشعار انتهاء الاشتراك = true
+        subsSheet.getRange(i + 1, 11).setValue(false); // إشعار الإيصال = false
+      }
+      continue;
+    }
+
+    // 📌 الحالة 2: رفع إيصال جديد
+    if (receipt && !notifiedReceipt) {
+      const msg = `📄 تم رفع إيصال جديد للعقار "${propertyName}" رقم ${propertyNumber}\nرابط الإيصال: ${receipt}\nواتساب صاحب العقار: ${ownerWhatsAppLink}`;
+      sendWhatsAppMessage(msg);
+
+      subsSheet.getRange(i + 1, 11).setValue(true);  // إشعار الإيصال = true
+      subsSheet.getRange(i + 1, 10).setValue(false); // إشعار انتهاء الاشتراك = false
+    }
+  }
+}
+
+// === القائمة عند فتح الشيت ===
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('لوحة الاشتراكات والأرباح')
+    .addItem('تحديث الاشتراكات تلقائياً', 'autoUpdateSubscriptions')
+    .addItem('تحديث الأرباح للشهر الحالي', 'updateProfitSheet')
+    .addItem('تحويل نصيب الشريك', 'transferPartnerShare')
+    .addItem('بدء دورة جديدة يدويًا', 'startNewCycle')       
+    .addItem('فحص الاشتراكات والإيصالات', 'notifySubscriptionOrReceipt')
+    .addToUi();
+}
+
+function sendDailyEndReminder() {
+  const ss = SpreadsheetApp.openById("1bTK3B3H0VmvyXuqPYgOphkVwPoud6NjeVQAfV1VWqZQ");
+  const subsSheet = ss.getSheetByName("الاشتراكات");
+  const data = subsSheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const propertyNumber = row[0];
+    const propertyName = row[1];
+    const ownerPhone = row[2];
+    const ownerWhatsAppLink = generateWhatsAppLink(ownerPhone);
+    const notifiedEnd = row[9]; // علم انتهاء الاشتراك
+
+    // ✅ فقط للعقارات التي انتهى اشتراكها وتم وضع true
+    if (notifiedEnd === true) {
+      const msg = `⏰ تذكير يومي: الاشتراك للعقار "${propertyName}" رقم ${propertyNumber} منتهي\nواتساب صاحب العقار: ${ownerWhatsAppLink}\nللتفعيل أو إدارة الاشتراك عبر الرابط: https://is.gd/lLXZ8l`;
+      sendWhatsAppMessage(msg);
+    }
+  }
+}
+
