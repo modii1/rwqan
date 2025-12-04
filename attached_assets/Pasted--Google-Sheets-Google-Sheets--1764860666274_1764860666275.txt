@@ -1,0 +1,147 @@
+⭐ أولاً: إنشاء شيت جديد داخل Google Sheets
+
+افتح Google Sheets الذي تستخدمه لمشروعك، ثم:
+
+اضغط + لإنشاء ورقة جديدة
+
+اكتب اسم الورقة:
+
+سجل التحقق
+
+
+ضع العناوين في الصف رقم 1 (A1 إلى E1):
+
+A	B	C	D	E
+التاريخ	رقم العقار	الإجراء	السبب	الأدمن
+هكذا بالضبط:
+التاريخ | رقم العقار | الإجراء | السبب | الأدمن
+
+⭐ ثانياً: تعديل googleSheets.ts لإضافة الدوال
+
+اذهب إلى:
+
+server/googleSheets.ts
+
+
+ثم أضف هذا القسم الجديد بالكامل تحت مكان مناسب (أنصح بوضعه قبل نهاية الكلاس):
+
+✔️ 1) أضف اسم الشيت في SHEETS
+
+ابحث عن:
+
+const SHEETS = {
+
+
+ثم أضف:
+
+VERIFICATION_LOGS: "سجل التحقق",
+
+✔️ 2) أضف الدوال داخل GoogleSheetsService
+🔽 أضف هذه الدوال داخل الكلاس:
+// ======================
+// 📌 سجل التحقق (GS)
+// ======================
+
+async addVerificationLogToSheet(log: {
+  date: string;
+  propertyNumber: string;
+  action: string;
+  reason: string;
+  admin: string;
+}) {
+  const row = [
+    log.date,
+    log.propertyNumber,
+    log.action,
+    log.reason,
+    log.admin,
+  ];
+
+  await this.appendToSheet(SHEETS.VERIFICATION_LOGS, [row]);
+}
+
+async getVerificationLogsFromSheet() {
+  const rows = await this.readSheet(SHEETS.VERIFICATION_LOGS);
+
+  return rows.map((r) => ({
+    date: r[0] || "",
+    propertyNumber: r[1] || "",
+    action: r[2] || "",
+    reason: r[3] || "",
+    admin: r[4] || "",
+  }));
+}
+
+⭐ ثالثاً: تعديل storage.ts ليستخدم الشيت بدل الذاكرة
+
+افتح:
+
+server/storage.ts
+
+
+واحذف أو تجاهل النظام القديم:
+
+private verificationLogs = [];
+
+
+واستبدل دواله بهذه النسخة:
+
+✔️ 1) إضافة السجل
+async addVerificationLog(log: {
+  propertyNumber: string;
+  action: "approved" | "rejected";
+  reason?: string;
+  date: string;
+  admin?: string;
+}) {
+  await googleSheetsService.addVerificationLogToSheet({
+    date: log.date,
+    propertyNumber: log.propertyNumber,
+    action: log.action,
+    reason: log.reason || "",
+    admin: log.admin || "Admin",
+  });
+
+  return log;
+}
+
+✔️ 2) جلب السجلات
+async getVerificationLogs() {
+  return googleSheetsService.getVerificationLogsFromSheet();
+}
+
+⭐ رابعاً: تعديل API الخاص بالتحقق ليضيف سجل في الشيت
+
+افتح:
+
+server/adminPropertiesRoutes.ts
+
+
+ثم بعد كل عملية قبول أو رفض أضف:
+
+✔️ مثال عند الموافقة:
+await storage.addVerificationLog({
+  propertyNumber,
+  action: "approved",
+  reason: "",
+  date: new Date().toISOString(),
+  admin: req.session?.admin || "Admin",
+});
+
+✔️ مثال عند الرفض:
+await storage.addVerificationLog({
+  propertyNumber,
+  action: "rejected",
+  reason,
+  date: new Date().toISOString(),
+  admin: req.session?.admin || "Admin",
+});
+
+⭐ خامساً: الآن صفحة verification-logs ستعمل تلقائياً
+
+لأنها تطلب من API:
+
+/api/admin/verification/logs
+
+
+والآن هذا API يرجع سجلات حقيقية من Google Sheets.

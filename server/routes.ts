@@ -1,3 +1,4 @@
+
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
 import type { CorsOptions } from "cors";
@@ -87,6 +88,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     credentials: true,
   };
   app.use(cors(corsOptions));
+  
+  
 
   // Owner Analytics - بيانات حقيقية من Google Sheets
   app.get("/api/owner/analytics", async (req, res) => {
@@ -95,6 +98,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!propertyNumber) {
         return res.status(401).json({ error: "Unauthorized" });
       }
+      
 
       // جلب جميع الطلبات للعقار من الشهر الحالي
       const allRequests = await googleSheetsService.getRequests();
@@ -264,24 +268,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // GET all properties (frontend + admin)
   app.get("/api/properties", async (_req, res) => {
-    try {
-      const items = await storage.getProperties();
-      res.json(items);
-    } catch (err) {
-      res.status(500).json({ error: "فشل في جلب العقارات" });
-    }
-  });
+  try {
+    const items = await storage.getProperties();
+
+    // 🟢 إظهار العقارات المقبولة فقط
+    // 🟢 مع السماح للعقارات القديمة التي لا تحتوي على verificationStatus
+    const filtered = items.filter((p) => {
+      // العقار الجديد: لازم يكون approved
+      if (p.verificationStatus) {
+        return p.verificationStatus === "approved";
+      }
+      // العقار القديم: لا يحتوي الحالة → اعتباره مقبول
+      return true;
+    });
+
+    res.json(filtered);
+  } catch (err) {
+    console.error("Properties fetch error:", err);
+    res.status(500).json({ error: "فشل في جلب العقارات" });
+  }
+});
+
+
 
   // GET single property
   app.get("/api/properties/:id", async (req, res) => {
-    try {
-      const p = await storage.getPropertyByNumber(req.params.id);
-      if (!p) return res.status(404).json({ error: "Not Found" });
-      res.json(p);
-    } catch (err) {
-      res.status(500).json({ error: "خطأ غير معروف" });
+  try {
+    const p = await storage.getPropertyByNumber(req.params.id);
+
+    if (!p) {
+      return res.status(404).json({ error: "العقار غير موجود" });
     }
-  });
+
+    // 🛑 العقار الجديد → لا يظهر إذا لم يكن approved
+    if (p.verificationStatus) {
+      if (p.verificationStatus !== "approved") {
+        return res.status(403).json({
+          error: "هذا العقار غير متاح حالياً",
+          status: p.verificationStatus,
+        });
+      }
+    }
+
+    // 🟢 العقارات القديمة → لا تحتوي verificationStatus → مسموحة
+    return res.json(p);
+
+  } catch (err) {
+    console.error("Property Fetch Error:", err);
+    res.status(500).json({ error: "خطأ غير معروف" });
+  }
+});
+
 
   // CREATE new property (admin)
   app.post("/api/properties", async (req, res) => {
@@ -2137,6 +2174,165 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       res.status(500).json({ error: "Failed to download code backup" });
     }
   });
+
+
+  // ==============================
+// 💬 WhatsApp API Routes
+// ==============================
+app.get("/api/whatsapp/logs", async (req, res) => {
+  try {
+    const logs = await googleSheetsService.getWhatsAppLogs();
+    res.json(logs);
+  } catch (e) {
+    console.error("WhatsApp logs error:", e);
+    res.status(500).json([]);
+  }
+});
+
+app.get("/api/whatsapp/requests", async (req, res) => {
+  try {
+    const requests = await googleSheetsService.getRequests();
+    res.json(requests);
+  } catch (e) {
+    console.error("WhatsApp requests error:", e);
+    res.status(500).json([]);
+  }
+});
+
+app.get("/api/whatsapp/stats", async (req, res) => {
+  try {
+    const logs = await googleSheetsService.getWhatsAppLogs();
+    const now = new Date();
+
+    const today = logs.filter(l => (new Date(l.createdAt)).toDateString() === now.toDateString()).length;
+    const week = logs.filter(l => {
+      const d = new Date(l.createdAt);
+      const diff = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
+      return diff <= 7;
+    }).length;
+    const month = logs.filter(l => {
+      const d = new Date(l.createdAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }).length;
+
+    res.json({
+      today,
+      week,
+      month,
+      total: logs.length,
+    });
+  } catch (e) {
+    console.error("WhatsApp stats error:", e);
+    res.status(500).json({ today: 0, week: 0, month: 0, total: 0 });
+  }
+});
+
+// إرسال يدوي للمدير
+app.post("/api/whatsapp/send", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: "Message required" });
+
+    const log = {
+      id: `WA-${Date.now()}`,
+      type: "manual",
+      message,
+      phone: process.env.ADMIN_PHONE || "966533220646",
+      status: "success",
+      response: "saved",
+      createdAt: new Date().toISOString(),
+    };
+
+    await googleSheetsService.addWhatsAppLog(log);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("WhatsApp send error:", e);
+    res.status(500).json({ error: "Failed" });
+  }
+});
+
+  // ==========================
+  //   التحقق من العقارات
+  // ==========================
+
+  app.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+
+    // تحديث الحالة في الشيت
+    const updated = await googleSheetsService.updateVerificationStatus(
+      propertyNumber,
+      "approved"
+    );
+
+    // تسجيل العملية داخل storage
+    await storage.addVerificationLog({
+      propertyNumber,
+      action: "approved",
+      reason: "",
+      date: new Date().toISOString(),
+      admin: "Admin",
+    });
+
+    res.json({
+      success: true,
+      message: "تم قبول العقار",
+      property: updated,
+    });
+
+  } catch (err) {
+    console.error("Approve Error:", err);
+    res.status(500).json({ success: false, message: "فشل في قبول العقار" });
+  }
+});
+
+  app.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
+    try {
+      const { propertyNumber } = req.params;
+      const { reason } = req.body;
+
+      // تحديث الحالة في الشيت
+      const updated = await googleSheetsService.updateVerificationStatus(
+        propertyNumber,
+        "rejected"
+      );
+
+      // تسجيل العملية داخل storage
+      await storage.addVerificationLog({
+        propertyNumber,
+        action: "rejected",
+        reason: reason || "",
+        date: new Date().toISOString(),
+        admin: "Admin",
+      });
+
+      res.json({
+        success: true,
+        message: "تم رفض العقار",
+        property: updated,
+      });
+
+    } catch (err) {
+      console.error("Reject Error:", err);
+      res.status(500).json({ success: false, message: "فشل في رفض العقار" });
+    }
+  });
+
+
+  // ===============================
+  // 🔵 Logs: جلب سجل التحقق بالكامل
+  // ===============================
+  app.get("/api/admin/verification/logs", async (req, res) => {
+    try {
+      const logs = await storage.getVerificationLogs();
+      res.json(logs || []);
+    } catch (error) {
+      console.error("Verification logs error:", error);
+      res.status(500).json({ error: "Failed to fetch verification logs" });
+    }
+  });
+
 
 
   

@@ -31,7 +31,12 @@ const SHEETS = {
   PRICES: "الأسعار",
   PAYMENTS: "المدفوعات",
   ANALYTICS: "الإحصائيات",
+  WHATSAPP: "تنبيهات الواتساب",
+  VERIFICATION_LOGS: "سجل التحقق",
 };
+
+// عمود حالة التحقق — العمود 20 (T)
+const COL_VERIFICATION = 20;
 
 // =======================
 // Replit Connectors Auth
@@ -114,6 +119,9 @@ async function getGoogleSheetClient() {
 class GoogleSheetsService {
   private async getSheets() {
     return await getGoogleSheetClient();
+
+  
+    
   }
 
   // ================== تهيئة الشيتات (اختياري) ==================
@@ -278,6 +286,20 @@ class GoogleSheetsService {
         "المدن",
         "آخر تحديث",
       ],
+
+      [SHEETS.WHATSAPP]: [
+        "المعرف",
+        "رقم العقار",
+        "اسم العقار",
+        "رقم المالك",
+        "نوع الإشعار",
+        "الرسالة",
+        "الحالة",
+        "رد API",
+        "التاريخ",
+      ],
+
+      
     };
 
     for (const [sheetName, headerRow] of Object.entries(headers)) {
@@ -440,6 +462,9 @@ class GoogleSheetsService {
       lastUpdate: row[16] || "",
       subscriptionDate: row[17] || "",
       pin: row[18] || "",
+      verificationStatus: row[COL_VERIFICATION - 1] || undefined,
+    
+
     };
 
     return p as Property;
@@ -475,6 +500,8 @@ class GoogleSheetsService {
     p.lastUpdate || "",
     p.subscriptionDate || "",
     p.pin || "",
+    p.verificationStatus || "pending"
+
   ];
 }
 
@@ -499,6 +526,8 @@ class GoogleSheetsService {
       ...property,
       createdAt: now,
       updatedAt: now,
+      verificationStatus: "pending",       
+
     };
 
     const row = this.propertyToRow(newProperty as Property);
@@ -530,6 +559,37 @@ class GoogleSheetsService {
 
     return updatedProperty;
   }
+
+  // ================== تحديث حالة التحقق ==================
+  async updateVerificationStatus(
+    propertyNumber: string,
+    newStatus: "pending" | "approved" | "rejected" | "incomplete"
+  ): Promise<Property> {
+    // 1) قراءة كل العقارات
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+
+    // 2) البحث عن العقار
+    const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+    if (rowIndex === -1) {
+      throw new Error(`Property not found: ${propertyNumber}`);
+    }
+
+    // 3) تحويل الصف إلى كائن
+    const currentProperty = this.rowToProperty(rows[rowIndex]);
+
+    // 4) تحديث الحالة فقط
+    currentProperty.verificationStatus = newStatus;
+
+    // 5) تحويل الكائن إلى صف
+    const updatedRow = this.propertyToRow(currentProperty);
+
+    // 6) كتابة الصف في الشيت
+    await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, updatedRow);
+
+    // 7) إعادة العقار المحدث
+    return currentProperty;
+  }
+
 
   async deleteProperty(propertyNumber: string): Promise<void> {
     const rows = await this.readSheet(SHEETS.PROPERTIES);
@@ -1335,6 +1395,113 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       throw err;
     }
   }
+
+
+  async getVerificationLogs() {
+    try {
+      const sheet = this.sheets.spreadsheets.values;
+      const result = await sheet.get({
+        spreadsheetId: this.SPREADSHEET_ID,
+        range: "سجل التحقق!A2:D",
+      });
+
+      const rows = result.data.values || [];
+
+      return rows.map((r) => ({
+        timestamp: r[0],
+        propertyNumber: r[1],
+        action: r[2],      // approved / rejected
+        admin: r[3] || "غير محدد",
+      }));
+    } catch (err) {
+      console.error("Sheet logs error:", err);
+      return [];
+    }
+  }
+
+
+
+// ======================
+// 📲 سجلات تنبيهات الواتساب
+// ======================
+async addWhatsAppLog(log: {
+  id: string;
+  type: string;
+  message: string;
+  phone: string;          // رقم المستلم (أنت كأدمن)
+  status: string;
+  response: string;
+  createdAt: string;
+  propertyNumber?: string;
+  propertyName?: string;
+  ownerPhone?: string;
+}) {
+
+  const row = [
+    log.id,
+    log.propertyNumber || "",
+    log.propertyName || "",
+    log.ownerPhone || "",
+    log.type,
+    log.message,
+    log.status,
+    log.response,
+    log.createdAt,
+  ];
+
+  await this.appendToSheet(SHEETS.WHATSAPP, [row]);
 }
 
+async getWhatsAppLogs() {
+  const rows = await this.readSheet(SHEETS.WHATSAPP);
+
+  return rows.map((row, idx) => ({
+    id: row[0] || `WA-${idx}`,
+    propertyNumber: row[1] || "",
+    propertyName: row[2] || "",
+    ownerPhone: row[3] || "",
+    type: row[4] || "",
+    message: row[5] || "",
+    status: row[6] || "",
+    response: row[7] || "",
+    createdAt: row[8] || "",
+  }));
+ }
+
+  // ======================
+  // 📌 سجل التحقق (Verification Logs)
+  // ======================
+
+  async addVerificationLogToSheet(log: {
+    date: string;
+    propertyNumber: string;
+    action: string;
+    reason: string;
+    admin: string;
+  }) {
+    const row = [
+      log.date,
+      log.propertyNumber,
+      log.action,
+      log.reason,
+      log.admin,
+    ];
+
+    await this.appendToSheet(SHEETS.VERIFICATION_LOGS, [row]);
+  }
+
+  async getVerificationLogsFromSheet() {
+    const rows = await this.readSheet(SHEETS.VERIFICATION_LOGS);
+
+    return rows.map((r) => ({
+      date: r[0] || "",
+      propertyNumber: r[1] || "",
+      action: r[2] || "",
+      reason: r[3] || "",
+      admin: r[4] || "",
+    }));
+  }
+}
 export const googleSheetsService = new GoogleSheetsService();
+
+

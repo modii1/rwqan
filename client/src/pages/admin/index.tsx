@@ -1,5 +1,7 @@
 // client/src/pages/admin/index.tsx
 import { useLocation } from "wouter";
+import AdminWhatsAppSection from "./sections/whatsapp";
+import AdminVerificationSection from "./sections/verification";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -21,6 +23,8 @@ import {
   Monitor,
   Tablet,
   MapPin,
+  MessageCircle, 
+
   Clock,
 } from "lucide-react";
 
@@ -36,6 +40,8 @@ import PaymentsSection from "./sections/payments";
 import AdminAnalytics from "./admin-analytics";
 import AdminBackup from "./admin-backup";
 import AdminCodeBackup from "./admin-code-backup";
+import VerificationLogsPage from "./sections/verification-logs";
+
 
 type AdminSection =
   | ""
@@ -46,8 +52,10 @@ type AdminSection =
   | "requests"
   | "payments"
   | "analytics"
+  | "verification"
   | "backup"
-  | "code-backup";
+  | "code-backup"
+  | "whatsapp";
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
@@ -152,6 +160,21 @@ export default function AdminDashboard() {
           onClick={() => setActiveSection("analytics")}
         />
 
+        {/*  - زر نظام الواتساب */}
+        <SidebarButton
+          icon={<MessageCircle className="w-4 h-4 text-green-600" />}
+          label="نظام الواتساب"
+          active={activeSection === "whatsapp"}
+          onClick={() => setActiveSection("whatsapp")}
+        />
+
+        <SidebarButton
+          icon={<Clock className="w-4 h-4" />}
+          label="نظام التحقق"
+          active={activeSection === "verification"}
+          onClick={() => setActiveSection("verification")}
+        />
+
         <div className="hidden md:block h-px bg-border my-2" />
 
         <SidebarButton
@@ -186,6 +209,8 @@ export default function AdminDashboard() {
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
         {activeSection === "code-backup" && <AdminCodeBackup />}
+        {activeSection === "whatsapp" && <AdminWhatsAppSection />}
+        {activeSection === "verification" && <AdminVerificationSection />}
       </main>
     </div>
   );
