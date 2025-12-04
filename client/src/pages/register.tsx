@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { FACILITIES } from "@shared/schema";
+import { Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft } from "lucide-react";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -37,6 +38,8 @@ export default function RegisterPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [facilitySearch, setFacilitySearch] = useState("");
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState("");
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,15 +51,11 @@ export default function RegisterPage() {
         ...formData,
         facilities,
         prices,
-        subscriptionType: 'عادي', // جميع العقارات الجديدة تبدأ بنوع "عادي"
+        subscriptionType: 'عادي',
       });
 
-      toast({
-        title: "تم تسجيل العقار بنجاح ✓",
-        description: "يمكنك الآن تسجيل الدخول وإدارة عقارك",
-      });
-
-      setLocation('/register-with-package');
+      setRegisteredPropertyNumber(formData.propertyNumber);
+      setRegistrationSuccess(true);
     } catch (error: any) {
       toast({
         title: "خطأ في التسجيل",
@@ -75,6 +74,92 @@ export default function RegisterPage() {
         : [...prev, facility]
     );
   };
+
+  // عرض صفحة النجاح بعد التسجيل
+  if (registrationSuccess) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
+        <Card className="max-w-lg w-full p-8 text-center space-y-6">
+          {/* أيقونة النجاح */}
+          <div className="flex justify-center">
+            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+              <Clock className="w-10 h-10 text-primary" />
+            </div>
+          </div>
+
+          {/* العنوان */}
+          <div>
+            <h1 className="text-2xl font-bold text-primary mb-2">
+              تم استلام طلبك بنجاح!
+            </h1>
+            <p className="text-muted-foreground">
+              عقارك قيد المراجعة من فريقنا
+            </p>
+          </div>
+
+          {/* تفاصيل العقار */}
+          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Home className="w-4 h-4" />
+                رقم العقار
+              </span>
+              <span className="font-bold text-lg">{registeredPropertyNumber}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Lock className="w-4 h-4" />
+                الرقم السري
+              </span>
+              <span className="font-mono text-lg">****</span>
+            </div>
+          </div>
+
+          {/* رسالة المراجعة */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5" />
+              <div className="text-right">
+                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
+                <p className="text-sm text-amber-700">
+                  سيتم مراجعة عقارك من قبل الإدارة خلال 24 ساعة.
+                  ستتمكن من تسجيل الدخول فور قبول العقار.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* معلومات التواصل */}
+          <div className="text-sm text-muted-foreground">
+            <p className="flex items-center justify-center gap-2">
+              <Phone className="w-4 h-4" />
+              للاستفسار: 0533220646
+            </p>
+          </div>
+
+          {/* الأزرار */}
+          <div className="flex flex-col gap-3">
+            <Button 
+              onClick={() => setLocation('/owner/login')}
+              className="w-full gradient-golden"
+              data-testid="button-go-login"
+            >
+              الذهاب لتسجيل الدخول
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => setLocation('/')}
+              className="w-full"
+              data-testid="button-go-home"
+            >
+              <ArrowLeft className="w-4 h-4 ml-2" />
+              العودة للرئيسية
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
