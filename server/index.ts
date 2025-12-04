@@ -2,10 +2,11 @@ import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
 import cors from "cors";
 import { registerRoutes } from "./routes";
-import { setupVite, log } from "./vite";
+import { setupVite } from "./vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
+import whatsappRoutes from "./whatsapp";
 
 const app = express();
 
@@ -14,23 +15,23 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // ====================================
-// 🚀 CORS SETTINGS (مهم جداً)
+// 🚀 CORS SETTINGS
 // ====================================
 app.use(
   cors({
-    origin: true,          // يسمح لكل الدومينات
-    credentials: true,     // يرسل الكوكيز
-  })
+    origin: true,
+    credentials: true,
+  }),
 );
 
 // ====================================
-// 🚀 SESSION SETTINGS (المهم جداً لعدم ظهور 401)
+// 🚀 SESSION SETTINGS
 // ====================================
 const memoryStore = new (MemoryStore(session))({
-  checkPeriod: 86400000, // كل 24 ساعة
+  checkPeriod: 86400000,
 });
 
-app.set("trust proxy", 1); // Replit uses reverse proxy
+app.set("trust proxy", 1);
 
 app.use(
   session({
@@ -40,11 +41,11 @@ app.use(
     store: memoryStore,
     cookie: {
       httpOnly: true,
-      secure: true,        // Replit uses HTTPS
-      sameSite: "none",    // ضروري لأن front/back دومين مختلف
-      maxAge: 1000 * 60 * 60 * 24 * 7, // أسبوع
+      secure: true,
+      sameSite: "none",
+      maxAge: 1000 * 60 * 60 * 24 * 7,
     },
-  })
+  }),
 );
 
 // =====================================
@@ -56,8 +57,9 @@ if (bucketId) {
 }
 
 (async () => {
-  // Register all API routes
+  // Register all project routes
   const server = await registerRoutes(app);
+
 
   // Error Handler
   const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -79,7 +81,7 @@ if (bucketId) {
 
     app.use(express.static(publicPath));
 
-    // Any non-API route returns React index.html
+    // Any non-API route returns index.html
     app.get("*", (req, res) => {
       if (!req.path.startsWith("/api"))
         return res.sendFile(path.join(publicPath, "index.html"));

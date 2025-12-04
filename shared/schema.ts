@@ -27,6 +27,7 @@ export const propertySchema = z.object({
   lastUpdate: z.string().optional(), // آخر تحديث
   subscriptionDate: z.string().optional(), // تاريخ الاشتراك
   pin: z.string().optional(), // رقم سري للدخول (للنظام القديم)
+  verificationStatus: z.enum(['pending', 'approved', 'rejected', 'incomplete']).optional(),
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
   createdAt: z.string().optional(),

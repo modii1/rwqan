@@ -10,6 +10,7 @@ import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
 
+
 // Pages
 import NotFound from "@/pages/not-found";
 import PropertiesPage from "@/pages/properties";
@@ -28,6 +29,10 @@ import AdminImagesPage from "@/pages/admin/admin-images";
 import AdminAnalytics from "@/pages/admin/admin-analytics";
 import AdminBackup from "@/pages/admin/admin-backup";
 import AdminCodeBackup from "@/pages/admin/admin-code-backup";
+import VerificationLogsPage from "@/pages/admin/sections/verification-logs";
+
+
+
 
 function Router() {
   useAnalytics();
@@ -57,6 +62,10 @@ function Router() {
       <Route path="/admin/backup" component={AdminBackup} />
       <Route path="/admin/code-backup" component={AdminCodeBackup} />
       <Route path="/admin/images/:propertyNumber" component={AdminImagesPage} />
+      <Route path="/admin/verification-logs" component={VerificationLogsPage} />
+
+      
+
 
       {/* صفحة 404 */}
       <Route component={NotFound} />
