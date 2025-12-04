@@ -308,14 +308,17 @@ export async function notifyNewProperty(data: {
   city: string;
   type: string;
 }) {
+  console.log("📲 Sending new property notification:", data.propertyNumber, data.propertyName);
   const text = `🏠 نوع العقار: ${data.type}\n📍 المنطقة: ${data.city}`;
-  return sendAdminWhatsAppNotification({
+  const result = await sendAdminWhatsAppNotification({
     type: "🏠 عقار جديد",
     text,
     propertyNumber: data.propertyNumber,
     propertyName: data.propertyName,
     ownerPhone: data.ownerPhone,
   });
+  console.log("📲 Notification result:", result);
+  return result;
 }
 
 /**
