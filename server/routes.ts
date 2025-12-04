@@ -1428,9 +1428,24 @@ app.get("/api/owner/analytics", async (req, res) => {
 
       const created = await storage.createProperty(newProperty);
 
+      // إرسال إشعار واتساب للمدير عند تسجيل عقار جديد
+      console.log("📲 Sending WhatsApp notification for new registration:", data.propertyNumber);
+      notifyNewProperty({
+        propertyNumber: data.propertyNumber,
+        propertyName: data.name || "",
+        ownerPhone: data.whatsappNumber || "",
+        city: data.city || "",
+        type: data.type || "",
+      }).then(result => {
+        console.log("📲 WhatsApp notification sent:", result);
+      }).catch(err => {
+        console.error("❌ WhatsApp notify error:", err);
+      });
+
       res.json(created);
 
     } catch (error) {
+      console.error("Register property error:", error);
       res.status(500).json({ error: "خطأ أثناء تسجيل العقار" });
     }
   });
