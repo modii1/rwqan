@@ -1664,6 +1664,7 @@ async getWhatsAppLogs() {
     activeSubscriptions: number;
     totalRevenue: number;
     partnerShare: number;
+    payments: any[];
   }> {
     const now = new Date();
     const monthYear = `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`;
@@ -1676,7 +1677,7 @@ async getWhatsAppLogs() {
       const paymentDate = new Date(p.createdAt || "");
       return paymentDate >= startOfMonth && 
              paymentDate <= endOfMonth && 
-             (p.status === "مكتمل" || p.status === "نجحت");
+             p.status === "مكتمل";
     });
     
     const totalRevenue = monthlyPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
@@ -1687,6 +1688,63 @@ async getWhatsAppLogs() {
       activeSubscriptions: monthlyPayments.length,
       totalRevenue,
       partnerShare,
+      payments: monthlyPayments,
+    };
+  }
+
+  async getProfitsSummary(): Promise<{
+    currentMonth: {
+      monthYear: string;
+      totalRevenue: number;
+      partnerShare: number;
+      paymentsCount: number;
+    };
+    allTime: {
+      totalRevenue: number;
+      partnerShare: number;
+      paymentsCount: number;
+    };
+    pendingPayments: number;
+    recentPayments: any[];
+  }> {
+    const payments = await this.getPayments();
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    const completedPayments = payments.filter(p => 
+      p.status === "مكتمل"
+    );
+    
+    const currentMonthPayments = completedPayments.filter(p => {
+      const paymentDate = new Date(p.createdAt || "");
+      return paymentDate >= startOfMonth;
+    });
+    
+    const pendingPayments = payments.filter(p => 
+      p.status === "قيد المراجعة" || p.status === "معلق"
+    ).length;
+    
+    const allTimeRevenue = completedPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+    const currentMonthRevenue = currentMonthPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+    
+    const recentPayments = payments
+      .sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime())
+      .slice(0, 10);
+    
+    return {
+      currentMonth: {
+        monthYear: `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`,
+        totalRevenue: currentMonthRevenue,
+        partnerShare: Math.round(currentMonthRevenue * 0.5 * 100) / 100,
+        paymentsCount: currentMonthPayments.length,
+      },
+      allTime: {
+        totalRevenue: allTimeRevenue,
+        partnerShare: Math.round(allTimeRevenue * 0.5 * 100) / 100,
+        paymentsCount: completedPayments.length,
+      },
+      pendingPayments,
+      recentPayments,
     };
   }
 

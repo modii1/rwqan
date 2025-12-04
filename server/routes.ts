@@ -2463,6 +2463,16 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
   });
 
+  app.get("/api/admin/partner-profits/summary", async (req, res) => {
+    try {
+      const summary = await googleSheetsService.getProfitsSummary();
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching profits summary:", error);
+      res.status(500).json({ error: "فشل في جلب ملخص الأرباح" });
+    }
+  });
+
   app.post("/api/admin/partner-profits", async (req, res) => {
     try {
       const profit = await googleSheetsService.createPartnerProfit(req.body);
@@ -2516,7 +2526,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
       }
       
       // جلب الباقة
-      const pkg = await storage.getPackage(packageId);
+      const pkg = await storage.getPackageById(packageId);
       if (!pkg) {
         return res.status(400).json({ error: "الباقة غير موجودة" });
       }
@@ -2532,7 +2542,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
         propertyNumber2,
         startDate,
         endDate: endDate.toISOString(),
-        status: "فعال",
+        status: "نشط",
       });
       
       res.json({ success: true, subscription: sub });
