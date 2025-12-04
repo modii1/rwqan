@@ -135,9 +135,14 @@ export default function AdminWhatsAppSection() {
           placeholder="اكتب الرسالة التي تريد أن تصل إلى المدير…"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
+          data-testid="input-whatsapp-message"
         />
 
-        <Button onClick={handleSend} disabled={loadingSend || !message.trim()}>
+        <Button 
+          onClick={handleSend} 
+          disabled={loadingSend || !message.trim()}
+          data-testid="button-send-whatsapp"
+        >
           {loadingSend ? (
             <Loader2 className="w-4 h-4 ml-2 animate-spin" />
           ) : (

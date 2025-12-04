@@ -7,15 +7,16 @@ import { Loader2, RefreshCw, Search } from "lucide-react";
 
 type LogEntry = {
   propertyNumber: string;
-  action: "approved" | "rejected";
+  action: string;
   reason?: string;
   date: string;
+  admin?: string;
 };
 
 export default function VerificationLogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "approved" | "rejected">("all");
+  const [filter, setFilter] = useState<"all" | "قبول" | "رفض">("all");
   const [loading, setLoading] = useState(true);
 
   async function loadLogs() {
@@ -74,16 +75,16 @@ export default function VerificationLogsPage() {
 
           <Button
             size="sm"
-            variant={filter === "approved" ? "default" : "outline"}
-            onClick={() => setFilter("approved")}
+            variant={filter === "قبول" ? "default" : "outline"}
+            onClick={() => setFilter("قبول")}
           >
             المقبولة
           </Button>
 
           <Button
             size="sm"
-            variant={filter === "rejected" ? "default" : "outline"}
-            onClick={() => setFilter("rejected")}
+            variant={filter === "رفض" ? "default" : "outline"}
+            onClick={() => setFilter("رفض")}
           >
             المرفوضة
           </Button>
@@ -108,18 +109,23 @@ export default function VerificationLogsPage() {
                   <div>
                     <p className="font-semibold">عقار #{log.propertyNumber}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(log.date).toLocaleString("ar-SA")}
+                      {log.date}
                     </p>
+                    {log.admin && (
+                      <p className="text-xs text-muted-foreground">
+                        بواسطة: {log.admin}
+                      </p>
+                    )}
                   </div>
 
                   <Badge
                     className={
-                      log.action === "approved"
+                      log.action === "قبول"
                         ? "bg-green-600 text-white"
                         : "bg-red-600 text-white"
                     }
                   >
-                    {log.action === "approved" ? "تم القبول" : "تم الرفض"}
+                    {log.action === "قبول" ? "تم القبول" : "تم الرفض"}
                   </Badge>
                 </div>
 
