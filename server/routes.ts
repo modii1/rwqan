@@ -1,4 +1,4 @@
-
+import whatsappRoutes from "./whatsapp";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
 import type { CorsOptions } from "cors";
@@ -88,7 +88,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     credentials: true,
   };
   app.use(cors(corsOptions));
-  
+  app.use("/api/whatsapp", whatsappRoutes);
   
 
   // Owner Analytics - بيانات حقيقية من Google Sheets
@@ -2270,9 +2270,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
     await storage.addVerificationLog({
       propertyNumber,
       action: "approved",
-      reason: "",
       date: new Date().toISOString(),
-      admin: "Admin",
     });
 
     res.json({
