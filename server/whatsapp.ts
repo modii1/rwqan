@@ -1,6 +1,7 @@
 // server/whatsapp.ts
 import express from "express";
 import { googleSheetsService } from "./googleSheets";
+import type { NotificationSettings } from "@shared/schema";
 
 const router = express.Router();
 
@@ -15,6 +16,44 @@ const ADMIN_WHATSAPP = META_NOTIFY_NUMBER || process.env.ADMIN_WHATSAPP || "9665
 // إعدادات Meta WhatsApp Cloud API
 const WHATSAPP_PHONE_NUMBER_ID = META_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
 const WHATSAPP_ACCESS_TOKEN = META_WHATSAPP_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || "";
+
+// كاش إعدادات الإشعارات
+let cachedSettings: NotificationSettings | null = null;
+let settingsCacheTime = 0;
+const CACHE_TTL = 60000; // 1 minute
+
+async function getNotificationSettings(): Promise<NotificationSettings> {
+  const now = Date.now();
+  if (cachedSettings && (now - settingsCacheTime) < CACHE_TTL) {
+    return cachedSettings;
+  }
+  
+  try {
+    cachedSettings = await googleSheetsService.getNotificationSettings();
+    settingsCacheTime = now;
+    return cachedSettings;
+  } catch (err) {
+    console.error("Error loading notification settings:", err);
+    return {
+      allNotifications: true,
+      newProperty: true,
+      newSubscription: true,
+      subscriptionRenewal: true,
+      receiptUpload: true,
+      propertyUpdate: true,
+      newPayment: true,
+      smartRequest: true,
+      propertyVerification: true,
+      subscriptionExpired: true,
+    };
+  }
+}
+
+// مسح كاش الإعدادات
+export function clearSettingsCache() {
+  cachedSettings = null;
+  settingsCacheTime = 0;
+}
 
 /**
  * دالة مساعدة: إرسال رسالة واتساب للمدير + حفظها في Google Sheet
@@ -232,6 +271,12 @@ export async function notifyNewSubscription(data: {
   packageName: string;
   amount: number;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.newSubscription) {
+    console.log("📵 Notification disabled: newSubscription");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `📦 باقة: ${data.packageName}\n💰 المبلغ: ${data.amount} ريال`;
   return sendAdminWhatsAppNotification({
     type: "🎉 اشتراك جديد",
@@ -252,6 +297,12 @@ export async function notifySubscriptionRenewal(data: {
   packageName: string;
   amount: number;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.subscriptionRenewal) {
+    console.log("📵 Notification disabled: subscriptionRenewal");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `🔄 تجديد باقة: ${data.packageName}\n💰 المبلغ: ${data.amount} ريال`;
   return sendAdminWhatsAppNotification({
     type: "🔄 تجديد اشتراك",
@@ -271,6 +322,12 @@ export async function notifyReceiptUpload(data: {
   ownerPhone: string;
   receiptUrl: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.receiptUpload) {
+    console.log("📵 Notification disabled: receiptUpload");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `📄 تم رفع إيصال جديد\n🔗 رابط الإيصال: ${data.receiptUrl}`;
   return sendAdminWhatsAppNotification({
     type: "📄 رفع إيصال",
@@ -289,6 +346,12 @@ export async function notifyPropertyUpdate(data: {
   propertyName: string;
   changes: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.propertyUpdate) {
+    console.log("📵 Notification disabled: propertyUpdate");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `✏️ التعديلات:\n${data.changes}`;
   return sendAdminWhatsAppNotification({
     type: "✏️ تعديل عقار",
@@ -308,6 +371,12 @@ export async function notifyNewProperty(data: {
   city: string;
   type: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.newProperty) {
+    console.log("📵 Notification disabled: newProperty");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   console.log("📲 Sending new property notification:", data.propertyNumber, data.propertyName);
   const text = `🏠 نوع العقار: ${data.type}\n📍 المنطقة: ${data.city}`;
   const result = await sendAdminWhatsAppNotification({
@@ -329,6 +398,12 @@ export async function notifySubscriptionExpired(data: {
   propertyName: string;
   ownerPhone: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.subscriptionExpired) {
+    console.log("📵 Notification disabled: subscriptionExpired");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `⚠️ الاشتراك منتهي - يرجى التجديد`;
   return sendAdminWhatsAppNotification({
     type: "⚠️ انتهاء اشتراك",
@@ -349,6 +424,12 @@ export async function notifyNewPayment(data: {
   paymentMethod: string;
   transactionId: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.newPayment) {
+    console.log("📵 Notification disabled: newPayment");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `💳 طريقة الدفع: ${data.paymentMethod}\n💰 المبلغ: ${data.amount} ريال\n🔢 رقم العملية: ${data.transactionId}`;
   return sendAdminWhatsAppNotification({
     type: "💳 دفعة جديدة",
@@ -367,6 +448,12 @@ export async function notifySmartRequest(data: {
   deviceType: string;
   ip: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.smartRequest) {
+    console.log("📵 Notification disabled: smartRequest");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const text = `📱 الجهاز: ${data.deviceType}\n🌐 IP: ${data.ip}`;
   return sendAdminWhatsAppNotification({
     type: "📲 طلب واتساب جديد",
@@ -386,6 +473,12 @@ export async function notifyPropertyVerification(data: {
   reason?: string;
   admin?: string;
 }) {
+  const settings = await getNotificationSettings();
+  if (!settings.allNotifications || !settings.propertyVerification) {
+    console.log("📵 Notification disabled: propertyVerification");
+    return { status: "disabled", response: "الإشعار معطل" };
+  }
+  
   const emoji = data.action === "قبول" ? "✅" : "❌";
   let text = `${emoji} الإجراء: ${data.action}`;
   if (data.reason) text += `\n📝 السبب: ${data.reason}`;

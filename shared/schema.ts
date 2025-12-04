@@ -246,6 +246,65 @@ export const insertCodeBackupSchema = codeBackupSchema.omit({ id: true, createdA
 export type InsertCodeBackup = z.infer<typeof insertCodeBackupSchema>;
 
 // =========================
+// Notification Settings Schema (إعدادات الإشعارات)
+// =========================
+export const notificationSettingsSchema = z.object({
+  allNotifications: z.boolean().default(true), // تشغيل/إيقاف كل الإشعارات
+  newProperty: z.boolean().default(true), // إشعار عقار جديد
+  newSubscription: z.boolean().default(true), // إشعار اشتراك جديد
+  subscriptionRenewal: z.boolean().default(true), // إشعار تجديد اشتراك
+  receiptUpload: z.boolean().default(true), // إشعار رفع إيصال
+  propertyUpdate: z.boolean().default(true), // إشعار تعديل عقار
+  newPayment: z.boolean().default(true), // إشعار دفعة جديدة
+  smartRequest: z.boolean().default(true), // إشعار طلب واتساب
+  propertyVerification: z.boolean().default(true), // إشعار تحقق
+  subscriptionExpired: z.boolean().default(true), // إشعار انتهاء اشتراك
+  updatedAt: z.string().optional(),
+});
+
+export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
+
+// =========================
+// Partner Profits Schema (أرباح الشريك)
+// =========================
+export const partnerProfitSchema = z.object({
+  id: z.string(),
+  monthYear: z.string(), // الشهر/السنة مثل "2025/11"
+  activeSubscriptions: z.number(), // عدد الاشتراكات الفعالة
+  totalRevenue: z.number(), // إجمالي الإيرادات
+  partnerShare: z.number(), // نصيب الشريك (50%)
+  partnerPercentage: z.number().default(50), // نسبة الشريك
+  transferDate: z.string().optional(), // تاريخ التحويل
+  transferStatus: z.enum(['pending', 'transferred']).default('pending'), // حالة التحويل
+  notes: z.string().optional(), // ملاحظات
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type PartnerProfit = z.infer<typeof partnerProfitSchema>;
+export const insertPartnerProfitSchema = partnerProfitSchema.omit({ id: true, createdAt: true });
+export type InsertPartnerProfit = z.infer<typeof insertPartnerProfitSchema>;
+
+// =========================
+// Multi-Property Package Schema (باقة عقارين)
+// =========================
+export const multiPropertySubscriptionSchema = z.object({
+  id: z.string(),
+  packageId: z.string(),
+  propertyNumber1: z.string(), // رقم العقار الأول
+  propertyNumber2: z.string(), // رقم العقار الثاني
+  startDate: z.string(),
+  endDate: z.string(),
+  status: z.enum(['نشط', 'منتهي', 'معلق']),
+  paymentId: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+
+export type MultiPropertySubscription = z.infer<typeof multiPropertySubscriptionSchema>;
+export const insertMultiPropertySubscriptionSchema = multiPropertySubscriptionSchema.omit({ id: true, createdAt: true });
+export type InsertMultiPropertySubscription = z.infer<typeof insertMultiPropertySubscriptionSchema>;
+
+// =========================
 // 100 Facilities List (قائمة المرافق)
 // =========================
 export const FACILITIES = [
