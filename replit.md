@@ -61,6 +61,22 @@
 - **Paymob**: بوابة دفع إلكتروني + Webhook للتحديث التلقائي
 - **Object Storage**: حفظ إيصالات الدفع
 - **Google Analytics**: تتبع الزوار والإحصائيات
+- **Meta WhatsApp Business API**: إشعارات فورية للمدير
+  - إرسال رسائل واتساب تلقائية عند أي حدث في المنصة
+  - يتطلب: `META_WHATSAPP_TOKEN`, `META_PHONE_NUMBER_ID`, `META_NOTIFY_NUMBER`
+
+### 5. نظام إشعارات الواتساب (Meta WhatsApp Business API)
+يتم إرسال إشعارات واتساب فورية للمدير عند:
+- **عقار جديد**: عند إضافة عقار جديد للمنصة
+- **تعديل عقار**: عند تحديث بيانات أي عقار
+- **طلب واتساب جديد**: عند نقر المستخدم على زر التواصل
+- **رفع إيصال**: عند رفع إيصال تحويل بنكي
+- **قبول/رفض عقار**: عند التحقق من عقار في لوحة الإدارة
+- **رسائل يدوية**: إمكانية إرسال رسائل من لوحة التحكم
+
+**الملفات المرتبطة:**
+- `server/whatsapp.ts`: جميع دوال الإشعارات
+- `server/routes.ts`: ربط الإشعارات بالأحداث
 
 ### 4. الصفحات
 
@@ -132,13 +148,23 @@
 
 ## متغيرات البيئة المطلوبة
 ```
+# Google Services
 GOOGLE_SHEET_ID=xxx
 GOOGLE_SERVICE_ACCOUNT_KEY=xxx  # JSON key من Google Cloud Service Account
+
+# Paymob
 PAYMOB_API_KEY=xxx
 PAYMOB_PUBLIC_KEY=xxx
 PAYMOB_HMAC_SECRET=xxx
 PAYMOB_INTEGRATION_ID_CARDS=xxx
 PAYMOB_INTEGRATION_ID_APPLEPAY=xxx
+
+# Meta WhatsApp Business API
+META_WHATSAPP_TOKEN=xxx         # توكن الوصول من Meta Business
+META_PHONE_NUMBER_ID=xxx        # معرف رقم الهاتف
+META_NOTIFY_NUMBER=xxx          # رقم الواتساب للإشعارات (بدون +)
+
+# Others
 SESSION_SECRET=xxx
 DEFAULT_OBJECT_STORAGE_BUCKET_ID=xxx
 ```
