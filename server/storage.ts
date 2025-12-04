@@ -294,33 +294,41 @@ export class GoogleSheetsStorage implements IStorage {
   // ===== Active Sessions Implementation (In-Memory) =====
   private activeSessions: Set<string> = new Set();
   
-  // ===== Verification Logs (In-Memory) =====
-  private verificationLogs: Array<{
+  // ===== Verification Logs (Google Sheets) =====
+  async addVerificationLog(log: {
     propertyNumber: string;
     action: "approved" | "rejected";
     reason?: string;
-    date: string;
-  }> = [];
+    admin?: string;
+  }) {
+    const utcNow = new Date();
+    const riyadhTime = new Date(utcNow.getTime() + (3 * 60 * 60 * 1000));
+    
+    const entry = {
+      date: riyadhTime.toLocaleString('ar-SA'),
+      propertyNumber: log.propertyNumber,
+      action: log.action === "approved" ? "قبول" : "رفض",
+      reason: log.reason || "",
+      admin: log.admin || "Admin",
+    };
 
-  async addVerificationLog(log: {
-  propertyNumber: string;
-  action: "approved" | "rejected";
-  reason?: string;
-}) {
-  const entry = {
-    propertyNumber: log.propertyNumber,
-    action: log.action,
-    reason: log.reason || "",
-    date: new Date().toISOString(),
-  };
-
-  this.verificationLogs.push(entry);
-  return entry;
-}
-
+    try {
+      await googleSheetsService.addVerificationLogToSheet(entry);
+      console.log("✅ تم حفظ سجل التحقق:", entry);
+    } catch (err) {
+      console.error("❌ فشل حفظ سجل التحقق:", err);
+    }
+    
+    return entry;
+  }
 
   async getVerificationLogs() {
-    return this.verificationLogs;
+    try {
+      return await googleSheetsService.getVerificationLogsFromSheet();
+    } catch (err) {
+      console.error("❌ فشل جلب سجلات التحقق:", err);
+      return [];
+    }
   }
 
 
