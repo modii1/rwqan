@@ -1,4 +1,13 @@
-import whatsappRoutes from "./whatsapp";
+import whatsappRoutes, {
+  notifyNewSubscription,
+  notifySubscriptionRenewal,
+  notifyReceiptUpload,
+  notifyPropertyUpdate,
+  notifyNewProperty,
+  notifyNewPayment,
+  notifySmartRequest,
+  notifyPropertyVerification,
+} from "./whatsapp";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
 import type { CorsOptions } from "cors";
@@ -340,6 +349,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageUrls: [],
       });
 
+      // إرسال إشعار واتساب عند إضافة عقار جديد
+      notifyNewProperty({
+        propertyNumber: data.propertyNumber,
+        propertyName: data.name || "",
+        ownerPhone: data.whatsappNumber || "",
+        city: data.city || "",
+        type: data.type || "",
+      }).catch(err => console.error("WhatsApp notify error:", err));
+
       res.json(created);
     } catch (err) {
       res.status(500).json({ error: "خطأ أثناء إنشاء العقار" });
@@ -365,6 +383,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!updated)
         return res.status(404).json({ error: "العقار غير موجود" });
+
+      // إرسال إشعار واتساب عند تعديل العقار
+      const changesText = Object.entries(mapped)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("\n");
+      notifyPropertyUpdate({
+        propertyNumber: req.params.propertyNumber,
+        propertyName: updated.name || "",
+        changes: changesText,
+      }).catch(err => console.error("WhatsApp notify error:", err));
 
       res.json(updated);
     } catch (error) {
@@ -505,6 +533,15 @@ const request = await storage.createRequest(
         }
       });
       keysToDelete.forEach(ip => requestTracker.delete(ip));
+
+      // إرسال إشعار واتساب عند طلب واتساب جديد
+      const property = await storage.getPropertyByNumber(propertyNumber);
+      notifySmartRequest({
+        propertyNumber,
+        propertyName: property?.name || "",
+        deviceType: deviceType,
+        ip: ipAddress,
+      }).catch(err => console.error("WhatsApp notify error:", err));
 
       res.json({
         ok: true,
@@ -1779,6 +1816,14 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       // حفظ الاشتراك إلى ورقة الاشتراكات
       await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property, receiptUrl);
       console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
+
+      // إرسال إشعار واتساب عند رفع الإيصال
+      notifyReceiptUpload({
+        propertyNumber,
+        propertyName: property.name || "",
+        ownerPhone: property.whatsappNumber || "",
+        receiptUrl,
+      }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
     res.json({ ok: true, paymentId: payment.id });
@@ -2273,6 +2318,15 @@ app.post("/api/whatsapp/send", async (req, res) => {
       date: new Date().toISOString(),
     });
 
+    // إرسال إشعار واتساب عند قبول العقار
+    const property = await storage.getPropertyByNumber(propertyNumber);
+    notifyPropertyVerification({
+      propertyNumber,
+      propertyName: property?.name || "",
+      action: "قبول",
+      admin: "Admin",
+    }).catch(err => console.error("WhatsApp notify error:", err));
+
     res.json({
       success: true,
       message: "تم قبول العقار",
@@ -2304,6 +2358,16 @@ app.post("/api/whatsapp/send", async (req, res) => {
         date: new Date().toISOString(),
         admin: "Admin",
       });
+
+      // إرسال إشعار واتساب عند رفض العقار
+      const property = await storage.getPropertyByNumber(propertyNumber);
+      notifyPropertyVerification({
+        propertyNumber,
+        propertyName: property?.name || "",
+        action: "رفض",
+        reason: reason || "",
+        admin: "Admin",
+      }).catch(err => console.error("WhatsApp notify error:", err));
 
       res.json({
         success: true,
