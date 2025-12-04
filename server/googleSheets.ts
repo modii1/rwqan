@@ -944,6 +944,45 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     return newPkg;
   }
 
+  async updatePackage(id: string, updates: Partial<Package>): Promise<Package | null> {
+    const rows = await this.readSheet(SHEETS.PACKAGES);
+    const rowIndex = rows.findIndex((row) => row[0] === id);
+    
+    if (rowIndex === -1) {
+      return null;
+    }
+    
+    const currentPkg = this.rowToPackage(rows[rowIndex]);
+    const updatedPkg = { ...currentPkg, ...updates };
+    
+    const features = Array.isArray(updatedPkg.features) ? updatedPkg.features.join(", ") : "";
+    
+    const newRow = [
+      updatedPkg.id,
+      updatedPkg.name,
+      updatedPkg.duration.toString(),
+      updatedPkg.price.toString(),
+      updatedPkg.type,
+      features,
+      updatedPkg.isActive ? "نعم" : "لا",
+      updatedPkg.createdAt || "",
+    ];
+    
+    await this.updateRow(SHEETS.PACKAGES, rowIndex + 2, newRow);
+    return updatedPkg;
+  }
+
+  async deletePackage(id: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.PACKAGES);
+    const rowIndex = rows.findIndex((row) => row[0] === id);
+    
+    if (rowIndex === -1) {
+      throw new Error("الباقة غير موجودة");
+    }
+    
+    await this.deleteRow(SHEETS.PACKAGES, rowIndex + 2);
+  }
+
   // ================== أكواد الخصم ==================
 
   async getDiscountCodes(): Promise<DiscountCode[]> {
@@ -980,6 +1019,51 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
     await this.appendToSheet(SHEETS.DISCOUNTS, [row]);
     return newCode;
+  }
+
+  async updateDiscountCode(code: string, updates: Partial<DiscountCode>): Promise<DiscountCode | null> {
+    const rows = await this.readSheet(SHEETS.DISCOUNTS);
+    const rowIndex = rows.findIndex((row) => row[0] === code);
+    
+    if (rowIndex === -1) {
+      return null;
+    }
+    
+    const currentDiscount = {
+      code: rows[rowIndex][0] || "",
+      type: rows[rowIndex][1] as any,
+      value: parseFloat(rows[rowIndex][2]) || 0,
+      expiryDate: rows[rowIndex][3] || undefined,
+      isActive: rows[rowIndex][4] === "true",
+      usageCount: parseInt(rows[rowIndex][5]) || 0,
+      createdAt: rows[rowIndex][6] || "",
+    };
+    
+    const updatedDiscount = { ...currentDiscount, ...updates };
+    
+    const newRow = [
+      updatedDiscount.code,
+      updatedDiscount.type,
+      updatedDiscount.value.toString(),
+      updatedDiscount.expiryDate || "",
+      updatedDiscount.isActive.toString(),
+      updatedDiscount.usageCount.toString(),
+      updatedDiscount.createdAt,
+    ];
+    
+    await this.updateRow(SHEETS.DISCOUNTS, rowIndex + 2, newRow);
+    return updatedDiscount;
+  }
+
+  async deleteDiscountCode(code: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.DISCOUNTS);
+    const rowIndex = rows.findIndex((row) => row[0] === code);
+    
+    if (rowIndex === -1) {
+      throw new Error("كود الخصم غير موجود");
+    }
+    
+    await this.deleteRow(SHEETS.DISCOUNTS, rowIndex + 2);
   }
 
   // ================== المدفوعات ==================
