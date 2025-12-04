@@ -9,11 +9,13 @@ import { Loader2, Pencil, Plus } from "lucide-react";
 import { Th, Td } from "../components/Table";
 
 type AdminDiscount = {
-  id: string;
   code: string;
-  percentage: number;
-  maxUsage?: number | null;
-  expiresAt?: string | null;
+  type: string;
+  value: number;
+  expiryDate?: string;
+  isActive: boolean;
+  usageCount: number;
+  createdAt: string;
 };
 
 export default function DiscountsSection() {
@@ -40,7 +42,7 @@ export default function DiscountsSection() {
         });
         if (!res.ok) throw new Error("فشل في إنشاء الكود");
       } else {
-        const res = await fetch(`/api/admin/discounts/${payload.id}`, {
+        const res = await fetch(`/api/admin/discounts/${payload.code}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -57,11 +59,13 @@ export default function DiscountsSection() {
   const startNew = () => {
     setIsNew(true);
     setEditingCode({
-      id: "",
       code: "",
-      percentage: 10,
-      maxUsage: null,
-      expiresAt: null,
+      type: "نسبة",
+      value: 10,
+      expiryDate: "",
+      isActive: true,
+      usageCount: 0,
+      createdAt: new Date().toISOString(),
     });
   };
 
@@ -92,19 +96,25 @@ export default function DiscountsSection() {
             <thead className="bg-muted/50 text-right">
               <tr>
                 <Th>الكود</Th>
-                <Th>نسبة الخصم %</Th>
-                <Th>الحد الأقصى للاستخدام</Th>
+                <Th>النوع</Th>
+                <Th>القيمة</Th>
                 <Th>تاريخ الانتهاء</Th>
+                <Th>الحالة</Th>
                 <Th>تحكم</Th>
               </tr>
             </thead>
             <tbody>
               {(data || []).map((d) => (
-                <tr key={d.id} className="border-t hover:bg-muted/40">
+                <tr key={d.code} className="border-t hover:bg-muted/40">
                   <Td>{d.code}</Td>
-                  <Td>{d.percentage}</Td>
-                  <Td>{d.maxUsage ?? "-"}</Td>
-                  <Td>{d.expiresAt || "-"}</Td>
+                  <Td>{d.type === "نسبة" ? "نسبة %" : "مبلغ ثابت"}</Td>
+                  <Td>{d.value}{d.type === "نسبة" ? "%" : " ريال"}</Td>
+                  <Td>{d.expiryDate || "-"}</Td>
+                  <Td>
+                    <span className={d.isActive ? "text-green-600" : "text-red-600"}>
+                      {d.isActive ? "نشط" : "غير نشط"}
+                    </span>
+                  </Td>
                   <Td>
                     <Button
                       size="icon"
@@ -122,7 +132,7 @@ export default function DiscountsSection() {
 
               {(data || []).length === 0 && (
                 <tr>
-                  <Td colSpan={5}>
+                  <Td colSpan={6}>
                     <div className="p-4 text-center text-xs text-muted-foreground">
                       لا توجد أكواد خصم حالياً.
                     </div>
@@ -142,14 +152,15 @@ export default function DiscountsSection() {
           </DialogHeader>
 
           {editingCode && (
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               {/* الكود */}
               <div>
-                <label className="block text-[11px] font-semibold text-muted-foreground">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
                   الكود
                 </label>
                 <Input
                   value={editingCode.code}
+                  disabled={!isNew}
                   onChange={(e) =>
                     setEditingCode({
                       ...editingCode,
@@ -159,35 +170,38 @@ export default function DiscountsSection() {
                 />
               </div>
 
-              {/* نسبة الخصم */}
+              {/* نوع الخصم */}
               <div>
-                <label className="block text-[11px] font-semibold text-muted-foreground">
-                  نسبة الخصم %
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                  نوع الخصم
                 </label>
-                <Input
-                  type="number"
-                  value={editingCode.percentage}
+                <select
+                  className="w-full p-2 border rounded-md text-sm bg-background"
+                  value={editingCode.type}
                   onChange={(e) =>
                     setEditingCode({
                       ...editingCode,
-                      percentage: Number(e.target.value || 0),
+                      type: e.target.value,
                     })
                   }
-                />
+                >
+                  <option value="نسبة">نسبة مئوية %</option>
+                  <option value="ثابت">مبلغ ثابت</option>
+                </select>
               </div>
 
-              {/* الحد الأقصى */}
+              {/* القيمة */}
               <div>
-                <label className="block text-[11px] font-semibold text-muted-foreground">
-                  الحد الأقصى للاستخدام (اختياري)
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                  {editingCode.type === "نسبة" ? "نسبة الخصم %" : "مبلغ الخصم (ريال)"}
                 </label>
                 <Input
                   type="number"
-                  value={editingCode.maxUsage ?? ""}
+                  value={editingCode.value}
                   onChange={(e) =>
                     setEditingCode({
                       ...editingCode,
-                      maxUsage: e.target.value ? Number(e.target.value) : null,
+                      value: Number(e.target.value || 0),
                     })
                   }
                 />
@@ -195,19 +209,38 @@ export default function DiscountsSection() {
 
               {/* تاريخ الانتهاء */}
               <div>
-                <label className="block text-[11px] font-semibold text-muted-foreground">
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
                   تاريخ الانتهاء (اختياري)
                 </label>
                 <Input
-                  placeholder="مثال: 2025-12-31"
-                  value={editingCode.expiresAt || ""}
+                  type="date"
+                  value={editingCode.expiryDate || ""}
                   onChange={(e) =>
                     setEditingCode({
                       ...editingCode,
-                      expiresAt: e.target.value || null,
+                      expiryDate: e.target.value || undefined,
                     })
                   }
                 />
+              </div>
+
+              {/* الحالة */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={editingCode.isActive}
+                  onChange={(e) =>
+                    setEditingCode({
+                      ...editingCode,
+                      isActive: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4"
+                />
+                <label htmlFor="isActive" className="text-sm">
+                  الكود نشط
+                </label>
               </div>
             </div>
           )}

@@ -2534,7 +2534,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
       // حساب التواريخ
       const startDate = new Date().toISOString();
       const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + (pkg.durationMonths || 1));
+      endDate.setMonth(endDate.getMonth() + (pkg.duration || 1));
       
       const sub = await googleSheetsService.createMultiPropertySubscription({
         packageId,
@@ -2549,6 +2549,190 @@ app.post("/api/whatsapp/send", async (req, res) => {
     } catch (error) {
       console.error("Error creating multi-property subscription:", error);
       res.status(500).json({ error: "فشل في إنشاء اشتراك العقارين" });
+    }
+  });
+
+  // ======================
+  // 📋 إدارة الاشتراكات
+  // ======================
+  app.get("/api/admin/subscriptions", async (req, res) => {
+    try {
+      const subscriptions = await storage.getSubscriptions();
+      const packages = await storage.getPackages();
+      const properties = await storage.getProperties();
+      
+      // تحويل الاشتراكات لتضمين معلومات إضافية
+      const enrichedSubscriptions = subscriptions.map(sub => {
+        const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+        const pkg = packages.find(p => p.id === sub.packageId);
+        
+        // حساب الأيام المتبقية
+        let remainingDays: number | null = null;
+        let status: "ساري" | "منتهي" | "قريب الانتهاء" = "ساري";
+        
+        if (sub.endDate) {
+          const end = new Date(sub.endDate);
+          const now = new Date();
+          remainingDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (remainingDays <= 0) {
+            status = "منتهي";
+          } else if (remainingDays <= 7) {
+            status = "قريب الانتهاء";
+          }
+        }
+        
+        return {
+          id: sub.id || `${sub.propertyNumber}-${sub.packageId}`,
+          propertyNumber: sub.propertyNumber,
+          name: property?.name || "غير معروف",
+          subscriptionType: pkg?.name || sub.packageId,
+          startDate: sub.startDate,
+          endDate: sub.endDate,
+          remainingDays,
+          status,
+        };
+      });
+      
+      res.json(enrichedSubscriptions);
+    } catch (error) {
+      console.error("Error fetching subscriptions:", error);
+      res.status(500).json({ error: "فشل في جلب الاشتراكات" });
+    }
+  });
+
+  // ======================
+  // 📦 إدارة الباقات
+  // ======================
+  app.get("/api/admin/packages", async (req, res) => {
+    try {
+      const packages = await storage.getPackages();
+      res.json(packages);
+    } catch (error) {
+      console.error("Error fetching packages:", error);
+      res.status(500).json({ error: "فشل في جلب الباقات" });
+    }
+  });
+
+  app.post("/api/admin/packages", async (req, res) => {
+    try {
+      const newPkg = await storage.createPackage(req.body);
+      res.json(newPkg);
+    } catch (error) {
+      console.error("Error creating package:", error);
+      res.status(500).json({ error: "فشل في إنشاء الباقة" });
+    }
+  });
+
+  app.put("/api/admin/packages/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updated = await storage.updatePackage(id, req.body);
+      if (!updated) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating package:", error);
+      res.status(500).json({ error: "فشل في تحديث الباقة" });
+    }
+  });
+
+  app.delete("/api/admin/packages/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deletePackage(id);
+      res.json({ success: true, message: "تم حذف الباقة بنجاح" });
+    } catch (error) {
+      console.error("Error deleting package:", error);
+      res.status(500).json({ error: "فشل في حذف الباقة" });
+    }
+  });
+
+  // ======================
+  // 🏷️ إدارة الخصومات
+  // ======================
+  app.get("/api/admin/discounts", async (req, res) => {
+    try {
+      const discounts = await storage.getDiscountCodes();
+      res.json(discounts);
+    } catch (error) {
+      console.error("Error fetching discounts:", error);
+      res.status(500).json({ error: "فشل في جلب أكواد الخصم" });
+    }
+  });
+
+  app.post("/api/admin/discounts", async (req, res) => {
+    try {
+      const newDiscount = await storage.createDiscountCode(req.body);
+      res.json(newDiscount);
+    } catch (error) {
+      console.error("Error creating discount:", error);
+      res.status(500).json({ error: "فشل في إنشاء كود الخصم" });
+    }
+  });
+
+  app.put("/api/admin/discounts/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updated = await storage.updateDiscountCode(id, req.body);
+      if (!updated) {
+        return res.status(404).json({ error: "كود الخصم غير موجود" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating discount:", error);
+      res.status(500).json({ error: "فشل في تحديث كود الخصم" });
+    }
+  });
+
+  app.delete("/api/admin/discounts/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteDiscountCode(id);
+      res.json({ success: true, message: "تم حذف كود الخصم بنجاح" });
+    } catch (error) {
+      console.error("Error deleting discount:", error);
+      res.status(500).json({ error: "فشل في حذف كود الخصم" });
+    }
+  });
+
+  // ======================
+  // 💳 إدارة المدفوعات
+  // ======================
+  app.get("/api/admin/payments", async (req, res) => {
+    try {
+      const payments = await storage.getPayments();
+      const properties = await storage.getProperties();
+      
+      // تضمين اسم العقار في المدفوعات
+      const enrichedPayments = payments.map(payment => {
+        const property = properties.find(p => p.propertyNumber === payment.propertyNumber);
+        return {
+          ...payment,
+          propertyName: property?.name || "غير معروف",
+        };
+      });
+      
+      res.json(enrichedPayments);
+    } catch (error) {
+      console.error("Error fetching payments:", error);
+      res.status(500).json({ error: "فشل في جلب المدفوعات" });
+    }
+  });
+
+  app.put("/api/admin/payments/:id/status", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const updated = await storage.updatePayment(id, { status });
+      if (!updated) {
+        return res.status(404).json({ error: "الدفعة غير موجودة" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating payment status:", error);
+      res.status(500).json({ error: "فشل في تحديث حالة الدفعة" });
     }
   });
 
