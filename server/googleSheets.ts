@@ -15,6 +15,11 @@ import type {
   InsertSuggestion,
   Payment,
   InsertPayment,
+  NotificationSettings,
+  PartnerProfit,
+  InsertPartnerProfit,
+  MultiPropertySubscription,
+  InsertMultiPropertySubscription,
 } from "@shared/schema";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
@@ -26,6 +31,7 @@ const SHEETS = {
   PACKAGES: "الباقات",
   DISCOUNTS: "أكواد الخصم",
   PROFITS: "الأرباح",
+  PARTNER_PROFITS: "أرباح الشريك",
   REQUESTS: "الطلبات",
   SUGGESTIONS: "الاقتراحات",
   PRICES: "الأسعار",
@@ -33,6 +39,8 @@ const SHEETS = {
   ANALYTICS: "الإحصائيات",
   WHATSAPP: "تنبيهات الواتساب",
   VERIFICATION_LOGS: "سجل التحقق",
+  SETTINGS: "الإعدادات",
+  MULTI_PROPERTY_SUBS: "اشتراكات العقارين",
 };
 
 // عمود حالة التحقق — العمود 20 (T)
@@ -306,9 +314,35 @@ class GoogleSheetsService {
         "السبب",
         "الأدمن",
       ],
-
-
-      
+      [SHEETS.SETTINGS]: [
+        "المفتاح",
+        "القيمة",
+        "آخر تحديث",
+      ],
+      [SHEETS.PARTNER_PROFITS]: [
+        "المعرف",
+        "الشهر/السنة",
+        "عدد الاشتراكات الفعالة",
+        "إجمالي الإيرادات",
+        "نصيب الشريك",
+        "نسبة الشريك",
+        "تاريخ التحويل",
+        "حالة التحويل",
+        "ملاحظات",
+        "تاريخ الإنشاء",
+        "تاريخ التحديث",
+      ],
+      [SHEETS.MULTI_PROPERTY_SUBS]: [
+        "المعرف",
+        "معرف الباقة",
+        "رقم العقار الأول",
+        "رقم العقار الثاني",
+        "تاريخ البداية",
+        "تاريخ الانتهاء",
+        "الحالة",
+        "معرف الدفع",
+        "تاريخ الإنشاء",
+      ],
     };
 
     for (const [sheetName, headerRow] of Object.entries(headers)) {
@@ -1488,6 +1522,236 @@ async getWhatsAppLogs() {
       reason: r[3] || "",
       admin: r[4] || "",
     }));
+  }
+
+  // ======================
+  // ⚙️ إعدادات الإشعارات
+  // ======================
+
+  async getNotificationSettings(): Promise<NotificationSettings> {
+    const rows = await this.readSheet(SHEETS.SETTINGS);
+    const settingsRow = rows.find(r => r[0] === 'notification_settings');
+    
+    if (settingsRow && settingsRow[1]) {
+      try {
+        return JSON.parse(settingsRow[1]);
+      } catch {
+        console.error("Error parsing notification settings");
+      }
+    }
+    
+    return {
+      allNotifications: true,
+      newProperty: true,
+      newSubscription: true,
+      subscriptionRenewal: true,
+      receiptUpload: true,
+      propertyUpdate: true,
+      newPayment: true,
+      smartRequest: true,
+      propertyVerification: true,
+      subscriptionExpired: true,
+    };
+  }
+
+  async saveNotificationSettings(settings: NotificationSettings): Promise<void> {
+    const sheets = await this.getSheets();
+    const rows = await this.readSheet(SHEETS.SETTINGS);
+    const rowIndex = rows.findIndex(r => r[0] === 'notification_settings');
+    
+    const settingsData = {
+      ...settings,
+      updatedAt: new Date().toISOString(),
+    };
+    
+    const row = ['notification_settings', JSON.stringify(settingsData), new Date().toISOString()];
+    
+    if (rowIndex !== -1) {
+      await this.updateRow(SHEETS.SETTINGS, rowIndex + 2, row);
+    } else {
+      await this.appendToSheet(SHEETS.SETTINGS, [row]);
+    }
+  }
+
+  // ======================
+  // 💰 أرباح الشريك
+  // ======================
+
+  async getPartnerProfits(): Promise<PartnerProfit[]> {
+    const rows = await this.readSheet(SHEETS.PARTNER_PROFITS);
+    return rows.map((row, idx) => ({
+      id: row[0] || `PP-${idx}`,
+      monthYear: row[1] || "",
+      activeSubscriptions: parseInt(row[2]) || 0,
+      totalRevenue: parseFloat(row[3]) || 0,
+      partnerShare: parseFloat(row[4]) || 0,
+      partnerPercentage: parseFloat(row[5]) || 50,
+      transferDate: row[6] || undefined,
+      transferStatus: (row[7] as any) || "pending",
+      notes: row[8] || undefined,
+      createdAt: row[9] || undefined,
+      updatedAt: row[10] || undefined,
+    }));
+  }
+
+  async createPartnerProfit(profit: InsertPartnerProfit): Promise<PartnerProfit> {
+    const id = `PP-${Date.now()}`;
+    const newProfit: PartnerProfit = {
+      id,
+      ...profit,
+      createdAt: new Date().toISOString(),
+    };
+
+    const row = [
+      newProfit.id,
+      newProfit.monthYear,
+      newProfit.activeSubscriptions.toString(),
+      newProfit.totalRevenue.toString(),
+      newProfit.partnerShare.toString(),
+      newProfit.partnerPercentage.toString(),
+      newProfit.transferDate || "",
+      newProfit.transferStatus,
+      newProfit.notes || "",
+      newProfit.createdAt,
+      newProfit.updatedAt || "",
+    ];
+
+    await this.appendToSheet(SHEETS.PARTNER_PROFITS, [row]);
+    return newProfit;
+  }
+
+  async updatePartnerProfit(id: string, updates: Partial<PartnerProfit>): Promise<PartnerProfit | null> {
+    const rows = await this.readSheet(SHEETS.PARTNER_PROFITS);
+    const rowIndex = rows.findIndex(r => r[0] === id);
+    
+    if (rowIndex === -1) return null;
+
+    const existingRow = rows[rowIndex];
+    const updatedProfit: PartnerProfit = {
+      id: existingRow[0],
+      monthYear: updates.monthYear ?? existingRow[1],
+      activeSubscriptions: updates.activeSubscriptions ?? (parseInt(existingRow[2]) || 0),
+      totalRevenue: updates.totalRevenue ?? (parseFloat(existingRow[3]) || 0),
+      partnerShare: updates.partnerShare ?? (parseFloat(existingRow[4]) || 0),
+      partnerPercentage: updates.partnerPercentage ?? (parseFloat(existingRow[5]) || 50),
+      transferDate: updates.transferDate ?? (existingRow[6] || undefined),
+      transferStatus: updates.transferStatus ?? (existingRow[7] || "pending"),
+      notes: updates.notes ?? (existingRow[8] || undefined),
+      createdAt: existingRow[9],
+      updatedAt: new Date().toISOString(),
+    };
+
+    const row = [
+      updatedProfit.id,
+      updatedProfit.monthYear,
+      updatedProfit.activeSubscriptions.toString(),
+      updatedProfit.totalRevenue.toString(),
+      updatedProfit.partnerShare.toString(),
+      updatedProfit.partnerPercentage.toString(),
+      updatedProfit.transferDate || "",
+      updatedProfit.transferStatus,
+      updatedProfit.notes || "",
+      updatedProfit.createdAt || "",
+      updatedProfit.updatedAt,
+    ];
+
+    await this.updateRow(SHEETS.PARTNER_PROFITS, rowIndex + 2, row);
+    return updatedProfit;
+  }
+
+  async calculateMonthlyProfits(): Promise<{
+    monthYear: string;
+    activeSubscriptions: number;
+    totalRevenue: number;
+    partnerShare: number;
+  }> {
+    const now = new Date();
+    const monthYear = `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+    
+    const payments = await this.getPayments();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    const monthlyPayments = payments.filter(p => {
+      const paymentDate = new Date(p.createdAt || "");
+      return paymentDate >= startOfMonth && 
+             paymentDate <= endOfMonth && 
+             (p.status === "مكتمل" || p.status === "نجحت");
+    });
+    
+    const totalRevenue = monthlyPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+    const partnerShare = Math.round(totalRevenue * 0.5 * 100) / 100;
+    
+    return {
+      monthYear,
+      activeSubscriptions: monthlyPayments.length,
+      totalRevenue,
+      partnerShare,
+    };
+  }
+
+  // ======================
+  // 🏠🏠 اشتراكات العقارين
+  // ======================
+
+  async getMultiPropertySubscriptions(): Promise<MultiPropertySubscription[]> {
+    const rows = await this.readSheet(SHEETS.MULTI_PROPERTY_SUBS);
+    return rows.map((row, idx) => ({
+      id: row[0] || `MPS-${idx}`,
+      packageId: row[1] || "",
+      propertyNumber1: row[2] || "",
+      propertyNumber2: row[3] || "",
+      startDate: row[4] || "",
+      endDate: row[5] || "",
+      status: (row[6] as any) || "معلق",
+      paymentId: row[7] || undefined,
+      createdAt: row[8] || undefined,
+    }));
+  }
+
+  async createMultiPropertySubscription(sub: InsertMultiPropertySubscription): Promise<MultiPropertySubscription> {
+    const id = `MPS-${Date.now()}`;
+    const newSub: MultiPropertySubscription = {
+      id,
+      ...sub,
+      createdAt: new Date().toISOString(),
+    };
+
+    const row = [
+      newSub.id,
+      newSub.packageId,
+      newSub.propertyNumber1,
+      newSub.propertyNumber2,
+      newSub.startDate,
+      newSub.endDate,
+      newSub.status,
+      newSub.paymentId || "",
+      newSub.createdAt,
+    ];
+
+    await this.appendToSheet(SHEETS.MULTI_PROPERTY_SUBS, [row]);
+    
+    const pkg = await this.getPackageById(newSub.packageId);
+    if (pkg) {
+      await this.activatePropertySubscription(newSub.propertyNumber1, pkg, newSub.startDate, newSub.endDate);
+      await this.activatePropertySubscription(newSub.propertyNumber2, pkg, newSub.startDate, newSub.endDate);
+    }
+    
+    return newSub;
+  }
+
+  private async activatePropertySubscription(propertyNumber: string, pkg: Package, startDate: string, endDate: string) {
+    const props = await this.readSheet(SHEETS.PROPERTIES);
+    const propIndex = props.findIndex(r => r[0] === propertyNumber);
+    
+    if (propIndex !== -1) {
+      const propRow = props[propIndex];
+      propRow[15] = "مميز";
+      propRow[16] = new Date().toISOString().split("T")[0];
+      propRow[17] = startDate.split("T")[0];
+      await this.updateRow(SHEETS.PROPERTIES, propIndex + 2, propRow);
+      console.log(`✅ Activated subscription for property ${propertyNumber}`);
+    }
   }
 }
 export const googleSheetsService = new GoogleSheetsService();

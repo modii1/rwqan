@@ -26,6 +26,8 @@ import {
   MessageCircle,
   ArrowRight,
   Clock,
+  Bell,
+  Wallet,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -41,6 +43,8 @@ import AdminAnalytics from "./admin-analytics";
 import AdminBackup from "./admin-backup";
 import AdminCodeBackup from "./admin-code-backup";
 import VerificationLogsPage from "./sections/verification-logs";
+import SettingsSection from "./sections/settings";
+import PartnerProfitsSection from "./sections/partner-profits";
 
 
 type AdminSection =
@@ -56,7 +60,9 @@ type AdminSection =
   | "verification-logs"
   | "backup"
   | "code-backup"
-  | "whatsapp";
+  | "whatsapp"
+  | "settings"
+  | "partner-profits";
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
@@ -198,6 +204,22 @@ export default function AdminDashboard() {
           active={activeSection === "code-backup"}
           onClick={() => setActiveSection("code-backup")}
         />
+
+        <div className="hidden md:block h-px bg-border my-2" />
+
+        <SidebarButton
+          icon={<Bell className="w-4 h-4" />}
+          label="الإعدادات"
+          active={activeSection === "settings"}
+          onClick={() => setActiveSection("settings")}
+        />
+
+        <SidebarButton
+          icon={<Wallet className="w-4 h-4 text-emerald-600" />}
+          label="أرباح الشريك"
+          active={activeSection === "partner-profits"}
+          onClick={() => setActiveSection("partner-profits")}
+        />
       </aside>
 
       {/* المحتوى */}
@@ -232,6 +254,8 @@ export default function AdminDashboard() {
         {activeSection === "whatsapp" && <AdminWhatsAppSection />}
         {activeSection === "verification" && <AdminVerificationSection />}
         {activeSection === "verification-logs" && <VerificationLogsPage />}
+        {activeSection === "settings" && <SettingsSection />}
+        {activeSection === "partner-profits" && <PartnerProfitsSection />}
       </main>
     </div>
   );

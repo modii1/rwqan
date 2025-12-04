@@ -2414,6 +2414,135 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
   
   // ======================
+  // ⚙️ إعدادات الإشعارات
+  // ======================
+  app.get("/api/admin/settings/notifications", async (req, res) => {
+    try {
+      const settings = await googleSheetsService.getNotificationSettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Error fetching notification settings:", error);
+      res.status(500).json({ error: "فشل في جلب إعدادات الإشعارات" });
+    }
+  });
+
+  app.put("/api/admin/settings/notifications", async (req, res) => {
+    try {
+      const settings = req.body;
+      await googleSheetsService.saveNotificationSettings(settings);
+      // مسح كاش الإعدادات في whatsapp.ts
+      const { clearSettingsCache } = await import("./whatsapp");
+      clearSettingsCache();
+      res.json({ success: true, message: "تم حفظ الإعدادات بنجاح" });
+    } catch (error) {
+      console.error("Error saving notification settings:", error);
+      res.status(500).json({ error: "فشل في حفظ الإعدادات" });
+    }
+  });
+
+  // ======================
+  // 💰 أرباح الشريك
+  // ======================
+  app.get("/api/admin/partner-profits", async (req, res) => {
+    try {
+      const profits = await googleSheetsService.getPartnerProfits();
+      res.json(profits);
+    } catch (error) {
+      console.error("Error fetching partner profits:", error);
+      res.status(500).json({ error: "فشل في جلب أرباح الشريك" });
+    }
+  });
+
+  app.get("/api/admin/partner-profits/current", async (req, res) => {
+    try {
+      const currentProfit = await googleSheetsService.calculateMonthlyProfits();
+      res.json(currentProfit);
+    } catch (error) {
+      console.error("Error calculating current profits:", error);
+      res.status(500).json({ error: "فشل في حساب الأرباح الحالية" });
+    }
+  });
+
+  app.post("/api/admin/partner-profits", async (req, res) => {
+    try {
+      const profit = await googleSheetsService.createPartnerProfit(req.body);
+      res.json(profit);
+    } catch (error) {
+      console.error("Error creating partner profit:", error);
+      res.status(500).json({ error: "فشل في إنشاء سجل الأرباح" });
+    }
+  });
+
+  app.put("/api/admin/partner-profits/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const profit = await googleSheetsService.updatePartnerProfit(id, req.body);
+      if (!profit) {
+        return res.status(404).json({ error: "سجل الأرباح غير موجود" });
+      }
+      res.json(profit);
+    } catch (error) {
+      console.error("Error updating partner profit:", error);
+      res.status(500).json({ error: "فشل في تحديث سجل الأرباح" });
+    }
+  });
+
+  // ======================
+  // 🏠🏠 اشتراكات العقارين
+  // ======================
+  app.get("/api/admin/multi-property-subscriptions", async (req, res) => {
+    try {
+      const subs = await googleSheetsService.getMultiPropertySubscriptions();
+      res.json(subs);
+    } catch (error) {
+      console.error("Error fetching multi-property subscriptions:", error);
+      res.status(500).json({ error: "فشل في جلب اشتراكات العقارين" });
+    }
+  });
+
+  app.post("/api/multi-property-subscription", async (req, res) => {
+    try {
+      const { packageId, propertyNumber1, propertyNumber2 } = req.body;
+      
+      // التحقق من وجود العقارين
+      const prop1 = await storage.getPropertyByNumber(propertyNumber1);
+      const prop2 = await storage.getPropertyByNumber(propertyNumber2);
+      
+      if (!prop1 || !prop2) {
+        return res.status(400).json({ 
+          error: "أحد العقارين غير موجود",
+          missing: !prop1 ? propertyNumber1 : propertyNumber2
+        });
+      }
+      
+      // جلب الباقة
+      const pkg = await storage.getPackage(packageId);
+      if (!pkg) {
+        return res.status(400).json({ error: "الباقة غير موجودة" });
+      }
+      
+      // حساب التواريخ
+      const startDate = new Date().toISOString();
+      const endDate = new Date();
+      endDate.setMonth(endDate.getMonth() + (pkg.durationMonths || 1));
+      
+      const sub = await googleSheetsService.createMultiPropertySubscription({
+        packageId,
+        propertyNumber1,
+        propertyNumber2,
+        startDate,
+        endDate: endDate.toISOString(),
+        status: "فعال",
+      });
+      
+      res.json({ success: true, subscription: sub });
+    } catch (error) {
+      console.error("Error creating multi-property subscription:", error);
+      res.status(500).json({ error: "فشل في إنشاء اشتراك العقارين" });
+    }
+  });
+
+  // ======================
   // DONE
   // ======================
   return createServer(app);
