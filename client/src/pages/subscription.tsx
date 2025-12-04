@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
-import { ChevronRight, Upload } from "lucide-react";
+import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
@@ -47,6 +47,7 @@ export default function SubscriptionPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState<string | null>(null);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
@@ -103,11 +104,7 @@ export default function SubscriptionPage() {
       });
 
       if (isFreePackage) {
-        toast({
-          title: "نجح! ✓",
-          description: "تم تسجيل عقارك بنجاح في الباقة المجانية",
-        });
-        setTimeout(() => setLocation('/owner/login'), 1500);
+        setRegistrationSuccess(true);
       } else {
         if (paymentMethod === 'online') {
           try {
@@ -144,11 +141,7 @@ export default function SubscriptionPage() {
             method: 'POST',
             body: formDataUpload,
           });
-          toast({
-            title: "تم استقبال طلبك",
-            description: "سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي",
-          });
-          setTimeout(() => setLocation('/owner/login'), 1500);
+          setRegistrationSuccess(true);
         }
       }
     } catch (error: any) {
@@ -161,6 +154,100 @@ export default function SubscriptionPage() {
       setIsSubmitting(false);
     }
   };
+
+  // عرض صفحة النجاح "قيد المراجعة"
+  if (registrationSuccess) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
+        <Card className="max-w-lg w-full p-8 text-center space-y-6">
+          {/* أيقونة النجاح */}
+          <div className="flex justify-center">
+            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+              <Clock className="w-10 h-10 text-[#c9951d]" />
+            </div>
+          </div>
+
+          {/* العنوان */}
+          <div>
+            <h1 className="text-2xl font-bold text-[#434040] mb-2">
+              تم استلام طلبك بنجاح!
+            </h1>
+            <p className="text-muted-foreground">
+              عقارك قيد المراجعة من فريقنا
+            </p>
+          </div>
+
+          {/* تفاصيل العقار */}
+          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Home className="w-4 h-4" />
+                رقم العقار
+              </span>
+              <span className="font-bold text-lg">{registeredPropertyNumber}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Lock className="w-4 h-4" />
+                الرقم السري
+              </span>
+              <span className="font-mono text-lg">****</span>
+            </div>
+            {selectedPackage && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">الباقة</span>
+                <Badge className="bg-[#c9951d] text-white">{selectedPackage.name}</Badge>
+              </div>
+            )}
+          </div>
+
+          {/* رسالة المراجعة */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-right">
+                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
+                <p className="text-sm text-amber-700">
+                  {isFreePackage 
+                    ? "سيتم مراجعة عقارك من قبل الإدارة خلال 24 ساعة. ستتمكن من تسجيل الدخول فور قبول العقار."
+                    : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* معلومات التواصل */}
+          <div className="text-sm text-muted-foreground">
+            <p className="flex items-center justify-center gap-2">
+              <Phone className="w-4 h-4" />
+              للاستفسار: 0533220646
+            </p>
+          </div>
+
+          {/* الأزرار */}
+          <div className="flex flex-col gap-3">
+            <Button 
+              onClick={() => setLocation('/owner/login')}
+              className="w-full bg-[#434040] hover:bg-[#333]"
+              data-testid="button-go-login"
+            >
+              الذهاب لتسجيل الدخول
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => setLocation('/')}
+              className="w-full"
+              data-testid="button-go-home"
+            >
+              <ArrowLeft className="w-4 h-4 ml-2" />
+              العودة للرئيسية
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
