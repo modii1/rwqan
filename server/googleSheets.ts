@@ -299,6 +299,15 @@ class GoogleSheetsService {
         "التاريخ",
       ],
 
+      [SHEETS.VERIFICATION_LOGS]: [
+        "التاريخ",
+        "رقم العقار",
+        "الإجراء",
+        "السبب",
+        "الأدمن",
+      ],
+
+
       
     };
 
@@ -1397,27 +1406,6 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   }
 
 
-  async getVerificationLogs() {
-    try {
-      const sheet = this.sheets.spreadsheets.values;
-      const result = await sheet.get({
-        spreadsheetId: this.SPREADSHEET_ID,
-        range: "سجل التحقق!A2:D",
-      });
-
-      const rows = result.data.values || [];
-
-      return rows.map((r) => ({
-        timestamp: r[0],
-        propertyNumber: r[1],
-        action: r[2],      // approved / rejected
-        admin: r[3] || "غير محدد",
-      }));
-    } catch (err) {
-      console.error("Sheet logs error:", err);
-      return [];
-    }
-  }
 
 
 

@@ -294,28 +294,33 @@ export class GoogleSheetsStorage implements IStorage {
   // ===== Active Sessions Implementation (In-Memory) =====
   private activeSessions: Set<string> = new Set();
   
-  // ===== Verification Logs (Google Sheets) =====
-  async addVerificationLog(log: {
+  // ===== Verification Logs (In-Memory) =====
+  private verificationLogs: Array<{
     propertyNumber: string;
     action: "approved" | "rejected";
     reason?: string;
-    date?: string;
-    admin?: string;
-  }) {
-    const entry = {
-      date: log.date || new Date().toISOString(),
-      propertyNumber: log.propertyNumber,
-      action: log.action,
-      reason: log.reason || "",
-      admin: log.admin || "Admin",
-    };
+    date: string;
+  }> = [];
 
-    await googleSheetsService.addVerificationLogToSheet(entry);
-    return entry;
-  }
+  async addVerificationLog(log: {
+  propertyNumber: string;
+  action: "approved" | "rejected";
+  reason?: string;
+}) {
+  const entry = {
+    propertyNumber: log.propertyNumber,
+    action: log.action,
+    reason: log.reason || "",
+    date: new Date().toISOString(),
+  };
+
+  this.verificationLogs.push(entry);
+  return entry;
+}
+
 
   async getVerificationLogs() {
-    return googleSheetsService.getVerificationLogsFromSheet();
+    return this.verificationLogs;
   }
 
 

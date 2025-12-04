@@ -4,7 +4,7 @@ const NOTIFY_NUMBER = "966533220646"; // رقمك الشخصي
 
 // === دالة إرسال رسالة واتساب ===
 function sendWhatsAppMessage(message) {
-  const url = `https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/v16.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: "whatsapp",
     to: NOTIFY_NUMBER,
