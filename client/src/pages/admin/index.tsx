@@ -23,8 +23,8 @@ import {
   Monitor,
   Tablet,
   MapPin,
-  MessageCircle, 
-
+  MessageCircle,
+  ArrowRight,
   Clock,
 } from "lucide-react";
 
@@ -53,6 +53,7 @@ type AdminSection =
   | "payments"
   | "analytics"
   | "verification"
+  | "verification-logs"
   | "backup"
   | "code-backup"
   | "whatsapp";
@@ -175,6 +176,13 @@ export default function AdminDashboard() {
           onClick={() => setActiveSection("verification")}
         />
 
+        <SidebarButton
+          icon={<BarChart3 className="w-4 h-4 text-orange-500" />}
+          label="سجل التحقق"
+          active={activeSection === "verification-logs"}
+          onClick={() => setActiveSection("verification-logs")}
+        />
+
         <div className="hidden md:block h-px bg-border my-2" />
 
         <SidebarButton
@@ -194,6 +202,18 @@ export default function AdminDashboard() {
 
       {/* المحتوى */}
       <main className="flex-1 p-3 md:p-6 space-y-4 overflow-auto">
+        {/* زر الرجوع */}
+        {activeSection !== "" && (
+          <button
+            onClick={() => setActiveSection("")}
+            className="flex items-center gap-2 text-sm text-primary hover:text-primary/80 mb-4 transition"
+            data-testid="button-back"
+          >
+            <ArrowRight className="w-4 h-4" />
+            رجوع للرئيسية
+          </button>
+        )}
+
         {activeSection === "" && (
           <div className="text-center text-muted-foreground text-sm mt-10 md:mt-20">
             اختر قسم من القائمة لبدء الإدارة
@@ -211,6 +231,7 @@ export default function AdminDashboard() {
         {activeSection === "code-backup" && <AdminCodeBackup />}
         {activeSection === "whatsapp" && <AdminWhatsAppSection />}
         {activeSection === "verification" && <AdminVerificationSection />}
+        {activeSection === "verification-logs" && <VerificationLogsPage />}
       </main>
     </div>
   );
