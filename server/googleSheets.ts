@@ -1090,6 +1090,11 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       newPayment.receiptUrl || "",
       newPayment.createdAt,
       newPayment.completedAt || "",
+      newPayment.action || "",
+      newPayment.pendingStartDate || "",
+      newPayment.pendingEndDate || "",
+      newPayment.pendingSubscriptionType || "",
+      newPayment.pendingPrice?.toString() || "",
     ];
 
     console.log(
@@ -1157,6 +1162,21 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
       completedAt:
         updates.completedAt ?? (current[12] || undefined),
+      
+      action:
+        updates.action ?? (current[13] as any || undefined),
+      
+      pendingStartDate:
+        updates.pendingStartDate ?? (current[14] || undefined),
+      
+      pendingEndDate:
+        updates.pendingEndDate ?? (current[15] || undefined),
+      
+      pendingSubscriptionType:
+        updates.pendingSubscriptionType ?? (current[16] || undefined),
+      
+      pendingPrice:
+        updates.pendingPrice ?? (parseFloat(current[17]) || undefined),
     };
 
     const row = [
@@ -1173,6 +1193,11 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       updatedPayment.receiptUrl || "",
       updatedPayment.createdAt,
       updatedPayment.completedAt || "",
+      updatedPayment.action || "",
+      updatedPayment.pendingStartDate || "",
+      updatedPayment.pendingEndDate || "",
+      updatedPayment.pendingSubscriptionType || "",
+      updatedPayment.pendingPrice?.toString() || "",
     ];
 
     await this.updateRow(SHEETS.PAYMENTS, rowIndex + 2, row);
@@ -1197,6 +1222,11 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         receiptUrl: row[10] || undefined,
         createdAt: row[11] || new Date().toISOString(),
         completedAt: row[12] || undefined,
+        action: (row[13] as any) || undefined,
+        pendingStartDate: row[14] || undefined,
+        pendingEndDate: row[15] || undefined,
+        pendingSubscriptionType: row[16] || undefined,
+        pendingPrice: parseFloat(row[17]) || undefined,
       }));
   }
 
