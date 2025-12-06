@@ -5,6 +5,19 @@ import { Loader2 } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
 
+// ✅ زر & مودال
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+// ✅ صفحة أرباح الشريك (تتعدل المسار إذا ملفك في مكان مختلف)
+import PartnerProfitsSection from "./partner-profits";
+
 type Payment = {
   id: string;
   propertyNumber: string;
@@ -28,12 +41,38 @@ export default function PaymentsSection() {
 
   return (
     <section className="space-y-3">
-      {/* ====== العنوان ====== */}
-      <div>
-        <h2 className="text-lg font-semibold">المدفوعات</h2>
-        <p className="text-xs text-muted-foreground">
-          عرض جميع عمليات الدفع — اشتراكات، تجديدات، معاملات Paymob.
-        </p>
+      {/* ====== العنوان + زر أرباح الشريك (مودال) ====== */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">المدفوعات</h2>
+          <p className="text-xs text-muted-foreground">
+            عرض جميع عمليات الدفع — اشتراكات، تجديدات، معاملات Paymob.
+          </p>
+        </div>
+
+        {/* زر يفتح مودال أرباح الشريك */}
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs md:text-sm"
+            >
+              أرباح الشريك
+            </Button>
+          </DialogTrigger>
+
+          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>أرباح الشريك</DialogTitle>
+            </DialogHeader>
+
+            {/* هنا نعرض صفحة أرباح الشريك كاملة داخل المودال */}
+            <div className="mt-2">
+              <PartnerProfitsSection />
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* ====== الجدول ====== */}
