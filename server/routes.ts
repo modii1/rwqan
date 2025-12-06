@@ -1677,20 +1677,12 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       paymentMethod as "cards" | "applepay"
     );
 
-    // إنشاء سجل الدفع
-    const payment = await storage.createPayment({
-      propertyNumber,
-      packageId,
-      amount: pkg.price,
-      discountCode: discountCode || "",
-      discountAmount: pkg.price - finalAmount,
-      finalAmount,
-      paymobOrderId: paymobResult.intentionId,
-      status: "قيد المراجعة",
-      paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
-    });
+    // حساب بيانات الاشتراك المعلقة (ستحفظ فقط بعد نجاح الدفع)
+    let pendingStartDate: string | undefined;
+    let pendingEndDate: string | undefined;
+    let pendingSubscriptionType: string | undefined;
+    let pendingPrice: number | undefined;
 
-    // حفظ البيانات للاشتراك/التمديد/الترقية
     if (action === 'extend' || action === 'upgrade') {
       const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
@@ -1711,21 +1703,32 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
 
-      const subscriptionData = {
-        packageId: packageId,
-        price: price,
-        subscriptionType: subscriptionType,
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        paymentId: payment.id,
-      };
-
-      // حفظ الاشتراك إلى ورقة الاشتراكات
-      await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property);
-      console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
+      // حفظ البيانات في المتغيرات
+      pendingStartDate = startDate.toISOString().split('T')[0];
+      pendingEndDate = endDate.toISOString().split('T')[0];
+      pendingSubscriptionType = subscriptionType;
+      pendingPrice = price;
     }
 
-    console.log(`✅ Payment created: ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
+    // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
+    const payment = await storage.createPayment({
+      propertyNumber,
+      packageId,
+      amount: pkg.price,
+      discountCode: discountCode || "",
+      discountAmount: pkg.price - finalAmount,
+      finalAmount,
+      paymobOrderId: paymobResult.intentionId,
+      status: "قيد المراجعة",
+      paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
+      action: action as 'new' | 'extend' | 'upgrade' | undefined,
+      pendingStartDate,
+      pendingEndDate,
+      pendingSubscriptionType,
+      pendingPrice,
+    });
+
+    console.log(`✅ Payment created (pending): ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
 
     res.json({
       checkoutUrl: paymobResult.checkoutUrl,
@@ -2734,6 +2737,107 @@ app.post("/api/whatsapp/send", async (req, res) => {
     } catch (error) {
       console.error("Error updating payment status:", error);
       res.status(500).json({ error: "فشل في تحديث حالة الدفعة" });
+    }
+  });
+
+  // ======================
+  // PAYMOB WEBHOOK
+  // ======================
+  app.post("/api/paymob/webhook", async (req, res) => {
+    try {
+      console.log("📥 Paymob webhook received:", req.body);
+
+      const webhook = req.body;
+      const hmac = (req.query.hmac || "") as string;
+
+      // التحقق من HMAC
+      const SECRET_KEY = process.env.PAYMOB_HMAC_SECRET || "";
+      if (SECRET_KEY) {
+        const crypto = await import("crypto");
+        const calculatedHmac = crypto
+          .createHmac("sha512", SECRET_KEY)
+          .update(JSON.stringify(webhook))
+          .digest("hex");
+        
+        if (calculatedHmac !== hmac) {
+          console.error("❌ Invalid HMAC signature");
+          return res.status(400).json({ error: "Invalid HMAC" });
+        }
+      }
+
+      const t = webhook.obj;
+      const transactionId = t.id;
+      const isSuccess = t.success;
+      const paymobOrderId = t.order?.id || t.order;
+
+      console.log(`📝 Transaction ${transactionId}, Success: ${isSuccess}, Order: ${paymobOrderId}`);
+
+      if (!isSuccess || !paymobOrderId) {
+        console.log("⚠️ Payment not successful or no order ID");
+        return res.json({ ok: true, message: "Payment not successful" });
+      }
+
+      // البحث عن سجل الدفع بناءً على paymobOrderId
+      const payments = await storage.getPayments();
+      const payment = payments.find(p => p.paymobOrderId === String(paymobOrderId));
+
+      if (!payment) {
+        console.error(`❌ Payment not found for paymobOrderId: ${paymobOrderId}`);
+        return res.status(404).json({ error: "Payment not found" });
+      }
+
+      console.log(`✅ Found payment: ${payment.id}, Status: ${payment.status}`);
+
+      // إذا كان الدفع مكتمل مسبقاً، لا تفعل شيء
+      if (payment.status === "مكتمل") {
+        console.log("✓ Payment already completed");
+        return res.json({ ok: true, message: "Payment already processed" });
+      }
+
+      // تحديث حالة الدفع إلى مكتمل
+      await storage.updatePayment(payment.id, { 
+        status: "مكتمل",
+        completedAt: new Date().toISOString()
+      });
+
+      console.log(`✅ Payment ${payment.id} marked as completed`);
+
+      // إذا كانت هناك بيانات اشتراك معلقة، قم بتفعيلها
+      if (payment.action && payment.pendingStartDate && payment.pendingEndDate) {
+        const property = await storage.getPropertyByNumber(payment.propertyNumber);
+        
+        if (property) {
+          const subscriptionData = {
+            packageId: payment.packageId,
+            price: payment.pendingPrice || payment.finalAmount,
+            subscriptionType: payment.pendingSubscriptionType || "موثوق",
+            startDate: payment.pendingStartDate,
+            endDate: payment.pendingEndDate,
+            paymentId: payment.id,
+          };
+
+          // حفظ الاشتراك إلى ورقة الاشتراكات
+          await googleSheetsService.addSubscriptionToSheet(
+            payment.propertyNumber, 
+            subscriptionData, 
+            property
+          );
+
+          console.log(`✅ Subscription activated for property ${payment.propertyNumber}`);
+        } else {
+          console.error(`❌ Property not found: ${payment.propertyNumber}`);
+        }
+      }
+
+      res.json({
+        ok: true,
+        message: "Payment processed successfully",
+        paymentId: payment.id,
+      });
+
+    } catch (error) {
+      console.error("❌ Webhook Error:", error);
+      res.status(500).json({ error: "server error" });
     }
   });
 
