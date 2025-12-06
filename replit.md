@@ -135,6 +135,13 @@
 - معرف Paymob
 - الحالة، طريقة الدفع
 - رابط الإيصال
+- **Metadata للتحقق من الدفع**:
+  - `action`: نوع الإجراء (activate/renew/upgrade)
+  - `pendingStartDate`: تاريخ بدء الاشتراك المعلق
+  - `pendingEndDate`: تاريخ انتهاء الاشتراك المعلق
+  - `pendingSubscriptionType`: نوع الاشتراك المعلق (موثوق/عادي)
+  - `pendingPrice`: سعر الاشتراك المعلق
+  - يتم حفظ هذه البيانات عند بدء الدفع وتفعيلها بعد تأكيد Paymob Webhook
 
 ### ورقة: الطلبات (WhatsApp)
 - كود قصير تلقائي
@@ -186,8 +193,38 @@ DEFAULT_OBJECT_STORAGE_BUCKET_ID=xxx
 - تحديث تلقائي لحالة الاشتراكات
 - إشعارات (ستضاف لاحقاً)
 
+## نظام التحقق من الدفع (Payment Verification System)
+
+### تدفق الدفع الآمن:
+1. **بدء الدفع**: عند اختيار باقة والضغط على "ادفع"
+   - يتم إنشاء سجل دفع بحالة "معلق"
+   - حفظ بيانات الاشتراك المطلوب في حقول `pending*`
+   - **لا يتم تفعيل الاشتراك في هذه المرحلة**
+   - إعادة توجيه المستخدم إلى صفحة دفع Paymob
+
+2. **تأكيد الدفع**: عند نجاح الدفع في Paymob
+   - Paymob يرسل webhook إلى `/api/paymob/webhook`
+   - التحقق من صحة Webhook بواسطة HMAC
+   - البحث عن سجل الدفع بناءً على `paymobOrderId`
+   - تحديث حالة الدفع إلى "مكتمل"
+   - **تفعيل الاشتراك** باستخدام البيانات من `pending*`
+   - حفظ الاشتراك في ورقة الاشتراكات
+
+3. **الأمان والموثوقية**:
+   - لا يتم تفعيل أي اشتراك إلا بعد تأكيد Paymob
+   - منع التلاعب: لا يمكن تفعيل اشتراك بدون دفع حقيقي
+   - HMAC Signature للتحقق من صحة Webhook
+   - معالجة idempotent: تجاهل Webhooks المكررة
+
+### الملفات المرتبطة:
+- `server/routes.ts`: endpoint `/api/paymob/webhook`
+- `server/paymob.ts`: إنشاء رابط الدفع
+- `server/googleSheets.ts`: حفظ وتحديث المدفوعات والاشتراكات
+- `shared/schema.ts`: تعريف Payment مع حقول metadata
+
 ## الأمان
 - تسجيل دخول آمن برقم العقار + PIN
 - Webhook مؤمّن بـ HMAC من Paymob
 - Session management مع Express
 - Environment variables لجميع المفاتيح السرية
+- **التحقق من الدفع**: لا تفعيل إلا بعد webhook من Paymob
