@@ -163,6 +163,12 @@ export const paymentSchema = z.object({
   receiptUrl: z.string().optional(),
   createdAt: z.string().optional(),
   completedAt: z.string().optional(),
+  // بيانات الاشتراك المعلق (يتم حفظها فقط عند نجاح الدفع)
+  action: z.enum(['new', 'extend', 'upgrade']).optional(),
+  pendingStartDate: z.string().optional(),
+  pendingEndDate: z.string().optional(),
+  pendingSubscriptionType: z.string().optional(),
+  pendingPrice: z.number().optional(),
 });
 
 export type Payment = z.infer<typeof paymentSchema>;
