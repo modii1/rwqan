@@ -305,7 +305,7 @@ export default function OwnerSubscriptionPage() {
         {paymentInfo && (
           <Card className="mb-8 p-6 border-[#b88d2b] bg-[#fffdf0]">
             <h2 className="text-2xl font-bold text-[#434040] mb-6">معلومات الدفع</h2>
-            
+
             <div className="bg-white p-4 rounded-lg mb-6 border border-[#e0c97b]">
               <div className="flex justify-between mb-3">
                 <span className="text-muted-foreground">الباقة:</span>

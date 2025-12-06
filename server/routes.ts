@@ -98,7 +98,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   app.use(cors(corsOptions));
   app.use("/api/whatsapp", whatsappRoutes);
-  
+
 
   // Owner Analytics - بيانات حقيقية من Google Sheets
   app.get("/api/owner/analytics", async (req, res) => {
@@ -107,12 +107,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!propertyNumber) {
         return res.status(401).json({ error: "Unauthorized" });
       }
-      
+
 
       // جلب جميع الطلبات للعقار من الشهر الحالي
       const allRequests = await googleSheetsService.getRequests();
       const propertyRequests = allRequests.filter(r => r.propertyNumber === propertyNumber);
-      
+
       const now = new Date();
       const currentMonth = propertyRequests.filter(r => {
         try {
@@ -122,7 +122,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return false;
         }
       });
-      
+
       const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1);
       const previousMonth = propertyRequests.filter(r => {
         try {
@@ -196,7 +196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const allRequests = await googleSheetsService.getRequests();
       const allProperties = await googleSheetsService.getProperties();
-      
+
       const byProperty: Record<string, number> = {};
       allRequests.forEach(r => {
         byProperty[r.propertyNumber] = (byProperty[r.propertyNumber] || 0) + 1;
@@ -459,7 +459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (lastRequest && now - lastRequest.timestamp < thirtyMinutes && lastRequest.propertyNumber === propertyNumber) {
         const remainingMs = thirtyMinutes - (now - lastRequest.timestamp);
         const remainingSeconds = Math.ceil(remainingMs / 1000);
-        
+
         // تحويل إلى صيغة أجمل (دقائق وثواني)
         const minutes = Math.floor(remainingSeconds / 60);
         const seconds = remainingSeconds % 60;
@@ -470,9 +470,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           timeDisplay = `${seconds} ثانية`;
         }
-        
+
         console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
-        
+
         return res.status(429).json({
           error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
           remainingSeconds,
@@ -486,7 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dayOfWeek = daysAr[now_date.getUTCDay()];
       const hourOfDay = now_date.getUTCHours();
       const minutes = now_date.getUTCMinutes();
-      
+
       // تحويل الساعة من 24 ساعة إلى 12 ساعة مع AM/PM
       const hour12 = hourOfDay % 12 || 12;
       const ampm = hourOfDay >= 12 ? 'م' : 'ص';
@@ -563,7 +563,7 @@ const request = await storage.createRequest(
     }
     const ua = userAgent.toLowerCase();
     console.log(`🔍 Detecting device from UA: ${ua.substring(0, 100)}...`);
-    
+
     if (/ipad|android(?!.*mobile)|kindle|playbook|silk/.test(ua)) {
       console.log("📱 Detected: TABLET");
       return 'tablet';
@@ -670,7 +670,7 @@ const request = await storage.createRequest(
     try {
       const propertyNumber = (req.session as any).propertyNumber;
       const { action, packageId } = req.body;
-      
+
       if (!['extend', 'upgrade'].includes(action)) {
         return res.status(400).json({ error: "إجراء غير صالح" });
       }
@@ -836,7 +836,7 @@ const request = await storage.createRequest(
       // ===== حساب الـ IPs الفريدة فقط =====
       // Map لتجميع الـ IPs الفريدة لكل عقار
       const uniqueIPMap: Record<string, { ipAddress: string; deviceType: 'mobile' | 'desktop' | 'tablet' }> = {};
-      
+
       allRequests.forEach(r => {
         const key = `${r.propertyNumber}:${r.ipAddress}`;
         if (!uniqueIPMap[key]) {
@@ -865,7 +865,7 @@ const request = await storage.createRequest(
       allRequests.forEach(r => {
         const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
         const city = prop?.city || 'غير محدد';
-        
+
         if (!cityIPMap[city]) {
           cityIPMap[city] = new Set();
         }
@@ -1141,9 +1141,9 @@ const request = await storage.createRequest(
   app.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
     try {
       const propertyNumber = (req.session as any).propertyNumber || "";
-      
+
       console.log(`📸 [UPLOAD] Property ${propertyNumber}, Files:`, req.files?.length);
-      
+
       if (!propertyNumber) {
         console.error("❌ [UPLOAD] No property number in session");
         return res.status(400).json({ error: "Property number not found in session" });
@@ -1167,9 +1167,9 @@ const request = await storage.createRequest(
         const file = files[i];
         // استخدام timestamp + index لتجنب التكرار
         const key = `${propertyNumber}/${timestamp}-${i}.jpg`;
-        
+
         console.log(`⬆️ [UPLOAD] Uploading ${key} (${file.size} bytes)`);
-        
+
         await r2.send(
           new PutObjectCommand({
             Bucket: R2_BUCKET,
@@ -1694,12 +1694,12 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     if (action === 'extend' || action === 'upgrade') {
       const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
-      
+
       let startDate = today;
       let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
       let price = pkg.price;
       let subscriptionType = pkg.type;
-      
+
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
       if (action === 'extend' && currentSubscription) {
         if (new Date(currentSubscription.endDate) > today) {
@@ -1710,7 +1710,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         price = (currentSubscription as any).price || pkg.price;
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
-      
+
       const subscriptionData = {
         packageId: packageId,
         price: price,
@@ -1719,7 +1719,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         endDate: endDate.toISOString().split('T')[0],
         paymentId: payment.id,
       };
-      
+
       // حفظ الاشتراك إلى ورقة الاشتراكات
       await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property);
       console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
@@ -1799,17 +1799,18 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     });
 
     // حفظ البيانات للاشتراك/التمديد/الترقية
-    if (action === 'extend' || action === 'upgrade' || !action) {
+    // لا تقم بإنشاء أو تعديل الاشتراك إلا إذا كان هناك إجراء محدد (extend أو upgrade)
+    if (action === 'extend' || action === 'upgrade') {
       const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
-      
+
       let startDate = today;
       let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
       let price = pkg.price;
       let subscriptionType = pkg.type;
-      
+
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
-      if ((action === 'extend' || !action) && currentSubscription) {
+      if (action === 'extend' && currentSubscription) {
         if (new Date(currentSubscription.endDate) > today) {
           startDate = new Date(currentSubscription.endDate);
           endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
@@ -1818,7 +1819,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         price = (currentSubscription as any).price || pkg.price;
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
-      
+
       const subscriptionData = {
         packageId: packageId,
         price: price,
@@ -1827,7 +1828,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         endDate: endDate.toISOString().split('T')[0],
         paymentId: payment.id,
       };
-      
+
       // حفظ الاشتراك إلى ورقة الاشتراكات
       await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property, receiptUrl);
       console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
@@ -1851,7 +1852,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   // ======================
   // MISSING ENDPOINTS FOR SUBSCRIPTION PAGE
   // ======================
-  
+
   // GET owner's property data
   app.get("/api/owner/property", requireOwner, async (req, res) => {
     try {
@@ -1859,12 +1860,12 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       if (!propertyNumber) {
         return res.status(400).json({ error: "Property not found in session" });
       }
-      
+
       const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
       if (!property) {
         return res.status(404).json({ error: "Property not found" });
       }
-      
+
       res.json(property);
     } catch (err: any) {
       console.error("Get property error:", err?.message);
@@ -1879,12 +1880,12 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       if (!propertyNumber) {
         return res.status(400).json({ error: "Property not found in session" });
       }
-      
+
       console.log(`🔍 Looking for subscription for property: ${propertyNumber}`);
-      
+
       // استخدام الدالة الجديدة للبحث عن الاشتراك
       const subscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
-      
+
       if (!subscription) {
         console.log(`❌ No subscription found for property: ${propertyNumber}`);
         // إرجاع اشتراك افتراضي مجاني إذا لم يوجد
@@ -1897,7 +1898,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
           status: "نشط",
         });
       }
-      
+
       console.log(`✅ Found subscription for ${propertyNumber}:`, subscription);
       res.json(subscription);
     } catch (err: any) {
@@ -2132,7 +2133,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   app.post("/api/code-backup/create", async (req, res) => {
     try {
       const files: Record<string, string> = {};
-      
+
       // Read all code files
       readCodeFiles("client/src", files);
       readCodeFiles("server", files);
@@ -2174,12 +2175,12 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         try {
           const fullPath = path.join(process.cwd(), filePath);
           const dir = path.dirname(fullPath);
-          
+
           // Create directories if they don't exist
           if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
           }
-          
+
           fs.writeFileSync(fullPath, content, 'utf-8');
           restoredCount++;
         } catch (e) {
@@ -2412,7 +2413,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
 
 
-  
+
   // ======================
   // ⚙️ إعدادات الإشعارات
   // ======================
@@ -2513,29 +2514,29 @@ app.post("/api/whatsapp/send", async (req, res) => {
   app.post("/api/multi-property-subscription", async (req, res) => {
     try {
       const { packageId, propertyNumber1, propertyNumber2 } = req.body;
-      
+
       // التحقق من وجود العقارين
       const prop1 = await storage.getPropertyByNumber(propertyNumber1);
       const prop2 = await storage.getPropertyByNumber(propertyNumber2);
-      
+
       if (!prop1 || !prop2) {
         return res.status(400).json({ 
           error: "أحد العقارين غير موجود",
           missing: !prop1 ? propertyNumber1 : propertyNumber2
         });
       }
-      
+
       // جلب الباقة
       const pkg = await storage.getPackageById(packageId);
       if (!pkg) {
         return res.status(400).json({ error: "الباقة غير موجودة" });
       }
-      
+
       // حساب التواريخ
       const startDate = new Date().toISOString();
       const endDate = new Date();
       endDate.setMonth(endDate.getMonth() + (pkg.duration || 1));
-      
+
       const sub = await googleSheetsService.createMultiPropertySubscription({
         packageId,
         propertyNumber1,
@@ -2544,7 +2545,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
         endDate: endDate.toISOString(),
         status: "نشط",
       });
-      
+
       res.json({ success: true, subscription: sub });
     } catch (error) {
       console.error("Error creating multi-property subscription:", error);
@@ -2560,28 +2561,28 @@ app.post("/api/whatsapp/send", async (req, res) => {
       const subscriptions = await storage.getSubscriptions();
       const packages = await storage.getPackages();
       const properties = await storage.getProperties();
-      
+
       // تحويل الاشتراكات لتضمين معلومات إضافية
       const enrichedSubscriptions = subscriptions.map(sub => {
         const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
         const pkg = packages.find(p => p.id === sub.packageId);
-        
+
         // حساب الأيام المتبقية
         let remainingDays: number | null = null;
         let status: "ساري" | "منتهي" | "قريب الانتهاء" = "ساري";
-        
+
         if (sub.endDate) {
           const end = new Date(sub.endDate);
           const now = new Date();
           remainingDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-          
+
           if (remainingDays <= 0) {
             status = "منتهي";
           } else if (remainingDays <= 7) {
             status = "قريب الانتهاء";
           }
         }
-        
+
         return {
           id: sub.id || `${sub.propertyNumber}-${sub.packageId}`,
           propertyNumber: sub.propertyNumber,
@@ -2593,7 +2594,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
           status,
         };
       });
-      
+
       res.json(enrichedSubscriptions);
     } catch (error) {
       console.error("Error fetching subscriptions:", error);
@@ -2704,7 +2705,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
     try {
       const payments = await storage.getPayments();
       const properties = await storage.getProperties();
-      
+
       // تضمين اسم العقار في المدفوعات
       const enrichedPayments = payments.map(payment => {
         const property = properties.find(p => p.propertyNumber === payment.propertyNumber);
@@ -2713,7 +2714,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
           propertyName: property?.name || "غير معروف",
         };
       });
-      
+
       res.json(enrichedPayments);
     } catch (error) {
       console.error("Error fetching payments:", error);
