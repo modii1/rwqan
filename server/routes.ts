@@ -2465,6 +2465,64 @@ app.post("/api/whatsapp/send", async (req, res) => {
   });
 
   // ======================
+  // ✅ تأكيد المدفوعات يدوياً
+  // ======================
+  app.post("/api/admin/payments/:paymentId/confirm", async (req, res) => {
+    try {
+      const { paymentId } = req.params;
+      console.log(`🔧 Manual payment confirmation for: ${paymentId}`);
+      
+      // جلب بيانات الدفع
+      const payment = await googleSheetsService.getPaymentById(paymentId);
+      if (!payment) {
+        return res.status(404).json({ error: "الدفعة غير موجودة" });
+      }
+      
+      if (payment.status === "مكتمل") {
+        return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
+      }
+      
+      // تحديث حالة الدفع
+      await googleSheetsService.updatePayment(paymentId, {
+        status: "مكتمل",
+        completedAt: new Date().toISOString(),
+        paymentMethod: payment.paymentMethod || "تأكيد يدوي",
+      });
+      
+      // تفعيل الاشتراك إذا كانت البيانات موجودة
+      if (payment.pendingStartDate && payment.pendingEndDate) {
+        const subscriptionData = {
+          propertyNumber: payment.propertyNumber,
+          packageId: payment.packageId,
+          startDate: payment.pendingStartDate,
+          endDate: payment.pendingEndDate,
+          status: "نشط" as const,
+          paymentId: paymentId,
+        };
+        
+        await googleSheetsService.createSubscription(subscriptionData);
+        
+        // تحديث نوع الاشتراك في العقار
+        const subType = payment.pendingSubscriptionType || "موثوق";
+        await googleSheetsService.updateProperty(payment.propertyNumber, {
+          subscriptionType: subType,
+          subscriptionDate: payment.pendingEndDate,
+        });
+        
+        console.log(`✅ Subscription activated for property: ${payment.propertyNumber}`);
+      }
+      
+      res.json({ 
+        success: true, 
+        message: "تم تأكيد الدفعة وتفعيل الاشتراك بنجاح" 
+      });
+    } catch (error: any) {
+      console.error("Error confirming payment:", error);
+      res.status(500).json({ error: "فشل في تأكيد الدفعة" });
+    }
+  });
+
+  // ======================
   // 💰 أرباح الشريك
   // ======================
   app.get("/api/admin/partner-profits", async (req, res) => {
