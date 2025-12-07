@@ -1765,11 +1765,17 @@ app.post("/api/owner/payment/retry", async (req, res) => {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
     
+    // جلب بيانات العقار
+    const property = await storage.getPropertyByNumber(payment.propertyNumber);
+    const phone = property?.whatsappNumber || "0500000000";
+    const propertyName = property?.name || "عقار";
+    
     // إنشاء رابط دفع جديد
-    const { createPaymentLink } = await import("./paymob");
-    const paymobResult = await createPaymentLink(
+    const paymobResult = await paymobService.createIntention(
       payment.finalAmount,
       payment.propertyNumber,
+      propertyName,
+      phone,
       pkg.name,
       pkg.duration,
       "cards"
