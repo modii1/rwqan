@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
@@ -137,6 +138,26 @@ const {
   enabled: sessionData?.isLoggedIn === true,
   retry: false,
   refetchOnWindowFocus: false,
+});
+
+// 6) إعادة محاولة الدفع
+const retryPaymentMutation = useMutation({
+  mutationFn: async (paymentId: string) => {
+    const response = await apiRequest('POST', '/api/owner/payment/retry', { paymentId });
+    return response.json();
+  },
+  onSuccess: (data) => {
+    if (data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+    }
+  },
+  onError: (error: any) => {
+    toast({
+      title: "خطأ",
+      description: error.message || "حدث خطأ في إعادة الدفع",
+      variant: "destructive",
+    });
+  },
 });
 
 // ================= DEBUG LOGS =================
@@ -417,7 +438,14 @@ const calculateAnalytics = () => {
           ) : (
             <div className="space-y-3">
               {paymentsData.map((payment: any) => (
-                <PaymentRow key={payment.id} payment={payment} />
+                <PaymentRow 
+                  key={payment.id} 
+                  payment={payment} 
+                  onRetryPayment={(p) => {
+                    retryPaymentMutation.mutate(p.id);
+                  }}
+                  isRetrying={retryPaymentMutation.isPending}
+                />
               ))}
             </div>
           )}
@@ -678,7 +706,7 @@ function AnalyticsBox({
   );
 }
 
-function PaymentRow({ payment }: { payment: any }) {
+function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onRetryPayment?: (payment: any) => void; isRetrying?: boolean }) {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "مكتمل":
@@ -763,6 +791,24 @@ function PaymentRow({ payment }: { payment: any }) {
             <div className="text-xs text-muted-foreground">الطريقة</div>
             <div className="text-sm">{payment.paymentMethod}</div>
           </div>
+        )}
+        
+        {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
+          <Button
+            size="sm"
+            variant="default"
+            className="bg-primary text-white gap-1"
+            onClick={() => onRetryPayment(payment)}
+            disabled={isRetrying}
+            data-testid={`button-retry-payment-${payment.id}`}
+          >
+            {isRetrying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CreditCard className="w-4 h-4" />
+            )}
+            {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
+          </Button>
         )}
       </div>
     </div>

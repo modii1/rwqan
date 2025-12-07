@@ -1740,6 +1740,58 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
   }
 });
 
+// إعادة محاولة الدفع للدفعات المعلقة
+app.post("/api/owner/payment/retry", async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+    }
+    
+    // جلب الدفعة السابقة
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+    
+    if (payment.status === "مكتمل") {
+      return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
+    }
+    
+    // جلب الباقة
+    const pkg = await storage.getPackageById(payment.packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+    
+    // إنشاء رابط دفع جديد
+    const { createPaymentLink } = await import("./paymob");
+    const paymobResult = await createPaymentLink(
+      payment.finalAmount,
+      payment.propertyNumber,
+      pkg.name,
+      pkg.duration,
+      "cards"
+    );
+    
+    // تحديث الدفعة بمعرف Paymob الجديد
+    await googleSheetsService.updatePayment(paymentId, {
+      paymobOrderId: paymobResult.intentionId,
+    });
+    
+    console.log(`🔄 Payment retry for ${paymentId}, new checkout: ${paymobResult.checkoutUrl}`);
+    
+    res.json({
+      checkoutUrl: paymobResult.checkoutUrl,
+      paymentId: paymentId,
+    });
+  } catch (err: any) {
+    console.error("Payment retry error:", err);
+    res.status(500).json({ error: err.message || "خطأ في إعادة الدفع" });
+  }
+});
+
 // 3. التحويل البنكي مع رفع الإيصال
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
