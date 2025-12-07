@@ -851,22 +851,46 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     }
   };
 
+  const getPackageNameArabic = (packageId: string) => {
+    const packageNames: Record<string, string> = {
+      'pkg-month': 'اشتراك شهر',
+      'pkg-2months': 'عرض خاص شهرين',
+      'pkg-2properties': 'اشتراك شهر لعقارين',
+      'pkg-camps': 'باقة المخيمات',
+      'pkg-free': 'باقة مجانية',
+    };
+    return packageNames[packageId] || packageId || 'باقة';
+  };
+
   return (
     <div 
       className="flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-lg bg-muted/10 border border-border/40 hover:bg-muted/20 transition"
       data-testid={`payment-row-${payment.id}`}
     >
+      {/* السعر على اليسار */}
+      <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
+        <div className="text-center md:text-right min-w-[70px]">
+          <div className="font-bold text-primary text-lg">
+            {payment.finalAmount || payment.amount} ر.س
+          </div>
+          {payment.paymentMethod && (
+            <div className="text-xs text-muted-foreground">{payment.paymentMethod}</div>
+          )}
+        </div>
+      </div>
+
+      {/* معلومات الباقة */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
           <CreditCard className="w-5 h-5 text-primary" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm truncate">{payment.packageId || "باقة"}</span>
             <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
               {getStatusIcon(payment.status)}
               {payment.status}
             </Badge>
+            <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
           </div>
           <div className="text-xs text-muted-foreground mt-1">
             {formatDate(payment.createdAt)}
@@ -874,39 +898,24 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-sm">
-        <div className="text-left">
-          <div className="text-xs text-muted-foreground">المبلغ</div>
-          <div className="font-bold text-primary">
-            {payment.finalAmount || payment.amount} ر.س
-          </div>
-        </div>
-        
-        {payment.paymentMethod && (
-          <div className="text-left">
-            <div className="text-xs text-muted-foreground">الطريقة</div>
-            <div className="text-sm">{payment.paymentMethod}</div>
-          </div>
-        )}
-        
-        {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
-          <Button
-            size="sm"
-            variant="default"
-            className="bg-primary text-white gap-1"
-            onClick={() => onRetryPayment(payment)}
-            disabled={isRetrying}
-            data-testid={`button-retry-payment-${payment.id}`}
-          >
-            {isRetrying ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CreditCard className="w-4 h-4" />
-            )}
-            {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
-          </Button>
-        )}
-      </div>
+      {/* زر إكمال الدفع */}
+      {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
+        <Button
+          size="sm"
+          variant="default"
+          className="bg-primary text-white gap-1 flex-shrink-0"
+          onClick={() => onRetryPayment(payment)}
+          disabled={isRetrying}
+          data-testid={`button-retry-payment-${payment.id}`}
+        >
+          {isRetrying ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <CreditCard className="w-4 h-4" />
+          )}
+          {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
+        </Button>
+      )}
     </div>
   );
 }
