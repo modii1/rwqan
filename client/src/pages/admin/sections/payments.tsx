@@ -32,6 +32,11 @@ type Payment = {
   createdAt: string;
   completedAt?: string;
   receiptUrl?: string;
+  transactionId?: string;
+  feeAmount?: number;
+  vatAmount?: number;
+  totalFees?: number;
+  netAmount?: number;
 };
 
 const FEE_RATES: Record<string, { rate: number; label: string }> = {
@@ -318,10 +323,32 @@ export default function PaymentsSection() {
                     </tr>
                     
                     {/* صف التفاصيل الموسعة */}
-                    {isExpanded && isCompleted && (
+                    {isExpanded && isCompleted && (() => {
+                      const hasPaymobFees = p.feeAmount !== undefined && p.feeAmount > 0;
+                      const actualFeeAmount = hasPaymobFees ? p.feeAmount! : fees.feeAmount;
+                      const actualVatAmount = hasPaymobFees ? (p.vatAmount || 0) : fees.vatOnFee;
+                      const actualTotalFees = hasPaymobFees ? (p.totalFees || actualFeeAmount + actualVatAmount) : fees.totalFees;
+                      const actualNetAmount = hasPaymobFees ? (p.netAmount || amount - actualTotalFees) : fees.netAmount;
+                      const actualPartnerProfit = actualNetAmount * PARTNER_SHARE;
+                      const actualOurProfit = actualNetAmount * PARTNER_SHARE;
+                      
+                      return (
                       <tr key={`${p.id}-details`} className="bg-muted/20">
                         <Td colSpan={9}>
                           <div className="py-3 px-2">
+                            {/* رقم المعاملة من Paymob */}
+                            {p.transactionId && (
+                              <div className="mb-3 flex items-center gap-2 text-xs">
+                                <span className="text-muted-foreground">رقم المعاملة (Paymob):</span>
+                                <code className="bg-primary/10 px-2 py-1 rounded font-mono font-bold text-primary">{p.transactionId}</code>
+                                {hasPaymobFees && (
+                                  <Badge variant="outline" className="text-[9px] text-green-600 border-green-300">
+                                    رسوم حقيقية
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+                            
                             <div className="text-xs font-semibold mb-3 text-muted-foreground">تفاصيل الرسوم والأرباح</div>
                             <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                               <div className="bg-card p-2 rounded border">
@@ -329,35 +356,35 @@ export default function PaymentsSection() {
                                 <div className="font-bold text-primary">{amount.toFixed(2)} ر.س</div>
                               </div>
                               <div className="bg-card p-2 rounded border">
-                                <div className="text-muted-foreground mb-1">نسبة الرسوم</div>
-                                <div className="font-semibold">{fees.feeLabel}</div>
+                                <div className="text-muted-foreground mb-1">طريقة الدفع</div>
+                                <div className="font-semibold">{p.paymentMethod || fees.feeLabel}</div>
                               </div>
                               <div className="bg-card p-2 rounded border">
                                 <div className="text-muted-foreground mb-1">رسوم البنك</div>
-                                <div className="font-semibold text-red-600">-{fees.feeAmount.toFixed(2)} ر.س</div>
+                                <div className="font-semibold text-red-600">-{actualFeeAmount.toFixed(2)} ر.س</div>
                               </div>
                               <div className="bg-card p-2 rounded border">
                                 <div className="text-muted-foreground mb-1">ضريبة الرسوم (15%)</div>
-                                <div className="font-semibold text-red-600">-{fees.vatOnFee.toFixed(2)} ر.س</div>
+                                <div className="font-semibold text-red-600">-{actualVatAmount.toFixed(2)} ر.س</div>
                               </div>
                               <div className="bg-card p-2 rounded border">
                                 <div className="text-muted-foreground mb-1">إجمالي الرسوم</div>
-                                <div className="font-bold text-red-600">-{fees.totalFees.toFixed(2)} ر.س</div>
+                                <div className="font-bold text-red-600">-{actualTotalFees.toFixed(2)} ر.س</div>
                               </div>
                               <div className="bg-card p-2 rounded border border-green-300 bg-green-50 dark:bg-green-900/20">
                                 <div className="text-muted-foreground mb-1">الصافي</div>
-                                <div className="font-bold text-green-600">{fees.netAmount.toFixed(2)} ر.س</div>
+                                <div className="font-bold text-green-600">{actualNetAmount.toFixed(2)} ر.س</div>
                               </div>
                             </div>
                             
                             <div className="mt-3 pt-3 border-t grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                               <div className="bg-amber-50 dark:bg-amber-900/20 p-2 rounded border border-amber-200">
                                 <div className="text-amber-600 mb-1">حصة الشريك (50%)</div>
-                                <div className="font-bold text-amber-700">{fees.partnerProfit.toFixed(2)} ر.س</div>
+                                <div className="font-bold text-amber-700">{actualPartnerProfit.toFixed(2)} ر.س</div>
                               </div>
                               <div className="bg-primary/10 p-2 rounded border border-primary/30">
                                 <div className="text-primary mb-1">أرباحنا (50%)</div>
-                                <div className="font-bold text-primary">{fees.ourProfit.toFixed(2)} ر.س</div>
+                                <div className="font-bold text-primary">{actualOurProfit.toFixed(2)} ر.س</div>
                               </div>
                               {p.discountCode && (
                                 <div className="bg-card p-2 rounded border">
@@ -382,7 +409,8 @@ export default function PaymentsSection() {
                           </div>
                         </Td>
                       </tr>
-                    )}
+                    );
+                    })()}
                   </>
                 );
               })}
