@@ -19,6 +19,11 @@ import {
   ChevronDown,
   Eye as EyeIcon,
   EyeOff,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Receipt,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
@@ -123,10 +128,22 @@ const {
   refetchOnWindowFocus: false,
 });
 
+// 5) جلب المدفوعات
+const {
+  data: paymentsData,
+  isLoading: paymentsLoading,
+} = useQuery<any[]>({
+  queryKey: ["/api/owner/payments"],
+  enabled: sessionData?.isLoggedIn === true,
+  retry: false,
+  refetchOnWindowFocus: false,
+});
+
 // ================= DEBUG LOGS =================
 console.log("🔍 requestsData:", requestsData);
 console.log("🔍 sessionData:", sessionData);
 console.log("🔍 isLoggedIn:", sessionData?.isLoggedIn);
+console.log("🔍 paymentsData:", paymentsData);
 
 
   useEffect(() => {
@@ -373,6 +390,37 @@ const calculateAnalytics = () => {
               <span className="md:hidden">إدارة</span>
             </Button>
           </div>
+        </Card>
+
+        {/* ===== سجل المدفوعات ===== */}
+        <Card className="p-4 md:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              سجل المدفوعات
+            </h2>
+            <Badge variant="outline" className="text-xs">
+              {paymentsData?.length || 0} عملية
+            </Badge>
+          </div>
+          
+          {paymentsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span className="mr-2 text-muted-foreground">جاري تحميل المدفوعات...</span>
+            </div>
+          ) : !paymentsData || paymentsData.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Receipt className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>لا توجد مدفوعات حتى الآن</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {paymentsData.map((payment: any) => (
+                <PaymentRow key={payment.id} payment={payment} />
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* ===== معلومات العقار + أداء العقار ===== */}
@@ -630,8 +678,96 @@ function AnalyticsBox({
   );
 }
 
+function PaymentRow({ payment }: { payment: any }) {
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "مكتمل":
+        return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+      case "قيد المراجعة":
+        return <Clock className="w-4 h-4 text-amber-500" />;
+      case "معلق":
+        return <Clock className="w-4 h-4 text-blue-500" />;
+      case "ملغي":
+      case "فشل":
+        return <XCircle className="w-4 h-4 text-red-500" />;
+      default:
+        return <Clock className="w-4 h-4 text-muted-foreground" />;
+    }
+  };
 
+  const getStatusBadgeClass = (status: string) => {
+    switch (status) {
+      case "مكتمل":
+        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+      case "قيد المراجعة":
+        return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+      case "معلق":
+        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+      case "ملغي":
+      case "فشل":
+        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+      default:
+        return "bg-muted text-muted-foreground";
+    }
+  };
 
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "---";
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString("ar-SA", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  return (
+    <div 
+      className="flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-lg bg-muted/10 border border-border/40 hover:bg-muted/20 transition"
+      data-testid={`payment-row-${payment.id}`}
+    >
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+          <CreditCard className="w-5 h-5 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm truncate">{payment.packageId || "باقة"}</span>
+            <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
+              {getStatusIcon(payment.status)}
+              {payment.status}
+            </Badge>
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {formatDate(payment.createdAt)}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 text-sm">
+        <div className="text-left">
+          <div className="text-xs text-muted-foreground">المبلغ</div>
+          <div className="font-bold text-primary">
+            {payment.finalAmount || payment.amount} ر.س
+          </div>
+        </div>
+        
+        {payment.paymentMethod && (
+          <div className="text-left">
+            <div className="text-xs text-muted-foreground">الطريقة</div>
+            <div className="text-sm">{payment.paymentMethod}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function BigActionButton({
   icon,

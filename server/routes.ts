@@ -1910,6 +1910,26 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
+  // GET owner's payments history - سجل مدفوعات المالك
+  app.get("/api/owner/payments", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "Property not found in session" });
+      }
+
+      console.log(`🔍 Fetching payments for property: ${propertyNumber}`);
+
+      const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
+      
+      console.log(`✅ Found ${payments.length} payments for property: ${propertyNumber}`);
+      res.json(payments);
+    } catch (err: any) {
+      console.error("Get owner payments error:", err?.message);
+      res.status(500).json({ error: "Failed to load payments" });
+    }
+  });
+
   // GET all available packages
   app.get("/api/packages", async (req, res) => {
     try {
