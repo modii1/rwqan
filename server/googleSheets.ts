@@ -1282,6 +1282,14 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     return payments.find((p) => p.id === id) || null;
   }
 
+  // جلب مدفوعات عقار معين
+  async getPaymentsByProperty(propertyNumber: string): Promise<Payment[]> {
+    const payments = await this.getPayments();
+    return payments
+      .filter((p) => p.propertyNumber === propertyNumber)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
   // ================== الاقتراحات / الطلبات ==================
 
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {
