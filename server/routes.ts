@@ -3001,32 +3001,40 @@ app.post("/api/whatsapp/send", async (req, res) => {
       if (!feeAmount && amount > 0) {
         console.log(`📊 Calculating fees locally based on payment method: ${paymentMethod}, cardType: ${cardSubType}`);
         
-        // نسب الرسوم الحقيقية من بيانات Paymob:
-        // - بطاقة Visa عادية: ~4.37% (2.62/60)
-        // - Apple Pay + Mada: ~3.86% (1.35/35)
-        // - Apple Pay عادي: ~2.67% (1.6/60)
-        // - Apple Pay: ~5.57% (1.95/35)
-        // المتوسط: ~4.0%
+        // نسب الرسوم الحقيقية من بيانات Paymob (محدثة):
+        // - 20 ر.س Apple Pay: 1.38 fees = 6.9% (1.20 رسوم + 0.18 ضريبة)
+        // - 60 ر.س Visa: 2.62 fees = 4.37%
+        // - 35 ر.س Apple Pay/Mada: 1.35 fees = 3.86%
+        // - 60 ر.س Apple Pay: 1.60 fees = 2.67%
+        // الرسوم تشمل: merchant fees + VAT (15%)
+        // لذا الرسوم الأساسية = المجموع / 1.15
         
-        let feeRate = 0.04; // افتراضي 4%
+        // نسبة شاملة للضريبة (أي المجموع الكلي كنسبة من المبلغ)
+        let totalFeeRate = 0.069; // افتراضي 6.9% (شامل الضريبة)
         
         // تحديد النسبة حسب نوع البطاقة وطريقة الدفع
         if (cardSubType === "Mada" || cardSubType === "mada") {
-          feeRate = 0.0386; // مدى عبر Apple Pay: 3.86%
+          totalFeeRate = 0.044; // مدى: ~4.4% شامل الضريبة
         } else if (paymentMethod === "card" && cardSubType === "Visa") {
-          feeRate = 0.0437; // Visa عادية: 4.37%
+          totalFeeRate = 0.050; // Visa عادية: ~5% شامل الضريبة
         } else if (paymentMethod === "apple_pay" || t.source_data?.type === "apple_pay") {
-          feeRate = 0.0267; // Apple Pay عادي: 2.67%
+          totalFeeRate = 0.069; // Apple Pay: ~6.9% شامل الضريبة (الأعلى)
         }
         
-        // حساب الرسوم
-        feeAmount = Math.round(amount * feeRate * 100) / 100;
-        vatAmount = Math.round(feeAmount * 0.15 * 100) / 100;
-        totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
+        // حساب الرسوم الإجمالية أولاً
+        totalFees = Math.round(amount * totalFeeRate * 100) / 100;
+        
+        // الرسوم الأساسية = الإجمالي / 1.15 (لإزالة الضريبة)
+        feeAmount = Math.round((totalFees / 1.15) * 100) / 100;
+        
+        // ضريبة القيمة المضافة = 15% من الرسوم الأساسية
+        vatAmount = Math.round((totalFees - feeAmount) * 100) / 100;
+        
+        // تقسيم الرسوم بين التاجر والبنك
         merchantFees = Math.round(feeAmount * 0.30 * 100) / 100;
         acqFees = Math.round(feeAmount * 0.70 * 100) / 100;
         
-        console.log(`📊 Calculated fees: rate=${feeRate * 100}%, fee=${feeAmount}, vat=${vatAmount}, total=${totalFees}`);
+        console.log(`📊 Calculated fees: totalRate=${totalFeeRate * 100}%, fee=${feeAmount}, vat=${vatAmount}, total=${totalFees}`);
       }
       
       console.log(`🏦 Final fees: feeAmount=${feeAmount}, vat=${vatAmount}, merchant=${merchantFees}, acq=${acqFees}, total=${totalFees}`);
@@ -3190,6 +3198,45 @@ app.post("/api/whatsapp/send", async (req, res) => {
       res.json({ success: true, message: "تم تحديث عناوين الأعمدة بنجاح" });
     } catch (error: any) {
       console.error("Error setting up payment headers:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ======================
+  // تحديث رسوم معاملة يدوياً
+  // ======================
+  app.post("/api/admin/payments/:transactionId/update-fees", async (req, res) => {
+    try {
+      const { transactionId } = req.params;
+      const { feeAmount, vatAmount, merchantFees, acqFees } = req.body;
+      
+      if (!transactionId) {
+        return res.status(400).json({ error: "معرف المعاملة مطلوب" });
+      }
+      
+      // حساب الإجمالي والصافي
+      const totalFees = (feeAmount || 0) + (vatAmount || 0);
+      
+      console.log(`📝 Updating fees for transaction ${transactionId}:`, {
+        feeAmount, vatAmount, totalFees, merchantFees, acqFees
+      });
+      
+      // تحديث الرسوم في Google Sheets
+      await googleSheetsService.updatePaymentFees(transactionId, {
+        feeAmount: feeAmount || 0,
+        vatAmount: vatAmount || 0,
+        totalFees,
+        merchantFees: merchantFees || 0,
+        acqFees: acqFees || 0,
+      });
+      
+      res.json({ 
+        success: true, 
+        message: "تم تحديث الرسوم بنجاح",
+        data: { feeAmount, vatAmount, totalFees, merchantFees, acqFees }
+      });
+    } catch (error: any) {
+      console.error("Error updating payment fees:", error);
       res.status(500).json({ error: error.message });
     }
   });

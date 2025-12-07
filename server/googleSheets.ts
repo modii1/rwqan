@@ -1118,6 +1118,50 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     }
   }
 
+  // تحديث رسوم معاملة معينة (بواسطة transactionId)
+  async updatePaymentFees(transactionId: string, fees: {
+    feeAmount: number;
+    vatAmount: number;
+    totalFees: number;
+    merchantFees: number;
+    acqFees: number;
+  }): Promise<void> {
+    const rows = await this.readSheet(SHEETS.PAYMENTS);
+    
+    // البحث عن الصف بناءً على transactionId (العمود S = index 18)
+    const rowIndex = rows.findIndex((row) => row[18] === transactionId);
+    
+    if (rowIndex === -1) {
+      throw new Error(`المعاملة ${transactionId} غير موجودة`);
+    }
+    
+    const existingRow = rows[rowIndex];
+    const amount = parseFloat(existingRow[6]) || 0; // العمود G = السعر النهائي
+    const netAmount = Math.round((amount - fees.totalFees) * 100) / 100;
+    
+    // تحديث أعمدة الرسوم (T إلى Y = الأعمدة 19-24 في الـ array، الصف الفعلي = rowIndex + 2)
+    // T: مجموع الرسوم | U: ضريبة | V: إجمالي | W: صافي | X: رسوم التاجر | Y: رسوم البنك
+    const sheets = await getGoogleSheetClient();
+    
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.PAYMENTS}!T${rowIndex + 2}:Y${rowIndex + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[
+          fees.feeAmount.toString(),      // T
+          fees.vatAmount.toString(),      // U
+          fees.totalFees.toString(),      // V
+          netAmount.toString(),           // W
+          fees.merchantFees.toString(),   // X
+          fees.acqFees.toString(),        // Y
+        ]],
+      },
+    });
+    
+    console.log(`✅ Updated fees for transaction ${transactionId}: total=${fees.totalFees}, net=${netAmount}`);
+  }
+
   async createPayment(payment: InsertPayment): Promise<Payment> {
     const id = `PAY-${Date.now()}`;
     const newPayment: Payment = {
