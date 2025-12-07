@@ -803,6 +803,8 @@ function AnalyticsBox({
 }
 
 function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onRetryPayment?: (payment: any) => void; isRetrying?: boolean }) {
+  const [showDetails, setShowDetails] = useState(false);
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "مكتمل":
@@ -862,59 +864,199 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     return packageNames[packageId] || packageId || 'باقة';
   };
 
+  const amount = payment.finalAmount || payment.amount || 0;
+  const feeAmount = payment.feeAmount || (amount * 0.025);
+  const vatAmount = payment.vatAmount || (feeAmount * 0.15);
+  const totalFees = payment.totalFees || (feeAmount + vatAmount);
+  const netAmount = payment.netAmount || (amount - totalFees);
+
   return (
     <div 
-      className="flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-lg bg-muted/10 border border-border/40 hover:bg-muted/20 transition"
+      className="rounded-lg bg-muted/10 border border-border/40 hover:bg-muted/20 transition overflow-hidden"
       data-testid={`payment-row-${payment.id}`}
     >
-      {/* السعر على اليسار */}
-      <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
-        <div className="text-center md:text-right min-w-[70px]">
-          <div className="font-bold text-primary text-lg">
-            {payment.finalAmount || payment.amount} ر.س
+      {/* الصف الرئيسي */}
+      <div className="flex flex-col md:flex-row md:items-center gap-3 p-4">
+        {/* السعر على اليسار */}
+        <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
+          <div className="text-center md:text-right min-w-[80px]">
+            <div className="font-bold text-primary text-lg">
+              {amount} ر.س
+            </div>
+            {payment.paymentMethod && (
+              <div className="text-xs text-muted-foreground">{payment.paymentMethod}</div>
+            )}
           </div>
-          {payment.paymentMethod && (
-            <div className="text-xs text-muted-foreground">{payment.paymentMethod}</div>
-          )}
         </div>
-      </div>
 
-      {/* معلومات الباقة */}
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-          <CreditCard className="w-5 h-5 text-primary" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
-              {getStatusIcon(payment.status)}
-              {payment.status}
-            </Badge>
-            <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
+        {/* معلومات الباقة */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <CreditCard className="w-5 h-5 text-primary" />
           </div>
-          <div className="text-xs text-muted-foreground mt-1">
-            {formatDate(payment.createdAt)}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
+                {getStatusIcon(payment.status)}
+                {payment.status}
+              </Badge>
+              <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {formatDate(payment.createdAt)}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* زر إكمال الدفع */}
-      {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
+        {/* زر عرض التفاصيل */}
         <Button
           size="sm"
-          variant="default"
-          className="bg-primary text-white gap-1 flex-shrink-0"
-          onClick={() => onRetryPayment(payment)}
-          disabled={isRetrying}
-          data-testid={`button-retry-payment-${payment.id}`}
+          variant="ghost"
+          className="flex-shrink-0 gap-1"
+          onClick={() => setShowDetails(!showDetails)}
+          data-testid={`button-toggle-details-${payment.id}`}
         >
-          {isRetrying ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+          {showDetails ? (
+            <ChevronDown className="w-4 h-4 rotate-180" />
           ) : (
-            <CreditCard className="w-4 h-4" />
+            <ChevronDown className="w-4 h-4" />
           )}
-          {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
+          <span className="text-xs">تفاصيل</span>
         </Button>
+
+        {/* زر إكمال الدفع */}
+        {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
+          <Button
+            size="sm"
+            variant="default"
+            className="bg-primary text-white gap-1 flex-shrink-0"
+            onClick={() => onRetryPayment(payment)}
+            disabled={isRetrying}
+            data-testid={`button-retry-payment-${payment.id}`}
+          >
+            {isRetrying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CreditCard className="w-4 h-4" />
+            )}
+            {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
+          </Button>
+        )}
+      </div>
+
+      {/* تفاصيل الدفعة الموسعة */}
+      {showDetails && (
+        <div className="border-t border-border/40 bg-muted/5 p-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            {/* المبلغ الأصلي */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">المبلغ الأصلي</div>
+              <div className="font-semibold">{payment.amount || amount} ر.س</div>
+            </div>
+            
+            {/* كود الخصم */}
+            {payment.discountCode && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">كود الخصم</div>
+                <div className="font-semibold text-green-600">{payment.discountCode}</div>
+              </div>
+            )}
+            
+            {/* قيمة الخصم */}
+            {payment.discountAmount > 0 && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">قيمة الخصم</div>
+                <div className="font-semibold text-green-600">-{payment.discountAmount} ر.س</div>
+              </div>
+            )}
+            
+            {/* المبلغ بعد الخصم */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">المبلغ النهائي</div>
+              <div className="font-bold text-primary">{amount} ر.س</div>
+            </div>
+            
+            {/* رسوم Paymob */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">رسوم الدفع (2.5%)</div>
+              <div className="font-semibold text-amber-600">{feeAmount.toFixed(2)} ر.س</div>
+            </div>
+            
+            {/* ضريبة على الرسوم */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">ضريبة الرسوم (15%)</div>
+              <div className="font-semibold text-amber-600">{vatAmount.toFixed(2)} ر.س</div>
+            </div>
+            
+            {/* إجمالي الرسوم */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">إجمالي الرسوم</div>
+              <div className="font-semibold text-red-500">{totalFees.toFixed(2)} ر.س</div>
+            </div>
+            
+            {/* المبلغ الصافي */}
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">المبلغ الصافي</div>
+              <div className="font-bold text-green-600">{netAmount.toFixed(2)} ر.س</div>
+            </div>
+          </div>
+
+          {/* تفاصيل إضافية */}
+          <div className="mt-4 pt-4 border-t border-border/30 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            {/* فترة الاشتراك */}
+            {payment.pendingStartDate && payment.pendingEndDate && (
+              <>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">بداية الاشتراك</div>
+                  <div className="font-semibold">{payment.pendingStartDate}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">نهاية الاشتراك</div>
+                  <div className="font-semibold">{payment.pendingEndDate}</div>
+                </div>
+              </>
+            )}
+            
+            {/* نوع الاشتراك */}
+            {payment.pendingSubscriptionType && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">نوع الاشتراك</div>
+                <Badge variant={payment.pendingSubscriptionType === 'موثوق' ? 'default' : 'outline'} className="text-xs">
+                  {payment.pendingSubscriptionType === 'موثوق' && <Crown className="w-3 h-3 ml-1" />}
+                  {payment.pendingSubscriptionType}
+                </Badge>
+              </div>
+            )}
+            
+            {/* نوع العملية */}
+            {payment.action && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">نوع العملية</div>
+                <div className="font-semibold">
+                  {payment.action === 'activate' ? 'تفعيل جديد' : 
+                   payment.action === 'renew' ? 'تجديد' : 
+                   payment.action === 'upgrade' ? 'ترقية' : payment.action}
+                </div>
+              </div>
+            )}
+            
+            {/* تاريخ الإتمام */}
+            {payment.completedAt && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">تاريخ الإتمام</div>
+                <div className="font-semibold">{formatDate(payment.completedAt)}</div>
+              </div>
+            )}
+
+            {/* رقم المعاملة */}
+            {payment.transactionId && (
+              <div className="col-span-2">
+                <div className="text-xs text-muted-foreground mb-1">رقم المعاملة</div>
+                <div className="font-mono text-xs bg-muted/30 px-2 py-1 rounded">{payment.transactionId}</div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
