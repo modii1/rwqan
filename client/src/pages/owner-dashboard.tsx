@@ -354,7 +354,7 @@ const calculateAnalytics = () => {
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg md:text-xl font-bold text-primary truncate">لوحة التحكم</h1>
                 {isVip && (
-                  <Badge className="bg-amber-500 text-white flex items-center gap-1 px-2 md:px-3 py-0.5 md:py-1 text-xs md:text-sm flex-shrink-0">
+                  <Badge className="text-white flex items-center gap-1 px-2 md:px-3 py-0.5 md:py-1 text-xs md:text-sm flex-shrink-0 bg-[#2e2f31]">
                     <Crown className="w-3 h-3" />
                     <span className="hidden md:inline">مميز</span>
                   </Badge>
