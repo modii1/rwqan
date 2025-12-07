@@ -25,6 +25,11 @@ import {
   XCircle,
   Receipt,
   Loader2,
+  Filter,
+  Plus,
+  Minus,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
@@ -40,6 +45,8 @@ export default function OwnerDashboard() {
   const { toast } = useToast();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [showRequestsStats, setShowRequestsStats] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
+  const [paymentsExpanded, setPaymentsExpanded] = useState(true);
 
 
   // ===================== دالة استخراج فترة الذروة =====================
@@ -305,7 +312,8 @@ const calculateAnalytics = () => {
     highestDemandDay,
     previousMonthGrowth: 0,
     totalProperties: 1,
-    peakPeriod, // ⬅ أعدناها هنا
+    peakPeriod,
+    rank: 1,
   };
 };
 
@@ -415,38 +423,126 @@ const calculateAnalytics = () => {
 
         {/* ===== سجل المدفوعات ===== */}
         <Card className="p-4 md:p-6">
+          {/* رأس القسم مع زر التوسيع/الطي */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-primary flex items-center gap-2">
-              <Receipt className="w-5 h-5" />
-              سجل المدفوعات
-            </h2>
+            <button
+              type="button"
+              onClick={() => setPaymentsExpanded(!paymentsExpanded)}
+              className="flex items-center gap-2 hover:opacity-80 transition"
+              data-testid="button-toggle-payments"
+            >
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                {paymentsExpanded ? (
+                  <Minus className="w-4 h-4 text-primary" />
+                ) : (
+                  <Plus className="w-4 h-4 text-primary" />
+                )}
+              </div>
+              <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+                <Receipt className="w-5 h-5" />
+                سجل المدفوعات
+              </h2>
+            </button>
             <Badge variant="outline" className="text-xs">
               {paymentsData?.length || 0} عملية
             </Badge>
           </div>
+
+          {/* أزرار الفلترة */}
+          {paymentsExpanded && paymentsData && paymentsData.length > 0 && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Filter className="w-4 h-4" />
+                <span>فلترة:</span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={paymentFilter === 'all' ? 'default' : 'outline'}
+                  onClick={() => setPaymentFilter('all')}
+                  className="text-xs"
+                  data-testid="button-filter-all"
+                >
+                  الكل ({paymentsData.length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={paymentFilter === 'completed' ? 'default' : 'outline'}
+                  onClick={() => setPaymentFilter('completed')}
+                  className="text-xs"
+                  data-testid="button-filter-completed"
+                >
+                  <CheckCircle2 className="w-3 h-3 ml-1" />
+                  مكتمل ({paymentsData.filter((p: any) => p.status === 'مكتمل').length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant={paymentFilter === 'pending' ? 'default' : 'outline'}
+                  onClick={() => setPaymentFilter('pending')}
+                  className="text-xs"
+                  data-testid="button-filter-pending"
+                >
+                  <Clock className="w-3 h-3 ml-1" />
+                  معلق ({paymentsData.filter((p: any) => p.status === 'قيد المراجعة' || p.status === 'معلق').length})
+                </Button>
+              </div>
+            </div>
+          )}
           
-          {paymentsLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              <span className="mr-2 text-muted-foreground">جاري تحميل المدفوعات...</span>
-            </div>
-          ) : !paymentsData || paymentsData.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Receipt className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>لا توجد مدفوعات حتى الآن</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {paymentsData.map((payment: any) => (
-                <PaymentRow 
-                  key={payment.id} 
-                  payment={payment} 
-                  onRetryPayment={(p) => {
-                    retryPaymentMutation.mutate(p.id);
-                  }}
-                  isRetrying={retryPaymentMutation.isPending}
-                />
-              ))}
+          {/* محتوى المدفوعات */}
+          {paymentsExpanded && (
+            <>
+              {paymentsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  <span className="mr-2 text-muted-foreground">جاري تحميل المدفوعات...</span>
+                </div>
+              ) : !paymentsData || paymentsData.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Receipt className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p>لا توجد مدفوعات حتى الآن</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {paymentsData
+                    .filter((payment: any) => {
+                      if (paymentFilter === 'all') return true;
+                      if (paymentFilter === 'completed') return payment.status === 'مكتمل';
+                      if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق';
+                      return true;
+                    })
+                    .map((payment: any) => (
+                      <PaymentRow 
+                        key={payment.id} 
+                        payment={payment} 
+                        onRetryPayment={(p) => {
+                          retryPaymentMutation.mutate(p.id);
+                        }}
+                        isRetrying={retryPaymentMutation.isPending}
+                      />
+                    ))}
+                  
+                  {/* رسالة إذا لم توجد نتائج بعد الفلترة */}
+                  {paymentsData.filter((payment: any) => {
+                    if (paymentFilter === 'all') return true;
+                    if (paymentFilter === 'completed') return payment.status === 'مكتمل';
+                    if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق';
+                    return true;
+                  }).length === 0 && (
+                    <div className="text-center py-6 text-muted-foreground">
+                      <Filter className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>لا توجد مدفوعات مطابقة للفلتر المحدد</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* رسالة عند الطي */}
+          {!paymentsExpanded && (
+            <div className="text-center py-4 text-muted-foreground text-sm">
+              اضغط على <Plus className="w-4 h-4 inline mx-1" /> لعرض سجل المدفوعات
             </div>
           )}
         </Card>
