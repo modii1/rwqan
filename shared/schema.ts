@@ -171,9 +171,11 @@ export const paymentSchema = z.object({
   pendingPrice: z.number().optional(),
   // بيانات Paymob Transaction
   transactionId: z.string().optional(),
-  feeAmount: z.number().optional(), // رسوم Paymob
-  vatAmount: z.number().optional(), // ضريبة القيمة المضافة
-  totalFees: z.number().optional(), // إجمالي الرسوم
+  merchantFees: z.number().optional(), // رسوم التاجر (merchant_fees)
+  acqFees: z.number().optional(), // رسوم البنك (acquirer fees)
+  vatAmount: z.number().optional(), // ضريبة القيمة المضافة على الرسوم
+  feeAmount: z.number().optional(), // إجمالي رسوم البنك (merchantFees + acqFees) - للتوافق مع الكود القديم
+  totalFees: z.number().optional(), // إجمالي الرسوم (merchantFees + acqFees + vat)
   netAmount: z.number().optional(), // المبلغ الصافي بعد الخصومات
 });
 

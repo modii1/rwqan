@@ -2966,9 +2966,15 @@ app.post("/api/whatsapp/send", async (req, res) => {
       
       // استخراج الرسوم الفعلية من Paymob (obj.data)
       const paymobData = t.data || {};
-      let feeAmount = paymobData.merchant_fees || paymobData.fees || 0;
+      let merchantFees = paymobData.merchant_fees || paymobData.fees || 0;
       let vatAmount = paymobData.vat || 0;
-      let totalFees = paymobData.total_fees || (feeAmount + vatAmount);
+      let acqFees = paymobData.acq_fees || 0; // رسوم البنك (acquirer fees)
+      
+      // إجمالي الرسوم = رسوم التاجر + الضريبة + رسوم البنك
+      let feeAmount = merchantFees + acqFees; // نجمعهما معاً لعرضهما كـ "رسوم البنك"
+      let totalFees = paymobData.total_fees || (merchantFees + vatAmount + acqFees);
+      
+      console.log(`🏦 Fees breakdown: merchant_fees=${merchantFees}, vat=${vatAmount}, acq_fees=${acqFees}, total=${totalFees}`);
       
       // إذا لم تأتِ الرسوم من Paymob، احسبها حسب طريقة الدفع
       const paymentMethod = t.source_data?.type || "";
@@ -3085,6 +3091,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
         completedAt: new Date().toISOString(),
         transactionId,
         paymentMethod: paymentMethodDisplay,
+        merchantFees,
+        acqFees,
         feeAmount,
         vatAmount,
         totalFees,
