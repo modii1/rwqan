@@ -2964,52 +2964,72 @@ app.post("/api/whatsapp/send", async (req, res) => {
       const amountCents = t.amount_cents || 0;
       const amount = amountCents / 100;
       
-      // استخراج الرسوم الفعلية من Paymob (obj.data)
-      const paymobData = t.data || {};
-      let merchantFees = paymobData.merchant_fees || paymobData.fees || 0;
-      let vatAmount = paymobData.vat || 0;
-      let acqFees = paymobData.acq_fees || 0; // رسوم البنك (acquirer fees)
-      
-      // إجمالي الرسوم = رسوم التاجر + الضريبة + رسوم البنك
-      let feeAmount = merchantFees + acqFees; // نجمعهما معاً لعرضهما كـ "رسوم البنك"
-      let totalFees = paymobData.total_fees || (merchantFees + vatAmount + acqFees);
-      
-      console.log(`🏦 Fees breakdown: merchant_fees=${merchantFees}, vat=${vatAmount}, acq_fees=${acqFees}, total=${totalFees}`);
-      
-      // إذا لم تأتِ الرسوم من Paymob، احسبها حسب طريقة الدفع
+      // استخراج معلومات طريقة الدفع
       const paymentMethod = t.source_data?.type || "";
       const cardSubType = t.source_data?.sub_type || "";
       
       // طباعة الـ webhook كاملاً لتحليل البيانات
       console.log(`📊 Full webhook obj:`, JSON.stringify(t, null, 2));
       
-      if (!feeAmount && amount > 0) {
-        // حساب الرسوم الحقيقية بناءً على نسب Paymob الفعلية
-        // Apple Pay / Cards: 2.67% (60 * 0.0267 = 1.6)
-        // Mada: 1.80%
-        let feeRate = 0.0267; // Apple Pay / بطاقات عادية (2.67%)
+      // محاولة جلب الرسوم الحقيقية من Paymob API
+      let feeAmount = 0;
+      let vatAmount = 0;
+      let totalFees = 0;
+      let merchantFees = 0;
+      let acqFees = 0;
+      
+      try {
+        console.log(`📡 Fetching real fees from Paymob API for transaction: ${transactionId}`);
+        const { paymobService } = await import("./paymob");
+        const txDetails = await paymobService.getTransactionDetails(transactionId);
         
+        if (txDetails && txDetails.fees > 0) {
+          console.log(`✅ Got real fees from Paymob API: fees=${txDetails.fees}, vat=${txDetails.vat}`);
+          feeAmount = txDetails.fees;
+          vatAmount = txDetails.vat;
+          totalFees = txDetails.totalFees;
+          
+          // تقسيم الرسوم (Paymob لا يفصل بين merchant و acq، لذا نقسمها تقريبياً)
+          merchantFees = Math.round(feeAmount * 0.30 * 100) / 100;
+          acqFees = Math.round(feeAmount * 0.70 * 100) / 100;
+        }
+      } catch (apiError) {
+        console.log(`⚠️ Could not fetch fees from Paymob API, will calculate locally`);
+      }
+      
+      // إذا لم نحصل على الرسوم من API، نحسبها محلياً
+      if (!feeAmount && amount > 0) {
+        console.log(`📊 Calculating fees locally based on payment method: ${paymentMethod}, cardType: ${cardSubType}`);
+        
+        // نسب الرسوم الحقيقية من بيانات Paymob:
+        // - بطاقة Visa عادية: ~4.37% (2.62/60)
+        // - Apple Pay + Mada: ~3.86% (1.35/35)
+        // - Apple Pay عادي: ~2.67% (1.6/60)
+        // - Apple Pay: ~5.57% (1.95/35)
+        // المتوسط: ~4.0%
+        
+        let feeRate = 0.04; // افتراضي 4%
+        
+        // تحديد النسبة حسب نوع البطاقة وطريقة الدفع
         if (cardSubType === "Mada" || cardSubType === "mada") {
-          feeRate = 0.018; // مدى 1.8%
+          feeRate = 0.0386; // مدى عبر Apple Pay: 3.86%
+        } else if (paymentMethod === "card" && cardSubType === "Visa") {
+          feeRate = 0.0437; // Visa عادية: 4.37%
+        } else if (paymentMethod === "apple_pay" || t.source_data?.type === "apple_pay") {
+          feeRate = 0.0267; // Apple Pay عادي: 2.67%
         }
         
-        // الرسوم = المبلغ × النسبة (تقريب لأقرب هللتين)
+        // حساب الرسوم
         feeAmount = Math.round(amount * feeRate * 100) / 100;
-        
-        // ضريبة القيمة المضافة = 15% من الرسوم
         vatAmount = Math.round(feeAmount * 0.15 * 100) / 100;
-        
-        // إجمالي الرسوم = الرسوم + الضريبة
         totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
-        
-        // تقسيم الرسوم بين التاجر والبنك (تقريبي)
-        // عادةً: merchant_fees ≈ 30%، acq_fees ≈ 70%
         merchantFees = Math.round(feeAmount * 0.30 * 100) / 100;
         acqFees = Math.round(feeAmount * 0.70 * 100) / 100;
         
-        console.log(`📊 Calculated fees: rate=${feeRate * 100}%, feeAmount=${feeAmount}, vat=${vatAmount}, total=${totalFees}`);
-        console.log(`📊 Split: merchant=${merchantFees}, acq=${acqFees}`);
+        console.log(`📊 Calculated fees: rate=${feeRate * 100}%, fee=${feeAmount}, vat=${vatAmount}, total=${totalFees}`);
       }
+      
+      console.log(`🏦 Final fees: feeAmount=${feeAmount}, vat=${vatAmount}, merchant=${merchantFees}, acq=${acqFees}, total=${totalFees}`);
       
       const netAmount = Math.round((amount - totalFees) * 100) / 100;
 
@@ -3018,7 +3038,6 @@ app.post("/api/whatsapp/send", async (req, res) => {
       console.log(`🏠 PropertyNumber: ${propertyNumber}`);
       console.log(`💳 PaymentMethod: ${paymentMethod}, CardType: ${cardSubType}`);
       console.log(`💰 Amount: ${amount}, Fee: ${feeAmount}, VAT: ${vatAmount}, Total Fees: ${totalFees}, Net: ${netAmount}`);
-      console.log(`📊 Paymob Data:`, JSON.stringify(paymobData, null, 2));
       console.log(`✅ Success: ${isSuccess}`);
 
       if (!isSuccess) {
