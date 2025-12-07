@@ -2766,11 +2766,24 @@ app.post("/api/whatsapp/send", async (req, res) => {
       }
 
       const t = webhook.obj;
-      const transactionId = t.id;
+      const transactionId = String(t.id);
       const isSuccess = t.success;
       const paymobOrderId = t.order?.id || t.order;
 
+      // استخراج بيانات الرسوم من Paymob
+      const amountCents = t.amount_cents || 0;
+      const amount = amountCents / 100;
+      
+      // حساب رسوم Paymob (2.5% + ضريبة 15% على الرسوم)
+      const feePercentage = 0.025; // 2.5%
+      const vatPercentage = 0.15; // 15%
+      const feeAmount = Math.round(amount * feePercentage * 100) / 100;
+      const vatAmount = Math.round(feeAmount * vatPercentage * 100) / 100;
+      const totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
+      const netAmount = Math.round((amount - totalFees) * 100) / 100;
+
       console.log(`📝 Transaction ${transactionId}, Success: ${isSuccess}, Order: ${paymobOrderId}`);
+      console.log(`💰 Amount: ${amount}, Fee: ${feeAmount}, VAT: ${vatAmount}, Total Fees: ${totalFees}, Net: ${netAmount}`);
 
       if (!isSuccess || !paymobOrderId) {
         console.log("⚠️ Payment not successful or no order ID");
@@ -2794,10 +2807,15 @@ app.post("/api/whatsapp/send", async (req, res) => {
         return res.json({ ok: true, message: "Payment already processed" });
       }
 
-      // تحديث حالة الدفع إلى مكتمل
+      // تحديث حالة الدفع إلى مكتمل مع بيانات الرسوم
       await storage.updatePayment(payment.id, { 
         status: "مكتمل",
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        transactionId,
+        feeAmount,
+        vatAmount,
+        totalFees,
+        netAmount,
       });
 
       console.log(`✅ Payment ${payment.id} marked as completed`);

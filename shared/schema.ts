@@ -153,10 +153,10 @@ export const paymentSchema = z.object({
   id: z.string(),
   propertyNumber: z.string(),
   packageId: z.string(),
-  amount: z.number(),
+  amount: z.number(), // السعر الأصلي قبل الخصم
   discountCode: z.string().optional(),
   discountAmount: z.number().default(0),
-  finalAmount: z.number(),
+  finalAmount: z.number(), // السعر بعد الخصم
   paymobOrderId: z.string().optional(),
   status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة']),
   paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي']).optional(),
@@ -169,6 +169,12 @@ export const paymentSchema = z.object({
   pendingEndDate: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
   pendingPrice: z.number().optional(),
+  // بيانات Paymob Transaction
+  transactionId: z.string().optional(),
+  feeAmount: z.number().optional(), // رسوم Paymob
+  vatAmount: z.number().optional(), // ضريبة القيمة المضافة
+  totalFees: z.number().optional(), // إجمالي الرسوم
+  netAmount: z.number().optional(), // المبلغ الصافي بعد الخصومات
 });
 
 export type Payment = z.infer<typeof paymentSchema>;
