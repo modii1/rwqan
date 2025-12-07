@@ -1,12 +1,23 @@
 import crypto from 'crypto';
 
-const SECRET_KEY = process.env.PAYMOB_SECRET_KEY || process.env.PAYMOB_API_KEY!;
+const SECRET_KEY = process.env.PAYMOB_API_KEY!;
 const PUBLIC_KEY = process.env.PAYMOB_PUBLIC_KEY!;
 const HMAC_SECRET = process.env.PAYMOB_HMAC_SECRET!;
 const INTEGRATION_ID_CARDS = parseInt(process.env.PAYMOB_INTEGRATION_ID_CARDS || '15650');
 const INTEGRATION_ID_APPLEPAY = parseInt(process.env.PAYMOB_INTEGRATION_ID_APPLEPAY || '15649');
 
 const PAYMOB_API_URL = 'https://ksa.paymob.com';
+
+// تسجيل معلومات المفاتيح عند بدء التشغيل
+console.log("🔑 Paymob Config:", {
+  hasSecretKey: !!SECRET_KEY,
+  secretKeyLength: SECRET_KEY?.length || 0,
+  secretKeyPrefix: SECRET_KEY?.substring(0, 10) || "none",
+  hasPublicKey: !!PUBLIC_KEY,
+  hasHmacSecret: !!HMAC_SECRET,
+  integrationCards: INTEGRATION_ID_CARDS,
+  integrationApplePay: INTEGRATION_ID_APPLEPAY,
+});
 
 interface IntentionResponse {
   client_secret: string;

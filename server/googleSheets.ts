@@ -750,7 +750,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     const isPremium =
       subscription.packageId?.includes("premium") ||
       subscription.packageId === "pkg-trusted" ||
-      (subscription.price && Number(subscription.price) > 0);
+      subscription.status === "نشط";
 
     // 🟡 15 = نوع الاشتراك
     propertyRow[15] = isPremium ? "مميز" : "عادي";
@@ -840,7 +840,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     const isPremium =
       updates.packageId?.includes("premium") ||
       updates.packageId === "pkg-trusted" ||
-      (updates.price && Number(updates.price) > 0);
+      updates.status === "نشط";
 
     // 🟡 نوع الاشتراك
     if (updates.packageId) {
@@ -1076,25 +1076,36 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       createdAt: new Date().toISOString(),
     };
 
+    // ترتيب الأعمدة:
+    // A: ID | B: رقم العقار | C: الباقة | D: السعر الأصلي | E: كود الخصم
+    // F: قيمة الخصم | G: السعر النهائي | H: معرف Paymob | I: الحالة | J: طريقة الدفع
+    // K: رابط الإيصال | L: تاريخ الإنشاء | M: تاريخ الإكمال | N: نوع الإجراء
+    // O: تاريخ البدء المعلق | P: تاريخ الانتهاء المعلق | Q: نوع الاشتراك المعلق | R: السعر المعلق
+    // S: معرف العملية | T: رسوم Paymob | U: ضريبة القيمة المضافة | V: إجمالي الرسوم | W: المبلغ الصافي
     const row = [
-      newPayment.id,
-      newPayment.propertyNumber,
-      newPayment.packageId,
-      newPayment.amount.toString(),
-      newPayment.discountCode || "",
-      newPayment.discountAmount.toString(),
-      newPayment.finalAmount.toString(),
-      newPayment.paymobOrderId || "",
-      newPayment.status,
-      newPayment.paymentMethod || "",
-      newPayment.receiptUrl || "",
-      newPayment.createdAt,
-      newPayment.completedAt || "",
-      newPayment.action || "",
-      newPayment.pendingStartDate || "",
-      newPayment.pendingEndDate || "",
-      newPayment.pendingSubscriptionType || "",
-      newPayment.pendingPrice?.toString() || "",
+      newPayment.id,                              // A
+      newPayment.propertyNumber,                  // B
+      newPayment.packageId,                       // C
+      newPayment.amount.toString(),               // D - السعر الأصلي
+      newPayment.discountCode || "",              // E
+      newPayment.discountAmount.toString(),       // F
+      newPayment.finalAmount.toString(),          // G - السعر بعد الخصم
+      newPayment.paymobOrderId || "",             // H
+      newPayment.status,                          // I
+      newPayment.paymentMethod || "",             // J
+      newPayment.receiptUrl || "",                // K
+      newPayment.createdAt,                       // L
+      newPayment.completedAt || "",               // M
+      newPayment.action || "",                    // N
+      newPayment.pendingStartDate || "",          // O
+      newPayment.pendingEndDate || "",            // P
+      newPayment.pendingSubscriptionType || "",   // Q
+      newPayment.pendingPrice?.toString() || "",  // R
+      newPayment.transactionId || "",             // S
+      newPayment.feeAmount?.toString() || "",     // T
+      newPayment.vatAmount?.toString() || "",     // U
+      newPayment.totalFees?.toString() || "",     // V
+      newPayment.netAmount?.toString() || "",     // W
     ];
 
     console.log(
@@ -1132,72 +1143,54 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       id: current[0],
       propertyNumber: updates.propertyNumber ?? current[1],
       packageId: updates.packageId ?? current[2],
-
-      amount:
-        updates.amount ?? (parseFloat(current[3]) || 0),
-
-      discountCode:
-        updates.discountCode ?? (current[4] || undefined),
-
-      discountAmount:
-        updates.discountAmount ??
-        (parseFloat(current[5]) || 0),
-
-      finalAmount:
-        updates.finalAmount ??
-        (parseFloat(current[6]) || 0),
-
-      paymobOrderId:
-        updates.paymobOrderId ?? (current[7] || undefined),
-
+      amount: updates.amount ?? (parseFloat(current[3]) || 0),
+      discountCode: updates.discountCode ?? (current[4] || undefined),
+      discountAmount: updates.discountAmount ?? (parseFloat(current[5]) || 0),
+      finalAmount: updates.finalAmount ?? (parseFloat(current[6]) || 0),
+      paymobOrderId: updates.paymobOrderId ?? (current[7] || undefined),
       status: updates.status ?? (current[8] as any),
-
-      paymentMethod:
-        updates.paymentMethod ?? (current[9] || undefined),
-
-      receiptUrl:
-        updates.receiptUrl ?? (current[10] || undefined),
-
+      paymentMethod: updates.paymentMethod ?? (current[9] || undefined),
+      receiptUrl: updates.receiptUrl ?? (current[10] || undefined),
       createdAt: current[11],
-
-      completedAt:
-        updates.completedAt ?? (current[12] || undefined),
-      
-      action:
-        updates.action ?? (current[13] as any || undefined),
-      
-      pendingStartDate:
-        updates.pendingStartDate ?? (current[14] || undefined),
-      
-      pendingEndDate:
-        updates.pendingEndDate ?? (current[15] || undefined),
-      
-      pendingSubscriptionType:
-        updates.pendingSubscriptionType ?? (current[16] || undefined),
-      
-      pendingPrice:
-        updates.pendingPrice ?? (parseFloat(current[17]) || undefined),
+      completedAt: updates.completedAt ?? (current[12] || undefined),
+      action: updates.action ?? (current[13] as any || undefined),
+      pendingStartDate: updates.pendingStartDate ?? (current[14] || undefined),
+      pendingEndDate: updates.pendingEndDate ?? (current[15] || undefined),
+      pendingSubscriptionType: updates.pendingSubscriptionType ?? (current[16] || undefined),
+      pendingPrice: updates.pendingPrice ?? (parseFloat(current[17]) || undefined),
+      // حقول Paymob الجديدة
+      transactionId: updates.transactionId ?? (current[18] || undefined),
+      feeAmount: updates.feeAmount ?? (parseFloat(current[19]) || undefined),
+      vatAmount: updates.vatAmount ?? (parseFloat(current[20]) || undefined),
+      totalFees: updates.totalFees ?? (parseFloat(current[21]) || undefined),
+      netAmount: updates.netAmount ?? (parseFloat(current[22]) || undefined),
     };
 
+    // نفس ترتيب الأعمدة كما في createPayment
     const row = [
-      updatedPayment.id,
-      updatedPayment.propertyNumber,
-      updatedPayment.packageId,
-      updatedPayment.amount.toString(),
-      updatedPayment.discountCode || "",
-      updatedPayment.discountAmount.toString(),
-      updatedPayment.finalAmount.toString(),
-      updatedPayment.paymobOrderId || "",
-      updatedPayment.status,
-      updatedPayment.paymentMethod || "",
-      updatedPayment.receiptUrl || "",
-      updatedPayment.createdAt,
-      updatedPayment.completedAt || "",
-      updatedPayment.action || "",
-      updatedPayment.pendingStartDate || "",
-      updatedPayment.pendingEndDate || "",
-      updatedPayment.pendingSubscriptionType || "",
-      updatedPayment.pendingPrice?.toString() || "",
+      updatedPayment.id,                              // A
+      updatedPayment.propertyNumber,                  // B
+      updatedPayment.packageId,                       // C
+      updatedPayment.amount.toString(),               // D
+      updatedPayment.discountCode || "",              // E
+      updatedPayment.discountAmount.toString(),       // F
+      updatedPayment.finalAmount.toString(),          // G
+      updatedPayment.paymobOrderId || "",             // H
+      updatedPayment.status,                          // I
+      updatedPayment.paymentMethod || "",             // J
+      updatedPayment.receiptUrl || "",                // K
+      updatedPayment.createdAt,                       // L
+      updatedPayment.completedAt || "",               // M
+      updatedPayment.action || "",                    // N
+      updatedPayment.pendingStartDate || "",          // O
+      updatedPayment.pendingEndDate || "",            // P
+      updatedPayment.pendingSubscriptionType || "",   // Q
+      updatedPayment.pendingPrice?.toString() || "",  // R
+      updatedPayment.transactionId || "",             // S
+      updatedPayment.feeAmount?.toString() || "",     // T
+      updatedPayment.vatAmount?.toString() || "",     // U
+      updatedPayment.totalFees?.toString() || "",     // V
+      updatedPayment.netAmount?.toString() || "",     // W
     ];
 
     await this.updateRow(SHEETS.PAYMENTS, rowIndex + 2, row);
@@ -1227,6 +1220,12 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         pendingEndDate: row[15] || undefined,
         pendingSubscriptionType: row[16] || undefined,
         pendingPrice: parseFloat(row[17]) || undefined,
+        // حقول Paymob الجديدة
+        transactionId: row[18] || undefined,
+        feeAmount: parseFloat(row[19]) || undefined,
+        vatAmount: parseFloat(row[20]) || undefined,
+        totalFees: parseFloat(row[21]) || undefined,
+        netAmount: parseFloat(row[22]) || undefined,
       }));
   }
 
