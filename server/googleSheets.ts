@@ -1129,7 +1129,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     // F: قيمة الخصم | G: السعر النهائي | H: معرف Paymob | I: الحالة | J: طريقة الدفع
     // K: رابط الإيصال | L: تاريخ الإنشاء | M: تاريخ الإكمال | N: نوع الإجراء
     // O: تاريخ البدء المعلق | P: تاريخ الانتهاء المعلق | Q: نوع الاشتراك المعلق | R: السعر المعلق
-    // S: معرف العملية | T: رسوم Paymob | U: ضريبة القيمة المضافة | V: إجمالي الرسوم | W: المبلغ الصافي
+    // S: معرف العملية | T: رسوم التاجر+البنك | U: ضريبة القيمة المضافة | V: إجمالي الرسوم | W: المبلغ الصافي
+    // X: رسوم التاجر | Y: رسوم البنك
     const row = [
       newPayment.id,                              // A
       newPayment.propertyNumber,                  // B
@@ -1150,10 +1151,12 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       newPayment.pendingSubscriptionType || "",   // Q
       newPayment.pendingPrice?.toString() || "",  // R
       newPayment.transactionId || "",             // S
-      newPayment.feeAmount?.toString() || "",     // T
+      newPayment.feeAmount?.toString() || "",     // T - مجموع الرسوم (merchant + acq)
       newPayment.vatAmount?.toString() || "",     // U
       newPayment.totalFees?.toString() || "",     // V
       newPayment.netAmount?.toString() || "",     // W
+      newPayment.merchantFees?.toString() || "",  // X - رسوم التاجر
+      newPayment.acqFees?.toString() || "",       // Y - رسوم البنك
     ];
 
     console.log(
@@ -1212,6 +1215,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       vatAmount: updates.vatAmount ?? (parseFloat(current[20]) || undefined),
       totalFees: updates.totalFees ?? (parseFloat(current[21]) || undefined),
       netAmount: updates.netAmount ?? (parseFloat(current[22]) || undefined),
+      merchantFees: updates.merchantFees ?? (parseFloat(current[23]) || undefined),
+      acqFees: updates.acqFees ?? (parseFloat(current[24]) || undefined),
     };
 
     // نفس ترتيب الأعمدة كما في createPayment
@@ -1235,10 +1240,12 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       updatedPayment.pendingSubscriptionType || "",   // Q
       updatedPayment.pendingPrice?.toString() || "",  // R
       updatedPayment.transactionId || "",             // S
-      updatedPayment.feeAmount?.toString() || "",     // T
+      updatedPayment.feeAmount?.toString() || "",     // T - مجموع الرسوم
       updatedPayment.vatAmount?.toString() || "",     // U
       updatedPayment.totalFees?.toString() || "",     // V
       updatedPayment.netAmount?.toString() || "",     // W
+      updatedPayment.merchantFees?.toString() || "",  // X - رسوم التاجر
+      updatedPayment.acqFees?.toString() || "",       // Y - رسوم البنك
     ];
 
     await this.updateRow(SHEETS.PAYMENTS, rowIndex + 2, row);
@@ -1274,6 +1281,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         vatAmount: parseFloat(row[20]) || undefined,
         totalFees: parseFloat(row[21]) || undefined,
         netAmount: parseFloat(row[22]) || undefined,
+        merchantFees: parseFloat(row[23]) || undefined,
+        acqFees: parseFloat(row[24]) || undefined,
       }));
   }
 

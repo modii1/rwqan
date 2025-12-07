@@ -33,6 +33,8 @@ type Payment = {
   completedAt?: string;
   receiptUrl?: string;
   transactionId?: string;
+  merchantFees?: number;
+  acqFees?: number;
   feeAmount?: number;
   vatAmount?: number;
   totalFees?: number;
@@ -324,10 +326,13 @@ export default function PaymentsSection() {
                     
                     {/* صف التفاصيل الموسعة */}
                     {isExpanded && isCompleted && (() => {
-                      const hasPaymobFees = p.feeAmount !== undefined && p.feeAmount > 0;
-                      const actualFeeAmount = hasPaymobFees ? p.feeAmount! : fees.feeAmount;
+                      const hasPaymobFees = p.totalFees !== undefined && p.totalFees > 0;
+                      const hasSeparateFees = p.merchantFees !== undefined || p.acqFees !== undefined;
+                      
+                      const actualMerchantFees = p.merchantFees || 0;
+                      const actualAcqFees = p.acqFees || 0;
                       const actualVatAmount = hasPaymobFees ? (p.vatAmount || 0) : fees.vatOnFee;
-                      const actualTotalFees = hasPaymobFees ? (p.totalFees || actualFeeAmount + actualVatAmount) : fees.totalFees;
+                      const actualTotalFees = hasPaymobFees ? (p.totalFees || 0) : fees.totalFees;
                       const actualNetAmount = hasPaymobFees ? (p.netAmount || amount - actualTotalFees) : fees.netAmount;
                       const actualPartnerProfit = actualNetAmount * PARTNER_SHARE;
                       const actualOurProfit = actualNetAmount * PARTNER_SHARE;
@@ -350,7 +355,7 @@ export default function PaymentsSection() {
                             )}
                             
                             <div className="text-xs font-semibold mb-3 text-muted-foreground">تفاصيل الرسوم والأرباح</div>
-                            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+                            <div className={`grid grid-cols-2 ${hasSeparateFees ? 'md:grid-cols-7' : 'md:grid-cols-6'} gap-3 text-xs`}>
                               <div className="bg-card p-2 rounded border">
                                 <div className="text-muted-foreground mb-1">المبلغ المدفوع</div>
                                 <div className="font-bold text-primary">{amount.toFixed(2)} ر.س</div>
@@ -359,10 +364,23 @@ export default function PaymentsSection() {
                                 <div className="text-muted-foreground mb-1">طريقة الدفع</div>
                                 <div className="font-semibold">{p.paymentMethod || fees.feeLabel}</div>
                               </div>
-                              <div className="bg-card p-2 rounded border">
-                                <div className="text-muted-foreground mb-1">رسوم البنك</div>
-                                <div className="font-semibold text-red-600">-{actualFeeAmount.toFixed(2)} ر.س</div>
-                              </div>
+                              {hasSeparateFees ? (
+                                <>
+                                  <div className="bg-card p-2 rounded border">
+                                    <div className="text-muted-foreground mb-1">رسوم التاجر</div>
+                                    <div className="font-semibold text-red-600">-{actualMerchantFees.toFixed(2)} ر.س</div>
+                                  </div>
+                                  <div className="bg-card p-2 rounded border">
+                                    <div className="text-muted-foreground mb-1">رسوم البنك (acq)</div>
+                                    <div className="font-semibold text-red-600">-{actualAcqFees.toFixed(2)} ر.س</div>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="bg-card p-2 rounded border">
+                                  <div className="text-muted-foreground mb-1">رسوم البنك</div>
+                                  <div className="font-semibold text-red-600">-{(p.feeAmount || fees.feeAmount).toFixed(2)} ر.س</div>
+                                </div>
+                              )}
                               <div className="bg-card p-2 rounded border">
                                 <div className="text-muted-foreground mb-1">ضريبة الرسوم (15%)</div>
                                 <div className="font-semibold text-red-600">-{actualVatAmount.toFixed(2)} ر.س</div>
