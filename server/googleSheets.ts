@@ -1089,20 +1089,22 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       "تاريخ الانتهاء المعلق", // P
       "نوع الاشتراك المعلق",  // Q
       "السعر المعلق",         // R
-      "معرف العملية",         // S
-      "رسوم Paymob",         // T
-      "ضريبة القيمة المضافة", // U
-      "إجمالي الرسوم",       // V
-      "المبلغ الصافي",        // W
+      "معرف العملية",         // S - Transaction ID
+      "مجموع الرسوم",         // T - feeAmount (merchant + acq)
+      "ضريبة القيمة المضافة", // U - vatAmount
+      "إجمالي الرسوم",       // V - totalFees
+      "المبلغ الصافي",        // W - netAmount
+      "رسوم التاجر",          // X - merchantFees
+      "رسوم البنك",           // Y - acqFees
     ];
 
     try {
       const sheets = await getGoogleSheetClient();
       
-      // تحديث الصف الأول بالعناوين
+      // تحديث الصف الأول بالعناوين (A إلى Y = 25 عمود)
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
-        range: `${SHEETS.PAYMENTS}!A1:W1`,
+        range: `${SHEETS.PAYMENTS}!A1:Y1`,
         valueInputOption: "RAW",
         requestBody: {
           values: [headers],
