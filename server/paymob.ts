@@ -185,6 +185,69 @@ export class PaymobService {
       extras: data.obj.payment_key_claims?.extra?.creation_extras || {},
     };
   }
+
+  /**
+   * جلب تفاصيل المعاملة من Paymob API للحصول على الرسوم الحقيقية
+   * @param transactionId معرف المعاملة من Paymob
+   * @returns تفاصيل المعاملة بما فيها الرسوم
+   */
+  async getTransactionDetails(transactionId: string): Promise<{
+    fees: number;
+    vat: number;
+    totalFees: number;
+    netAmount: number;
+    amount: number;
+    success: boolean;
+  } | null> {
+    try {
+      console.log(`📡 Fetching transaction details from Paymob API for: ${transactionId}`);
+      
+      // استخدام Transaction Inquiry API
+      // GET https://ksa.paymob.com/api/acceptance/transactions/{transaction_id}
+      const response = await fetch(
+        `${PAYMOB_API_URL}/api/acceptance/transactions/${transactionId}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SECRET_KEY}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`❌ Paymob API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`❌ Error details: ${errorText}`);
+        return null;
+      }
+
+      const data = await response.json();
+      console.log(`📊 Paymob Transaction Response:`, JSON.stringify(data, null, 2));
+
+      // استخراج الرسوم من الـ response
+      // الحقول المتوقعة: fees, vat, أو قد تكون في data object
+      const amount = (data.amount_cents || 0) / 100;
+      const fees = data.fees || data.merchant_fees || data.data?.fees || 0;
+      const vat = data.vat || data.data?.vat || 0;
+      const totalFees = fees + vat;
+      const netAmount = amount - totalFees;
+
+      console.log(`💰 Extracted fees: amount=${amount}, fees=${fees}, vat=${vat}, total=${totalFees}, net=${netAmount}`);
+
+      return {
+        fees,
+        vat,
+        totalFees,
+        netAmount,
+        amount,
+        success: data.success || false,
+      };
+    } catch (error) {
+      console.error(`❌ Error fetching transaction details:`, error);
+      return null;
+    }
+  }
 }
 
 export const paymobService = new PaymobService();
