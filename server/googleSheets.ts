@@ -1287,7 +1287,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     const payments = await this.getPayments();
     return payments
       .filter((p) => p.propertyNumber === propertyNumber)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }
 
   // ================== الاقتراحات / الطلبات ==================
