@@ -1068,6 +1068,54 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
   // ================== المدفوعات ==================
 
+  // تحديث عناوين أعمدة ورقة المدفوعات
+  async setupPaymentsSheetHeaders(): Promise<void> {
+    const headers = [
+      "معرف الدفع",           // A
+      "رقم العقار",           // B
+      "الباقة",               // C
+      "السعر الأصلي",         // D
+      "كود الخصم",            // E
+      "قيمة الخصم",           // F
+      "السعر النهائي",        // G
+      "معرف Paymob",         // H
+      "الحالة",               // I
+      "طريقة الدفع",          // J
+      "رابط الإيصال",         // K
+      "تاريخ الإنشاء",        // L
+      "تاريخ الإكمال",        // M
+      "نوع الإجراء",          // N
+      "تاريخ البدء المعلق",   // O
+      "تاريخ الانتهاء المعلق", // P
+      "نوع الاشتراك المعلق",  // Q
+      "السعر المعلق",         // R
+      "معرف العملية",         // S
+      "رسوم Paymob",         // T
+      "ضريبة القيمة المضافة", // U
+      "إجمالي الرسوم",       // V
+      "المبلغ الصافي",        // W
+    ];
+
+    try {
+      const sheets = await getGoogleSheetClient();
+      
+      // تحديث الصف الأول بالعناوين
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEETS.PAYMENTS}!A1:W1`,
+        valueInputOption: "RAW",
+        requestBody: {
+          values: [headers],
+        },
+      });
+      
+      console.log(`✅ Payment sheet headers updated successfully`);
+    } catch (error) {
+      console.error("❌ Error updating payment sheet headers:", error);
+      throw error;
+    }
+  }
+
   async createPayment(payment: InsertPayment): Promise<Payment> {
     const id = `PAY-${Date.now()}`;
     const newPayment: Payment = {

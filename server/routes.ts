@@ -2769,6 +2769,17 @@ app.post("/api/whatsapp/send", async (req, res) => {
       const transactionId = String(t.id);
       const isSuccess = t.success;
       const paymobOrderId = t.order?.id || t.order;
+      
+      // استخراج intentionId من المواقع المختلفة
+      const intentionId = t.intention?.id || 
+                         t.payment_key_claims?.extra?.creation_extras?.intention_id ||
+                         t.special_reference ||
+                         t.merchant_order_id;
+      
+      // استخراج رقم العقار من البيانات
+      const propertyNumber = t.payment_key_claims?.extra?.creation_extras?.property_number ||
+                            t.shipping_data?.extra_description?.split('-')[0]?.trim() ||
+                            "";
 
       // استخراج بيانات الرسوم من Paymob
       const amountCents = t.amount_cents || 0;
@@ -2782,20 +2793,50 @@ app.post("/api/whatsapp/send", async (req, res) => {
       const totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
       const netAmount = Math.round((amount - totalFees) * 100) / 100;
 
-      console.log(`📝 Transaction ${transactionId}, Success: ${isSuccess}, Order: ${paymobOrderId}`);
+      console.log(`📝 Transaction ${transactionId}, Success: ${isSuccess}`);
+      console.log(`🔑 OrderId: ${paymobOrderId}, IntentionId: ${intentionId}, PropertyNumber: ${propertyNumber}`);
       console.log(`💰 Amount: ${amount}, Fee: ${feeAmount}, VAT: ${vatAmount}, Total Fees: ${totalFees}, Net: ${netAmount}`);
+      console.log(`📦 Full webhook data:`, JSON.stringify(t, null, 2).substring(0, 1000));
 
-      if (!isSuccess || !paymobOrderId) {
-        console.log("⚠️ Payment not successful or no order ID");
+      if (!isSuccess) {
+        console.log("⚠️ Payment not successful");
         return res.json({ ok: true, message: "Payment not successful" });
       }
 
-      // البحث عن سجل الدفع بناءً على paymobOrderId
+      // البحث عن سجل الدفع بناءً على عدة معايير
       const payments = await storage.getPayments();
-      const payment = payments.find(p => p.paymobOrderId === String(paymobOrderId));
+      console.log(`📋 Total payments in database: ${payments.length}`);
+      console.log(`📋 Recent payments:`, payments.slice(-5).map(p => ({ id: p.id, paymobOrderId: p.paymobOrderId, status: p.status })));
+      
+      // محاولة البحث بعدة طرق
+      let payment = payments.find(p => p.paymobOrderId === String(paymobOrderId));
+      
+      if (!payment && intentionId) {
+        console.log(`🔍 Searching by intentionId: ${intentionId}`);
+        payment = payments.find(p => p.paymobOrderId === String(intentionId));
+      }
+      
+      // البحث بآخر دفعة "قيد المراجعة" للعقار المحدد إذا وجد
+      if (!payment && propertyNumber) {
+        console.log(`🔍 Searching by propertyNumber: ${propertyNumber}`);
+        payment = payments.find(p => 
+          p.propertyNumber === propertyNumber && 
+          p.status === "قيد المراجعة"
+        );
+      }
+      
+      // البحث بآخر دفعة "قيد المراجعة" بنفس المبلغ
+      if (!payment) {
+        console.log(`🔍 Searching by amount: ${amount}`);
+        payment = payments.find(p => 
+          p.finalAmount === amount && 
+          p.status === "قيد المراجعة"
+        );
+      }
 
       if (!payment) {
-        console.error(`❌ Payment not found for paymobOrderId: ${paymobOrderId}`);
+        console.error(`❌ Payment not found. OrderId: ${paymobOrderId}, IntentionId: ${intentionId}`);
+        console.error(`❌ Available paymobOrderIds:`, payments.slice(-10).map(p => p.paymobOrderId));
         return res.status(404).json({ error: "Payment not found" });
       }
 
@@ -2858,6 +2899,29 @@ app.post("/api/whatsapp/send", async (req, res) => {
       res.status(500).json({ error: "server error" });
     }
   });
+
+  // ======================
+  // تحديث عناوين أعمدة المدفوعات
+  // ======================
+  app.post("/api/admin/setup-payment-headers", async (req, res) => {
+    try {
+      await googleSheetsService.setupPaymentsSheetHeaders();
+      res.json({ success: true, message: "تم تحديث عناوين الأعمدة بنجاح" });
+    } catch (error: any) {
+      console.error("Error setting up payment headers:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // تشغيل تحديث عناوين الأعمدة عند بدء الخادم
+  setTimeout(async () => {
+    try {
+      console.log("🔧 Setting up payment sheet headers...");
+      await googleSheetsService.setupPaymentsSheetHeaders();
+    } catch (error) {
+      console.error("❌ Failed to setup payment headers:", error);
+    }
+  }, 5000);
 
   // ======================
   // DONE
