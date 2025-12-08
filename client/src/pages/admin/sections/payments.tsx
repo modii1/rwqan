@@ -1,5 +1,5 @@
 // client/src/pages/admin/sections/payments.tsx
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,32 +41,52 @@ type Payment = {
   netAmount?: number;
 };
 
-const FEE_RATES: Record<string, { rate: number; label: string }> = {
-  "بطاقة": { rate: 0.025, label: "بطاقة (2.5%)" },
-  "Visa": { rate: 0.025, label: "Visa (2.5%)" },
-  "MasterCard": { rate: 0.025, label: "MasterCard (2.5%)" },
-  "Mada": { rate: 0.018, label: "مدى (1.8%)" },
-  "Apple Pay": { rate: 0.025, label: "Apple Pay (2.5%)" },
-  "تحويل بنكي": { rate: 0, label: "تحويل بنكي (0%)" },
-  "default": { rate: 0.025, label: "افتراضي (2.5%)" },
+const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
+  "mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
+  "visa-local": { percentage: 2.7, fixedFee: 1, label: "Visa/MC محلي (2.7% + 1 ر.س)" },
+  "visa-intl": { percentage: 3.7, fixedFee: 1, label: "Visa/MC دولي (3.7% + 1 ر.س)" },
+  "stc": { percentage: 1.0, fixedFee: 1, label: "STC Pay (1% + 1 ر.س)" },
+  "apple": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
+  "بطاقة": { percentage: 2.7, fixedFee: 1, label: "بطاقة (2.7% + 1 ر.س)" },
+  "Visa": { percentage: 2.7, fixedFee: 1, label: "Visa (2.7% + 1 ر.س)" },
+  "MasterCard": { percentage: 2.7, fixedFee: 1, label: "MasterCard (2.7% + 1 ر.س)" },
+  "Mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
+  "Apple Pay": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
+  "تحويل بنكي": { percentage: 0, fixedFee: 0, label: "تحويل بنكي (0%)" },
+  "default": { percentage: 2.7, fixedFee: 1, label: "افتراضي (2.7% + 1 ر.س)" },
 };
 
 const VAT_RATE = 0.15;
 const PARTNER_SHARE = 0.50;
 
 function calculateFees(amount: number, paymentMethod: string) {
-  const feeConfig = FEE_RATES[paymentMethod] || FEE_RATES["default"];
-  const feeAmount = amount * feeConfig.rate;
-  const vatOnFee = feeAmount * VAT_RATE;
-  const totalFees = feeAmount + vatOnFee;
+  const method = (paymentMethod || "").toLowerCase();
+  
+  let config = PAYMOB_FEE_RATES["default"];
+  if (method.includes("mada") || method.includes("مدى")) {
+    config = PAYMOB_FEE_RATES["mada"];
+  } else if (method.includes("stc")) {
+    config = PAYMOB_FEE_RATES["stc"];
+  } else if (method.includes("apple")) {
+    config = PAYMOB_FEE_RATES["apple"];
+  } else if (method.includes("تحويل") || method.includes("bank")) {
+    config = PAYMOB_FEE_RATES["تحويل بنكي"];
+  } else {
+    config = PAYMOB_FEE_RATES[paymentMethod] || PAYMOB_FEE_RATES["default"];
+  }
+  
+  const baseFee = (amount * config.percentage / 100) + config.fixedFee;
+  const vatOnFee = baseFee * VAT_RATE;
+  const totalFees = baseFee + vatOnFee;
   const netAmount = amount - totalFees;
   const partnerProfit = netAmount * PARTNER_SHARE;
   const ourProfit = netAmount * PARTNER_SHARE;
   
   return {
-    feeRate: feeConfig.rate,
-    feeLabel: feeConfig.label,
-    feeAmount,
+    feeRate: config.percentage / 100,
+    fixedFee: config.fixedFee,
+    feeLabel: config.label,
+    feeAmount: baseFee,
     vatOnFee,
     totalFees,
     netAmount,
@@ -251,8 +271,8 @@ export default function PaymentsSection() {
                 const isCompleted = p.status === "مكتمل";
 
                 return (
-                  <>
-                    <tr key={p.id} className="border-t hover:bg-muted/40">
+                  <Fragment key={p.id}>
+                    <tr className="border-t hover:bg-muted/40">
                       <Td>
                         <div>
                           <div className="font-semibold">{p.propertyNumber}</div>
@@ -429,7 +449,7 @@ export default function PaymentsSection() {
                       </tr>
                     );
                     })()}
-                  </>
+                  </Fragment>
                 );
               })}
 
@@ -449,10 +469,13 @@ export default function PaymentsSection() {
 
       {/* ملاحظة توضيحية */}
       <div className="text-[10px] text-muted-foreground bg-muted/30 p-3 rounded-lg">
-        <strong>ملاحظة:</strong> الرسوم تختلف حسب طريقة الدفع:
+        <strong>ملاحظة:</strong> الرسوم الرسمية من Paymob KSA:
         <ul className="mt-1 mr-4 list-disc">
-          <li>بطاقة Visa / MasterCard / Apple Pay: 2.5% + ضريبة 15%</li>
-          <li>مدى (Mada): 1.8% + ضريبة 15%</li>
+          <li>مدى (Mada): 1% + 1 ر.س + ضريبة 15%</li>
+          <li>STC Pay: 1% + 1 ر.س + ضريبة 15%</li>
+          <li>Visa/MasterCard محلي: 2.7% + 1 ر.س + ضريبة 15%</li>
+          <li>Visa/MasterCard دولي: 3.7% + 1 ر.س + ضريبة 15%</li>
+          <li>Apple Pay: 2.7% + 1 ر.س + ضريبة 15%</li>
           <li>تحويل بنكي: 0%</li>
         </ul>
         <div className="mt-2">
