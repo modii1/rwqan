@@ -155,38 +155,47 @@ export class PaymobService {
   /* ==========================================================
       3) الحصول على Auth Token من Paymob
          يستخدم LEGACY_API_KEY للحصول على token للـ Transaction Inquiry API
+         
+         ملاحظة: Transaction Inquiry API يتطلب "API Key" من لوحة تحكم Paymob
+         وهو مختلف عن "Secret Key" (sau_sk_...)
+         
+         للحصول على API Key:
+         1. سجل دخول إلى: https://ksa.paymob.com/portal2/en/login
+         2. اذهب إلى: Settings → Account Info
+         3. ابحث عن حقل "API Key" (ليس Secret Key أو Public Key)
+         4. اضغط "View" وانسخ القيمة
   =========================================================== */
   async getAuthToken(): Promise<string | null> {
     try {
       console.log("🔐 Getting Paymob auth token...");
-      console.log("   Using Legacy API Key, length:", LEGACY_API_KEY?.length || 0);
       
       if (!LEGACY_API_KEY) {
-        console.error("❌ PAYMOB_LEGACY_API_KEY is not set");
+        console.log("   ⚠️ PAYMOB_LEGACY_API_KEY is not set - Transaction Inquiry disabled");
         return null;
       }
 
       let apiKey = LEGACY_API_KEY;
+      console.log("   API Key length:", apiKey.length);
       
-      // Check if it's already a JWT token
+      // Check if it's already a JWT token (starts with eyJ)
       if (apiKey.startsWith('eyJ')) {
-        console.log("✅ Using provided JWT token directly");
+        console.log("   Provided value is a JWT token (might be expired)");
         return apiKey;
       }
       
       // Try to decode base64 - the key might be base64 encoded
       try {
         const decoded = Buffer.from(apiKey, 'base64').toString('utf-8');
-        console.log("   Decoded value starts with:", decoded.substring(0, 10));
         if (decoded.startsWith('eyJ')) {
-          console.log("✅ Decoded base64 to JWT token");
+          console.log("   Decoded base64 to JWT token (might be expired)");
           return decoded;
         }
       } catch (e) {
-        console.log("   Not valid base64, using as API key");
+        // Not base64
       }
       
-      // Use as API key to get token
+      // Use as API key to get fresh token
+      console.log("   Requesting fresh auth token from Paymob...");
       const response = await fetch(
         "https://ksa.paymob.com/api/auth/tokens",
         {
@@ -204,10 +213,12 @@ export class PaymobService {
 
       if (!response.ok || !data.token) {
         console.error("❌ Auth token error:", data);
+        console.log("   ⚠️ Make sure PAYMOB_LEGACY_API_KEY contains the 'API Key' from Paymob dashboard");
+        console.log("   ⚠️ The 'API Key' is different from 'Secret Key' (sau_sk_...)");
         return null;
       }
 
-      console.log("✅ Got auth token successfully");
+      console.log("✅ Got fresh auth token successfully");
       return data.token;
     } catch (err) {
       console.error("❌ Auth token exception:", err);
@@ -290,6 +301,55 @@ export class PaymobService {
 
   async inquiryBySpecialReference(ref: string) {
     return this.inquiryTransaction({ merchant_order_id: ref });
+  }
+
+  /* ==========================================================
+      5) حساب الرسوم التقريبية بناءً على نوع البطاقة
+         يُستخدم عندما لا يتوفر Transaction Inquiry API
+         
+         النسب التقريبية:
+         - Apple Pay: 6.9%
+         - Visa/Mastercard: 5.0%
+         - Mada: 4.4%
+         - Default: 4.6%
+  =========================================================== */
+  calculateEstimatedFees(amount: number, cardType?: string, paymentMethod?: string): {
+    merchantFees: number;
+    acqFees: number;
+    vat: number;
+    totalFees: number;
+    netAmount: number;
+    isEstimated: boolean;
+  } {
+    let feePercentage = 0.046; // Default 4.6%
+    
+    if (paymentMethod === 'applepay' || paymentMethod === 'apple_pay') {
+      feePercentage = 0.069; // Apple Pay: 6.9%
+    } else if (cardType) {
+      const cardTypeLower = cardType.toLowerCase();
+      if (cardTypeLower.includes('mada')) {
+        feePercentage = 0.044; // Mada: 4.4%
+      } else if (cardTypeLower.includes('visa') || cardTypeLower.includes('mastercard')) {
+        feePercentage = 0.050; // Visa/Mastercard: 5.0%
+      }
+    }
+    
+    // Calculate fees (VAT is included in the total fee percentage)
+    const totalFees = Math.round(amount * feePercentage * 100) / 100;
+    const vatRate = 0.15; // 15% VAT in Saudi Arabia
+    const feesBeforeVat = totalFees / (1 + vatRate);
+    const vat = Math.round((totalFees - feesBeforeVat) * 100) / 100;
+    const merchantFees = Math.round(feesBeforeVat * 100) / 100;
+    const acqFees = 0; // Included in merchant fees for estimation
+    
+    return {
+      merchantFees,
+      acqFees,
+      vat,
+      totalFees,
+      netAmount: Math.round((amount - totalFees) * 100) / 100,
+      isEstimated: true,
+    };
   }
 }
 
