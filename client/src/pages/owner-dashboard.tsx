@@ -47,6 +47,22 @@ export default function OwnerDashboard() {
   const [showRequestsStats, setShowRequestsStats] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [paymentsExpanded, setPaymentsExpanded] = useState(true);
+  
+  // شريط التحقق الذكي
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationProgress, setVerificationProgress] = useState(0);
+  const [verificationSteps, setVerificationSteps] = useState<{
+    step: number;
+    name: string;
+    status: 'pending' | 'checking' | 'success' | 'error';
+    message?: string;
+  }[]>([
+    { step: 1, name: 'التحقق من معرف الباقة', status: 'pending' },
+    { step: 2, name: 'التحقق من تاريخ البدء', status: 'pending' },
+    { step: 3, name: 'التحقق من تاريخ الانتهاء', status: 'pending' },
+    { step: 4, name: 'التحقق من نوع الاشتراك', status: 'pending' },
+    { step: 5, name: 'التحقق من حالة الدفع', status: 'pending' },
+  ]);
 
 
   // ===================== دالة استخراج فترة الذروة =====================
@@ -151,12 +167,110 @@ const {
 const {
   data: pendingCheckData,
   isLoading: isPendingCheckLoading,
+  refetch: refetchPendingCheck,
 } = useQuery<any>({
   queryKey: ["/api/owner/payment/check-pending"],
   enabled: sessionData?.isLoggedIn === true,
   retry: false,
   refetchInterval: 30000, // تحديث كل 30 ثانية
 });
+
+// دالة التحقق التدريجي الذكي
+const startSmartVerification = async () => {
+  if (!pendingCheckData?.payment) return;
+  
+  setIsVerifying(true);
+  setVerificationProgress(0);
+  
+  const steps = [...verificationSteps];
+  const payment = pendingCheckData.payment;
+  
+  // خطوة 1: التحقق من معرف الباقة
+  steps[0].status = 'checking';
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 800));
+  
+  if (payment.pendingPackageId || payment.packageId) {
+    steps[0].status = 'success';
+    steps[0].message = payment.pendingPackageId || payment.packageId;
+  } else {
+    steps[0].status = 'error';
+    steps[0].message = 'معرف الباقة مفقود';
+  }
+  setVerificationProgress(20);
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 600));
+  
+  // خطوة 2: التحقق من تاريخ البدء
+  steps[1].status = 'checking';
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 800));
+  
+  if (payment.pendingStartDate) {
+    steps[1].status = 'success';
+    steps[1].message = new Date(payment.pendingStartDate).toLocaleDateString('en-US');
+  } else {
+    steps[1].status = 'error';
+    steps[1].message = 'تاريخ البدء مفقود';
+  }
+  setVerificationProgress(40);
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 600));
+  
+  // خطوة 3: التحقق من تاريخ الانتهاء
+  steps[2].status = 'checking';
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 800));
+  
+  if (payment.pendingEndDate) {
+    steps[2].status = 'success';
+    steps[2].message = new Date(payment.pendingEndDate).toLocaleDateString('en-US');
+  } else {
+    steps[2].status = 'error';
+    steps[2].message = 'تاريخ الانتهاء مفقود';
+  }
+  setVerificationProgress(60);
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 600));
+  
+  // خطوة 4: التحقق من نوع الاشتراك
+  steps[3].status = 'checking';
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 800));
+  
+  if (payment.pendingSubscriptionType) {
+    steps[3].status = 'success';
+    steps[3].message = payment.pendingSubscriptionType;
+  } else {
+    steps[3].status = 'error';
+    steps[3].message = 'نوع الاشتراك مفقود';
+  }
+  setVerificationProgress(80);
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 600));
+  
+  // خطوة 5: التحقق من حالة الدفع
+  steps[4].status = 'checking';
+  setVerificationSteps([...steps]);
+  await new Promise(r => setTimeout(r, 800));
+  
+  if (payment.status === 'قيد المراجعة') {
+    steps[4].status = 'success';
+    steps[4].message = 'جاهز للموافقة';
+  } else {
+    steps[4].status = 'error';
+    steps[4].message = payment.status || 'حالة غير معروفة';
+  }
+  setVerificationProgress(100);
+  setVerificationSteps([...steps]);
+  
+  // إعادة تحديث البيانات
+  await refetchPendingCheck();
+  
+  setTimeout(() => {
+    setIsVerifying(false);
+  }, 1500);
+};
 
 // 6) إعادة محاولة الدفع
 const retryPaymentMutation = useMutation({
@@ -432,52 +546,102 @@ const calculateAnalytics = () => {
           </div>
         </Card>
 
-        {/* ===== شريط ذكاء التحقق من التحويل البنكي المعلق ===== */}
+        {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {!isPendingCheckLoading && pendingCheckData?.hasPending && (
-          <Card className={`p-4 md:p-6 border-2 ${
-            pendingCheckData.autoCheckPassed 
-              ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-              : 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-          }`}>
-            <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                pendingCheckData.autoCheckPassed 
-                  ? 'bg-green-100 dark:bg-green-900/40'
-                  : 'bg-amber-100 dark:bg-amber-900/40'
-              }`}>
-                {pendingCheckData.autoCheckPassed ? (
-                  <CheckCircle2 className="w-6 h-6 text-green-600" />
-                ) : (
-                  <AlertTriangle className="w-6 h-6 text-amber-600" />
+          <Card className="p-4 md:p-6 border-2 border-[#17a2b8] bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/20 dark:to-blue-900/20">
+            <div className="space-y-4">
+              {/* العنوان والزر */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-lg md:text-xl text-[#17a2b8] flex items-center gap-2">
+                    <Activity className="w-6 h-6 animate-pulse" />
+                    تحويل بنكي معلق
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    اضغط على "التحقق من الاشتراك" لفحص البيانات تلقائياً
+                  </p>
+                </div>
+                {!isVerifying && (
+                  <Button 
+                    onClick={startSmartVerification}
+                    className="bg-[#17a2b8] hover:bg-[#138496] text-white"
+                    data-testid="button-start-verification"
+                  >
+                    <Activity className="w-4 h-4 ml-2" />
+                    التحقق من الاشتراك
+                  </Button>
                 )}
               </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-base md:text-lg mb-2">
-                  {pendingCheckData.autoCheckPassed 
-                    ? '✅ التحويل البنكي جاهز للتفعيل!' 
-                    : '⚠️ تحويل بنكي معلق - يحتاج مراجعة'}
-                </h3>
-                
-                {pendingCheckData.autoCheckPassed ? (
-                  <p className="text-sm text-muted-foreground mb-3">
-                    تم التحقق التلقائي من جميع البيانات بنجاح. سيتم تفعيل الاشتراك تلقائياً بعد مراجعة الإدارة.
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      تم العثور على بعض المشاكل في بيانات التحويل:
-                    </p>
-                    <ul className="list-disc mr-5 text-sm space-y-1 mb-3">
-                      {pendingCheckData.issues?.map((issue: string, idx: number) => (
-                        <li key={idx} className="text-amber-700 dark:text-amber-400">{issue}</li>
-                      ))}
-                    </ul>
-                    <p className="text-xs text-muted-foreground">
-                      يرجى التأكد من البيانات أو التواصل مع الدعم للمساعدة.
-                    </p>
-                  </>
-                )}
 
+              {/* شريط التقدم والنسبة المئوية */}
+              {isVerifying && (
+                <div className="space-y-3">
+                  {/* النسبة المئوية */}
+                  <div className="text-center">
+                    <div className="text-4xl font-bold text-[#17a2b8] mb-1">
+                      {verificationProgress}%
+                    </div>
+                    <p className="text-sm text-muted-foreground">جاري التحقق من البيانات...</p>
+                  </div>
+
+                  {/* شريط التقدم */}
+                  <div className="w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden border-2 border-[#17a2b8]">
+                    <div 
+                      className="h-full bg-gradient-to-r from-[#17a2b8] to-[#138496] transition-all duration-500 ease-out"
+                      style={{ width: `${verificationProgress}%` }}
+                    />
+                  </div>
+
+                  {/* الخطوات */}
+                  <div className="space-y-2 mt-4">
+                    {verificationSteps.map((step) => (
+                      <div 
+                        key={step.step}
+                        className={`flex items-center gap-3 p-3 rounded-lg border ${
+                          step.status === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-900/20' :
+                          step.status === 'error' ? 'bg-red-50 border-red-200 dark:bg-red-900/20' :
+                          step.status === 'checking' ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20' :
+                          'bg-gray-50 border-gray-200 dark:bg-gray-800'
+                        }`}
+                      >
+                        {/* الأيقونة */}
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          step.status === 'success' ? 'bg-green-500' :
+                          step.status === 'error' ? 'bg-red-500' :
+                          step.status === 'checking' ? 'bg-blue-500' :
+                          'bg-gray-300'
+                        }`}>
+                          {step.status === 'success' ? (
+                            <CheckCircle2 className="w-5 h-5 text-white" />
+                          ) : step.status === 'error' ? (
+                            <XCircle className="w-5 h-5 text-white" />
+                          ) : step.status === 'checking' ? (
+                            <Loader2 className="w-5 h-5 text-white animate-spin" />
+                          ) : (
+                            <Clock className="w-5 h-5 text-white" />
+                          )}
+                        </div>
+
+                        {/* النص */}
+                        <div className="flex-1">
+                          <div className="font-semibold text-sm">{step.name}</div>
+                          {step.message && (
+                            <div className="text-xs text-muted-foreground mt-1">{step.message}</div>
+                          )}
+                        </div>
+
+                        {/* رقم الخطوة */}
+                        <div className="text-xs font-bold text-muted-foreground">
+                          {step.step}/5
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* معلومات الدفع */}
+              {!isVerifying && (
                 <div className="mt-3 p-3 bg-white dark:bg-background rounded-lg border">
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
@@ -496,11 +660,12 @@ const calculateAnalytics = () => {
                       rel="noreferrer" 
                       className="text-xs text-primary underline mt-2 inline-block"
                     >
+                      <Receipt className="w-3 h-3 inline ml-1" />
                       عرض الإيصال
                     </a>
                   )}
                 </div>
-              </div>
+              )}
             </div>
           </Card>
         )}
