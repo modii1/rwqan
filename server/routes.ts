@@ -2876,157 +2876,118 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
   });
 
-  // ======================
-// PAYMOB WEBHOOK
+// ======================
+// PAYMOB WEBHOOK (STRICT INQUIRY MODE)
 // ======================
 app.post("/api/paymob/webhook", async (req, res) => {
   try {
     console.log("📥 Paymob webhook received");
-    console.log("📥 Body:", JSON.stringify(req.body, null, 2));
 
     const webhook = req.body;
     const t = webhook.obj;
+
     if (!t) {
-      console.log("⚠️ Missing obj");
+      console.log("⚠️ Invalid webhook format");
       return res.json({ ok: true });
     }
 
-    // استخراج المعلومات الأساسية
     const transactionId = String(t.id || "");
-    const isSuccess = t.success;
-    const paymobOrderId = String(t.order?.id || t.order || "");
+    const paymobOrderId = String(t.order?.id || "");
     const merchantOrderId =
-      t.merchant_order_id || t.order?.merchant_order_id || "";
+      t.merchant_order_id ||
+      t.order?.merchant_order_id ||
+      "";
+
     const amount = (t.amount_cents || 0) / 100;
+    const isSuccess = t.success;
+
+    if (!isSuccess) {
+      console.log("⚠️ Payment not successful");
+      return res.json({ ok: true });
+    }
 
     // استخراج رقم العقار
     let propertyNumber = "";
-    if (merchantOrderId?.includes("-")) {
+    if (merchantOrderId.includes("-")) {
       propertyNumber = merchantOrderId.split("-")[0];
     }
     if (!propertyNumber) {
       propertyNumber =
-        t.payment_key_claims?.extra?.creation_extras?.propertyNumber || "";
+        t.payment_key_claims?.extra?.creation_extras?.propertyNumber ||
+        "";
     }
 
-    const paymentMethod = t.source_data?.type || "";
-    const cardSubType = t.source_data?.sub_type || "";
+    console.log("🏠 Property:", propertyNumber);
+    console.log("💰 Amount:", amount);
+    console.log("🔑 Order ID:", paymobOrderId);
+    console.log("🔑 Merchant Ref:", merchantOrderId);
 
-    console.log("🧾 Transaction:", transactionId, propertyNumber, amount);
+    // ==========================================================
+    // 🔥 STRICT INQUIRY: استعلام Paymob الرسمي فقط
+    // ==========================================================
+    const { paymobService } = await import("./paymob");
 
-    // ===============================
-    // 1) جلب الرسوم من Paymob Inquiry
-    // ===============================
-    let merchantFees = 0;
-    let acqFees = 0;
-    let vatAmount = 0;
-    let totalFees = 0;
-    let netAmount = 0;
+    const inquiry = await paymobService.inquiryTransaction({
+      order_id: paymobOrderId
+    });
 
-    try {
-      const { paymobService } = await import("./paymob");
-      const inquiry = await paymobService.inquiryByTransactionId(transactionId);
-
-      console.log("📡 Inquiry Response:", inquiry);
-
-      if (inquiry?.transaction) {
-        merchantFees = inquiry.transaction.merchant_fees || 0;
-        acqFees = inquiry.transaction.acq_fees || 0;
-        vatAmount = inquiry.transaction.vat || 0;
-        totalFees = inquiry.transaction.total_fees || 0;
-        netAmount =
-          inquiry.transaction.net_amount || amount - totalFees || amount;
-      } else {
-        console.log("⚠️ Inquiry returned no transaction data");
-      }
-    } catch (err) {
-      console.log("❌ Inquiry API Error:", err);
+    if (!inquiry || !inquiry.ok) {
+      console.error("❌ Inquiry failed — STRICT MODE prevents fallback");
+      return res.status(400).json({ error: "Inquiry failed" });
     }
 
-    console.log(
-      "🏦 Final Fees → merchant:",
-      merchantFees,
-      "acq:",
-      acqFees,
-      "vat:",
-      vatAmount,
-      "total:",
-      totalFees,
-      "net:",
-      netAmount
-    );
+    console.log("📊 Inquiry data:", inquiry.raw);
 
-    if (!isSuccess) {
-      console.log("⚠️ Payment failed");
-      return res.json({ ok: true });
-    }
+    const merchantFees = inquiry.merchantFees;
+    const acqFees = inquiry.acqFees;
+    const vatAmount = inquiry.vat;
+    const totalFees = inquiry.totalFees;
+    const netAmount = inquiry.netAmount;
 
-    // ===============================
-    // 2) البحث عن سجل الدفع
-    // ===============================
+    console.log(`🏦 Fees: merchant=${merchantFees} acq=${acqFees} vat=${vatAmount} total=${totalFees}`);
+    console.log(`💵 Net Amount: ${netAmount}`);
+
+    // ==========================================================
+    // البحث عن سجل الدفع
+    // ==========================================================
     const payments = await storage.getPayments();
-    let payment = null;
 
-    // أفضل بحث
-    if (!payment && merchantOrderId) {
-      payment = payments.find((p) =>
-        p.paymobOrderId?.includes(merchantOrderId)
-      );
-    }
-
-    // البحث بالـ order_id
-    if (!payment && paymobOrderId) {
-      payment = payments.find((p) => p.paymobOrderId === paymobOrderId);
-    }
-
-    // البحث برقم العقار + مبلغ
-    if (!payment && propertyNumber) {
-      payment = payments.find(
-        (p) =>
-          p.propertyNumber === propertyNumber &&
-          p.status === "قيد المراجعة" &&
-          p.finalAmount === amount
-      );
-    }
+    let payment =
+      payments.find(p => p.paymobOrderId === paymobOrderId) ||
+      payments.find(p => p.propertyNumber === propertyNumber && p.status === "قيد المراجعة");
 
     if (!payment) {
       console.error("❌ Payment not found");
       return res.status(404).json({ error: "Payment not found" });
     }
 
-    console.log("✅ Found Payment:", payment.id);
+    console.log("✅ Payment found:", payment.id);
 
+    // منع التكرار
     if (payment.status === "مكتمل") {
-      console.log("⚠️ Already completed");
       return res.json({ ok: true });
     }
 
-    // ===============================
-    // 3) تحديث الدفع بالرسوم الحقيقية
-    // ===============================
+    // ==========================================================
+    // تحديث حالة الدفع STRICT — الرسوم من Inquiry فقط
+    // ==========================================================
     await storage.updatePayment(payment.id, {
       status: "مكتمل",
       completedAt: new Date().toISOString(),
       transactionId,
-      paymentMethod: cardSubType || paymentMethod || "بطاقة",
+      paymentMethod: t.source_data?.sub_type || t.source_data?.type || "بطاقة",
       merchantFees,
       acqFees,
+      feeAmount: merchantFees + acqFees,
       vatAmount,
       totalFees,
-      feeAmount: merchantFees + acqFees,
       netAmount,
     });
 
-    console.log("💰 Payment Updated:", payment.id);
+    console.log(`✅ Payment ${payment.id} marked as completed (STRICT MODE)`);
 
-    // ===============================
-    // 4) تفعيل الاشتراك لو فيه معلّق
-    // ===============================
-    if (
-      payment.action &&
-      payment.pendingStartDate &&
-      payment.pendingEndDate
-    ) {
+    // تفعيل الاشتراك إذا موجود
+    if (payment.action && payment.pendingStartDate && payment.pendingEndDate) {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
 
       if (property) {
@@ -3043,81 +3004,85 @@ app.post("/api/paymob/webhook", async (req, res) => {
           property
         );
 
-        console.log("🎉 Subscription Activated:", payment.propertyNumber);
+        console.log(`🔥 Subscription activated for property ${payment.propertyNumber}`);
       }
     }
 
-    return res.json({ ok: true, paymentId: payment.id });
+    return res.json({
+      ok: true,
+      message: "Payment processed successfully",
+      paymentId: payment.id,
+    });
+
   } catch (err) {
     console.error("❌ Webhook Error:", err);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "server error" });
   }
 });
 
-  // ======================
-  // تحديث عناوين أعمدة المدفوعات
-  // ======================
-  app.post("/api/admin/setup-payment-headers", async (req, res) => {
-    try {
-      await googleSheetsService.setupPaymentsSheetHeaders();
-      res.json({ success: true, message: "تم تحديث عناوين الأعمدة بنجاح" });
-    } catch (error: any) {
-      console.error("Error setting up payment headers:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
 
-  // ======================
-  // تحديث رسوم معاملة يدوياً
-  // ======================
-  app.post("/api/admin/payments/:transactionId/update-fees", async (req, res) => {
-    try {
-      const { transactionId } = req.params;
-      const { feeAmount, vatAmount, merchantFees, acqFees } = req.body;
-      
-      if (!transactionId) {
-        return res.status(400).json({ error: "معرف المعاملة مطلوب" });
-      }
-      
-      // حساب الإجمالي والصافي
-      const totalFees = (feeAmount || 0) + (vatAmount || 0);
-      
-      console.log(`📝 Updating fees for transaction ${transactionId}:`, {
-        feeAmount, vatAmount, totalFees, merchantFees, acqFees
-      });
-      
-      // تحديث الرسوم في Google Sheets
-      await googleSheetsService.updatePaymentFees(transactionId, {
-        feeAmount: feeAmount || 0,
-        vatAmount: vatAmount || 0,
-        totalFees,
-        merchantFees: merchantFees || 0,
-        acqFees: acqFees || 0,
-      });
-      
-      res.json({ 
-        success: true, 
-        message: "تم تحديث الرسوم بنجاح",
-        data: { feeAmount, vatAmount, totalFees, merchantFees, acqFees }
-      });
-    } catch (error: any) {
-      console.error("Error updating payment fees:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+// ======================
+// تحديث عناوين أعمدة المدفوعات
+// ======================
+app.post("/api/admin/setup-payment-headers", async (req, res) => {
+  try {
+    await googleSheetsService.setupPaymentsSheetHeaders();
+    res.json({ success: true, message: "تم تحديث عناوين الأعمدة بنجاح" });
+  } catch (error: any) {
+    console.error("Error setting up payment headers:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  // تشغيل تحديث عناوين الأعمدة عند بدء الخادم
-  setTimeout(async () => {
-    try {
-      console.log("🔧 Setting up payment sheet headers...");
-      await googleSheetsService.setupPaymentsSheetHeaders();
-    } catch (error) {
-      console.error("❌ Failed to setup payment headers:", error);
+// ======================
+// تحديث رسوم معاملة يدوياً
+// ======================
+app.post("/api/admin/payments/:transactionId/update-fees", async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const { feeAmount, vatAmount, merchantFees, acqFees } = req.body;
+    
+    if (!transactionId) {
+      return res.status(400).json({ error: "معرف المعاملة مطلوب" });
     }
-  }, 5000);
+    
+    const totalFees = (feeAmount || 0) + (vatAmount || 0);
+    
+    console.log(`📝 Updating fees for transaction ${transactionId}:`, {
+      feeAmount, vatAmount, totalFees, merchantFees, acqFees
+    });
+    
+    await googleSheetsService.updatePaymentFees(transactionId, {
+      feeAmount: feeAmount || 0,
+      vatAmount: vatAmount || 0,
+      totalFees,
+      merchantFees: merchantFees || 0,
+      acqFees: acqFees || 0,
+    });
+    
+    res.json({ 
+      success: true, 
+      message: "تم تحديث الرسوم بنجاح",
+      data: { feeAmount, vatAmount, totalFees, merchantFees, acqFees }
+    });
+  } catch (error: any) {
+    console.error("Error updating payment fees:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  // ======================
-  // DONE
-  // ======================
-  return createServer(app);
+// تشغيل تحديث عناوين الأعمدة عند بدء الخادم
+setTimeout(async () => {
+  try {
+    console.log("🔧 Setting up payment sheet headers...");
+    await googleSheetsService.setupPaymentsSheetHeaders();
+  } catch (error) {
+    console.error("❌ Failed to setup payment headers:", error);
+  }
+}, 5000);
+
+// ======================
+// DONE
+// ======================
+return createServer(app);
 }
