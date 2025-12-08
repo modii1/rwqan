@@ -11,8 +11,14 @@ Modiy is a comprehensive property management system designed for investment prop
 - **Language**: All generated content and explanations should be in Arabic.
 
 ## Recent Changes (December 08, 2025)
-- **Smart Property Verification System**: Redesigned verification process to check property data completeness (location, images ≥3, region, type, amenities, prices) instead of payment data. Features animated 6-step progress tracking with detailed status messages.
-- **Auto-Activation**: Upon successful property verification, system automatically activates subscription and sends WhatsApp notification to admin.
+- **Smart Property Verification System**: Redesigned verification process to check property data completeness using existing Google Sheets columns:
+  - **Images**: Fetched from Replit Object Storage (R2) via `/api/owner/r2-images` (requires ≥3 images)
+  - **Facilities**: Read from column 8 (`🔹 المرافق`) - supports both JSON array and comma-separated formats (requires ≥3)
+  - **Location/Region**: Read from columns 4 (`📍 الموقع`) and 5 (`📍 المنطقة`)
+  - **Prices**: Read from columns 10-15 (weekday, weekend, overnight, special, holidays)
+  - **Type**: Read from column 7 (`🏠 النوع`)
+- **Auto-Activation**: Upon successful property verification, system automatically updates `verificationStatus` to "approved" and activates subscription if valid payment exists.
+- **No New Columns Added**: Verification uses only existing Google Sheets columns - no `imageUrls`, `amenities`, or `region` columns needed.
 - **Payment Button Logic**: Refined button display - "رفع إيصال" for bank transfer receipts, "إكمال الدفع" only for Paymob electronic payments with paymobOrderId.
 - **Package Names**: Fixed Arabic display of package names in payment history (e.g., "اشتراك خاص شهرين" for pkg-special-2months).
 - **Date Format**: Changed from Arabic Hijri to English Gregorian format using `toLocaleDateString('en-US')` for better consistency.
@@ -33,7 +39,7 @@ Modiy is a comprehensive property management system designed for investment prop
 - **Frontend**: React, Vite, TypeScript, Tailwind CSS, shadcn/ui.
 - **Backend**: Express.js, TypeScript.
 - **Data Storage**: Google Sheets for all primary data (properties, subscriptions, payments, etc.).
-- **Image Storage**: Google Drive for real property images, with automatic public access.
+- **Image Storage**: Replit Object Storage (R2) for property images, organized by property number.
 - **Receipt Storage**: Replit Object Storage for payment receipts.
 - **Payment Gateway**: Paymob for secure credit card and Apple Pay transactions, including webhook for automatic updates.
 - **Analytics**: Google Analytics 4.
