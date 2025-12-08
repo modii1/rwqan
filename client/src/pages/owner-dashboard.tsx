@@ -249,7 +249,8 @@ const startSmartVerification = async () => {
     await new Promise(r => setTimeout(r, 800));
     
     const propData = property as any;
-    const imagesArray = propData.images || [];
+    // دعم كلا الحقلين: imageUrls (الجديد) و images (القديم)
+    const imagesArray = propData.imageUrls || propData.images || [];
     
     if (imagesArray.length >= 3) {
       steps[2].status = 'success';
@@ -270,8 +271,11 @@ const startSmartVerification = async () => {
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 800));
     
-    const amenitiesCount = propData.amenities ? 
-      (Array.isArray(propData.amenities) ? propData.amenities.length : propData.amenities.split(',').length) : 0;
+    // دعم كلا الحقلين: amenities (مصفوفة) و facilities (القديم)
+    const amenitiesData = propData.amenities || propData.facilities || [];
+    const amenitiesCount = Array.isArray(amenitiesData) 
+      ? amenitiesData.length 
+      : (typeof amenitiesData === 'string' ? amenitiesData.split(',').length : 0);
     
     if (property.type && amenitiesCount >= 3) {
       steps[3].status = 'success';
@@ -292,7 +296,12 @@ const startSmartVerification = async () => {
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 800));
     
+    // دعم كلا البنيتين: prices object (الجديد) و حقول منفصلة (القديم)
+    const pricesObj = propData.prices || {};
     const hasValidPrices = (
+      (pricesObj.weekday && pricesObj.weekday > 0) ||
+      (pricesObj.weekend && pricesObj.weekend > 0) ||
+      (pricesObj.overnight && pricesObj.overnight > 0) ||
       (propData.priceMidweek && propData.priceMidweek > 0) ||
       (propData.priceWeekend && propData.priceWeekend > 0) ||
       (propData.priceOvernight && propData.priceOvernight > 0)
@@ -301,8 +310,10 @@ const startSmartVerification = async () => {
     if (hasValidPrices) {
       steps[4].status = 'success';
       const prices = [];
-      if (propData.priceMidweek) prices.push(`منتصف الأسبوع: ${propData.priceMidweek}`);
-      if (propData.priceWeekend) prices.push(`نهاية الأسبوع: ${propData.priceWeekend}`);
+      if (pricesObj.weekday) prices.push(`منتصف الأسبوع: ${pricesObj.weekday}`);
+      else if (propData.priceMidweek) prices.push(`منتصف الأسبوع: ${propData.priceMidweek}`);
+      if (pricesObj.weekend) prices.push(`نهاية الأسبوع: ${pricesObj.weekend}`);
+      else if (propData.priceWeekend) prices.push(`نهاية الأسبوع: ${propData.priceWeekend}`);
       steps[4].message = prices.join(' | ');
     } else {
       steps[4].status = 'error';
