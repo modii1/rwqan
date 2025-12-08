@@ -243,23 +243,34 @@ const startSmartVerification = async () => {
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
     
-    // خطوة 3: التحقق من الصور
+    // خطوة 3: التحقق من الصور (من Replit Object Storage R2)
     steps[2].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 800));
     
     const propData = property as any;
-    // دعم كلا الحقلين: imageUrls (الجديد) و images (القديم)
-    const imagesArray = propData.imageUrls || propData.images || [];
+    // جلب عدد الصور من R2 Object Storage
+    let imagesCount = 0;
+    try {
+      const imagesResponse = await fetch('/api/owner/r2-images');
+      if (imagesResponse.ok) {
+        const imagesData = await imagesResponse.json();
+        // API يُرجع { images: [...] }
+        const imagesArray = imagesData.images || imagesData;
+        imagesCount = Array.isArray(imagesArray) ? imagesArray.length : 0;
+      }
+    } catch (e) {
+      console.log('لم يتم جلب الصور من R2');
+    }
     
-    if (imagesArray.length >= 3) {
+    if (imagesCount >= 3) {
       steps[2].status = 'success';
-      steps[2].message = `${imagesArray.length} صورة`;
+      steps[2].message = `${imagesCount} صورة`;
     } else {
       steps[2].status = 'error';
-      steps[2].message = imagesArray.length === 0 
-        ? 'لا توجد صور' 
-        : `${imagesArray.length} صورة فقط (يجب 3 على الأقل)`;
+      steps[2].message = imagesCount === 0 
+        ? 'لا توجد صور مرفوعة' 
+        : `${imagesCount} صورة فقط (يجب 3 على الأقل)`;
       hasErrors = true;
     }
     setVerificationProgress(50);
@@ -271,20 +282,29 @@ const startSmartVerification = async () => {
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 800));
     
-    // دعم كلا الحقلين: amenities (مصفوفة) و facilities (القديم)
-    const amenitiesData = propData.amenities || propData.facilities || [];
-    const amenitiesCount = Array.isArray(amenitiesData) 
-      ? amenitiesData.length 
-      : (typeof amenitiesData === 'string' ? amenitiesData.split(',').length : 0);
+    // استخدام حقل facilities من Google Sheets (عمود 8)
+    const facilitiesData = propData.facilities || [];
+    let facilitiesCount = 0;
+    if (Array.isArray(facilitiesData)) {
+      facilitiesCount = facilitiesData.length;
+    } else if (typeof facilitiesData === 'string' && facilitiesData.trim()) {
+      // قد تكون المرافق مفصولة بفاصلة أو JSON
+      try {
+        const parsed = JSON.parse(facilitiesData);
+        facilitiesCount = Array.isArray(parsed) ? parsed.length : 0;
+      } catch {
+        facilitiesCount = facilitiesData.split(',').filter(s => s.trim()).length;
+      }
+    }
     
-    if (property.type && amenitiesCount >= 3) {
+    if (property.type && facilitiesCount >= 3) {
       steps[3].status = 'success';
-      steps[3].message = `${property.type} - ${amenitiesCount} مرفق`;
+      steps[3].message = `${property.type} - ${facilitiesCount} مرفق`;
     } else {
       steps[3].status = 'error';
       steps[3].message = !property.type 
         ? 'النوع مفقود' 
-        : `${amenitiesCount} مرفق فقط (يجب 3 على الأقل)`;
+        : `${facilitiesCount} مرفق فقط (يجب 3 على الأقل)`;
       hasErrors = true;
     }
     setVerificationProgress(66);
