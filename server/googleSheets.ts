@@ -1936,6 +1936,7 @@ async getWhatsAppLogs() {
     recentPayments: any[];
   }> {
     const payments = await this.getPayments();
+    const feeConfigs = await this.getFeeConfigs();
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     
@@ -1952,8 +1953,60 @@ async getWhatsAppLogs() {
       p.status === "قيد المراجعة" || p.status === "معلق"
     ).length;
     
-    const allTimeRevenue = completedPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
-    const currentMonthRevenue = currentMonthPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+    // حساب الأرباح مع الرسوم الحقيقية من نظام FeeConfig
+    const calculateNetProfit = (paymentsList: any[]) => {
+      let totalRevenue = 0;
+      let totalNetAfterFees = 0;
+      
+      for (const p of paymentsList) {
+        const amount = p.finalAmount || 0;
+        totalRevenue += amount;
+        
+        // إذا كان لدينا رسوم فعلية من Paymob، استخدمها
+        if (p.totalFees !== undefined && p.totalFees > 0) {
+          const netAmount = p.netAmount || (amount - p.totalFees);
+          totalNetAfterFees += netAmount;
+        } else {
+          // حساب الرسوم من FeeConfig بناءً على طريقة الدفع
+          const paymentMethod = (p.paymentMethod || "").toLowerCase();
+          
+          // البحث عن إعدادات الرسوم المناسبة
+          let feeConfig = feeConfigs.find(fc => {
+            const fcName = (fc.nameEn || "").toLowerCase();
+            return (
+              (paymentMethod.includes("mada") || paymentMethod.includes("مدى")) && fcName.includes("mada") ||
+              paymentMethod.includes("stc") && fcName.includes("stc") ||
+              (paymentMethod.includes("apple") || paymentMethod.includes("Apple Pay")) && fcName.includes("apple") ||
+              (paymentMethod.includes("تحويل") || paymentMethod.includes("bank")) && fc.feePercentage === 0
+            );
+          });
+          
+          // افتراضي: Visa/MC محلي
+          if (!feeConfig) {
+            feeConfig = feeConfigs.find(fc => (fc.nameEn || "").toLowerCase().includes("visa") && fc.cardType === "local");
+          }
+          
+          if (feeConfig) {
+            const baseFee = (amount * feeConfig.feePercentage / 100) + feeConfig.fixedFee;
+            const vatOnFee = baseFee * (feeConfig.vatPercentage / 100);
+            const totalFees = baseFee + vatOnFee;
+            const netAmount = amount - totalFees;
+            totalNetAfterFees += netAmount;
+          } else {
+            // في حالة عدم وجود إعدادات، نفترض رسوم 0% (تحويل بنكي)
+            totalNetAfterFees += amount;
+          }
+        }
+      }
+      
+      // حصة الشريك 50% من الصافي
+      const partnerShare = Math.round(totalNetAfterFees * 0.5 * 100) / 100;
+      
+      return { totalRevenue, partnerShare };
+    };
+    
+    const currentMonthCalc = calculateNetProfit(currentMonthPayments);
+    const allTimeCalc = calculateNetProfit(completedPayments);
     
     const recentPayments = payments
       .sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime())
@@ -1962,13 +2015,13 @@ async getWhatsAppLogs() {
     return {
       currentMonth: {
         monthYear: `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`,
-        totalRevenue: currentMonthRevenue,
-        partnerShare: Math.round(currentMonthRevenue * 0.5 * 100) / 100,
+        totalRevenue: currentMonthCalc.totalRevenue,
+        partnerShare: currentMonthCalc.partnerShare,
         paymentsCount: currentMonthPayments.length,
       },
       allTime: {
-        totalRevenue: allTimeRevenue,
-        partnerShare: Math.round(allTimeRevenue * 0.5 * 100) / 100,
+        totalRevenue: allTimeCalc.totalRevenue,
+        partnerShare: allTimeCalc.partnerShare,
         paymentsCount: completedPayments.length,
       },
       pendingPayments,
