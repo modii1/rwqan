@@ -2877,7 +2877,52 @@ app.post("/api/whatsapp/send", async (req, res) => {
   });
 
   // ======================
-// PAYMOB WEBHOOK
+// PAYMOB WEBHOOK - GET (Return URL from Paymob)
+// ======================
+app.get("/api/paymob/webhook", async (req, res) => {
+  try {
+    console.log("📥 Paymob GET redirect received");
+    console.log("📥 Query params:", req.query);
+    
+    // استخراج معلومات من الـ query params
+    const success = req.query.success === 'true';
+    const orderId = req.query.order as string || '';
+    const transactionId = req.query.id as string || '';
+    
+    console.log(`📊 Return URL: success=${success}, order=${orderId}, txn=${transactionId}`);
+    
+    if (success && orderId) {
+      // جلب الرسوم الحقيقية من Paymob Inquiry API
+      try {
+        const { paymobService } = await import("./paymob");
+        console.log(`📡 Calling Paymob Inquiry API with order_id: ${orderId}`);
+        const inquiry = await paymobService.inquiryByOrderId(orderId);
+        
+        if (inquiry?.ok) {
+          console.log(`✅ Got real fees from Paymob: merchant=${inquiry.merchantFees}, acq=${inquiry.acqFees}, vat=${inquiry.vat}, total=${inquiry.totalFees}`);
+          console.log(`📊 Full inquiry response:`, JSON.stringify(inquiry, null, 2));
+        } else {
+          console.log("⚠️ Inquiry returned no data");
+        }
+      } catch (err) {
+        console.log("❌ Inquiry API Error:", err);
+      }
+    }
+    
+    // إعادة التوجيه إلى صفحة نجاح الدفع
+    if (success) {
+      res.redirect('/owner/subscription?payment=success');
+    } else {
+      res.redirect('/owner/subscription?payment=failed');
+    }
+  } catch (error) {
+    console.error("❌ GET Webhook Error:", error);
+    res.redirect('/owner/subscription?payment=error');
+  }
+});
+
+// ======================
+// PAYMOB WEBHOOK - POST (Server-to-Server notification)
 // ======================
 app.post("/api/paymob/webhook", async (req, res) => {
   try {
@@ -3066,6 +3111,34 @@ app.post("/api/paymob/webhook", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+  // ======================
+  // اختبار Paymob Inquiry API
+  // ======================
+  app.post("/api/admin/test-inquiry", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      
+      if (!orderId) {
+        return res.status(400).json({ error: "orderId مطلوب" });
+      }
+      
+      console.log(`🧪 Testing Paymob Inquiry API with order_id: ${orderId}`);
+      
+      const { paymobService } = await import("./paymob");
+      const inquiry = await paymobService.inquiryByOrderId(orderId);
+      
+      console.log(`📊 Inquiry Result:`, JSON.stringify(inquiry, null, 2));
+      
+      res.json({
+        success: true,
+        inquiry
+      });
+    } catch (error: any) {
+      console.error("❌ Inquiry Test Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // ======================
   // تحديث عناوين أعمدة المدفوعات

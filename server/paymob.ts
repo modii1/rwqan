@@ -150,31 +150,81 @@ export class PaymobService {
   }
 
   /* ==========================================================
-      3) 🚀 Transaction Inquiry API الرسمي (تصحيح كامل)
+      3) الحصول على Auth Token من Paymob
+  =========================================================== */
+  async getAuthToken(): Promise<string | null> {
+    try {
+      console.log("🔐 Getting Paymob auth token...");
+      
+      const response = await fetch(
+        "https://ksa.paymob.com/api/auth/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            api_key: SECRET_KEY,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.token) {
+        console.error("❌ Auth token error:", data);
+        return null;
+      }
+
+      console.log("✅ Got auth token successfully");
+      return data.token;
+    } catch (err) {
+      console.error("❌ Auth token exception:", err);
+      return null;
+    }
+  }
+
+  /* ==========================================================
+      4) 🚀 Transaction Inquiry API الرسمي
   =========================================================== */
   async inquiryTransaction(body: {
     order_id?: string;
     merchant_order_id?: string;
   }) {
     try {
+      // الحصول على auth token أولاً
+      const authToken = await this.getAuthToken();
+      
+      if (!authToken) {
+        console.error("❌ Failed to get auth token");
+        return null;
+      }
+
+      console.log("📡 Calling Transaction Inquiry API...");
+      
       const response = await fetch(
         "https://ksa.paymob.com/api/ecommerce/orders/transaction_inquiry",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Token ${SECRET_KEY}`, // ✔ صحيح
+            "Authorization": `Bearer ${authToken}`,
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            auth_token: authToken,
+            ...body,
+          }),
         }
       );
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.error("Inquiry error:", data);
+        console.error("❌ Inquiry error:", data);
         return null;
       }
+
+      console.log("📊 Inquiry raw response:", JSON.stringify(data, null, 2));
 
       const merchantFees = data.merchant_fees ?? 0;
       const acqFees = data.acq_fees ?? 0;
@@ -195,7 +245,7 @@ export class PaymobService {
         raw: data,
       };
     } catch (err) {
-      console.error("Inquiry Exception:", err);
+      console.error("❌ Inquiry Exception:", err);
       return null;
     }
   }
