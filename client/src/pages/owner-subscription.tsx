@@ -347,22 +347,62 @@ export default function OwnerSubscriptionPage() {
                 <div className="p-4 bg-muted/30 rounded-lg mt-3">
                   <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
                   <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
-                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
+                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2 mb-3">
                     <Upload className="w-4 h-4" />
                     {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
                   </Button>
+                  {receiptFile && (
+                    <Button 
+                      type="button" 
+                      onClick={async () => {
+                        setIsSubmittingPayment(true);
+                        try {
+                          const propertyNumber = property?.propertyNumber;
+                          const formData = new FormData();
+                          formData.append('propertyNumber', propertyNumber || '');
+                          formData.append('packageId', paymentInfo.packageId);
+                          formData.append('receipt', receiptFile);
+                          formData.append('action', paymentInfo.action);
+                          await fetch('/api/owner/payment/bank-transfer', {
+                            method: 'POST',
+                            body: formData,
+                          });
+                          toast({
+                            title: 'تم رفع الإيصال بنجاح',
+                            description: 'سيتم التحقق من التحويل البنكي وتفعيل الاشتراك قريباً',
+                          });
+                          queryClient.invalidateQueries({ queryKey: ['/api/owner/current-subscription'] });
+                          setPaymentInfo(null);
+                          setSelectedPaymentMethod(null);
+                          setReceiptFile(null);
+                        } catch (err: any) {
+                          toast({
+                            title: 'خطأ في رفع الإيصال',
+                            description: err.message || 'حدث خطأ غير متوقع',
+                            variant: 'destructive',
+                          });
+                        } finally {
+                          setIsSubmittingPayment(false);
+                        }
+                      }}
+                      disabled={isSubmittingPayment}
+                      className="w-full"
+                      data-testid="button-upload-receipt"
+                    >
+                      {isSubmittingPayment ? 'جاري الرفع...' : 'رفع الإيصال'}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="flex gap-3">
-              <Button
-                onClick={async () => {
-                  if (!selectedPaymentMethod) return;
-                  setIsSubmittingPayment(true);
-                  try {
-                    const propertyNumber = property?.propertyNumber;
-                    if (selectedPaymentMethod === 'online') {
+              {selectedPaymentMethod === 'online' && (
+                <Button
+                  onClick={async () => {
+                    setIsSubmittingPayment(true);
+                    try {
+                      const propertyNumber = property?.propertyNumber;
                       const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
                         propertyNumber,
                         packageId: paymentInfo.packageId,
@@ -375,44 +415,23 @@ export default function OwnerSubscriptionPage() {
                       } else {
                         throw new Error('لم يتم الحصول على رابط الدفع');
                       }
-                    } else if (selectedPaymentMethod === 'bank' && receiptFile) {
-                      const formData = new FormData();
-                      formData.append('propertyNumber', propertyNumber || '');
-                      formData.append('packageId', paymentInfo.packageId);
-                      formData.append('receipt', receiptFile);
-                      formData.append('action', paymentInfo.action);
-                      await fetch('/api/owner/payment/bank-transfer', {
-                        method: 'POST',
-                        body: formData,
-                      });
+                    } catch (err: any) {
                       toast({
-                        title: 'تم استقبال طلبك',
-                        description: 'سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي',
+                        title: 'خطأ في الدفع',
+                        description: err.message || 'حدث خطأ غير متوقع',
+                        variant: 'destructive',
                       });
-                      queryClient.invalidateQueries({ queryKey: ['/api/owner/current-subscription'] });
-                      setPaymentInfo(null);
-                      setSelectedPaymentMethod(null);
-                      setReceiptFile(null);
+                    } finally {
+                      setIsSubmittingPayment(false);
                     }
-                  } catch (err: any) {
-                    toast({
-                      title: 'خطأ في الدفع',
-                      description: err.message || 'حدث خطأ غير متوقع',
-                      variant: 'destructive',
-                    });
-                  } finally {
-                    setIsSubmittingPayment(false);
-                  }
-                }}
-                disabled={!selectedPaymentMethod || isSubmittingPayment || (selectedPaymentMethod === 'bank' && !receiptFile)}
-                className="flex-1"
-                data-testid="button-confirm-payment"
-              >
-                {isSubmittingPayment 
-                  ? (selectedPaymentMethod === 'bank' ? 'جاري الرفع...' : 'جاري الدفع...')
-                  : (selectedPaymentMethod === 'bank' ? 'رفع الإيصال وإكمال الطلب' : 'تأكيد الدفع')
-                }
-              </Button>
+                  }}
+                  disabled={isSubmittingPayment}
+                  className="flex-1"
+                  data-testid="button-confirm-payment"
+                >
+                  {isSubmittingPayment ? 'جاري الدفع...' : 'تأكيد الدفع'}
+                </Button>
+              )}
               <Button
                 onClick={() => {
                   setPaymentInfo(null);
