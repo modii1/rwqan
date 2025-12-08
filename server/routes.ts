@@ -2174,6 +2174,10 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
       }
 
+      // تحديث حالة التحقق إلى approved عند نجاح التفعيل
+      await googleSheetsService.updateVerificationStatus(propertyNumber, "approved");
+      console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber}`);
+
       // إرسال إشعار WhatsApp
       const packageId = validPayment.pendingPackageId || validPayment.packageId;
       await sendWhatsAppNotification(
