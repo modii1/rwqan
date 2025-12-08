@@ -80,11 +80,12 @@ export default function OwnerDashboard() {
     message?: string;
   }[]>([
     { step: 1, name: 'التحقق من رقم العقار', status: 'pending' },
-    { step: 2, name: 'التحقق من الموقع والمنطقة', status: 'pending' },
-    { step: 3, name: 'التحقق من الصور', status: 'pending' },
-    { step: 4, name: 'التحقق من النوع والمرافق', status: 'pending' },
-    { step: 5, name: 'التحقق من الأسعار', status: 'pending' },
-    { step: 6, name: 'تفعيل الاشتراك', status: 'pending' },
+    { step: 2, name: 'التحقق من رقم الجوال', status: 'pending' },
+    { step: 3, name: 'التحقق من الموقع والاتجاه', status: 'pending' },
+    { step: 4, name: 'التحقق من الصور', status: 'pending' },
+    { step: 5, name: 'التحقق من النوع والمرافق', status: 'pending' },
+    { step: 6, name: 'التحقق من الأسعار', status: 'pending' },
+    { step: 7, name: 'تحديث حالة العقار', status: 'pending' },
   ]);
 
 
@@ -207,12 +208,13 @@ const startSmartVerification = async () => {
   
   const steps = [...verificationSteps];
   let hasErrors = false;
+  const propData = property as any;
   
   try {
     // خطوة 1: التحقق من رقم العقار
     steps[0].status = 'checking';
     setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
     
     if (property.propertyNumber && property.propertyNumber.length === 5) {
       steps[0].status = 'success';
@@ -222,40 +224,63 @@ const startSmartVerification = async () => {
       steps[0].message = 'رقم العقار غير صحيح (يجب أن يكون 5 أرقام)';
       hasErrors = true;
     }
-    setVerificationProgress(16);
+    setVerificationProgress(14);
     setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 400));
     
-    // خطوة 2: التحقق من الموقع والمنطقة
+    // خطوة 2: التحقق من رقم الجوال
     steps[1].status = 'checking';
     setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
     
-    if (property.location && property.city) {
+    const phoneNumber = propData.whatsappNumber || propData.phone || '';
+    if (phoneNumber && phoneNumber.length >= 9) {
       steps[1].status = 'success';
-      steps[1].message = `${property.city} - ${property.location}`;
+      steps[1].message = `رقم الجوال: ${phoneNumber}`;
     } else {
       steps[1].status = 'error';
-      steps[1].message = !property.city ? 'المدينة مفقودة' : 'الموقع مفقود';
+      steps[1].message = phoneNumber ? 'رقم الجوال غير صحيح' : 'رقم الجوال مفقود';
       hasErrors = true;
     }
-    setVerificationProgress(33);
+    setVerificationProgress(28);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 400));
+    
+    // خطوة 3: التحقق من الموقع والاتجاه
+    steps[2].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
     
-    // خطوة 3: التحقق من الصور (من Replit Object Storage R2)
-    steps[2].status = 'checking';
-    setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
+    const hasLocation = property.location && property.location.trim();
+    const hasDirection = propData.direction && propData.direction.trim();
+    const hasCity = property.city && property.city.trim();
     
-    const propData = property as any;
-    // جلب عدد الصور من R2 Object Storage
+    if (hasLocation && hasDirection && hasCity) {
+      steps[2].status = 'success';
+      steps[2].message = `${property.city} - ${property.location} (${propData.direction})`;
+    } else {
+      steps[2].status = 'error';
+      const missing = [];
+      if (!hasCity) missing.push('المدينة');
+      if (!hasLocation) missing.push('الموقع');
+      if (!hasDirection) missing.push('الاتجاه');
+      steps[2].message = `${missing.join(' و ')} مفقود`;
+      hasErrors = true;
+    }
+    setVerificationProgress(42);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 400));
+    
+    // خطوة 4: التحقق من الصور (من R2)
+    steps[3].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
     let imagesCount = 0;
     try {
       const imagesResponse = await fetch('/api/owner/r2-images');
       if (imagesResponse.ok) {
         const imagesData = await imagesResponse.json();
-        // API يُرجع { images: [...] }
         const imagesArray = imagesData.images || imagesData;
         imagesCount = Array.isArray(imagesArray) ? imagesArray.length : 0;
       }
@@ -264,90 +289,85 @@ const startSmartVerification = async () => {
     }
     
     if (imagesCount >= 3) {
-      steps[2].status = 'success';
-      steps[2].message = `${imagesCount} صورة`;
+      steps[3].status = 'success';
+      steps[3].message = `${imagesCount} صورة`;
     } else {
-      steps[2].status = 'error';
-      steps[2].message = imagesCount === 0 
+      steps[3].status = 'error';
+      steps[3].message = imagesCount === 0 
         ? 'لا توجد صور مرفوعة' 
         : `${imagesCount} صورة فقط (يجب 3 على الأقل)`;
       hasErrors = true;
     }
-    setVerificationProgress(50);
+    setVerificationProgress(56);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 400));
+    
+    // خطوة 5: التحقق من النوع والمرافق
+    steps[4].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
     
-    // خطوة 4: التحقق من النوع والمرافق
-    steps[3].status = 'checking';
-    setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
-    
-    // استخدام حقل facilities من Google Sheets (عمود 8)
     const facilitiesData = propData.facilities || [];
     let facilitiesCount = 0;
     if (Array.isArray(facilitiesData)) {
       facilitiesCount = facilitiesData.length;
     } else if (typeof facilitiesData === 'string' && facilitiesData.trim()) {
-      // قد تكون المرافق مفصولة بفاصلة أو JSON
       try {
         const parsed = JSON.parse(facilitiesData);
         facilitiesCount = Array.isArray(parsed) ? parsed.length : 0;
       } catch {
-        facilitiesCount = facilitiesData.split(',').filter(s => s.trim()).length;
+        facilitiesCount = facilitiesData.split(',').filter((s: string) => s.trim()).length;
       }
     }
     
-    if (property.type && facilitiesCount >= 3) {
-      steps[3].status = 'success';
-      steps[3].message = `${property.type} - ${facilitiesCount} مرفق`;
+    const hasType = property.type && property.type.trim();
+    if (hasType && facilitiesCount >= 3) {
+      steps[4].status = 'success';
+      steps[4].message = `${property.type} - ${facilitiesCount} مرفق`;
     } else {
-      steps[3].status = 'error';
-      steps[3].message = !property.type 
-        ? 'النوع مفقود' 
-        : `${facilitiesCount} مرفق فقط (يجب 3 على الأقل)`;
+      steps[4].status = 'error';
+      if (!hasType) {
+        steps[4].message = 'النوع مفقود';
+      } else {
+        steps[4].message = `${facilitiesCount} مرفق فقط (يجب 3 على الأقل)`;
+      }
       hasErrors = true;
     }
-    setVerificationProgress(66);
+    setVerificationProgress(70);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 400));
+    
+    // خطوة 6: التحقق من الأسعار
+    steps[5].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
     
-    // خطوة 5: التحقق من الأسعار
-    steps[4].status = 'checking';
-    setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
-    
-    // دعم كلا البنيتين: prices object (الجديد) و حقول منفصلة (القديم)
     const pricesObj = propData.prices || {};
     const hasValidPrices = (
-      (pricesObj.weekday && pricesObj.weekday > 0) ||
-      (pricesObj.weekend && pricesObj.weekend > 0) ||
-      (pricesObj.overnight && pricesObj.overnight > 0) ||
-      (propData.priceMidweek && propData.priceMidweek > 0) ||
-      (propData.priceWeekend && propData.priceWeekend > 0) ||
-      (propData.priceOvernight && propData.priceOvernight > 0)
+      (pricesObj.weekday && Number(pricesObj.weekday) > 0) ||
+      (pricesObj.weekend && Number(pricesObj.weekend) > 0) ||
+      (pricesObj.overnight && Number(pricesObj.overnight) > 0)
     );
     
     if (hasValidPrices) {
-      steps[4].status = 'success';
+      steps[5].status = 'success';
       const prices = [];
-      if (pricesObj.weekday) prices.push(`منتصف الأسبوع: ${pricesObj.weekday}`);
-      else if (propData.priceMidweek) prices.push(`منتصف الأسبوع: ${propData.priceMidweek}`);
+      if (pricesObj.weekday) prices.push(`وسط الأسبوع: ${pricesObj.weekday}`);
       if (pricesObj.weekend) prices.push(`نهاية الأسبوع: ${pricesObj.weekend}`);
-      else if (propData.priceWeekend) prices.push(`نهاية الأسبوع: ${propData.priceWeekend}`);
-      steps[4].message = prices.join(' | ');
+      steps[5].message = prices.join(' | ');
     } else {
-      steps[4].status = 'error';
-      steps[4].message = 'لا توجد أسعار محددة';
+      steps[5].status = 'error';
+      steps[5].message = 'لا توجد أسعار محددة';
       hasErrors = true;
     }
-    setVerificationProgress(83);
+    setVerificationProgress(84);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 400));
+    
+    // خطوة 7: تحديث حالة العقار
+    steps[6].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
-    // خطوة 6: تفعيل الاشتراك
-    steps[5].status = 'checking';
-    setVerificationSteps([...steps]);
-    await new Promise(r => setTimeout(r, 800));
     
     // جمع الأخطاء من الخطوات
     const errorsList = steps
@@ -355,56 +375,64 @@ const startSmartVerification = async () => {
       .map(s => `${s.name}: ${s.message}`);
     
     if (!hasErrors) {
-      // استدعاء API لتفعيل الاشتراك تلقائياً
+      // استدعاء API لتفعيل الاشتراك - سيعطي approved
       const response = await apiRequest('POST', '/api/owner/property/activate', {
-        propertyNumber: property.propertyNumber
+        propertyNumber: property.propertyNumber,
+        status: 'approved'
       });
       const result = await response.json();
       
       if (result.success) {
-        steps[5].status = 'success';
-        steps[5].message = 'تم تفعيل الاشتراك بنجاح!';
+        steps[6].status = 'success';
+        steps[6].message = 'تم اعتماد العقار بنجاح! ✅';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
         
-        // تعيين نتيجة الفحص الناجحة
         setVerificationResult({
           success: true,
-          summary: 'تم التحقق من جميع بيانات العقار بنجاح وتفعيل الاشتراك تلقائياً',
+          summary: 'تم التحقق من جميع بيانات العقار بنجاح وتم اعتماده',
           errors: []
         });
         
         toast({
-          title: "✅ تم التفعيل بنجاح",
-          description: "تم تفعيل اشتراكك تلقائياً بعد نجاح فحص بيانات العقار",
+          title: "✅ تم الاعتماد بنجاح",
+          description: "تم اعتماد عقارك بعد نجاح فحص البيانات",
         });
         
-        // إعادة تحميل البيانات
         setTimeout(async () => {
           await queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
           setIsVerifying(false);
         }, 2000);
       } else {
-        steps[5].status = 'error';
-        steps[5].message = result.message || 'فشل التفعيل';
+        steps[6].status = 'error';
+        steps[6].message = result.message || 'فشل الاعتماد';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
         
         setVerificationResult({
           success: false,
-          summary: result.message || 'فشل تفعيل الاشتراك',
-          errors: [result.message || 'فشل التفعيل']
+          summary: result.message || 'فشل اعتماد العقار',
+          errors: [result.message || 'فشل الاعتماد']
         });
         
         setTimeout(() => setIsVerifying(false), 2000);
       }
     } else {
-      steps[5].status = 'error';
-      steps[5].message = 'لا يمكن التفعيل - يوجد أخطاء في البيانات';
+      // استدعاء API لتحديث الحالة إلى rejected
+      try {
+        await apiRequest('POST', '/api/owner/property/activate', {
+          propertyNumber: property.propertyNumber,
+          status: 'rejected'
+        });
+      } catch (e) {
+        console.log('فشل تحديث الحالة إلى rejected');
+      }
+      
+      steps[6].status = 'error';
+      steps[6].message = 'تم رفض العقار - يوجد بيانات ناقصة';
       setVerificationProgress(100);
       setVerificationSteps([...steps]);
       
-      // تعيين نتيجة الفحص الفاشلة مع الأسباب
       setVerificationResult({
         success: false,
         summary: `فشل التحقق - ${errorsList.length} مشكلة تحتاج إصلاح`,
@@ -412,12 +440,15 @@ const startSmartVerification = async () => {
       });
       
       toast({
-        title: "⚠️ فشل التحقق",
-        description: "يرجى إصلاح الأخطاء في بيانات العقار أولاً",
+        title: "❌ تم رفض العقار",
+        description: "يرجى إصلاح الأخطاء في بيانات العقار وإعادة الفحص",
         variant: "destructive",
       });
       
-      setTimeout(() => setIsVerifying(false), 2000);
+      setTimeout(async () => {
+        await queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+        setIsVerifying(false);
+      }, 2000);
     }
   } catch (error: any) {
     toast({
