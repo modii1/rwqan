@@ -2000,6 +2000,158 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   });
 
   // ======================
+  // نظام التحقق الذكي من التحويلات البنكية
+  // ======================
+  
+  // التحقق التلقائي من التحويل البنكي المعلق
+  app.get("/api/owner/payment/check-pending", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
+      
+      // البحث عن دفعة معلقة (تحويل بنكي)
+      const pendingPayment = payments.find(p => 
+        (p.status === "قيد المراجعة" || p.status === "معلق") && 
+        p.paymentMethod === "تحويل بنكي"
+      );
+
+      if (!pendingPayment) {
+        return res.json({ hasPending: false });
+      }
+
+      // التحقق التلقائي من البيانات
+      const issues: string[] = [];
+      
+      // 1. التحقق من الإيصال
+      if (!pendingPayment.receiptUrl) {
+        issues.push("لم يتم رفع إيصال التحويل");
+      }
+
+      // 2. التحقق من البيانات الأساسية
+      if (!pendingPayment.finalAmount || pendingPayment.finalAmount <= 0) {
+        issues.push("المبلغ غير صحيح");
+      }
+
+      if (!pendingPayment.packageId) {
+        issues.push("لم يتم تحديد الباقة");
+      }
+
+      // 3. التحقق من العمر (أكثر من 7 أيام = تحذير)
+      const paymentDate = new Date(pendingPayment.createdAt || "");
+      const daysSincePayment = Math.floor((Date.now() - paymentDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysSincePayment > 7) {
+        issues.push(`الدفع معلق منذ ${daysSincePayment} يوم - قد تحتاج المتابعة`);
+      }
+
+      return res.json({
+        hasPending: true,
+        payment: pendingPayment,
+        autoCheckPassed: issues.length === 0,
+        issues: issues.length > 0 ? issues : undefined,
+      });
+    } catch (err: any) {
+      console.error("Check pending payment error:", err);
+      res.status(500).json({ error: "خطأ في التحقق من الدفع" });
+    }
+  });
+
+  // قبول التحويل البنكي (للإدارة)
+  app.post("/api/admin/payment/approve", async (req, res) => {
+    try {
+      const { paymentId } = req.body;
+
+      if (!paymentId) {
+        return res.status(400).json({ error: "معرف الدفع مطلوب" });
+      }
+
+      // جلب بيانات الدفع
+      const payment = await googleSheetsService.getPaymentById(paymentId);
+      if (!payment) {
+        return res.status(404).json({ error: "الدفع غير موجود" });
+      }
+
+      // التحقق من أن الدفع معلق
+      if (payment.status !== "قيد المراجعة" && payment.status !== "معلق") {
+        return res.status(400).json({ error: "الدفع ليس معلقاً" });
+      }
+
+      // تحديث حالة الدفع إلى مكتمل
+      await googleSheetsService.updatePaymentStatus(paymentId, "مكتمل");
+
+      // تفعيل الاشتراك إذا كان التحويل لاشتراك جديد/تمديد/ترقية
+      const property = await googleSheetsService.getPropertyByNumber(payment.propertyNumber);
+      if (property && payment.packageId) {
+        const pkg = await googleSheetsService.getPackageById(payment.packageId);
+        if (pkg) {
+          const today = new Date();
+          const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(payment.propertyNumber);
+
+          let startDate = today;
+          let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+
+          // إذا كان هناك اشتراك نشط، ابدأ من تاريخ انتهائه
+          if (currentSubscription && new Date(currentSubscription.endDate) > today) {
+            startDate = new Date(currentSubscription.endDate);
+            endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+          }
+
+          const subscriptionData = {
+            packageId: pkg.id,
+            price: payment.finalAmount,
+            subscriptionType: pkg.type,
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0],
+            paymentId: payment.id,
+          };
+
+          await googleSheetsService.addSubscriptionToSheet(
+            payment.propertyNumber, 
+            subscriptionData, 
+            property, 
+            payment.receiptUrl || ""
+          );
+
+          // تحديث نوع الاشتراك في العقار
+          await googleSheetsService.updatePropertySubscription(
+            payment.propertyNumber,
+            pkg.type,
+            endDate.toISOString().split('T')[0]
+          );
+        }
+      }
+
+      res.json({ ok: true, message: "تم قبول التحويل وتفعيل الاشتراك" });
+    } catch (err: any) {
+      console.error("Approve payment error:", err);
+      res.status(500).json({ error: "خطأ في قبول الدفع" });
+    }
+  });
+
+  // رفض التحويل البنكي (للإدارة)
+  app.post("/api/admin/payment/reject", async (req, res) => {
+    try {
+      const { paymentId, reason } = req.body;
+
+      if (!paymentId) {
+        return res.status(400).json({ error: "معرف الدفع مطلوب" });
+      }
+
+      // تحديث حالة الدفع إلى مرفوض
+      await googleSheetsService.updatePaymentStatus(paymentId, "مرفوض");
+
+      res.json({ ok: true, message: "تم رفض التحويل" });
+    } catch (err: any) {
+      console.error("Reject payment error:", err);
+      res.status(500).json({ error: "خطأ في رفض الدفع" });
+    }
+  });
+
+  // ======================
   // BACKUP SYSTEM - نظام النسخ الاحتياطية المتقدم
   // ======================
 
