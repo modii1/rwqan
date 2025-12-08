@@ -160,7 +160,7 @@ export default function FeeConfigsSection() {
     const name = nameEn.toLowerCase();
     if (name.includes("mada")) return "💳";
     if (name.includes("stc")) return "📱";
-    if (name.includes("apple")) return "🍎";
+    if (name.includes("apple")) return "📱";
     return "💳";
   };
 
