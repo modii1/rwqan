@@ -2153,10 +2153,25 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         return res.status(401).json({ error: "Unauthorized" });
       }
 
+      // قراءة الحالة المطلوبة من الطلب (approved أو rejected)
+      const requestedStatus = req.body.status || 'approved';
+
       // جلب بيانات العقار
       const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
       if (!property) {
         return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      // إذا كانت الحالة rejected، نحدث مباشرة ونخرج
+      if (requestedStatus === 'rejected') {
+        await googleSheetsService.updateVerificationStatus(propertyNumber, "rejected");
+        console.log(`❌ Verification status updated to 'rejected' for property ${propertyNumber}`);
+        
+        return res.json({ 
+          success: true, 
+          message: "تم تحديث حالة العقار إلى مرفوض",
+          status: 'rejected'
+        });
       }
 
       // البحث عن دفعة معلقة أو مكتملة حديثة
