@@ -2915,7 +2915,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
     console.log("🧾 Transaction:", transactionId, propertyNumber, amount);
 
     // ===============================
-    // 1) جلب الرسوم من Paymob Inquiry
+    // 1) جلب الرسوم من Paymob Inquiry API
     // ===============================
     let merchantFees = 0;
     let acqFees = 0;
@@ -2925,22 +2925,35 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
     try {
       const { paymobService } = await import("./paymob");
-      const inquiry = await paymobService.inquiryByTransactionId(transactionId);
+      
+      // استخدام inquiryByOrderId لجلب الرسوم الحقيقية
+      console.log(`📡 Calling Paymob Inquiry API with order_id: ${paymobOrderId}`);
+      const inquiry = await paymobService.inquiryByOrderId(paymobOrderId);
 
-      console.log("📡 Inquiry Response:", inquiry);
+      console.log("📡 Inquiry Response:", JSON.stringify(inquiry, null, 2));
 
-      if (inquiry?.transaction) {
-        merchantFees = inquiry.transaction.merchant_fees || 0;
-        acqFees = inquiry.transaction.acq_fees || 0;
-        vatAmount = inquiry.transaction.vat || 0;
-        totalFees = inquiry.transaction.total_fees || 0;
-        netAmount =
-          inquiry.transaction.net_amount || amount - totalFees || amount;
+      if (inquiry?.ok) {
+        merchantFees = inquiry.merchantFees || 0;
+        acqFees = inquiry.acqFees || 0;
+        vatAmount = inquiry.vat || 0;
+        totalFees = inquiry.totalFees || 0;
+        netAmount = inquiry.netAmount || (amount - totalFees);
+        console.log(`✅ Got real fees from Paymob: merchant=${merchantFees}, acq=${acqFees}, vat=${vatAmount}, total=${totalFees}`);
       } else {
-        console.log("⚠️ Inquiry returned no transaction data");
+        console.log("⚠️ Inquiry returned no data, using fallback calculation");
+        // حساب احتياطي: 6.9% شامل الضريبة
+        totalFees = Math.round(amount * 0.069 * 100) / 100;
+        const baseFee = Math.round((totalFees / 1.15) * 100) / 100;
+        vatAmount = Math.round((totalFees - baseFee) * 100) / 100;
+        merchantFees = Math.round(baseFee * 0.30 * 100) / 100;
+        acqFees = Math.round(baseFee * 0.70 * 100) / 100;
+        netAmount = Math.round((amount - totalFees) * 100) / 100;
       }
     } catch (err) {
       console.log("❌ Inquiry API Error:", err);
+      // حساب احتياطي عند الفشل
+      totalFees = Math.round(amount * 0.069 * 100) / 100;
+      netAmount = Math.round((amount - totalFees) * 100) / 100;
     }
 
     console.log(
