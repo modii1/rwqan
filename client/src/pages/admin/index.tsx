@@ -28,6 +28,7 @@ import {
   Clock,
   Bell,
   Wallet,
+  Settings2,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -45,6 +46,7 @@ import AdminCodeBackup from "./admin-code-backup";
 import VerificationLogsPage from "./sections/verification-logs";
 import SettingsSection from "./sections/settings";
 import PartnerProfitsSection from "./sections/partner-profits";
+import FeeConfigsSection from "./sections/fee-configs";
 
 
 type AdminSection =
@@ -62,7 +64,8 @@ type AdminSection =
   | "code-backup"
   | "whatsapp"
   | "settings"
-  | "partner-profits";
+  | "partner-profits"
+  | "fee-configs";
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
@@ -220,6 +223,13 @@ export default function AdminDashboard() {
           active={activeSection === "partner-profits"}
           onClick={() => setActiveSection("partner-profits")}
         />
+
+        <SidebarButton
+          icon={<Settings2 className="w-4 h-4 text-amber-600" />}
+          label="إعدادات الرسوم"
+          active={activeSection === "fee-configs"}
+          onClick={() => setActiveSection("fee-configs")}
+        />
       </aside>
 
       {/* المحتوى */}
@@ -256,6 +266,7 @@ export default function AdminDashboard() {
         {activeSection === "verification-logs" && <VerificationLogsPage />}
         {activeSection === "settings" && <SettingsSection />}
         {activeSection === "partner-profits" && <PartnerProfitsSection />}
+        {activeSection === "fee-configs" && <FeeConfigsSection />}
       </main>
     </div>
   );

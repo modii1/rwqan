@@ -3197,10 +3197,94 @@ app.post("/api/paymob/webhook", async (req, res) => {
     try {
       console.log("🔧 Setting up payment sheet headers...");
       await googleSheetsService.setupPaymentsSheetHeaders();
+      
+      console.log("🔧 Initializing fee configs...");
+      await googleSheetsService.initializeFeeConfigs();
     } catch (error) {
-      console.error("❌ Failed to setup payment headers:", error);
+      console.error("❌ Failed to setup payment headers or fee configs:", error);
     }
   }, 5000);
+
+  // ======================
+  // 💰 إعدادات الرسوم (Fee Configurations)
+  // ======================
+  
+  app.get("/api/admin/fee-configs", async (req, res) => {
+    try {
+      const configs = await googleSheetsService.getFeeConfigs();
+      res.json(configs);
+    } catch (error: any) {
+      console.error("Error fetching fee configs:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/fee-configs", async (req, res) => {
+    try {
+      const config = await googleSheetsService.createFeeConfig(req.body);
+      res.json(config);
+    } catch (error: any) {
+      console.error("Error creating fee config:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/admin/fee-configs/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const config = await googleSheetsService.updateFeeConfig(id, req.body);
+      if (!config) {
+        return res.status(404).json({ error: "إعدادات الرسوم غير موجودة" });
+      }
+      res.json(config);
+    } catch (error: any) {
+      console.error("Error updating fee config:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/admin/fee-configs/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await googleSheetsService.deleteFeeConfig(id);
+      res.json({ success: true, message: "تم حذف إعدادات الرسوم بنجاح" });
+    } catch (error: any) {
+      console.error("Error deleting fee config:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/fee-configs/initialize", async (req, res) => {
+    try {
+      await googleSheetsService.initializeFeeConfigs();
+      res.json({ success: true, message: "تم تهيئة إعدادات الرسوم الافتراضية" });
+    } catch (error: any) {
+      console.error("Error initializing fee configs:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/calculate-fees", async (req, res) => {
+    try {
+      const { amount, paymentMethod, cardType, useConfigs } = req.body;
+      
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "المبلغ مطلوب ويجب أن يكون أكبر من 0" });
+      }
+
+      let fees;
+      if (useConfigs) {
+        fees = await googleSheetsService.calculatePaymentFeesFromConfigs(amount, paymentMethod, cardType);
+      } else {
+        fees = googleSheetsService.calculatePaymentFees(amount, paymentMethod, cardType);
+      }
+      
+      res.json(fees);
+    } catch (error: any) {
+      console.error("Error calculating fees:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // ======================
   // DONE
