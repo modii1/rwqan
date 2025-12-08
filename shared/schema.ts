@@ -335,3 +335,76 @@ export const FACILITIES = [
 ] as const;
 
 export type Facility = typeof FACILITIES[number];
+
+// =========================
+// Fee Configuration Schema (إعدادات الرسوم)
+// =========================
+export const feeConfigSchema = z.object({
+  id: z.string(),
+  name: z.string(), // اسم وسيلة الدفع
+  nameEn: z.string(), // اسم وسيلة الدفع بالإنجليزي
+  percentage: z.number(), // نسبة الرسوم %
+  fixedFee: z.number().default(1), // رسوم ثابتة (1 ريال)
+  vatRate: z.number().default(15), // نسبة ضريبة القيمة المضافة %
+  isActive: z.boolean().default(true),
+  isLocal: z.boolean().default(true), // محلي أو دولي
+  updatedAt: z.string().optional(),
+});
+
+export type FeeConfig = z.infer<typeof feeConfigSchema>;
+export const insertFeeConfigSchema = feeConfigSchema.omit({ id: true, updatedAt: true });
+export type InsertFeeConfig = z.infer<typeof insertFeeConfigSchema>;
+
+// الرسوم الافتراضية من Paymob KSA
+export const DEFAULT_FEE_CONFIGS: FeeConfig[] = [
+  {
+    id: "fee-visa-local",
+    name: "Visa/Mastercard محلي",
+    nameEn: "Visa/Mastercard Local",
+    percentage: 2.7,
+    fixedFee: 1,
+    vatRate: 15,
+    isActive: true,
+    isLocal: true,
+  },
+  {
+    id: "fee-visa-intl",
+    name: "Visa/Mastercard دولي",
+    nameEn: "Visa/Mastercard International",
+    percentage: 3.7,
+    fixedFee: 1,
+    vatRate: 15,
+    isActive: true,
+    isLocal: false,
+  },
+  {
+    id: "fee-mada",
+    name: "مدى",
+    nameEn: "Mada",
+    percentage: 1.0,
+    fixedFee: 1,
+    vatRate: 15,
+    isActive: true,
+    isLocal: true,
+  },
+  {
+    id: "fee-stc",
+    name: "STC Pay",
+    nameEn: "STC Pay",
+    percentage: 1.0,
+    fixedFee: 1,
+    vatRate: 15,
+    isActive: true,
+    isLocal: true,
+  },
+  {
+    id: "fee-applepay",
+    name: "Apple Pay",
+    nameEn: "Apple Pay",
+    percentage: 2.7,
+    fixedFee: 1,
+    vatRate: 15,
+    isActive: true,
+    isLocal: true,
+  },
+];

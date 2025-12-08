@@ -20,7 +20,10 @@ import type {
   InsertPartnerProfit,
   MultiPropertySubscription,
   InsertMultiPropertySubscription,
+  FeeConfig,
+  InsertFeeConfig,
 } from "@shared/schema";
+import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 
@@ -41,6 +44,7 @@ const SHEETS = {
   VERIFICATION_LOGS: "سجل التحقق",
   SETTINGS: "الإعدادات",
   MULTI_PROPERTY_SUBS: "اشتراكات العقارين",
+  FEE_CONFIGS: "إعدادات الرسوم",
 };
 
 // عمود حالة التحقق — العمود 20 (T)
@@ -2034,6 +2038,242 @@ async getWhatsAppLogs() {
       await this.updateRow(SHEETS.PROPERTIES, propIndex + 2, propRow);
       console.log(`✅ Activated subscription for property ${propertyNumber}`);
     }
+  }
+
+  // ======================
+  // 💰 إعدادات الرسوم (Paymob Fees)
+  // ======================
+
+  async initializeFeeConfigs(): Promise<void> {
+    try {
+      const existingConfigs = await this.getFeeConfigs();
+      if (existingConfigs.length === 0) {
+        console.log("🔧 Initializing default fee configs...");
+        for (const config of DEFAULT_FEE_CONFIGS) {
+          await this.createFeeConfig(config);
+        }
+        console.log(`✅ Created ${DEFAULT_FEE_CONFIGS.length} default fee configs`);
+      }
+    } catch (err) {
+      console.error("Error initializing fee configs:", err);
+    }
+  }
+
+  async getFeeConfigs(): Promise<FeeConfig[]> {
+    const rows = await this.readSheet(SHEETS.FEE_CONFIGS);
+    return rows.map((row) => ({
+      id: row[0] || "",
+      name: row[1] || "",
+      nameEn: row[2] || "",
+      percentage: parseFloat(row[3]) || 0,
+      fixedFee: parseFloat(row[4]) || 1,
+      vatRate: parseFloat(row[5]) || 15,
+      isActive: row[6] === "true",
+      isLocal: row[7] === "true",
+      updatedAt: row[8] || undefined,
+    }));
+  }
+
+  async getFeeConfigById(id: string): Promise<FeeConfig | null> {
+    const configs = await this.getFeeConfigs();
+    return configs.find(c => c.id === id) || null;
+  }
+
+  async createFeeConfig(config: InsertFeeConfig | FeeConfig): Promise<FeeConfig> {
+    const id = (config as any).id || `fee-${Date.now()}`;
+    const newConfig: FeeConfig = {
+      id,
+      name: config.name,
+      nameEn: config.nameEn,
+      percentage: config.percentage,
+      fixedFee: config.fixedFee ?? 1,
+      vatRate: config.vatRate ?? 15,
+      isActive: config.isActive ?? true,
+      isLocal: config.isLocal ?? true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const row = [
+      newConfig.id,
+      newConfig.name,
+      newConfig.nameEn,
+      newConfig.percentage.toString(),
+      newConfig.fixedFee.toString(),
+      newConfig.vatRate.toString(),
+      newConfig.isActive.toString(),
+      newConfig.isLocal.toString(),
+      newConfig.updatedAt,
+    ];
+
+    await this.appendToSheet(SHEETS.FEE_CONFIGS, [row]);
+    return newConfig;
+  }
+
+  async updateFeeConfig(id: string, updates: Partial<FeeConfig>): Promise<FeeConfig | null> {
+    const rows = await this.readSheet(SHEETS.FEE_CONFIGS);
+    const rowIndex = rows.findIndex(r => r[0] === id);
+    
+    if (rowIndex === -1) return null;
+
+    const existingRow = rows[rowIndex];
+    const updatedConfig: FeeConfig = {
+      id: existingRow[0],
+      name: updates.name ?? existingRow[1],
+      nameEn: updates.nameEn ?? existingRow[2],
+      percentage: updates.percentage ?? (parseFloat(existingRow[3]) || 0),
+      fixedFee: updates.fixedFee ?? (parseFloat(existingRow[4]) || 1),
+      vatRate: updates.vatRate ?? (parseFloat(existingRow[5]) || 15),
+      isActive: updates.isActive ?? (existingRow[6] === "true"),
+      isLocal: updates.isLocal ?? (existingRow[7] === "true"),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const row = [
+      updatedConfig.id,
+      updatedConfig.name,
+      updatedConfig.nameEn,
+      updatedConfig.percentage.toString(),
+      updatedConfig.fixedFee.toString(),
+      updatedConfig.vatRate.toString(),
+      updatedConfig.isActive.toString(),
+      updatedConfig.isLocal.toString(),
+      updatedConfig.updatedAt,
+    ];
+
+    await this.updateRow(SHEETS.FEE_CONFIGS, rowIndex + 2, row);
+    return updatedConfig;
+  }
+
+  async deleteFeeConfig(id: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.FEE_CONFIGS);
+    const rowIndex = rows.findIndex(r => r[0] === id);
+    
+    if (rowIndex === -1) {
+      throw new Error("إعدادات الرسوم غير موجودة");
+    }
+    
+    await this.deleteRow(SHEETS.FEE_CONFIGS, rowIndex + 2);
+  }
+
+  calculatePaymentFees(amount: number, paymentMethod?: string, cardType?: string): {
+    feeAmount: number;
+    vatAmount: number;
+    totalFees: number;
+    netAmount: number;
+    feePercentage: number;
+    fixedFee: number;
+    feeConfigId: string;
+    feeConfigName: string;
+  } {
+    let percentage = 2.7;
+    let fixedFee = 1;
+    let vatRate = 15;
+    let feeConfigId = "fee-visa-local";
+    let feeConfigName = "Visa/Mastercard محلي";
+
+    const method = (paymentMethod || "").toLowerCase();
+    const card = (cardType || "").toLowerCase();
+
+    if (card.includes("mada") || method.includes("mada")) {
+      percentage = 1.0;
+      feeConfigId = "fee-mada";
+      feeConfigName = "مدى";
+    } else if (card.includes("stc") || method.includes("stc")) {
+      percentage = 1.0;
+      feeConfigId = "fee-stc";
+      feeConfigName = "STC Pay";
+    } else if (method.includes("apple") || card.includes("apple")) {
+      percentage = 2.7;
+      feeConfigId = "fee-applepay";
+      feeConfigName = "Apple Pay";
+    } else if (card.includes("international") || !card.includes("local")) {
+      if (card.includes("visa") || card.includes("master")) {
+        percentage = 3.7;
+        feeConfigId = "fee-visa-intl";
+        feeConfigName = "Visa/Mastercard دولي";
+      }
+    }
+
+    const baseFee = (amount * percentage / 100) + fixedFee;
+    const vatAmount = Math.round(baseFee * vatRate / 100 * 100) / 100;
+    const feeAmount = Math.round(baseFee * 100) / 100;
+    const totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
+    const netAmount = Math.round((amount - totalFees) * 100) / 100;
+
+    return {
+      feeAmount,
+      vatAmount,
+      totalFees,
+      netAmount,
+      feePercentage: percentage,
+      fixedFee,
+      feeConfigId,
+      feeConfigName,
+    };
+  }
+
+  async calculatePaymentFeesFromConfigs(amount: number, paymentMethod?: string, cardType?: string): Promise<{
+    feeAmount: number;
+    vatAmount: number;
+    totalFees: number;
+    netAmount: number;
+    feePercentage: number;
+    fixedFee: number;
+    feeConfigId: string;
+    feeConfigName: string;
+  }> {
+    const configs = await this.getFeeConfigs();
+    const method = (paymentMethod || "").toLowerCase();
+    const card = (cardType || "").toLowerCase();
+
+    let config = configs.find(c => c.isActive && (
+      c.nameEn.toLowerCase().includes("mada") && (card.includes("mada") || method.includes("mada"))
+    ));
+
+    if (!config) {
+      config = configs.find(c => c.isActive && (
+        c.nameEn.toLowerCase().includes("stc") && (card.includes("stc") || method.includes("stc"))
+      ));
+    }
+
+    if (!config) {
+      config = configs.find(c => c.isActive && (
+        c.nameEn.toLowerCase().includes("apple") && (method.includes("apple") || card.includes("apple"))
+      ));
+    }
+
+    if (!config && (card.includes("visa") || card.includes("master") || method.includes("card"))) {
+      const isIntl = card.includes("international") || !card.includes("local");
+      config = configs.find(c => c.isActive && 
+        c.nameEn.toLowerCase().includes("visa") &&
+        (isIntl ? !c.isLocal : c.isLocal)
+      );
+    }
+
+    if (!config) {
+      config = configs.find(c => c.isActive && c.nameEn.toLowerCase().includes("visa") && c.isLocal);
+    }
+
+    if (!config) {
+      return this.calculatePaymentFees(amount, paymentMethod, cardType);
+    }
+
+    const baseFee = (amount * config.percentage / 100) + config.fixedFee;
+    const vatAmount = Math.round(baseFee * config.vatRate / 100 * 100) / 100;
+    const feeAmount = Math.round(baseFee * 100) / 100;
+    const totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
+    const netAmount = Math.round((amount - totalFees) * 100) / 100;
+
+    return {
+      feeAmount,
+      vatAmount,
+      totalFees,
+      netAmount,
+      feePercentage: config.percentage,
+      fixedFee: config.fixedFee,
+      feeConfigId: config.id,
+      feeConfigName: config.name,
+    };
   }
 }
 export const googleSheetsService = new GoogleSheetsService();
