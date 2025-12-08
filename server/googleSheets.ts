@@ -50,6 +50,9 @@ const SHEETS = {
 
 // عمود حالة التحقق — العمود 20 (T)
 const COL_VERIFICATION = 20;
+const COL_IMAGE_URLS = 21;   // عمود روابط الصور (JSON array)
+const COL_AMENITIES = 22;    // عمود المرافق الجديدة (JSON array)
+const COL_REGION = 23;       // عمود المنطقة
 
 // =======================
 // Replit Connectors Auth
@@ -511,8 +514,22 @@ class GoogleSheetsService {
       subscriptionDate: row[17] || "",
       pin: row[18] || "",
       verificationStatus: row[COL_VERIFICATION - 1] || undefined,
-    
-
+      // الحقول الجديدة
+      imageUrls: row[COL_IMAGE_URLS - 1] ? (() => {
+        try {
+          return JSON.parse(row[COL_IMAGE_URLS - 1]);
+        } catch {
+          return row[COL_IMAGE_URLS - 1].split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      })() : [],
+      amenities: row[COL_AMENITIES - 1] ? (() => {
+        try {
+          return JSON.parse(row[COL_AMENITIES - 1]);
+        } catch {
+          return row[COL_AMENITIES - 1].split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      })() : [],
+      region: row[COL_REGION - 1] || "",
     };
 
     return p as Property;
@@ -527,6 +544,10 @@ class GoogleSheetsService {
       : typeof p.facilities === "string"
       ? p.facilities
       : "";
+
+  // الحقول الجديدة
+  const imageUrlsStr = Array.isArray(p.imageUrls) ? JSON.stringify(p.imageUrls) : "";
+  const amenitiesStr = Array.isArray(p.amenities) ? JSON.stringify(p.amenities) : "";
 
   return [
     p.propertyNumber || "",
@@ -548,8 +569,10 @@ class GoogleSheetsService {
     p.lastUpdate || "",
     p.subscriptionDate || "",
     p.pin || "",
-    p.verificationStatus || "pending"
-
+    p.verificationStatus || "pending",
+    imageUrlsStr,        // عمود 21 - روابط الصور
+    amenitiesStr,        // عمود 22 - المرافق الجديدة
+    p.region || "",      // عمود 23 - المنطقة
   ];
 }
 

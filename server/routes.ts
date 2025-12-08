@@ -276,6 +276,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
 
   // GET all properties (frontend + admin)
+  // 🔧 endpoint مؤقت لتحديث بيانات العقار (للاختبار)
+  app.put("/api/admin/property/:propertyNumber", async (req, res) => {
+    try {
+      const { propertyNumber } = req.params;
+      const updates = req.body;
+      const updated = await storage.updateProperty(propertyNumber, updates);
+      res.json({ success: true, property: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
   app.get("/api/properties", async (_req, res) => {
   try {
     const items = await storage.getProperties();
@@ -2154,10 +2166,16 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
       );
 
+      // إذا لا توجد دفعة صالحة، نقوم فقط بتحديث حالة التحقق إلى approved
       if (!validPayment) {
+        // تحديث حالة التحقق حتى بدون دفعة (للعقارات القديمة أو المجانية)
+        await googleSheetsService.updateVerificationStatus(propertyNumber, "approved");
+        console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber} (no payment required)`);
+        
         return res.json({ 
-          success: false, 
-          message: "لا توجد دفعة صالحة لتفعيل الاشتراك" 
+          success: true, 
+          message: "تم التحقق من بيانات العقار بنجاح وتم تحديث الحالة إلى مُعتمد",
+          verificationOnly: true
         });
       }
 
