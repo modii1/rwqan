@@ -2877,317 +2877,182 @@ app.post("/api/whatsapp/send", async (req, res) => {
   });
 
   // ======================
-  // PAYMOB WEBHOOK
-  // ======================
-  app.post("/api/paymob/webhook", async (req, res) => {
+// PAYMOB WEBHOOK
+// ======================
+app.post("/api/paymob/webhook", async (req, res) => {
+  try {
+    console.log("📥 Paymob webhook received");
+    console.log("📥 Body:", JSON.stringify(req.body, null, 2));
+
+    const webhook = req.body;
+    const t = webhook.obj;
+    if (!t) {
+      console.log("⚠️ Missing obj");
+      return res.json({ ok: true });
+    }
+
+    // استخراج المعلومات الأساسية
+    const transactionId = String(t.id || "");
+    const isSuccess = t.success;
+    const paymobOrderId = String(t.order?.id || t.order || "");
+    const merchantOrderId =
+      t.merchant_order_id || t.order?.merchant_order_id || "";
+    const amount = (t.amount_cents || 0) / 100;
+
+    // استخراج رقم العقار
+    let propertyNumber = "";
+    if (merchantOrderId?.includes("-")) {
+      propertyNumber = merchantOrderId.split("-")[0];
+    }
+    if (!propertyNumber) {
+      propertyNumber =
+        t.payment_key_claims?.extra?.creation_extras?.propertyNumber || "";
+    }
+
+    const paymentMethod = t.source_data?.type || "";
+    const cardSubType = t.source_data?.sub_type || "";
+
+    console.log("🧾 Transaction:", transactionId, propertyNumber, amount);
+
+    // ===============================
+    // 1) جلب الرسوم من Paymob Inquiry
+    // ===============================
+    let merchantFees = 0;
+    let acqFees = 0;
+    let vatAmount = 0;
+    let totalFees = 0;
+    let netAmount = 0;
+
     try {
-      console.log("📥 Paymob webhook received");
-      console.log("📥 Full Body:", JSON.stringify(req.body, null, 2));
-      console.log("📥 Headers:", JSON.stringify(req.headers, null, 2));
+      const { paymobService } = await import("./paymob");
+      const inquiry = await paymobService.inquiryByTransactionId(transactionId);
 
-      const webhook = req.body;
-      const hmacFromHeader = req.headers["hmac"] as string || "";
-      const hmacFromQuery = (req.query.hmac || "") as string;
-      const hmac = hmacFromHeader || hmacFromQuery;
+      console.log("📡 Inquiry Response:", inquiry);
 
-      const t = webhook.obj;
-      if (!t) {
-        console.log("⚠️ No obj in webhook, might be a different format");
-        return res.json({ ok: true, message: "No obj field" });
+      if (inquiry?.transaction) {
+        merchantFees = inquiry.transaction.merchant_fees || 0;
+        acqFees = inquiry.transaction.acq_fees || 0;
+        vatAmount = inquiry.transaction.vat || 0;
+        totalFees = inquiry.transaction.total_fees || 0;
+        netAmount =
+          inquiry.transaction.net_amount || amount - totalFees || amount;
+      } else {
+        console.log("⚠️ Inquiry returned no transaction data");
       }
+    } catch (err) {
+      console.log("❌ Inquiry API Error:", err);
+    }
 
-      // التحقق من HMAC بالطريقة الصحيحة (ordered fields)
-      const SECRET_KEY = process.env.PAYMOB_HMAC_SECRET || "";
-      if (SECRET_KEY && hmac) {
-        const crypto = await import("crypto");
-        
-        // الحقول المرتبة لحساب HMAC
-        const orderedValues = [
-          String(t.amount_cents || ""),
-          String(t.created_at || ""),
-          String(t.currency || ""),
-          String(t.error_occured || false),
-          String(t.has_parent_transaction || false),
-          String(t.id || ""),
-          String(t.integration_id || ""),
-          String(t.is_3d_secure || false),
-          String(t.is_auth || false),
-          String(t.is_capture || false),
-          String(t.is_refunded || false),
-          String(t.is_standalone_payment || false),
-          String(t.is_voided || false),
-          String(t.order?.id || t.order || ""),
-          String(t.owner || ""),
-          String(t.pending || false),
-          String(t.source_data?.pan || ""),
-          String(t.source_data?.sub_type || ""),
-          String(t.source_data?.type || ""),
-          String(t.success || false),
-        ].join("");
+    console.log(
+      "🏦 Final Fees → merchant:",
+      merchantFees,
+      "acq:",
+      acqFees,
+      "vat:",
+      vatAmount,
+      "total:",
+      totalFees,
+      "net:",
+      netAmount
+    );
 
-        const calculatedHmac = crypto
-          .createHmac("sha512", SECRET_KEY)
-          .update(orderedValues)
-          .digest("hex");
-        
-        if (calculatedHmac !== hmac) {
-          console.warn("⚠️ HMAC mismatch - continuing for debugging");
-        } else {
-          console.log("✅ HMAC verified successfully");
-        }
-      }
-      
-      const transactionId = String(t.id || "");
-      const isSuccess = t.success;
-      const paymobOrderId = String(t.order?.id || t.order || "");
-      
-      // استخراج merchant_order_id (يحتوي على propertyNumber-timestamp)
-      const merchantOrderId = t.merchant_order_id || 
-                              t.order?.merchant_order_id ||
-                              "";
-      
-      // استخراج رقم العقار من merchant_order_id (format: propertyNumber-timestamp)
-      let propertyNumber = "";
-      if (merchantOrderId && merchantOrderId.includes("-")) {
-        propertyNumber = merchantOrderId.split("-")[0];
-      }
-      
-      // محاولات أخرى لاستخراج رقم العقار
-      if (!propertyNumber) {
-        propertyNumber = t.payment_key_claims?.extra?.creation_extras?.propertyNumber ||
-                        t.shipping_data?.extra_description?.split('-')[0]?.trim() ||
-                        t.intention?.extras?.creation_extras?.propertyNumber ||
-                        "";
-      }
+    if (!isSuccess) {
+      console.log("⚠️ Payment failed");
+      return res.json({ ok: true });
+    }
 
-      // استخراج بيانات المبلغ
-      const amountCents = t.amount_cents || 0;
-      const amount = amountCents / 100;
-      
-      // استخراج معلومات طريقة الدفع
-      const paymentMethod = t.source_data?.type || "";
-      const cardSubType = t.source_data?.sub_type || "";
-      
-      // طباعة الـ webhook كاملاً لتحليل البيانات
-      console.log(`📊 Full webhook obj:`, JSON.stringify(t, null, 2));
-      
-      // محاولة جلب الرسوم الحقيقية من Paymob API
-      let feeAmount = 0;
-      let vatAmount = 0;
-      let totalFees = 0;
-      let merchantFees = 0;
-      let acqFees = 0;
-      
-      try {
-        console.log(`📡 Fetching real fees from Paymob API for transaction: ${transactionId}`);
-        const { paymobService } = await import("./paymob");
-        const txDetails = await paymobService.getTransactionDetails(transactionId);
-        
-        if (txDetails && txDetails.fees > 0) {
-          console.log(`✅ Got real fees from Paymob API: fees=${txDetails.fees}, vat=${txDetails.vat}`);
-          feeAmount = txDetails.fees;
-          vatAmount = txDetails.vat;
-          totalFees = txDetails.totalFees;
-          
-          // تقسيم الرسوم (Paymob لا يفصل بين merchant و acq، لذا نقسمها تقريبياً)
-          merchantFees = Math.round(feeAmount * 0.30 * 100) / 100;
-          acqFees = Math.round(feeAmount * 0.70 * 100) / 100;
-        }
-      } catch (apiError) {
-        console.log(`⚠️ Could not fetch fees from Paymob API, will calculate locally`);
-      }
-      
-      // إذا لم نحصل على الرسوم من API، نحسبها محلياً
-      if (!feeAmount && amount > 0) {
-        console.log(`📊 Calculating fees locally based on payment method: ${paymentMethod}, cardType: ${cardSubType}`);
-        
-        // نسب الرسوم الحقيقية من بيانات Paymob (محدثة):
-        // - 20 ر.س Apple Pay: 1.38 fees = 6.9% (1.20 رسوم + 0.18 ضريبة)
-        // - 60 ر.س Visa: 2.62 fees = 4.37%
-        // - 35 ر.س Apple Pay/Mada: 1.35 fees = 3.86%
-        // - 60 ر.س Apple Pay: 1.60 fees = 2.67%
-        // الرسوم تشمل: merchant fees + VAT (15%)
-        // لذا الرسوم الأساسية = المجموع / 1.15
-        
-        // نسبة شاملة للضريبة (أي المجموع الكلي كنسبة من المبلغ)
-        let totalFeeRate = 0.069; // افتراضي 6.9% (شامل الضريبة)
-        
-        // تحديد النسبة حسب نوع البطاقة وطريقة الدفع
-        if (cardSubType === "Mada" || cardSubType === "mada") {
-          totalFeeRate = 0.044; // مدى: ~4.4% شامل الضريبة
-        } else if (paymentMethod === "card" && cardSubType === "Visa") {
-          totalFeeRate = 0.050; // Visa عادية: ~5% شامل الضريبة
-        } else if (paymentMethod === "apple_pay" || t.source_data?.type === "apple_pay") {
-          totalFeeRate = 0.069; // Apple Pay: ~6.9% شامل الضريبة (الأعلى)
-        }
-        
-        // حساب الرسوم الإجمالية أولاً
-        totalFees = Math.round(amount * totalFeeRate * 100) / 100;
-        
-        // الرسوم الأساسية = الإجمالي / 1.15 (لإزالة الضريبة)
-        feeAmount = Math.round((totalFees / 1.15) * 100) / 100;
-        
-        // ضريبة القيمة المضافة = 15% من الرسوم الأساسية
-        vatAmount = Math.round((totalFees - feeAmount) * 100) / 100;
-        
-        // تقسيم الرسوم بين التاجر والبنك
-        merchantFees = Math.round(feeAmount * 0.30 * 100) / 100;
-        acqFees = Math.round(feeAmount * 0.70 * 100) / 100;
-        
-        console.log(`📊 Calculated fees: totalRate=${totalFeeRate * 100}%, fee=${feeAmount}, vat=${vatAmount}, total=${totalFees}`);
-      }
-      
-      console.log(`🏦 Final fees: feeAmount=${feeAmount}, vat=${vatAmount}, merchant=${merchantFees}, acq=${acqFees}, total=${totalFees}`);
-      
-      const netAmount = Math.round((amount - totalFees) * 100) / 100;
+    // ===============================
+    // 2) البحث عن سجل الدفع
+    // ===============================
+    const payments = await storage.getPayments();
+    let payment = null;
 
-      console.log(`📝 Transaction ID: ${transactionId}`);
-      console.log(`🔑 OrderId: ${paymobOrderId}, MerchantOrderId: ${merchantOrderId}`);
-      console.log(`🏠 PropertyNumber: ${propertyNumber}`);
-      console.log(`💳 PaymentMethod: ${paymentMethod}, CardType: ${cardSubType}`);
-      console.log(`💰 Amount: ${amount}, Fee: ${feeAmount}, VAT: ${vatAmount}, Total Fees: ${totalFees}, Net: ${netAmount}`);
-      console.log(`✅ Success: ${isSuccess}`);
+    // أفضل بحث
+    if (!payment && merchantOrderId) {
+      payment = payments.find((p) =>
+        p.paymobOrderId?.includes(merchantOrderId)
+      );
+    }
 
-      if (!isSuccess) {
-        console.log("⚠️ Payment not successful");
-        return res.json({ ok: true, message: "Payment not successful" });
-      }
+    // البحث بالـ order_id
+    if (!payment && paymobOrderId) {
+      payment = payments.find((p) => p.paymobOrderId === paymobOrderId);
+    }
 
-      // البحث عن سجل الدفع بناءً على عدة معايير
-      const payments = await storage.getPayments();
-      console.log(`📋 Total payments in database: ${payments.length}`);
-      
-      // عرض الدفعات المعلقة فقط
-      const pendingPayments = payments.filter(p => p.status === "قيد المراجعة");
-      console.log(`📋 Pending payments: ${pendingPayments.length}`);
-      pendingPayments.forEach(p => {
-        console.log(`   - ${p.id}: property=${p.propertyNumber}, amount=${p.finalAmount}, paymobOrderId=${p.paymobOrderId?.substring(0, 30)}...`);
-      });
-      
-      let payment = null;
-      
-      // 1. البحث بـ merchantOrderId (الأكثر دقة)
-      if (!payment && merchantOrderId) {
-        console.log(`🔍 1. Searching by merchantOrderId: ${merchantOrderId}`);
-        // يمكن أن يكون مخزن كـ paymobOrderId أو جزء منه
-        payment = payments.find(p => 
-          p.paymobOrderId?.includes(merchantOrderId) || 
-          merchantOrderId.includes(p.id?.replace("PAY-", ""))
-        );
-      }
-      
-      // 2. البحث بـ paymobOrderId (Paymob's order ID)
-      if (!payment && paymobOrderId) {
-        console.log(`🔍 2. Searching by paymobOrderId: ${paymobOrderId}`);
-        payment = payments.find(p => 
-          p.paymobOrderId === paymobOrderId ||
-          p.paymobOrderId?.includes(paymobOrderId)
-        );
-      }
-      
-      // 3. البحث برقم العقار + المبلغ + حالة معلقة
-      if (!payment && propertyNumber && amount > 0) {
-        console.log(`🔍 3. Searching by propertyNumber + amount: ${propertyNumber}, ${amount}`);
-        payment = payments.find(p => 
-          p.propertyNumber === propertyNumber && 
-          p.finalAmount === amount &&
-          p.status === "قيد المراجعة"
-        );
-      }
-      
-      // 4. البحث برقم العقار + حالة معلقة فقط
-      if (!payment && propertyNumber) {
-        console.log(`🔍 4. Searching by propertyNumber only: ${propertyNumber}`);
-        payment = payments.find(p => 
-          p.propertyNumber === propertyNumber && 
-          p.status === "قيد المراجعة"
-        );
-      }
-      
-      // 5. البحث بالمبلغ + حالة معلقة (آخر محاولة)
-      if (!payment && amount > 0) {
-        console.log(`🔍 5. Searching by amount only: ${amount}`);
-        payment = payments.find(p => 
-          p.finalAmount === amount && 
-          p.status === "قيد المراجعة"
-        );
-      }
+    // البحث برقم العقار + مبلغ
+    if (!payment && propertyNumber) {
+      payment = payments.find(
+        (p) =>
+          p.propertyNumber === propertyNumber &&
+          p.status === "قيد المراجعة" &&
+          p.finalAmount === amount
+      );
+    }
 
-      if (!payment) {
-        console.error(`❌ Payment not found!`);
-        console.error(`   MerchantOrderId: ${merchantOrderId}`);
-        console.error(`   PaymobOrderId: ${paymobOrderId}`);
-        console.error(`   PropertyNumber: ${propertyNumber}`);
-        console.error(`   Amount: ${amount}`);
-        return res.status(404).json({ error: "Payment not found" });
-      }
+    if (!payment) {
+      console.error("❌ Payment not found");
+      return res.status(404).json({ error: "Payment not found" });
+    }
 
-      console.log(`✅ Found payment: ${payment.id}, Status: ${payment.status}`);
+    console.log("✅ Found Payment:", payment.id);
 
-      // إذا كان الدفع مكتمل مسبقاً، لا تفعل شيء
-      if (payment.status === "مكتمل") {
-        console.log("✓ Payment already completed");
-        return res.json({ ok: true, message: "Payment already processed" });
-      }
+    if (payment.status === "مكتمل") {
+      console.log("⚠️ Already completed");
+      return res.json({ ok: true });
+    }
 
-      // تحديث حالة الدفع إلى مكتمل مع بيانات الرسوم الحقيقية
-      const paymentMethodDisplay = cardSubType || paymentMethod || "بطاقة";
-      
-      await storage.updatePayment(payment.id, { 
-        status: "مكتمل",
-        completedAt: new Date().toISOString(),
-        transactionId,
-        paymentMethod: paymentMethodDisplay,
-        merchantFees,
-        acqFees,
-        feeAmount,
-        vatAmount,
-        totalFees,
-        netAmount,
-      });
-      
-      console.log(`💳 Payment method saved: ${paymentMethodDisplay}`);
+    // ===============================
+    // 3) تحديث الدفع بالرسوم الحقيقية
+    // ===============================
+    await storage.updatePayment(payment.id, {
+      status: "مكتمل",
+      completedAt: new Date().toISOString(),
+      transactionId,
+      paymentMethod: cardSubType || paymentMethod || "بطاقة",
+      merchantFees,
+      acqFees,
+      vatAmount,
+      totalFees,
+      feeAmount: merchantFees + acqFees,
+      netAmount,
+    });
 
-      console.log(`✅ Payment ${payment.id} marked as completed`);
+    console.log("💰 Payment Updated:", payment.id);
 
-      // إذا كانت هناك بيانات اشتراك معلقة، قم بتفعيلها
-      if (payment.action && payment.pendingStartDate && payment.pendingEndDate) {
-        const property = await storage.getPropertyByNumber(payment.propertyNumber);
-        
-        if (property) {
-          const subscriptionData = {
+    // ===============================
+    // 4) تفعيل الاشتراك لو فيه معلّق
+    // ===============================
+    if (
+      payment.action &&
+      payment.pendingStartDate &&
+      payment.pendingEndDate
+    ) {
+      const property = await storage.getPropertyByNumber(payment.propertyNumber);
+
+      if (property) {
+        await googleSheetsService.addSubscriptionToSheet(
+          payment.propertyNumber,
+          {
             packageId: payment.packageId,
             price: payment.pendingPrice || payment.finalAmount,
             subscriptionType: payment.pendingSubscriptionType || "موثوق",
             startDate: payment.pendingStartDate,
             endDate: payment.pendingEndDate,
             paymentId: payment.id,
-          };
+          },
+          property
+        );
 
-          // حفظ الاشتراك إلى ورقة الاشتراكات
-          await googleSheetsService.addSubscriptionToSheet(
-            payment.propertyNumber, 
-            subscriptionData, 
-            property
-          );
-
-          console.log(`✅ Subscription activated for property ${payment.propertyNumber}`);
-        } else {
-          console.error(`❌ Property not found: ${payment.propertyNumber}`);
-        }
+        console.log("🎉 Subscription Activated:", payment.propertyNumber);
       }
-
-      res.json({
-        ok: true,
-        message: "Payment processed successfully",
-        paymentId: payment.id,
-      });
-
-    } catch (error) {
-      console.error("❌ Webhook Error:", error);
-      res.status(500).json({ error: "server error" });
     }
-  });
+
+    return res.json({ ok: true, paymentId: payment.id });
+  } catch (err) {
+    console.error("❌ Webhook Error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
   // ======================
   // تحديث عناوين أعمدة المدفوعات
