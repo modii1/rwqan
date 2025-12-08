@@ -1,265 +1,82 @@
 # نظام إدارة العقارات - مودي الذكي 🏡
 
-## الدومين الرسمي
-**https://modiy.replit.app**
+## Overview
+Modiy is a comprehensive property management system designed for investment properties in the Qassim region of Saudi Arabia. It offers a premium platform for showcasing properties, integrated with a sophisticated subscription model, secure payment gateways, and cloud storage solutions. The project aims to streamline property listings, enhance user experience with advanced filtering, and provide robust management tools for property owners and administrators.
 
-## نظرة عامة
-نظام متكامل لإدارة العقارات الاستثمارية في منطقة القصيم، المملكة العربية السعودية. يوفر النظام منصة فاخرة لعرض العقارات مع نظام اشتراكات مميز وتكامل كامل مع خدمات الدفع والتخزين السحابي.
+## User Preferences
+- **Coding Style**: The user prefers clean, modular, and well-documented code, with an emphasis on maintainability and scalability.
+- **Communication**: The user prefers clear and concise communication, focusing on solutions and potential issues with proposed changes.
+- **Workflow**: The user favors an iterative development approach, with regular updates and opportunities for feedback.
+- **Interaction**: The user expects the agent to ask for confirmation before implementing significant architectural changes or refactoring large portions of the codebase.
+- **Language**: All generated content and explanations should be in Arabic.
 
-## التقنيات المستخدمة
-- **Frontend**: React + Vite + TypeScript + Tailwind CSS + shadcn/ui
-- **Backend**: Express.js + TypeScript
-- **Database**: Google Sheets (تخزين البيانات)
-- **Storage**: Google Drive (الصور) + Replit Object Storage (الإيصالات)
-- **Payments**: Paymob (بطاقات + Apple Pay)
-- **Analytics**: Google Analytics 4
-- **Design**: تصميم عربي RTL فاخر بلون ذهبي (#b88d2b)
+## System Architecture
 
-## الميزات الرئيسية
+### UI/UX Decisions
+- **Design Language**: Luxurious Arabic RTL design with a golden color scheme (#b88d2b).
+- **Fonts**: Cairo from Google Fonts.
+- **Responsive Design**: Mobile-first approach, 100% responsive.
+- **Property Cards**: Differentiated styling for "Trusted" (paid) properties (background #fffdf0, border #e0c97b) and free listings.
+- **Navigation**: Collapsible and movable sidebar for easy navigation, automatically hidden/shown on small screens.
+- **WhatsApp Button**: Green (#25D366) with request logging.
 
-### 1. نظام العقارات
-- عرض العقارات بتصميم فاخر مع بطاقات مميزة
-- **ترتيب ذكي**: العقارات الموثوقة (مدفوعة) في الأعلى، المجانية في الأسفل
-- **شارة "موثوق"** للعقارات المدفوعة + اسم العقار ظاهر
-- **العقارات المجانية**: بدون اسم + بدون شارة + في الأسفل
-- 100 فلتر للمرافق (مسبح، مبيت، ألعاب مائية، إلخ)
-- فلاتر ذكية: المدينة، الاتجاه، النوع، السعر
-- بحث شامل في جميع الحقول
-- معرض صور تفاعلي (حتى **15 صورة** لكل عقار)
-- أسعار متعددة: وسط الأسبوع، نهاية الأسبوع، مبيت، إجازات
+### Technical Implementations
+- **Frontend**: React, Vite, TypeScript, Tailwind CSS, shadcn/ui.
+- **Backend**: Express.js, TypeScript.
+- **Data Storage**: Google Sheets for all primary data (properties, subscriptions, payments, etc.).
+- **Image Storage**: Google Drive for real property images, with automatic public access.
+- **Receipt Storage**: Replit Object Storage for payment receipts.
+- **Payment Gateway**: Paymob for secure credit card and Apple Pay transactions, including webhook for automatic updates.
+- **Analytics**: Google Analytics 4.
+- **Messaging**: Meta WhatsApp Business API for instant notifications to the administrator.
+- **Smart Verification**: Automated bank transfer verification system for subscription activation.
+- **Fee Management**: Customizable Paymob KSA fee configuration via an admin panel.
+- **Date & Time Management**: All dates and times are handled in Riyadh local time (UTC+3) using Gregorian calendar, with dedicated utility functions.
+- **Scheduler**: Daily automated tasks for subscription expiry checks and status updates.
 
-### 2. نظام الاشتراكات
-- **نوعان فقط**:
-  - **موثوق (مميز)**: أي اشتراك مدفوع - عرض مميز بتصميم ذهبي + شارة "موثوق" + أولوية في البحث
-  - **عادي (مجاني)**: باقة مجانية - عرض عادي بدون مميزات
-  
-- **5 باقات**:
-  1. **اشتراك شهر** - 30 يوم - 35 ر.س (موثوق)
-  2. **عرض خاص شهرين** - 60 يوم - 60 ر.س بدلاً من 70 (موثوق)
-  3. **اشتراك شهر لعقارين** - 30 يوم - 50 ر.س (موثوق)
-  4. **باقة المخيمات** - 30 يوم - 20 ر.س (موثوق)
-  5. **باقة مجانية** - 0 ر.س - نسبة 10% من الحجز (عادي)
-     - **بدون اسم العقار** في البطاقة
-     - بدون تفاصيل العقار
-     - بدون رقم جوال
-     - إعلان يوم الثلاثاء فقط بالقروبات
-     - بدون تصميم خاص
-     - بدون شارة "موثوق"
-     - **تظهر في الأسفل** (بعد العقارات الموثوقة)
+### Feature Specifications
+- **Property System**:
+    - Luxurious property display with distinct cards.
+    - Smart sorting: Trusted (paid) properties prioritized at the top.
+    - 100 amenity filters, smart filters (city, direction, type, price), and comprehensive search.
+    - Interactive image gallery (up to 15 images per property).
+    - Multiple pricing options (mid-week, weekend, overnight, holidays).
+- **Subscription System**:
+    - Two types: "Trusted" (paid, premium display, priority) and "Normal" (free, basic display, lower priority).
+    - Five package options, including monthly, promotional, multi-property, and free.
+    - Discount codes (percentage or fixed amount).
+    - Automatic renewal with daily scheduling.
+- **WhatsApp Notification System**: Real-time notifications to admin for new properties, property edits, WhatsApp inquiries, receipt uploads, property approval/rejection, and manual messages.
+- **Secure Payment Flow**: Payment initiated, pending record created, Paymob webhook confirms payment, then subscription activated. HMAC validation for webhooks.
+- **User Authentication**: Secure login for owners (property ID + PIN).
 
-- أكواد خصم (نسبة أو قيمة ثابتة)
-- تجديد تلقائي مع جدولة يومية
-- دفع آمن عبر Paymob (بطاقات + Apple Pay) أو تحويل بنكي
+### Data Structure (Google Sheets)
+- **Property Data**: Property number (required, 5 digits), name, PIN, city, direction, type, amenities (comma-separated or JSON array), prices, subscription type, Drive folder ID.
+- **Subscriptions**: Start/end date, status, package ID, payment ID.
+- **Packages**: Name, duration, price, type, features, activation status.
+- **Discount Codes**: Code, type (percentage/fixed), value, expiry date, activation status.
+- **Payments**: Amount, discount code, final amount, Paymob ID, status, payment method, receipt link, and metadata (`action`, `pendingStartDate`, `pendingEndDate`, `pendingSubscriptionType`, `pendingPrice`) for payment verification.
+- **Requests (WhatsApp)**: Auto-generated short code, property number, request time.
+- **Suggestions**: Name, mobile, city, suggestion, status.
+- **Fee Settings**: Configuration for different payment methods (Mada, STC Pay, Visa/MC, Apple Pay) including percentages, fixed fees, and tax rates.
 
-### 3. التكاملات
-- **Google Sheets**: تخزين جميع البيانات (عقارات، اشتراكات، مدفوعات، إلخ)
-- **Google Drive**: إدارة صور العقارات الحقيقية
-  - **Service Account**: `moddy-drive-service@modi-bot-465120.iam.gserviceaccount.com`
-  - تجلب الصور تلقائياً من مجلدات Drive
-  - تجعل الصور public تلقائياً عند الجلب
-  - المجلد الرئيسي: `169jrXmGGQ27mtjkubu-i762xwQQ3e1uE` (صلاحية Editor)
-- **Paymob**: بوابة دفع إلكتروني + Webhook للتحديث التلقائي
-- **Object Storage**: حفظ إيصالات الدفع
-- **Google Analytics**: تتبع الزوار والإحصائيات
-- **Meta WhatsApp Business API**: إشعارات فورية للمدير
-  - إرسال رسائل واتساب تلقائية عند أي حدث في المنصة
-  - يتطلب: `META_WHATSAPP_TOKEN`, `META_PHONE_NUMBER_ID`, `META_NOTIFY_NUMBER`
+## External Dependencies
 
-### 5. نظام إشعارات الواتساب (Meta WhatsApp Business API)
-يتم إرسال إشعارات واتساب فورية للمدير عند:
-- **عقار جديد**: عند إضافة عقار جديد للمنصة
-- **تعديل عقار**: عند تحديث بيانات أي عقار
-- **طلب واتساب جديد**: عند نقر المستخدم على زر التواصل
-- **رفع إيصال**: عند رفع إيصال تحويل بنكي
-- **قبول/رفض عقار**: عند التحقق من عقار في لوحة الإدارة
-- **رسائل يدوية**: إمكانية إرسال رسائل من لوحة التحكم
-
-**الملفات المرتبطة:**
-- `server/whatsapp.ts`: جميع دوال الإشعارات
-- `server/routes.ts`: ربط الإشعارات بالأحداث
-
-### 4. الصفحات
-
-#### صفحات عامة (للجميع):
-- `/` - الصفحة الرئيسية لعرض العقارات
-- `/stats` - إحصائيات الموقع
-- `/suggest` - صفحة "اقترح لنا" للاقتراحات
-- `/register` - صفحة "اشترك معنا" لتسجيل عقار جديد
-
-#### صفحات خاصة (لأصحاب العقارات):
-- `/owner/login` - تسجيل الدخول (رقم العقار + PIN)
-- `/owner/dashboard` - لوحة تحكم المالك
-- `/owner/subscription` - إدارة الاشتراك والدفع
-- `/owner/images` - رفع وإدارة صور العقار
-
-#### صفحات إدارية (للإدارة):
-- `/admin/profits` - لوحة الأرباح
-- `/admin/packages` - إدارة الباقات
-- `/admin/discounts` - إدارة أكواد الخصم
-
-## هيكل البيانات (Google Sheets)
-
-### ورقة: بيانات العقارات
-- **رقم العقار** (5 أرقام - **مطلوب**)
-  - العقارات بدون رقم يتم تخطيها تلقائياً
-- الاسم
-- الرقم السري (PIN)
-- المدينة، الاتجاه، النوع
-- **المرافق**: نص مفصول بفواصل أو JSON array
-  - مثال: `صالة جلوس, مجلس داخلي, مسبح خارجي`
-  - أو: `["صالة جلوس", "مجلس داخلي", "مسبح خارجي"]`
-- الأسعار (متعدد)
-- نوع الاشتراك
-- معرف مجلد Drive
-
-### ورقة: الاشتراكات
-- تاريخ البدء/الانتهاء
-- الحالة
-- معرف الباقة
-- معرف الدفع
-
-### ورقة: الباقات
-- الاسم، المدة، السعر
-- النوع، المميزات
-- حالة التفعيل
-
-### ورقة: أكواد الخصم
-- الكود
-- النوع (نسبة/قيمة ثابتة)
-- القيمة
-- تاريخ الانتهاء
-- حالة التفعيل
-
-### ورقة: المدفوعات
-- مبلغ، كود خصم، المبلغ النهائي
-- معرف Paymob
-- الحالة، طريقة الدفع
-- رابط الإيصال
-- **Metadata للتحقق من الدفع**:
-  - `action`: نوع الإجراء (activate/renew/upgrade)
-  - `pendingStartDate`: تاريخ بدء الاشتراك المعلق
-  - `pendingEndDate`: تاريخ انتهاء الاشتراك المعلق
-  - `pendingSubscriptionType`: نوع الاشتراك المعلق (موثوق/عادي)
-  - `pendingPrice`: سعر الاشتراك المعلق
-  - يتم حفظ هذه البيانات عند بدء الدفع وتفعيلها بعد تأكيد Paymob Webhook
-
-### ورقة: الطلبات (WhatsApp)
-- كود قصير تلقائي
-- رقم العقار
-- وقت الطلب
-
-### ورقة: الاقتراحات
-- الاسم، الجوال، المدينة
-- الاقتراح
-- الحالة
-
-### ورقة: إعدادات الرسوم
-- معرف الإعداد (fee-mada, fee-visa-local, etc)
-- الاسم بالعربي
-- الاسم بالإنجليزي
-- نسبة الرسوم (%)
-- الرسوم الثابتة (ر.س)
-- نسبة الضريبة (%)
-- حالة التفعيل
-- نوع البطاقة (محلي/دولي)
-- تاريخ التحديث
-
-## نظام رسوم Paymob KSA (إعدادات قابلة للتخصيص)
-
-### الرسوم الرسمية:
-| وسيلة الدفع | النسبة | رسوم ثابتة | الضريبة |
-|------------|--------|-----------|---------|
-| مدى (Mada) | 1% | 1 ر.س | 15% |
-| STC Pay | 1% | 1 ر.س | 15% |
-| Visa/MC محلي | 2.7% | 1 ر.س | 15% |
-| Visa/MC دولي | 3.7% | 1 ر.س | 15% |
-| Apple Pay | 2.7% | 1 ر.س | 15% |
-
-### صفحة الإدارة:
-- `/admin` → قسم "إعدادات الرسوم"
-- إضافة/تعديل/حذف وسائل دفع
-- حاسبة رسوم تفاعلية
-- تهيئة تلقائية للرسوم الافتراضية
-
-### API Endpoints:
-- `GET /api/admin/fee-configs` - جلب إعدادات الرسوم
-- `POST /api/admin/fee-configs` - إضافة إعداد جديد
-- `PUT /api/admin/fee-configs/:id` - تحديث إعداد
-- `DELETE /api/admin/fee-configs/:id` - حذف إعداد
-- `POST /api/admin/calculate-fees` - حساب الرسوم لمبلغ معين
-
-## متغيرات البيئة المطلوبة
-```
-# Google Services
-GOOGLE_SHEET_ID=xxx
-GOOGLE_SERVICE_ACCOUNT_KEY=xxx  # JSON key من Google Cloud Service Account
-
-# Paymob
-PAYMOB_API_KEY=xxx
-PAYMOB_PUBLIC_KEY=xxx
-PAYMOB_HMAC_SECRET=xxx
-PAYMOB_INTEGRATION_ID_CARDS=xxx
-PAYMOB_INTEGRATION_ID_APPLEPAY=xxx
-
-# Meta WhatsApp Business API
-META_WHATSAPP_TOKEN=xxx         # توكن الوصول من Meta Business
-META_PHONE_NUMBER_ID=xxx        # معرف رقم الهاتف
-META_NOTIFY_NUMBER=xxx          # رقم الواتساب للإشعارات (بدون +)
-
-# Others
-SESSION_SECRET=xxx
-DEFAULT_OBJECT_STORAGE_BUCKET_ID=xxx
-```
-
-## ملاحظات التصميم
-- تصميم Mobile-First متجاوب 100%
-- لغة عربية RTL كاملة
-- خط Cairo من Google Fonts
-- لون ذهبي فاخر (#b88d2b)
-- بطاقات العقارات الموثوقة: خلفية #fffdf0 + إطار #e0c97b
-- زر WhatsApp أخضر (#25D366) مع تسجيل الطلبات
-- **سايدبار جانبي**: نظام تنقل قابل للطي والتحريك
-  - عرض قابل للتخصيص (20rem افتراضياً)
-  - إخفاء/إظهار تلقائي للشاشات الصغيرة
-  - تنقل سهل بين جميع الصفحات
-
-## الجدولة التلقائية
-- تشغيل يومي للتحقق من انتهاء الاشتراكات
-- تحديث تلقائي لحالة الاشتراكات
-- إشعارات (ستضاف لاحقاً)
-
-## نظام التحقق من الدفع (Payment Verification System)
-
-### تدفق الدفع الآمن:
-1. **بدء الدفع**: عند اختيار باقة والضغط على "ادفع"
-   - يتم إنشاء سجل دفع بحالة "معلق"
-   - حفظ بيانات الاشتراك المطلوب في حقول `pending*`
-   - **لا يتم تفعيل الاشتراك في هذه المرحلة**
-   - إعادة توجيه المستخدم إلى صفحة دفع Paymob
-
-2. **تأكيد الدفع**: عند نجاح الدفع في Paymob
-   - Paymob يرسل webhook إلى `/api/paymob/webhook`
-   - التحقق من صحة Webhook بواسطة HMAC
-   - البحث عن سجل الدفع بناءً على `paymobOrderId`
-   - تحديث حالة الدفع إلى "مكتمل"
-   - **تفعيل الاشتراك** باستخدام البيانات من `pending*`
-   - حفظ الاشتراك في ورقة الاشتراكات
-
-3. **الأمان والموثوقية**:
-   - لا يتم تفعيل أي اشتراك إلا بعد تأكيد Paymob
-   - منع التلاعب: لا يمكن تفعيل اشتراك بدون دفع حقيقي
-   - HMAC Signature للتحقق من صحة Webhook
-   - معالجة idempotent: تجاهل Webhooks المكررة
-
-### الملفات المرتبطة:
-- `server/routes.ts`: endpoint `/api/paymob/webhook`
-- `server/paymob.ts`: إنشاء رابط الدفع
-- `server/googleSheets.ts`: حفظ وتحديث المدفوعات والاشتراكات
-- `shared/schema.ts`: تعريف Payment مع حقول metadata
-
-## الأمان
-- تسجيل دخول آمن برقم العقار + PIN
-- Webhook مؤمّن بـ HMAC من Paymob
-- Session management مع Express
-- Environment variables لجميع المفاتيح السرية
-- **التحقق من الدفع**: لا تفعيل إلا بعد webhook من Paymob
+-   **Google Sheets**: Primary database for all application data.
+    -   `GOOGLE_SHEET_ID`
+    -   `GOOGLE_SERVICE_ACCOUNT_KEY` (JSON key)
+-   **Google Drive**: Stores property images.
+    -   Service Account: `moddy-drive-service@modi-bot-465120.iam.gserviceaccount.com` (Editor access to main folder `169jrXmGGQ27mtjkubu-i762xwQQ3e1uE`)
+-   **Paymob**: Payment gateway for transactions.
+    -   `PAYMOB_API_KEY`
+    -   `PAYMOB_PUBLIC_KEY`
+    -   `PAYMOB_HMAC_SECRET`
+    -   `PAYMOB_INTEGRATION_ID_CARDS`
+    -   `PAYMOB_INTEGRATION_ID_APPLEPAY`
+-   **Replit Object Storage**: Stores payment receipts.
+    -   `DEFAULT_OBJECT_STORAGE_BUCKET_ID`
+-   **Google Analytics 4**: For tracking website visitors and statistics.
+-   **Meta WhatsApp Business API**: For sending automated WhatsApp notifications.
+    -   `META_WHATSAPP_TOKEN`
+    -   `META_PHONE_NUMBER_ID`
+    -   `META_NOTIFY_NUMBER`

@@ -24,6 +24,7 @@ import type {
   InsertFeeConfig,
 } from "@shared/schema";
 import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
+import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 
@@ -760,7 +761,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     propertyRow[15] = isPremium ? "مميز" : "عادي";
 
     // 🟡 16 = آخر تحديث
-    propertyRow[16] = new Date().toISOString().split("T")[0];
+    propertyRow[16] = toRiyadhISO(getNowInRiyadh()).split("T")[0];
 
     // 🟡 17 = تاريخ الاشتراك
     propertyRow[17] = subscription.startDate.split("T")[0];
@@ -1171,7 +1172,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     const newPayment: Payment = {
       id,
       ...payment,
-      createdAt: new Date().toISOString(),
+      createdAt: toRiyadhISO(getNowInRiyadh()),
     };
 
     // ترتيب الأعمدة:
@@ -1894,12 +1895,12 @@ async getWhatsAppLogs() {
     partnerShare: number;
     payments: any[];
   }> {
-    const now = new Date();
+    const now = getNowInRiyadh();
     const monthYear = `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`;
     
     const payments = await this.getPayments();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startOfMonth = getStartOfMonthRiyadh(now);
+    const endOfMonth = getEndOfMonthRiyadh(now);
     
     const monthlyPayments = payments.filter(p => {
       const paymentDate = new Date(p.createdAt || "");
@@ -1937,8 +1938,8 @@ async getWhatsAppLogs() {
   }> {
     const payments = await this.getPayments();
     const feeConfigs = await this.getFeeConfigs();
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const now = getNowInRiyadh();
+    const startOfMonth = getStartOfMonthRiyadh(now);
     
     const completedPayments = payments.filter(p => 
       p.status === "مكتمل"
