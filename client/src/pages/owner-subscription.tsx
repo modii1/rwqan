@@ -408,7 +408,10 @@ export default function OwnerSubscriptionPage() {
                 className="flex-1"
                 data-testid="button-confirm-payment"
               >
-                {isSubmittingPayment ? 'جاري الدفع...' : 'تأكيد الدفع'}
+                {isSubmittingPayment 
+                  ? (selectedPaymentMethod === 'bank' ? 'جاري الرفع...' : 'جاري الدفع...')
+                  : (selectedPaymentMethod === 'bank' ? 'رفع الإيصال وإكمال الطلب' : 'تأكيد الدفع')
+                }
               </Button>
               <Button
                 onClick={() => {
