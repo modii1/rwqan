@@ -151,10 +151,13 @@ export class PaymobService {
 
   /* ==========================================================
       3) الحصول على Auth Token من Paymob
+         ملاحظة: هذا يتطلب API Key وليس Secret Key
+         الـ API Key مختلف عن Secret Key (الذي يبدأ بـ sau_sk_)
   =========================================================== */
   async getAuthToken(): Promise<string | null> {
     try {
       console.log("🔐 Getting Paymob auth token...");
+      console.log("   Using key prefix:", SECRET_KEY?.substring(0, 15));
       
       const response = await fetch(
         "https://ksa.paymob.com/api/auth/tokens",
@@ -173,6 +176,8 @@ export class PaymobService {
 
       if (!response.ok || !data.token) {
         console.error("❌ Auth token error:", data);
+        console.log("   Note: Transaction Inquiry API requires the 'API Key' from Paymob dashboard");
+        console.log("   The 'Secret Key' (sau_sk_...) is for Unified Checkout only");
         return null;
       }
 
@@ -185,22 +190,71 @@ export class PaymobService {
   }
 
   /* ==========================================================
-      4) 🚀 Transaction Inquiry API الرسمي
+      4) 🚀 Transaction Inquiry API - باستخدام Secret Key مباشرة
+         نستخدم endpoint مختلف يدعم Bearer token
   =========================================================== */
   async inquiryTransaction(body: {
     order_id?: string;
     merchant_order_id?: string;
   }) {
     try {
-      // الحصول على auth token أولاً
+      console.log("📡 Trying Transaction Inquiry API...");
+      console.log("   Request body:", JSON.stringify(body));
+      
+      // Method 1: Try using Secret Key directly as Bearer token with v1 endpoint
+      const orderId = body.order_id;
+      if (orderId) {
+        console.log("   Attempting direct Bearer token auth...");
+        
+        // Try getting order details directly
+        const directResponse = await fetch(
+          `https://ksa.paymob.com/v1/orders/${orderId}`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${SECRET_KEY}`,
+            },
+          }
+        );
+
+        if (directResponse.ok) {
+          const orderData = await directResponse.json();
+          console.log("📊 Direct order lookup response:", JSON.stringify(orderData, null, 2));
+          
+          // Extract fee information if available
+          if (orderData) {
+            const amountCents = orderData.amount_cents || orderData.amount || 0;
+            const originalAmount = amountCents > 100 ? amountCents / 100 : amountCents;
+            
+            return {
+              ok: true,
+              originalAmount,
+              merchantFees: orderData.merchant_fees || 0,
+              acqFees: orderData.acq_fees || 0,
+              vat: orderData.vat || 0,
+              totalFees: (orderData.merchant_fees || 0) + (orderData.acq_fees || 0) + (orderData.vat || 0),
+              netAmount: originalAmount - ((orderData.merchant_fees || 0) + (orderData.acq_fees || 0) + (orderData.vat || 0)),
+              raw: orderData,
+            };
+          }
+        } else {
+          const errorText = await directResponse.text();
+          console.log("   Direct lookup failed:", directResponse.status, errorText);
+        }
+      }
+
+      // Method 2: Fall back to legacy auth token method
       const authToken = await this.getAuthToken();
       
       if (!authToken) {
-        console.error("❌ Failed to get auth token");
+        console.error("❌ Failed to get auth token - Transaction Inquiry API not available");
+        console.log("   To enable Transaction Inquiry, add the 'API Key' from Paymob Dashboard");
+        console.log("   Go to: Settings → Account Info → API Key (different from Secret Key)");
         return null;
       }
 
-      console.log("📡 Calling Transaction Inquiry API...");
+      console.log("📡 Calling Legacy Transaction Inquiry API...");
       
       const response = await fetch(
         "https://ksa.paymob.com/api/ecommerce/orders/transaction_inquiry",
