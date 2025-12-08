@@ -1,11 +1,13 @@
 // client/src/pages/admin/sections/payments.tsx
 import { useState, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, CheckCircle2, XCircle } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -122,6 +124,51 @@ function formatDate(dateStr: string) {
 
 export default function PaymentsSection() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const { toast } = useToast();
+  
+  // Mutation للموافقة على التحويل البنكي
+  const approvePaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const response = await apiRequest("POST", "/api/admin/payment/approve", { paymentId });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      toast({
+        title: "✅ تم قبول التحويل",
+        description: "تم تفعيل الاشتراك بنجاح",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "❌ خطأ",
+        description: "فشل قبول التحويل",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutation لرفض التحويل البنكي
+  const rejectPaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const response = await apiRequest("POST", "/api/admin/payment/reject", { paymentId });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      toast({
+        title: "✅ تم رفض التحويل",
+        description: "تم رفض الدفع بنجاح",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "❌ خطأ",
+        description: "فشل رفض التحويل",
+        variant: "destructive",
+      });
+    },
+  });
   
   const { data, isLoading } = useQuery<Payment[]>({
     queryKey: ["admin-payments"],
@@ -327,12 +374,13 @@ export default function PaymentsSection() {
                       </Td>
                       <Td>{formatDate(p.createdAt)}</Td>
                       <Td>
-                        {isCompleted && (
+                        {(isCompleted || p.status === "قيد المراجعة") && (
                           <Button
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6"
                             onClick={() => setExpandedRow(isExpanded ? null : p.id)}
+                            data-testid={`button-expand-payment-${p.id}`}
                           >
                             {isExpanded ? (
                               <ChevronUp className="w-3 h-3" />
@@ -344,7 +392,84 @@ export default function PaymentsSection() {
                       </Td>
                     </tr>
                     
-                    {/* صف التفاصيل الموسعة */}
+                    {/* صف التفاصيل الموسعة - للمدفوعات المعلقة */}
+                    {isExpanded && p.status === "قيد المراجعة" && (
+                      <tr key={`${p.id}-pending-details`} className="bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300">
+                        <Td colSpan={9}>
+                          <div className="py-4 px-3">
+                            <div className="text-sm font-bold mb-3 text-amber-700 dark:text-amber-400">
+                              🔍 تحويل بنكي معلق - يحتاج مراجعة
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
+                              <div className="bg-card p-3 rounded border">
+                                <div className="text-muted-foreground mb-1">رقم العقار</div>
+                                <div className="font-bold">{p.propertyNumber}</div>
+                              </div>
+                              <div className="bg-card p-3 rounded border">
+                                <div className="text-muted-foreground mb-1">الباقة</div>
+                                <div className="font-semibold">{getPackageNameArabic(p.packageId || '')}</div>
+                              </div>
+                              <div className="bg-card p-3 rounded border">
+                                <div className="text-muted-foreground mb-1">المبلغ النهائي</div>
+                                <div className="font-bold text-green-600">{amount.toFixed(2)} ر.س</div>
+                              </div>
+                              <div className="bg-card p-3 rounded border">
+                                <div className="text-muted-foreground mb-1">تاريخ الدفع</div>
+                                <div className="font-semibold">{formatDate(p.createdAt)}</div>
+                              </div>
+                            </div>
+
+                            {p.receiptUrl && (
+                              <div className="mb-4">
+                                <a
+                                  href={p.receiptUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 underline text-sm hover:text-blue-800"
+                                >
+                                  📎 عرض إيصال التحويل البنكي
+                                </a>
+                              </div>
+                            )}
+
+                            <div className="flex gap-3 mt-4">
+                              <Button
+                                size="sm"
+                                variant="default"
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                                onClick={() => approvePaymentMutation.mutate(p.id)}
+                                disabled={approvePaymentMutation.isPending}
+                                data-testid={`button-approve-payment-${p.id}`}
+                              >
+                                {approvePaymentMutation.isPending ? (
+                                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-4 h-4 ml-2" />
+                                )}
+                                قبول التحويل وتفعيل الاشتراك
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => rejectPaymentMutation.mutate(p.id)}
+                                disabled={rejectPaymentMutation.isPending}
+                                data-testid={`button-reject-payment-${p.id}`}
+                              >
+                                {rejectPaymentMutation.isPending ? (
+                                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 ml-2" />
+                                )}
+                                رفض التحويل
+                              </Button>
+                            </div>
+                          </div>
+                        </Td>
+                      </tr>
+                    )}
+                    
+                    {/* صف التفاصيل الموسعة - للمدفوعات المكتملة */}
                     {isExpanded && isCompleted && (() => {
                       const hasPaymobFees = p.totalFees !== undefined && p.totalFees > 0;
                       const hasSeparateFees = p.merchantFees !== undefined || p.acqFees !== undefined;
