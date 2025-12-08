@@ -147,6 +147,17 @@ const {
   refetchOnWindowFocus: false,
 });
 
+// 5.1) التحقق من التحويل البنكي المعلق - نظام ذكي
+const {
+  data: pendingCheckData,
+  isLoading: isPendingCheckLoading,
+} = useQuery<any>({
+  queryKey: ["/api/owner/payment/check-pending"],
+  enabled: sessionData?.isLoggedIn === true,
+  retry: false,
+  refetchInterval: 30000, // تحديث كل 30 ثانية
+});
+
 // 6) إعادة محاولة الدفع
 const retryPaymentMutation = useMutation({
   mutationFn: async (paymentId: string) => {
@@ -420,6 +431,79 @@ const calculateAnalytics = () => {
             </Button>
           </div>
         </Card>
+
+        {/* ===== شريط ذكاء التحقق من التحويل البنكي المعلق ===== */}
+        {!isPendingCheckLoading && pendingCheckData?.hasPending && (
+          <Card className={`p-4 md:p-6 border-2 ${
+            pendingCheckData.autoCheckPassed 
+              ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+              : 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+          }`}>
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                pendingCheckData.autoCheckPassed 
+                  ? 'bg-green-100 dark:bg-green-900/40'
+                  : 'bg-amber-100 dark:bg-amber-900/40'
+              }`}>
+                {pendingCheckData.autoCheckPassed ? (
+                  <CheckCircle2 className="w-6 h-6 text-green-600" />
+                ) : (
+                  <AlertTriangle className="w-6 h-6 text-amber-600" />
+                )}
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-base md:text-lg mb-2">
+                  {pendingCheckData.autoCheckPassed 
+                    ? '✅ التحويل البنكي جاهز للتفعيل!' 
+                    : '⚠️ تحويل بنكي معلق - يحتاج مراجعة'}
+                </h3>
+                
+                {pendingCheckData.autoCheckPassed ? (
+                  <p className="text-sm text-muted-foreground mb-3">
+                    تم التحقق التلقائي من جميع البيانات بنجاح. سيتم تفعيل الاشتراك تلقائياً بعد مراجعة الإدارة.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      تم العثور على بعض المشاكل في بيانات التحويل:
+                    </p>
+                    <ul className="list-disc mr-5 text-sm space-y-1 mb-3">
+                      {pendingCheckData.issues?.map((issue: string, idx: number) => (
+                        <li key={idx} className="text-amber-700 dark:text-amber-400">{issue}</li>
+                      ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground">
+                      يرجى التأكد من البيانات أو التواصل مع الدعم للمساعدة.
+                    </p>
+                  </>
+                )}
+
+                <div className="mt-3 p-3 bg-white dark:bg-background rounded-lg border">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">الباقة:</span>
+                      <span className="font-semibold mr-2">{pendingCheckData.payment?.packageId || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">المبلغ:</span>
+                      <span className="font-semibold mr-2">{pendingCheckData.payment?.finalAmount} ر.س</span>
+                    </div>
+                  </div>
+                  {pendingCheckData.payment?.receiptUrl && (
+                    <a 
+                      href={pendingCheckData.payment.receiptUrl} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="text-xs text-primary underline mt-2 inline-block"
+                    >
+                      عرض الإيصال
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* ===== سجل المدفوعات ===== */}
         <Card className="p-4 md:p-6">
