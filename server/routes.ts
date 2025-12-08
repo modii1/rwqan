@@ -1798,6 +1798,79 @@ app.post("/api/owner/payment/retry", async (req, res) => {
   }
 });
 
+// رفع إيصال جديد لدفعة معلقة
+app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    const { paymentId } = req.body;
+    
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ error: "الإيصال مطلوب" });
+    }
+    
+    // جلب الدفعة والتحقق من أنها تخص هذا العقار
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+    
+    if (payment.propertyNumber !== propertyNumber) {
+      return res.status(403).json({ error: "غير مصرح لك" });
+    }
+    
+    // رفع الإيصال إلى R2
+    let receiptUrl = "";
+    if (req.file && R2_BUCKET) {
+      const receiptKey = `receipts/${propertyNumber}-${Date.now()}.jpg`;
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: receiptKey,
+          Body: req.file.buffer,
+          ContentType: "image/jpeg",
+        })
+      );
+      receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+    }
+    
+    // تحديث الدفعة بالإيصال الجديد
+    await googleSheetsService.updatePayment(paymentId, {
+      receiptUrl: receiptUrl,
+    });
+    
+    // إرسال إشعار WhatsApp
+    const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
+    await sendWhatsAppNotification(
+      `📤 *تم رفع إيصال جديد*\n\n` +
+      `📍 العقار: ${property?.name || propertyNumber}\n` +
+      `🔢 رقم العقار: ${propertyNumber}\n` +
+      `💵 المبلغ: ${payment.finalAmount} ر.س\n` +
+      `📦 الباقة: ${payment.packageId}\n` +
+      `🧾 الإيصال: ${receiptUrl}\n\n` +
+      `⏳ بانتظار المراجعة والتفعيل`
+    );
+    
+    console.log(`📤 Receipt uploaded for payment ${paymentId}: ${receiptUrl}`);
+    
+    res.json({ 
+      success: true, 
+      message: "تم رفع الإيصال بنجاح",
+      receiptUrl: receiptUrl
+    });
+  } catch (err: any) {
+    console.error("Receipt upload error:", err);
+    res.status(500).json({ error: err.message || "خطأ في رفع الإيصال" });
+  }
+});
+
 // 3. التحويل البنكي مع رفع الإيصال
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {

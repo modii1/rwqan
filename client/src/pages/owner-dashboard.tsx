@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
@@ -30,6 +30,7 @@ import {
   Minus,
   ChevronLeft,
   ChevronRight,
+  Upload,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
@@ -39,6 +40,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function OwnerDashboard() {
   const [, setLocation] = useLocation();
@@ -47,6 +55,20 @@ export default function OwnerDashboard() {
   const [showRequestsStats, setShowRequestsStats] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [paymentsExpanded, setPaymentsExpanded] = useState(true);
+  
+  // نافذة رفع الإيصال للتحويل البنكي
+  const [showReceiptDialog, setShowReceiptDialog] = useState(false);
+  const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState<any>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // نتيجة الفحص النهائية
+  const [verificationResult, setVerificationResult] = useState<{
+    success: boolean;
+    summary: string;
+    errors: string[];
+  } | null>(null);
   
   // شريط التحقق الذكي - فحص بيانات العقار
   const [isVerifying, setIsVerifying] = useState(false);
@@ -296,6 +318,11 @@ const startSmartVerification = async () => {
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 800));
     
+    // جمع الأخطاء من الخطوات
+    const errorsList = steps
+      .filter(s => s.status === 'error')
+      .map(s => `${s.name}: ${s.message}`);
+    
     if (!hasErrors) {
       // استدعاء API لتفعيل الاشتراك تلقائياً
       const response = await apiRequest('POST', '/api/owner/property/activate', {
@@ -308,6 +335,13 @@ const startSmartVerification = async () => {
         steps[5].message = 'تم تفعيل الاشتراك بنجاح!';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
+        
+        // تعيين نتيجة الفحص الناجحة
+        setVerificationResult({
+          success: true,
+          summary: 'تم التحقق من جميع بيانات العقار بنجاح وتفعيل الاشتراك تلقائياً',
+          errors: []
+        });
         
         toast({
           title: "✅ تم التفعيل بنجاح",
@@ -325,6 +359,12 @@ const startSmartVerification = async () => {
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
         
+        setVerificationResult({
+          success: false,
+          summary: result.message || 'فشل تفعيل الاشتراك',
+          errors: [result.message || 'فشل التفعيل']
+        });
+        
         setTimeout(() => setIsVerifying(false), 2000);
       }
     } else {
@@ -332,6 +372,13 @@ const startSmartVerification = async () => {
       steps[5].message = 'لا يمكن التفعيل - يوجد أخطاء في البيانات';
       setVerificationProgress(100);
       setVerificationSteps([...steps]);
+      
+      // تعيين نتيجة الفحص الفاشلة مع الأسباب
+      setVerificationResult({
+        success: false,
+        summary: `فشل التحقق - ${errorsList.length} مشكلة تحتاج إصلاح`,
+        errors: errorsList
+      });
       
       toast({
         title: "⚠️ فشل التحقق",
@@ -347,7 +394,56 @@ const startSmartVerification = async () => {
       description: error.message || "حدث خطأ أثناء التحقق",
       variant: "destructive",
     });
+    setVerificationResult({
+      success: false,
+      summary: 'حدث خطأ أثناء التحقق',
+      errors: [error.message || 'خطأ غير متوقع']
+    });
     setIsVerifying(false);
+  }
+};
+
+// دالة رفع الإيصال للتحويل البنكي
+const handleReceiptUpload = async () => {
+  if (!receiptFile || !selectedPaymentForReceipt) return;
+  
+  setIsUploadingReceipt(true);
+  
+  try {
+    const formData = new FormData();
+    formData.append('paymentId', selectedPaymentForReceipt.id);
+    formData.append('receipt', receiptFile);
+    
+    const response = await fetch('/api/owner/payment/upload-receipt', {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok) {
+      toast({
+        title: "✅ تم رفع الإيصال",
+        description: "تم رفع إيصال التحويل بنجاح وسيتم مراجعته",
+      });
+      
+      // إغلاق النافذة وإعادة تحميل البيانات
+      setShowReceiptDialog(false);
+      setSelectedPaymentForReceipt(null);
+      setReceiptFile(null);
+      await queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
+    } else {
+      throw new Error(result.error || 'فشل رفع الإيصال');
+    }
+  } catch (error: any) {
+    toast({
+      title: "خطأ",
+      description: error.message || "حدث خطأ في رفع الإيصال",
+      variant: "destructive",
+    });
+  } finally {
+    setIsUploadingReceipt(false);
   }
 };
 
@@ -718,6 +814,64 @@ const calculateAnalytics = () => {
                   </div>
                 </div>
               )}
+              
+              {/* نتيجة الفحص الواضحة للعميل */}
+              {verificationResult && !isVerifying && (
+                <div className={`mt-4 p-4 rounded-lg border-2 ${
+                  verificationResult.success 
+                    ? 'bg-green-50 border-green-400 dark:bg-green-900/20' 
+                    : 'bg-red-50 border-red-400 dark:bg-red-900/20'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      verificationResult.success ? 'bg-green-500' : 'bg-red-500'
+                    }`}>
+                      {verificationResult.success ? (
+                        <CheckCircle2 className="w-6 h-6 text-white" />
+                      ) : (
+                        <XCircle className="w-6 h-6 text-white" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className={`font-bold text-lg ${
+                        verificationResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
+                      }`}>
+                        {verificationResult.success ? '✅ نجح الفحص!' : '❌ فشل الفحص'}
+                      </h4>
+                      <p className={`text-sm mt-1 ${
+                        verificationResult.success ? 'text-green-600 dark:text-green-300' : 'text-red-600 dark:text-red-300'
+                      }`}>
+                        {verificationResult.summary}
+                      </p>
+                      
+                      {/* قائمة الأخطاء */}
+                      {verificationResult.errors.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <p className="text-sm font-semibold text-red-700 dark:text-red-400">المشاكل التي تحتاج إصلاح:</p>
+                          <ul className="list-disc list-inside text-sm text-red-600 dark:text-red-300 space-y-1">
+                            {verificationResult.errors.map((error, idx) => (
+                              <li key={idx}>{error}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {/* زر تعديل البيانات */}
+                      {!verificationResult.success && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="mt-3 bg-red-600 hover:bg-red-700 text-white gap-2"
+                          onClick={() => setLocation("/owner/update-property")}
+                        >
+                          <Edit3 className="w-4 h-4" />
+                          تعديل البيانات
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         )}
@@ -817,7 +971,14 @@ const calculateAnalytics = () => {
                         key={payment.id} 
                         payment={payment} 
                         onRetryPayment={(p) => {
-                          retryPaymentMutation.mutate(p.id);
+                          // إذا كان التحويل بنكي، افتح نافذة رفع الإيصال
+                          if (p.paymentMethod === 'تحويل بنكي') {
+                            setSelectedPaymentForReceipt(p);
+                            setShowReceiptDialog(true);
+                          } else {
+                            // دفع إلكتروني - إعادة محاولة الدفع
+                            retryPaymentMutation.mutate(p.id);
+                          }
                         }}
                         isRetrying={retryPaymentMutation.isPending}
                       />
@@ -1003,9 +1164,120 @@ const calculateAnalytics = () => {
             onClose={() => setShowRequestsStats(false)}
           />
         )}
+
+        {/* ===== نافذة رفع الإيصال للتحويل البنكي ===== */}
+        <Dialog open={showReceiptDialog} onOpenChange={setShowReceiptDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                رفع إيصال التحويل البنكي
+              </DialogTitle>
+              <DialogDescription>
+                ارفع صورة إيصال التحويل البنكي للدفعة المعلقة وسيتم مراجعتها
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              {/* معلومات الدفعة */}
+              {selectedPaymentForReceipt && (
+                <div className="p-3 bg-muted/20 rounded-lg text-sm space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">المبلغ:</span>
+                    <span className="font-bold">{selectedPaymentForReceipt.finalAmount} ر.س</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">الباقة:</span>
+                    <span>{getPackageNameArabic(selectedPaymentForReceipt.packageId)}</span>
+                  </div>
+                  {selectedPaymentForReceipt.receiptUrl && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">إيصال سابق:</span>
+                      <a 
+                        href={selectedPaymentForReceipt.receiptUrl} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-primary text-xs underline"
+                      >
+                        عرض الإيصال السابق
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* رفع الإيصال */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold">صورة الإيصال الجديد</label>
+                <input 
+                  ref={fileInputRef} 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} 
+                  className="hidden" 
+                />
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => fileInputRef.current?.click()} 
+                  className="w-full gap-2"
+                >
+                  <Upload className="w-4 h-4" />
+                  {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
+                </Button>
+                {receiptFile && (
+                  <p className="text-xs text-green-600">تم اختيار: {receiptFile.name}</p>
+                )}
+              </div>
+              
+              {/* أزرار الإجراء */}
+              <div className="flex gap-2 pt-4">
+                <Button
+                  onClick={handleReceiptUpload}
+                  disabled={!receiptFile || isUploadingReceipt}
+                  className="flex-1 gap-2"
+                >
+                  {isUploadingReceipt ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      جاري الرفع...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      رفع الإيصال
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowReceiptDialog(false);
+                    setSelectedPaymentForReceipt(null);
+                    setReceiptFile(null);
+                  }}
+                >
+                  إلغاء
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
+}
+
+// دالة تحويل اسم الباقة للعربي
+function getPackageNameArabic(packageId: string): string {
+  const packageNames: Record<string, string> = {
+    'pkg-monthly': 'اشتراك شهري',
+    'pkg-special': 'اشتراك خاص شهري',
+    'pkg-special-2months': 'اشتراك خاص شهرين',
+    'pkg-camps': 'اشتراك معسكرات شهري',
+    'pkg-free': 'اشتراك مجاني',
+  };
+  return packageNames[packageId] || packageId;
 }
 
 /* ================== مكوّنات مساعدة ================== */
