@@ -48,7 +48,7 @@ export default function OwnerDashboard() {
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [paymentsExpanded, setPaymentsExpanded] = useState(true);
   
-  // شريط التحقق الذكي
+  // شريط التحقق الذكي - فحص بيانات العقار
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationProgress, setVerificationProgress] = useState(0);
   const [verificationSteps, setVerificationSteps] = useState<{
@@ -57,11 +57,12 @@ export default function OwnerDashboard() {
     status: 'pending' | 'checking' | 'success' | 'error';
     message?: string;
   }[]>([
-    { step: 1, name: 'التحقق من معرف الباقة', status: 'pending' },
-    { step: 2, name: 'التحقق من تاريخ البدء', status: 'pending' },
-    { step: 3, name: 'التحقق من تاريخ الانتهاء', status: 'pending' },
-    { step: 4, name: 'التحقق من نوع الاشتراك', status: 'pending' },
-    { step: 5, name: 'التحقق من حالة الدفع', status: 'pending' },
+    { step: 1, name: 'التحقق من رقم العقار', status: 'pending' },
+    { step: 2, name: 'التحقق من الموقع والمنطقة', status: 'pending' },
+    { step: 3, name: 'التحقق من الصور', status: 'pending' },
+    { step: 4, name: 'التحقق من النوع والمرافق', status: 'pending' },
+    { step: 5, name: 'التحقق من الأسعار', status: 'pending' },
+    { step: 6, name: 'تفعيل الاشتراك', status: 'pending' },
   ]);
 
 
@@ -175,101 +176,179 @@ const {
   refetchInterval: 30000, // تحديث كل 30 ثانية
 });
 
-// دالة التحقق التدريجي الذكي
+// دالة التحقق التدريجي الذكي من بيانات العقار
 const startSmartVerification = async () => {
-  if (!pendingCheckData?.payment) return;
+  if (!property) return;
   
   setIsVerifying(true);
   setVerificationProgress(0);
   
   const steps = [...verificationSteps];
-  const payment = pendingCheckData.payment;
+  let hasErrors = false;
   
-  // خطوة 1: التحقق من معرف الباقة
-  steps[0].status = 'checking';
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 800));
-  
-  if (payment.pendingPackageId || payment.packageId) {
-    steps[0].status = 'success';
-    steps[0].message = payment.pendingPackageId || payment.packageId;
-  } else {
-    steps[0].status = 'error';
-    steps[0].message = 'معرف الباقة مفقود';
-  }
-  setVerificationProgress(20);
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 600));
-  
-  // خطوة 2: التحقق من تاريخ البدء
-  steps[1].status = 'checking';
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 800));
-  
-  if (payment.pendingStartDate) {
-    steps[1].status = 'success';
-    steps[1].message = new Date(payment.pendingStartDate).toLocaleDateString('en-US');
-  } else {
-    steps[1].status = 'error';
-    steps[1].message = 'تاريخ البدء مفقود';
-  }
-  setVerificationProgress(40);
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 600));
-  
-  // خطوة 3: التحقق من تاريخ الانتهاء
-  steps[2].status = 'checking';
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 800));
-  
-  if (payment.pendingEndDate) {
-    steps[2].status = 'success';
-    steps[2].message = new Date(payment.pendingEndDate).toLocaleDateString('en-US');
-  } else {
-    steps[2].status = 'error';
-    steps[2].message = 'تاريخ الانتهاء مفقود';
-  }
-  setVerificationProgress(60);
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 600));
-  
-  // خطوة 4: التحقق من نوع الاشتراك
-  steps[3].status = 'checking';
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 800));
-  
-  if (payment.pendingSubscriptionType) {
-    steps[3].status = 'success';
-    steps[3].message = payment.pendingSubscriptionType;
-  } else {
-    steps[3].status = 'error';
-    steps[3].message = 'نوع الاشتراك مفقود';
-  }
-  setVerificationProgress(80);
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 600));
-  
-  // خطوة 5: التحقق من حالة الدفع
-  steps[4].status = 'checking';
-  setVerificationSteps([...steps]);
-  await new Promise(r => setTimeout(r, 800));
-  
-  if (payment.status === 'قيد المراجعة') {
-    steps[4].status = 'success';
-    steps[4].message = 'جاهز للموافقة';
-  } else {
-    steps[4].status = 'error';
-    steps[4].message = payment.status || 'حالة غير معروفة';
-  }
-  setVerificationProgress(100);
-  setVerificationSteps([...steps]);
-  
-  // إعادة تحديث البيانات
-  await refetchPendingCheck();
-  
-  setTimeout(() => {
+  try {
+    // خطوة 1: التحقق من رقم العقار
+    steps[0].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    if (property.propertyNumber && property.propertyNumber.length === 5) {
+      steps[0].status = 'success';
+      steps[0].message = `رقم العقار: ${property.propertyNumber}`;
+    } else {
+      steps[0].status = 'error';
+      steps[0].message = 'رقم العقار غير صحيح (يجب أن يكون 5 أرقام)';
+      hasErrors = true;
+    }
+    setVerificationProgress(16);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // خطوة 2: التحقق من الموقع والمنطقة
+    steps[1].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    if (property.location && property.city) {
+      steps[1].status = 'success';
+      steps[1].message = `${property.city} - ${property.location}`;
+    } else {
+      steps[1].status = 'error';
+      steps[1].message = !property.city ? 'المدينة مفقودة' : 'الموقع مفقود';
+      hasErrors = true;
+    }
+    setVerificationProgress(33);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // خطوة 3: التحقق من الصور
+    steps[2].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    const propData = property as any;
+    const imagesArray = propData.images || [];
+    
+    if (imagesArray.length >= 3) {
+      steps[2].status = 'success';
+      steps[2].message = `${imagesArray.length} صورة`;
+    } else {
+      steps[2].status = 'error';
+      steps[2].message = imagesArray.length === 0 
+        ? 'لا توجد صور' 
+        : `${imagesArray.length} صورة فقط (يجب 3 على الأقل)`;
+      hasErrors = true;
+    }
+    setVerificationProgress(50);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // خطوة 4: التحقق من النوع والمرافق
+    steps[3].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    const amenitiesCount = propData.amenities ? 
+      (Array.isArray(propData.amenities) ? propData.amenities.length : propData.amenities.split(',').length) : 0;
+    
+    if (property.type && amenitiesCount >= 3) {
+      steps[3].status = 'success';
+      steps[3].message = `${property.type} - ${amenitiesCount} مرفق`;
+    } else {
+      steps[3].status = 'error';
+      steps[3].message = !property.type 
+        ? 'النوع مفقود' 
+        : `${amenitiesCount} مرفق فقط (يجب 3 على الأقل)`;
+      hasErrors = true;
+    }
+    setVerificationProgress(66);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // خطوة 5: التحقق من الأسعار
+    steps[4].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    const hasValidPrices = (
+      (propData.priceMidweek && propData.priceMidweek > 0) ||
+      (propData.priceWeekend && propData.priceWeekend > 0) ||
+      (propData.priceOvernight && propData.priceOvernight > 0)
+    );
+    
+    if (hasValidPrices) {
+      steps[4].status = 'success';
+      const prices = [];
+      if (propData.priceMidweek) prices.push(`منتصف الأسبوع: ${propData.priceMidweek}`);
+      if (propData.priceWeekend) prices.push(`نهاية الأسبوع: ${propData.priceWeekend}`);
+      steps[4].message = prices.join(' | ');
+    } else {
+      steps[4].status = 'error';
+      steps[4].message = 'لا توجد أسعار محددة';
+      hasErrors = true;
+    }
+    setVerificationProgress(83);
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 600));
+    
+    // خطوة 6: تفعيل الاشتراك
+    steps[5].status = 'checking';
+    setVerificationSteps([...steps]);
+    await new Promise(r => setTimeout(r, 800));
+    
+    if (!hasErrors) {
+      // استدعاء API لتفعيل الاشتراك تلقائياً
+      const response = await apiRequest('POST', '/api/owner/property/activate', {
+        propertyNumber: property.propertyNumber
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        steps[5].status = 'success';
+        steps[5].message = 'تم تفعيل الاشتراك بنجاح!';
+        setVerificationProgress(100);
+        setVerificationSteps([...steps]);
+        
+        toast({
+          title: "✅ تم التفعيل بنجاح",
+          description: "تم تفعيل اشتراكك تلقائياً بعد نجاح فحص بيانات العقار",
+        });
+        
+        // إعادة تحميل البيانات
+        setTimeout(async () => {
+          await queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+          setIsVerifying(false);
+        }, 2000);
+      } else {
+        steps[5].status = 'error';
+        steps[5].message = result.message || 'فشل التفعيل';
+        setVerificationProgress(100);
+        setVerificationSteps([...steps]);
+        
+        setTimeout(() => setIsVerifying(false), 2000);
+      }
+    } else {
+      steps[5].status = 'error';
+      steps[5].message = 'لا يمكن التفعيل - يوجد أخطاء في البيانات';
+      setVerificationProgress(100);
+      setVerificationSteps([...steps]);
+      
+      toast({
+        title: "⚠️ فشل التحقق",
+        description: "يرجى إصلاح الأخطاء في بيانات العقار أولاً",
+        variant: "destructive",
+      });
+      
+      setTimeout(() => setIsVerifying(false), 2000);
+    }
+  } catch (error: any) {
+    toast({
+      title: "خطأ",
+      description: error.message || "حدث خطأ أثناء التحقق",
+      variant: "destructive",
+    });
     setIsVerifying(false);
-  }, 1500);
+  }
 };
 
 // 6) إعادة محاولة الدفع
@@ -547,28 +626,28 @@ const calculateAnalytics = () => {
         </Card>
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
-        {!isPendingCheckLoading && pendingCheckData?.hasPending && (
+        {property && (
           <Card className="p-4 md:p-6 border-2 border-[#17a2b8] bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/20 dark:to-blue-900/20">
             <div className="space-y-4">
               {/* العنوان والزر */}
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <h3 className="font-bold text-lg md:text-xl text-[#17a2b8] flex items-center gap-2">
                     <Activity className="w-6 h-6 animate-pulse" />
-                    تحويل بنكي معلق
+                    التحقق الذكي من بيانات العقار
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
-                    اضغط على "التحقق من الاشتراك" لفحص البيانات تلقائياً
+                    فحص ذكي لجميع بيانات عقارك وتفعيل تلقائي للاشتراك عند النجاح
                   </p>
                 </div>
                 {!isVerifying && (
                   <Button 
                     onClick={startSmartVerification}
-                    className="bg-[#17a2b8] hover:bg-[#138496] text-white"
+                    className="bg-[#17a2b8] hover:bg-[#138496] text-white flex-shrink-0"
                     data-testid="button-start-verification"
                   >
                     <Activity className="w-4 h-4 ml-2" />
-                    التحقق من الاشتراك
+                    بدء التحقق الذكي
                   </Button>
                 )}
               </div>
@@ -632,38 +711,11 @@ const calculateAnalytics = () => {
 
                         {/* رقم الخطوة */}
                         <div className="text-xs font-bold text-muted-foreground">
-                          {step.step}/5
+                          {step.step}/6
                         </div>
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-
-              {/* معلومات الدفع */}
-              {!isVerifying && (
-                <div className="mt-3 p-3 bg-white dark:bg-background rounded-lg border">
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">الباقة:</span>
-                      <span className="font-semibold mr-2">{pendingCheckData.payment?.packageId || '-'}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">المبلغ:</span>
-                      <span className="font-semibold mr-2">{pendingCheckData.payment?.finalAmount} ر.س</span>
-                    </div>
-                  </div>
-                  {pendingCheckData.payment?.receiptUrl && (
-                    <a 
-                      href={pendingCheckData.payment.receiptUrl} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="text-xs text-primary underline mt-2 inline-block"
-                    >
-                      <Receipt className="w-3 h-3 inline ml-1" />
-                      عرض الإيصال
-                    </a>
-                  )}
                 </div>
               )}
             </div>

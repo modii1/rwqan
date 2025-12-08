@@ -2060,6 +2060,74 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
+  // تفعيل الاشتراك تلقائياً بعد التحقق من بيانات العقار
+  app.post("/api/owner/property/activate", requireOwner, async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any).propertyNumber;
+      if (!propertyNumber) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // جلب بيانات العقار
+      const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      // البحث عن دفعة معلقة أو مكتملة حديثة
+      const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
+      const validPayment = payments.find(p => 
+        (p.status === "مكتمل" || p.status === "قيد المراجعة") &&
+        p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
+      );
+
+      if (!validPayment) {
+        return res.json({ 
+          success: false, 
+          message: "لا توجد دفعة صالحة لتفعيل الاشتراك" 
+        });
+      }
+
+      // تحديث الاشتراك في Google Sheets
+      await googleSheetsService.updatePropertySubscription(
+        propertyNumber,
+        validPayment.pendingSubscriptionType!,
+        validPayment.pendingStartDate!,
+        validPayment.pendingEndDate!
+      );
+
+      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
+      if (validPayment.status === "قيد المراجعة") {
+        await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
+      }
+
+      // إرسال إشعار WhatsApp
+      const packageId = validPayment.pendingPackageId || validPayment.packageId;
+      await sendWhatsAppNotification(
+        `🎉 *تم تفعيل اشتراك تلقائياً*\n\n` +
+        `📍 العقار: ${property.name}\n` +
+        `🔢 رقم العقار: ${propertyNumber}\n` +
+        `📦 الباقة: ${packageId}\n` +
+        `💵 المبلغ: ${validPayment.finalAmount} ر.س\n` +
+        `📅 من: ${validPayment.pendingStartDate}\n` +
+        `📅 إلى: ${validPayment.pendingEndDate}\n` +
+        `🏷️ نوع الاشتراك: ${validPayment.pendingSubscriptionType}\n\n` +
+        `✅ تم التحقق من بيانات العقار وتفعيل الاشتراك تلقائياً بنجاح`
+      );
+
+      res.json({ 
+        success: true, 
+        message: "تم تفعيل الاشتراك بنجاح" 
+      });
+    } catch (err: any) {
+      console.error("Property activation error:", err);
+      res.status(500).json({ 
+        success: false, 
+        error: "خطأ في تفعيل الاشتراك" 
+      });
+    }
+  });
+
   // قبول التحويل البنكي (للإدارة)
   app.post("/api/admin/payment/approve", async (req, res) => {
     try {
