@@ -1090,7 +1090,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     if (!dateStr) return "---";
     try {
       const date = new Date(dateStr);
-      return date.toLocaleDateString("ar-SA", {
+      return date.toLocaleDateString("en-US", {
         year: "numeric",
         month: "short",
         day: "numeric",
@@ -1106,6 +1106,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     const packageNames: Record<string, string> = {
       'pkg-month': 'اشتراك شهر',
       'pkg-2months': 'عرض خاص شهرين',
+      'pkg-special-2months': 'اشتراك خاص شهرين',
       'pkg-2properties': 'اشتراك شهر لعقارين',
       'pkg-camps': 'باقة المخيمات',
       'pkg-free': 'باقة مجانية',
@@ -1172,7 +1173,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           </Button>
         )}
 
-        {/* زر إكمال الدفع */}
+        {/* زر إكمال الدفع / رفع إيصال */}
         {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
           <Button
             size="sm"
@@ -1184,10 +1185,12 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           >
             {isRetrying ? (
               <Loader2 className="w-4 h-4 animate-spin" />
+            ) : payment.paymentMethod === 'تحويل بنكي' ? (
+              <Receipt className="w-4 h-4" />
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري التحويل..." : "إكمال الدفع"}
+            {isRetrying ? "جاري التحويل..." : payment.paymentMethod === 'تحويل بنكي' ? "رفع إيصال" : "إكمال الدفع"}
           </Button>
         )}
       </div>
