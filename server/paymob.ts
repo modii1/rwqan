@@ -3,6 +3,7 @@ import crypto from 'crypto';
 const SECRET_KEY = process.env.PAYMOB_API_KEY!;
 const PUBLIC_KEY = process.env.PAYMOB_PUBLIC_KEY!;
 const HMAC_SECRET = process.env.PAYMOB_HMAC_SECRET!;
+const LEGACY_API_KEY = process.env.PAYMOB_LEGACY_API_KEY!;
 const INTEGRATION_ID_CARDS = parseInt(process.env.PAYMOB_INTEGRATION_ID_CARDS || '15650');
 const INTEGRATION_ID_APPLEPAY = parseInt(process.env.PAYMOB_INTEGRATION_ID_APPLEPAY || '15649');
 
@@ -14,6 +15,8 @@ console.log("🔑 Paymob Config:", {
   secretKeyPrefix: SECRET_KEY?.substring(0, 10) || "none",
   hasPublicKey: !!PUBLIC_KEY,
   hasHmacSecret: !!HMAC_SECRET,
+  hasLegacyApiKey: !!LEGACY_API_KEY,
+  legacyApiKeyLength: LEGACY_API_KEY?.length || 0,
   integrationCards: INTEGRATION_ID_CARDS,
   integrationApplePay: INTEGRATION_ID_APPLEPAY,
 });
@@ -151,14 +154,39 @@ export class PaymobService {
 
   /* ==========================================================
       3) الحصول على Auth Token من Paymob
-         ملاحظة: هذا يتطلب API Key وليس Secret Key
-         الـ API Key مختلف عن Secret Key (الذي يبدأ بـ sau_sk_)
+         يستخدم LEGACY_API_KEY للحصول على token للـ Transaction Inquiry API
   =========================================================== */
   async getAuthToken(): Promise<string | null> {
     try {
       console.log("🔐 Getting Paymob auth token...");
-      console.log("   Using key prefix:", SECRET_KEY?.substring(0, 15));
+      console.log("   Using Legacy API Key, length:", LEGACY_API_KEY?.length || 0);
       
+      if (!LEGACY_API_KEY) {
+        console.error("❌ PAYMOB_LEGACY_API_KEY is not set");
+        return null;
+      }
+
+      let apiKey = LEGACY_API_KEY;
+      
+      // Check if it's already a JWT token
+      if (apiKey.startsWith('eyJ')) {
+        console.log("✅ Using provided JWT token directly");
+        return apiKey;
+      }
+      
+      // Try to decode base64 - the key might be base64 encoded
+      try {
+        const decoded = Buffer.from(apiKey, 'base64').toString('utf-8');
+        console.log("   Decoded value starts with:", decoded.substring(0, 10));
+        if (decoded.startsWith('eyJ')) {
+          console.log("✅ Decoded base64 to JWT token");
+          return decoded;
+        }
+      } catch (e) {
+        console.log("   Not valid base64, using as API key");
+      }
+      
+      // Use as API key to get token
       const response = await fetch(
         "https://ksa.paymob.com/api/auth/tokens",
         {
@@ -167,7 +195,7 @@ export class PaymobService {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            api_key: SECRET_KEY,
+            api_key: apiKey,
           }),
         }
       );
@@ -176,8 +204,6 @@ export class PaymobService {
 
       if (!response.ok || !data.token) {
         console.error("❌ Auth token error:", data);
-        console.log("   Note: Transaction Inquiry API requires the 'API Key' from Paymob dashboard");
-        console.log("   The 'Secret Key' (sau_sk_...) is for Unified Checkout only");
         return null;
       }
 
@@ -190,71 +216,25 @@ export class PaymobService {
   }
 
   /* ==========================================================
-      4) 🚀 Transaction Inquiry API - باستخدام Secret Key مباشرة
-         نستخدم endpoint مختلف يدعم Bearer token
+      4) 🚀 Transaction Inquiry API - باستخدام Legacy API Key
   =========================================================== */
   async inquiryTransaction(body: {
     order_id?: string;
     merchant_order_id?: string;
   }) {
     try {
-      console.log("📡 Trying Transaction Inquiry API...");
+      console.log("📡 Calling Transaction Inquiry API...");
       console.log("   Request body:", JSON.stringify(body));
       
-      // Method 1: Try using Secret Key directly as Bearer token with v1 endpoint
-      const orderId = body.order_id;
-      if (orderId) {
-        console.log("   Attempting direct Bearer token auth...");
-        
-        // Try getting order details directly
-        const directResponse = await fetch(
-          `https://ksa.paymob.com/v1/orders/${orderId}`,
-          {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${SECRET_KEY}`,
-            },
-          }
-        );
-
-        if (directResponse.ok) {
-          const orderData = await directResponse.json();
-          console.log("📊 Direct order lookup response:", JSON.stringify(orderData, null, 2));
-          
-          // Extract fee information if available
-          if (orderData) {
-            const amountCents = orderData.amount_cents || orderData.amount || 0;
-            const originalAmount = amountCents > 100 ? amountCents / 100 : amountCents;
-            
-            return {
-              ok: true,
-              originalAmount,
-              merchantFees: orderData.merchant_fees || 0,
-              acqFees: orderData.acq_fees || 0,
-              vat: orderData.vat || 0,
-              totalFees: (orderData.merchant_fees || 0) + (orderData.acq_fees || 0) + (orderData.vat || 0),
-              netAmount: originalAmount - ((orderData.merchant_fees || 0) + (orderData.acq_fees || 0) + (orderData.vat || 0)),
-              raw: orderData,
-            };
-          }
-        } else {
-          const errorText = await directResponse.text();
-          console.log("   Direct lookup failed:", directResponse.status, errorText);
-        }
-      }
-
-      // Method 2: Fall back to legacy auth token method
+      // Get auth token using Legacy API Key
       const authToken = await this.getAuthToken();
       
       if (!authToken) {
-        console.error("❌ Failed to get auth token - Transaction Inquiry API not available");
-        console.log("   To enable Transaction Inquiry, add the 'API Key' from Paymob Dashboard");
-        console.log("   Go to: Settings → Account Info → API Key (different from Secret Key)");
+        console.error("❌ Failed to get auth token");
         return null;
       }
 
-      console.log("📡 Calling Legacy Transaction Inquiry API...");
+      console.log("📡 Sending inquiry request...");
       
       const response = await fetch(
         "https://ksa.paymob.com/api/ecommerce/orders/transaction_inquiry",
@@ -262,7 +242,6 @@ export class PaymobService {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${authToken}`,
           },
           body: JSON.stringify({
             auth_token: authToken,
@@ -280,6 +259,7 @@ export class PaymobService {
 
       console.log("📊 Inquiry raw response:", JSON.stringify(data, null, 2));
 
+      // Extract fee information from transaction
       const merchantFees = data.merchant_fees ?? 0;
       const acqFees = data.acq_fees ?? 0;
       const vat = data.vat ?? 0;
