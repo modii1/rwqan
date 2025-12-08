@@ -10,6 +10,15 @@ Modiy is a comprehensive property management system designed for investment prop
 - **Interaction**: The user expects the agent to ask for confirmation before implementing significant architectural changes or refactoring large portions of the codebase.
 - **Language**: All generated content and explanations should be in Arabic.
 
+## Recent Changes (December 08, 2025)
+- **Smart Property Verification System**: Redesigned verification process to check property data completeness (location, images ≥3, region, type, amenities, prices) instead of payment data. Features animated 6-step progress tracking with detailed status messages.
+- **Auto-Activation**: Upon successful property verification, system automatically activates subscription and sends WhatsApp notification to admin.
+- **Payment Button Logic**: Refined button display - "رفع إيصال" for bank transfer receipts, "إكمال الدفع" only for Paymob electronic payments with paymobOrderId.
+- **Package Names**: Fixed Arabic display of package names in payment history (e.g., "اشتراك خاص شهرين" for pkg-special-2months).
+- **Date Format**: Changed from Arabic Hijri to English Gregorian format using `toLocaleDateString('en-US')` for better consistency.
+- **Error Handling**: Red display with specific error messages and "تعديل البيانات" option when validation fails; green success with auto-activation when all checks pass.
+- **API Endpoint**: Added `/api/owner/property/activate` for automatic subscription activation after property data verification.
+
 ## System Architecture
 
 ### UI/UX Decisions
