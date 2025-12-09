@@ -3253,24 +3253,31 @@ app.get("/api/paymob/webhook", async (req, res) => {
   try {
     console.log("📥 Paymob GET redirect received");
     console.log("📥 Query params:", req.query);
-    
-    // استخراج معلومات من الـ query params
-    const success = req.query.success === 'true';
-    const orderId = req.query.order as string || '';
-    const transactionId = req.query.id as string || '';
-    
-    console.log(`📊 Return URL: success=${success}, order=${orderId}, txn=${transactionId}`);
-    
+
+    const success = req.query.success === "true";
+    const orderId = (req.query.order as string) || "";
+    const transactionId = (req.query.id as string) || "";
+    const merchantOrderId = (req.query.merchant_order_id as string) || "";
+
+    console.log(`📊 success=${success}, order=${orderId}, txn=${transactionId}, merchantOrderId=${merchantOrderId}`);
+
+    // 🔍 استخراج رقم العقار من merchant_order_id أو special_reference
+    let propertyNumber = "";
+    if (merchantOrderId && merchantOrderId.includes("-")) {
+      propertyNumber = merchantOrderId.split("-")[0];
+    }
+
+    console.log("🏡 Extracted property number:", propertyNumber);
+
+    // 🔎 استعلام الرسوم (اختياري)
     if (success && orderId) {
-      // جلب الرسوم الحقيقية من Paymob Inquiry API
       try {
         const { paymobService } = await import("./paymob");
         console.log(`📡 Calling Paymob Inquiry API with order_id: ${orderId}`);
         const inquiry = await paymobService.inquiryByOrderId(orderId);
-        
+
         if (inquiry?.ok) {
-          console.log(`✅ Got real fees from Paymob: merchant=${inquiry.merchantFees}, acq=${inquiry.acqFees}, vat=${inquiry.vat}, total=${inquiry.totalFees}`);
-          console.log(`📊 Full inquiry response:`, JSON.stringify(inquiry, null, 2));
+          console.log("✅ Inquiry fees:", inquiry);
         } else {
           console.log("⚠️ Inquiry returned no data");
         }
@@ -3278,18 +3285,22 @@ app.get("/api/paymob/webhook", async (req, res) => {
         console.log("❌ Inquiry API Error:", err);
       }
     }
-    
-    // إعادة التوجيه إلى صفحة نجاح الدفع
+
+    // 🎯 إعادة التوجيه إلى صفحة قيد المراجعة للمالك الجديد
     if (success) {
-      res.redirect('/owner/subscription?payment=success');
+      const redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
+      console.log("🔁 Redirecting to:", redirectUrl);
+      return res.redirect(redirectUrl);
     } else {
-      res.redirect('/owner/subscription?payment=failed');
+      return res.redirect(`/subscription?payment=failed`);
     }
+
   } catch (error) {
     console.error("❌ GET Webhook Error:", error);
-    res.redirect('/owner/subscription?payment=error');
+    return res.redirect(`/subscription?payment=error`);
   }
 });
+
 
 // ======================
 // PAYMOB WEBHOOK - POST (Server-to-Server notification)
