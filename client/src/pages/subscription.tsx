@@ -98,6 +98,8 @@ export default function SubscriptionPage() {
       const propertyNumber = registrationData.propertyNumber;
       setRegisteredPropertyNumber(propertyNumber);
 
+      document.cookie = `ownerPropertyNumber=${propertyNumber}; path=/; SameSite=None; Secure; max-age=604800`;
+
       toast({
         title: "تم تسجيل العقار بنجاح",
         description: "جاري إكمال عملية الاشتراك...",

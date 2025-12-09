@@ -2022,10 +2022,15 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   // GET owner's current subscription from الاشتراكات sheet
   app.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
     try {
-      const propertyNumber = (req.session as any).propertyNumber;
-      if (!propertyNumber) {
-        return res.status(400).json({ error: "Property not found in session" });
-      }
+      // اقرأ رقم العقار من الكوكي وليس السيشن
+const propertyNumber =
+  req.cookies?.ownerPropertyNumber ||
+  (req.session as any)?.propertyNumber;
+
+if (!propertyNumber) {
+  return res.status(401).json({ error: "NOT_AUTHENTICATED" });
+}
+
 
       console.log(`🔍 Looking for subscription for property: ${propertyNumber}`);
 
@@ -2056,10 +2061,15 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
   // GET owner's payments history - سجل مدفوعات المالك
   app.get("/api/owner/payments", requireOwner, async (req, res) => {
     try {
-      const propertyNumber = (req.session as any).propertyNumber;
-      if (!propertyNumber) {
-        return res.status(400).json({ error: "Property not found in session" });
-      }
+      // اقرأ رقم العقار من الكوكي وليس السيشن
+const propertyNumber =
+  req.cookies?.ownerPropertyNumber ||
+  (req.session as any)?.propertyNumber;
+
+if (!propertyNumber) {
+  return res.status(401).json({ error: "NOT_AUTHENTICATED" });
+}
+
 
       console.log(`🔍 Fetching payments for property: ${propertyNumber}`);
 
@@ -2194,14 +2204,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
         });
       }
 
-      // تحديث الاشتراك في Google Sheets
-      await googleSheetsService.updatePropertySubscription(
-        propertyNumber,
-        validPayment.pendingSubscriptionType!,
-        validPayment.pendingStartDate!,
-        validPayment.pendingEndDate!
-      );
-
+  
       // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
       if (validPayment.status === "قيد المراجعة") {
         await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
@@ -2238,96 +2241,133 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
     }
   });
 
-  // قبول التحويل البنكي (للإدارة)
-  app.post("/api/admin/payment/approve", async (req, res) => {
-    try {
-      const { paymentId } = req.body;
+ // قبول التحويل البنكي (للإدارة)
+app.post("/api/admin/payment/approve", async (req, res) => {
+  try {
+    const { paymentId } = req.body;
 
-      if (!paymentId) {
-        return res.status(400).json({ error: "معرف الدفع مطلوب" });
-      }
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفع مطلوب" });
+    }
 
-      // جلب بيانات الدفع
-      const payment = await googleSheetsService.getPaymentById(paymentId);
-      if (!payment) {
-        return res.status(404).json({ error: "الدفع غير موجود" });
-      }
+    // جلب بيانات الدفع
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفع غير موجود" });
+    }
 
-      // التحقق من أن الدفع معلق
-      if (payment.status !== "قيد المراجعة" && payment.status !== "معلق") {
-        return res.status(400).json({ error: "الدفع ليس معلقاً" });
-      }
+    // التحقق من أن الدفع معلق
+    if (payment.status !== "قيد المراجعة" && payment.status !== "معلق") {
+      return res.status(400).json({ error: "الدفع ليس معلقاً" });
+    }
 
-      // تحديث حالة الدفع إلى مكتمل
-      await googleSheetsService.updatePaymentStatus(paymentId, "مكتمل");
+    // تحديث حالة الدفع إلى مكتمل
+    await googleSheetsService.updatePaymentStatus(paymentId, "مكتمل");
 
-      // تفعيل الاشتراك إذا كان التحويل لاشتراك جديد/تمديد/ترقية
-      const property = await googleSheetsService.getPropertyByNumber(payment.propertyNumber);
-      if (property && payment.packageId) {
-        const pkg = await googleSheetsService.getPackageById(payment.packageId);
-        if (pkg) {
-          const today = new Date();
-          const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(payment.propertyNumber);
+    // جلب بيانات العقار
+    const property = await googleSheetsService.getPropertyByNumber(payment.propertyNumber);
 
-          let startDate = today;
-          let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+    if (property && payment.packageId) {
+      const pkg = await googleSheetsService.getPackageById(payment.packageId);
+      if (pkg) {
+        const today = new Date();
+        const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(payment.propertyNumber);
 
-          // إذا كان هناك اشتراك نشط، ابدأ من تاريخ انتهائه
-          if (currentSubscription && new Date(currentSubscription.endDate) > today) {
-            startDate = new Date(currentSubscription.endDate);
-            endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
-          }
+        let startDate = today;
+        let endDate = new Date(today.getTime() + pkg.duration * 86400000);
 
-          const subscriptionData = {
-            packageId: pkg.id,
-            price: payment.finalAmount,
-            subscriptionType: pkg.type,
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0],
-            paymentId: payment.id,
-          };
-
-          await googleSheetsService.addSubscriptionToSheet(
-            payment.propertyNumber, 
-            subscriptionData, 
-            property, 
-            payment.receiptUrl || ""
-          );
-
-          // تحديث نوع الاشتراك في العقار
-          await googleSheetsService.updatePropertySubscription(
-            payment.propertyNumber,
-            pkg.type,
-            endDate.toISOString().split('T')[0]
-          );
+        // إذا كان هناك اشتراك نشط، ابدأ من تاريخ انتهائه
+        if (currentSubscription && new Date(currentSubscription.endDate) > today) {
+          startDate = new Date(currentSubscription.endDate);
+          endDate = new Date(startDate.getTime() + pkg.duration * 86400000);
         }
+
+        const subscriptionData = {
+          packageId: pkg.id,
+          price: payment.finalAmount,
+          subscriptionType: pkg.type,
+          startDate: startDate.toISOString().split("T")[0],
+          endDate: endDate.toISOString().split("T")[0],
+          paymentId: payment.id,
+        };
+
+        // إضافة الاشتراك للشيت
+        await googleSheetsService.addSubscriptionToSheet(
+          payment.propertyNumber,
+          subscriptionData,
+          property,
+          payment.receiptUrl || ""
+        );
       }
-
-      res.json({ ok: true, message: "تم قبول التحويل وتفعيل الاشتراك" });
-    } catch (err: any) {
-      console.error("Approve payment error:", err);
-      res.status(500).json({ error: "خطأ في قبول الدفع" });
     }
-  });
 
-  // رفض التحويل البنكي (للإدارة)
-  app.post("/api/admin/payment/reject", async (req, res) => {
-    try {
-      const { paymentId, reason } = req.body;
+    // ================================
+    // قبول التحقق تلقائياً
+    // ================================
 
-      if (!paymentId) {
-        return res.status(400).json({ error: "معرف الدفع مطلوب" });
-      }
+    await googleSheetsService.updateVerificationStatus(
+      payment.propertyNumber,
+      "approved"
+    );
 
-      // تحديث حالة الدفع إلى مرفوض
-      await googleSheetsService.updatePaymentStatus(paymentId, "مرفوض");
+    // سجل التحقق
+    await googleSheetsService.addVerificationLogToSheet({
+      date: new Date().toISOString(),
+      propertyNumber: payment.propertyNumber,
+      action: "قبول التحقق",
+      reason: "تم التأكد من صحة الإيصال وتفعيل الاشتراك",
+      admin: "النظام",
+    });
 
-      res.json({ ok: true, message: "تم رفض التحويل" });
-    } catch (err: any) {
-      console.error("Reject payment error:", err);
-      res.status(500).json({ error: "خطأ في رفض الدفع" });
+    res.json({ ok: true, message: "تم قبول التحويل وتفعيل الاشتراك" });
+
+  } catch (err: any) {
+    console.error("Approve payment error:", err);
+    res.status(500).json({ error: "خطأ في قبول الدفع" });
+  }
+});
+
+
+ // ======================
+// رفض التحويل البنكي
+// ======================
+app.post("/api/admin/payment/reject", async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفع مطلوب" });
     }
-  });
+
+    // تحديث حالة الدفع
+    await googleSheetsService.updatePaymentStatus(paymentId, "مرفوض");
+
+    // جلب بيانات الدفع لمعرفة العقار
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (payment && payment.propertyNumber) {
+
+      // رفض التحقق
+      await googleSheetsService.updateVerificationStatus(payment.propertyNumber, "rejected");
+
+      // تسجيل في سجل التحقق
+      await googleSheetsService.addVerificationLogToSheet({
+        date: new Date().toISOString(),
+        propertyNumber: payment.propertyNumber,
+        action: "رفض التحقق",
+        reason: "إيصال دفع غير صحيح",
+        admin: "النظام",
+      });
+    }
+
+    res.json({ ok: true, message: "تم رفض التحويل" });
+  } catch (err: any) {
+    console.error("Reject payment error:", err);
+    res.status(500).json({ error: "خطأ في رفض الدفع" });
+  }
+});
+
+
+
 
   // ======================
   // BACKUP SYSTEM - نظام النسخ الاحتياطية المتقدم
