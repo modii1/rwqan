@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "@shared/schema";
 import { Card } from "@/components/ui/card";
@@ -53,6 +53,21 @@ export default function SubscriptionPage() {
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+
+    const paymentSuccess = query.get("payment") === "success";
+    const propertyNum = query.get("property");
+
+    // إذا عاد المستخدم من Paymob بعد الدفع الإلكتروني
+    if (paymentSuccess && propertyNum) {
+      setRegisteredPropertyNumber(propertyNum);
+      setRegistrationSuccess(true);
+    }
+  }, []);
+
+  
 
   const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ['/api/packages'],

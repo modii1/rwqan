@@ -66,6 +66,8 @@ export class PaymobService {
         email: `${phone}@example.com`,
         phone_number: phone,
         country: 'KSA',
+        // ⭐⭐⭐ إعادة التوجيه بعد الدفع
+        redirect_url: "https://modiy.replit.app/subscription",
       },
       customer: {
         first_name: propertyName || 'عميل',
