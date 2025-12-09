@@ -1347,6 +1347,35 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }
 
+
+  // ================== تحديث حالة الدفع ==================
+  async updatePaymentStatus(paymentId: string, newStatus: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.PAYMENTS);
+
+    // العمود A = "معرف الدفع" → index = 0
+    const rowIndex = rows.findIndex(r => String(r[0]) === String(paymentId));
+
+    if (rowIndex === -1) {
+      throw new Error(`لم يتم العثور على الدفع: ${paymentId}`);
+    }
+
+    // عمود الحالة = العمود 9 → index = 8
+    const STATUS_COLUMN = 8;
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.PAYMENTS}!I${rowIndex + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[newStatus]],
+      },
+    });
+
+    console.log(`✅ Payment status updated → ${paymentId}: ${newStatus}`);
+  }
+
+
   // ================== الاقتراحات / الطلبات ==================
 
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {
@@ -2326,6 +2355,7 @@ async getWhatsAppLogs() {
       feeConfigName: config.name,
     };
   }
+  
 }
 export const googleSheetsService = new GoogleSheetsService();
 
