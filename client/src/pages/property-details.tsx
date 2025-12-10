@@ -94,6 +94,12 @@ export default function PropertyDetailsPage() {
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  
+  // ⭐ سحب للرجوع على مستوى الصفحة
+  const [pageSwipeStartX, setPageSwipeStartX] = useState<number | null>(null);
+  const [pageSwipeStartY, setPageSwipeStartY] = useState<number | null>(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const isSwipingRef = { current: false };
 
   const propertyId = params?.id ?? "";
 
@@ -327,7 +333,7 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  // ===== سحب باللمس (Swipe) =====
+  // ===== سحب باللمس للصور =====
   const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     setTouchStartX(e.touches[0].clientX);
   };
@@ -338,12 +344,10 @@ export default function PropertyDetailsPage() {
     const threshold = 40;
 
     if (diff > threshold) {
-      // سحب لليمين => الصورة السابقة
       setSelectedImage((prev) =>
         images.length ? (prev - 1 + images.length) % images.length : prev
       );
     } else if (diff < -threshold) {
-      // سحب لليسار => الصورة التالية
       setSelectedImage((prev) =>
         images.length ? (prev + 1) % images.length : prev
       );
@@ -351,6 +355,70 @@ export default function PropertyDetailsPage() {
 
     setTouchStartX(null);
   };
+  
+  // ===== سحب للرجوع (الصفحة كاملة) =====
+  const handlePageTouchStart = (e: globalThis.TouchEvent) => {
+    // لا تتفعل إذا كان السحب على منطقة الصور
+    const target = e.target as HTMLElement;
+    if (target.closest('.aspect-video')) return;
+    
+    setPageSwipeStartX(e.touches[0].clientX);
+    setPageSwipeStartY(e.touches[0].clientY);
+    isSwipingRef.current = false;
+  };
+  
+  const handlePageTouchMove = (e: globalThis.TouchEvent) => {
+    if (pageSwipeStartX == null || pageSwipeStartY == null) return;
+    
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - pageSwipeStartX;
+    const diffY = Math.abs(currentY - pageSwipeStartY);
+    
+    // تحقق أن السحب أفقي (ليس عمودي)
+    if (!isSwipingRef.current && diffX > 15 && diffX > diffY * 1.5) {
+      isSwipingRef.current = true;
+    }
+    
+    if (isSwipingRef.current && diffX > 0) {
+      // منع التمرير العمودي أثناء السحب الأفقي
+      e.preventDefault();
+      setSwipeOffset(Math.min(diffX * 0.4, 80));
+    }
+  };
+  
+  const handlePageTouchEnd = () => {
+    if (swipeOffset > 50) {
+      // سحب كافي للرجوع
+      setSwipeOffset(100);
+      setTimeout(() => {
+        if (window.history.length > 1) {
+          window.history.back();
+        } else {
+          setLocation("/");
+        }
+      }, 100);
+    } else {
+      setSwipeOffset(0);
+    }
+    setPageSwipeStartX(null);
+    setPageSwipeStartY(null);
+    isSwipingRef.current = false;
+  };
+  
+  // إضافة مستمعي اللمس للصفحة
+  useEffect(() => {
+    const options = { passive: false } as AddEventListenerOptions;
+    document.addEventListener('touchstart', handlePageTouchStart, options);
+    document.addEventListener('touchmove', handlePageTouchMove, options);
+    document.addEventListener('touchend', handlePageTouchEnd);
+    
+    return () => {
+      document.removeEventListener('touchstart', handlePageTouchStart);
+      document.removeEventListener('touchmove', handlePageTouchMove);
+      document.removeEventListener('touchend', handlePageTouchEnd);
+    };
+  }, [pageSwipeStartX, pageSwipeStartY, swipeOffset]);
 
   // إخفاء اسم العقار لغير المشتركين
   const displayName = isVerified(property) ? property.name : "";
@@ -428,9 +496,22 @@ export default function PropertyDetailsPage() {
 
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* ⭐ مؤشر السحب في منتصف الشاشة (لا يغيّر شيء من تصميمك) */}
+    <div 
+      className="min-h-screen bg-background transition-transform duration-100 ease-out"
+      style={{ 
+        transform: swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'none',
+      }}
+    >
+      {/* ⭐ مؤشر السحب */}
       <EdgeSwipeIndicator />
+      
+      {/* شريط التقدم للسحب */}
+      {swipeOffset > 0 && (
+        <div 
+          className="fixed top-0 left-0 h-1 bg-primary z-50 transition-all duration-100"
+          style={{ width: `${Math.min((swipeOffset / 50) * 100, 100)}%` }}
+        />
+      )}
 
       {/* ===== Header ===== */}
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
