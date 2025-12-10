@@ -326,39 +326,67 @@
 
 
 /* ================================
-   ⭐ 3 Golden Arrows <<< (Swipe Left Indicator)
+   ⭐ مؤشر السحب للرجوع (محسّن)
    ================================ */
-.edge-swipe-arrows {
+.swipe-hint-container {
   position: fixed !important;
-  right: 14px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  display: flex;
-  flex-direction: row;  /* مهم جداً: خلي الأسهم بجانب بعض مثل <<< */
-  align-items: center;
-  gap: 0px;             /* متلاصقة تماماً */
   z-index: 999999;
   pointer-events: none;
+  animation: fadeInOut 4s ease-in-out forwards;
 }
 
-/* شكل كل سهم <<< */
-.edge-swipe-arrows span {
-  width: 18px;
-  height: 18px;
-  border-left: 3px solid #d4a035; /* ذهبي */
-  border-bottom: 3px solid #d4a035;
-  transform: rotate(45deg);  /* ينتج شكل < */
-  opacity: 0.35;
-  animation: arrowSwipe 1.4s infinite ease-in-out;
+.swipe-hint-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 10px 8px;
+  border-radius: 20px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  border: 1px solid rgba(212, 160, 53, 0.3);
 }
 
-/* ترتيب النبض */
-.edge-swipe-arrows span:nth-child(1) { animation-delay: 0s; }
-.edge-swipe-arrows span:nth-child(2) { animation-delay: 0.12s; }
-.edge-swipe-arrows span:nth-child(3) { animation-delay: 0.24s; }
+.swipe-arrows {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+}
 
-@keyframes arrowSwipe {
-  0%   { opacity: 0.2; transform: rotate(45deg) translateX(0); }
-  50%  { opacity: 1;   transform: rotate(45deg) translateX(-6px); }
-  100% { opacity: 0.2; transform: rotate(45deg) translateX(0); }
+.swipe-arrows span {
+  width: 12px;
+  height: 12px;
+  border-left: 2.5px solid #b88d2b;
+  border-bottom: 2.5px solid #b88d2b;
+  transform: rotate(45deg);
+  animation: arrowPulse 1.2s infinite ease-in-out;
+}
+
+.swipe-arrows span:nth-child(1) { animation-delay: 0s; }
+.swipe-arrows span:nth-child(2) { animation-delay: 0.1s; }
+.swipe-arrows span:nth-child(3) { animation-delay: 0.2s; }
+
+.swipe-text {
+  font-size: 10px;
+  font-weight: 600;
+  color: #b88d2b;
+  white-space: nowrap;
+  font-family: 'Cairo', sans-serif;
+}
+
+@keyframes arrowPulse {
+  0%, 100% { opacity: 0.3; transform: rotate(45deg) translateX(0); }
+  50% { opacity: 1; transform: rotate(45deg) translateX(-4px); }
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateY(-50%) translateX(10px); }
+  10% { opacity: 1; transform: translateY(-50%) translateX(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
