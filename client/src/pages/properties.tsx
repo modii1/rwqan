@@ -194,19 +194,11 @@ export default function PropertiesPage() {
         if (!hasAllFacilities) return false;
       }
 
-      // Price filter - إظهار العقارات التي لديها أي سعر يساوي أو أقل من السعر المحدد
+      // Price filter - إظهار العقارات التي سعرها الرئيسي (المعروض على الكارد) أقل أو يساوي السعر المحدد
       if (maxPrice < 5000) {
-        const prices = [
-          parseFloat(property.prices.weekday) || 0,
-          parseFloat(property.prices.weekend) || 0,
-          parseFloat(property.prices.overnight) || 0,
-          parseFloat(property.prices.holidays) || 0,
-        ];
-        const validPrices = prices.filter((p) => p > 0);
-        if (validPrices.length > 0) {
-          const hasAffordablePrice = validPrices.some((p) => p <= maxPrice);
-          if (!hasAffordablePrice) return false;
-        }
+        // السعر الرئيسي هو نفسه المعروض على الكارد
+        const mainPrice = parseFloat(property.prices.weekend) || parseFloat(property.prices.weekday) || 0;
+        if (mainPrice > maxPrice) return false;
       }
 
       return true;
