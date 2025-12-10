@@ -108,10 +108,12 @@ export function AppSidebar() {
                       href={item.url} 
                       data-testid={`sidebar-link-${item.url}`}
                       onClick={() => {
-                        // إلغاء الفلاتر عند الضغط على الصفحة الرئيسية
+                        // إلغاء الفلاتر والترتيب عند الضغط على الصفحة الرئيسية
                         if (item.url === "/") {
                           sessionStorage.removeItem("propertyFilters");
                           sessionStorage.removeItem("visibleCount");
+                          sessionStorage.removeItem("shuffleKey");
+                          window.location.href = "/";
                         }
                       }}
                     >

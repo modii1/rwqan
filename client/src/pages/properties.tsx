@@ -483,7 +483,7 @@ export default function PropertiesPage() {
             <Slider
               value={[maxPrice]}
               onValueChange={(value) => setMaxPrice(value[0])}
-              min={100}
+              min={0}
               max={5000}
               step={50}
               className="mt-2"
@@ -953,7 +953,7 @@ export default function PropertiesPage() {
               <Slider
                 value={[maxPrice]}
                 onValueChange={(v) => setMaxPrice(v[0])}
-                min={100}
+                min={0}
                 max={5000}
                 step={50}
               />
