@@ -1,59 +1,26 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Property, FACILITIES } from "@shared/schema";
+import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowRight, Search } from "lucide-react";
-
-// المدن المتاحة
-const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'] as const;
-
-// الاتجاهات المتاحة
-const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب', 'وسط'] as const;
-
-// أنواع العقارات
-const TYPES = ['قسمين' , 'قسم'] as const;
 
 export default function OwnerUpdateProperty() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [formData, setFormData] = useState<any>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [facilitySearch, setFacilitySearch] = useState("");
 
-  // بيانات النموذج
-  const [formData, setFormData] = useState({
-    name: "",
-    location: "",
-    city: "",
-    direction: "",
-    type: "",
-    whatsappNumber: "",
-  });
-
-  // الأسعار
-  const [prices, setPrices] = useState({
-    weekday: "",
-    weekend: "",
-    overnight: "",
-    holidays: "",
-  });
-
-  // المرافق المختارة
-  const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-
-  const { data: property, isLoading: isLoadingProperty } = useQuery<Property>({
+  const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
     retry: false,
     refetchOnWindowFocus: false,
   });
 
-  // تحميل البيانات الحالية
   useEffect(() => {
     if (property) {
       setFormData({
@@ -62,46 +29,17 @@ export default function OwnerUpdateProperty() {
         city: property.city || "",
         direction: property.direction || "",
         type: property.type || "",
-        whatsappNumber: property.whatsappNumber || "",
-      });
-
-      setPrices({
         weekday: property.prices?.weekday || "",
         weekend: property.prices?.weekend || "",
         overnight: property.prices?.overnight || "",
         holidays: property.prices?.holidays || "",
       });
-
-      // تحليل المرافق
-      let facs: string[] = [];
-      const rawFacilities = property.facilities as string[] | string | undefined;
-      if (rawFacilities) {
-        if (Array.isArray(rawFacilities)) {
-          facs = rawFacilities;
-        } else if (typeof rawFacilities === "string") {
-          try {
-            const parsed = JSON.parse(rawFacilities);
-            facs = Array.isArray(parsed) ? parsed : [];
-          } catch {
-            facs = rawFacilities.split(",").map((s: string) => s.trim()).filter(Boolean);
-          }
-        }
-      }
-      setSelectedFacilities(facs);
     }
   }, [property]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const toggleFacility = (facility: string) => {
-    setSelectedFacilities((prev) =>
-      prev.includes(facility)
-        ? prev.filter((f) => f !== facility)
-        : [...prev, facility]
-    );
+    setFormData((prev: any) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -115,15 +53,13 @@ export default function OwnerUpdateProperty() {
         city: formData.city,
         direction: formData.direction,
         type: formData.type,
-        whatsappNumber: formData.whatsappNumber,
-        facilities: selectedFacilities,
         prices: {
           display: property?.prices?.display || "",
-          weekday: prices.weekday,
-          weekend: prices.weekend,
-          overnight: prices.overnight,
+          weekday: formData.weekday,
+          weekend: formData.weekend,
+          overnight: formData.overnight,
           special: property?.prices?.special || "",
-          holidays: prices.holidays,
+          holidays: formData.holidays,
         },
       };
 
@@ -133,7 +69,7 @@ export default function OwnerUpdateProperty() {
 
       toast({
         title: "تم التحديث بنجاح",
-        description: "تم حفظ بيانات العقار",
+        description: "تم حفظ بيانات العقار في Google Sheets",
       });
 
       setTimeout(() => setLocation("/owner/dashboard"), 1000);
@@ -148,283 +84,154 @@ export default function OwnerUpdateProperty() {
     }
   };
 
-  if (isLoadingProperty) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   if (!property) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Card className="p-6 text-center">
-          <p className="text-muted-foreground">لم يتم العثور على بيانات العقار</p>
-          <Button onClick={() => setLocation("/owner/dashboard")} className="mt-4">
-            العودة للوحة التحكم
-          </Button>
-        </Card>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      {/* Header */}
-      <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => window.history.back()}
-            data-testid="button-back"
-          >
-            <ArrowRight className="w-5 h-5" />
-          </Button>
-          <div className="flex-1">
-            <h1 className="text-lg font-bold text-primary">تحديث بيانات العقار</h1>
-            <p className="text-xs text-muted-foreground">عقار رقم {property.propertyNumber}</p>
-          </div>
-        </div>
-      </header>
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <Card className="p-6">
+          <h1 className="text-2xl font-bold text-primary mb-6">تحديث بيانات العقار</h1>
 
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* البيانات الأساسية */}
-          <Card className="p-5">
-            <h2 className="text-base font-bold text-primary mb-4 border-b pb-2">البيانات الأساسية</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <Label htmlFor="name" className="text-base">اسم العقار</Label>
+              <Input
+                id="name"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                placeholder="اسم العقار"
+                className="mt-2"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="location" className="text-base">الموقع</Label>
+              <Input
+                id="location"
+                name="location"
+                value={formData.location}
+                onChange={handleChange}
+                placeholder="الموقع أو العنوان"
+                className="mt-2"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <Label htmlFor="name" className="text-sm font-medium">اسم العقار</Label>
+                <Label htmlFor="city" className="text-base">المدينة</Label>
                 <Input
-                  id="name"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleChange}
-                  placeholder="اسم العقار"
-                  className="mt-1"
-                  data-testid="input-name"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="whatsappNumber" className="text-sm font-medium">رقم الواتساب</Label>
-                <Input
-                  id="whatsappNumber"
-                  name="whatsappNumber"
-                  value={formData.whatsappNumber}
-                  onChange={handleChange}
-                  placeholder="966XXXXXXXXX"
-                  className="mt-1"
-                  dir="ltr"
-                  data-testid="input-whatsapp"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="location" className="text-sm font-medium">الموقع / الحي</Label>
-                <Input
-                  id="location"
-                  name="location"
-                  value={formData.location}
-                  onChange={handleChange}
-                  placeholder="الحي أو الموقع"
-                  className="mt-1"
-                  data-testid="input-location"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="city" className="text-sm font-medium">المدينة</Label>
-                <select
                   id="city"
                   name="city"
                   value={formData.city}
                   onChange={handleChange}
-                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                  data-testid="select-city"
-                >
-                  <option value="">اختر المدينة</option>
-                  {CITIES.map((city) => (
-                    <option key={city} value={city}>{city}</option>
-                  ))}
-                </select>
+                  placeholder="المدينة"
+                  className="mt-2"
+                />
               </div>
-
               <div>
-                <Label htmlFor="direction" className="text-sm font-medium">الاتجاه</Label>
-                <select
+                <Label htmlFor="direction" className="text-base">الاتجاه</Label>
+                <Input
                   id="direction"
                   name="direction"
                   value={formData.direction}
                   onChange={handleChange}
-                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                  data-testid="select-direction"
-                >
-                  <option value="">اختر الاتجاه</option>
-                  {DIRECTIONS.map((dir) => (
-                    <option key={dir} value={dir}>{dir}</option>
-                  ))}
-                </select>
+                  placeholder="الاتجاه"
+                  className="mt-2"
+                />
               </div>
-
               <div>
-                <Label htmlFor="type" className="text-sm font-medium">نوع العقار</Label>
-                <select
+                <Label htmlFor="type" className="text-base">النوع</Label>
+                <Input
                   id="type"
                   name="type"
                   value={formData.type}
                   onChange={handleChange}
-                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                  data-testid="select-type"
-                >
-                  <option value="">اختر النوع</option>
-                  {TYPES.map((type) => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </Card>
-
-          {/* الأسعار */}
-          <Card className="p-5">
-            <h2 className="text-base font-bold text-primary mb-4 border-b pb-2">الأسعار (ريال)</h2>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <Label htmlFor="weekday" className="text-sm font-medium">وسط الأسبوع</Label>
-                <Input
-                  id="weekday"
-                  type="number"
-                  value={prices.weekday}
-                  onChange={(e) => setPrices({ ...prices, weekday: e.target.value })}
-                  placeholder="0"
-                  className="mt-1"
-                  data-testid="input-price-weekday"
-                />
-              </div>
-              <div>
-                <Label htmlFor="weekend" className="text-sm font-medium">نهاية الأسبوع</Label>
-                <Input
-                  id="weekend"
-                  type="number"
-                  value={prices.weekend}
-                  onChange={(e) => setPrices({ ...prices, weekend: e.target.value })}
-                  placeholder="0"
-                  className="mt-1"
-                  data-testid="input-price-weekend"
-                />
-              </div>
-              <div>
-                <Label htmlFor="overnight" className="text-sm font-medium">المبيت</Label>
-                <Input
-                  id="overnight"
-                  type="number"
-                  value={prices.overnight}
-                  onChange={(e) => setPrices({ ...prices, overnight: e.target.value })}
-                  placeholder="0"
-                  className="mt-1"
-                  data-testid="input-price-overnight"
-                />
-              </div>
-              <div>
-                <Label htmlFor="holidays" className="text-sm font-medium">الإجازات</Label>
-                <Input
-                  id="holidays"
-                  type="number"
-                  value={prices.holidays}
-                  onChange={(e) => setPrices({ ...prices, holidays: e.target.value })}
-                  placeholder="0"
-                  className="mt-1"
-                  data-testid="input-price-holidays"
+                  placeholder="النوع"
+                  className="mt-2"
                 />
               </div>
             </div>
-          </Card>
 
-          {/* المرافق */}
-          <Card className="p-5">
-            <h2 className="text-base font-bold text-primary mb-4 border-b pb-2">
-              المرافق ({selectedFacilities.length} مختار)
-            </h2>
-            
-            {/* البحث في المرافق */}
-            <div className="relative mb-4">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="ابحث عن مرفق..."
-                value={facilitySearch}
-                onChange={(e) => setFacilitySearch(e.target.value)}
-                className="pr-10"
-                data-testid="input-facility-search"
-              />
-            </div>
-
-            {/* المرافق المختارة */}
-            {selectedFacilities.length > 0 && (
-              <div className="mb-4 p-3 bg-primary/5 rounded-lg border border-primary/20">
-                <p className="text-xs font-medium text-primary mb-2">المرافق المختارة:</p>
-                <div className="flex flex-wrap gap-2">
-                  {selectedFacilities.map((f) => (
-                    <span
-                      key={f}
-                      className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full cursor-pointer hover:bg-primary/20"
-                      onClick={() => toggleFacility(f)}
-                    >
-                      {f} ✕
-                    </span>
-                  ))}
+            <div className="border-t pt-6">
+              <h2 className="text-lg font-bold mb-4">الأسعار (ريال)</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="weekday" className="text-base">سعر وسط الأسبوع</Label>
+                  <Input
+                    id="weekday"
+                    name="weekday"
+                    type="number"
+                    value={formData.weekday}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className="mt-2"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="weekend" className="text-base">سعر نهاية الأسبوع</Label>
+                  <Input
+                    id="weekend"
+                    name="weekend"
+                    type="number"
+                    value={formData.weekend}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className="mt-2"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="overnight" className="text-base">سعر المبيت</Label>
+                  <Input
+                    id="overnight"
+                    name="overnight"
+                    type="number"
+                    value={formData.overnight}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className="mt-2"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="holidays" className="text-base">سعر الإجازات</Label>
+                  <Input
+                    id="holidays"
+                    name="holidays"
+                    type="number"
+                    value={formData.holidays}
+                    onChange={handleChange}
+                    placeholder="0"
+                    className="mt-2"
+                  />
                 </div>
               </div>
-            )}
-
-            {/* قائمة المرافق */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-64 overflow-y-auto p-2 bg-muted/30 rounded-lg">
-              {FACILITIES
-                .filter((f) => f.toLowerCase().includes(facilitySearch.toLowerCase()))
-                .map((facility) => (
-                  <div key={facility} className="flex items-center gap-2">
-                    <Checkbox
-                      checked={selectedFacilities.includes(facility)}
-                      onCheckedChange={() => toggleFacility(facility)}
-                      id={`fac-${facility}`}
-                      data-testid={`checkbox-facility-${facility}`}
-                    />
-                    <label
-                      htmlFor={`fac-${facility}`}
-                      className="text-xs cursor-pointer select-none"
-                    >
-                      {facility}
-                    </label>
-                  </div>
-                ))}
             </div>
-          </Card>
 
-          {/* أزرار الحفظ */}
-          <div className="flex gap-3">
-            <Button
-              type="submit"
-              disabled={isLoading}
-              className="flex-1"
-              data-testid="button-save"
-            >
-              {isLoading ? "جاري الحفظ..." : "حفظ التغييرات"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setLocation("/owner/dashboard")}
-              disabled={isLoading}
-              data-testid="button-cancel"
-            >
-              إلغاء
-            </Button>
-          </div>
-        </form>
+            <div className="flex gap-3 pt-6">
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="flex-1"
+              >
+                {isLoading ? "جاري الحفظ..." : "حفظ التغييرات"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setLocation("/owner/dashboard")}
+                disabled={isLoading}
+              >
+                إلغاء
+              </Button>
+            </div>
+          </form>
+        </Card>
       </div>
     </div>
   );

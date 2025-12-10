@@ -425,25 +425,14 @@ export default function PropertyDetailsPage() {
 };
 
 
-  // دالة الرجوع السريع - تعمل مثل السحب بالضبط
-  const goBack = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const y = Number(sessionStorage.getItem("scrollPosition") || 0);
-
-    // الرجوع للقائمة
-    setLocation("/");
-
-    // إعادة موضع السكرول = مثل سحب iOS
-    setTimeout(() => {
-      window.scrollTo({
-        top: y,
-        behavior: "instant",
-      });
-    }, 50);
+  // دالة الرجوع السريع
+  const goBack = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      setLocation("/");
+    }
   };
-
 
   return (
     <div className="min-h-screen bg-background">
