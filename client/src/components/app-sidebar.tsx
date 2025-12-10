@@ -112,7 +112,6 @@ export function AppSidebar() {
                         if (item.url === "/") {
                           sessionStorage.removeItem("propertyFilters");
                           sessionStorage.removeItem("visibleCount");
-                          sessionStorage.removeItem("scrollPosition");
                         }
                       }}
                     >

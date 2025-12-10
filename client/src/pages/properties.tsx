@@ -76,8 +76,14 @@ export default function PropertiesPage() {
   const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
   const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
   
-  // مفتاح عشوائي يتغير عند إعادة تحميل الصفحة أو إلغاء الفلاتر
-  const [shuffleKey, setShuffleKey] = useState(() => Date.now());
+  // مفتاح عشوائي ثابت طوال الجلسة (يتغير فقط عند تحديث الصفحة بالكامل)
+  const [shuffleKey] = useState(() => {
+    const saved = sessionStorage.getItem("shuffleKey");
+    if (saved) return parseInt(saved);
+    const newKey = Date.now();
+    sessionStorage.setItem("shuffleKey", String(newKey));
+    return newKey;
+  });
 
   // لزر التصفية الثابت وزر الصعود للأعلى
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -307,8 +313,6 @@ export default function PropertiesPage() {
     setSelectedType("all");
     setSelectedFacilities([]);
     setMaxPrice(5000);
-    // تغيير مفتاح الخلط لإعادة ترتيب العقارات عشوائياً
-    setShuffleKey(Date.now());
     // مسح الفلاتر المحفوظة
     sessionStorage.removeItem("propertyFilters");
   };
