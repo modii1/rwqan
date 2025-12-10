@@ -9,8 +9,62 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle } from "lucide-react";
+import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator } from "lucide-react";
 import type { PartnerProfit, Payment } from "@shared/schema";
+
+// رسوم Paymob
+const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
+  "mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
+  "visa-local": { percentage: 2.7, fixedFee: 1, label: "Visa/MC (2.7% + 1 ر.س)" },
+  "stc": { percentage: 1.0, fixedFee: 1, label: "STC Pay (1% + 1 ر.س)" },
+  "apple": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
+  "بطاقة": { percentage: 2.7, fixedFee: 1, label: "بطاقة (2.7% + 1 ر.س)" },
+  "Visa": { percentage: 2.7, fixedFee: 1, label: "Visa (2.7% + 1 ر.س)" },
+  "MasterCard": { percentage: 2.7, fixedFee: 1, label: "MasterCard (2.7% + 1 ر.س)" },
+  "Mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
+  "Apple Pay": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
+  "تحويل بنكي": { percentage: 0, fixedFee: 0, label: "تحويل بنكي (0%)" },
+  "default": { percentage: 2.7, fixedFee: 1, label: "افتراضي (2.7% + 1 ر.س)" },
+};
+
+const VAT_RATE = 0.15;
+const PARTNER_SHARE = 0.50;
+
+function calculateFees(amount: number, paymentMethod: string) {
+  const method = (paymentMethod || "").toLowerCase();
+  
+  let config = PAYMOB_FEE_RATES["default"];
+  if (method.includes("mada") || method.includes("مدى")) {
+    config = PAYMOB_FEE_RATES["mada"];
+  } else if (method.includes("stc")) {
+    config = PAYMOB_FEE_RATES["stc"];
+  } else if (method.includes("apple")) {
+    config = PAYMOB_FEE_RATES["apple"];
+  } else if (method.includes("تحويل") || method.includes("bank")) {
+    config = PAYMOB_FEE_RATES["تحويل بنكي"];
+  } else {
+    config = PAYMOB_FEE_RATES[paymentMethod] || PAYMOB_FEE_RATES["default"];
+  }
+  
+  const baseFee = (amount * config.percentage / 100) + config.fixedFee;
+  const vatOnFee = baseFee * VAT_RATE;
+  const totalFees = baseFee + vatOnFee;
+  const netAmount = amount - totalFees;
+  const partnerProfit = netAmount * PARTNER_SHARE;
+  const ourProfit = netAmount * PARTNER_SHARE;
+  
+  return {
+    feeRate: config.percentage / 100,
+    fixedFee: config.fixedFee,
+    feeLabel: config.label,
+    feeAmount: baseFee,
+    vatOnFee,
+    totalFees,
+    netAmount,
+    partnerProfit,
+    ourProfit,
+  };
+}
 
 export default function PartnerProfitsSection() {
   const { toast } = useToast();
@@ -225,43 +279,99 @@ export default function PartnerProfitsSection() {
         <CardContent>
           {summary?.recentPayments && summary.recentPayments.length > 0 ? (
             <div className="space-y-3">
-              {summary.recentPayments.map((payment, index) => (
-                <div
-                  key={payment.id || index}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${
-                      payment.status === "مكتمل"
-                        ? "bg-green-100 dark:bg-green-900/30"
-                        : "bg-gray-100 dark:bg-gray-800"
-                    }`}>
-                      <CreditCard className={`w-4 h-4 ${
-                        payment.status === "مكتمل"
-                          ? "text-green-600"
-                          : "text-gray-500"
-                      }`} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">عقار: {payment.propertyNumber}</span>
-                        {getPaymentStatusBadge(payment.status)}
+              {summary.recentPayments.map((payment, index) => {
+                const fees = calculateFees(payment.finalAmount || 0, payment.paymentMethod || '');
+                
+                return (
+                  <div
+                    key={payment.id || index}
+                    className="p-4 rounded-lg border"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`p-2 rounded-lg ${
+                            payment.status === "مكتمل"
+                              ? "bg-green-100 dark:bg-green-900/30"
+                              : "bg-gray-100 dark:bg-gray-800"
+                          }`}
+                        >
+                          <CreditCard
+                            className={`w-4 h-4 ${
+                              payment.status === "مكتمل"
+                                ? "text-green-600"
+                                : "text-gray-500"
+                            }`}
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">
+                              عقار: {payment.propertyNumber}
+                            </span>
+                            {getPaymentStatusBadge(payment.status)}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {payment.paymentMethod} |{" "}
+                            {new Date(payment.createdAt || "").toLocaleDateString("ar-SA")}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {payment.paymentMethod} | {new Date(payment.createdAt || "").toLocaleDateString("ar-SA")}
+
+                      <div className="text-left">
+                        <p className="font-bold text-lg">
+                          {payment.finalAmount?.toLocaleString()} ريال
+                        </p>
                       </div>
                     </div>
-                  </div>
-                  <div className="text-left">
-                    <p className="font-bold">{payment.finalAmount?.toLocaleString()} ريال</p>
+                    
                     {payment.status === "مكتمل" && (
-                      <p className="text-xs text-emerald-600">
-                        الشريك: {((payment.finalAmount || 0) * 0.5).toLocaleString()} ريال
-                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
+                        <div className="text-center p-2 rounded bg-red-50 dark:bg-red-950/20">
+                          <div className="flex items-center justify-center gap-1 text-xs text-red-600 mb-1">
+                            <Percent className="w-3 h-3" />
+                            <span>الرسوم + ض.ق.م</span>
+                          </div>
+                          <p className="font-semibold text-red-600">
+                            -{fees.totalFees.toFixed(2)} ريال
+                          </p>
+                        </div>
+                        
+                        <div className="text-center p-2 rounded bg-blue-50 dark:bg-blue-950/20">
+                          <div className="flex items-center justify-center gap-1 text-xs text-blue-600 mb-1">
+                            <Calculator className="w-3 h-3" />
+                            <span>الصافي</span>
+                          </div>
+                          <p className="font-semibold text-blue-600">
+                            {fees.netAmount.toFixed(2)} ريال
+                          </p>
+                        </div>
+                        
+                        <div className="text-center p-2 rounded bg-emerald-50 dark:bg-emerald-950/20">
+                          <div className="flex items-center justify-center gap-1 text-xs text-emerald-600 mb-1">
+                            <Wallet className="w-3 h-3" />
+                            <span>حصة الشريك (50%)</span>
+                          </div>
+                          <p className="font-semibold text-emerald-600">
+                            {fees.partnerProfit.toFixed(2)} ريال
+                          </p>
+                        </div>
+                        
+                        <div className="text-center p-2 rounded bg-amber-50 dark:bg-amber-950/20">
+                          <div className="flex items-center justify-center gap-1 text-xs text-amber-600 mb-1">
+                            <TrendingUp className="w-3 h-3" />
+                            <span>حصتنا (50%)</span>
+                          </div>
+                          <p className="font-semibold text-amber-600">
+                            {fees.ourProfit.toFixed(2)} ريال
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
@@ -270,6 +380,7 @@ export default function PartnerProfitsSection() {
             </div>
           )}
         </CardContent>
+
       </Card>
 
       <Card>
