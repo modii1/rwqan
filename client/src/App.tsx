@@ -90,12 +90,13 @@ export default function App() {
   }, []);
 
   const handleHome = () => {
-    // Clear all filters from sessionStorage
+    // مسح جميع الفلاتر والترتيب العشوائي لإعادة ترتيب جديد
     sessionStorage.removeItem("propertyFilters");
     sessionStorage.removeItem("visibleCount");
     sessionStorage.removeItem("scrollPosition");
-    // الانتقال للصفحة الرئيسية بدون تحديث كامل
-    setLocation("/");
+    sessionStorage.removeItem("shuffleKey");
+    // تحديث الصفحة بالكامل لإلغاء كل شيء
+    window.location.href = "/";
   };
 
   const handleLogout = async () => {
