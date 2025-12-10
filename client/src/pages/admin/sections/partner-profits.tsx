@@ -199,8 +199,8 @@ export default function PartnerProfitsSection() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">الشهر الحالي</p>
-                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                  {summary?.currentMonth.partnerShare.toLocaleString() || 0} ريال
+                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400" dir="ltr">
+                  {(summary?.currentMonth.partnerShare || 0).toLocaleString("en-US")} ر.س
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {summary?.currentMonth.paymentsCount || 0} دفعة مكتملة
@@ -218,8 +218,8 @@ export default function PartnerProfitsSection() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">إجمالي الأرباح</p>
-                <p className="text-2xl font-bold">
-                  {summary?.allTime.partnerShare.toLocaleString() || 0} ريال
+                <p className="text-2xl font-bold" dir="ltr">
+                  {(summary?.allTime.partnerShare || 0).toLocaleString("en-US")} ر.س
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   {summary?.allTime.paymentsCount || 0} دفعة إجمالية
@@ -237,7 +237,7 @@ export default function PartnerProfitsSection() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">في انتظار المراجعة</p>
-                <p className="text-2xl font-bold text-orange-600">
+                <p className="text-2xl font-bold text-orange-600" dir="ltr">
                   {summary?.pendingPayments || 0}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -280,7 +280,19 @@ export default function PartnerProfitsSection() {
           {summary?.recentPayments && summary.recentPayments.length > 0 ? (
             <div className="space-y-3">
               {summary.recentPayments.map((payment, index) => {
-                const fees = calculateFees(payment.finalAmount || 0, payment.paymentMethod || '');
+                const amount = payment.finalAmount || 0;
+                const calculatedFees = calculateFees(amount, payment.paymentMethod || '');
+                
+                // استخدام بيانات Paymob الفعلية إن وُجدت (مثل المدفوعات)
+                const paymentData = payment as any;
+                const totalFees = paymentData.totalFees !== undefined 
+                  ? paymentData.totalFees 
+                  : calculatedFees.totalFees;
+                const netAmount = paymentData.netAmount !== undefined 
+                  ? paymentData.netAmount 
+                  : amount - totalFees;
+                const partnerProfit = netAmount * PARTNER_SHARE;
+                const ourProfit = netAmount * PARTNER_SHARE;
                 
                 return (
                   <div
@@ -314,14 +326,14 @@ export default function PartnerProfitsSection() {
                           </div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {payment.paymentMethod} |{" "}
-                            {new Date(payment.createdAt || "").toLocaleDateString("ar-SA")}
+                            {new Date(payment.createdAt || "").toLocaleDateString("en-US")}
                           </div>
                         </div>
                       </div>
 
-                      <div className="text-left">
+                      <div className="text-left" dir="ltr">
                         <p className="font-bold text-lg">
-                          {payment.finalAmount?.toLocaleString()} ريال
+                          {amount.toLocaleString("en-US")} ريال
                         </p>
                       </div>
                     </div>
@@ -333,8 +345,8 @@ export default function PartnerProfitsSection() {
                             <Percent className="w-3 h-3" />
                             <span>الرسوم + ض.ق.م</span>
                           </div>
-                          <p className="font-semibold text-red-600">
-                            -{fees.totalFees.toFixed(2)} ريال
+                          <p className="font-semibold text-red-600" dir="ltr">
+                            -{totalFees.toFixed(2)} ر.س
                           </p>
                         </div>
                         
@@ -343,8 +355,8 @@ export default function PartnerProfitsSection() {
                             <Calculator className="w-3 h-3" />
                             <span>الصافي</span>
                           </div>
-                          <p className="font-semibold text-blue-600">
-                            {fees.netAmount.toFixed(2)} ريال
+                          <p className="font-semibold text-blue-600" dir="ltr">
+                            {netAmount.toFixed(2)} ر.س
                           </p>
                         </div>
                         
@@ -353,8 +365,8 @@ export default function PartnerProfitsSection() {
                             <Wallet className="w-3 h-3" />
                             <span>حصة الشريك (50%)</span>
                           </div>
-                          <p className="font-semibold text-emerald-600">
-                            {fees.partnerProfit.toFixed(2)} ريال
+                          <p className="font-semibold text-emerald-600" dir="ltr">
+                            {partnerProfit.toFixed(2)} ر.س
                           </p>
                         </div>
                         
@@ -363,8 +375,8 @@ export default function PartnerProfitsSection() {
                             <TrendingUp className="w-3 h-3" />
                             <span>حصتنا (50%)</span>
                           </div>
-                          <p className="font-semibold text-amber-600">
-                            {fees.ourProfit.toFixed(2)} ريال
+                          <p className="font-semibold text-amber-600" dir="ltr">
+                            {ourProfit.toFixed(2)} ر.س
                           </p>
                         </div>
                       </div>
@@ -458,14 +470,14 @@ export default function PartnerProfitsSection() {
                         {getStatusBadge(profit.transferStatus)}
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
-                        {profit.activeSubscriptions} دفعة | {profit.totalRevenue.toLocaleString()} ريال إيرادات
+                        {profit.activeSubscriptions} دفعة | <span dir="ltr">{profit.totalRevenue.toLocaleString("en-US")}</span> ر.س إيرادات
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-left">
                       <p className="text-sm text-muted-foreground">نصيب الشريك</p>
-                      <p className="font-bold text-emerald-600">{profit.partnerShare.toLocaleString()} ريال</p>
+                      <p className="font-bold text-emerald-600" dir="ltr">{profit.partnerShare.toLocaleString("en-US")} ر.س</p>
                     </div>
                     {profit.transferStatus === "pending" && (
                       <Button
