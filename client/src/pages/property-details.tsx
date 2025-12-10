@@ -80,16 +80,46 @@ export default function PropertyDetailsPage() {
 
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   const propertyId = params?.id ?? "";
 
+  // جلب بيانات العقار مباشرة من الخادم (أسرع من Google Apps Script)
   const {
-    data: properties = [],
+    data: property,
     isLoading,
     isError,
-  } = useQuery<PropertyDetails[]>({
-    queryKey: ["property-details"],
+  } = useQuery<PropertyDetails | null>({
+    queryKey: ["property-details", propertyId],
     queryFn: async () => {
+      if (!propertyId) return null;
+      
+      // محاولة الجلب من الخادم المحلي أولاً (أسرع بكثير)
+      try {
+        const localRes = await fetch(`/api/properties/${propertyId}`);
+        if (localRes.ok) {
+          const data = await localRes.json();
+          if (data) {
+            return {
+              propertyNumber: data.propertyNumber || propertyId,
+              name: data.name || "",
+              city: data.city || "",
+              direction: data.direction || "",
+              location: data.location || "",
+              type: data.type || "",
+              facilities: Array.isArray(data.facilities) ? data.facilities : [],
+              prices: data.prices || { weekday: "", weekend: "", overnight: "", holidays: "" },
+              subscriptionType: data.subscriptionType || (data.name ? "مميز" : "عادي"),
+              phone: data.whatsappNumber || "",
+              imageCount: 0,
+            } as PropertyDetails;
+          }
+        }
+      } catch {
+        // تجاهل - سنجرب Google Apps Script
+      }
+      
+      // الرجوع إلى Google Apps Script
       const res = await fetch(
         "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
       );
@@ -98,94 +128,53 @@ export default function PropertyDetailsPage() {
       }
 
       const raw = await res.json();
+      if (!Array.isArray(raw)) return null;
 
-      if (!Array.isArray(raw)) return [];
+      const item = raw.find((p: any) => String(p["رقم العقار"]) === propertyId);
+      if (!item) return null;
 
-      return raw.map((item: any): PropertyDetails => {
-        const propertyNumber = String(item["رقم العقار"] || "");
-        const name = item["اسم العقار"] || "";
-        const city = item["المنطقة"] || "";
-        const direction = item["الاتجاه"] || "";
-        const location = item["الموقع"] || "";
-        const type = item["النوع"] || "";
-
-        // المرافق: قد تكون نص عادي أو JSON مصفوفة
-        let facilities: string[] = [];
-        const rawFacilities = item["المرافق"] || "";
-        if (typeof rawFacilities === "string") {
-          const trimmed = rawFacilities.trim();
-          if (trimmed.startsWith("[")) {
-            try {
-              const parsed = JSON.parse(trimmed);
-              if (Array.isArray(parsed)) {
-                facilities = parsed.map((f) => String(f).trim());
-              }
-            } catch {
-              facilities = trimmed
-                .split(",")
-                .map((f: string) => f.replace(/"/g, "").trim())
-                .filter(Boolean);
+      const name = item["اسم العقار"] || "";
+      let facilities: string[] = [];
+      const rawFacilities = item["المرافق"] || "";
+      if (typeof rawFacilities === "string") {
+        const trimmed = rawFacilities.trim();
+        if (trimmed.startsWith("[")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              facilities = parsed.map((f) => String(f).trim());
             }
-          } else {
-            facilities = trimmed
-              .split(",")
-              .map((f: string) => f.replace(/"/g, "").trim())
-              .filter(Boolean);
+          } catch {
+            facilities = trimmed.split(",").map((f: string) => f.replace(/"/g, "").trim()).filter(Boolean);
           }
+        } else {
+          facilities = trimmed.split(",").map((f: string) => f.replace(/"/g, "").trim()).filter(Boolean);
         }
+      }
 
-        const prices = {
+      return {
+        propertyNumber: String(item["رقم العقار"] || ""),
+        name,
+        city: item["المنطقة"] || "",
+        direction: item["الاتجاه"] || "",
+        location: item["الموقع"] || "",
+        type: item["النوع"] || "",
+        facilities,
+        prices: {
           weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
           weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
           overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
           holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
-        };
-
-        // قاعدة الاشتراك: إذا فيه اسم عقار = مميز، إذا ما فيه = عادي
-        const subscriptionType = name ? "مميز" : "عادي";
-
-        // رقم الجوال (للعقارات المميزة فقط عادة)
-        const phone = item["رقم الجوال"] ? String(item["رقم الجوال"]) : "";
-
-        // عدد الصور الحقيقي من عمود "رابط الصور" لو كان فيه مصفوفة
-        let imageCount = 0;
-        const imagesField = item["رابط الصور"];
-        if (typeof imagesField === "string") {
-          const trimmedImages = imagesField.trim();
-          if (trimmedImages.startsWith("[")) {
-            try {
-              const arr = JSON.parse(trimmedImages);
-              if (Array.isArray(arr)) {
-                imageCount = arr.length;
-              }
-            } catch {
-              // تجاهل الخطأ
-            }
-          }
-        }
-
-        return {
-          propertyNumber,
-          name,
-          city,
-          direction,
-          location,
-          type,
-          facilities,
-          prices,
-          subscriptionType,
-          phone,
-          imageCount,
-        };
-      });
+        },
+        subscriptionType: name ? "مميز" : "عادي",
+        phone: item["رقم الجوال"] ? String(item["رقم الجوال"]) : "",
+        imageCount: 0,
+      } as PropertyDetails;
     },
-
-    staleTime: 1000 * 60, // دقيقة
+    staleTime: 1000 * 60 * 5, // 5 دقائق
     retry: 1,
     refetchOnWindowFocus: false,
   });
-
-  const property = properties.find((p) => p.propertyNumber === propertyId);
 
   // ✅ تتبع الزيارات
   useEffect(() => {
@@ -221,28 +210,32 @@ export default function PropertyDetailsPage() {
     setSelectedImage(0);
   }, [property?.propertyNumber]);
 
-  // نحسب الصور من R2 - استخدم fetch للتحقق من الصور الفعلية
-  const [r2Images, setR2Images] = useState<string[]>([]);
-  
-  useEffect(() => {
-    if (!property) return;
-    
-    const fetchR2Images = async () => {
+  // جلب الصور من R2 بشكل متوازي مع البيانات
+  const { data: r2ImagesData } = useQuery<string[]>({
+    queryKey: ["r2-images", propertyId],
+    queryFn: async () => {
+      if (!propertyId) return [];
       try {
-        const res = await fetch(`/api/admin/r2-images/${property.propertyNumber}`);
+        const res = await fetch(`/api/admin/r2-images/${propertyId}`);
         if (res.ok) {
           const data = await res.json();
-          setR2Images(data.images || []);
+          return data.images || [];
         }
       } catch {
-        setR2Images([]);
+        // تجاهل
       }
-    };
-    
-    fetchR2Images();
-  }, [property?.propertyNumber]);
+      return [];
+    },
+    staleTime: 1000 * 60 * 10, // 10 دقائق
+    enabled: !!propertyId,
+  });
   
-  let images = r2Images;
+  const images = r2ImagesData || [];
+  
+  // إعادة تعيين حالة تحميل الصورة عند تغيير الصورة
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [selectedImage]);
 
   // ✅ Preload للصورة التالية لتسريع التصفح
   useEffect(() => {
@@ -273,10 +266,50 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  if (!property) {
+  // حالة التحميل مع Skeleton
+  if (isLoading || !property) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-
+      <div className="min-h-screen bg-background">
+        <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/")}>
+              <ArrowRight className="w-5 h-5" />
+            </Button>
+            <div className="flex-1">
+              <div className="h-5 w-32 bg-muted animate-pulse rounded" />
+              <div className="h-3 w-20 bg-muted animate-pulse rounded mt-1" />
+            </div>
+          </div>
+        </header>
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-4">
+              <Card className="overflow-hidden">
+                <div className="aspect-video bg-muted animate-pulse flex items-center justify-center">
+                  <Home className="w-16 h-16 text-muted-foreground/30" />
+                </div>
+              </Card>
+              <Card className="p-6">
+                <div className="h-6 w-32 bg-muted animate-pulse rounded mb-4" />
+                <div className="flex flex-wrap gap-6">
+                  {[1,2,3,4].map(i => (
+                    <div key={i} className="h-12 w-24 bg-muted animate-pulse rounded" />
+                  ))}
+                </div>
+              </Card>
+            </div>
+            <div className="space-y-4">
+              <Card className="p-6">
+                <div className="h-6 w-20 bg-muted animate-pulse rounded mb-4" />
+                <div className="space-y-3">
+                  {[1,2,3].map(i => (
+                    <div key={i} className="h-8 bg-muted animate-pulse rounded" />
+                  ))}
+                </div>
+              </Card>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -449,14 +482,21 @@ export default function PropertyDetailsPage() {
                       />
                     )}
 
+                    {/* Skeleton أثناء تحميل الصورة */}
+                    {!imageLoaded && (
+                      <div className="absolute inset-0 bg-muted animate-pulse flex items-center justify-center">
+                        <Home className="w-16 h-16 text-muted-foreground/30" />
+                      </div>
+                    )}
                     <img
                       src={images[selectedImage]}
                       alt={`صورة ${selectedImage + 1}`}
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
                       loading="eager"
                       decoding="async"
                       data-testid="img-main"
                       draggable={false}
+                      onLoad={() => setImageLoaded(true)}
                     />
 
                     {images.length > 1 && (
