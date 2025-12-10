@@ -425,13 +425,12 @@ export default function PropertyDetailsPage() {
 };
 
 
-  // دالة الرجوع السريع
-  const goBack = () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      setLocation("/");
-    }
+  // دالة الرجوع السريع - نفس سلوك السحب من الحافة
+  const goBack = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // استخدام history.back() مباشرة - نفس سلوك السحب الأصلي
+    window.history.back();
   };
 
   return (
