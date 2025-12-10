@@ -13,11 +13,20 @@ import { Link, useLocation } from "wouter";
 import { PriceDisplay } from "@/components/price-display";
 import { getCurrencyLabel } from "@/lib/currency";
 
-// دالة لخلط المصفوفة عشوائياً (Fisher-Yates)
-function shuffleArray<T>(array: T[]): T[] {
+// دالة لإنشاء مولد أرقام عشوائية قابل للتكرار (seeded random)
+function seededRandom(seed: number) {
+  return function() {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+}
+
+// دالة لخلط المصفوفة عشوائياً مع seed ثابت (Fisher-Yates)
+function shuffleArrayWithSeed<T>(array: T[], seed: number): T[] {
   const shuffled = [...array];
+  const random = seededRandom(seed);
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
@@ -133,8 +142,10 @@ export default function PropertiesPage() {
     );
   };
 
-  const filteredPropertiesBase = properties
-    .filter((property) => {
+  // تصفية وترتيب العقارات - كل شيء داخل useMemo لمنع إعادة الحساب عند التمرير
+  const filteredProperties = useMemo(() => {
+    // تصفية العقارات أولاً
+    const filtered = properties.filter((property) => {
       // Search query
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -193,7 +204,6 @@ export default function PropertiesPage() {
         ];
         const validPrices = prices.filter((p) => p > 0);
         if (validPrices.length > 0) {
-          // العقار يظهر إذا كان لديه أي سعر أقل أو يساوي السعر المحدد
           const hasAffordablePrice = validPrices.some((p) => p <= maxPrice);
           if (!hasAffordablePrice) return false;
         }
@@ -201,22 +211,17 @@ export default function PropertiesPage() {
 
       return true;
     });
-  
-  // ترتيب عشوائي مع الحفاظ على المميز أولاً
-  const shuffledProperties = useMemo(() => {
-    // فصل العقارات المميزة عن العادية
-    const verified = filteredPropertiesBase.filter(p => p.subscriptionType === "مميز");
-    const regular = filteredPropertiesBase.filter(p => p.subscriptionType !== "مميز");
     
-    // خلط كل مجموعة عشوائياً
-    const shuffledVerified = shuffleArray(verified);
-    const shuffledRegular = shuffleArray(regular);
+    // ترتيب عشوائي مع الحفاظ على المميز أولاً
+    const verified = filtered.filter(p => p.subscriptionType === "مميز");
+    const regular = filtered.filter(p => p.subscriptionType !== "مميز");
     
-    // المميز أولاً ثم العادي
+    // خلط كل مجموعة عشوائياً باستخدام shuffleKey الثابت
+    const shuffledVerified = shuffleArrayWithSeed(verified, shuffleKey);
+    const shuffledRegular = shuffleArrayWithSeed(regular, shuffleKey + 1);
+    
     return [...shuffledVerified, ...shuffledRegular];
-  }, [filteredPropertiesBase, shuffleKey]);
-  
-  const filteredProperties = shuffledProperties;
+  }, [properties, searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, shuffleKey]);
 
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
