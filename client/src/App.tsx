@@ -94,8 +94,8 @@ export default function App() {
     sessionStorage.removeItem("propertyFilters");
     sessionStorage.removeItem("visibleCount");
     sessionStorage.removeItem("scrollPosition");
-    // إعادة تحميل الصفحة لتطبيق الفلاتر الجديدة
-    window.location.href = "/";
+    // الانتقال للصفحة الرئيسية بدون تحديث كامل
+    setLocation("/");
   };
 
   const handleLogout = async () => {
