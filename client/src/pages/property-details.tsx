@@ -10,14 +10,27 @@ import { PriceDisplay } from "@/components/price-display";
 import { useToast } from "@/hooks/use-toast";
 import { trackEvent } from "@/lib/analytics";
 
-// ⭐ مؤشر السحب الذهبي في منتصف الشاشة (لا يلمس أي شيء من تصميمك)
-// ⭐ مؤشر السحب المتدرّج (مجموعة أسهم)
+// ⭐ مؤشر السحب المحسّن - يظهر لمدة 4 ثواني ثم يختفي
 function EdgeSwipeIndicator() {
+  const [visible, setVisible] = useState(true);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(false), 4000);
+    return () => clearTimeout(timer);
+  }, []);
+  
+  if (!visible) return null;
+  
   return (
-    <div className="edge-swipe-arrows">
-      <span></span>
-      <span></span>
-      <span></span>
+    <div className="swipe-hint-container">
+      <div className="swipe-hint-content">
+        <div className="swipe-arrows">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <span className="swipe-text">اسحب للرجوع</span>
+      </div>
     </div>
   );
 }
