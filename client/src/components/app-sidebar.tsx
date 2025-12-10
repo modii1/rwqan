@@ -104,7 +104,18 @@ export function AppSidebar() {
                     asChild 
                     isActive={location === item.url}
                   >
-                    <Link href={item.url} data-testid={`sidebar-link-${item.url}`}>
+                    <Link 
+                      href={item.url} 
+                      data-testid={`sidebar-link-${item.url}`}
+                      onClick={() => {
+                        // إلغاء الفلاتر عند الضغط على الصفحة الرئيسية
+                        if (item.url === "/") {
+                          sessionStorage.removeItem("propertyFilters");
+                          sessionStorage.removeItem("visibleCount");
+                          sessionStorage.removeItem("scrollPosition");
+                        }
+                      }}
+                    >
                       <item.icon className="mr-2" />
                       <span>{item.title}</span>
                     </Link>

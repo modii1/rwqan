@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,16 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
 import { PriceDisplay } from "@/components/price-display";
 import { getCurrencyLabel } from "@/lib/currency";
+
+// دالة لخلط المصفوفة عشوائياً (Fisher-Yates)
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -65,6 +75,9 @@ export default function PropertiesPage() {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
   const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
+  
+  // مفتاح عشوائي يتغير عند إعادة تحميل الصفحة أو إلغاء الفلاتر
+  const [shuffleKey, setShuffleKey] = useState(() => Date.now());
 
   // لزر التصفية الثابت وزر الصعود للأعلى
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -114,7 +127,7 @@ export default function PropertiesPage() {
     );
   };
 
-  const filteredProperties = properties
+  const filteredPropertiesBase = properties
     .filter((property) => {
       // Search query
       if (searchQuery) {
@@ -178,15 +191,23 @@ export default function PropertiesPage() {
       }
 
       return true;
-    })
-    .sort((a, b) => {
-      // Sort: verified (مميز) properties first, then free (عادي)
-      const aIsVerified = a.subscriptionType === "مميز";
-      const bIsVerified = b.subscriptionType === "مميز";
-      if (aIsVerified && !bIsVerified) return -1;
-      if (!aIsVerified && bIsVerified) return 1;
-      return 0;
     });
+  
+  // ترتيب عشوائي مع الحفاظ على المميز أولاً
+  const shuffledProperties = useMemo(() => {
+    // فصل العقارات المميزة عن العادية
+    const verified = filteredPropertiesBase.filter(p => p.subscriptionType === "مميز");
+    const regular = filteredPropertiesBase.filter(p => p.subscriptionType !== "مميز");
+    
+    // خلط كل مجموعة عشوائياً
+    const shuffledVerified = shuffleArray(verified);
+    const shuffledRegular = shuffleArray(regular);
+    
+    // المميز أولاً ثم العادي
+    return [...shuffledVerified, ...shuffledRegular];
+  }, [filteredPropertiesBase, shuffleKey]);
+  
+  const filteredProperties = shuffledProperties;
 
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
@@ -283,6 +304,10 @@ export default function PropertiesPage() {
     setSelectedType("all");
     setSelectedFacilities([]);
     setPriceRange([0, 5000]);
+    // تغيير مفتاح الخلط لإعادة ترتيب العقارات عشوائياً
+    setShuffleKey(Date.now());
+    // مسح الفلاتر المحفوظة
+    sessionStorage.removeItem("propertyFilters");
   };
 
   const getCurrentImageIndex = (propertyNumber: string) => {
