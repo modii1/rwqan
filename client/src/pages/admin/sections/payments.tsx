@@ -181,18 +181,30 @@ export default function PaymentsSection() {
 
   const completedPayments = (data || []).filter(p => p.status === "مكتمل");
   
-  const totals = completedPayments.reduce((acc, p) => {
-    const amount = p.finalAmount || p.amount || 0;
-    const fees = calculateFees(amount, p.paymentMethod || "default");
-    
-    return {
-      totalAmount: acc.totalAmount + amount,
-      totalFees: acc.totalFees + fees.totalFees,
-      totalNet: acc.totalNet + fees.netAmount,
-      partnerProfit: acc.partnerProfit + fees.partnerProfit,
-      ourProfit: acc.ourProfit + fees.ourProfit,
-    };
-  }, { totalAmount: 0, totalFees: 0, totalNet: 0, partnerProfit: 0, ourProfit: 0 });
+const totals = completedPayments.reduce((acc, p) => {
+  const amount = p.finalAmount || p.amount || 0;
+
+  // استخدام بيانات Paymob الفعلية إن وُجدت
+  const totalFees = p.totalFees !== undefined
+    ? p.totalFees
+    : calculateFees(amount, p.paymentMethod || "default").totalFees;
+
+  const netAmount = p.netAmount !== undefined
+    ? p.netAmount
+    : amount - totalFees;
+
+  const partnerProfit = netAmount * 0.5;
+  const ourProfit = netAmount * 0.5;
+
+  return {
+    totalAmount: acc.totalAmount + amount,
+    totalFees: acc.totalFees + totalFees,
+    totalNet: acc.totalNet + netAmount,
+    partnerProfit: acc.partnerProfit + partnerProfit,
+    ourProfit: acc.ourProfit + ourProfit,
+  };
+}, { totalAmount: 0, totalFees: 0, totalNet: 0, partnerProfit: 0, ourProfit: 0 });
+
 
   return (
     <section className="space-y-4">
@@ -340,23 +352,25 @@ export default function PaymentsSection() {
                         <span className="text-xs">{p.paymentMethod || '-'}</span>
                       </Td>
                       <Td>
-                        {isCompleted ? (
-                          <span className="text-red-600 text-xs font-medium">
-                            -{fees.totalFees.toFixed(2)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">-</span>
-                        )}
-                      </Td>
-                      <Td>
-                        {isCompleted ? (
-                          <span className="text-green-600 font-semibold text-xs">
-                            {fees.netAmount.toFixed(2)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">-</span>
-                        )}
-                      </Td>
+  {isCompleted ? (
+    <span className="text-red-600 text-xs font-medium">
+      -{(p.totalFees ?? fees.totalFees).toFixed(2)}
+    </span>
+  ) : (
+    <span className="text-muted-foreground text-xs">-</span>
+  )}
+</Td>
+
+<Td>
+  {isCompleted ? (
+    <span className="text-green-600 font-semibold text-xs">
+      {(p.netAmount ?? (amount - (p.totalFees ?? fees.totalFees))).toFixed(2)}
+    </span>
+  ) : (
+    <span className="text-muted-foreground text-xs">-</span>
+  )}
+</Td>
+
                       <Td>
                         <Badge
                           variant={
