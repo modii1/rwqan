@@ -70,7 +70,7 @@ export default function PropertiesPage() {
   const [selectedDirection, setSelectedDirection] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-  const [priceRange, setPriceRange] = useState<[number, number]>([0, 5000]);
+  const [maxPrice, setMaxPrice] = useState<number>(5000);
   const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
@@ -97,7 +97,7 @@ export default function PropertiesPage() {
       setSelectedDirection(f.selectedDirection || "");
       setSelectedType(f.selectedType || "");
       setSelectedFacilities(f.selectedFacilities || []);
-      setPriceRange(f.priceRange || [0, 5000]);
+      setMaxPrice(f.maxPrice || 5000);
     }
   }, []);
 
@@ -177,17 +177,20 @@ export default function PropertiesPage() {
         if (!hasAllFacilities) return false;
       }
 
-      // Price filter
-      const prices = [
-        parseFloat(property.prices.weekday) || 0,
-        parseFloat(property.prices.weekend) || 0,
-        parseFloat(property.prices.overnight) || 0,
-        parseFloat(property.prices.holidays) || 0,
-      ];
-      const validPrices = prices.filter((p) => p > 0);
-      if (validPrices.length > 0) {
-        const minPrice = Math.min(...validPrices);
-        if (minPrice < priceRange[0] || minPrice > priceRange[1]) return false;
+      // Price filter - إظهار العقارات التي لديها أي سعر يساوي أو أقل من السعر المحدد
+      if (maxPrice < 5000) {
+        const prices = [
+          parseFloat(property.prices.weekday) || 0,
+          parseFloat(property.prices.weekend) || 0,
+          parseFloat(property.prices.overnight) || 0,
+          parseFloat(property.prices.holidays) || 0,
+        ];
+        const validPrices = prices.filter((p) => p > 0);
+        if (validPrices.length > 0) {
+          // العقار يظهر إذا كان لديه أي سعر أقل أو يساوي السعر المحدد
+          const hasAffordablePrice = validPrices.some((p) => p <= maxPrice);
+          if (!hasAffordablePrice) return false;
+        }
       }
 
       return true;
@@ -220,10 +223,10 @@ export default function PropertiesPage() {
       selectedDirection,
       selectedType,
       selectedFacilities,
-      priceRange,
+      maxPrice,
     };
     sessionStorage.setItem("propertyFilters", JSON.stringify(filters));
-  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, priceRange]);
+  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice]);
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
   useEffect(() => {
@@ -303,7 +306,7 @@ export default function PropertiesPage() {
     setSelectedDirection("all");
     setSelectedType("all");
     setSelectedFacilities([]);
-    setPriceRange([0, 5000]);
+    setMaxPrice(5000);
     // تغيير مفتاح الخلط لإعادة ترتيب العقارات عشوائياً
     setShuffleKey(Date.now());
     // مسح الفلاتر المحفوظة
@@ -466,12 +469,12 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
+              السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
             </label>
             <Slider
-              value={priceRange}
-              onValueChange={(value) => setPriceRange(value as [number, number])}
-              min={0}
+              value={[maxPrice]}
+              onValueChange={(value) => setMaxPrice(value[0])}
+              min={100}
               max={5000}
               step={50}
               className="mt-2"
@@ -936,12 +939,12 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                نطاق السعر: {priceRange[0]} - {priceRange[1]} ريال
+                السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
               </label>
               <Slider
-                value={priceRange}
-                onValueChange={(v) => setPriceRange(v as [number, number])}
-                min={0}
+                value={[maxPrice]}
+                onValueChange={(v) => setMaxPrice(v[0])}
+                min={100}
                 max={5000}
                 step={50}
               />
