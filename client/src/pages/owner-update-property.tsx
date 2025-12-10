@@ -18,7 +18,7 @@ const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'ا�
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب', 'وسط'] as const;
 
 // أنواع العقارات
-const TYPES = ['شاليه', 'استراحة', 'مزرعة', 'فيلا', 'شقة'] as const;
+const TYPES = ['قسمين' , 'قسم'] as const;
 
 export default function OwnerUpdateProperty() {
   const [, setLocation] = useLocation();
