@@ -425,13 +425,10 @@ export default function PropertyDetailsPage() {
 };
 
 
-  // دالة الرجوع السريع
+  // دالة الرجوع السريع - تنقل مباشر مع استعادة موقع التمرير
   const goBack = () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      setLocation("/");
-    }
+    // التنقل للصفحة الرئيسية - سيتم استعادة موقع التمرير تلقائياً من sessionStorage
+    setLocation("/");
   };
 
   return (
