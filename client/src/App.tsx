@@ -143,7 +143,7 @@ export default function App() {
       <TooltipProvider>
         <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
-          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-[80px] overflow-visible">
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-[50px] overflow-visible">
             <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
