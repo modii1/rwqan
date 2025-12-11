@@ -143,7 +143,7 @@ export default function App() {
       <TooltipProvider>
         <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
-          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-14 overflow-visible">
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-[100px] overflow-visible">
             <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
@@ -152,7 +152,7 @@ export default function App() {
                 <img 
                   src={logoImage} 
                   alt="روقإن" 
-                  className="h-[200px] w-auto relative top-8"
+                  className="h-[250px] w-auto relative top-12"
                 />
               </a>
               <nav className="flex items-center gap-2">
