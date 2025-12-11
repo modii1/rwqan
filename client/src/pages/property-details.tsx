@@ -447,21 +447,10 @@ export default function PropertyDetailsPage() {
     }
   };
 
-  // ⭐ دالة الرجوع المتوافقة مع Safari + Chrome + Edge + Wouter
-  const goBack = (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    // لو فيه خطوة سابقة في التاريخ → رجوع طبيعي
-    if (window.history.length > 1) {
-      window.history.back();
-      return;
-    }
-
-    // fallback — لو ما فيه خطوة سابقة (فتح مباشر)
-    setLocation("/properties"); // أو "/" حسب موقعك
+  // ⭐ دالة الرجوع البسيطة
+  const goBack = () => {
+    // استخدام setLocation للتنقل السلس مع wouter
+    setLocation("/");
   };
 
   return (
