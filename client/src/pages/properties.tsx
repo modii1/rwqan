@@ -136,6 +136,22 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
+  // ✅ استعادة موقع التمرير بعد تحميل العقارات
+  useEffect(() => {
+    const savedScroll = sessionStorage.getItem("scrollPosition");
+    if (savedScroll && !isLoading && properties.length > 0) {
+      const scrollY = parseInt(savedScroll, 10);
+      if (!Number.isNaN(scrollY) && scrollY > 0) {
+        // تأخير صغير للسماح للـ DOM بالتحديث
+        requestAnimationFrame(() => {
+          window.scrollTo(0, scrollY);
+          // مسح الموقع المحفوظ بعد الاستعادة
+          sessionStorage.removeItem("scrollPosition");
+        });
+      }
+    }
+  }, [isLoading, properties.length]);
+
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
       prev.includes(facility) ? prev.filter((f) => f !== facility) : [...prev, facility]
