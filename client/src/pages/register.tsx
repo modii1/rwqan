@@ -166,7 +166,7 @@ export default function RegisterPage() {
       <header className="bg-card border-b border-border shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <h1 className="text-2xl font-bold text-primary">اشترك معنا</h1>
-          <p className="text-sm text-muted-foreground">سجل عقارك في مودي الذكي</p>
+          <p className="text-sm text-muted-foreground">سجل عقارك في روقإن</p>
         </div>
       </header>
 
@@ -191,7 +191,7 @@ export default function RegisterPage() {
               <div>
                 <label className="block text-sm font-semibold mb-2">اسم العقار</label>
                 <Input
-                  placeholder="شالية مودي"
+                  placeholder="شالية روقإن"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required

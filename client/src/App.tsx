@@ -146,9 +146,13 @@ export default function App() {
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
               <a
                 href="/"
-                className="text-xl font-bold text-primary hover:opacity-80 transition"
+                className="flex items-center gap-2 hover:opacity-80 transition"
               >
-                مودي الذكي
+                <img 
+                  src="/logo.png" 
+                  alt="روقإن" 
+                  className="h-10 w-auto"
+                />
               </a>
               <nav className="flex items-center gap-2">
                 <Button

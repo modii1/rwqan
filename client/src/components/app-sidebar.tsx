@@ -85,10 +85,10 @@ export function AppSidebar() {
     <Sidebar side="right" collapsible="offcanvas">
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <div className="text-3xl">🏡</div>
+          <img src="/logo.png" alt="روقإن" className="h-12 w-auto" />
           <div>
-            <h2 className="text-lg font-bold text-sidebar-primary">مودي الذكي</h2>
-            <p className="text-xs text-sidebar-foreground/70">إدارة العقارات</p>
+            <h2 className="text-lg font-bold text-sidebar-primary">روقإن</h2>
+            <p className="text-xs text-sidebar-foreground/70">رفاهية ونُزل</p>
           </div>
         </div>
       </SidebarHeader>
