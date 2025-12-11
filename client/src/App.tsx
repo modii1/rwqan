@@ -143,16 +143,16 @@ export default function App() {
       <TooltipProvider>
         <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
-          <header className="bg-white border-b shadow-sm sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-16">
+            <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
-                className="flex items-center gap-2 hover:opacity-80 transition"
+                className="flex items-center gap-2 hover:opacity-80 transition h-full py-2"
               >
                 <img 
                   src={logoImage} 
                   alt="روقإن" 
-                  className="h-10 w-auto"
+                  className="h-full w-auto"
                 />
               </a>
               <nav className="flex items-center gap-2">
