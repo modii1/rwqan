@@ -9,6 +9,7 @@ import { useSessionQuery } from "@/hooks/use-session";
 import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
+import logoImage from "./assets/logo.png";
 
 // ✅ تفعيل الحفاظ على موقع التمرير عند الرجوع
 if ('scrollRestoration' in window.history) {
@@ -148,11 +149,13 @@ export default function App() {
                 href="/"
                 className="flex items-center gap-2 hover:opacity-80 transition"
               >
-                <img 
-                  src="/logo.png" 
-                  alt="روقإن" 
-                  className="h-10 w-auto"
-                />
+                <div className="bg-[#1a1a1a] rounded-lg p-1.5">
+                  <img 
+                    src={logoImage} 
+                    alt="روقإن" 
+                    className="h-8 w-auto"
+                  />
+                </div>
               </a>
               <nav className="flex items-center gap-2">
                 <Button
