@@ -152,7 +152,7 @@ export default function App() {
                 <img 
                   src={logoImage} 
                   alt="روقإن" 
-                  className="h-[210px] w-auto relative top-[7px] right-[10px]"
+                  className="h-[210px] w-auto relative top-[7px] left-[50px]"
                 />
               </a>
               <nav className="flex items-center gap-2">
