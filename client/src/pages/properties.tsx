@@ -160,26 +160,34 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
-  // ✅ استعادة موقع التمرير باستخدام رقم العقار (أكثر موثوقية من scroll position)
+  // ✅ استعادة موقع التمرير باستخدام رقم العقار + موقعه على الشاشة
   useEffect(() => {
     if (isLoading || properties.length === 0) return;
     
-    const lastPropertyId = sessionStorage.getItem("lastViewedProperty");
-    if (!lastPropertyId) return;
+    const savedData = sessionStorage.getItem("lastViewedProperty");
+    if (!savedData) return;
     
-    // تأخير للسماح بتحميل الـ DOM
-    const timer = setTimeout(() => {
-      const element = document.querySelector(`[data-property-id="${lastPropertyId}"]`);
-      if (element) {
-        // العقار يظهر في أعلى الشاشة مع مسافة صغيرة (80px للهيدر)
-        const rect = element.getBoundingClientRect();
-        const scrollTop = window.pageYOffset + rect.top - 100;
-        window.scrollTo({ top: scrollTop, behavior: "instant" });
-      }
+    try {
+      const { propertyId, offsetFromTop } = JSON.parse(savedData);
+      
+      // تأخير للسماح بتحميل الـ DOM
+      const timer = setTimeout(() => {
+        const element = document.querySelector(`[data-property-id="${propertyId}"]`);
+        if (element) {
+          // حساب موقع التمرير لإرجاع العنصر لنفس موقعه على الشاشة
+          const rect = element.getBoundingClientRect();
+          const currentOffsetFromTop = rect.top;
+          const scrollAdjustment = currentOffsetFromTop - offsetFromTop;
+          const targetScroll = window.pageYOffset + scrollAdjustment;
+          window.scrollTo({ top: Math.max(0, targetScroll), behavior: "instant" });
+        }
+        sessionStorage.removeItem("lastViewedProperty");
+      }, 150);
+      
+      return () => clearTimeout(timer);
+    } catch {
       sessionStorage.removeItem("lastViewedProperty");
-    }, 150);
-    
-    return () => clearTimeout(timer);
+    }
   }, [isLoading, properties.length]);
 
   const toggleFacility = (facility: string) => {
@@ -444,9 +452,16 @@ export default function PropertiesPage() {
     }, 150);
   };
 
-  const handleCardClick = (propertyNumber: string) => {
-    // حفظ رقم العقار للرجوع إليه لاحقاً
-    sessionStorage.setItem("lastViewedProperty", propertyNumber);
+  const handleCardClick = (propertyNumber: string, e: React.MouseEvent) => {
+    // حفظ رقم العقار + موقعه على الشاشة للرجوع إليه بالضبط
+    const card = (e.currentTarget as HTMLElement).closest(`[data-property-id="${propertyNumber}"]`);
+    if (card) {
+      const rect = card.getBoundingClientRect();
+      sessionStorage.setItem("lastViewedProperty", JSON.stringify({
+        propertyId: propertyNumber,
+        offsetFromTop: rect.top
+      }));
+    }
     setLocation(`/property/${propertyNumber}`);
   };
 
@@ -692,8 +707,8 @@ export default function PropertiesPage() {
                               ? "opacity-0"
                               : "opacity-100"
                           }`}
-                          onClick={() =>
-                            handleCardClick(property.propertyNumber)
+                          onClick={(e) =>
+                            handleCardClick(property.propertyNumber, e)
                           }
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
@@ -772,7 +787,7 @@ export default function PropertiesPage() {
                     {property.subscriptionType === "مميز" && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                        onClick={() => handleCardClick(property.propertyNumber)}
+                        onClick={(e) => handleCardClick(property.propertyNumber, e)}
                       >
                         {property.name}
                       </h3>
@@ -816,7 +831,7 @@ export default function PropertiesPage() {
                       {/* CTA Button - Fixed at bottom */}
                       <Button
                         className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                        onClick={() => handleCardClick(property.propertyNumber)}
+                        onClick={(e) => handleCardClick(property.propertyNumber, e)}
                         data-testid={`button-details-${property.propertyNumber}`}
                       >
                         عرض التفاصيل
