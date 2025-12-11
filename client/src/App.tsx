@@ -10,6 +10,11 @@ import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
 
+// ✅ تفعيل الحفاظ على موقع التمرير عند الرجوع
+if ('scrollRestoration' in window.history) {
+  window.history.scrollRestoration = 'auto';
+}
+
 
 // Pages
 import NotFound from "@/pages/not-found";
