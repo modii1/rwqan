@@ -160,21 +160,17 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
-  // ✅ استعادة موقع التمرير باستخدام رقم العقار + موقعه على الشاشة
-  useEffect(() => {
-    if (isLoading || properties.length === 0) return;
-    
+  // ✅ دالة استعادة موقع التمرير
+  const restoreScrollPosition = () => {
     const savedData = sessionStorage.getItem("lastViewedProperty");
     if (!savedData) return;
     
     try {
       const { propertyId, offsetFromTop } = JSON.parse(savedData);
       
-      // تأخير للسماح بتحميل الـ DOM
-      const timer = setTimeout(() => {
+      setTimeout(() => {
         const element = document.querySelector(`[data-property-id="${propertyId}"]`);
         if (element) {
-          // حساب موقع التمرير لإرجاع العنصر لنفس موقعه على الشاشة
           const rect = element.getBoundingClientRect();
           const currentOffsetFromTop = rect.top;
           const scrollAdjustment = currentOffsetFromTop - offsetFromTop;
@@ -183,12 +179,29 @@ export default function PropertiesPage() {
         }
         sessionStorage.removeItem("lastViewedProperty");
       }, 150);
-      
-      return () => clearTimeout(timer);
     } catch {
       sessionStorage.removeItem("lastViewedProperty");
     }
+  };
+
+  // ✅ استعادة موقع التمرير عند تحميل العقارات
+  useEffect(() => {
+    if (isLoading || properties.length === 0) return;
+    restoreScrollPosition();
   }, [isLoading, properties.length]);
+  
+  // ✅ استعادة موقع التمرير عند الرجوع بالسحب أو زر المتصفح (pageshow event)
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      // persisted = true يعني الصفحة جاءت من bfcache (السحب للرجوع)
+      if (event.persisted && properties.length > 0) {
+        restoreScrollPosition();
+      }
+    };
+    
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, [properties.length]);
 
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
