@@ -1,7 +1,7 @@
-# نظام إدارة العقارات - مودي الذكي 🏡
+# نظام إدارة العقارات - روقإن 🏡
 
 ## Overview
-Modiy is a comprehensive property management system designed for investment properties in the Qassim region of Saudi Arabia. It offers a premium platform for showcasing properties, integrated with a sophisticated subscription model, secure payment gateways, and cloud storage solutions. The project aims to streamline property listings, enhance user experience with advanced filtering, and provide robust management tools for property owners and administrators.
+روقإن (Roqen) is a comprehensive property management system designed for investment properties in the Qassim region of Saudi Arabia. It offers a premium platform for showcasing properties, integrated with a sophisticated subscription model, secure payment gateways, and cloud storage solutions. The project aims to streamline property listings, enhance user experience with advanced filtering, and provide robust management tools for property owners and administrators.
 
 ## User Preferences
 - **Coding Style**: The user prefers clean, modular, and well-documented code, with an emphasis on maintainability and scalability.
