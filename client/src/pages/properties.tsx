@@ -160,6 +160,25 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
+  // ✅ استعادة موقع التمرير باستخدام رقم العقار (أكثر موثوقية من scroll position)
+  useEffect(() => {
+    if (isLoading || properties.length === 0) return;
+    
+    const lastPropertyId = sessionStorage.getItem("lastViewedProperty");
+    if (!lastPropertyId) return;
+    
+    // تأخير للسماح بتحميل الـ DOM
+    const timer = setTimeout(() => {
+      const element = document.querySelector(`[data-property-id="${lastPropertyId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: "instant", block: "center" });
+      }
+      sessionStorage.removeItem("lastViewedProperty");
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [isLoading, properties.length]);
+
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
       prev.includes(facility)
@@ -423,6 +442,8 @@ export default function PropertiesPage() {
   };
 
   const handleCardClick = (propertyNumber: string) => {
+    // حفظ رقم العقار للرجوع إليه لاحقاً
+    sessionStorage.setItem("lastViewedProperty", propertyNumber);
     setLocation(`/property/${propertyNumber}`);
   };
 
@@ -625,6 +646,7 @@ export default function PropertiesPage() {
                       : "property-card-standard"
                   }`}
                   data-testid={`card-property-${property.propertyNumber}`}
+                  data-property-id={property.propertyNumber}
                 >
                   {/* Image Section - Full width at top with swipe support */}
                   <div
