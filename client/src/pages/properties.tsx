@@ -171,10 +171,13 @@ export default function PropertiesPage() {
     const timer = setTimeout(() => {
       const element = document.querySelector(`[data-property-id="${lastPropertyId}"]`);
       if (element) {
-        element.scrollIntoView({ behavior: "instant", block: "center" });
+        // العقار يظهر في أعلى الشاشة مع مسافة صغيرة (80px للهيدر)
+        const rect = element.getBoundingClientRect();
+        const scrollTop = window.pageYOffset + rect.top - 100;
+        window.scrollTo({ top: scrollTop, behavior: "instant" });
       }
       sessionStorage.removeItem("lastViewedProperty");
-    }, 100);
+    }, 150);
     
     return () => clearTimeout(timer);
   }, [isLoading, properties.length]);
