@@ -149,13 +149,11 @@ export default function App() {
                 href="/"
                 className="flex items-center gap-2 hover:opacity-80 transition"
               >
-                <div className="bg-[#1a1a1a] rounded-lg p-1.5">
-                  <img 
-                    src={logoImage} 
-                    alt="روقإن" 
-                    className="h-8 w-auto"
-                  />
-                </div>
+                <img 
+                  src={logoImage} 
+                  alt="روقإن" 
+                  className="h-14 w-auto"
+                />
               </a>
               <nav className="flex items-center gap-2">
                 <Button
