@@ -285,7 +285,7 @@ export default function AdminVerificationSection() {
 شريكنا العزيز،
 تم *قبول عقاركم* رقم ${property.propertyNumber} (${property.name || ""}).
 
-العقار الآن ظاهر للعملاء في منصة روقإن ✔✨
+العقار الآن ظاهر للعملاء في منصة روقـان ✔✨
 `;
                         openWhatsApp(property.whatsappNumber as any, msg);
 

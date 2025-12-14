@@ -9,7 +9,8 @@ import { useSessionQuery } from "@/hooks/use-session";
 import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
-import logoImage from "./assets/logo.png";
+import logoIcon from "./assets/logo-icon.png";
+import logoFull from "./assets/logo-full.png";
 
 // ✅ تفعيل الحفاظ على موقع التمرير عند الرجوع
 if ('scrollRestoration' in window.history) {
@@ -147,13 +148,17 @@ export default function App() {
             <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
-                className="flex items-center gap-2 hover:opacity-80 transition"
+                className="flex items-center gap-3 hover:opacity-80 transition"
               >
                 <img 
-                  src={logoImage} 
-                  alt="روقإن" 
-                  className="h-[180px] w-auto relative top-[1px] left-[50px]"
+                  src={logoIcon} 
+                  alt="روقـان" 
+                  className="h-[50px] w-auto"
                 />
+                <div className="hidden sm:flex flex-col leading-tight">
+                  <span className="text-lg font-bold text-[#5a5a5a]">روقـان</span>
+                  <span className="text-xs text-[#b88d2b]">نُـزل ورفـاهية</span>
+                </div>
               </a>
               <nav className="flex items-center gap-2">
                 <Button
@@ -206,6 +211,28 @@ export default function App() {
           <main className="flex-1">
             <Router />
           </main>
+          
+          {/* Footer */}
+          <footer className="bg-[#1a1a1a] text-white py-8 mt-auto">
+            <div className="max-w-7xl mx-auto px-4">
+              <div className="flex flex-col items-center gap-4">
+                <img 
+                  src={logoFull} 
+                  alt="روقـان" 
+                  className="h-[80px] w-auto"
+                />
+                <p className="text-center text-sm text-gray-400">
+                  روقـان | نُـزل ورفـاهية
+                  <br />
+                  للشاليهات والاستراحات والعقارات، اكتشف أفضل العقارات
+                </p>
+                <p className="text-xs text-gray-500 mt-2">
+                  © {new Date().getFullYear()} روقـان - جميع الحقوق محفوظة
+                </p>
+              </div>
+            </div>
+          </footer>
+          
           <Toaster />
         </div>
       </TooltipProvider>
