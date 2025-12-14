@@ -134,7 +134,7 @@ export default function OwnerLogin() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-primary mb-2" data-testid="text-login-title">
-            روقإن
+            روقـان
           </h1>
           <p className="text-muted-foreground">تسجيل دخول آمن</p>
         </div>

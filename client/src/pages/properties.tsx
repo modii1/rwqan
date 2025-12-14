@@ -490,7 +490,7 @@ export default function PropertiesPage() {
                 هل لديك عقار استثماري؟
               </h2>
               <p className="text-muted-foreground text-sm md:text-base">
-                سجّل عقارك الآن واحصل على عرض مميز في منصة روقإن
+                سجّل عقارك الآن واحصل على عرض مميز في منصة روقـان
               </p>
             </div>
             <Link href="/subscription">
