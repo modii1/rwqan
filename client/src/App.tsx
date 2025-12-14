@@ -209,13 +209,13 @@ export default function App() {
           </main>
           
           {/* Footer */}
-          <footer className="bg-[#1a1a1a] text-white py-8 mt-auto">
+          <footer className="bg-transparent py-8 mt-auto">
             <div className="max-w-7xl mx-auto px-4">
               <div className="flex flex-col items-center gap-4">
                 <img 
                   src={logoFull} 
                   alt="روقـان" 
-                  className="h-[80px] w-auto"
+                  className="h-[300px] w-auto"
                 />
                 <p className="text-center text-sm text-gray-400">
                   روقـان | نُـزل ورفـاهية
