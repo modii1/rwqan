@@ -153,7 +153,7 @@ export default function App() {
                 <img 
                   src={logoIcon} 
                   alt="روقـان" 
-                  className="h-[200px] w-auto"
+                  className="h-[220px] w-auto"
                 />
               </a>
               <nav className="flex items-center gap-2">
