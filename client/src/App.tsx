@@ -209,7 +209,7 @@ export default function App() {
           </main>
           
           {/* Footer */}
-          <footer className="bg-transparent py-4 mt-auto">
+          <footer className="bg-transparent py-2 mt-auto">
             <div className="max-w-7xl mx-auto px-4">
               <div className="flex flex-col items-center gap-4">
                 <img 
