@@ -261,12 +261,28 @@ export default function PropertyDetailsPage() {
     setImageLoaded(false);
   }, [selectedImage]);
 
-  // ✅ Preload للصورة التالية لتسريع التصفح
+  // ✅ Preload للصور الأولى عند تحميل الصفحة + الصورة التالية
+  useEffect(() => {
+    if (!images || images.length === 0) return;
+    
+    // تحميل مسبق للصور الـ 3 الأولى فوراً
+    images.slice(0, 3).forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, [images]);
+  
+  // Preload للصورة التالية عند التنقل
   useEffect(() => {
     if (!images || images.length === 0) return;
     const nextIndex = (selectedImage + 1) % images.length;
-    const img = new Image();
-    img.src = images[nextIndex];
+    const prevIndex = selectedImage === 0 ? images.length - 1 : selectedImage - 1;
+    
+    // تحميل الصورة التالية والسابقة
+    [nextIndex, prevIndex].forEach((idx) => {
+      const img = new Image();
+      img.src = images[idx];
+    });
   }, [images, selectedImage]);
 
   // ===== حالات التحميل / الخطأ / غير موجود =====
