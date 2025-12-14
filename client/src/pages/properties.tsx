@@ -857,22 +857,21 @@ export default function PropertiesPage() {
           </div>
         )}
       </div>
-      {/* زر تصفية عائم شفاف في الوسط */}
-      {showFilterFab && (
+      {/* زر تصفية ثابت فوق الفوتر */}
+      <div className="flex justify-center py-4">
         <button
           type="button"
           onClick={() => setShowFiltersModal(true)}
           className="
-            fixed bottom-20 right-1/2 translate-x-1/2 z-50
-            bg-white/60 backdrop-blur-md border border-[#b88d2b]/40
-            text-[#b88d2b] font-bold shadow-xl rounded-full
+            bg-white/80 backdrop-blur-md border border-[#b88d2b]/40
+            text-[#b88d2b] font-bold shadow-lg rounded-full
             px-10 py-3 text-lg
-            hover:bg-white/90 transition
+            hover:bg-white transition
           "
         >
           تصفية
         </button>
-      )}
+      </div>
       {/* زر الصعود للأعلى */}
       {showScrollTop && (
         <button
