@@ -211,19 +211,17 @@ export default function App() {
           {/* Footer */}
           <footer className="bg-transparent py-0 mt-auto">
             <div className="max-w-7xl mx-auto px-4">
-              <div className="flex flex-col items-center gap-4">
+              <div className="flex flex-col items-center gap-1">
                 <img 
                   src={logoFull} 
                   alt="روقـان" 
-                  className="h-[300px] w-auto"
+                  className="h-[200px] w-auto"
                 />
-                <p className="text-center text-sm text-gray-400">
-                  روقـان | نُـزل ورفـاهية
-                  <br />
-                  للشاليهات والاستراحات والعقارات، اكتشف أفضل العقارات
+                <p className="text-center text-xs text-gray-400">
+                  روقـان | نُـزل ورفـاهية - للشاليهات والاستراحات والعقارات
                 </p>
-                <p className="text-xs text-gray-500 mt-2">
-                  © {new Date().getFullYear()} روقـان - جميع الحقوق محفوظة
+                <p className="text-xs text-gray-500">
+                  © {new Date().getFullYear()} روقـان
                 </p>
               </div>
             </div>
