@@ -148,17 +148,13 @@ export default function App() {
             <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
-                className="flex items-center gap-3 hover:opacity-80 transition"
+                className="flex items-center hover:opacity-80 transition"
               >
                 <img 
                   src={logoIcon} 
                   alt="روقـان" 
-                  className="h-[50px] w-auto"
+                  className="h-[60px] w-auto"
                 />
-                <div className="hidden sm:flex flex-col leading-tight">
-                  <span className="text-lg font-bold text-[#5a5a5a]">روقـان</span>
-                  <span className="text-xs text-[#b88d2b]">نُـزل ورفـاهية</span>
-                </div>
               </a>
               <nav className="flex items-center gap-2">
                 <Button
