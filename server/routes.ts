@@ -1482,6 +1482,8 @@ app.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
     const images =
       list.Contents?.map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
 
+    // إضافة Cache headers لتسريع الاستجابة
+    res.set('Cache-Control', 'public, max-age=300'); // 5 دقائق
     res.json({ images });
   } catch (err) {
     console.error("ADMIN R2 LIST ERROR:", err);
