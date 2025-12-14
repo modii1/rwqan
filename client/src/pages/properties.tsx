@@ -332,7 +332,7 @@ export default function PropertiesPage() {
   useEffect(() => {
     const onScroll = () => {
       const y = window.scrollY || window.pageYOffset;
-      setShowFilterFab(y > 200); // يظهر زر التصفية بعد نزول بسيط
+      setShowFilterFab(true); // يظهر زر التصفية دائماً
       setShowScrollTop(y > 400); // يظهر زر السهم بعد نزول أكثر
 
       // تحميل المزيد تلقائياً عند الاقتراب من أسفل الصفحة
