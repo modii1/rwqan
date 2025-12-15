@@ -215,7 +215,7 @@ export default function App() {
                 <img 
                   src={logoFull} 
                   alt="روقـان" 
-                  className="h-[300px] w-auto"
+                  className="h-[300px] w-auto mt-[-52px] mb-[-52px] ml-[0px] mr-[0px] pl-[10px] pr-[10px] pt-[-2px] pb-[-2px]"
                 />
                 <p className="text-center text-xs text-gray-400">
                   روقـان | نُـزل ورفـاهية - للشاليهات والاستراحات والعقارات
