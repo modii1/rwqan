@@ -93,6 +93,11 @@ export default function PropertyDetailsPage() {
 
   const propertyId = params?.id ?? "";
 
+  // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [propertyId]);
+
   // جلب بيانات العقار مباشرة من الخادم (أسرع من Google Apps Script)
   const {
     data: property,
