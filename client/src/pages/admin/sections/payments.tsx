@@ -400,13 +400,27 @@ const totals = completedPayments.reduce((acc, p) => {
                             badgeClass = "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
                           }
                           
+                          const getStatusHint = () => {
+                            if (p.status === "معلق") return "بانتظار اكتمال الدفع";
+                            if (p.status === "فشل") return "فشل الدفع";
+                            if (p.status === "قيد المراجعة" && isBankTransfer) return "تحويل بنكي بانتظار المراجعة";
+                            if (p.status === "نجح - قيد التحقق") return "بانتظار إكمال بيانات العقار";
+                            if (p.status === "مكتمل") return "";
+                            return "";
+                          };
+
                           return (
-                            <Badge
-                              variant={variant}
-                              className={`text-[10px] ${badgeClass}`}
-                            >
-                              {displayStatus}
-                            </Badge>
+                            <div className="flex flex-col items-start gap-0.5">
+                              <Badge
+                                variant={variant}
+                                className={`text-[10px] ${badgeClass}`}
+                              >
+                                {displayStatus}
+                              </Badge>
+                              {getStatusHint() && (
+                                <span className="text-[9px] text-muted-foreground">{getStatusHint()}</span>
+                              )}
+                            </div>
                           );
                         })()}
                       </Td>
