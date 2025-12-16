@@ -59,7 +59,7 @@ export default function SuggestPage() {
           <div className="text-center mb-8">
             <div className="text-4xl mb-4">💡</div>
             <h2 className="text-xl font-bold text-primary mb-2">نسعد بسماع اقتراحاتك</h2>
-            <p className="text-muted-foreground">ساهم في تحسين تجربة مودي الذكي</p>
+            <p className="text-muted-foreground">ساهم في تحسين تجربة روقإن</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
