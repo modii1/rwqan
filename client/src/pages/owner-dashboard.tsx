@@ -1484,13 +1484,14 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
   const getStatusReason = (status: string, paymentMethod: string, createdAt?: string) => {
     switch (status) {
       case "معلق":
-        // حساب الوقت المتبقي للدفع (3 دقائق)
+        // حساب الوقت المنقضي منذ إنشاء الدفعة
         if (createdAt) {
           const created = new Date(createdAt);
           const now = new Date();
           const diffMs = now.getTime() - created.getTime();
           const diffMins = Math.floor(diffMs / 60000);
-          if (diffMins < 3) {
+          // إذا مر أقل من 3 دقائق، اظهر الوقت المتبقي
+          if (diffMins >= 0 && diffMins < 3) {
             const remaining = 3 - diffMins;
             return `جاري الدفع... (${remaining} دقيقة متبقية)`;
           }
@@ -1501,7 +1502,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
       case "قيد المراجعة":
         return paymentMethod === "تحويل بنكي" 
           ? "بانتظار مراجعة الإدارة للإيصال" 
-          : "بانتظار المراجعة";
+          : "لم يكتمل الدفع - اضغط لإكمال الدفع";
       case "نجح - قيد التحقق":
         return "تم الدفع بنجاح - أكمل بيانات العقار للتفعيل";
       case "مكتمل":
