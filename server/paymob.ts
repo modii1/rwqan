@@ -67,7 +67,7 @@ export class PaymobService {
         phone_number: phone,
         country: 'KSA',
         // ⭐⭐⭐ إعادة التوجيه بعد الدفع
-        redirect_url: "https://modiy.replit.app/subscription",
+        redirect_url: "https://rwqan.replit.app/subscription",
       },
       customer: {
         first_name: propertyName || 'عميل',
