@@ -130,7 +130,6 @@ export default function SubscriptionPage() {
               packageId: selectedPackageId,
               discountCode: validatedDiscount?.code,
               paymentMethod: 'cards',
-              action: 'new',
             });
             const paymentData = await paymentResponse.json();
             if (paymentData.checkoutUrl) {
@@ -397,7 +396,7 @@ export default function SubscriptionPage() {
                   <div>
                     <label className="block text-sm font-semibold mb-2">اسم العقار *</label>
                     <Input
-                      placeholder="شالية مودي"
+                      placeholder="شالية روقإن"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       required
