@@ -3443,10 +3443,15 @@ app.post("/api/paymob/webhook", async (req, res) => {
     }
 
     // ===============================
-    // 3) تحديث الدفع بالرسوم الحقيقية
+    // 3) تحديد الحالة بناءً على نوع الإجراء
     // ===============================
+    // التسجيل الجديد: يبقى قيد التحقق من البيانات حتى يكملها المالك
+    // التمديد/الترقية: يتم التفعيل مباشرة
+    const isNewRegistration = !payment.action || payment.action === 'new';
+    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
+
     await storage.updatePayment(payment.id, {
-      status: "مكتمل",
+      status: newStatus,
       completedAt: new Date().toISOString(),
       transactionId,
       paymentMethod: cardSubType || paymentMethod || "بطاقة",
@@ -3458,12 +3463,13 @@ app.post("/api/paymob/webhook", async (req, res) => {
       netAmount,
     });
 
-    console.log("💰 Payment Updated:", payment.id);
+    console.log(`💰 Payment Updated: ${payment.id}, Status: ${newStatus}`);
 
     // ===============================
-    // 4) تفعيل الاشتراك لو فيه معلّق
+    // 4) تفعيل الاشتراك فقط للتمديد/الترقية (ليس التسجيل الجديد)
     // ===============================
     if (
+      !isNewRegistration &&
       payment.action &&
       payment.pendingStartDate &&
       payment.pendingEndDate
@@ -3484,8 +3490,10 @@ app.post("/api/paymob/webhook", async (req, res) => {
           property
         );
 
-        console.log("🎉 Subscription Activated:", payment.propertyNumber);
+        console.log("🎉 Subscription Activated (extend/upgrade):", payment.propertyNumber);
       }
+    } else if (isNewRegistration) {
+      console.log("📋 New registration - awaiting property data verification:", payment.propertyNumber);
     }
 
     return res.json({ ok: true, paymentId: payment.id });
