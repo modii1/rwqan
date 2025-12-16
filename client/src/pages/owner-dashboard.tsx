@@ -54,7 +54,7 @@ export default function OwnerDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [showRequestsStats, setShowRequestsStats] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
-  const [paymentsExpanded, setPaymentsExpanded] = useState(true);
+  const [paymentsExpanded, setPaymentsExpanded] = useState(false);
   
   // نافذة رفع الإيصال للتحويل البنكي
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
