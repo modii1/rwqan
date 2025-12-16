@@ -1,5 +1,4 @@
 import { Home, LogIn, LogOut, LayoutDashboard, CreditCard, ImagePlus, Lightbulb, UserPlus } from "lucide-react";
-import logoImage from "../assets/logo.png";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -86,10 +85,10 @@ export function AppSidebar() {
     <Sidebar side="right" collapsible="offcanvas">
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <img src={logoImage} alt="روقإن" className="h-14 w-auto" />
+          <div className="text-3xl">🏡</div>
           <div>
-            <h2 className="text-lg font-bold text-sidebar-primary">روقإن</h2>
-            <p className="text-xs text-sidebar-foreground/70">رفاهية ونُزل</p>
+            <h2 className="text-lg font-bold text-sidebar-primary">مودي الذكي</h2>
+            <p className="text-xs text-sidebar-foreground/70">إدارة العقارات</p>
           </div>
         </div>
       </SidebarHeader>
