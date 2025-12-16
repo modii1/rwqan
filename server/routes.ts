@@ -1482,8 +1482,6 @@ app.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
     const images =
       list.Contents?.map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
 
-    // إضافة Cache headers لتسريع الاستجابة
-    res.set('Cache-Control', 'public, max-age=300'); // 5 دقائق
     res.json({ images });
   } catch (err) {
     console.error("ADMIN R2 LIST ERROR:", err);
@@ -1692,13 +1690,18 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     );
 
     // حساب بيانات الاشتراك المعلقة (ستحفظ فقط بعد نجاح الدفع)
+    let pendingStartDate: string | undefined;
+    let pendingEndDate: string | undefined;
+    let pendingSubscriptionType: string | undefined;
+    let pendingPrice: number | undefined;
+
+    // حساب تواريخ الاشتراك لجميع الحالات
     const today = new Date();
     let startDate = today;
     let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
     let price = pkg.price;
     let subscriptionType = pkg.type;
 
-    // للتمديد والترقية: حساب التواريخ بناءً على الاشتراك الحالي
     if (action === 'extend' || action === 'upgrade') {
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
 
@@ -1714,14 +1717,13 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       }
     }
 
-    // حفظ البيانات للجميع (تسجيل جديد، تمديد، ترقية)
-    const pendingStartDate = startDate.toISOString().split('T')[0];
-    const pendingEndDate = endDate.toISOString().split('T')[0];
-    const pendingSubscriptionType = subscriptionType;
-    const pendingPrice = price;
+    // حفظ بيانات الاشتراك المعلقة لجميع الحالات
+    pendingStartDate = startDate.toISOString().split('T')[0];
+    pendingEndDate = endDate.toISOString().split('T')[0];
+    pendingSubscriptionType = subscriptionType;
+    pendingPrice = price;
 
     // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
-    // ملاحظة: الدفعات الإلكترونية تبدأ بحالة "معلق" حتى يتم إكمال الدفع
     const payment = await storage.createPayment({
       propertyNumber,
       packageId,
@@ -1730,7 +1732,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       discountAmount: pkg.price - finalAmount,
       finalAmount,
       paymobOrderId: paymobResult.intentionId,
-      status: "معلق",
+      status: "قيد المراجعة",
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
       action: action as 'new' | 'extend' | 'upgrade' | undefined,
       pendingStartDate,
@@ -2183,10 +2185,10 @@ if (!propertyNumber) {
         });
       }
 
-      // البحث عن دفعة معلقة أو ناجحة أو مكتملة حديثة
+      // البحث عن دفعة معلقة أو مكتملة حديثة
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
       const validPayment = payments.find(p => 
-        (p.status === "مكتمل" || p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") &&
+        (p.status === "مكتمل" || p.status === "قيد المراجعة") &&
         p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
       );
 
@@ -2204,27 +2206,9 @@ if (!propertyNumber) {
       }
 
   
-      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة أو نجح - قيد التحقق
-      if (validPayment.status === "قيد المراجعة" || validPayment.status === "نجح - قيد التحقق") {
+      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
+      if (validPayment.status === "قيد المراجعة") {
         await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
-        console.log(`💰 Payment status updated to 'مكتمل' for payment ${validPayment.id}`);
-      }
-
-      // إنشاء الاشتراك بناءً على بيانات الدفع المعلقة
-      if (validPayment.pendingStartDate && validPayment.pendingEndDate && validPayment.pendingSubscriptionType) {
-        await googleSheetsService.addSubscriptionToSheet(
-          propertyNumber,
-          {
-            packageId: validPayment.pendingPackageId || validPayment.packageId,
-            price: validPayment.pendingPrice || validPayment.finalAmount,
-            subscriptionType: validPayment.pendingSubscriptionType,
-            startDate: validPayment.pendingStartDate,
-            endDate: validPayment.pendingEndDate,
-            paymentId: validPayment.id,
-          },
-          property
-        );
-        console.log(`🎉 Subscription created for property ${propertyNumber}`);
       }
 
       // تحديث حالة التحقق إلى approved عند نجاح التفعيل
@@ -3423,30 +3407,62 @@ app.post("/api/paymob/webhook", async (req, res) => {
     const payments = await storage.getPayments();
     let payment = null;
 
-    // أفضل بحث
+    console.log("🔍 Searching for payment with:", { merchantOrderId, paymobOrderId, propertyNumber, amount });
+    console.log("🔍 Available pending payments:", payments.filter(p => p.status === "معلق" || p.status === "قيد المراجعة").map(p => ({
+      id: p.id,
+      propertyNumber: p.propertyNumber,
+      amount: p.finalAmount,
+      paymobOrderId: p.paymobOrderId,
+      status: p.status
+    })));
+
+    // البحث 1: بـ merchant_order_id (الصيغة: propertyNumber-timestamp أو id)
     if (!payment && merchantOrderId) {
-      payment = payments.find((p) =>
-        p.paymobOrderId?.includes(merchantOrderId)
-      );
+      // استخراج رقم العقار من merchant_order_id
+      const propNum = merchantOrderId.split("-")[0];
+      if (propNum) {
+        payment = payments.find((p) =>
+          p.propertyNumber === propNum &&
+          (p.status === "معلق" || p.status === "قيد المراجعة") &&
+          Math.abs(p.finalAmount - amount) < 0.01
+        );
+        if (payment) console.log("✅ Found by merchant_order_id property match");
+      }
     }
 
-    // البحث بالـ order_id
+    // البحث 2: بـ paymobOrderId المباشر (لو نفس الصيغة)
     if (!payment && paymobOrderId) {
       payment = payments.find((p) => p.paymobOrderId === paymobOrderId);
+      if (payment) console.log("✅ Found by paymobOrderId exact match");
     }
 
-    // البحث برقم العقار + مبلغ
+    // البحث 3: برقم العقار + مبلغ (معلق أو قيد المراجعة)
     if (!payment && propertyNumber) {
       payment = payments.find(
         (p) =>
           p.propertyNumber === propertyNumber &&
-          p.status === "قيد المراجعة" &&
-          p.finalAmount === amount
+          (p.status === "معلق" || p.status === "قيد المراجعة") &&
+          Math.abs(p.finalAmount - amount) < 0.01
       );
+      if (payment) console.log("✅ Found by property + amount");
+    }
+
+    // البحث 4: آخر دفعة معلقة لنفس رقم العقار
+    if (!payment && propertyNumber) {
+      const pendingPayments = payments.filter(
+        (p) =>
+          p.propertyNumber === propertyNumber &&
+          (p.status === "معلق" || p.status === "قيد المراجعة")
+      ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      if (pendingPayments.length > 0) {
+        payment = pendingPayments[0];
+        console.log("✅ Found latest pending payment for property");
+      }
     }
 
     if (!payment) {
-      console.error("❌ Payment not found");
+      console.error("❌ Payment not found for:", { merchantOrderId, paymobOrderId, propertyNumber, amount });
       return res.status(404).json({ error: "Payment not found" });
     }
 
@@ -3458,15 +3474,14 @@ app.post("/api/paymob/webhook", async (req, res) => {
     }
 
     // ===============================
-    // 3) تحديد الحالة بناءً على نوع الإجراء
+    // 3) تحديث الدفع بالرسوم الحقيقية
     // ===============================
-    // التسجيل الجديد: يبقى قيد التحقق من البيانات حتى يكملها المالك
-    // التمديد/الترقية: يتم التفعيل مباشرة
-    const isNewRegistration = !payment.action || payment.action === 'new';
-    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
+    // التسجيل الجديد يحتاج مراجعة، الترقية والتمديد تفعّل مباشرة
+    const isNewRegistration = payment.action === 'new' || !payment.action;
+    const newPaymentStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
 
     await storage.updatePayment(payment.id, {
-      status: newStatus,
+      status: newPaymentStatus as any,
       completedAt: new Date().toISOString(),
       transactionId,
       paymentMethod: cardSubType || paymentMethod || "بطاقة",
@@ -3478,14 +3493,13 @@ app.post("/api/paymob/webhook", async (req, res) => {
       netAmount,
     });
 
-    console.log(`💰 Payment Updated: ${payment.id}, Status: ${newStatus}`);
+    console.log(`💰 Payment Updated: ${payment.id} - Status: ${newPaymentStatus}`);
 
     // ===============================
-    // 4) تفعيل الاشتراك فقط للتمديد/الترقية (ليس التسجيل الجديد)
+    // 4) تفعيل الاشتراك (فقط للترقية والتمديد - التسجيل الجديد يحتاج مراجعة)
     // ===============================
     if (
       !isNewRegistration &&
-      payment.action &&
       payment.pendingStartDate &&
       payment.pendingEndDate
     ) {
@@ -3505,10 +3519,31 @@ app.post("/api/paymob/webhook", async (req, res) => {
           property
         );
 
-        console.log("🎉 Subscription Activated (extend/upgrade):", payment.propertyNumber);
+        console.log("🎉 Subscription Activated:", payment.propertyNumber);
       }
     } else if (isNewRegistration) {
-      console.log("📋 New registration - awaiting property data verification:", payment.propertyNumber);
+      console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);
+    }
+
+    // إرسال إشعار WhatsApp
+    try {
+      const property = await storage.getPropertyByNumber(payment.propertyNumber);
+      const pkg = await storage.getPackageById(payment.packageId);
+      const actionText = isNewRegistration ? "تسجيل جديد" : (payment.action === 'extend' ? "تمديد" : "ترقية");
+      
+      await sendWhatsAppNotification(
+        `💳 *دفع إلكتروني ناجح*\n\n` +
+        `📍 العقار: ${property?.name || payment.propertyNumber}\n` +
+        `🔢 رقم العقار: ${payment.propertyNumber}\n` +
+        `📦 الباقة: ${pkg?.name || payment.packageId}\n` +
+        `💵 المبلغ: ${payment.finalAmount} ر.س\n` +
+        `🏦 الصافي: ${netAmount.toFixed(2)} ر.س\n` +
+        `📊 الرسوم: ${totalFees.toFixed(2)} ر.س\n` +
+        `🔄 النوع: ${actionText}\n` +
+        `✅ الحالة: ${newPaymentStatus}`
+      );
+    } catch (err) {
+      console.log("⚠️ WhatsApp notification failed:", err);
     }
 
     return res.json({ ok: true, paymentId: payment.id });
