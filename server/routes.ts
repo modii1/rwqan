@@ -1692,19 +1692,15 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     );
 
     // حساب بيانات الاشتراك المعلقة (ستحفظ فقط بعد نجاح الدفع)
-    let pendingStartDate: string | undefined;
-    let pendingEndDate: string | undefined;
-    let pendingSubscriptionType: string | undefined;
-    let pendingPrice: number | undefined;
+    const today = new Date();
+    let startDate = today;
+    let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+    let price = pkg.price;
+    let subscriptionType = pkg.type;
 
+    // للتمديد والترقية: حساب التواريخ بناءً على الاشتراك الحالي
     if (action === 'extend' || action === 'upgrade') {
-      const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
-
-      let startDate = today;
-      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
-      let price = pkg.price;
-      let subscriptionType = pkg.type;
 
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
       if (action === 'extend' && currentSubscription) {
@@ -1716,13 +1712,13 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         price = (currentSubscription as any).price || pkg.price;
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
-
-      // حفظ البيانات في المتغيرات
-      pendingStartDate = startDate.toISOString().split('T')[0];
-      pendingEndDate = endDate.toISOString().split('T')[0];
-      pendingSubscriptionType = subscriptionType;
-      pendingPrice = price;
     }
+
+    // حفظ البيانات للجميع (تسجيل جديد، تمديد، ترقية)
+    const pendingStartDate = startDate.toISOString().split('T')[0];
+    const pendingEndDate = endDate.toISOString().split('T')[0];
+    const pendingSubscriptionType = subscriptionType;
+    const pendingPrice = price;
 
     // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
     const payment = await storage.createPayment({
@@ -2186,10 +2182,10 @@ if (!propertyNumber) {
         });
       }
 
-      // البحث عن دفعة معلقة أو مكتملة حديثة
+      // البحث عن دفعة معلقة أو ناجحة أو مكتملة حديثة
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
       const validPayment = payments.find(p => 
-        (p.status === "مكتمل" || p.status === "قيد المراجعة") &&
+        (p.status === "مكتمل" || p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") &&
         p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
       );
 
@@ -2207,9 +2203,27 @@ if (!propertyNumber) {
       }
 
   
-      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
-      if (validPayment.status === "قيد المراجعة") {
+      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة أو نجح - قيد التحقق
+      if (validPayment.status === "قيد المراجعة" || validPayment.status === "نجح - قيد التحقق") {
         await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
+        console.log(`💰 Payment status updated to 'مكتمل' for payment ${validPayment.id}`);
+      }
+
+      // إنشاء الاشتراك بناءً على بيانات الدفع المعلقة
+      if (validPayment.pendingStartDate && validPayment.pendingEndDate && validPayment.pendingSubscriptionType) {
+        await googleSheetsService.addSubscriptionToSheet(
+          propertyNumber,
+          {
+            packageId: validPayment.pendingPackageId || validPayment.packageId,
+            price: validPayment.pendingPrice || validPayment.finalAmount,
+            subscriptionType: validPayment.pendingSubscriptionType,
+            startDate: validPayment.pendingStartDate,
+            endDate: validPayment.pendingEndDate,
+            paymentId: validPayment.id,
+          },
+          property
+        );
+        console.log(`🎉 Subscription created for property ${propertyNumber}`);
       }
 
       // تحديث حالة التحقق إلى approved عند نجاح التفعيل
