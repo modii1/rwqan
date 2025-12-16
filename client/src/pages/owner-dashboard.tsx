@@ -1484,18 +1484,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
   const getStatusReason = (status: string, paymentMethod: string, createdAt?: string) => {
     switch (status) {
       case "معلق":
-        // حساب الوقت المنقضي منذ إنشاء الدفعة
-        if (createdAt) {
-          const created = new Date(createdAt);
-          const now = new Date();
-          const diffMs = now.getTime() - created.getTime();
-          const diffMins = Math.floor(diffMs / 60000);
-          // إذا مر أقل من 3 دقائق، اظهر الوقت المتبقي
-          if (diffMins >= 0 && diffMins < 3) {
-            const remaining = 3 - diffMins;
-            return `جاري الدفع... (${remaining} دقيقة متبقية)`;
-          }
-        }
+        // الدفعات المعلقة - اظهر رسالة إكمال الدفع مباشرة
         return "لم يكتمل الدفع - اضغط لإكمال الدفع";
       case "فشل":
         return "فشل الدفع - اضغط لإعادة المحاولة";
@@ -1520,22 +1509,12 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     // للدفعات الفاشلة، اظهر الزر دائماً
     if (payment.status === "فشل") return true;
     
-    // للدفعات المعلقة، اظهر الزر بعد 3 دقائق
-    if (payment.status === "معلق") {
-      if (payment.createdAt) {
-        const created = new Date(payment.createdAt);
-        const now = new Date();
-        const diffMs = now.getTime() - created.getTime();
-        const diffMins = diffMs / 60000;
-        return diffMins >= 3; // 3 دقائق
-      }
-      return true; // إذا لم يوجد تاريخ، اظهر الزر
-    }
+    // للدفعات المعلقة، اظهر الزر مباشرة (بدون انتظار)
+    if (payment.status === "معلق") return true;
     
     // للدفعات الإلكترونية القديمة بحالة "قيد المراجعة" (غير مكتملة)
-    // هذه دفعات أُنشئت قبل تعديل النظام ولم تُكمل
     if (payment.status === "قيد المراجعة" && payment.paymentMethod !== "تحويل بنكي") {
-      return true; // اظهر زر إكمال الدفع
+      return true;
     }
     
     return false;
