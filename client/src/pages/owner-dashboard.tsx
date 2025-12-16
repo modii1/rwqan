@@ -1000,7 +1000,7 @@ const calculateAnalytics = () => {
                   data-testid="button-filter-pending"
                 >
                   <Clock className="w-3 h-3 ml-1" />
-                  معلق ({paymentsData.filter((p: any) => p.status === 'قيد المراجعة' || p.status === 'معلق').length})
+                  معلق ({paymentsData.filter((p: any) => p.status === 'قيد المراجعة' || p.status === 'معلق' || p.status === 'نجح - قيد التحقق').length})
                 </Button>
               </div>
             </div>
@@ -1025,7 +1025,7 @@ const calculateAnalytics = () => {
                     .filter((payment: any) => {
                       if (paymentFilter === 'all') return true;
                       if (paymentFilter === 'completed') return payment.status === 'مكتمل';
-                      if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق';
+                      if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق' || payment.status === 'نجح - قيد التحقق';
                       return true;
                     })
                     .map((payment: any) => (
@@ -1050,7 +1050,7 @@ const calculateAnalytics = () => {
                   {paymentsData.filter((payment: any) => {
                     if (paymentFilter === 'all') return true;
                     if (paymentFilter === 'completed') return payment.status === 'مكتمل';
-                    if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق';
+                    if (paymentFilter === 'pending') return payment.status === 'قيد المراجعة' || payment.status === 'معلق' || payment.status === 'نجح - قيد التحقق';
                     return true;
                   }).length === 0 && (
                     <div className="text-center py-6 text-muted-foreground">
@@ -1444,6 +1444,8 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     switch (status) {
       case "مكتمل":
         return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+      case "نجح - قيد التحقق":
+        return <CheckCircle2 className="w-4 h-4 text-blue-500" />;
       case "قيد المراجعة":
         return <Clock className="w-4 h-4 text-amber-500" />;
       case "معلق":
@@ -1460,6 +1462,8 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     switch (status) {
       case "مكتمل":
         return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+      case "نجح - قيد التحقق":
+        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
       case "قيد المراجعة":
         return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
       case "معلق":
@@ -1472,16 +1476,22 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     }
   };
 
+  const getDisplayStatus = (status: string) => {
+    if (status === "نجح - قيد التحقق") return "قيد المراجعة";
+    return status;
+  };
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "---";
     try {
       const date = new Date(dateStr);
-      return date.toLocaleDateString("en-US", {
+      return date.toLocaleString("en-US", {
         year: "numeric",
         month: "short",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
+        timeZone: "Asia/Riyadh",
       });
     } catch {
       return dateStr;
@@ -1531,7 +1541,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
             <div className="flex items-center gap-2 flex-wrap">
               <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
                 {getStatusIcon(payment.status)}
-                {payment.status}
+                {getDisplayStatus(payment.status)}
               </Badge>
               <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
             </div>
@@ -1559,8 +1569,26 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           </Button>
         )}
 
-        {/* زر إكمال الدفع / رفع إيصال */}
-        {(payment.status === "قيد المراجعة" || payment.status === "معلق") && onRetryPayment && (
+        {/* زر تفاصيل - للدفعات الإلكترونية الناجحة قيد التحقق */}
+        {payment.status === "نجح - قيد التحقق" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="flex-shrink-0 gap-1"
+            onClick={() => setShowDetails(!showDetails)}
+            data-testid={`button-toggle-details-${payment.id}`}
+          >
+            {showDetails ? (
+              <ChevronDown className="w-4 h-4 rotate-180" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+            <span className="text-xs">تفاصيل</span>
+          </Button>
+        )}
+
+        {/* زر إكمال الدفع / رفع إيصال - فقط للتحويل البنكي */}
+        {(payment.status === "قيد المراجعة" && payment.paymentMethod === "تحويل بنكي") && onRetryPayment && (
           <Button
             size="sm"
             variant="default"
@@ -1581,7 +1609,47 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
         )}
       </div>
 
-      {/* تفاصيل الدفعة الموسعة - فقط للدفعات المكتملة */}
+      {/* تفاصيل الدفعة الموسعة - للدفعات الناجحة قيد التحقق */}
+      {showDetails && payment.status === "نجح - قيد التحقق" && (
+        <div className="border-t border-border/40 bg-blue-50/50 dark:bg-blue-900/10 p-4">
+          <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded text-sm text-blue-800 dark:text-blue-300 mb-4">
+            ✅ تم استلام الدفع بنجاح! يرجى إكمال بيانات العقار وسيتم تفعيل الاشتراك تلقائياً.
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
+              <div className="font-bold text-primary">{amount} ر.س</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">الباقة</div>
+              <div className="font-semibold">{getPackageNameArabic(payment.packageId)}</div>
+            </div>
+            {payment.pendingSubscriptionType && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">نوع الاشتراك</div>
+                <Badge variant={payment.pendingSubscriptionType === 'موثوق' ? 'default' : 'outline'} className="text-xs">
+                  {payment.pendingSubscriptionType === 'موثوق' && <Crown className="w-3 h-3 ml-1" />}
+                  {payment.pendingSubscriptionType}
+                </Badge>
+              </div>
+            )}
+            {payment.pendingStartDate && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">تاريخ البداية المتوقع</div>
+                <div className="font-semibold">{payment.pendingStartDate}</div>
+              </div>
+            )}
+            {payment.pendingEndDate && (
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">تاريخ الانتهاء المتوقع</div>
+                <div className="font-semibold">{payment.pendingEndDate}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* تفاصيل الدفعة الموسعة - للدفعات المكتملة */}
       {showDetails && isCompleted && (
         <div className="border-t border-border/40 bg-muted/5 p-4">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
