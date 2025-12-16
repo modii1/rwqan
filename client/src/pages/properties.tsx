@@ -3,25 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Property } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Search,
-  X,
-  ExternalLink,
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
-  Star,
-} from "lucide-react";
+import { Search, X, ExternalLink, ChevronLeft, ChevronRight, Sparkles, Star } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Link, useLocation } from "wouter";
 import { PriceDisplay } from "@/components/price-display";
@@ -29,7 +15,7 @@ import { getCurrencyLabel } from "@/lib/currency";
 
 // دالة لإنشاء مولد أرقام عشوائية قابل للتكرار (seeded random)
 function seededRandom(seed: number) {
-  return function () {
+  return function() {
     seed = (seed * 9301 + 49297) % 233280;
     return seed / 233280;
   };
@@ -94,21 +80,11 @@ export default function PropertiesPage() {
   const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [maxPrice, setMaxPrice] = useState<number>(5000);
-  const [selectedImage, setSelectedImage] = useState<{
-    url: string;
-    index: number;
-    total: number;
-  } | null>(null);
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
-    null,
-  );
-  const [currentImageIndex, setCurrentImageIndex] = useState<
-    Map<string, number>
-  >(new Map());
-  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(
-    new Set(),
-  );
-
+  const [selectedImage, setSelectedImage] = useState<{ url: string; index: number; total: number } | null>(null);
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
+  const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(new Set());
+  
   // مفتاح عشوائي ثابت طوال الجلسة (يتغير فقط عند تحديث الصفحة بالكامل)
   const [shuffleKey] = useState(() => {
     const saved = sessionStorage.getItem("shuffleKey");
@@ -160,54 +136,9 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
-  // ✅ دالة استعادة موقع التمرير
-  const restoreScrollPosition = () => {
-    const savedData = sessionStorage.getItem("lastViewedProperty");
-    if (!savedData) return;
-    
-    try {
-      const { propertyId, offsetFromTop } = JSON.parse(savedData);
-      
-      setTimeout(() => {
-        const element = document.querySelector(`[data-property-id="${propertyId}"]`);
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          const currentOffsetFromTop = rect.top;
-          const scrollAdjustment = currentOffsetFromTop - offsetFromTop;
-          const targetScroll = window.pageYOffset + scrollAdjustment;
-          window.scrollTo({ top: Math.max(0, targetScroll), behavior: "instant" });
-        }
-        sessionStorage.removeItem("lastViewedProperty");
-      }, 150);
-    } catch {
-      sessionStorage.removeItem("lastViewedProperty");
-    }
-  };
-
-  // ✅ استعادة موقع التمرير عند تحميل العقارات
-  useEffect(() => {
-    if (isLoading || properties.length === 0) return;
-    restoreScrollPosition();
-  }, [isLoading, properties.length]);
-  
-  // ✅ استعادة موقع التمرير عند الرجوع بالسحب أو زر المتصفح (pageshow event)
-  useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      // persisted = true يعني الصفحة جاءت من bfcache (السحب للرجوع)
-      if (event.persisted && properties.length > 0) {
-        restoreScrollPosition();
-      }
-    };
-    
-    window.addEventListener("pageshow", handlePageShow);
-    return () => window.removeEventListener("pageshow", handlePageShow);
-  }, [properties.length]);
-
   const toggleFacility = (facility: string) => {
     setSelectedFacilities((prev) =>
-      prev.includes(facility)
-        ? prev.filter((f) => f !== facility)
-        : [...prev, facility],
+      prev.includes(facility) ? prev.filter((f) => f !== facility) : [...prev, facility]
     );
   };
 
@@ -232,11 +163,7 @@ export default function PropertiesPage() {
       }
 
       // Direction filter
-      if (
-        selectedDirection &&
-        selectedDirection !== "" &&
-        selectedDirection !== "all"
-      ) {
+      if (selectedDirection && selectedDirection !== "" && selectedDirection !== "all") {
         if (property.direction !== selectedDirection) return false;
       }
 
@@ -247,63 +174,46 @@ export default function PropertiesPage() {
 
       // Facilities filter with smart matching and normalization
       if (selectedFacilities.length > 0) {
-        const hasAllFacilities = selectedFacilities.every(
-          (selectedFacility) => {
-            // Direct match
-            if (property.facilities.includes(selectedFacility)) {
-              return true;
-            }
+        const hasAllFacilities = selectedFacilities.every((selectedFacility) => {
+          // Direct match
+          if (property.facilities.includes(selectedFacility)) {
+            return true;
+          }
 
-            // Smart match using SMART_FILTERS with normalization
-            const smartKeywords =
-              SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
-            if (smartKeywords) {
-              return property.facilities.some((facility) => {
-                const normalizedFacility = normalizeText(facility);
-                return smartKeywords.some((keyword) =>
-                  normalizedFacility.includes(normalizeText(keyword)),
-                );
-              });
-            }
+          // Smart match using SMART_FILTERS with normalization
+          const smartKeywords = SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
+          if (smartKeywords) {
+            return property.facilities.some((facility) => {
+              const normalizedFacility = normalizeText(facility);
+              return smartKeywords.some((keyword) => normalizedFacility.includes(normalizeText(keyword)));
+            });
+          }
 
-            return false;
-          },
-        );
+          return false;
+        });
         if (!hasAllFacilities) return false;
       }
 
       // Price filter - إظهار العقارات التي سعرها الرئيسي (المعروض على الكارد) أقل أو يساوي السعر المحدد
       if (maxPrice < 5000) {
         // السعر الرئيسي هو نفسه المعروض على الكارد
-        const mainPrice =
-          parseFloat(property.prices.weekend) ||
-          parseFloat(property.prices.weekday) ||
-          0;
+        const mainPrice = parseFloat(property.prices.weekend) || parseFloat(property.prices.weekday) || 0;
         if (mainPrice > maxPrice) return false;
       }
 
       return true;
     });
-
+    
     // ترتيب عشوائي مع الحفاظ على المميز أولاً
-    const verified = filtered.filter((p) => p.subscriptionType === "مميز");
-    const regular = filtered.filter((p) => p.subscriptionType !== "مميز");
-
+    const verified = filtered.filter(p => p.subscriptionType === "مميز");
+    const regular = filtered.filter(p => p.subscriptionType !== "مميز");
+    
     // خلط كل مجموعة عشوائياً باستخدام shuffleKey الثابت
     const shuffledVerified = shuffleArrayWithSeed(verified, shuffleKey);
     const shuffledRegular = shuffleArrayWithSeed(regular, shuffleKey + 1);
-
+    
     return [...shuffledVerified, ...shuffledRegular];
-  }, [
-    properties,
-    searchQuery,
-    selectedCity,
-    selectedDirection,
-    selectedType,
-    selectedFacilities,
-    maxPrice,
-    shuffleKey,
-  ]);
+  }, [properties, searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, shuffleKey]);
 
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
@@ -319,14 +229,7 @@ export default function PropertiesPage() {
       maxPrice,
     };
     sessionStorage.setItem("propertyFilters", JSON.stringify(filters));
-  }, [
-    searchQuery,
-    selectedCity,
-    selectedDirection,
-    selectedType,
-    selectedFacilities,
-    maxPrice,
-  ]);
+  }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice]);
 
   // مراقبة السكرول لإظهار/إخفاء الأزرار + تفعيل الـ infinite scroll
   useEffect(() => {
@@ -383,12 +286,8 @@ export default function PropertiesPage() {
       const whatsappNumber = property.whatsappNumber || DEFAULT_WHATSAPP;
 
       const message = property.whatsappNumber
-        ? encodeURIComponent(
-            `مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}\n\nكود الطلب: ${result.requestCode}`,
-          )
-        : encodeURIComponent(
-            `استفسار عن رقم العقار ${property.propertyNumber}\n\nكود الطلب: ${result.requestCode}`,
-          );
+        ? encodeURIComponent(`مرحباً، أريد الاستفسار عن عقار رقم ${property.propertyNumber} - ${property.name}\n\nكود الطلب: ${result.requestCode}`)
+        : encodeURIComponent(`استفسار عن رقم العقار ${property.propertyNumber}\n\nكود الطلب: ${result.requestCode}`);
 
       window.open(`https://wa.me/${whatsappNumber}?text=${message}`, "_blank");
 
@@ -424,9 +323,7 @@ export default function PropertiesPage() {
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
       const next = (current + 1) % totalImages;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, next)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, next)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -440,9 +337,7 @@ export default function PropertiesPage() {
     setTimeout(() => {
       const current = getCurrentImageIndex(propertyNumber);
       const prev = current === 0 ? totalImages - 1 : current - 1;
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, prev)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, prev)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -454,9 +349,7 @@ export default function PropertiesPage() {
   const goToImage = (propertyNumber: string, index: number) => {
     setImageTransitioning(new Set(imageTransitioning.add(propertyNumber)));
     setTimeout(() => {
-      setCurrentImageIndex(
-        new Map(currentImageIndex.set(propertyNumber, index)),
-      );
+      setCurrentImageIndex(new Map(currentImageIndex.set(propertyNumber, index)));
       setTimeout(() => {
         const newSet = new Set(imageTransitioning);
         newSet.delete(propertyNumber);
@@ -465,16 +358,9 @@ export default function PropertiesPage() {
     }, 150);
   };
 
-  const handleCardClick = (propertyNumber: string, e: React.MouseEvent) => {
-    // حفظ رقم العقار + موقعه على الشاشة للرجوع إليه بالضبط
-    const card = (e.currentTarget as HTMLElement).closest(`[data-property-id="${propertyNumber}"]`);
-    if (card) {
-      const rect = card.getBoundingClientRect();
-      sessionStorage.setItem("lastViewedProperty", JSON.stringify({
-        propertyId: propertyNumber,
-        offsetFromTop: rect.top
-      }));
-    }
+  const handleCardClick = (propertyNumber: string) => {
+    // حفظ موضع السكرول قبل الانتقال + visibleCount (يحفظ تلقائياً من useEffect فوق)
+    sessionStorage.setItem("scrollPosition", String(window.scrollY));
     setLocation(`/property/${propertyNumber}`);
   };
 
@@ -490,7 +376,7 @@ export default function PropertiesPage() {
                 هل لديك عقار استثماري؟
               </h2>
               <p className="text-muted-foreground text-sm md:text-base">
-                سجّل عقارك الآن واحصل على عرض مميز في منصة روقإن
+                سجّل عقارك الآن واحصل على عرض مميز في منصة مودي الذكي
               </p>
             </div>
             <Link href="/subscription">
@@ -551,10 +437,7 @@ export default function PropertiesPage() {
             </Select>
 
             {/* Direction */}
-            <Select
-              value={selectedDirection}
-              onValueChange={setSelectedDirection}
-            >
+            <Select value={selectedDirection} onValueChange={setSelectedDirection}>
               <SelectTrigger data-testid="select-direction">
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
@@ -602,18 +485,12 @@ export default function PropertiesPage() {
 
           {/* Priority Facilities */}
           <div>
-            <label className="block text-sm font-semibold mb-2 text-foreground">
-              المرافق
-            </label>
+            <label className="block text-sm font-semibold mb-2 text-foreground">المرافق</label>
             <div className="flex flex-wrap gap-2">
               {PRIORITY_FACILITIES.map((facility) => (
                 <Badge
                   key={facility}
-                  variant={
-                    selectedFacilities.includes(facility)
-                      ? "default"
-                      : "outline"
-                  }
+                  variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                   className="
                     cursor-pointer hover-elevate active-elevate-2
                     text-base
@@ -634,10 +511,7 @@ export default function PropertiesPage() {
         {/* Results */}
         <div className="mb-4">
           <p className="text-sm text-muted-foreground">
-            عدد النتائج:{" "}
-            <span className="font-bold text-foreground">
-              {filteredProperties.length}
-            </span>
+            عدد النتائج: <span className="font-bold text-foreground">{filteredProperties.length}</span>
           </p>
         </div>
 
@@ -649,23 +523,19 @@ export default function PropertiesPage() {
           </div>
         ) : filteredProperties.length === 0 ? (
           <Card className="p-12 text-center">
-            <p className="text-lg text-muted-foreground">
-              لا توجد عقارات تطابق البحث
-            </p>
+            <p className="text-lg text-muted-foreground">لا توجد عقارات تطابق البحث</p>
           </Card>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {visibleProperties.map((property) => {
-              const r2Base =
-                "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
+              const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
               const imageUrls = [
                 `${r2Base}/${property.propertyNumber}/1.jpg`,
                 `${r2Base}/${property.propertyNumber}/2.jpg`,
                 `${r2Base}/${property.propertyNumber}/3.jpg`,
               ];
 
-              const mainPrice =
-                property.prices.weekend || property.prices.weekday || "0";
+              const mainPrice = property.prices.weekend || property.prices.weekday || "0";
               const topFacilities = property.facilities.slice(0, 3);
 
               return (
@@ -677,7 +547,6 @@ export default function PropertiesPage() {
                       : "property-card-standard"
                   }`}
                   data-testid={`card-property-${property.propertyNumber}`}
-                  data-property-id={property.propertyNumber}
                 >
                   {/* Image Section - Full width at top with swipe support */}
                   <div
@@ -708,21 +577,13 @@ export default function PropertiesPage() {
                     {imageUrls.length > 0 && (
                       <>
                         <img
-                          src={
-                            imageUrls[
-                              getCurrentImageIndex(property.propertyNumber)
-                            ]
-                          }
+                          src={imageUrls[getCurrentImageIndex(property.propertyNumber)]}
                           alt={property.name}
                           loading="lazy"
                           className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${
-                            imageTransitioning.has(property.propertyNumber)
-                              ? "opacity-0"
-                              : "opacity-100"
+                            imageTransitioning.has(property.propertyNumber) ? "opacity-0" : "opacity-100"
                           }`}
-                          onClick={(e) =>
-                            handleCardClick(property.propertyNumber, e)
-                          }
+                          onClick={() => handleCardClick(property.propertyNumber)}
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
 
@@ -730,9 +591,7 @@ export default function PropertiesPage() {
                         {property.subscriptionType === "مميز" && (
                           <div className="absolute top-2 md:top-4 right-2 md:right-4 bg-white/95 backdrop-blur-sm px-2 md:px-4 py-1 md:py-2 rounded-full shadow-lg flex items-center gap-1 md:gap-2">
                             <Star className="w-4 h-4 md:w-5 md:h-5 text-yellow-600 fill-yellow-600" />
-                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">
-                              مميز
-                            </span>
+                            <span className="text-[#b38b00] font-bold text-xs md:text-sm">مميز</span>
                           </div>
                         )}
 
@@ -746,10 +605,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                nextImage(
-                                  property.propertyNumber,
-                                  imageUrls.length,
-                                );
+                                nextImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-next-image-${property.propertyNumber}`}
                             >
@@ -763,10 +619,7 @@ export default function PropertiesPage() {
                               className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                prevImage(
-                                  property.propertyNumber,
-                                  imageUrls.length,
-                                );
+                                prevImage(property.propertyNumber, imageUrls.length);
                               }}
                               data-testid={`button-prev-image-${property.propertyNumber}`}
                             >
@@ -782,8 +635,7 @@ export default function PropertiesPage() {
                               <div
                                 key={idx}
                                 className={`h-1.5 rounded-full transition-all ${
-                                  idx ===
-                                  getCurrentImageIndex(property.propertyNumber)
+                                  idx === getCurrentImageIndex(property.propertyNumber)
                                     ? "w-4 bg-white"
                                     : "w-1.5 bg-white/50"
                                 }`}
@@ -800,7 +652,7 @@ export default function PropertiesPage() {
                     {property.subscriptionType === "مميز" && (
                       <h3
                         className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
-                        onClick={(e) => handleCardClick(property.propertyNumber, e)}
+                        onClick={() => handleCardClick(property.propertyNumber)}
                       >
                         {property.name}
                       </h3>
@@ -808,20 +660,14 @@ export default function PropertiesPage() {
 
                     {/* Location */}
                     <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
-                      <svg
-                        className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
+                      <svg className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                         <path
                           fillRule="evenodd"
                           d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span className="font-semibold truncate text-[13px]">
-                        {property.location || property.city}
-                      </span>
+                      <span className="font-semibold truncate text-[13px]">{property.location || property.city}</span>
                     </div>
 
                     {/* Top Facilities - Hidden on small mobile */}
@@ -829,9 +675,7 @@ export default function PropertiesPage() {
                       {topFacilities.map((facility, idx) => (
                         <div key={idx} className="flex items-center gap-2">
                           <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
-                          <span className="font-semibold text-xs">
-                            {facility}
-                          </span>
+                          <span className="font-semibold text-xs">{facility}</span>
                         </div>
                       ))}
                     </div>
@@ -844,7 +688,7 @@ export default function PropertiesPage() {
                       {/* CTA Button - Fixed at bottom */}
                       <Button
                         className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
-                        onClick={(e) => handleCardClick(property.propertyNumber, e)}
+                        onClick={() => handleCardClick(property.propertyNumber)}
                         data-testid={`button-details-${property.propertyNumber}`}
                       >
                         عرض التفاصيل
@@ -890,25 +734,16 @@ export default function PropertiesPage() {
         </button>
       )}
       {/* Property Details Dialog */}
-      <Dialog
-        open={!!selectedProperty}
-        onOpenChange={(open) => !open && setSelectedProperty(null)}
-      >
+      <Dialog open={!!selectedProperty} onOpenChange={(open) => !open && setSelectedProperty(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           {selectedProperty && (
             <div className="space-y-6">
-              <DialogTitle className="sr-only">
-                {selectedProperty.name}
-              </DialogTitle>
+              <DialogTitle className="sr-only">{selectedProperty.name}</DialogTitle>
               {/* Image Gallery */}
               {selectedProperty.imageUrls.length > 0 && (
                 <div className="relative">
                   <img
-                    src={
-                      selectedProperty.imageUrls[
-                        getCurrentImageIndex(selectedProperty.propertyNumber)
-                      ]
-                    }
+                    src={selectedProperty.imageUrls[getCurrentImageIndex(selectedProperty.propertyNumber)]}
                     alt={selectedProperty.name}
                     className="w-full h-96 object-cover rounded-lg"
                     data-testid="img-dialog-current"
@@ -919,10 +754,7 @@ export default function PropertiesPage() {
                     <>
                       <button
                         onClick={() =>
-                          prevImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length,
-                          )
+                          prevImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-prev-image"
@@ -931,10 +763,7 @@ export default function PropertiesPage() {
                       </button>
                       <button
                         onClick={() =>
-                          nextImage(
-                            selectedProperty.propertyNumber,
-                            selectedProperty.imageUrls.length,
-                          )
+                          nextImage(selectedProperty.propertyNumber, selectedProperty.imageUrls.length)
                         }
                         className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
                         data-testid="button-next-image"
@@ -951,16 +780,11 @@ export default function PropertiesPage() {
                         <button
                           key={idx}
                           className={`h-2 rounded-full transition-all ${
-                            idx ===
-                            getCurrentImageIndex(
-                              selectedProperty.propertyNumber,
-                            )
+                            idx === getCurrentImageIndex(selectedProperty.propertyNumber)
                               ? "w-8 bg-[#b88d2b]"
                               : "w-2 bg-muted-foreground/30"
                           }`}
-                          onClick={() =>
-                            goToImage(selectedProperty.propertyNumber, idx)
-                          }
+                          onClick={() => goToImage(selectedProperty.propertyNumber, idx)}
                           data-testid={`button-slide-${idx}`}
                         />
                       ))}
@@ -971,12 +795,9 @@ export default function PropertiesPage() {
 
               {/* Details */}
               <div>
-                <h2 className="text-2xl font-bold text-foreground mb-2">
-                  {selectedProperty.name}
-                </h2>
+                <h2 className="text-2xl font-bold text-foreground mb-2">{selectedProperty.name}</h2>
                 <p className="text-muted-foreground mb-4">
-                  {selectedProperty.city} • {selectedProperty.direction} •{" "}
-                  {selectedProperty.type}
+                  {selectedProperty.city} • {selectedProperty.direction} • {selectedProperty.type}
                 </p>
 
                 {/* All Prices */}
@@ -984,41 +805,25 @@ export default function PropertiesPage() {
                   {selectedProperty.prices.weekday && (
                     <div className="flex justify-between items-center">
                       <span>وسط الأسبوع:</span>
-                      <PriceDisplay
-                        amount={selectedProperty.prices.weekday}
-                        size="md"
-                        textColor="text-green-600"
-                      />
+                      <PriceDisplay amount={selectedProperty.prices.weekday} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.weekend && (
                     <div className="flex justify-between items-center">
                       <span>نهاية الأسبوع:</span>
-                      <PriceDisplay
-                        amount={selectedProperty.prices.weekend}
-                        size="md"
-                        textColor="text-green-600"
-                      />
+                      <PriceDisplay amount={selectedProperty.prices.weekend} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.overnight && (
                     <div className="flex justify-between items-center">
                       <span>مبيت:</span>
-                      <PriceDisplay
-                        amount={selectedProperty.prices.overnight}
-                        size="md"
-                        textColor="text-green-600"
-                      />
+                      <PriceDisplay amount={selectedProperty.prices.overnight} size="md" textColor="text-green-600" />
                     </div>
                   )}
                   {selectedProperty.prices.holidays && (
                     <div className="flex justify-between items-center">
                       <span>إجازات:</span>
-                      <PriceDisplay
-                        amount={selectedProperty.prices.holidays}
-                        size="md"
-                        textColor="text-green-600"
-                      />
+                      <PriceDisplay amount={selectedProperty.prices.holidays} size="md" textColor="text-green-600" />
                     </div>
                   )}
                 </div>
@@ -1028,11 +833,7 @@ export default function PropertiesPage() {
                   <h4 className="font-semibold mb-2">المرافق:</h4>
                   <div className="flex flex-wrap gap-2">
                     {selectedProperty.facilities.map((facility, idx) => (
-                      <Badge
-                        key={`dialog-facility-${idx}-${facility}`}
-                        variant="secondary"
-                        className="text-xs"
-                      >
+                      <Badge key={`dialog-facility-${idx}-${facility}`} variant="secondary" className="text-xs">
                         {facility}
                       </Badge>
                     ))}
@@ -1045,9 +846,7 @@ export default function PropertiesPage() {
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() =>
-                        window.open(selectedProperty.imagesFolderUrl, "_blank")
-                      }
+                      onClick={() => window.open(selectedProperty.imagesFolderUrl, "_blank")}
                     >
                       <ExternalLink className="w-4 h-4 ml-2" />
                       فتح ملف العقار
@@ -1068,9 +867,7 @@ export default function PropertiesPage() {
         {/* فلتر الموبايل (نفس السابق) */}
         <Dialog open={showFiltersModal} onOpenChange={setShowFiltersModal}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-6 rounded-xl">
-            <DialogTitle className="text-xl font-bold text-primary mb-4">
-              تصفية العقارات
-            </DialogTitle>
+            <DialogTitle className="text-xl font-bold text-primary mb-4">تصفية العقارات</DialogTitle>
 
             {/* Search */}
             <div className="mb-4">
@@ -1088,9 +885,7 @@ export default function PropertiesPage() {
 
             {/* City */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                المدينة
-              </label>
+              <label className="text-sm font-semibold mb-2 block">المدينة</label>
               <Select value={selectedCity} onValueChange={setSelectedCity}>
                 <SelectTrigger>
                   <SelectValue placeholder="المدينة" />
@@ -1108,13 +903,8 @@ export default function PropertiesPage() {
 
             {/* Direction */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                الاتجاه
-              </label>
-              <Select
-                value={selectedDirection}
-                onValueChange={setSelectedDirection}
-              >
+              <label className="text-sm font-semibold mb-2 block">الاتجاه</label>
+              <Select value={selectedDirection} onValueChange={setSelectedDirection}>
                 <SelectTrigger>
                   <SelectValue placeholder="الاتجاه" />
                 </SelectTrigger>
@@ -1131,9 +921,7 @@ export default function PropertiesPage() {
 
             {/* Type */}
             <div className="mb-4">
-              <label className="text-sm font-semibold mb-2 block">
-                نوع العقار
-              </label>
+              <label className="text-sm font-semibold mb-2 block">نوع العقار</label>
               <Select value={selectedType} onValueChange={setSelectedType}>
                 <SelectTrigger>
                   <SelectValue placeholder="النوع" />
@@ -1165,18 +953,12 @@ export default function PropertiesPage() {
 
             {/* Facilities */}
             <div className="mb-6">
-              <label className="text-sm font-semibold mb-2 block">
-                المرافق
-              </label>
+              <label className="text-sm font-semibold mb-2 block">المرافق</label>
               <div className="flex flex-wrap gap-2">
                 {PRIORITY_FACILITIES.map((facility) => (
                   <Badge
                     key={facility}
-                    variant={
-                      selectedFacilities.includes(facility)
-                        ? "default"
-                        : "outline"
-                    }
+                    variant={selectedFacilities.includes(facility) ? "default" : "outline"}
                     className="cursor-pointer"
                     onClick={() => toggleFacility(facility)}
                   >
@@ -1210,19 +992,12 @@ export default function PropertiesPage() {
         </Dialog>
       </Dialog>
       {/* Image Modal */}
-      <Dialog
-        open={!!selectedImage}
-        onOpenChange={() => setSelectedImage(null)}
-      >
+      <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
         <DialogContent className="max-w-4xl p-0">
           {selectedImage && (
             <div className="relative">
               <DialogTitle className="sr-only">صورة العقار</DialogTitle>
-              <img
-                src={selectedImage.url}
-                alt="صورة العقار"
-                className="w-full h-auto rounded-lg"
-              />
+              <img src={selectedImage.url} alt="صورة العقار" className="w-full h-auto rounded-lg" />
               <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1 rounded">
                 {selectedImage.index + 1} / {selectedImage.total}
               </div>

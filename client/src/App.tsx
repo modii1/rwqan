@@ -9,7 +9,6 @@ import { useSessionQuery } from "@/hooks/use-session";
 import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
-import logoImage from "./assets/logo.png";
 
 // ✅ تفعيل الحفاظ على موقع التمرير عند الرجوع
 if ('scrollRestoration' in window.history) {
@@ -143,17 +142,13 @@ export default function App() {
       <TooltipProvider>
         <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
-          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-[70px] overflow-visible">
-            <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
               <a
                 href="/"
-                className="flex items-center gap-2 hover:opacity-80 transition"
+                className="text-xl font-bold text-primary hover:opacity-80 transition"
               >
-                <img 
-                  src={logoImage} 
-                  alt="روقإن" 
-                  className="h-[180px] w-auto relative top-[1px] left-[50px]"
-                />
+                مودي الذكي
               </a>
               <nav className="flex items-center gap-2">
                 <Button

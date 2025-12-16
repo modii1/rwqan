@@ -134,7 +134,7 @@ export default function OwnerLogin() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-primary mb-2" data-testid="text-login-title">
-            روقإن
+            مودي الذكي
           </h1>
           <p className="text-muted-foreground">تسجيل دخول آمن</p>
         </div>
@@ -193,9 +193,9 @@ export default function OwnerLogin() {
             <div className="mt-6 text-center text-sm text-muted-foreground">
               <p>ليس لديك حساب؟</p>
               <Button
-                variant="ghost"
+                variant="link"
                 onClick={() => setLocation("/subscription")}
-                className="text-primary underline"
+                className="text-primary"
                 data-testid="link-register"
               >
                 سجل معنا الآن
