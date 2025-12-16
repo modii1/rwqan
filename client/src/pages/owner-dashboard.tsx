@@ -539,6 +539,37 @@ const retryPaymentMutation = useMutation({
   },
 });
 
+// التحقق من حالة الدفع مباشرة من Paymob
+const verifyPaymentMutation = useMutation({
+  mutationFn: async (paymentId: string) => {
+    const response = await fetch(`/api/payment/verify-status/${encodeURIComponent(paymentId)}`);
+    return response.json();
+  },
+  onSuccess: (data) => {
+    if (data.verified) {
+      toast({
+        title: "تم التحقق بنجاح ✅",
+        description: data.message || "تم تأكيد الدفع",
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/owner/payments'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/owner/current-subscription'] });
+    } else {
+      toast({
+        title: "لم يتم التأكيد",
+        description: data.message || "الدفعة لم تكتمل بعد",
+        variant: "destructive",
+      });
+    }
+  },
+  onError: (error: any) => {
+    toast({
+      title: "خطأ",
+      description: error.message || "حدث خطأ في التحقق",
+      variant: "destructive",
+    });
+  },
+});
+
 // ================= DEBUG LOGS =================
 console.log("🔍 requestsData:", requestsData);
 console.log("🔍 sessionData:", sessionData);
@@ -1064,6 +1095,8 @@ const calculateAnalytics = () => {
                           }
                         }}
                         isRetrying={retryPaymentMutation.isPending}
+                        onVerifyPayment={(p) => verifyPaymentMutation.mutate(p.id)}
+                        isVerifying={verifyPaymentMutation.isPending}
                       />
                     ))}
                   
@@ -1458,7 +1491,7 @@ function AnalyticsBox({
   );
 }
 
-function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onRetryPayment?: (payment: any) => void; isRetrying?: boolean }) {
+function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVerifying }: { payment: any; onRetryPayment?: (payment: any) => void; isRetrying?: boolean; onVerifyPayment?: (payment: any) => void; isVerifying?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
 
   const getStatusIcon = (status: string) => {
@@ -1676,7 +1709,26 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           </Button>
         )}
 
-        {/* زر إكمال/إعادة الدفع - للدفعات الإلكترونية المعلقة (بعد 3 دقائق) أو الفاشلة */}
+        {/* زر تحقق من الدفع - للدفعات الإلكترونية المعلقة */}
+        {payment.status === "معلق" && payment.paymobOrderId && onVerifyPayment && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1 flex-shrink-0 border-green-500 text-green-600 hover:bg-green-50"
+            onClick={() => onVerifyPayment(payment)}
+            disabled={isVerifying}
+            data-testid={`button-verify-payment-${payment.id}`}
+          >
+            {isVerifying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4" />
+            )}
+            {isVerifying ? "جاري التحقق..." : "تحقق من الدفع"}
+          </Button>
+        )}
+
+        {/* زر إكمال/إعادة الدفع - للدفعات الإلكترونية المعلقة أو الفاشلة */}
         {shouldShowRetryButton(payment) && onRetryPayment && (
           <Button
             size="sm"
