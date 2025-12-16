@@ -372,61 +372,23 @@ const totals = completedPayments.reduce((acc, p) => {
 </Td>
 
                       <Td>
-                        {(() => {
-                          const isBankTransfer = p.paymentMethod?.includes("تحويل") || p.paymentMethod?.includes("بنكي");
-                          const isElectronic = !isBankTransfer && (p.paymentMethod?.includes("بطاقة") || p.paymentMethod?.includes("Apple") || p.paymentMethod?.includes("Visa") || p.paymentMethod?.includes("Mada") || p.paymentMethod?.includes("MasterCard"));
-                          
-                          let displayStatus = p.status;
-                          let badgeClass = "";
-                          let variant: "default" | "outline" | "destructive" = "outline";
-                          
-                          if (p.status === "مكتمل") {
-                            displayStatus = "مكتمل";
-                            badgeClass = "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
-                            variant = "default";
-                          } else if (p.status === "نجح - قيد التحقق") {
-                            displayStatus = "نجح";
-                            badgeClass = "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
-                            variant = "default";
-                          } else if (p.status === "قيد المراجعة" && isBankTransfer) {
-                            displayStatus = "قيد المراجعة";
-                            badgeClass = "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
-                            variant = "outline";
-                          } else if (p.status === "فشل" || p.status === "ملغي") {
-                            displayStatus = p.status;
-                            variant = "destructive";
-                          } else {
-                            displayStatus = p.status;
-                            badgeClass = "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
+                        <Badge
+                          variant={
+                            p.status === "مكتمل" ? "default" :
+                            p.status === "قيد المراجعة" ? "outline" : "destructive"
                           }
-                          
-                          const getStatusHint = () => {
-                            if (p.status === "معلق") return "بانتظار اكتمال الدفع";
-                            if (p.status === "فشل") return "فشل الدفع";
-                            if (p.status === "قيد المراجعة" && isBankTransfer) return "تحويل بنكي بانتظار المراجعة";
-                            if (p.status === "نجح - قيد التحقق") return "بانتظار إكمال بيانات العقار";
-                            if (p.status === "مكتمل") return "";
-                            return "";
-                          };
-
-                          return (
-                            <div className="flex flex-col items-start gap-0.5">
-                              <Badge
-                                variant={variant}
-                                className={`text-[10px] ${badgeClass}`}
-                              >
-                                {displayStatus}
-                              </Badge>
-                              {getStatusHint() && (
-                                <span className="text-[9px] text-muted-foreground">{getStatusHint()}</span>
-                              )}
-                            </div>
-                          );
-                        })()}
+                          className={`text-[10px] ${
+                            p.status === "مكتمل" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                            p.status === "قيد المراجعة" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
+                            ""
+                          }`}
+                        >
+                          {p.status}
+                        </Badge>
                       </Td>
                       <Td>{formatDate(p.createdAt)}</Td>
                       <Td>
-                        {(isCompleted || p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") && (
+                        {(isCompleted || p.status === "قيد المراجعة") && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -444,50 +406,7 @@ const totals = completedPayments.reduce((acc, p) => {
                       </Td>
                     </tr>
                     
-                    {/* صف التفاصيل الموسعة - للمدفوعات الإلكترونية الناجحة (قيد التحقق من البيانات) */}
-                    {isExpanded && p.status === "نجح - قيد التحقق" && (
-                      <tr key={`${p.id}-success-pending`} className="bg-blue-50 dark:bg-blue-900/10 border-t-2 border-blue-300">
-                        <Td colSpan={9}>
-                          <div className="py-4 px-3">
-                            <div className="text-sm font-bold mb-3 text-blue-700 dark:text-blue-400">
-                              ✅ دفع إلكتروني ناجح - ينتظر إكمال بيانات العقار
-                            </div>
-                            
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
-                              <div className="bg-card p-3 rounded border">
-                                <div className="text-muted-foreground mb-1">رقم العقار</div>
-                                <div className="font-bold">{p.propertyNumber}</div>
-                              </div>
-                              <div className="bg-card p-3 rounded border">
-                                <div className="text-muted-foreground mb-1">الباقة</div>
-                                <div className="font-semibold">{getPackageNameArabic(p.packageId || '')}</div>
-                              </div>
-                              <div className="bg-card p-3 rounded border">
-                                <div className="text-muted-foreground mb-1">المبلغ المدفوع</div>
-                                <div className="font-bold text-green-600">{amount.toFixed(2)} ر.س</div>
-                              </div>
-                              <div className="bg-card p-3 rounded border">
-                                <div className="text-muted-foreground mb-1">تاريخ الدفع</div>
-                                <div className="font-semibold">{formatDate(p.createdAt)}</div>
-                              </div>
-                            </div>
-
-                            {p.transactionId && (
-                              <div className="mb-3 flex items-center gap-2 text-xs">
-                                <span className="text-muted-foreground">رقم المعاملة (Paymob):</span>
-                                <code className="bg-primary/10 px-2 py-1 rounded font-mono font-bold text-primary">{p.transactionId}</code>
-                              </div>
-                            )}
-
-                            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded text-xs text-blue-800 dark:text-blue-300">
-                              💡 الدفع تم بنجاح. سيتم تفعيل الاشتراك تلقائياً عندما يكمل المالك بيانات العقار ويتحقق منها.
-                            </div>
-                          </div>
-                        </Td>
-                      </tr>
-                    )}
-
-                    {/* صف التفاصيل الموسعة - للمدفوعات المعلقة (تحويل بنكي) */}
+                    {/* صف التفاصيل الموسعة - للمدفوعات المعلقة */}
                     {isExpanded && p.status === "قيد المراجعة" && (
                       <tr key={`${p.id}-pending-details`} className="bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300">
                         <Td colSpan={9}>
