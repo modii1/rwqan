@@ -1481,10 +1481,21 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
     return status;
   };
 
-  const getStatusReason = (status: string, paymentMethod: string) => {
+  const getStatusReason = (status: string, paymentMethod: string, createdAt?: string) => {
     switch (status) {
       case "معلق":
-        return "لم يكتمل الدفع - اضغط لإعادة المحاولة";
+        // حساب الوقت المتبقي للدفع (3 دقائق)
+        if (createdAt) {
+          const created = new Date(createdAt);
+          const now = new Date();
+          const diffMs = now.getTime() - created.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          if (diffMins < 3) {
+            const remaining = 3 - diffMins;
+            return `جاري الدفع... (${remaining} دقيقة متبقية)`;
+          }
+        }
+        return "لم يكتمل الدفع - اضغط لإكمال الدفع";
       case "فشل":
         return "فشل الدفع - اضغط لإعادة المحاولة";
       case "قيد المراجعة":
@@ -1498,6 +1509,35 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
       default:
         return "";
     }
+  };
+
+  // التحقق من إظهار زر إكمال/إعادة الدفع
+  const shouldShowRetryButton = (payment: any) => {
+    // استثناء التحويل البنكي
+    if (payment.paymentMethod === "تحويل بنكي") return false;
+    
+    // للدفعات الفاشلة، اظهر الزر دائماً
+    if (payment.status === "فشل") return true;
+    
+    // للدفعات المعلقة، اظهر الزر بعد 3 دقائق
+    if (payment.status === "معلق") {
+      if (payment.createdAt) {
+        const created = new Date(payment.createdAt);
+        const now = new Date();
+        const diffMs = now.getTime() - created.getTime();
+        const diffMins = diffMs / 60000;
+        return diffMins >= 3; // 3 دقائق
+      }
+      return true; // إذا لم يوجد تاريخ، اظهر الزر
+    }
+    
+    // للدفعات الإلكترونية القديمة بحالة "قيد المراجعة" (غير مكتملة)
+    // هذه دفعات أُنشئت قبل تعديل النظام ولم تُكمل
+    if (payment.status === "قيد المراجعة" && payment.paymentMethod !== "تحويل بنكي") {
+      return true; // اظهر زر إكمال الدفع
+    }
+    
+    return false;
   };
 
   const formatDate = (dateStr: string) => {
@@ -1567,14 +1607,14 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
             <div className="text-xs text-muted-foreground mt-1">
               {formatDate(payment.createdAt)}
             </div>
-            {getStatusReason(payment.status, payment.paymentMethod) && (
+            {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt) && (
               <div className={`text-xs mt-1 ${
                 payment.status === "مكتمل" ? "text-green-600 dark:text-green-400" :
                 payment.status === "فشل" ? "text-red-600 dark:text-red-400" :
                 payment.status === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
                 "text-amber-600 dark:text-amber-400"
               }`}>
-                {getStatusReason(payment.status, payment.paymentMethod)}
+                {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt)}
               </div>
             )}
           </div>
@@ -1635,8 +1675,8 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           </Button>
         )}
 
-        {/* زر إعادة الدفع - للدفعات الإلكترونية المعلقة أو الفاشلة */}
-        {((payment.status === "معلق" || payment.status === "فشل") && payment.paymentMethod !== "تحويل بنكي") && onRetryPayment && (
+        {/* زر إكمال/إعادة الدفع - للدفعات الإلكترونية المعلقة (بعد 3 دقائق) أو الفاشلة */}
+        {shouldShowRetryButton(payment) && onRetryPayment && (
           <Button
             size="sm"
             variant="default"
@@ -1650,7 +1690,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري التحويل..." : "إعادة الدفع"}
+            {isRetrying ? "جاري التحويل..." : payment.status === "فشل" ? "إعادة الدفع" : (payment.status === "معلق" || payment.status === "قيد المراجعة") ? "إكمال الدفع" : "إعادة الدفع"}
           </Button>
         )}
       </div>
