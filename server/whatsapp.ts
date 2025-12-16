@@ -68,7 +68,7 @@ async function sendAdminWhatsAppNotification(options: {
   const { type, text, propertyNumber, propertyName, ownerPhone } = options;
 
   // بناء نص الرسالة
-  let body = `تنبيه جديد من نظام مودي الذكي ✅\n\n`;
+  let body = `تنبيه جديد من نظام روقـان ✅\n\n`;
   body += `نوع الإشعار: ${type}\n\n`;
   if (propertyNumber) body += `رقم العقار: ${propertyNumber}\n`;
   if (propertyName) body += `اسم العقار: ${propertyName}\n`;

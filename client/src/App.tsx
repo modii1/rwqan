@@ -9,6 +9,8 @@ import { useSessionQuery } from "@/hooks/use-session";
 import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
 import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
+import logoIcon from "./assets/logo-icon.png";
+import logoFull from "./assets/logo-full.png";
 
 // ✅ تفعيل الحفاظ على موقع التمرير عند الرجوع
 if ('scrollRestoration' in window.history) {
@@ -142,13 +144,17 @@ export default function App() {
       <TooltipProvider>
         <div className="min-h-screen flex flex-col bg-background">
           {/* Header */}
-          <header className="bg-white border-b shadow-sm sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <header className="bg-white border-b shadow-sm sticky top-0 z-50 h-[70px] overflow-visible">
+            <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
               <a
                 href="/"
-                className="text-xl font-bold text-primary hover:opacity-80 transition"
+                className="flex items-center hover:opacity-80 transition"
               >
-                مودي الذكي
+                <img 
+                  src={logoIcon} 
+                  alt="روقـان" 
+                  className="h-[110px] w-auto"
+                />
               </a>
               <nav className="flex items-center gap-2">
                 <Button
@@ -201,6 +207,26 @@ export default function App() {
           <main className="flex-1">
             <Router />
           </main>
+          
+          {/* Footer */}
+          <footer className="bg-transparent py-0 mt-auto">
+            <div className="max-w-7xl mx-auto px-4">
+              <div className="flex flex-col items-center gap-1">
+                <img 
+                  src={logoFull} 
+                  alt="روقـان" 
+                  className="h-[300px] w-auto mt-[-52px] mb-[-52px] ml-[0px] mr-[0px] pl-[10px] pr-[10px] pt-[-2px] pb-[-2px]"
+                />
+                <p className="text-center text-xs text-gray-400">
+                  روقـان | نُـزل ورفـاهية - للشاليهات والاستراحات والعقارات
+                </p>
+                <p className="text-xs text-gray-500">
+                  © {new Date().getFullYear()} روقـان
+                </p>
+              </div>
+            </div>
+          </footer>
+          
           <Toaster />
         </div>
       </TooltipProvider>
