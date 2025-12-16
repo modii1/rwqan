@@ -13,14 +13,14 @@ import { trackEvent } from "@/lib/analytics";
 // ⭐ مؤشر السحب المحسّن - يظهر لمدة 4 ثواني ثم يختفي
 function EdgeSwipeIndicator() {
   const [visible, setVisible] = useState(true);
-
+  
   useEffect(() => {
     const timer = setTimeout(() => setVisible(false), 4000);
     return () => clearTimeout(timer);
   }, []);
-
+  
   if (!visible) return null;
-
+  
   return (
     <div className="swipe-hint-container">
       <div className="swipe-hint-content">
@@ -58,7 +58,9 @@ interface PropertyDetails {
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
 function isVerified(property: PropertyDetails) {
-  return property.subscriptionType?.trim().includes("مميز");
+  return (
+    property.subscriptionType?.trim().includes("مميز")
+  );
 }
 
 function detectDeviceType() {
@@ -80,6 +82,7 @@ function detectDeviceType() {
   return "unknown";
 }
 
+
 export default function PropertyDetailsPage() {
   const [, params] = useRoute<{ id: string }>("/property/:id");
   const [, setLocation] = useLocation();
@@ -87,16 +90,12 @@ export default function PropertyDetailsPage() {
   const [isSending, setIsSending] = useState(false);
   const [shake, setShake] = useState(false);
 
+
   const [selectedImage, setSelectedImage] = useState<number>(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
 
   const propertyId = params?.id ?? "";
-
-  // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
-  }, [propertyId]);
 
   // جلب بيانات العقار مباشرة من الخادم (أسرع من Google Apps Script)
   const {
@@ -107,7 +106,7 @@ export default function PropertyDetailsPage() {
     queryKey: ["property-details", propertyId],
     queryFn: async () => {
       if (!propertyId) return null;
-
+      
       // محاولة الجلب من الخادم المحلي أولاً (أسرع بكثير)
       try {
         const localRes = await fetch(`/api/properties/${propertyId}`);
@@ -122,14 +121,8 @@ export default function PropertyDetailsPage() {
               location: data.location || "",
               type: data.type || "",
               facilities: Array.isArray(data.facilities) ? data.facilities : [],
-              prices: data.prices || {
-                weekday: "",
-                weekend: "",
-                overnight: "",
-                holidays: "",
-              },
-              subscriptionType:
-                data.subscriptionType || (data.name ? "مميز" : "عادي"),
+              prices: data.prices || { weekday: "", weekend: "", overnight: "", holidays: "" },
+              subscriptionType: data.subscriptionType || (data.name ? "مميز" : "عادي"),
               phone: data.whatsappNumber || "",
               imageCount: 0,
             } as PropertyDetails;
@@ -138,10 +131,10 @@ export default function PropertyDetailsPage() {
       } catch {
         // تجاهل - سنجرب Google Apps Script
       }
-
+      
       // الرجوع إلى Google Apps Script
       const res = await fetch(
-        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData",
+        "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData"
       );
       if (!res.ok) {
         throw new Error("فشل في جلب البيانات");
@@ -165,16 +158,10 @@ export default function PropertyDetailsPage() {
               facilities = parsed.map((f) => String(f).trim());
             }
           } catch {
-            facilities = trimmed
-              .split(",")
-              .map((f: string) => f.replace(/"/g, "").trim())
-              .filter(Boolean);
+            facilities = trimmed.split(",").map((f: string) => f.replace(/"/g, "").trim()).filter(Boolean);
           }
         } else {
-          facilities = trimmed
-            .split(",")
-            .map((f: string) => f.replace(/"/g, "").trim())
-            .filter(Boolean);
+          facilities = trimmed.split(",").map((f: string) => f.replace(/"/g, "").trim()).filter(Boolean);
         }
       }
 
@@ -187,12 +174,8 @@ export default function PropertyDetailsPage() {
         type: item["النوع"] || "",
         facilities,
         prices: {
-          weekday: item["سعر وسط الأسبوع"]
-            ? String(item["سعر وسط الأسبوع"])
-            : "",
-          weekend: item["سعر نهاية الأسبوع"]
-            ? String(item["سعر نهاية الأسبوع"])
-            : "",
+          weekday: item["سعر وسط الأسبوع"] ? String(item["سعر وسط الأسبوع"]) : "",
+          weekend: item["سعر نهاية الأسبوع"] ? String(item["سعر نهاية الأسبوع"]) : "",
           overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
           holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
         },
@@ -209,27 +192,28 @@ export default function PropertyDetailsPage() {
   // ✅ تتبع الزيارات
   useEffect(() => {
     if (!propertyId) return;
-
+    
     const trackView = async () => {
-      try {
-        const deviceType = detectDeviceType();
+  try {
+    const deviceType = detectDeviceType();
 
-        await fetch("/api/track-pageview", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            propertyNumber: propertyId,
-            userAgent: navigator.userAgent,
-            device: deviceType,
-          }),
-        });
-      } catch (err) {
-        console.log("Failed to track page view:", err);
-      }
-    };
+    await fetch("/api/track-pageview", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ 
+        propertyNumber: propertyId,
+        userAgent: navigator.userAgent,
+        device: deviceType,
+      }),
+    });
+  } catch (err) {
+    console.log("Failed to track page view:", err);
+  }
+};
 
+    
     trackView();
   }, [propertyId]);
 
@@ -258,38 +242,22 @@ export default function PropertyDetailsPage() {
     staleTime: 1000 * 60 * 10, // 10 دقائق
     enabled: !!propertyId,
   });
-
+  
   const images = r2ImagesData || [];
-
+  
   // إعادة تعيين حالة تحميل الصورة عند تغيير الصورة
   useEffect(() => {
     setImageLoaded(false);
   }, [selectedImage]);
 
-  // ✅ Preload للصور الأولى عند تحميل الصفحة + الصورة التالية
-  useEffect(() => {
-    if (!images || images.length === 0) return;
-    
-    // تحميل مسبق للصور الـ 3 الأولى فوراً
-    images.slice(0, 3).forEach((src) => {
-      const img = new Image();
-      img.src = src;
-    });
-  }, [images]);
-  
-  // Preload للصورة التالية عند التنقل
+  // ✅ Preload للصورة التالية لتسريع التصفح
   useEffect(() => {
     if (!images || images.length === 0) return;
     const nextIndex = (selectedImage + 1) % images.length;
-    const prevIndex = selectedImage === 0 ? images.length - 1 : selectedImage - 1;
-    
-    // تحميل الصورة التالية والسابقة
-    [nextIndex, prevIndex].forEach((idx) => {
-      const img = new Image();
-      img.src = images[idx];
-    });
+    const img = new Image();
+    img.src = images[nextIndex];
   }, [images, selectedImage]);
-
+  
   // ===== حالات التحميل / الخطأ / غير موجود =====
 
   if (isError) {
@@ -298,13 +266,10 @@ export default function PropertyDetailsPage() {
         <Card className="p-8 text-center space-y-4">
           <h2 className="text-xl font-bold mb-2">تعذر تحميل البيانات</h2>
           <p className="text-sm text-muted-foreground">
-            حدث خطأ أثناء الاتصال بالخادم. تأكد من الاتصال بالإنترنت ثم حاول مرة
-            أخرى.
+            حدث خطأ أثناء الاتصال بالخادم. تأكد من الاتصال بالإنترنت ثم حاول مرة أخرى.
           </p>
           <div className="flex justify-center gap-3">
-            <Button onClick={() => window.location.reload()}>
-              إعادة المحاولة
-            </Button>
+            <Button onClick={() => window.location.reload()}>إعادة المحاولة</Button>
             <Button variant="outline" onClick={() => setLocation("/")}>
               العودة للرئيسية
             </Button>
@@ -320,11 +285,7 @@ export default function PropertyDetailsPage() {
       <div className="min-h-screen bg-background">
         <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLocation("/")}
-            >
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/")}>
               <ArrowRight className="w-5 h-5" />
             </Button>
             <div className="flex-1">
@@ -344,11 +305,8 @@ export default function PropertyDetailsPage() {
               <Card className="p-6">
                 <div className="h-6 w-32 bg-muted animate-pulse rounded mb-4" />
                 <div className="flex flex-wrap gap-6">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div
-                      key={i}
-                      className="h-12 w-24 bg-muted animate-pulse rounded"
-                    />
+                  {[1,2,3,4].map(i => (
+                    <div key={i} className="h-12 w-24 bg-muted animate-pulse rounded" />
                   ))}
                 </div>
               </Card>
@@ -357,11 +315,8 @@ export default function PropertyDetailsPage() {
               <Card className="p-6">
                 <div className="h-6 w-20 bg-muted animate-pulse rounded mb-4" />
                 <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div
-                      key={i}
-                      className="h-8 bg-muted animate-pulse rounded"
-                    />
+                  {[1,2,3].map(i => (
+                    <div key={i} className="h-8 bg-muted animate-pulse rounded" />
                   ))}
                 </div>
               </Card>
@@ -384,11 +339,11 @@ export default function PropertyDetailsPage() {
 
     if (diff > threshold) {
       setSelectedImage((prev) =>
-        images.length ? (prev - 1 + images.length) % images.length : prev,
+        images.length ? (prev - 1 + images.length) % images.length : prev
       );
     } else if (diff < -threshold) {
       setSelectedImage((prev) =>
-        images.length ? (prev + 1) % images.length : prev,
+        images.length ? (prev + 1) % images.length : prev
       );
     }
 
@@ -400,79 +355,95 @@ export default function PropertyDetailsPage() {
 
   // الواتساب: رقم العقار المميّز أو رقم افتراضي
   const handleWhatsApp = async () => {
-    // ⭐ عند الضغط المتكرر — اهتزاز فقط
-    if (isSending) {
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
+  // ⭐ عند الضغط المتكرر — اهتزاز فقط
+  if (isSending) {
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
+    return;
+  }
+
+  setIsSending(true);
+
+  try {
+    const response = await fetch("/api/requests/smart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyNumber: property.propertyNumber }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      if (result.remainingTimeFormatted) {
+        toast({
+          title: "⏱️ انتظر",
+          description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
+          variant: "destructive",
+        });
+      }
+      setIsSending(false);
       return;
     }
 
-    setIsSending(true);
+    const DEFAULT_WHATSAPP = "966533220646";
+    const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
+    const nameText = isVerified(property) ? ` - ${property.name}` : "";
+    const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
 
-    try {
-      const response = await fetch("/api/requests/smart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyNumber: property.propertyNumber }),
-      });
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
 
-      const result = await response.json();
+    const url = isMobile
+      ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
+      : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
 
-      if (!response.ok) {
-        if (result.remainingTimeFormatted) {
-          toast({
-            title: "⏱️ انتظر",
-            description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
-            variant: "destructive",
-          });
-        }
-        setIsSending(false);
-        return;
-      }
+    if (isMobile) {
+  window.location.href = url; // الجوال
+} else {
+  window.open(url, "_blank"); // سطح المكتب
+}
 
-      const DEFAULT_WHATSAPP = "966533220646";
-      const whatsappNumber = property.phone || DEFAULT_WHATSAPP;
-      const nameText = isVerified(property) ? ` - ${property.name}` : "";
-      const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
 
-      const isMobile =
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-          navigator.userAgent,
-        );
+    toast({
+      title: "✅ تم تسجيل طلبك",
+      description: `في ${result.requestTime}`,
+    });
 
-      const url = isMobile
-        ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
-        : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+    // رجوع الزر بعد ثانيتين
+    setTimeout(() => setIsSending(false), 2000);
 
-      if (isMobile) {
-        window.location.href = url; // الجوال
-      } else {
-        window.open(url, "_blank"); // سطح المكتب
-      }
+  } catch (error) {
+    console.error("Error creating WhatsApp request:", error);
+    toast({
+      title: "خطأ",
+      description: "حدث خطأ عند تسجيل الطلب",
+      variant: "destructive",
+    });
+    setIsSending(false);
+  }
+};
 
-      toast({
-        title: "✅ تم تسجيل طلبك",
-        description: `في ${result.requestTime}`,
-      });
 
-      // رجوع الزر بعد ثانيتين
-      setTimeout(() => setIsSending(false), 2000);
-    } catch (error) {
-      console.error("Error creating WhatsApp request:", error);
-      toast({
-        title: "خطأ",
-        description: "حدث خطأ عند تسجيل الطلب",
-        variant: "destructive",
-      });
-      setIsSending(false);
-    }
-  };
+  // دالة الرجوع السريع - تعمل مثل السحب بالضبط
+  const goBack = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-  // ⭐ دالة الرجوع البسيطة
-  const goBack = () => {
-    // استخدام setLocation للتنقل السلس مع wouter
+    const y = Number(sessionStorage.getItem("scrollPosition") || 0);
+
+    // الرجوع للقائمة
     setLocation("/");
+
+    // إعادة موضع السكرول = مثل سحب iOS
+    setTimeout(() => {
+      window.scrollTo({
+        top: y,
+        behavior: "instant",
+      });
+    }, 50);
   };
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -483,7 +454,11 @@ export default function PropertyDetailsPage() {
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
           {/* زر الرجوع */}
-          <Button variant="ghost" size="icon" onClick={goBack}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={goBack}
+          >
             <ArrowRight className="w-5 h-5" />
           </Button>
 
@@ -541,7 +516,7 @@ export default function PropertyDetailsPage() {
                     <img
                       src={images[selectedImage]}
                       alt={`صورة ${selectedImage + 1}`}
-                      className={`w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+                      className={`w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
                       loading="eager"
                       decoding="async"
                       data-testid="img-main"
@@ -556,7 +531,7 @@ export default function PropertyDetailsPage() {
                           type="button"
                           onClick={() =>
                             setSelectedImage(
-                              (prev) => (prev + 1) % images.length,
+                              (prev) => (prev + 1) % images.length
                             )
                           }
                           className="absolute inset-y-0 right-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
@@ -570,11 +545,7 @@ export default function PropertyDetailsPage() {
                             stroke="currentColor"
                             strokeWidth={2}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15 19l-7-7 7-7"
-                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                           </svg>
                         </button>
 
@@ -583,8 +554,7 @@ export default function PropertyDetailsPage() {
                           type="button"
                           onClick={() =>
                             setSelectedImage(
-                              (prev) =>
-                                (prev - 1 + images.length) % images.length,
+                              (prev) => (prev - 1 + images.length) % images.length
                             )
                           }
                           className="absolute inset-y-0 left-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
@@ -598,11 +568,7 @@ export default function PropertyDetailsPage() {
                             stroke="currentColor"
                             strokeWidth={2}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M9 5l7 7-7 7"
-                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                           </svg>
                         </button>
                       </>
@@ -648,18 +614,14 @@ export default function PropertyDetailsPage() {
 
             {/* ===== التفاصيل ===== */}
             <Card className="p-6">
-              <h2 className="text-xl font-bold text-primary mb-4">
-                تفاصيل العقار
-              </h2>
+              <h2 className="text-xl font-bold text-primary mb-4">تفاصيل العقار</h2>
 
               <div className="flex flex-wrap items-center gap-6 mb-6">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">المدينة</p>
-                    <p className="font-semibold">
-                      {property.city || "غير محدد"}
-                    </p>
+                    <p className="font-semibold">{property.city || "غير محدد"}</p>
                   </div>
                 </div>
 
@@ -677,9 +639,7 @@ export default function PropertyDetailsPage() {
                   <Home className="w-5 h-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">النوع</p>
-                    <p className="font-semibold">
-                      {property.type || "غير محدد"}
-                    </p>
+                    <p className="font-semibold">{property.type || "غير محدد"}</p>
                   </div>
                 </div>
 
@@ -737,10 +697,7 @@ export default function PropertyDetailsPage() {
                 {property.prices?.overnight && (
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">مبيت</span>
-                    <PriceDisplay
-                      amount={property.prices.overnight}
-                      size="md"
-                    />
+                    <PriceDisplay amount={property.prices.overnight} size="md" />
                   </div>
                 )}
 
@@ -757,42 +714,43 @@ export default function PropertyDetailsPage() {
             <Card className="p-6">
               <h3 className="text-lg font-bold text-primary mb-4">التواصل</h3>
               <Button
-                onClick={handleWhatsApp}
-                disabled={isSending}
-                className={`
+  onClick={handleWhatsApp}
+  disabled={isSending}
+  className={`
     w-full text-white 
     ${isSending ? "bg-gray-400 cursor-not-allowed" : "bg-[#25D366] hover:bg-[#128C7E]"}
     ${shake ? "animate-shake" : ""}
   `}
-                size="lg"
-                data-testid="button-whatsapp"
-              >
-                {isSending ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                      />
-                    </svg>
-                    جاري التحميل...
-                  </span>
-                ) : (
-                  <>
-                    <Phone className="w-5 h-5 ml-2" />
-                    تواصل عبر واتساب
-                  </>
-                )}
-              </Button>
+  size="lg"
+  data-testid="button-whatsapp"
+>
+  {isSending ? (
+    <span className="flex items-center gap-2">
+      <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24">
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        />
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+        />
+      </svg>
+      جاري التحميل...
+    </span>
+  ) : (
+    <>
+      <Phone className="w-5 h-5 ml-2" />
+      تواصل عبر واتساب
+    </>
+  )}
+</Button>
+
             </Card>
           </div>
         </div>

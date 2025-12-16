@@ -1482,8 +1482,6 @@ app.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
     const images =
       list.Contents?.map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
 
-    // إضافة Cache headers لتسريع الاستجابة
-    res.set('Cache-Control', 'public, max-age=300'); // 5 دقائق
     res.json({ images });
   } catch (err) {
     console.error("ADMIN R2 LIST ERROR:", err);
@@ -1650,94 +1648,6 @@ app.post("/api/discount/validate", async (req, res) => {
   }
 });
 
-// 🔍 التحقق من حالة الدفع - البديل (GET method)
-app.get("/api/payment/verify-status/:paymentId", async (req, res) => {
-  try {
-    const { paymentId } = req.params;
-    
-    if (!paymentId) {
-      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
-    }
-    
-    const payment = await googleSheetsService.getPaymentById(paymentId);
-    if (!payment) {
-      return res.status(404).json({ error: "الدفعة غير موجودة" });
-    }
-    
-    if (payment.status === "مكتمل" || (payment.status as any) === "نجح - قيد التحقق") {
-      return res.json({ verified: true, status: payment.status, message: "الدفعة مؤكدة مسبقاً" });
-    }
-    
-    if (!payment.paymobOrderId) {
-      return res.json({ verified: false, status: payment.status, message: "لا يوجد معرف Paymob" });
-    }
-    
-    console.log(`🔍 Verifying payment ${paymentId} with Paymob: ${payment.paymobOrderId}`);
-    
-    const intentionStatus = await paymobService.getIntentionStatus(payment.paymobOrderId);
-    
-    if (!intentionStatus) {
-      return res.json({ verified: false, status: payment.status, message: "فشل في الاتصال بـ Paymob" });
-    }
-    
-    if (!intentionStatus.success && intentionStatus.raw?.error === 'old_format') {
-      return res.json({ 
-        verified: false, 
-        status: payment.status,
-        message: intentionStatus.raw.message || "هذه الدفعة بصيغة قديمة. يرجى استخدام إعادة المحاولة.",
-        isOldFormat: true,
-      });
-    }
-    
-    if (!intentionStatus.isPaid) {
-      return res.json({ verified: false, status: payment.status, message: "الدفعة لم تكتمل بعد" });
-    }
-    
-    const isNewRegistration = !payment.action || payment.action === 'new';
-    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
-    const fees = paymobService.calculateEstimatedFees(payment.finalAmount, intentionStatus.cardType, intentionStatus.paymentMethod);
-    
-    await googleSheetsService.updatePayment(paymentId, {
-      status: newStatus as any,
-      completedAt: new Date().toISOString(),
-      transactionId: String(intentionStatus.transactionId || ""),
-      paymentMethod: (intentionStatus.cardType || intentionStatus.paymentMethod || "بطاقة") as any,
-      merchantFees: fees.merchantFees,
-      acqFees: fees.acqFees,
-      vatAmount: fees.vat,
-      totalFees: fees.totalFees,
-      feeAmount: fees.merchantFees + fees.acqFees,
-      netAmount: fees.netAmount,
-    });
-    
-    console.log(`✅ Payment ${paymentId} verified and updated to ${newStatus}`);
-    
-    if (!isNewRegistration && payment.pendingStartDate && payment.pendingEndDate) {
-      const property = await storage.getPropertyByNumber(payment.propertyNumber);
-      if (property) {
-        await googleSheetsService.addSubscriptionToSheet(
-          payment.propertyNumber,
-          {
-            packageId: payment.packageId,
-            price: payment.pendingPrice || payment.finalAmount,
-            subscriptionType: payment.pendingSubscriptionType || "مميز",
-            startDate: payment.pendingStartDate,
-            endDate: payment.pendingEndDate,
-            paymentId: payment.id,
-          },
-          property,
-          ""
-        );
-      }
-    }
-    
-    res.json({ verified: true, status: newStatus, message: "تم التحقق من الدفع بنجاح", transactionId: intentionStatus.transactionId });
-  } catch (err: any) {
-    console.error("Payment verify error:", err);
-    res.status(500).json({ error: err.message || "خطأ في التحقق" });
-  }
-});
-
 // 2. بدء عملية الدفع الإلكتروني
 app.post("/api/owner/payment/initiate", async (req, res) => {
   try {
@@ -1780,15 +1690,19 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     );
 
     // حساب بيانات الاشتراك المعلقة (ستحفظ فقط بعد نجاح الدفع)
-    const today = new Date();
-    let startDate = today;
-    let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
-    let price = pkg.price;
-    let subscriptionType = pkg.type;
+    let pendingStartDate: string | undefined;
+    let pendingEndDate: string | undefined;
+    let pendingSubscriptionType: string | undefined;
+    let pendingPrice: number | undefined;
 
-    // للتمديد والترقية: حساب التواريخ بناءً على الاشتراك الحالي
     if (action === 'extend' || action === 'upgrade') {
+      const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
+
+      let startDate = today;
+      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      let price = pkg.price;
+      let subscriptionType = pkg.type;
 
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
       if (action === 'extend' && currentSubscription) {
@@ -1800,16 +1714,15 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         price = (currentSubscription as any).price || pkg.price;
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
+
+      // حفظ البيانات في المتغيرات
+      pendingStartDate = startDate.toISOString().split('T')[0];
+      pendingEndDate = endDate.toISOString().split('T')[0];
+      pendingSubscriptionType = subscriptionType;
+      pendingPrice = price;
     }
 
-    // حفظ البيانات للجميع (تسجيل جديد، تمديد، ترقية)
-    const pendingStartDate = startDate.toISOString().split('T')[0];
-    const pendingEndDate = endDate.toISOString().split('T')[0];
-    const pendingSubscriptionType = subscriptionType;
-    const pendingPrice = price;
-
     // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
-    // ملاحظة: الدفعات الإلكترونية تبدأ بحالة "معلق" حتى يتم إكمال الدفع
     const payment = await storage.createPayment({
       propertyNumber,
       packageId,
@@ -1817,8 +1730,8 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       discountCode: discountCode || "",
       discountAmount: pkg.price - finalAmount,
       finalAmount,
-      paymobOrderId: paymobResult.clientSecret, // استخدام clientSecret للتحقق من الحالة لاحقاً
-      status: "معلق",
+      paymobOrderId: paymobResult.intentionId,
+      status: "قيد المراجعة",
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
       action: action as 'new' | 'extend' | 'upgrade' | undefined,
       pendingStartDate,
@@ -1836,133 +1749,6 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
   } catch (err: any) {
     console.error("Payment initiate error:", err);
     res.status(500).json({ error: err.message || "خطأ في بدء الدفع" });
-  }
-});
-
-// 🔍 التحقق من حالة الدفع مباشرة من Paymob (بديل للـ webhook)
-app.post("/api/owner/payment/check-status", async (req, res) => {
-  try {
-    const { paymentId } = req.body;
-    
-    if (!paymentId) {
-      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
-    }
-    
-    // جلب الدفعة
-    const payment = await googleSheetsService.getPaymentById(paymentId);
-    if (!payment) {
-      return res.status(404).json({ error: "الدفعة غير موجودة" });
-    }
-    
-    // إذا كانت الدفعة مكتملة مسبقاً
-    if (payment.status === "مكتمل" || (payment.status as any) === "نجح - قيد التحقق") {
-      return res.json({ 
-        verified: true, 
-        status: payment.status,
-        message: "الدفعة مؤكدة مسبقاً" 
-      });
-    }
-    
-    // التحقق من أن الدفعة لها paymobOrderId
-    if (!payment.paymobOrderId) {
-      return res.json({ 
-        verified: false, 
-        status: payment.status,
-        message: "لا يوجد معرف Paymob" 
-      });
-    }
-    
-    console.log(`🔍 Verifying payment ${paymentId} with Paymob: ${payment.paymobOrderId}`);
-    
-    // التحقق من حالة الـ intention في Paymob
-    const intentionStatus = await paymobService.getIntentionStatus(payment.paymobOrderId);
-    
-    if (!intentionStatus) {
-      return res.json({ 
-        verified: false, 
-        status: payment.status,
-        message: "فشل في الاتصال بـ Paymob" 
-      });
-    }
-    
-    // التحقق من المدفوعات بصيغة قديمة
-    if (!intentionStatus.success && intentionStatus.raw?.error === 'old_format') {
-      return res.json({ 
-        verified: false, 
-        status: payment.status,
-        message: intentionStatus.raw.message || "هذه الدفعة بصيغة قديمة. يرجى استخدام خيار إعادة المحاولة.",
-        isOldFormat: true,
-      });
-    }
-    
-    console.log(`📊 Intention status: isPaid=${intentionStatus.isPaid}, txnId=${intentionStatus.transactionId}`);
-    
-    if (!intentionStatus.isPaid) {
-      return res.json({ 
-        verified: false, 
-        status: payment.status,
-        message: "الدفعة لم تكتمل بعد في نظام الدفع. يمكنك الانتظار أو استخدام خيار إعادة المحاولة." 
-      });
-    }
-    
-    // الدفع ناجح! تحديث السجل
-    const isNewRegistration = !payment.action || payment.action === 'new';
-    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
-    
-    // حساب الرسوم التقريبية
-    const fees = paymobService.calculateEstimatedFees(
-      payment.finalAmount, 
-      intentionStatus.cardType, 
-      intentionStatus.paymentMethod
-    );
-    
-    await googleSheetsService.updatePayment(paymentId, {
-      status: newStatus as any,
-      completedAt: new Date().toISOString(),
-      transactionId: String(intentionStatus.transactionId || ""),
-      paymentMethod: (intentionStatus.cardType || intentionStatus.paymentMethod || "بطاقة") as any,
-      merchantFees: fees.merchantFees,
-      acqFees: fees.acqFees,
-      vatAmount: fees.vat,
-      totalFees: fees.totalFees,
-      feeAmount: fees.merchantFees + fees.acqFees,
-      netAmount: fees.netAmount,
-    });
-    
-    console.log(`✅ Payment ${paymentId} verified and updated to ${newStatus}`);
-    
-    // تفعيل الاشتراك للتمديد/الترقية
-    if (!isNewRegistration && payment.pendingStartDate && payment.pendingEndDate) {
-      const property = await storage.getPropertyByNumber(payment.propertyNumber);
-      
-      if (property) {
-        await googleSheetsService.addSubscriptionToSheet(
-          payment.propertyNumber,
-          {
-            packageId: payment.packageId,
-            price: payment.pendingPrice || payment.finalAmount,
-            subscriptionType: payment.pendingSubscriptionType || "مميز",
-            startDate: payment.pendingStartDate,
-            endDate: payment.pendingEndDate,
-            paymentId: payment.id,
-          },
-          property,
-          ""
-        );
-        console.log(`🎉 Subscription activated for ${payment.propertyNumber}`);
-      }
-    }
-    
-    res.json({ 
-      verified: true, 
-      status: newStatus,
-      message: "تم التحقق من الدفع بنجاح",
-      transactionId: intentionStatus.transactionId,
-    });
-    
-  } catch (err: any) {
-    console.error("Payment verify error:", err);
-    res.status(500).json({ error: err.message || "خطأ في التحقق من الدفع" });
   }
 });
 
@@ -2007,9 +1793,9 @@ app.post("/api/owner/payment/retry", async (req, res) => {
       "cards"
     );
     
-    // تحديث الدفعة بمعرف Paymob الجديد (clientSecret للتحقق لاحقاً)
+    // تحديث الدفعة بمعرف Paymob الجديد
     await googleSheetsService.updatePayment(paymentId, {
-      paymobOrderId: paymobResult.clientSecret,
+      paymobOrderId: paymobResult.intentionId,
     });
     
     console.log(`🔄 Payment retry for ${paymentId}, new checkout: ${paymobResult.checkoutUrl}`);
@@ -2398,10 +2184,10 @@ if (!propertyNumber) {
         });
       }
 
-      // البحث عن دفعة معلقة أو ناجحة أو مكتملة حديثة
+      // البحث عن دفعة معلقة أو مكتملة حديثة
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
       const validPayment = payments.find(p => 
-        (p.status === "مكتمل" || p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") &&
+        (p.status === "مكتمل" || p.status === "قيد المراجعة") &&
         p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
       );
 
@@ -2419,27 +2205,9 @@ if (!propertyNumber) {
       }
 
   
-      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة أو نجح - قيد التحقق
-      if (validPayment.status === "قيد المراجعة" || validPayment.status === "نجح - قيد التحقق") {
+      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
+      if (validPayment.status === "قيد المراجعة") {
         await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
-        console.log(`💰 Payment status updated to 'مكتمل' for payment ${validPayment.id}`);
-      }
-
-      // إنشاء الاشتراك بناءً على بيانات الدفع المعلقة
-      if (validPayment.pendingStartDate && validPayment.pendingEndDate && validPayment.pendingSubscriptionType) {
-        await googleSheetsService.addSubscriptionToSheet(
-          propertyNumber,
-          {
-            packageId: validPayment.pendingPackageId || validPayment.packageId,
-            price: validPayment.pendingPrice || validPayment.finalAmount,
-            subscriptionType: validPayment.pendingSubscriptionType,
-            startDate: validPayment.pendingStartDate,
-            endDate: validPayment.pendingEndDate,
-            paymentId: validPayment.id,
-          },
-          property
-        );
-        console.log(`🎉 Subscription created for property ${propertyNumber}`);
       }
 
       // تحديث حالة التحقق إلى approved عند نجاح التفعيل
@@ -3673,15 +3441,10 @@ app.post("/api/paymob/webhook", async (req, res) => {
     }
 
     // ===============================
-    // 3) تحديد الحالة بناءً على نوع الإجراء
+    // 3) تحديث الدفع بالرسوم الحقيقية
     // ===============================
-    // التسجيل الجديد: يبقى قيد التحقق من البيانات حتى يكملها المالك
-    // التمديد/الترقية: يتم التفعيل مباشرة
-    const isNewRegistration = !payment.action || payment.action === 'new';
-    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
-
     await storage.updatePayment(payment.id, {
-      status: newStatus,
+      status: "مكتمل",
       completedAt: new Date().toISOString(),
       transactionId,
       paymentMethod: cardSubType || paymentMethod || "بطاقة",
@@ -3693,13 +3456,12 @@ app.post("/api/paymob/webhook", async (req, res) => {
       netAmount,
     });
 
-    console.log(`💰 Payment Updated: ${payment.id}, Status: ${newStatus}`);
+    console.log("💰 Payment Updated:", payment.id);
 
     // ===============================
-    // 4) تفعيل الاشتراك فقط للتمديد/الترقية (ليس التسجيل الجديد)
+    // 4) تفعيل الاشتراك لو فيه معلّق
     // ===============================
     if (
-      !isNewRegistration &&
       payment.action &&
       payment.pendingStartDate &&
       payment.pendingEndDate
@@ -3720,10 +3482,8 @@ app.post("/api/paymob/webhook", async (req, res) => {
           property
         );
 
-        console.log("🎉 Subscription Activated (extend/upgrade):", payment.propertyNumber);
+        console.log("🎉 Subscription Activated:", payment.propertyNumber);
       }
-    } else if (isNewRegistration) {
-      console.log("📋 New registration - awaiting property data verification:", payment.propertyNumber);
     }
 
     return res.json({ ok: true, paymentId: payment.id });

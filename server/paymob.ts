@@ -67,7 +67,7 @@ export class PaymobService {
         phone_number: phone,
         country: 'KSA',
         // ⭐⭐⭐ إعادة التوجيه بعد الدفع
-        redirect_url: "https://rwqan.replit.app/subscription",
+        redirect_url: "https://modiy.replit.app/subscription",
       },
       customer: {
         first_name: propertyName || 'عميل',
@@ -303,96 +303,6 @@ export class PaymobService {
 
   async inquiryBySpecialReference(ref: string) {
     return this.inquiryTransaction({ merchant_order_id: ref });
-  }
-
-  /* ==========================================================
-      6) 🔍 التحقق من حالة الـ Intention مباشرة
-         يُستخدم للتحقق من حالة الدفع عند عودة المستخدم
-  =========================================================== */
-  async getIntentionStatus(clientSecretOrIntentionId: string): Promise<{
-    success: boolean;
-    isPaid: boolean;
-    transactionId?: string;
-    orderId?: string;
-    amount?: number;
-    paymentMethod?: string;
-    cardType?: string;
-    raw?: any;
-  } | null> {
-    try {
-      console.log(`🔍 Checking intention status: ${clientSecretOrIntentionId}`);
-      
-      // استخدام الـ endpoint الصحيح مع public_key و client_secret
-      // الـ client_secret يبدأ بـ cs_ أو csk_
-      const isClientSecret = clientSecretOrIntentionId.startsWith('cs_') || 
-                            clientSecretOrIntentionId.startsWith('csk_');
-      
-      let response;
-      let data;
-      
-      if (isClientSecret) {
-        // استخدام endpoint element مع public_key و client_secret
-        const url = `${PAYMOB_API_URL}/v1/intention/element/${PUBLIC_KEY}/${clientSecretOrIntentionId}/`;
-        console.log(`🔗 Using element endpoint: ${url}`);
-        
-        response = await fetch(url, {
-          method: 'GET',
-        });
-      } else {
-        // للمدفوعات القديمة التي تحتوي على intention_id (pi_live_...)
-        // لا يمكن التحقق منها مباشرة - نرجع خطأ واضح
-        console.log(`⚠️ Old payment format detected (intention_id: ${clientSecretOrIntentionId}).`);
-        console.log(`   This payment was created before the verification update.`);
-        console.log(`   User should use "Retry Payment" to create a new verifiable payment.`);
-        
-        // نرجع نتيجة خاصة للمدفوعات القديمة
-        return {
-          success: false,
-          isPaid: false,
-          raw: { 
-            error: 'old_format',
-            message: 'هذه الدفعة بصيغة قديمة. يرجى استخدام خيار "إعادة المحاولة" لإنشاء دفعة جديدة.',
-            intentionId: clientSecretOrIntentionId,
-          },
-        };
-      }
-
-      if (!response.ok) {
-        console.error("❌ Intention status check failed:", response.status);
-        const errorText = await response.text();
-        console.error("❌ Error response:", errorText);
-        return null;
-      }
-
-      data = await response.json();
-      console.log("📊 Intention data:", JSON.stringify(data, null, 2));
-
-      // التحقق من وجود معاملة ناجحة
-      const transactions = data.payment_keys_claims || data.transactions || [];
-      const successfulTxn = Array.isArray(transactions) 
-        ? transactions.find((t: any) => t.success === true)
-        : null;
-
-      // أو التحقق من حالة الـ intention نفسها
-      const isPaid = data.status === 'successful' || 
-                     data.confirmed === true || 
-                     successfulTxn !== null ||
-                     (data.paid_amount_cents && data.paid_amount_cents > 0);
-
-      return {
-        success: true,
-        isPaid,
-        transactionId: successfulTxn?.id || data.transaction_id || data.id,
-        orderId: data.order_id || data.id,
-        amount: (data.amount_cents || data.paid_amount_cents || 0) / 100,
-        paymentMethod: successfulTxn?.source_data?.type || data.payment_method,
-        cardType: successfulTxn?.source_data?.sub_type,
-        raw: data,
-      };
-    } catch (err) {
-      console.error("❌ Intention status exception:", err);
-      return null;
-    }
   }
 
   /* ==========================================================
