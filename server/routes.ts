@@ -1695,15 +1695,14 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     let pendingSubscriptionType: string | undefined;
     let pendingPrice: number | undefined;
 
-    // حساب تواريخ الاشتراك لجميع الحالات
-    const today = new Date();
-    let startDate = today;
-    let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
-    let price = pkg.price;
-    let subscriptionType = pkg.type;
-
     if (action === 'extend' || action === 'upgrade') {
+      const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
+
+      let startDate = today;
+      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      let price = pkg.price;
+      let subscriptionType = pkg.type;
 
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
       if (action === 'extend' && currentSubscription) {
@@ -1715,13 +1714,13 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
         price = (currentSubscription as any).price || pkg.price;
         subscriptionType = (currentSubscription as any).subscriptionType || pkg.type;
       }
-    }
 
-    // حفظ بيانات الاشتراك المعلقة لجميع الحالات
-    pendingStartDate = startDate.toISOString().split('T')[0];
-    pendingEndDate = endDate.toISOString().split('T')[0];
-    pendingSubscriptionType = subscriptionType;
-    pendingPrice = price;
+      // حفظ البيانات في المتغيرات
+      pendingStartDate = startDate.toISOString().split('T')[0];
+      pendingEndDate = endDate.toISOString().split('T')[0];
+      pendingSubscriptionType = subscriptionType;
+      pendingPrice = price;
+    }
 
     // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
     const payment = await storage.createPayment({
@@ -3476,12 +3475,8 @@ app.post("/api/paymob/webhook", async (req, res) => {
     // ===============================
     // 3) تحديث الدفع بالرسوم الحقيقية
     // ===============================
-    // التسجيل الجديد يحتاج مراجعة، الترقية والتمديد تفعّل مباشرة
-    const isNewRegistration = payment.action === 'new' || !payment.action;
-    const newPaymentStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
-
     await storage.updatePayment(payment.id, {
-      status: newPaymentStatus as any,
+      status: "مكتمل",
       completedAt: new Date().toISOString(),
       transactionId,
       paymentMethod: cardSubType || paymentMethod || "بطاقة",
@@ -3493,13 +3488,13 @@ app.post("/api/paymob/webhook", async (req, res) => {
       netAmount,
     });
 
-    console.log(`💰 Payment Updated: ${payment.id} - Status: ${newPaymentStatus}`);
+    console.log("💰 Payment Updated:", payment.id);
 
     // ===============================
-    // 4) تفعيل الاشتراك (فقط للترقية والتمديد - التسجيل الجديد يحتاج مراجعة)
+    // 4) تفعيل الاشتراك لو فيه معلّق
     // ===============================
     if (
-      !isNewRegistration &&
+      payment.action &&
       payment.pendingStartDate &&
       payment.pendingEndDate
     ) {
@@ -3521,29 +3516,6 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
         console.log("🎉 Subscription Activated:", payment.propertyNumber);
       }
-    } else if (isNewRegistration) {
-      console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);
-    }
-
-    // إرسال إشعار WhatsApp
-    try {
-      const property = await storage.getPropertyByNumber(payment.propertyNumber);
-      const pkg = await storage.getPackageById(payment.packageId);
-      const actionText = isNewRegistration ? "تسجيل جديد" : (payment.action === 'extend' ? "تمديد" : "ترقية");
-      
-      await sendWhatsAppNotification(
-        `💳 *دفع إلكتروني ناجح*\n\n` +
-        `📍 العقار: ${property?.name || payment.propertyNumber}\n` +
-        `🔢 رقم العقار: ${payment.propertyNumber}\n` +
-        `📦 الباقة: ${pkg?.name || payment.packageId}\n` +
-        `💵 المبلغ: ${payment.finalAmount} ر.س\n` +
-        `🏦 الصافي: ${netAmount.toFixed(2)} ر.س\n` +
-        `📊 الرسوم: ${totalFees.toFixed(2)} ر.س\n` +
-        `🔄 النوع: ${actionText}\n` +
-        `✅ الحالة: ${newPaymentStatus}`
-      );
-    } catch (err) {
-      console.log("⚠️ WhatsApp notification failed:", err);
     }
 
     return res.json({ ok: true, paymentId: payment.id });

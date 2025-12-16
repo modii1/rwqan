@@ -130,7 +130,6 @@ export default function SubscriptionPage() {
               packageId: selectedPackageId,
               discountCode: validatedDiscount?.code,
               paymentMethod: 'cards',
-              action: 'new',
             });
             const paymentData = await paymentResponse.json();
             if (paymentData.checkoutUrl) {
