@@ -3406,30 +3406,62 @@ app.post("/api/paymob/webhook", async (req, res) => {
     const payments = await storage.getPayments();
     let payment = null;
 
-    // أفضل بحث
+    console.log("🔍 Searching for payment with:", { merchantOrderId, paymobOrderId, propertyNumber, amount });
+    console.log("🔍 Available pending payments:", payments.filter(p => p.status === "معلق" || p.status === "قيد المراجعة").map(p => ({
+      id: p.id,
+      propertyNumber: p.propertyNumber,
+      amount: p.finalAmount,
+      paymobOrderId: p.paymobOrderId,
+      status: p.status
+    })));
+
+    // البحث 1: بـ merchant_order_id (الصيغة: propertyNumber-timestamp أو id)
     if (!payment && merchantOrderId) {
-      payment = payments.find((p) =>
-        p.paymobOrderId?.includes(merchantOrderId)
-      );
+      // استخراج رقم العقار من merchant_order_id
+      const propNum = merchantOrderId.split("-")[0];
+      if (propNum) {
+        payment = payments.find((p) =>
+          p.propertyNumber === propNum &&
+          (p.status === "معلق" || p.status === "قيد المراجعة") &&
+          Math.abs(p.finalAmount - amount) < 0.01
+        );
+        if (payment) console.log("✅ Found by merchant_order_id property match");
+      }
     }
 
-    // البحث بالـ order_id
+    // البحث 2: بـ paymobOrderId المباشر (لو نفس الصيغة)
     if (!payment && paymobOrderId) {
       payment = payments.find((p) => p.paymobOrderId === paymobOrderId);
+      if (payment) console.log("✅ Found by paymobOrderId exact match");
     }
 
-    // البحث برقم العقار + مبلغ
+    // البحث 3: برقم العقار + مبلغ (معلق أو قيد المراجعة)
     if (!payment && propertyNumber) {
       payment = payments.find(
         (p) =>
           p.propertyNumber === propertyNumber &&
-          p.status === "قيد المراجعة" &&
-          p.finalAmount === amount
+          (p.status === "معلق" || p.status === "قيد المراجعة") &&
+          Math.abs(p.finalAmount - amount) < 0.01
       );
+      if (payment) console.log("✅ Found by property + amount");
+    }
+
+    // البحث 4: آخر دفعة معلقة لنفس رقم العقار
+    if (!payment && propertyNumber) {
+      const pendingPayments = payments.filter(
+        (p) =>
+          p.propertyNumber === propertyNumber &&
+          (p.status === "معلق" || p.status === "قيد المراجعة")
+      ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      if (pendingPayments.length > 0) {
+        payment = pendingPayments[0];
+        console.log("✅ Found latest pending payment for property");
+      }
     }
 
     if (!payment) {
-      console.error("❌ Payment not found");
+      console.error("❌ Payment not found for:", { merchantOrderId, paymobOrderId, propertyNumber, amount });
       return res.status(404).json({ error: "Payment not found" });
     }
 
