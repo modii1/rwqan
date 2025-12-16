@@ -1650,6 +1650,94 @@ app.post("/api/discount/validate", async (req, res) => {
   }
 });
 
+// 🔍 التحقق من حالة الدفع - البديل (GET method)
+app.get("/api/payment/verify-status/:paymentId", async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+    }
+    
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+    
+    if (payment.status === "مكتمل" || (payment.status as any) === "نجح - قيد التحقق") {
+      return res.json({ verified: true, status: payment.status, message: "الدفعة مؤكدة مسبقاً" });
+    }
+    
+    if (!payment.paymobOrderId) {
+      return res.json({ verified: false, status: payment.status, message: "لا يوجد معرف Paymob" });
+    }
+    
+    console.log(`🔍 Verifying payment ${paymentId} with Paymob: ${payment.paymobOrderId}`);
+    
+    const intentionStatus = await paymobService.getIntentionStatus(payment.paymobOrderId);
+    
+    if (!intentionStatus) {
+      return res.json({ verified: false, status: payment.status, message: "فشل في الاتصال بـ Paymob" });
+    }
+    
+    if (!intentionStatus.success && intentionStatus.raw?.error === 'old_format') {
+      return res.json({ 
+        verified: false, 
+        status: payment.status,
+        message: intentionStatus.raw.message || "هذه الدفعة بصيغة قديمة. يرجى استخدام إعادة المحاولة.",
+        isOldFormat: true,
+      });
+    }
+    
+    if (!intentionStatus.isPaid) {
+      return res.json({ verified: false, status: payment.status, message: "الدفعة لم تكتمل بعد" });
+    }
+    
+    const isNewRegistration = !payment.action || payment.action === 'new';
+    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
+    const fees = paymobService.calculateEstimatedFees(payment.finalAmount, intentionStatus.cardType, intentionStatus.paymentMethod);
+    
+    await googleSheetsService.updatePayment(paymentId, {
+      status: newStatus as any,
+      completedAt: new Date().toISOString(),
+      transactionId: String(intentionStatus.transactionId || ""),
+      paymentMethod: (intentionStatus.cardType || intentionStatus.paymentMethod || "بطاقة") as any,
+      merchantFees: fees.merchantFees,
+      acqFees: fees.acqFees,
+      vatAmount: fees.vat,
+      totalFees: fees.totalFees,
+      feeAmount: fees.merchantFees + fees.acqFees,
+      netAmount: fees.netAmount,
+    });
+    
+    console.log(`✅ Payment ${paymentId} verified and updated to ${newStatus}`);
+    
+    if (!isNewRegistration && payment.pendingStartDate && payment.pendingEndDate) {
+      const property = await storage.getPropertyByNumber(payment.propertyNumber);
+      if (property) {
+        await googleSheetsService.addSubscriptionToSheet(
+          payment.propertyNumber,
+          {
+            packageId: payment.packageId,
+            price: payment.pendingPrice || payment.finalAmount,
+            subscriptionType: payment.pendingSubscriptionType || "مميز",
+            startDate: payment.pendingStartDate,
+            endDate: payment.pendingEndDate,
+            paymentId: payment.id,
+          },
+          property,
+          ""
+        );
+      }
+    }
+    
+    res.json({ verified: true, status: newStatus, message: "تم التحقق من الدفع بنجاح", transactionId: intentionStatus.transactionId });
+  } catch (err: any) {
+    console.error("Payment verify error:", err);
+    res.status(500).json({ error: err.message || "خطأ في التحقق" });
+  }
+});
+
 // 2. بدء عملية الدفع الإلكتروني
 app.post("/api/owner/payment/initiate", async (req, res) => {
   try {
@@ -1729,7 +1817,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       discountCode: discountCode || "",
       discountAmount: pkg.price - finalAmount,
       finalAmount,
-      paymobOrderId: paymobResult.intentionId,
+      paymobOrderId: paymobResult.clientSecret, // استخدام clientSecret للتحقق من الحالة لاحقاً
       status: "معلق",
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
       action: action as 'new' | 'extend' | 'upgrade' | undefined,
@@ -1748,6 +1836,133 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
   } catch (err: any) {
     console.error("Payment initiate error:", err);
     res.status(500).json({ error: err.message || "خطأ في بدء الدفع" });
+  }
+});
+
+// 🔍 التحقق من حالة الدفع مباشرة من Paymob (بديل للـ webhook)
+app.post("/api/owner/payment/check-status", async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+    }
+    
+    // جلب الدفعة
+    const payment = await googleSheetsService.getPaymentById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+    
+    // إذا كانت الدفعة مكتملة مسبقاً
+    if (payment.status === "مكتمل" || (payment.status as any) === "نجح - قيد التحقق") {
+      return res.json({ 
+        verified: true, 
+        status: payment.status,
+        message: "الدفعة مؤكدة مسبقاً" 
+      });
+    }
+    
+    // التحقق من أن الدفعة لها paymobOrderId
+    if (!payment.paymobOrderId) {
+      return res.json({ 
+        verified: false, 
+        status: payment.status,
+        message: "لا يوجد معرف Paymob" 
+      });
+    }
+    
+    console.log(`🔍 Verifying payment ${paymentId} with Paymob: ${payment.paymobOrderId}`);
+    
+    // التحقق من حالة الـ intention في Paymob
+    const intentionStatus = await paymobService.getIntentionStatus(payment.paymobOrderId);
+    
+    if (!intentionStatus) {
+      return res.json({ 
+        verified: false, 
+        status: payment.status,
+        message: "فشل في الاتصال بـ Paymob" 
+      });
+    }
+    
+    // التحقق من المدفوعات بصيغة قديمة
+    if (!intentionStatus.success && intentionStatus.raw?.error === 'old_format') {
+      return res.json({ 
+        verified: false, 
+        status: payment.status,
+        message: intentionStatus.raw.message || "هذه الدفعة بصيغة قديمة. يرجى استخدام خيار إعادة المحاولة.",
+        isOldFormat: true,
+      });
+    }
+    
+    console.log(`📊 Intention status: isPaid=${intentionStatus.isPaid}, txnId=${intentionStatus.transactionId}`);
+    
+    if (!intentionStatus.isPaid) {
+      return res.json({ 
+        verified: false, 
+        status: payment.status,
+        message: "الدفعة لم تكتمل بعد في نظام الدفع. يمكنك الانتظار أو استخدام خيار إعادة المحاولة." 
+      });
+    }
+    
+    // الدفع ناجح! تحديث السجل
+    const isNewRegistration = !payment.action || payment.action === 'new';
+    const newStatus = isNewRegistration ? "نجح - قيد التحقق" : "مكتمل";
+    
+    // حساب الرسوم التقريبية
+    const fees = paymobService.calculateEstimatedFees(
+      payment.finalAmount, 
+      intentionStatus.cardType, 
+      intentionStatus.paymentMethod
+    );
+    
+    await googleSheetsService.updatePayment(paymentId, {
+      status: newStatus as any,
+      completedAt: new Date().toISOString(),
+      transactionId: String(intentionStatus.transactionId || ""),
+      paymentMethod: (intentionStatus.cardType || intentionStatus.paymentMethod || "بطاقة") as any,
+      merchantFees: fees.merchantFees,
+      acqFees: fees.acqFees,
+      vatAmount: fees.vat,
+      totalFees: fees.totalFees,
+      feeAmount: fees.merchantFees + fees.acqFees,
+      netAmount: fees.netAmount,
+    });
+    
+    console.log(`✅ Payment ${paymentId} verified and updated to ${newStatus}`);
+    
+    // تفعيل الاشتراك للتمديد/الترقية
+    if (!isNewRegistration && payment.pendingStartDate && payment.pendingEndDate) {
+      const property = await storage.getPropertyByNumber(payment.propertyNumber);
+      
+      if (property) {
+        await googleSheetsService.addSubscriptionToSheet(
+          payment.propertyNumber,
+          {
+            packageId: payment.packageId,
+            price: payment.pendingPrice || payment.finalAmount,
+            subscriptionType: payment.pendingSubscriptionType || "مميز",
+            startDate: payment.pendingStartDate,
+            endDate: payment.pendingEndDate,
+            paymentId: payment.id,
+          },
+          property,
+          ""
+        );
+        console.log(`🎉 Subscription activated for ${payment.propertyNumber}`);
+      }
+    }
+    
+    res.json({ 
+      verified: true, 
+      status: newStatus,
+      message: "تم التحقق من الدفع بنجاح",
+      transactionId: intentionStatus.transactionId,
+    });
+    
+  } catch (err: any) {
+    console.error("Payment verify error:", err);
+    res.status(500).json({ error: err.message || "خطأ في التحقق من الدفع" });
   }
 });
 
@@ -1792,9 +2007,9 @@ app.post("/api/owner/payment/retry", async (req, res) => {
       "cards"
     );
     
-    // تحديث الدفعة بمعرف Paymob الجديد
+    // تحديث الدفعة بمعرف Paymob الجديد (clientSecret للتحقق لاحقاً)
     await googleSheetsService.updatePayment(paymentId, {
-      paymobOrderId: paymobResult.intentionId,
+      paymobOrderId: paymobResult.clientSecret,
     });
     
     console.log(`🔄 Payment retry for ${paymentId}, new checkout: ${paymobResult.checkoutUrl}`);
