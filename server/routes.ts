@@ -1721,6 +1721,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     const pendingPrice = price;
 
     // إنشاء سجل الدفع مع بيانات الاشتراك المعلقة
+    // ملاحظة: الدفعات الإلكترونية تبدأ بحالة "معلق" حتى يتم إكمال الدفع
     const payment = await storage.createPayment({
       propertyNumber,
       packageId,
@@ -1729,7 +1730,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       discountAmount: pkg.price - finalAmount,
       finalAmount,
       paymobOrderId: paymobResult.intentionId,
-      status: "قيد المراجعة",
+      status: "معلق",
       paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
       action: action as 'new' | 'extend' | 'upgrade' | undefined,
       pendingStartDate,
