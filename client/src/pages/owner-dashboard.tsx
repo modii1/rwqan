@@ -1477,8 +1477,27 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
   };
 
   const getDisplayStatus = (status: string) => {
-    if (status === "نجح - قيد التحقق") return "قيد المراجعة";
+    if (status === "نجح - قيد التحقق") return "قيد التحقق";
     return status;
+  };
+
+  const getStatusReason = (status: string, paymentMethod: string) => {
+    switch (status) {
+      case "معلق":
+        return "لم يكتمل الدفع - اضغط لإعادة المحاولة";
+      case "فشل":
+        return "فشل الدفع - اضغط لإعادة المحاولة";
+      case "قيد المراجعة":
+        return paymentMethod === "تحويل بنكي" 
+          ? "بانتظار مراجعة الإدارة للإيصال" 
+          : "بانتظار المراجعة";
+      case "نجح - قيد التحقق":
+        return "تم الدفع بنجاح - أكمل بيانات العقار للتفعيل";
+      case "مكتمل":
+        return "تم بنجاح ✓";
+      default:
+        return "";
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -1548,6 +1567,16 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
             <div className="text-xs text-muted-foreground mt-1">
               {formatDate(payment.createdAt)}
             </div>
+            {getStatusReason(payment.status, payment.paymentMethod) && (
+              <div className={`text-xs mt-1 ${
+                payment.status === "مكتمل" ? "text-green-600 dark:text-green-400" :
+                payment.status === "فشل" ? "text-red-600 dark:text-red-400" :
+                payment.status === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
+                "text-amber-600 dark:text-amber-400"
+              }`}>
+                {getStatusReason(payment.status, payment.paymentMethod)}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1587,8 +1616,27 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           </Button>
         )}
 
-        {/* زر إكمال الدفع / رفع إيصال - فقط للتحويل البنكي */}
+        {/* زر رفع إيصال - للتحويل البنكي قيد المراجعة */}
         {(payment.status === "قيد المراجعة" && payment.paymentMethod === "تحويل بنكي") && onRetryPayment && (
+          <Button
+            size="sm"
+            variant="default"
+            className="bg-primary text-white gap-1 flex-shrink-0"
+            onClick={() => onRetryPayment(payment)}
+            disabled={isRetrying}
+            data-testid={`button-upload-receipt-${payment.id}`}
+          >
+            {isRetrying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Receipt className="w-4 h-4" />
+            )}
+            {isRetrying ? "جاري الرفع..." : "رفع إيصال"}
+          </Button>
+        )}
+
+        {/* زر إعادة الدفع - للدفعات الإلكترونية المعلقة أو الفاشلة */}
+        {((payment.status === "معلق" || payment.status === "فشل") && payment.paymentMethod !== "تحويل بنكي") && onRetryPayment && (
           <Button
             size="sm"
             variant="default"
@@ -1599,12 +1647,10 @@ function PaymentRow({ payment, onRetryPayment, isRetrying }: { payment: any; onR
           >
             {isRetrying ? (
               <Loader2 className="w-4 h-4 animate-spin" />
-            ) : payment.paymentMethod === 'تحويل بنكي' ? (
-              <Receipt className="w-4 h-4" />
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري التحويل..." : payment.paymentMethod === 'تحويل بنكي' ? "رفع إيصال" : "إكمال الدفع"}
+            {isRetrying ? "جاري التحويل..." : "إعادة الدفع"}
           </Button>
         )}
       </div>
