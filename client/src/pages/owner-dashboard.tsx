@@ -187,6 +187,16 @@ const {
   refetchOnWindowFocus: false,
 });
 
+// 5.0) جلب بيانات الاشتراك الحالي
+const {
+  data: currentSubscription,
+} = useQuery<any>({
+  queryKey: ["/api/owner/current-subscription"],
+  enabled: sessionData?.isLoggedIn === true,
+  retry: false,
+  refetchOnWindowFocus: false,
+});
+
 // 5.1) التحقق من التحويل البنكي المعلق - نظام ذكي
 const {
   data: pendingCheckData,
@@ -584,9 +594,9 @@ console.log("🔍 paymentsData:", paymentsData);
       return null;
     }
     
-    // From subscriptionDate field
-    if (property.subscriptionDate) {
-      const endDate = new Date(property.subscriptionDate);
+    // استخدام تاريخ الانتهاء من بيانات الاشتراك الحالي
+    if (currentSubscription?.endDate) {
+      const endDate = new Date(currentSubscription.endDate);
       const now = new Date();
       const diffTime = endDate.getTime() - now.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -596,8 +606,19 @@ console.log("🔍 paymentsData:", paymentsData);
     return null;
   };
 
+  // حساب إجمالي أيام الاشتراك
+  const calculateTotalDays = () => {
+    if (currentSubscription?.startDate && currentSubscription?.endDate) {
+      const start = new Date(currentSubscription.startDate);
+      const end = new Date(currentSubscription.endDate);
+      const diffTime = end.getTime() - start.getTime();
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    }
+    return 30; // افتراضي
+  };
+
   const remainingDays = calculateRemainingDays();
-  const totalDays = 30; // مدة الاشتراك الأساسية
+  const totalDays = calculateTotalDays();
   const usedDays =
     remainingDays !== null ? Math.max(totalDays - remainingDays, 0) : null;
   const progressPercent =
