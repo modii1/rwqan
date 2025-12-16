@@ -379,7 +379,7 @@ export default function SubscriptionPage() {
                   <div>
                     <label className="block text-sm font-semibold mb-2">اسم العقار *</label>
                     <Input
-                      placeholder="شالية مودي"
+                      placeholder="شالية روقـان"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       required
