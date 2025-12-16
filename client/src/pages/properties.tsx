@@ -108,6 +108,10 @@ export default function PropertiesPage() {
   const [imageTransitioning, setImageTransitioning] = useState<Set<string>>(
     new Set(),
   );
+  
+  // تخزين الصور الفعلية لكل عقار من R2
+  const [propertyImages, setPropertyImages] = useState<Map<string, string[]>>(new Map());
+  const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
 
   // مفتاح عشوائي ثابت طوال الجلسة (يتغير فقط عند تحديث الصفحة بالكامل)
   const [shuffleKey] = useState(() => {
@@ -189,8 +193,43 @@ export default function PropertiesPage() {
     if (isLoading || properties.length === 0) return;
     restoreScrollPosition();
   }, [isLoading, properties.length]);
+
+  // 🖼️ جلب الصور الفعلية من R2 لكل عقار مرئي
+  const r2Base = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
   
-  // ✅ استعادة موقع التمرير عند الرجوع بالسحب أو زر المتصفح (pageshow event)
+  const fetchPropertyImages = async (propertyNumber: string) => {
+    if (propertyImages.has(propertyNumber) || loadingImages.has(propertyNumber)) return;
+    
+    setLoadingImages(prev => new Set(prev).add(propertyNumber));
+    try {
+      const response = await fetch(`/api/public/property-images/${propertyNumber}`);
+      const data = await response.json();
+      setPropertyImages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(propertyNumber, data.images || []);
+        return newMap;
+      });
+    } catch {
+      // في حالة الخطأ، استخدم الصور الافتراضية
+      setPropertyImages(prev => {
+        const newMap = new Map(prev);
+        newMap.set(propertyNumber, [
+          `${r2Base}/${propertyNumber}/1.jpg`,
+          `${r2Base}/${propertyNumber}/2.jpg`,
+          `${r2Base}/${propertyNumber}/3.jpg`,
+        ]);
+        return newMap;
+      });
+    } finally {
+      setLoadingImages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(propertyNumber);
+        return newSet;
+      });
+    }
+  };
+
+// ✅ استعادة موقع التمرير عند الرجوع بالسحب أو زر المتصفح (pageshow event)
   useEffect(() => {
     const handlePageShow = (event: PageTransitionEvent) => {
       // persisted = true يعني الصفحة جاءت من bfcache (السحب للرجوع)
@@ -307,6 +346,14 @@ export default function PropertiesPage() {
 
   // قائمة العقارات الظاهرة حالياً فقط
   const visibleProperties = filteredProperties.slice(0, visibleCount);
+
+  // 🖼️ جلب الصور للعقارات المرئية
+  useEffect(() => {
+    if (isLoading || properties.length === 0) return;
+    visibleProperties.forEach(property => {
+      fetchPropertyImages(property.propertyNumber);
+    });
+  }, [visibleProperties.length, isLoading]);
 
   // حفظ الفلاتر في sessionStorage عند تغييرها
   useEffect(() => {
@@ -656,13 +703,11 @@ export default function PropertiesPage() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {visibleProperties.map((property) => {
-              const r2Base =
-                "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
-              const imageUrls = [
-                `${r2Base}/${property.propertyNumber}/1.jpg`,
-                `${r2Base}/${property.propertyNumber}/2.jpg`,
-                `${r2Base}/${property.propertyNumber}/3.jpg`,
-              ];
+              // استخدام الصور الفعلية من R2 أو صورة placeholder
+              const cachedImages = propertyImages.get(property.propertyNumber);
+              const imageUrls = cachedImages && cachedImages.length > 0 
+                ? cachedImages 
+                : [`${r2Base}/${property.propertyNumber}/1.jpg`]; // صورة واحدة كـ fallback
 
               const mainPrice =
                 property.prices.weekend || property.prices.weekday || "0";
@@ -705,7 +750,7 @@ export default function PropertiesPage() {
                       }
                     }}
                   >
-                    {imageUrls.length > 0 && (
+                    {imageUrls.length > 0 ? (
                       <>
                         <img
                           src={
@@ -723,6 +768,10 @@ export default function PropertiesPage() {
                           onClick={(e) =>
                             handleCardClick(property.propertyNumber, e)
                           }
+                          onError={(e) => {
+                            // إظهار placeholder عند فشل تحميل الصورة
+                            (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo, sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
+                          }}
                           data-testid={`img-property-${property.propertyNumber}-current`}
                         />
 
@@ -792,6 +841,14 @@ export default function PropertiesPage() {
                           </div>
                         )}
                       </>
+                    ) : (
+                      /* Placeholder عندما لا توجد صور */
+                      <div 
+                        className="w-full h-48 md:h-72 bg-gray-100 flex items-center justify-center cursor-pointer"
+                        onClick={(e) => handleCardClick(property.propertyNumber, e)}
+                      >
+                        <span className="text-gray-400 text-sm">لا توجد صور</span>
+                      </div>
                     )}
                   </div>
                   {/* Content Section - Flexible grow */}

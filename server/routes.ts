@@ -1464,6 +1464,38 @@ app.get("/api/owner/analytics", async (req, res) => {
 
 
 // ======================================================
+// 🖼️ PUBLIC — جلب صور العقار من R2 (للصفحة الرئيسية)
+// ======================================================
+app.get("/api/public/property-images/:propertyNumber", async (req, res) => {
+  try {
+    const propertyNumber = req.params.propertyNumber;
+
+    const list = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: `${propertyNumber}/`,
+      })
+    );
+
+    // فلترة الصور فقط (jpg, png, webp) وترتيبها
+    const images = (list.Contents || [])
+      .filter((obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key))
+      .sort((a, b) => {
+        // ترتيب حسب اسم الملف (1.jpg, 2.jpg, etc.)
+        const numA = parseInt(a.Key?.match(/(\d+)\./)?.[1] || "0");
+        const numB = parseInt(b.Key?.match(/(\d+)\./)?.[1] || "0");
+        return numA - numB;
+      })
+      .map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`);
+
+    res.json({ images });
+  } catch (err) {
+    console.error("PUBLIC R2 LIST ERROR:", err);
+    res.json({ images: [] }); // Return empty array on error
+  }
+});
+
+// ======================================================
 // 🟣 ADMIN — إدارة صور العقار من R2 (جلب + رفع + حذف)
 // ======================================================
 
