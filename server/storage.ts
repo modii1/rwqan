@@ -35,6 +35,7 @@ export interface IStorage {
   // Subscriptions (الاشتراكات)
   getSubscriptions(): Promise<Subscription[]>;
   getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]>;
+  getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null>;
   createSubscription(subscription: InsertSubscription): Promise<Subscription>;
   updateSubscription(id: string, subscription: Partial<Subscription>): Promise<Subscription>;
   updateSubscriptionRemainingDays(propertyNumber: string, remainingDays: number): Promise<void>;
@@ -127,6 +128,10 @@ export class GoogleSheetsStorage implements IStorage {
   async getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]> {
     const subscriptions = await googleSheetsService.getSubscriptions();
     return subscriptions.filter(s => s.propertyNumber === propertyNumber);
+  }
+
+  async getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null> {
+    return googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
   }
 
   async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
