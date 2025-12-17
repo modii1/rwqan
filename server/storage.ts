@@ -37,6 +37,7 @@ export interface IStorage {
   getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]>;
   createSubscription(subscription: InsertSubscription): Promise<Subscription>;
   updateSubscription(id: string, subscription: Partial<Subscription>): Promise<Subscription>;
+  updateSubscriptionRemainingDays(propertyNumber: string, remainingDays: number): Promise<void>;
   
   // Packages (الباقات)
   getPackages(): Promise<Package[]>;
@@ -134,6 +135,10 @@ export class GoogleSheetsStorage implements IStorage {
 
   async updateSubscription(id: string, subscription: Partial<Subscription>): Promise<Subscription> {
     return googleSheetsService.updateSubscription(id, subscription);
+  }
+  
+  async updateSubscriptionRemainingDays(propertyNumber: string, remainingDays: number): Promise<void> {
+    return googleSheetsService.updateSubscriptionRemainingDays(propertyNumber, remainingDays);
   }
 
   async getPackages(): Promise<Package[]> {

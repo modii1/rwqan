@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
 import whatsappRoutes from "./whatsapp";
+import { startScheduler } from "./scheduler";
 
 const app = express();
 
@@ -94,5 +95,8 @@ if (bucketId) {
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen({ port, host: "0.0.0.0" }, () => {
     console.log("🚀 Server running on port", port);
+    
+    // تشغيل المهام المجدولة
+    startScheduler();
   });
 })();
