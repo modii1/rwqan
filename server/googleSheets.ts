@@ -942,8 +942,15 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       }
     }
     
+    const id = row[0] || `pkg-${Date.now()}`;
+    // تحديد عدد العقارات: إما من العمود أو افتراضي للباقة ذات العقارين
+    let propertyCount = parseInt(row[8]) || 1;
+    if (id === 'pkg-month-2properties' && propertyCount === 1) {
+      propertyCount = 2; // القيمة الافتراضية لباقة العقارين
+    }
+    
     return {
-      id: row[0] || `pkg-${Date.now()}`,
+      id,
       name: row[1] || "",
       duration: parseInt(row[2]) || 30,
       price: parseFloat(row[3]) || 0,
@@ -951,7 +958,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       features,
       isActive: row[6] !== "false" && row[6] !== "لا",
       createdAt: row[7] || undefined,
-      propertyCount: parseInt(row[8]) || 1, // عدد العقارات (افتراضي 1)
+      propertyCount,
     };
   }
 
@@ -1018,6 +1025,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       features,
       updatedPkg.isActive ? "نعم" : "لا",
       updatedPkg.createdAt || "",
+      (updatedPkg.propertyCount || 1).toString(), // عدد العقارات
     ];
     
     await this.updateRow(SHEETS.PACKAGES, rowIndex + 2, newRow);
