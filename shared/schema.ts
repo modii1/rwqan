@@ -173,6 +173,7 @@ export const paymentSchema = z.object({
   pendingEndDate: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
   pendingPrice: z.number().optional(),
+  secondPropertyNumber: z.string().optional(), // رقم العقار الثاني (لباقات العقارين)
   // بيانات Paymob Transaction
   transactionId: z.string().optional(),
   merchantFees: z.number().optional(), // رسوم التاجر (merchant_fees)
