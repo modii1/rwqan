@@ -2410,6 +2410,18 @@ app.post("/api/admin/payment/approve", async (req, res) => {
               payment.receiptUrl || ""
             );
             console.log(`✅ Second property subscription activated: ${(payment as any).secondPropertyNumber}, price: ${pricePerProperty}`);
+            
+            // === ملء شيت "اشتراكات العقارين" تلقائياً ===
+            await googleSheetsService.createMultiPropertySubscription({
+              packageId: pkg.id,
+              propertyNumber1: payment.propertyNumber,
+              propertyNumber2: (payment as any).secondPropertyNumber,
+              startDate: startDate.toISOString().split("T")[0],
+              endDate: endDate.toISOString().split("T")[0],
+              status: "نشط",
+              paymentId: payment.id,
+            });
+            console.log(`✅ Multi-property subscription record created in sheet`);
           }
         }
       }
