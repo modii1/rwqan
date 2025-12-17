@@ -3125,11 +3125,25 @@ app.post("/api/whatsapp/send", async (req, res) => {
           }
         }
 
+        // تحديد نوع الاشتراك الصحيح من البيانات
+        // الأولوية: subscriptionType من الشيت > رسوم الاشتراك > اسم الباقة
+        const subWithType = sub as any;
+        let displayType = "عادي";
+        
+        if (subWithType.subscriptionType === "مميز" || subWithType.price > 0) {
+          displayType = "مميز";
+        } else if (pkg?.name) {
+          displayType = pkg.name;
+        } else if (subWithType.subscriptionType) {
+          displayType = subWithType.subscriptionType;
+        }
+
         return {
           id: sub.id || `${sub.propertyNumber}-${sub.packageId}`,
           propertyNumber: sub.propertyNumber,
           name: property?.name || "غير معروف",
-          subscriptionType: pkg?.name || sub.packageId,
+          subscriptionType: displayType,
+          price: subWithType.price || 0,
           startDate: sub.startDate,
           endDate: sub.endDate,
           remainingDays,

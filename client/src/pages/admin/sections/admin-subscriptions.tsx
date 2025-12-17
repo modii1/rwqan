@@ -37,6 +37,7 @@ interface AdminSubscription {
   propertyNumber: string;
   name: string;
   subscriptionType: string;
+  price: number;
   startDate: string;
   endDate: string;
   remainingDays: number | null;
@@ -239,7 +240,12 @@ export default function AdminSubscriptionsSection() {
                       <Calendar className="w-3 h-3" />
                       {formatDate(sub.startDate)} - {formatDate(sub.endDate)}
                     </span>
-                    <Badge variant="outline">{sub.subscriptionType}</Badge>
+                    <Badge className={sub.subscriptionType === "مميز" ? "bg-[#b88d2b] text-white" : "bg-gray-400 text-white"}>
+                      {sub.subscriptionType}
+                    </Badge>
+                    {sub.price > 0 && (
+                      <span className="text-[#b88d2b] font-semibold">{sub.price} ر.س</span>
+                    )}
                   </div>
                 </div>
 
