@@ -3905,6 +3905,101 @@ app.post("/api/paymob/webhook", async (req, res) => {
   });
 
   // ======================
+  // 💵 التكاليف/المصاريف (Expenses)
+  // ======================
+
+  app.get("/api/admin/expenses", async (req, res) => {
+    try {
+      const expenses = await googleSheetsService.getExpenses();
+      res.json(expenses);
+    } catch (error: any) {
+      console.error("Error fetching expenses:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/expenses/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const expense = await googleSheetsService.getExpenseById(id);
+      if (!expense) {
+        return res.status(404).json({ error: "التكلفة غير موجودة" });
+      }
+      res.json(expense);
+    } catch (error: any) {
+      console.error("Error fetching expense:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/expenses", async (req, res) => {
+    try {
+      const { title, amount, category, description, date } = req.body;
+      
+      if (!title || !amount || !date) {
+        return res.status(400).json({ error: "العنوان والمبلغ والتاريخ مطلوبة" });
+      }
+
+      const expense = await googleSheetsService.createExpense({
+        title,
+        amount: parseFloat(amount),
+        category: category || "أخرى",
+        description,
+        date,
+      });
+      res.json(expense);
+    } catch (error: any) {
+      console.error("Error creating expense:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/admin/expenses/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      
+      if (updates.amount) {
+        updates.amount = parseFloat(updates.amount);
+      }
+
+      const expense = await googleSheetsService.updateExpense(id, updates);
+      if (!expense) {
+        return res.status(404).json({ error: "التكلفة غير موجودة" });
+      }
+      res.json(expense);
+    } catch (error: any) {
+      console.error("Error updating expense:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/admin/expenses/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await googleSheetsService.deleteExpense(id);
+      res.json({ success: true, message: "تم حذف التكلفة بنجاح" });
+    } catch (error: any) {
+      console.error("Error deleting expense:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/expenses/total", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const total = await googleSheetsService.getTotalExpenses(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      res.json({ total });
+    } catch (error: any) {
+      console.error("Error calculating total expenses:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ======================
   // DONE
   // ======================
   return createServer(app);
