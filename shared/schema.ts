@@ -49,6 +49,7 @@ export const subscriptionSchema = z.object({
   endDate: z.string(),
   status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً']),
   paymentId: z.string().optional(),
+  linkedProperty: z.string().optional(), // رقم العقار المرتبط (لباقات العقارين)
   createdAt: z.string().optional(),
   cancelledAt: z.string().optional(),
   cancelReason: z.string().optional(),
@@ -70,6 +71,7 @@ export const packageSchema = z.object({
   features: z.array(z.string()).default([]),
   description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),
+  propertyCount: z.number().default(1), // عدد العقارات (1 = عقار واحد، 2 = عقارين)
   createdAt: z.string().optional(),
 });
 
