@@ -2018,7 +2018,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
     }
 
-    // إنشاء سجل الدفع
+    // إنشاء سجل الدفع (مع حفظ العقار الثاني إن وجد)
     const payment = await storage.createPayment({
       propertyNumber,
       packageId,
@@ -2029,7 +2029,10 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       status: "قيد المراجعة",
       paymentMethod: "تحويل بنكي",
       receiptUrl,
-    });
+      secondPropertyNumber: secondPropertyNumber || undefined,
+    } as any);
+    
+    console.log(`💾 Payment created: ${payment.id}, secondPropertyNumber: ${secondPropertyNumber || 'none'}`);
 
     // حفظ البيانات للاشتراك/التمديد/الترقية
     // لا تقم بإنشاء أو تعديل الاشتراك إلا إذا كان هناك إجراء محدد (extend أو upgrade)
@@ -2369,13 +2372,18 @@ app.post("/api/admin/payment/approve", async (req, res) => {
           endDate = new Date(startDate.getTime() + pkg.duration * 86400000);
         }
 
+        // حساب السعر لكل عقار (نصف السعر إذا كانت باقة عقارين)
+        const isMultiProperty = !!(payment as any).secondPropertyNumber;
+        const pricePerProperty = isMultiProperty ? payment.finalAmount / 2 : payment.finalAmount;
+        
         const subscriptionData = {
           packageId: pkg.id,
-          price: payment.finalAmount,
+          price: pricePerProperty,
           subscriptionType: pkg.type,
           startDate: startDate.toISOString().split("T")[0],
           endDate: endDate.toISOString().split("T")[0],
           paymentId: payment.id,
+          linkedProperty: isMultiProperty ? (payment as any).secondPropertyNumber : undefined,
         };
 
         // إضافة الاشتراك للشيت
@@ -2385,6 +2393,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
           property,
           payment.receiptUrl || ""
         );
+        console.log(`✅ First property subscription activated: ${payment.propertyNumber}, price: ${pricePerProperty}`);
 
         // === إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين ===
         if ((payment as any).secondPropertyNumber) {
@@ -2392,7 +2401,6 @@ app.post("/api/admin/payment/approve", async (req, res) => {
           if (secondProperty) {
             const secondSubscriptionData = {
               ...subscriptionData,
-              price: payment.finalAmount / 2, // نصف السعر لكل عقار
               linkedProperty: payment.propertyNumber, // ربط بالعقار الأول
             };
             await googleSheetsService.addSubscriptionToSheet(
@@ -2401,13 +2409,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
               secondProperty,
               payment.receiptUrl || ""
             );
-            console.log(`✅ Second property subscription activated: ${(payment as any).secondPropertyNumber}`);
-            
-            // تحديث الاشتراك الأول بربط العقار الثاني
-            await googleSheetsService.updateSubscriptionLinkedProperty(
-              payment.propertyNumber,
-              (payment as any).secondPropertyNumber
-            );
+            console.log(`✅ Second property subscription activated: ${(payment as any).secondPropertyNumber}, price: ${pricePerProperty}`);
           }
         }
       }

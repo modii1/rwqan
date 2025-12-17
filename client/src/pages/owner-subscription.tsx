@@ -405,7 +405,14 @@ export default function OwnerSubscriptionPage() {
                     </div>
                     <p className="text-sm text-muted-foreground mb-3">{pkg.duration} يوم</p>
                     <div className="flex items-center justify-between">
-                      <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                      {(pkg.propertyCount || 1) > 1 ? (
+                        <div>
+                          <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price / (pkg.propertyCount || 1)} ر.س<span className="text-sm font-normal text-muted-foreground"> / عقار</span></p>
+                          <p className="text-xs text-muted-foreground">الإجمالي: {pkg.price} ر.س للعقارين</p>
+                        </div>
+                      ) : (
+                        <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                      )}
                       {(pkg.propertyCount || 1) > 1 && (
                         <Badge variant="secondary" className="text-xs">
                           {pkg.propertyCount} عقارات
@@ -715,9 +722,18 @@ export default function OwnerSubscriptionPage() {
                 )}
                 <h4 className="text-lg font-bold mb-4 text-[#434040]">{pkg.name}</h4>
                 <div className="mb-4">
-                  <p className="text-3xl font-bold text-[#b88d2b]">
-                    {pkg.price}<span className="text-sm"> ر.س</span>
-                  </p>
+                  {(pkg.propertyCount || 1) > 1 ? (
+                    <>
+                      <p className="text-3xl font-bold text-[#b88d2b]">
+                        {pkg.price / (pkg.propertyCount || 1)}<span className="text-sm"> ر.س / عقار</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">الإجمالي: {pkg.price} ر.س للعقارين</p>
+                    </>
+                  ) : (
+                    <p className="text-3xl font-bold text-[#b88d2b]">
+                      {pkg.price}<span className="text-sm"> ر.س</span>
+                    </p>
+                  )}
                   <p className="text-sm text-muted-foreground mt-1">{pkg.duration} يوم</p>
                 </div>
                 <div className="mb-4">

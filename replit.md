@@ -16,10 +16,11 @@
   - Added `linkedProperty` field to subscriptions (column 13 in Subscriptions sheet)
   - Second property verification with PIN match required
   - Both properties get activated with same subscription dates
-  - Price split evenly between both properties
+  - Price split evenly between both properties (25 SAR each)
   - Linked property displayed in owner dashboard
-- **Payment Schema Updated**: Added `secondPropertyNumber` field for storing second property in payment records
-- **Activation Logic Updated**: Both bank transfer approval and Paymob webhook now create two linked subscriptions
+- **Payment Schema Updated**: Added `secondPropertyNumber` field for storing second property in payment records (column Z in Payments sheet)
+- **Activation Logic Updated**: Both bank transfer approval and Paymob webhook now create two linked subscriptions with correct pricing
+- **UI Pricing Display**: Multi-property packages now show per-property price ("25 ر.س / عقار") with total ("الإجمالي: 50 ر.س للعقارين")
 
 ## Previous Changes (December 08, 2025)
 - **Smart Property Verification System**: Redesigned verification process to check property data completeness using existing Google Sheets columns:
