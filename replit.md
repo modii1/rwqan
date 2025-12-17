@@ -10,7 +10,18 @@
 - **Interaction**: The user expects the agent to ask for confirmation before implementing significant architectural changes or refactoring large portions of the codebase.
 - **Language**: All generated content and explanations should be in Arabic.
 
-## Recent Changes (December 08, 2025)
+## Recent Changes (December 17, 2025)
+- **Multi-Property Subscription Plans**: Added support for 2-property packages (50 SAR for 2 properties = 25 SAR each):
+  - Added `propertyCount` field to packages (column 8 in Packages sheet)
+  - Added `linkedProperty` field to subscriptions (column 13 in Subscriptions sheet)
+  - Second property verification with PIN match required
+  - Both properties get activated with same subscription dates
+  - Price split evenly between both properties
+  - Linked property displayed in owner dashboard
+- **Payment Schema Updated**: Added `secondPropertyNumber` field for storing second property in payment records
+- **Activation Logic Updated**: Both bank transfer approval and Paymob webhook now create two linked subscriptions
+
+## Previous Changes (December 08, 2025)
 - **Smart Property Verification System**: Redesigned verification process to check property data completeness using existing Google Sheets columns:
   - **Images**: Fetched from Replit Object Storage (R2) via `/api/owner/r2-images` (requires ≥3 images)
   - **Facilities**: Read from column 8 (`🔹 المرافق`) - supports both JSON array and comma-separated formats (requires ≥3)
