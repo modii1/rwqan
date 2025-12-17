@@ -258,10 +258,13 @@ export default function OwnerSubscriptionPage() {
           {/* معلومات الاشتراك */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
-              <p className="text-xs text-muted-foreground mb-1">السعر</p>
+              <p className="text-xs text-muted-foreground mb-1">رسوم الاشتراك</p>
               <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-price">
-                {(currentSubscription as any)?.price || currentPackage?.price || 0} ر.س
+                {(currentSubscription as any)?.price || (currentPackage?.propertyCount && currentPackage.propertyCount > 1 ? currentPackage.price / currentPackage.propertyCount : currentPackage?.price) || 0} ر.س
               </p>
+              {(currentPackage?.propertyCount || 1) > 1 && (
+                <p className="text-xs text-muted-foreground">(لكل عقار)</p>
+              )}
             </div>
             <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
               <p className="text-xs text-muted-foreground mb-1">المدة</p>
