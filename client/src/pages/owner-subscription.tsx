@@ -42,6 +42,12 @@ export default function OwnerSubscriptionPage() {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [showUpgradeWarning, setShowUpgradeWarning] = useState(false);
   const [pendingUpgradePackage, setPendingUpgradePackage] = useState<string | null>(null);
+  
+  // للباقات متعددة العقارات
+  const [secondPropertyNumber, setSecondPropertyNumber] = useState<string>('');
+  const [secondPropertyInfo, setSecondPropertyInfo] = useState<{ number: string; name: string; city: string } | null>(null);
+  const [isVerifyingSecondProperty, setIsVerifyingSecondProperty] = useState(false);
+  const [secondPropertyError, setSecondPropertyError] = useState<string | null>(null);
 
   const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
@@ -120,6 +126,49 @@ export default function OwnerSubscriptionPage() {
     } else {
       prepareMutation.mutate({ action: 'upgrade', packageId });
     }
+  };
+
+  // التحقق من العقار الثاني
+  const verifySecondProperty = async () => {
+    if (!secondPropertyNumber.trim()) {
+      setSecondPropertyError('الرجاء إدخال رقم العقار الثاني');
+      return;
+    }
+    
+    setIsVerifyingSecondProperty(true);
+    setSecondPropertyError(null);
+    setSecondPropertyInfo(null);
+    
+    try {
+      const response = await apiRequest('POST', '/api/owner/verify-second-property', {
+        secondPropertyNumber: secondPropertyNumber.trim()
+      });
+      const data = await response.json();
+      
+      if (data.ok) {
+        setSecondPropertyInfo(data.property);
+        toast({
+          title: 'تم التحقق بنجاح',
+          description: `تم العثور على: ${data.property.name}`,
+        });
+      }
+    } catch (err: any) {
+      setSecondPropertyError(err.message || 'فشل في التحقق من العقار');
+    } finally {
+      setIsVerifyingSecondProperty(false);
+    }
+  };
+
+  // هل الباقة المختارة تدعم عقارين؟
+  const selectedPackage = packages.find(p => p.id === selectedPackageId);
+  const isMultiPropertyPackage = (selectedPackage?.propertyCount || 1) > 1;
+
+  // إعادة تعيين العقار الثاني عند تغيير الباقة
+  const handlePackageSelect = (packageId: string) => {
+    setSelectedPackageId(packageId);
+    setSecondPropertyNumber('');
+    setSecondPropertyInfo(null);
+    setSecondPropertyError(null);
   };
 
   if (!property || !currentSubscription) {
@@ -320,7 +369,7 @@ export default function OwnerSubscriptionPage() {
                 availablePackages.map(pkg => (
                   <div
                     key={pkg.id}
-                    onClick={() => setSelectedPackageId(pkg.id)}
+                    onClick={() => handlePackageSelect(pkg.id)}
                     className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
                       selectedPackageId === pkg.id
                         ? 'border-[#b88d2b] bg-[#fffdf0]'
@@ -335,16 +384,90 @@ export default function OwnerSubscriptionPage() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground mb-3">{pkg.duration} يوم</p>
-                    <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                      {(pkg.propertyCount || 1) > 1 && (
+                        <Badge variant="secondary" className="text-xs">
+                          {pkg.propertyCount} عقارات
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
             </div>
 
+            {/* قسم العقار الثاني - يظهر فقط للباقات متعددة العقارات */}
+            {isMultiPropertyPackage && selectedPackageId && (
+              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-3 flex items-center gap-2">
+                  <Crown className="w-5 h-5" />
+                  باقة عقارين - أدخل رقم العقار الثاني
+                </h4>
+                <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
+                  هذه الباقة تشمل عقارين بنفس السعر. يجب أن يكون العقار الثاني مسجلاً بنفس الرقم السري.
+                </p>
+                
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={secondPropertyNumber}
+                    onChange={(e) => {
+                      setSecondPropertyNumber(e.target.value);
+                      setSecondPropertyError(null);
+                    }}
+                    placeholder="رقم العقار الثاني (5 أرقام)"
+                    className="flex-1 px-4 py-2 border border-input rounded-lg bg-background text-foreground"
+                    maxLength={5}
+                    data-testid="input-second-property"
+                  />
+                  <Button
+                    onClick={verifySecondProperty}
+                    disabled={isVerifyingSecondProperty || !secondPropertyNumber.trim()}
+                    variant="outline"
+                    data-testid="button-verify-second-property"
+                  >
+                    {isVerifyingSecondProperty ? 'جاري التحقق...' : 'تحقق'}
+                  </Button>
+                </div>
+                
+                {/* رسالة خطأ */}
+                {secondPropertyError && (
+                  <div className="p-3 bg-red-100 dark:bg-red-950/30 border border-red-300 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+                    {secondPropertyError}
+                  </div>
+                )}
+                
+                {/* معلومات العقار الثاني بعد التحقق */}
+                {secondPropertyInfo && (
+                  <div className="p-3 bg-green-100 dark:bg-green-950/30 border border-green-300 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span className="font-semibold">تم التحقق بنجاح</span>
+                    </div>
+                    <div className="mt-2 text-sm text-green-600 dark:text-green-400">
+                      <p>اسم العقار: <strong>{secondPropertyInfo.name}</strong></p>
+                      <p>المدينة: <strong>{secondPropertyInfo.city}</strong></p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <Button
                 onClick={() => {
                   if (!selectedPackageId) return;
+                  
+                  // للباقات متعددة العقارات، يجب التحقق من العقار الثاني
+                  if (isMultiPropertyPackage && !secondPropertyInfo) {
+                    toast({
+                      title: 'مطلوب',
+                      description: 'الرجاء إدخال رقم العقار الثاني والتحقق منه',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
                   
                   if (selectedAction === 'upgrade' && daysRemaining > 0) {
                     setPendingUpgradePackage(selectedPackageId);
@@ -356,7 +479,7 @@ export default function OwnerSubscriptionPage() {
                     });
                   }
                 }}
-                disabled={!selectedPackageId || prepareMutation.isPending}
+                disabled={!selectedPackageId || prepareMutation.isPending || (isMultiPropertyPackage && !secondPropertyInfo)}
                 className="flex-1"
                 data-testid="button-continue-payment"
               >
@@ -401,6 +524,13 @@ export default function OwnerSubscriptionPage() {
                 <span className="text-lg font-bold text-[#434040]">الإجمالي:</span>
                 <span className="text-2xl font-bold text-[#b88d2b]">{paymentInfo.price} ر.س</span>
               </div>
+              {/* إظهار العقار الثاني إذا كانت باقة عقارين */}
+              {secondPropertyInfo && (
+                <div className="flex justify-between mt-3 pt-3 border-t border-blue-200">
+                  <span className="text-muted-foreground">العقار الثاني:</span>
+                  <span className="font-bold text-[#434040]">{secondPropertyInfo.name} ({secondPropertyInfo.number})</span>
+                </div>
+              )}
             </div>
 
             <div className="mb-6">
@@ -463,6 +593,9 @@ export default function OwnerSubscriptionPage() {
                           formData.append('packageId', paymentInfo.packageId);
                           formData.append('receipt', receiptFile);
                           formData.append('action', paymentInfo.action);
+                          if (secondPropertyInfo) {
+                            formData.append('secondPropertyNumber', secondPropertyInfo.number);
+                          }
                           await fetch('/api/owner/payment/bank-transfer', {
                             method: 'POST',
                             body: formData,
@@ -508,6 +641,7 @@ export default function OwnerSubscriptionPage() {
                         packageId: paymentInfo.packageId,
                         action: paymentInfo.action,
                         paymentMethod: 'cards',
+                        secondPropertyNumber: secondPropertyInfo?.number || undefined,
                       });
                       const paymentData = await paymentResponse.json();
                       if (paymentData.checkoutUrl) {

@@ -677,6 +677,63 @@ const request = await storage.createRequest(
     });
   });
 
+  // التحقق من العقار الثاني (للباقات متعددة العقارات)
+  app.post("/api/owner/verify-second-property", requireOwner, async (req, res) => {
+    try {
+      const ownerPropertyNumber = (req.session as any).propertyNumber;
+      const { secondPropertyNumber } = req.body;
+
+      if (!secondPropertyNumber) {
+        return res.status(400).json({ error: "رقم العقار الثاني مطلوب" });
+      }
+
+      // التحقق من أن العقار الثاني ليس نفس العقار الأول
+      if (secondPropertyNumber === ownerPropertyNumber) {
+        return res.status(400).json({ error: "لا يمكن اختيار نفس العقار" });
+      }
+
+      // جلب بيانات العقار الأول
+      const ownerProperty = await storage.getPropertyByNumber(ownerPropertyNumber);
+      if (!ownerProperty) {
+        return res.status(404).json({ error: "لم يتم العثور على عقارك" });
+      }
+
+      // جلب بيانات العقار الثاني
+      const secondProperty = await storage.getPropertyByNumber(secondPropertyNumber);
+      if (!secondProperty) {
+        return res.status(404).json({ error: "لم يتم العثور على العقار الثاني" });
+      }
+
+      // التحقق من تطابق الـ PIN (نفس المالك)
+      if (secondProperty.pin !== ownerProperty.pin) {
+        return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
+      }
+
+      // التحقق من أن العقار الثاني ليس لديه اشتراك مميز نشط
+      const secondSubscription = await storage.getSubscriptionByPropertyNumber(secondPropertyNumber);
+      if (secondSubscription && secondSubscription.status === 'نشط') {
+        const endDate = new Date(secondSubscription.endDate);
+        if (endDate > new Date()) {
+          return res.status(400).json({ 
+            error: "العقار الثاني لديه اشتراك نشط بالفعل",
+            existingEndDate: secondSubscription.endDate
+          });
+        }
+      }
+
+      res.json({
+        ok: true,
+        property: {
+          number: secondProperty.propertyNumber,
+          name: secondProperty.name,
+          city: secondProperty.city
+        }
+      });
+    } catch (err: any) {
+      console.error("Verify second property error:", err);
+      res.status(500).json({ error: err?.message || "فشل في التحقق" });
+    }
+  });
 
   // تحضير معلومات الدفع للترقية/التمديد (بدون دفع فوري)
   app.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
@@ -1702,7 +1759,7 @@ app.post("/api/discount/validate", async (req, res) => {
 // 2. بدء عملية الدفع الإلكتروني
 app.post("/api/owner/payment/initiate", async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode, paymentMethod = "cards", action } = req.body;
+    const { propertyNumber, packageId, discountCode, paymentMethod = "cards", action, secondPropertyNumber } = req.body;
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
@@ -1790,6 +1847,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
       pendingEndDate,
       pendingSubscriptionType,
       pendingPrice,
+      secondPropertyNumber: secondPropertyNumber || undefined,
     });
 
     console.log(`✅ Payment created (pending): ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
@@ -1938,7 +1996,7 @@ app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (r
 // 3. التحويل البنكي مع رفع الإيصال
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode, action } = req.body;
+    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
