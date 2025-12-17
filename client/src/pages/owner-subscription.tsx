@@ -1,14 +1,34 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Property, Package, Subscription } from "@shared/schema";
-import { CalendarDays, Crown, TrendingUp, Check, ExternalLink, Upload } from "lucide-react";
+import { 
+  CalendarDays, Crown, TrendingUp, Check, Upload, 
+  AlertTriangle, Clock, XCircle, CheckCircle2, Timer
+} from "lucide-react";
+import {
+  calculateRemainingDays,
+  calculateSubscriptionDuration,
+  getSubscriptionStatus,
+  getStatusInfo,
+  canExtendSubscription,
+  canUpgradeSubscription,
+  formatDate,
+  SubscriptionStatus,
+} from "@/lib/subscription-utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function OwnerSubscriptionPage() {
   const [, setLocation] = useLocation();
@@ -20,41 +40,46 @@ export default function OwnerSubscriptionPage() {
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [showUpgradeWarning, setShowUpgradeWarning] = useState(false);
+  const [pendingUpgradePackage, setPendingUpgradePackage] = useState<string | null>(null);
 
-  // جلب بيانات المالك
   const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
   });
 
-  // جلب الاشتراك الحالي
   const { data: currentSubscription } = useQuery<Subscription>({
     queryKey: ["/api/owner/current-subscription"],
   });
 
-  // جلب جميع الباقات
   const { data: packages = [] } = useQuery<Package[]>({
     queryKey: ["/api/packages"],
   });
 
-  // جلب الباقة الحالية
   const currentPackage = packages.find(p => p.id === currentSubscription?.packageId);
 
-  // حساب الأيام المتبقية
-  const daysRemaining = currentSubscription
-    ? Math.ceil((new Date(currentSubscription.endDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+  // حساب الأيام المتبقية باستخدام الدوال الآمنة
+  const daysRemaining = currentSubscription 
+    ? calculateRemainingDays(currentSubscription.endDate)
     : 0;
 
-  // حساب مدة الاشتراك من البيانات
-  const subscriptionDuration = currentSubscription && currentSubscription.startDate && currentSubscription.endDate
-    ? Math.ceil((new Date(currentSubscription.endDate).getTime() - new Date(currentSubscription.startDate).getTime()) / (1000 * 60 * 60 * 24))
+  // حساب مدة الاشتراك
+  const subscriptionDuration = currentSubscription
+    ? calculateSubscriptionDuration(currentSubscription.startDate, currentSubscription.endDate)
     : 0;
 
-  const isSubscriptionActive = daysRemaining > 0;
+  // تحديد حالة الاشتراك
+  const subscriptionStatus: SubscriptionStatus = currentSubscription
+    ? getSubscriptionStatus(currentSubscription.endDate, currentSubscription.status)
+    : 'expired';
+
+  const statusInfo = getStatusInfo(subscriptionStatus);
+
   // هل يمكن التمديد؟
-  const canExtend = daysRemaining <= 10;
+  const canExtend = canExtendSubscription(currentSubscription?.endDate, subscriptionStatus);
+  
+  // هل يمكن الترقية؟
+  const canUpgrade = canUpgradeSubscription(subscriptionStatus);
 
-
-  // تحضير معلومات الدفع
   const prepareMutation = useMutation({
     mutationFn: async ({ action, packageId }: { action: 'extend' | 'upgrade'; packageId: string }) => {
       const response = await apiRequest('POST', '/api/owner/subscription/prepare-payment', {
@@ -68,42 +93,34 @@ export default function OwnerSubscriptionPage() {
     },
     onError: (error: any) => {
       toast({
-        title: "❌ خطأ",
+        title: "خطأ",
         description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  // تأكيد الدفع والاشتراك
-  const confirmMutation = useMutation({
-    mutationFn: async ({ paymentId }: { paymentId: string }) => {
-      const response = await apiRequest('POST', '/api/owner/subscription/confirm', {
-        action: paymentInfo?.action,
-        packageId: paymentInfo?.packageId,
-        paymentId,
+  // تأكيد الترقية مع التحذير
+  const handleUpgradeConfirm = () => {
+    if (pendingUpgradePackage) {
+      prepareMutation.mutate({ 
+        action: 'upgrade', 
+        packageId: pendingUpgradePackage 
       });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
-      toast({
-        title: "✅ تم بنجاح",
-        description: `تم ${paymentInfo?.action === 'extend' ? 'التمديد' : 'الترقية'} بنجاح وتم استقطاع المبلغ`,
-      });
-      setSelectedAction(null);
-      setPaymentInfo(null);
-      setSelectedPackageId(null);
-      setSelectedPaymentMethod(null);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "❌ خطأ",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+      setShowUpgradeWarning(false);
+      setPendingUpgradePackage(null);
+    }
+  };
+
+  // طلب الترقية مع إظهار التحذير إذا كان هناك أيام متبقية
+  const requestUpgrade = (packageId: string) => {
+    if (daysRemaining > 0) {
+      setPendingUpgradePackage(packageId);
+      setShowUpgradeWarning(true);
+    } else {
+      prepareMutation.mutate({ action: 'upgrade', packageId });
+    }
+  };
 
   if (!property || !currentSubscription) {
     return (
@@ -111,53 +128,53 @@ export default function OwnerSubscriptionPage() {
         <Card className="p-8 text-center">
           <div className="inline-block w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
           <p className="text-lg font-semibold text-foreground">جاري تحميل البيانات...</p>
-          <p className="text-sm text-muted-foreground mt-2">يرجى الانتظار قليلاً</p>
         </Card>
       </div>
     );
   }
 
+  // فلترة الباقات حسب الإجراء المختار
   const availablePackages = packages.filter(p => {
-  if (selectedAction === 'upgrade') {
-    // الترقية: فقط باقات أعلى سعراً
-    return p.price > (currentPackage?.price || 0);
-  }
+    if (!p.isActive) return false;
+    
+    if (selectedAction === 'upgrade') {
+      return p.price > (currentPackage?.price || 0);
+    }
+    if (selectedAction === 'extend') {
+      return p.price > 0;
+    }
+    return true;
+  });
 
-  if (selectedAction === 'extend') {
-    // التمديد: ممنوع عرض الباقة المجانية
-    return p.price > 0;
-  }
-
-  return true;
-});
-
+  // أيقونة الحالة
+  const StatusIcon = () => {
+    switch (subscriptionStatus) {
+      case 'active': return <CheckCircle2 className="w-5 h-5" />;
+      case 'expiring': return <Timer className="w-5 h-5" />;
+      case 'expired': return <XCircle className="w-5 h-5" />;
+      case 'cancelled': return <XCircle className="w-5 h-5" />;
+      case 'pending': return <Clock className="w-5 h-5" />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-[#434040] mb-2">إدارة الاشتراك</h1>
-            <p className="text-muted-foreground">عقار: {property.name} ({property.propertyNumber})</p>
-          </div>
-          <Button
-            onClick={() => setLocation("/owner/subscription")}
-            variant="outline"
-            className="flex items-center gap-2"
-            data-testid="button-view-all-packages"
-          >
-            <span>اشترك معنا</span>
-            <ExternalLink className="w-4 h-4" />
-          </Button>
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-[#434040] mb-2">إدارة الاشتراك</h1>
+          <p className="text-muted-foreground">عقار: {property.name} ({property.propertyNumber})</p>
         </header>
 
-        {/* الاشتراك الحالي */}
-        <Card className={`mb-8 p-6 border-2 transition-all ${
-          currentPackage?.type === 'مميز' && isSubscriptionActive
-            ? 'border-green-500 bg-gradient-to-r from-green-50 to-background dark:from-green-950/20'
-            : 'border-[#e0c97b] bg-gradient-to-r from-[#fffdf0] to-background'
+        {/* بطاقة الاشتراك الحالية */}
+        <Card className={`mb-8 p-6 border-2 transition-all ${statusInfo.borderColor} ${
+          subscriptionStatus === 'active' 
+            ? 'bg-gradient-to-r from-green-50 to-background dark:from-green-950/20'
+            : subscriptionStatus === 'expiring'
+            ? 'bg-gradient-to-r from-orange-50 to-background dark:from-orange-950/20'
+            : 'bg-gradient-to-r from-[#fffdf0] to-background'
         }`}>
+          {/* رأس البطاقة */}
           <div className="flex items-start justify-between mb-6">
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -166,134 +183,193 @@ export default function OwnerSubscriptionPage() {
               </div>
               <p className="text-lg font-semibold text-[#b88d2b]">{currentPackage?.name || 'بدون اشتراك'}</p>
             </div>
-            <div className="flex gap-2 items-center">
-              {currentPackage?.type === 'مميز' && isSubscriptionActive && (
-                <Badge className="bg-green-500 text-white animate-pulse">
-                  ✓ مفعلة
-                </Badge>
-              )}
-              <Badge className={isSubscriptionActive ? "bg-green-500" : "bg-red-500"}>
-                {isSubscriptionActive ? '✓ نشط' : '✗ منتهي'}
-              </Badge>
-            </div>
+            <Badge className={`${statusInfo.bgColor} text-white flex items-center gap-1`} data-testid="badge-subscription-status">
+              <StatusIcon />
+              {statusInfo.label}
+            </Badge>
           </div>
 
+          {/* عداد الأيام المتبقية - كبير وواضح */}
+          <div className="text-center py-8 mb-6 rounded-xl bg-white/50 dark:bg-black/20 border border-border">
+            <p className="text-sm text-muted-foreground mb-2">الأيام المتبقية</p>
+            <p className={`text-7xl font-bold ${statusInfo.color}`} data-testid="text-days-remaining">
+              {daysRemaining}
+            </p>
+            <p className="text-lg text-muted-foreground mt-2">يوم</p>
+            
+            {/* تحذير إذا ينتهي قريباً */}
+            {subscriptionStatus === 'expiring' && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-orange-600">
+                <AlertTriangle className="w-5 h-5" />
+                <span className="font-semibold">اشتراكك ينتهي قريباً! قم بالتمديد الآن</span>
+              </div>
+            )}
+          </div>
+
+          {/* معلومات الاشتراك */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div>
-              <p className="text-sm text-muted-foreground">السعر الشهري</p>
-              <p className="text-2xl font-bold text-[#434040]">{(currentSubscription as any)?.price || currentPackage?.price || 0} ر.س</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">المدة</p>
-              <p className="text-2xl font-bold text-[#434040]">{subscriptionDuration || currentPackage?.duration || 0} يوم</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">الأيام المتبقية</p>
-              <p className={`text-2xl font-bold ${daysRemaining > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {Math.max(0, daysRemaining)} يوم
+            <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
+              <p className="text-xs text-muted-foreground mb-1">السعر</p>
+              <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-price">
+                {(currentSubscription as any)?.price || currentPackage?.price || 0} ر.س
               </p>
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">انتهاء الاشتراك</p>
-              <p className="text-lg font-bold text-[#434040]">
-                {new Date(currentSubscription.endDate).toLocaleDateString('en-US')}
+            <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
+              <p className="text-xs text-muted-foreground mb-1">المدة</p>
+              <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-duration">
+                {subscriptionDuration || currentPackage?.duration || 0} يوم
+              </p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
+              <p className="text-xs text-muted-foreground mb-1">تاريخ البداية</p>
+              <p className="text-sm font-bold text-[#434040]" data-testid="text-start-date">
+                {formatDate(currentSubscription.startDate)}
+              </p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
+              <p className="text-xs text-muted-foreground mb-1">تاريخ الانتهاء</p>
+              <p className="text-sm font-bold text-[#434040]" data-testid="text-end-date">
+                {formatDate(currentSubscription.endDate)}
               </p>
             </div>
           </div>
 
-         {/* أزرار الإجراءات */}
-<div className="flex gap-3 flex-wrap">
+          {/* أزرار الإجراءات */}
+          <div className="flex gap-3 flex-wrap">
+            {/* زر التمديد */}
+            {canExtend ? (
+              <Button
+                onClick={() => {
+                  setSelectedAction('extend');
+                  setSelectedPackageId(null);
+                  setPaymentInfo(null);
+                }}
+                variant={selectedAction === 'extend' ? 'default' : 'outline'}
+                className="flex-1 md:flex-initial"
+                data-testid="button-extend-subscription"
+              >
+                <CalendarDays className="w-4 h-4 ml-2" />
+                تمديد الاشتراك
+              </Button>
+            ) : (
+              <div className="flex-1 md:flex-initial px-4 py-2 text-sm text-muted-foreground bg-muted/30 rounded-lg text-center">
+                يمكن التمديد عند بقاء 10 أيام أو أقل
+              </div>
+            )}
 
-  {/* زر التمديد بشرط ≤ 10 أيام */}
-  {daysRemaining <= 10 ? (
-    <Button
-      onClick={() => setSelectedAction('extend')}
-      variant={selectedAction === 'extend' ? 'default' : 'outline'}
-      className="flex-1 md:flex-initial"
-    >
-      <CalendarDays className="w-4 h-4 ml-2" />
-      تمديد الاشتراك
-    </Button>
-  ) : (
-    <div className="flex-1 text-center text-red-600 font-semibold py-2">
-      يمكن تمديد الاشتراك فقط عندما يتبقى 10 أيام أو أقل
-    </div>
-  )}
-
-  {/* زر الترقية — بدون تعديل */}
-  <Button
-    onClick={() => setSelectedAction('upgrade')}
-    variant={selectedAction === 'upgrade' ? 'default' : 'outline'}
-    className="flex-1 md:flex-initial"
-  >
-    <TrendingUp className="w-4 h-4 ml-2" />
-    الترقية إلى باقة أفضل
-  </Button>
-
-</div>
-
+            {/* زر الترقية */}
+            {canUpgrade && (
+              <Button
+                onClick={() => {
+                  setSelectedAction('upgrade');
+                  setSelectedPackageId(null);
+                  setPaymentInfo(null);
+                }}
+                variant={selectedAction === 'upgrade' ? 'default' : 'outline'}
+                className="flex-1 md:flex-initial"
+                data-testid="button-upgrade-subscription"
+              >
+                <TrendingUp className="w-4 h-4 ml-2" />
+                الترقية إلى باقة أفضل
+              </Button>
+            )}
+          </div>
         </Card>
 
         {/* اختيار الباقة */}
-        {selectedAction && (
+        {selectedAction && !paymentInfo && (
           <Card className="mb-8 p-6">
-            <h3 className="text-xl font-bold mb-6">
+            <h3 className="text-xl font-bold mb-2">
               {selectedAction === 'extend' ? 'اختر مدة التمديد' : 'اختر الباقة الجديدة'}
             </h3>
+            
+            {/* تحذير الترقية */}
+            {selectedAction === 'upgrade' && daysRemaining > 0 && (
+              <div className="mb-6 p-4 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-orange-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-orange-800 dark:text-orange-200 mb-1">تنبيه مهم</p>
+                    <p className="text-sm text-orange-700 dark:text-orange-300">
+                      لديك اشتراك متبقي فيه <strong>{daysRemaining} يوم</strong>.
+                      الترقية ستؤدي إلى:
+                    </p>
+                    <ul className="text-sm text-orange-700 dark:text-orange-300 mt-2 list-disc mr-4 space-y-1">
+                      <li>تصفير العداد الحالي</li>
+                      <li>بدء باقة جديدة بالكامل</li>
+                      <li>الأيام المتبقية السابقة لن تُرحّل</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ملاحظة التمديد */}
+            {selectedAction === 'extend' && (
+              <p className="text-sm text-muted-foreground mb-6">
+                الأيام الجديدة ستُضاف إلى اشتراكك الحالي
+              </p>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              {availablePackages.map(pkg => (
-                <div
-                  key={pkg.id}
-                  onClick={() => setSelectedPackageId(pkg.id)}
-                  className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                    selectedPackageId === pkg.id
-                      ? 'border-[#b88d2b] bg-[#fffdf0]'
-                      : 'border-border hover:border-[#b88d2b]'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-bold text-[#434040]">{pkg.name}</h4>
-                    {selectedPackageId === pkg.id && (
-                      <Check className="w-5 h-5 text-[#b88d2b]" />
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-3">{pkg.duration} يوم</p>
-                  <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+              {availablePackages.length === 0 ? (
+                <div className="col-span-2 text-center py-8 text-muted-foreground">
+                  لا توجد باقات متاحة للإجراء المختار
                 </div>
-              ))}
+              ) : (
+                availablePackages.map(pkg => (
+                  <div
+                    key={pkg.id}
+                    onClick={() => setSelectedPackageId(pkg.id)}
+                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      selectedPackageId === pkg.id
+                        ? 'border-[#b88d2b] bg-[#fffdf0]'
+                        : 'border-border hover:border-[#b88d2b]'
+                    }`}
+                    data-testid={`package-card-${pkg.id}`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-bold text-[#434040]">{pkg.name}</h4>
+                      {selectedPackageId === pkg.id && (
+                        <Check className="w-5 h-5 text-[#b88d2b]" />
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">{pkg.duration} يوم</p>
+                    <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="flex gap-3">
               <Button
-  onClick={() => {
-
-    // ❌ منع التمديد إذا المتبقي أكثر من 10 أيام
-    if (selectedAction === "extend" && daysRemaining > 10) {
-      toast({
-        title: "لا يمكن التمديد",
-        description: "يمكن تمديد الاشتراك فقط عندما يتبقى 10 أيام أو أقل.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (selectedPackageId && selectedAction) {
-      prepareMutation.mutate({ 
-        action: selectedAction, 
-        packageId: selectedPackageId 
-      });
-    }
-  }}
-  disabled={!selectedPackageId || prepareMutation.isPending}
-  className="flex-1"
->
-  {prepareMutation.isPending ? 'جاري التحضير...' : 'متابعة للدفع'}
-</Button>
-<Button
-                onClick={() => setSelectedAction(null)}
+                onClick={() => {
+                  if (!selectedPackageId) return;
+                  
+                  if (selectedAction === 'upgrade' && daysRemaining > 0) {
+                    setPendingUpgradePackage(selectedPackageId);
+                    setShowUpgradeWarning(true);
+                  } else {
+                    prepareMutation.mutate({ 
+                      action: selectedAction, 
+                      packageId: selectedPackageId 
+                    });
+                  }
+                }}
+                disabled={!selectedPackageId || prepareMutation.isPending}
+                className="flex-1"
+                data-testid="button-continue-payment"
+              >
+                {prepareMutation.isPending ? 'جاري التحضير...' : 'متابعة للدفع'}
+              </Button>
+              <Button
+                onClick={() => {
+                  setSelectedAction(null);
+                  setSelectedPackageId(null);
+                }}
                 variant="outline"
                 className="flex-1"
+                data-testid="button-cancel-action"
               >
                 إلغاء
               </Button>
@@ -315,6 +391,12 @@ export default function OwnerSubscriptionPage() {
                 <span className="text-muted-foreground">المدة:</span>
                 <span className="font-bold text-[#434040]">{paymentInfo.duration} يوم</span>
               </div>
+              <div className="flex justify-between mb-3">
+                <span className="text-muted-foreground">نوع العملية:</span>
+                <span className="font-bold text-[#434040]">
+                  {paymentInfo.action === 'extend' ? 'تمديد' : 'ترقية'}
+                </span>
+              </div>
               <div className="flex justify-between border-t pt-3">
                 <span className="text-lg font-bold text-[#434040]">الإجمالي:</span>
                 <span className="text-2xl font-bold text-[#b88d2b]">{paymentInfo.price} ر.س</span>
@@ -326,7 +408,11 @@ export default function OwnerSubscriptionPage() {
               <div className="space-y-3">
                 <div
                   onClick={() => { setSelectedPaymentMethod('online'); setReceiptFile(null); }}
-                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedPaymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${
+                    selectedPaymentMethod === 'online' 
+                      ? 'border-[#434040] bg-[#434040]/5' 
+                      : 'border-border hover:border-[#434040]/50'
+                  }`}
                   data-testid="payment-method-online"
                 >
                   <div className="font-semibold">الدفع الإلكتروني</div>
@@ -334,7 +420,11 @@ export default function OwnerSubscriptionPage() {
                 </div>
                 <div
                   onClick={() => setSelectedPaymentMethod('bank')}
-                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedPaymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${
+                    selectedPaymentMethod === 'bank' 
+                      ? 'border-[#434040] bg-[#434040]/5' 
+                      : 'border-border hover:border-[#434040]/50'
+                  }`}
                   data-testid="payment-method-bank"
                 >
                   <div className="font-semibold">تحويل بنكي</div>
@@ -342,12 +432,23 @@ export default function OwnerSubscriptionPage() {
                 </div>
               </div>
 
-              {/* Bank Receipt Upload */}
+              {/* رفع إيصال التحويل البنكي */}
               {selectedPaymentMethod === 'bank' && (
                 <div className="p-4 bg-muted/30 rounded-lg mt-3">
                   <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
-                  <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2 mb-3">
+                  <input 
+                    ref={fileInputRef} 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} 
+                    className="hidden" 
+                  />
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => fileInputRef.current?.click()} 
+                    className="w-full gap-2 mb-3"
+                  >
                     <Upload className="w-4 h-4" />
                     {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
                   </Button>
@@ -357,9 +458,8 @@ export default function OwnerSubscriptionPage() {
                       onClick={async () => {
                         setIsSubmittingPayment(true);
                         try {
-                          const propertyNumber = property?.propertyNumber;
                           const formData = new FormData();
-                          formData.append('propertyNumber', propertyNumber || '');
+                          formData.append('propertyNumber', property?.propertyNumber || '');
                           formData.append('packageId', paymentInfo.packageId);
                           formData.append('receipt', receiptFile);
                           formData.append('action', paymentInfo.action);
@@ -369,12 +469,13 @@ export default function OwnerSubscriptionPage() {
                           });
                           toast({
                             title: 'تم رفع الإيصال بنجاح',
-                            description: 'سيتم التحقق من التحويل البنكي وتفعيل الاشتراك قريباً',
+                            description: 'سيتم التحقق من التحويل وتفعيل الاشتراك قريباً',
                           });
                           queryClient.invalidateQueries({ queryKey: ['/api/owner/current-subscription'] });
                           setPaymentInfo(null);
                           setSelectedPaymentMethod(null);
                           setReceiptFile(null);
+                          setSelectedAction(null);
                         } catch (err: any) {
                           toast({
                             title: 'خطأ في رفع الإيصال',
@@ -402,9 +503,8 @@ export default function OwnerSubscriptionPage() {
                   onClick={async () => {
                     setIsSubmittingPayment(true);
                     try {
-                      const propertyNumber = property?.propertyNumber;
                       const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
-                        propertyNumber,
+                        propertyNumber: property?.propertyNumber,
                         packageId: paymentInfo.packageId,
                         action: paymentInfo.action,
                         paymentMethod: 'cards',
@@ -440,6 +540,7 @@ export default function OwnerSubscriptionPage() {
                 }}
                 variant="outline"
                 className="flex-1"
+                data-testid="button-cancel-payment"
               >
                 إلغاء
               </Button>
@@ -451,11 +552,18 @@ export default function OwnerSubscriptionPage() {
         <div>
           <h3 className="text-xl font-bold mb-6">الباقات المتاحة</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {packages.map(pkg => (
-              <Card key={pkg.id} className="p-6 hover:shadow-lg transition-shadow">
+            {packages.filter(p => p.isActive).map(pkg => (
+              <Card key={pkg.id} className={`p-6 hover:shadow-lg transition-shadow ${
+                currentPackage?.id === pkg.id ? 'border-2 border-[#b88d2b]' : ''
+              }`}>
+                {currentPackage?.id === pkg.id && (
+                  <Badge className="mb-4 bg-[#b88d2b]">باقتك الحالية</Badge>
+                )}
                 <h4 className="text-lg font-bold mb-4 text-[#434040]">{pkg.name}</h4>
                 <div className="mb-4">
-                  <p className="text-3xl font-bold text-[#b88d2b]">{pkg.price}<span className="text-sm"> ر.س</span></p>
+                  <p className="text-3xl font-bold text-[#b88d2b]">
+                    {pkg.price}<span className="text-sm"> ر.س</span>
+                  </p>
                   <p className="text-sm text-muted-foreground mt-1">{pkg.duration} يوم</p>
                 </div>
                 <div className="mb-4">
@@ -477,6 +585,48 @@ export default function OwnerSubscriptionPage() {
           </div>
         </div>
       </div>
+
+      {/* حوار تأكيد الترقية */}
+      <Dialog open={showUpgradeWarning} onOpenChange={setShowUpgradeWarning}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
+              <AlertTriangle className="w-6 h-6" />
+              تأكيد الترقية
+            </DialogTitle>
+            <DialogDescription className="text-right pt-4">
+              <div className="space-y-3">
+                <p>
+                  لديك اشتراك متبقي فيه <strong className="text-orange-600">{daysRemaining} يوم</strong>.
+                </p>
+                <p>الترقية ستؤدي إلى:</p>
+                <ul className="list-disc mr-6 space-y-1 text-sm">
+                  <li>تصفير العداد الحالي</li>
+                  <li>بدء باقة جديدة بالكامل</li>
+                  <li>الأيام المتبقية السابقة لن تُرحّل</li>
+                </ul>
+                <p className="font-semibold pt-2">هل أنت متأكد من المتابعة؟</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setShowUpgradeWarning(false)}
+              data-testid="button-cancel-upgrade-warning"
+            >
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleUpgradeConfirm}
+              className="bg-orange-600 hover:bg-orange-700"
+              data-testid="button-confirm-upgrade-warning"
+            >
+              نعم، متابعة الترقية
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
