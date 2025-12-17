@@ -1705,7 +1705,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             ) : (
               <Receipt className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري الرفع..." : "رفع إيصال"}
+            {isRetrying ? "جاري الرفع..." : "رفع إيصال جديد"}
           </Button>
         )}
 
