@@ -1920,6 +1920,8 @@ async getWhatsAppLogs() {
       notes: row[8] || undefined,
       createdAt: row[9] || undefined,
       updatedAt: row[10] || undefined,
+      totalExpenses: parseFloat(row[11]) || 0,
+      netProfitAfterExpenses: parseFloat(row[12]) || 0,
     }));
   }
 
@@ -1928,6 +1930,8 @@ async getWhatsAppLogs() {
     const newProfit: PartnerProfit = {
       id,
       ...profit,
+      totalExpenses: profit.totalExpenses || 0,
+      netProfitAfterExpenses: profit.netProfitAfterExpenses || 0,
       createdAt: new Date().toISOString(),
     };
 
@@ -1943,6 +1947,8 @@ async getWhatsAppLogs() {
       newProfit.notes || "",
       newProfit.createdAt,
       newProfit.updatedAt || "",
+      (newProfit.totalExpenses || 0).toString(),
+      (newProfit.netProfitAfterExpenses || 0).toString(),
     ];
 
     await this.appendToSheet(SHEETS.PARTNER_PROFITS, [row]);
@@ -1968,6 +1974,8 @@ async getWhatsAppLogs() {
       notes: updates.notes ?? (existingRow[8] || undefined),
       createdAt: existingRow[9],
       updatedAt: new Date().toISOString(),
+      totalExpenses: updates.totalExpenses ?? (parseFloat(existingRow[11]) || 0),
+      netProfitAfterExpenses: updates.netProfitAfterExpenses ?? (parseFloat(existingRow[12]) || 0),
     };
 
     const row = [
@@ -1982,6 +1990,8 @@ async getWhatsAppLogs() {
       updatedProfit.notes || "",
       updatedProfit.createdAt || "",
       updatedProfit.updatedAt,
+      (updatedProfit.totalExpenses || 0).toString(),
+      (updatedProfit.netProfitAfterExpenses || 0).toString(),
     ];
 
     await this.updateRow(SHEETS.PARTNER_PROFITS, rowIndex + 2, row);
