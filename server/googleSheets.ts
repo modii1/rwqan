@@ -223,6 +223,7 @@ class GoogleSheetsService {
         "علم إشعار الإيصال",
         "آخر دورة",
         "رمز التحديث",
+        "العقار المرتبط",
       ],
       [SHEETS.PACKAGES]: [
         "المعرف",
@@ -233,6 +234,7 @@ class GoogleSheetsService {
         "المميزات",
         "نشط",
         "تاريخ الإنشاء",
+        "عدد العقارات",
       ],
       [SHEETS.DISCOUNTS]: [
         "الكود",
@@ -650,7 +652,7 @@ class GoogleSheetsService {
   // ================== الاشتراكات ==================
   
   // قراءة من ورقة الاشتراكات الفعلية
-  // الأعمدة: رقم العقار(0), اسم العقار(1), رقم الجوال(2), رسوم الاشتراك(3), نوع الاشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6), الأيام المتبقية(7), رابط الإيصال(8), علم انتهاء(9), علم إشعار(10), آخر دورة(11), رمز التحديث(12)
+  // الأعمدة: رقم العقار(0), اسم العقار(1), رقم الجوال(2), رسوم الاشتراك(3), نوع الاشتراك(4), تاريخ البداية(5), تاريخ الانتهاء(6), الأيام المتبقية(7), رابط الإيصال(8), علم انتهاء(9), علم إشعار(10), آخر دورة(11), رمز التحديث(12), العقار المرتبط(13)
   private rowToSubscriptionFromSheet(row: any[]): Subscription & { price?: number; subscriptionType?: string; propertyName?: string } {
     const propertyName = row[1] ? String(row[1]).trim() : "";  // قراءة اسم العقار من العمود 1
     const startDate = row[5] ? String(row[5]) : "";
@@ -658,6 +660,7 @@ class GoogleSheetsService {
     const packageId = row[12] ? String(row[12]) : "pkg-free";  // قراءة packageId من العمود 12
     const price = row[3] ? parseFloat(String(row[3])) : 0;  // قراءة السعر من العمود 3
     const subscriptionType = row[4] ? String(row[4]).trim() : "عادي";  // قراءة نوع الاشتراك من العمود 4
+    const linkedProperty = row[13] ? String(row[13]).trim() : undefined;  // العقار المرتبط (العمود 13)
     
     // حساب الحالة تلقائياً من تاريخ الانتهاء
     let status = "نشط";
@@ -680,6 +683,7 @@ class GoogleSheetsService {
       price,  // إضافة السعر
       subscriptionType,  // نوع الاشتراك من الشيت مباشرة (العمود 4)
       propertyName,  // اسم العقار من الشيت مباشرة (العمود 1)
+      linkedProperty,  // العقار المرتبط
     };
   }
 
@@ -711,6 +715,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     "",                                          // 10 علم إشعار الإيصال
     "",                                          // 11 آخر دورة ← تم حذف التاريخ
     subscription.packageId || "",                // 12 رمز التحديث (packageId)
+    subscription.linkedProperty || "",           // 13 العقار المرتبط
   ];
 }
 
@@ -902,7 +907,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   // ================== الباقات ==================
   
   // قراءة الباقات من ورقة الباقات
-  // الأعمدة: المعرف(0), الاسم(1), المدة(2), السعر(3), النوع(4), المميزات(5), نشط(6), تاريخ الإنشاء(7)
+  // الأعمدة: المعرف(0), الاسم(1), المدة(2), السعر(3), النوع(4), المميزات(5), نشط(6), تاريخ الإنشاء(7), عدد العقارات(8)
   private rowToPackage(row: any[]): Package {
     const featuresRaw = row[5] || "";
     let features: string[] = [];
@@ -926,6 +931,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       features,
       isActive: row[6] !== "false" && row[6] !== "لا",
       createdAt: row[7] || undefined,
+      propertyCount: parseInt(row[8]) || 1, // عدد العقارات (افتراضي 1)
     };
   }
 
@@ -963,6 +969,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       features,
       newPkg.isActive ? "نعم" : "لا",
       newPkg.createdAt,
+      (newPkg.propertyCount || 1).toString(), // عدد العقارات
     ];
     
     await this.appendToSheet(SHEETS.PACKAGES, [row]);
