@@ -3133,23 +3133,19 @@ app.post("/api/whatsapp/send", async (req, res) => {
           }
         }
 
-        // تحديد نوع الاشتراك الصحيح من البيانات
-        // الأولوية: subscriptionType من الشيت > رسوم الاشتراك > اسم الباقة
+        // قراءة البيانات من الاشتراك مباشرة
         const subWithType = sub as any;
-        let displayType = "عادي";
         
-        if (subWithType.subscriptionType === "مميز" || subWithType.price > 0) {
-          displayType = "مميز";
-        } else if (pkg?.name) {
-          displayType = pkg.name;
-        } else if (subWithType.subscriptionType) {
-          displayType = subWithType.subscriptionType;
-        }
+        // نوع الاشتراك من الشيت مباشرة (العمود 4)
+        const displayType = subWithType.subscriptionType || "عادي";
+        
+        // اسم العقار من الشيت مباشرة (العمود 1) أو من جدول العقارات
+        const propertyName = subWithType.propertyName || property?.name || "غير معروف";
 
         return {
           id: sub.id || `${sub.propertyNumber}-${sub.packageId}`,
           propertyNumber: sub.propertyNumber,
-          name: property?.name || "غير معروف",
+          name: propertyName,
           subscriptionType: displayType,
           price: subWithType.price || 0,
           startDate: sub.startDate,
