@@ -47,9 +47,11 @@ export const subscriptionSchema = z.object({
   packageId: z.string(),
   startDate: z.string(),
   endDate: z.string(),
-  status: z.enum(['نشط', 'منتهي', 'معلق']),
+  status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً']),
   paymentId: z.string().optional(),
   createdAt: z.string().optional(),
+  cancelledAt: z.string().optional(),
+  cancelReason: z.string().optional(),
 });
 
 export type Subscription = z.infer<typeof subscriptionSchema>;
