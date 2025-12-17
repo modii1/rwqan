@@ -1438,30 +1438,7 @@ app.get("/api/owner/analytics", async (req, res) => {
   });
 
 
-  app.get("/api/packages", async (_req, res) => {
-    try {
-      const rows = await googleSheetsService.readSheet("الباقات");
-
-      if (!rows || rows.length <= 1) {
-        return res.json([]);
-      }
-
-      const packages = rows.slice(1).map((row) => ({
-        id: row[0],
-        name: row[1],
-        duration: Number(row[2]),
-        price: Number(row[3]),
-        type: row[4],
-        features: parseFeatures(row[5]),
-        isActive: String(row[6]).toLowerCase() === "true",
-        createdAt: row[7] || "",
-      }));
-
-      res.json(packages.filter((p) => p.isActive));
-    } catch {
-      res.status(500).json({ error: "failed to load packages" });
-    }
-  });
+  // استخدام getPackages() في السطر 2197 بدلاً من هذا (تم حذفه لتجنب التكرار)
 
   function parseFeatures(val: any): string[] {
     if (!val) return [];
