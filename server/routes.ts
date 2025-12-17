@@ -19,6 +19,7 @@ import { storage } from "./storage";
 import { googleSheetsService } from "./googleSheets";
 import { googleDriveService } from "./googleDrive";
 import { paymobService } from "./paymob";
+import { updateRemainingDaysInSheet } from "./scheduler";
 
 import session from "express-session";
 import MemoryStore from "memorystore";
@@ -836,6 +837,24 @@ const request = await storage.createRequest(
     } catch (err: any) {
       console.error("Visitors error:", err);
       res.status(500).json({ error: "فشل في جلب بيانات الزوار" });
+    }
+  });
+
+  // =====================================
+  // 📅 تحديث الأيام المتبقية يدوياً
+  // =====================================
+  app.post("/api/admin/update-remaining-days", requireAdmin, async (req, res) => {
+    try {
+      console.log("📅 [API] تشغيل تحديث الأيام المتبقية يدوياً...");
+      const result = await updateRemainingDaysInSheet();
+      res.json({ 
+        success: true, 
+        message: "تم تحديث الأيام المتبقية بنجاح",
+        ...result 
+      });
+    } catch (error) {
+      console.error("❌ [API] خطأ في تحديث الأيام المتبقية:", error);
+      res.status(500).json({ error: "فشل في تحديث الأيام المتبقية" });
     }
   });
 

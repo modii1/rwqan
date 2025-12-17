@@ -876,7 +876,28 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     };
   }
 
-
+  /**
+   * تحديث الأيام المتبقية في ورقة الاشتراكات
+   * العمود 7 = الأيام المتبقية
+   */
+  async updateSubscriptionRemainingDays(propertyNumber: string, remainingDays: number): Promise<void> {
+    try {
+      const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+      const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+      
+      if (rowIndex === -1) {
+        // لا يوجد اشتراك لهذا العقار
+        return;
+      }
+      
+      const row = rows[rowIndex];
+      row[7] = Math.max(0, remainingDays); // العمود 7 = الأيام المتبقية
+      
+      await this.updateRow(SHEETS.SUBSCRIPTIONS, rowIndex + 2, row);
+    } catch (error) {
+      console.error(`❌ خطأ في تحديث الأيام المتبقية للعقار ${propertyNumber}:`, error);
+    }
+  }
 
   // ================== الباقات ==================
   
