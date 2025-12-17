@@ -9,7 +9,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Property, Package, Subscription } from "@shared/schema";
 import { 
   CalendarDays, Crown, TrendingUp, Check, Upload, 
-  AlertTriangle, Clock, XCircle, CheckCircle2, Timer
+  AlertTriangle, Clock, XCircle, CheckCircle2, Timer, Building2
 } from "lucide-react";
 import {
   calculateRemainingDays,
@@ -282,6 +282,26 @@ export default function OwnerSubscriptionPage() {
               </p>
             </div>
           </div>
+
+          {/* العقار المرتبط */}
+          {(currentSubscription as any)?.linkedProperty && (
+            <div className="mb-6 p-4 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                  <Building2 className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">العقار المرتبط</p>
+                  <p className="font-bold text-blue-600" data-testid="text-linked-property">
+                    {(currentSubscription as any).linkedProperty}
+                  </p>
+                </div>
+                <p className="mr-auto text-xs text-muted-foreground">
+                  باقة عقارين - نفس تاريخ الانتهاء
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* أزرار الإجراءات */}
           <div className="flex gap-3 flex-wrap">
