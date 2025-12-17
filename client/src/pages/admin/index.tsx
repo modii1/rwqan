@@ -71,7 +71,7 @@ export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
 
   // تحقق جلسة الأدمن
-  const { data: adminSession, isLoading } = useQuery({
+  const { data: adminSession, isLoading } = useQuery<{ isAdmin: boolean }>({
     queryKey: ["/api/admin/session"],
   });
 
