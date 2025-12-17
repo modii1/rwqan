@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator } from "lucide-react";
-import type { PartnerProfit, Payment } from "@shared/schema";
+import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator, Trash2, MinusCircle, Banknote } from "lucide-react";
+import type { PartnerProfit, Payment, Expense } from "@shared/schema";
 
 // رسوم Paymob
 const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
@@ -80,16 +81,70 @@ export default function PartnerProfitsSection() {
       totalRevenue: number;
       partnerShare: number;
       paymentsCount: number;
+      totalExpenses: number;
+      netProfitAfterExpenses: number;
     };
     allTime: {
       totalRevenue: number;
       partnerShare: number;
       paymentsCount: number;
+      totalExpenses: number;
+      netProfitAfterExpenses: number;
     };
     pendingPayments: number;
     recentPayments: Payment[];
+    recentExpenses: Expense[];
   }>({
     queryKey: ["/api/admin/partner-profits/summary"],
+  });
+
+  const { data: expenses = [], isLoading: isLoadingExpenses, refetch: refetchExpenses } = useQuery<Expense[]>({
+    queryKey: ["/api/admin/expenses"],
+  });
+
+  const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
+
+  const createExpenseMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest("POST", "/api/admin/expenses", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits/summary"] });
+      setIsExpenseDialogOpen(false);
+      toast({
+        title: "تمت الإضافة",
+        description: "تم إضافة التكلفة بنجاح",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "خطأ",
+        description: "فشل في إضافة التكلفة",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/admin/expenses/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits/summary"] });
+      toast({
+        title: "تم الحذف",
+        description: "تم حذف التكلفة بنجاح",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "خطأ",
+        description: "فشل في حذف التكلفة",
+        variant: "destructive",
+      });
+    },
   });
 
   const createMutation = useMutation({
@@ -191,19 +246,50 @@ export default function PartnerProfitsSection() {
     );
   }
 
+  const getCategoryBadge = (category: string) => {
+    const colors: Record<string, string> = {
+      "صيانة": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+      "إعلانات": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+      "رواتب": "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+      "استضافة": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+      "أخرى": "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
+    };
+    return <Badge className={colors[category] || colors["أخرى"]}>{category}</Badge>;
+  };
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* ملخص الأرباح - الصف الأول */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="bg-gradient-to-l from-blue-50 to-sky-50 dark:from-blue-950/20 dark:to-sky-950/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">الإيرادات (الشهر)</p>
+                <p className="text-2xl font-bold text-blue-700 dark:text-blue-400" dir="ltr">
+                  {(summary?.currentMonth.totalRevenue || 0).toLocaleString("en-US")} ر.س
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {summary?.currentMonth.paymentsCount || 0} دفعة مكتملة
+                </p>
+              </div>
+              <div className="p-3 rounded-full bg-blue-100 dark:bg-blue-900/30">
+                <Banknote className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="bg-gradient-to-l from-emerald-50 to-green-50 dark:from-emerald-950/20 dark:to-green-950/20 border-emerald-200 dark:border-emerald-800">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">الشهر الحالي</p>
+                <p className="text-sm text-muted-foreground">حصة الشريك (50%)</p>
                 <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400" dir="ltr">
                   {(summary?.currentMonth.partnerShare || 0).toLocaleString("en-US")} ر.س
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {summary?.currentMonth.paymentsCount || 0} دفعة مكتملة
+                  قبل خصم التكاليف
                 </p>
               </div>
               <div className="p-3 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
@@ -213,11 +299,56 @@ export default function PartnerProfitsSection() {
           </CardContent>
         </Card>
 
+        <Card className="bg-gradient-to-l from-red-50 to-rose-50 dark:from-red-950/20 dark:to-rose-950/20 border-red-200 dark:border-red-800">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">التكاليف (الشهر)</p>
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400" dir="ltr">
+                  -{(summary?.currentMonth.totalExpenses || 0).toLocaleString("en-US")} ر.س
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {expenses.filter(e => {
+                    const expDate = new Date(e.date);
+                    const now = new Date();
+                    return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+                  }).length} تكلفة هذا الشهر
+                </p>
+              </div>
+              <div className="p-3 rounded-full bg-red-100 dark:bg-red-900/30">
+                <MinusCircle className="w-6 h-6 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-l from-amber-50 to-yellow-50 dark:from-amber-950/20 dark:to-yellow-950/20 border-amber-200 dark:border-amber-800">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">صافي الربح (الشهر)</p>
+                <p className="text-2xl font-bold text-amber-700 dark:text-amber-400" dir="ltr">
+                  {(summary?.currentMonth.netProfitAfterExpenses || 0).toFixed(2)} ر.س
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  بعد خصم التكاليف
+                </p>
+              </div>
+              <div className="p-3 rounded-full bg-amber-100 dark:bg-amber-900/30">
+                <Wallet className="w-6 h-6 text-amber-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* الإجماليات - الصف الثاني */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">إجمالي الأرباح</p>
+                <p className="text-sm text-muted-foreground">إجمالي حصة الشريك</p>
                 <p className="text-2xl font-bold" dir="ltr">
                   {(summary?.allTime.partnerShare || 0).toLocaleString("en-US")} ر.س
                 </p>
@@ -227,6 +358,25 @@ export default function PartnerProfitsSection() {
               </div>
               <div className="p-3 rounded-full bg-primary/10">
                 <Wallet className="w-6 h-6 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">إجمالي التكاليف</p>
+                <p className="text-2xl font-bold text-red-600" dir="ltr">
+                  -{(summary?.allTime.totalExpenses || 0).toLocaleString("en-US")} ر.س
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {expenses.length} تكلفة مسجلة
+                </p>
+              </div>
+              <div className="p-3 rounded-full bg-red-100 dark:bg-red-900/30">
+                <MinusCircle className="w-6 h-6 text-red-600" />
               </div>
             </div>
           </CardContent>
@@ -251,6 +401,111 @@ export default function PartnerProfitsSection() {
           </CardContent>
         </Card>
       </div>
+
+      {/* قسم إدارة التكاليف */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <MinusCircle className="w-5 h-5 text-red-500" />
+                إدارة التكاليف والمصروفات
+              </CardTitle>
+              <CardDescription>
+                أضف التكاليف التي يجب خصمها من الأرباح
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchExpenses()}
+                className="gap-2"
+                data-testid="button-refresh-expenses"
+              >
+                <RefreshCw className="w-4 h-4" />
+                تحديث
+              </Button>
+              <Dialog open={isExpenseDialogOpen} onOpenChange={setIsExpenseDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-2" data-testid="button-add-expense">
+                    <Plus className="w-4 h-4" />
+                    إضافة تكلفة
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
+                    <DialogDescription>
+                      أدخل بيانات التكلفة لخصمها من الأرباح
+                    </DialogDescription>
+                  </DialogHeader>
+                  <AddExpenseForm
+                    onSubmit={(data) => createExpenseMutation.mutate(data)}
+                    isPending={createExpenseMutation.isPending}
+                  />
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoadingExpenses ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : expenses.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <MinusCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>لا توجد تكاليف مسجلة</p>
+              <p className="text-sm mt-2">اضغط على "إضافة تكلفة" لإضافة أول تكلفة</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {expenses.map((expense) => (
+                <div
+                  key={expense.id}
+                  className="flex items-center justify-between p-4 rounded-lg border hover-elevate"
+                  data-testid={`expense-row-${expense.id}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
+                      <MinusCircle className="w-5 h-5 text-red-600" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold">{expense.title}</span>
+                        {getCategoryBadge(expense.category)}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {expense.description && <span>{expense.description} | </span>}
+                        <span>{new Date(expense.date).toLocaleDateString("en-US")}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-left">
+                      <p className="font-bold text-red-600" dir="ltr">
+                        -{expense.amount.toLocaleString("en-US")} ر.س
+                      </p>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="text-red-500 hover:text-red-700 hover:bg-red-100"
+                      onClick={() => deleteExpenseMutation.mutate(expense.id)}
+                      disabled={deleteExpenseMutation.isPending}
+                      data-testid={`button-delete-expense-${expense.id}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -619,6 +874,118 @@ function AddProfitForm({
           <Loader2 className="w-4 h-4 animate-spin ml-2" />
         ) : null}
         إضافة السجل
+      </Button>
+    </form>
+  );
+}
+
+const EXPENSE_CATEGORIES = [
+  { value: "صيانة", label: "صيانة" },
+  { value: "إعلانات", label: "إعلانات" },
+  { value: "رواتب", label: "رواتب" },
+  { value: "استضافة", label: "استضافة" },
+  { value: "أخرى", label: "أخرى" },
+];
+
+function AddExpenseForm({ 
+  onSubmit, 
+  isPending 
+}: { 
+  onSubmit: (data: { title: string; amount: number; category: string; description: string; date: string }) => void; 
+  isPending: boolean;
+}) {
+  const [formData, setFormData] = useState({
+    title: "",
+    amount: 0,
+    category: "أخرى",
+    description: "",
+    date: new Date().toISOString().split('T')[0],
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label>عنوان التكلفة</Label>
+        <Input
+          placeholder="مثال: صيانة السيرفر"
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          required
+          data-testid="input-expense-title"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>المبلغ (ريال)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.amount}
+            onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
+            required
+            data-testid="input-expense-amount"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>التصنيف</Label>
+          <Select
+            value={formData.category}
+            onValueChange={(value) => setFormData({ ...formData, category: value })}
+          >
+            <SelectTrigger data-testid="select-expense-category">
+              <SelectValue placeholder="اختر التصنيف" />
+            </SelectTrigger>
+            <SelectContent>
+              {EXPENSE_CATEGORIES.map((cat) => (
+                <SelectItem key={cat.value} value={cat.value}>
+                  {cat.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>التاريخ</Label>
+        <Input
+          type="date"
+          value={formData.date}
+          onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+          required
+          data-testid="input-expense-date"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>الوصف (اختياري)</Label>
+        <Textarea
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          placeholder="تفاصيل إضافية عن التكلفة..."
+          data-testid="input-expense-description"
+        />
+      </div>
+
+      <div className="p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">سيتم خصم:</span>
+          <span className="font-bold text-red-600" dir="ltr">-{formData.amount.toLocaleString()} ر.س</span>
+        </div>
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isPending} data-testid="button-submit-expense">
+        {isPending ? (
+          <Loader2 className="w-4 h-4 animate-spin ml-2" />
+        ) : null}
+        إضافة التكلفة
       </Button>
     </form>
   );
