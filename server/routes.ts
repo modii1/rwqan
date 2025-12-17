@@ -3109,18 +3109,26 @@ app.post("/api/whatsapp/send", async (req, res) => {
         const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
         const pkg = packages.find(p => p.id === sub.packageId);
 
-        // حساب الأيام المتبقية
+        // حساب الأيام المتبقية - الاشتراك يبقى فعال طوال يوم الانتهاء
         let remainingDays: number | null = null;
         let status: "ساري" | "منتهي" | "قريب الانتهاء" = "ساري";
 
         if (sub.endDate) {
           const end = new Date(sub.endDate);
           const now = new Date();
-          remainingDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          // تصفير الوقت للمقارنة بالأيام فقط
+          end.setHours(0, 0, 0, 0);
+          now.setHours(0, 0, 0, 0);
+          
+          const diffTime = end.getTime() - now.getTime();
+          remainingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-          if (remainingDays <= 0) {
+          // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (سالب)
+          if (remainingDays < 0) {
             status = "منتهي";
           } else if (remainingDays <= 7) {
+            // اليوم الأخير (0) أو باقي 7 أيام أو أقل ← ينتهي قريباً
             status = "قريب الانتهاء";
           }
         }

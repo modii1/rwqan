@@ -111,9 +111,10 @@ export default function AdminSubscriptionsSection() {
   };
 
   const getStatusBadge = (status: string, remainingDays: number | null) => {
-    const days = remainingDays ?? 0;
+    const days = remainingDays ?? -1;
     
-    if (status === "منتهي" || days <= 0) {
+    // منتهي: أيام سالبة فقط (تاريخ الانتهاء قبل اليوم)
+    if (status === "منتهي" || days < 0) {
       return (
         <Badge className="bg-red-500 text-white flex items-center gap-1">
           <XCircle className="w-3 h-3" />
@@ -121,11 +122,12 @@ export default function AdminSubscriptionsSection() {
         </Badge>
       );
     }
+    // ينتهي قريباً: اليوم الأخير (0) أو باقي 7 أيام أو أقل
     if (status === "قريب الانتهاء" || days <= 7) {
       return (
         <Badge className="bg-orange-500 text-white flex items-center gap-1">
           <AlertTriangle className="w-3 h-3" />
-          ينتهي قريباً
+          {days === 0 ? "ينتهي اليوم" : "ينتهي قريباً"}
         </Badge>
       );
     }
@@ -252,12 +254,15 @@ export default function AdminSubscriptionsSection() {
                 {/* Days Remaining */}
                 <div className="text-center px-4">
                   <p className={`text-2xl font-bold ${
-                    (sub.remainingDays ?? 0) <= 0 ? 'text-red-600' :
+                    (sub.remainingDays ?? -1) < 0 ? 'text-red-600' :
                     (sub.remainingDays ?? 0) <= 7 ? 'text-orange-600' : 'text-green-600'
                   }`} data-testid={`text-remaining-days-${sub.propertyNumber}`}>
-                    {Math.max(0, sub.remainingDays ?? 0)}
+                    {(sub.remainingDays ?? -1) < 0 ? "منتهي" : sub.remainingDays}
                   </p>
-                  <p className="text-xs text-muted-foreground">يوم متبقي</p>
+                  <p className="text-xs text-muted-foreground">
+                    {(sub.remainingDays ?? -1) < 0 ? "" : 
+                     sub.remainingDays === 0 ? "اليوم الأخير" : "يوم متبقي"}
+                  </p>
                 </div>
 
                 {/* Status & Actions */}
