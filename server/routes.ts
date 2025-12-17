@@ -3161,10 +3161,10 @@ app.post("/api/whatsapp/send", async (req, res) => {
         return res.status(400).json({ error: "الباقة غير موجودة" });
       }
 
-      // حساب التواريخ
+      // حساب التواريخ (duration بالأيام)
       const startDate = new Date().toISOString();
       const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + (pkg.duration || 1));
+      endDate.setDate(endDate.getDate() + (pkg.duration || 30));
 
       const sub = await googleSheetsService.createMultiPropertySubscription({
         packageId,
