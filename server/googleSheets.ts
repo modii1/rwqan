@@ -2027,17 +2027,23 @@ async getWhatsAppLogs() {
       totalRevenue: number;
       partnerShare: number;
       paymentsCount: number;
+      totalExpenses: number;
+      netProfitAfterExpenses: number;
     };
     allTime: {
       totalRevenue: number;
       partnerShare: number;
       paymentsCount: number;
+      totalExpenses: number;
+      netProfitAfterExpenses: number;
     };
     pendingPayments: number;
     recentPayments: any[];
+    recentExpenses: Expense[];
   }> {
     const payments = await this.getPayments();
     const feeConfigs = await this.getFeeConfigs();
+    const expenses = await this.getExpenses();
     const now = getNowInRiyadh();
     const startOfMonth = getStartOfMonthRiyadh(now);
     
@@ -2113,20 +2119,42 @@ async getWhatsAppLogs() {
       .sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime())
       .slice(0, 10);
     
+    // حساب التكاليف للشهر الحالي
+    const currentMonthStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+    const currentMonthExpenses = expenses.filter(e => e.date.startsWith(currentMonthStr));
+    const currentMonthTotalExpenses = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+    
+    // حساب إجمالي التكاليف
+    const allTimeTotalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+    
+    // الربح الصافي بعد التكاليف
+    const currentMonthNetProfit = Math.max(0, currentMonthCalc.partnerShare - currentMonthTotalExpenses);
+    const allTimeNetProfit = Math.max(0, allTimeCalc.partnerShare - allTimeTotalExpenses);
+    
+    // آخر التكاليف المضافة
+    const recentExpenses = expenses
+      .sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime())
+      .slice(0, 5);
+    
     return {
       currentMonth: {
         monthYear: `${now.getFullYear()}/${(now.getMonth() + 1).toString().padStart(2, '0')}`,
         totalRevenue: currentMonthCalc.totalRevenue,
         partnerShare: currentMonthCalc.partnerShare,
         paymentsCount: currentMonthPayments.length,
+        totalExpenses: currentMonthTotalExpenses,
+        netProfitAfterExpenses: currentMonthNetProfit,
       },
       allTime: {
         totalRevenue: allTimeCalc.totalRevenue,
         partnerShare: allTimeCalc.partnerShare,
         paymentsCount: completedPayments.length,
+        totalExpenses: allTimeTotalExpenses,
+        netProfitAfterExpenses: allTimeNetProfit,
       },
       pendingPayments,
       recentPayments,
+      recentExpenses,
     };
   }
 
