@@ -58,10 +58,10 @@ async function updateRemainingDaysInSheet() {
 export function startScheduler() {
   console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
   
-  // تحديث فوري عند بدء السيرفر
+  // تحديث عند بدء السيرفر (بعد تأخير لتجنب تجاوز حصص Google Sheets)
   setTimeout(() => {
     updateRemainingDaysInSheet().catch(console.error);
-  }, 5000); // انتظار 5 ثواني للتأكد من جاهزية النظام
+  }, 60000); // انتظار 60 ثانية لتجنب تجاوز حصة القراءة
   
   // تحديث كل 24 ساعة (86400000 مللي ثانية)
   const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
