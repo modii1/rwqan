@@ -310,6 +310,8 @@ export const partnerProfitSchema = z.object({
   totalRevenue: z.number(), // إجمالي الإيرادات
   partnerShare: z.number(), // نصيب الشريك (50%)
   partnerPercentage: z.number().default(50), // نسبة الشريك
+  totalExpenses: z.number().default(0), // إجمالي التكاليف
+  netProfitAfterExpenses: z.number().default(0), // الربح الصافي بعد التكاليف
   transferDate: z.string().optional(), // تاريخ التحويل
   transferStatus: z.enum(['pending', 'transferred']).default('pending'), // حالة التحويل
   notes: z.string().optional(), // ملاحظات

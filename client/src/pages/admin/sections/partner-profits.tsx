@@ -197,6 +197,8 @@ export default function PartnerProfitsSection() {
       totalRevenue: summary.currentMonth.totalRevenue,
       partnerShare: summary.currentMonth.partnerShare,
       partnerPercentage: 50,
+      totalExpenses: summary.currentMonth.totalExpenses || 0,
+      netProfitAfterExpenses: summary.currentMonth.netProfitAfterExpenses || 0,
       transferStatus: "pending",
     });
   };
@@ -713,26 +715,22 @@ export default function PartnerProfitsSection() {
               {profits.map((profit) => (
                 <div
                   key={profit.id}
-                  className="flex items-center justify-between p-4 rounded-lg border hover-elevate"
+                  className="p-4 rounded-lg border hover-elevate"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Calendar className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{profit.monthYear}</span>
-                        {getStatusBadge(profit.transferStatus)}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-4">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <Calendar className="w-5 h-5 text-primary" />
                       </div>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {profit.activeSubscriptions} دفعة | <span dir="ltr">{profit.totalRevenue.toLocaleString("en-US")}</span> ر.س إيرادات
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{profit.monthYear}</span>
+                          {getStatusBadge(profit.transferStatus)}
+                        </div>
+                        <div className="text-sm text-muted-foreground mt-1">
+                          {profit.activeSubscriptions} دفعة | <span dir="ltr">{profit.totalRevenue.toLocaleString("en-US")}</span> ر.س إيرادات
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-left">
-                      <p className="text-sm text-muted-foreground">نصيب الشريك</p>
-                      <p className="font-bold text-emerald-600" dir="ltr">{profit.partnerShare.toLocaleString("en-US")} ر.س</p>
                     </div>
                     {profit.transferStatus === "pending" && (
                       <Button
@@ -747,6 +745,32 @@ export default function PartnerProfitsSection() {
                         تم التحويل
                       </Button>
                     )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
+                    <div className="text-center p-2 rounded bg-emerald-50 dark:bg-emerald-950/20">
+                      <div className="text-xs text-emerald-600 mb-1">حصة الشريك</div>
+                      <p className="font-semibold text-emerald-600" dir="ltr">
+                        {profit.partnerShare.toLocaleString("en-US")} ر.س
+                      </p>
+                    </div>
+                    <div className="text-center p-2 rounded bg-red-50 dark:bg-red-950/20">
+                      <div className="text-xs text-red-600 mb-1">التكاليف</div>
+                      <p className="font-semibold text-red-600" dir="ltr">
+                        -{(profit.totalExpenses || 0).toLocaleString("en-US")} ر.س
+                      </p>
+                    </div>
+                    <div className="text-center p-2 rounded bg-amber-50 dark:bg-amber-950/20">
+                      <div className="text-xs text-amber-600 mb-1">صافي الربح</div>
+                      <p className="font-semibold text-amber-600" dir="ltr">
+                        {(profit.netProfitAfterExpenses || 0).toFixed(2)} ر.س
+                      </p>
+                    </div>
+                    <div className="text-center p-2 rounded bg-blue-50 dark:bg-blue-950/20">
+                      <div className="text-xs text-blue-600 mb-1">نسبة الشريك</div>
+                      <p className="font-semibold text-blue-600">
+                        {profit.partnerPercentage}%
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))}
