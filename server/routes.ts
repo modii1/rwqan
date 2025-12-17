@@ -2408,6 +2408,31 @@ app.post("/api/admin/payment/approve", async (req, res) => {
           property,
           payment.receiptUrl || ""
         );
+
+        // === إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين ===
+        if ((payment as any).secondPropertyNumber) {
+          const secondProperty = await googleSheetsService.getPropertyByNumber((payment as any).secondPropertyNumber);
+          if (secondProperty) {
+            const secondSubscriptionData = {
+              ...subscriptionData,
+              price: payment.finalAmount / 2, // نصف السعر لكل عقار
+              linkedProperty: payment.propertyNumber, // ربط بالعقار الأول
+            };
+            await googleSheetsService.addSubscriptionToSheet(
+              (payment as any).secondPropertyNumber,
+              secondSubscriptionData,
+              secondProperty,
+              payment.receiptUrl || ""
+            );
+            console.log(`✅ Second property subscription activated: ${(payment as any).secondPropertyNumber}`);
+            
+            // تحديث الاشتراك الأول بربط العقار الثاني
+            await googleSheetsService.updateSubscriptionLinkedProperty(
+              payment.propertyNumber,
+              (payment as any).secondPropertyNumber
+            );
+          }
+        }
       }
     }
 
@@ -2419,6 +2444,14 @@ app.post("/api/admin/payment/approve", async (req, res) => {
       payment.propertyNumber,
       "approved"
     );
+    
+    // قبول التحقق للعقار الثاني أيضاً
+    if ((payment as any).secondPropertyNumber) {
+      await googleSheetsService.updateVerificationStatus(
+        (payment as any).secondPropertyNumber,
+        "approved"
+      );
+    }
 
     // سجل التحقق
     await googleSheetsService.addVerificationLogToSheet({
@@ -3633,20 +3666,46 @@ app.post("/api/paymob/webhook", async (req, res) => {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
 
       if (property) {
+        const subscriptionData = {
+          packageId: payment.packageId,
+          price: payment.pendingPrice || payment.finalAmount,
+          subscriptionType: payment.pendingSubscriptionType || "موثوق",
+          startDate: payment.pendingStartDate,
+          endDate: payment.pendingEndDate,
+          paymentId: payment.id,
+        };
+        
         await googleSheetsService.addSubscriptionToSheet(
           payment.propertyNumber,
-          {
-            packageId: payment.packageId,
-            price: payment.pendingPrice || payment.finalAmount,
-            subscriptionType: payment.pendingSubscriptionType || "موثوق",
-            startDate: payment.pendingStartDate,
-            endDate: payment.pendingEndDate,
-            paymentId: payment.id,
-          },
+          subscriptionData,
           property
         );
 
         console.log("🎉 Subscription Activated:", payment.propertyNumber);
+
+        // === إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين ===
+        if ((payment as any).secondPropertyNumber) {
+          const secondProperty = await storage.getPropertyByNumber((payment as any).secondPropertyNumber);
+          if (secondProperty) {
+            const secondSubscriptionData = {
+              ...subscriptionData,
+              price: (payment.pendingPrice || payment.finalAmount) / 2,
+              linkedProperty: payment.propertyNumber,
+            };
+            await googleSheetsService.addSubscriptionToSheet(
+              (payment as any).secondPropertyNumber,
+              secondSubscriptionData,
+              secondProperty
+            );
+            console.log(`🎉 Second property subscription activated: ${(payment as any).secondPropertyNumber}`);
+            
+            // تحديث الاشتراك الأول بربط العقار الثاني
+            await googleSheetsService.updateSubscriptionLinkedProperty(
+              payment.propertyNumber,
+              (payment as any).secondPropertyNumber
+            );
+          }
+        }
       }
     } else if (isNewRegistration) {
       console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);

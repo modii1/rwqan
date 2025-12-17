@@ -831,6 +831,26 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   }
 }
 
+  // تحديث العقار المرتبط في الاشتراك
+  async updateSubscriptionLinkedProperty(propertyNumber: string, linkedProperty: string): Promise<void> {
+    try {
+      const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+      const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+      
+      if (rowIndex === -1) {
+        console.log(`⚠️ Subscription not found for property ${propertyNumber}`);
+        return;
+      }
+      
+      const row = rows[rowIndex];
+      row[13] = linkedProperty; // العمود 13 = العقار المرتبط
+      
+      await this.updateRow(SHEETS.SUBSCRIPTIONS, rowIndex + 2, row);
+      console.log(`🔗 Updated linkedProperty for ${propertyNumber} → ${linkedProperty}`);
+    } catch (error) {
+      console.error(`❌ خطأ في تحديث العقار المرتبط للعقار ${propertyNumber}:`, error);
+    }
+  }
 
   async updateSubscription(
     id: string,
