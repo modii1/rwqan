@@ -22,6 +22,8 @@ import type {
   InsertMultiPropertySubscription,
   FeeConfig,
   InsertFeeConfig,
+  Expense,
+  InsertExpense,
 } from "@shared/schema";
 import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils";
@@ -349,6 +351,15 @@ class GoogleSheetsService {
         "تاريخ الانتهاء",
         "الحالة",
         "معرف الدفع",
+        "تاريخ الإنشاء",
+      ],
+      [SHEETS.EXPENSES]: [
+        "المعرف",
+        "العنوان",
+        "المبلغ",
+        "التصنيف",
+        "الوصف",
+        "التاريخ",
         "تاريخ الإنشاء",
       ],
     };
@@ -2415,6 +2426,112 @@ async getWhatsAppLogs() {
       feeConfigId: config.id,
       feeConfigName: config.name,
     };
+  }
+
+  // ======================
+  // 💵 التكاليف/المصاريف (Expenses)
+  // ======================
+
+  async getExpenses(): Promise<Expense[]> {
+    const rows = await this.readSheet(SHEETS.EXPENSES);
+    return rows.map((row) => ({
+      id: row[0] || "",
+      title: row[1] || "",
+      amount: parseFloat(row[2]) || 0,
+      category: (row[3] as Expense["category"]) || "أخرى",
+      description: row[4] || undefined,
+      date: row[5] || "",
+      createdAt: row[6] || undefined,
+    }));
+  }
+
+  async getExpenseById(id: string): Promise<Expense | null> {
+    const expenses = await this.getExpenses();
+    return expenses.find(e => e.id === id) || null;
+  }
+
+  async createExpense(expense: InsertExpense): Promise<Expense> {
+    const id = `EXP-${Date.now()}`;
+    const newExpense: Expense = {
+      id,
+      ...expense,
+      createdAt: new Date().toISOString(),
+    };
+
+    const row = [
+      newExpense.id,
+      newExpense.title,
+      newExpense.amount.toString(),
+      newExpense.category || "أخرى",
+      newExpense.description || "",
+      newExpense.date,
+      newExpense.createdAt,
+    ];
+
+    await this.appendToSheet(SHEETS.EXPENSES, [row]);
+    console.log(`💵 Created expense: ${id} - ${newExpense.title} (${newExpense.amount} ر.س)`);
+    return newExpense;
+  }
+
+  async updateExpense(id: string, updates: Partial<InsertExpense>): Promise<Expense | null> {
+    const rows = await this.readSheet(SHEETS.EXPENSES);
+    const rowIndex = rows.findIndex(r => r[0] === id);
+    
+    if (rowIndex === -1) return null;
+
+    const existingRow = rows[rowIndex];
+    const updatedExpense: Expense = {
+      id: existingRow[0],
+      title: updates.title ?? existingRow[1],
+      amount: updates.amount ?? (parseFloat(existingRow[2]) || 0),
+      category: updates.category ?? (existingRow[3] as Expense["category"]) ?? "أخرى",
+      description: updates.description ?? existingRow[4] ?? undefined,
+      date: updates.date ?? existingRow[5],
+      createdAt: existingRow[6],
+    };
+
+    const row = [
+      updatedExpense.id,
+      updatedExpense.title,
+      updatedExpense.amount.toString(),
+      updatedExpense.category || "أخرى",
+      updatedExpense.description || "",
+      updatedExpense.date,
+      updatedExpense.createdAt,
+    ];
+
+    await this.updateRow(SHEETS.EXPENSES, rowIndex + 2, row);
+    return updatedExpense;
+  }
+
+  async deleteExpense(id: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.EXPENSES);
+    const rowIndex = rows.findIndex(r => r[0] === id);
+    
+    if (rowIndex === -1) {
+      throw new Error("التكلفة غير موجودة");
+    }
+    
+    await this.deleteRow(SHEETS.EXPENSES, rowIndex + 2);
+    console.log(`🗑️ Deleted expense: ${id}`);
+  }
+
+  async getExpensesByMonth(monthYear: string): Promise<Expense[]> {
+    const expenses = await this.getExpenses();
+    return expenses.filter(e => e.date.startsWith(monthYear));
+  }
+
+  async getTotalExpenses(startDate?: string, endDate?: string): Promise<number> {
+    const expenses = await this.getExpenses();
+    let filtered = expenses;
+    
+    if (startDate && endDate) {
+      filtered = expenses.filter(e => e.date >= startDate && e.date <= endDate);
+    } else if (startDate) {
+      filtered = expenses.filter(e => e.date >= startDate);
+    }
+    
+    return filtered.reduce((total, e) => total + e.amount, 0);
   }
   
 }
