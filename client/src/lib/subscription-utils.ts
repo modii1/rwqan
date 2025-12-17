@@ -57,20 +57,40 @@ export function resetToMidnight(date: Date): Date {
 
 /**
  * حساب الأيام المتبقية من تاريخ الانتهاء
- * القاعدة: الأيام المتبقية = (تاريخ النهاية - تاريخ اليوم)
- * لا يسمح بقيم سالبة
+ * القاعدة: الاشتراك يبقى فعال طوال يوم الانتهاء (حتى 23:59:59)
+ * - إذا اليوم = تاريخ الانتهاء ← 0 (اليوم الأخير، لكن الاشتراك فعال)
+ * - إذا تاريخ الانتهاء > اليوم ← عدد الأيام المتبقية
+ * - إذا تاريخ الانتهاء < اليوم ← -1 (منتهي)
  */
 export function calculateRemainingDays(endDate: any): number {
   const end = parseDate(endDate);
-  if (!end) return 0;
+  if (!end) return -1;
   
   const today = resetToMidnight(new Date());
   const endMidnight = resetToMidnight(end);
   
   const diffTime = endMidnight.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
   
-  return Math.max(0, diffDays);
+  // إذا كان الفرق سالب ← الاشتراك منتهي
+  // إذا = 0 ← اليوم الأخير (الاشتراك فعال)
+  // إذا > 0 ← الأيام المتبقية
+  return diffDays;
+}
+
+/**
+ * التحقق من انتهاء الاشتراك
+ * الاشتراك يعتبر منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم
+ */
+export function isSubscriptionExpired(endDate: any): boolean {
+  return calculateRemainingDays(endDate) < 0;
+}
+
+/**
+ * التحقق إذا كان اليوم هو اليوم الأخير
+ */
+export function isLastDay(endDate: any): boolean {
+  return calculateRemainingDays(endDate) === 0;
 }
 
 /**
@@ -100,6 +120,7 @@ export type SubscriptionStatus =
 
 /**
  * تحديد حالة الاشتراك بناءً على الأيام المتبقية والحالة المخزنة
+ * القاعدة: الاشتراك يبقى فعال طوال يوم الانتهاء
  */
 export function getSubscriptionStatus(
   endDate: any, 
@@ -111,7 +132,9 @@ export function getSubscriptionStatus(
   
   const remainingDays = calculateRemainingDays(endDate);
   
-  if (remainingDays === 0) return 'expired';
+  // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (سالب)
+  if (remainingDays < 0) return 'expired';
+  // اليوم الأخير أو باقي 5 أيام أو أقل ← ينتهي قريباً
   if (remainingDays <= 5) return 'expiring';
   return 'active';
 }
