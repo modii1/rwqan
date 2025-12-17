@@ -2158,12 +2158,10 @@ async getWhatsAppLogs() {
     ];
 
     await this.appendToSheet(SHEETS.MULTI_PROPERTY_SUBS, [row]);
+    console.log(`📝 Created multi-property subscription record: ${id} for properties ${newSub.propertyNumber1} & ${newSub.propertyNumber2}`);
     
-    const pkg = await this.getPackageById(newSub.packageId);
-    if (pkg) {
-      await this.activatePropertySubscription(newSub.propertyNumber1, pkg, newSub.startDate, newSub.endDate);
-      await this.activatePropertySubscription(newSub.propertyNumber2, pkg, newSub.startDate, newSub.endDate);
-    }
+    // ملاحظة: تفعيل الاشتراكات يتم في routes.ts بعد الموافقة على الدفع
+    // لا حاجة لاستدعاء activatePropertySubscription هنا لتجنب التكرار
     
     return newSub;
   }
