@@ -84,6 +84,28 @@ export default function AdminSubscriptionsSection() {
     },
   });
 
+  // تحديث الأيام المتبقية يدوياً
+  const updateDaysMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/admin/update-remaining-days', {});
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
+      toast({
+        title: "تم التحديث بنجاح",
+        description: `تم تحديث ${data.updatedCount || 0} اشتراك`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "خطأ",
+        description: error.message || "فشل في تحديث الأيام المتبقية",
+        variant: "destructive",
+      });
+    },
+  });
+
   const filteredSubscriptions = subscriptions
     .filter(sub => {
       const matchesSearch = 
@@ -158,10 +180,22 @@ export default function AdminSubscriptionsSection() {
           <h1 className="text-2xl font-bold text-[#434040]">إدارة الاشتراكات</h1>
           <p className="text-muted-foreground">عرض وإدارة جميع اشتراكات العقارات</p>
         </div>
-        <Button onClick={() => refetch()} variant="outline" className="gap-2">
-          <RefreshCw className="w-4 h-4" />
-          تحديث
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={() => updateDaysMutation.mutate()} 
+            variant="default"
+            disabled={updateDaysMutation.isPending}
+            className="gap-2"
+            data-testid="button-update-days"
+          >
+            <Calendar className="w-4 h-4" />
+            {updateDaysMutation.isPending ? "جاري التحديث..." : "تحديث الأيام"}
+          </Button>
+          <Button onClick={() => refetch()} variant="outline" className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            تحديث
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
