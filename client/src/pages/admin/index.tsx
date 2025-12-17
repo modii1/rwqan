@@ -35,7 +35,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 import PropertiesSection from "./sections/properties";
-import SubscriptionsSection from "./sections/subscriptions";
+import AdminSubscriptionsSection from "./sections/admin-subscriptions";
 import PackagesSection from "./sections/packages";
 import DiscountsSection from "./sections/discounts";
 import RequestsSection from "./sections/requests";
@@ -253,7 +253,7 @@ export default function AdminDashboard() {
         )}
 
         {activeSection === "properties" && <PropertiesSection />}
-        {activeSection === "subscriptions" && <SubscriptionsSection />}
+        {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
         {activeSection === "payments" && <PaymentsSection />}
         {activeSection === "packages" && <PackagesSection />}
         {activeSection === "discounts" && <DiscountsSection />}
