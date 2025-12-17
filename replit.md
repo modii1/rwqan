@@ -11,6 +11,12 @@
 - **Language**: All generated content and explanations should be in Arabic.
 
 ## Recent Changes (December 17, 2025)
+- **Expense Tracking System**: Added comprehensive expense/cost tracking to deduct from profits:
+  - New "التكاليف" (Expenses) sheet in Google Sheets with columns: المعرف, العنوان, المبلغ, التصنيف, الوصف, التاريخ, تاريخ الإنشاء
+  - Categories: صيانة, إعلانات, رواتب, استضافة, أخرى
+  - API endpoints: GET/POST/PUT/DELETE `/api/admin/expenses`
+  - Profit summary now includes: `totalExpenses` and `netProfitAfterExpenses` for both current month and all-time
+  - Expenses are automatically deducted from partner share to calculate net profit
 - **Multi-Property Subscription Plans**: Added support for 2-property packages (50 SAR for 2 properties = 25 SAR each):
   - Added `propertyCount` field to packages (column 8 in Packages sheet)
   - Added `linkedProperty` field to subscriptions (column 13 in Subscriptions sheet)
@@ -18,6 +24,7 @@
   - Both properties get activated with same subscription dates
   - Price split evenly between both properties (25 SAR each)
   - Linked property displayed in owner dashboard
+  - Automatic "اشتراكات العقارين" sheet population upon payment approval
 - **Payment Schema Updated**: Added `secondPropertyNumber` field for storing second property in payment records (column Z in Payments sheet)
 - **Activation Logic Updated**: Both bank transfer approval and Paymob webhook now create two linked subscriptions with correct pricing
 - **UI Pricing Display**: Multi-property packages now show per-property price ("25 ر.س / عقار") with total ("الإجمالي: 50 ر.س للعقارين")
