@@ -46,6 +46,7 @@ const SHEETS = {
   SETTINGS: "الإعدادات",
   MULTI_PROPERTY_SUBS: "اشتراكات العقارين",
   FEE_CONFIGS: "إعدادات الرسوم",
+  EXPENSES: "التكاليف",
 };
 
 // عمود حالة التحقق — العمود 20 (T)

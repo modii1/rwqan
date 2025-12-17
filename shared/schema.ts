@@ -115,6 +115,23 @@ export const insertProfitSchema = profitSchema.omit({ id: true, createdAt: true 
 export type InsertProfit = z.infer<typeof insertProfitSchema>;
 
 // =========================
+// Expense Schema (التكاليف/المصاريف)
+// =========================
+export const expenseSchema = z.object({
+  id: z.string(),
+  title: z.string(), // عنوان التكلفة (مثل: صيانة، إعلانات، رواتب)
+  amount: z.number(), // المبلغ
+  category: z.enum(['صيانة', 'إعلانات', 'رواتب', 'استضافة', 'أخرى']).default('أخرى'),
+  description: z.string().optional(), // وصف إضافي
+  date: z.string(), // تاريخ التكلفة
+  createdAt: z.string().optional(),
+});
+
+export type Expense = z.infer<typeof expenseSchema>;
+export const insertExpenseSchema = expenseSchema.omit({ id: true, createdAt: true });
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+
+// =========================
 // Request Schema (الطلبات - WhatsApp)
 // =========================
 export const requestSchema = z.object({
