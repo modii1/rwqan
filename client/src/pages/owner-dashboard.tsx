@@ -67,7 +67,7 @@ export default function OwnerDashboard() {
         description: "تم تفعيل اشتراكك بنجاح. شكراً لك!",
       });
       // إزالة query param من URL
-      window.history.replaceState({}, '', '/owner');
+      window.history.replaceState({}, '', '/owner/dashboard');
     }
   }, [toast]);
 
