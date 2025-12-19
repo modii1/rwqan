@@ -404,7 +404,13 @@ export async function notifySubscriptionExpired(data: {
     return { status: "disabled", response: "الإشعار معطل" };
   }
   
-  const text = `⚠️ الاشتراك منتهي - يرجى التجديد\n\n🔗 رابط تسجيل الدخول:\nhttps://rwqan.replit.app/owner\n\n📞 للتواصل واتساب:\nhttps://wa.me/966533220646`;
+  // تنسيق رقم المالك للواتساب (إزالة الصفر وإضافة 966)
+  let ownerWhatsApp = data.ownerPhone.replace(/^0/, '966').replace(/[^0-9]/g, '');
+  if (!ownerWhatsApp.startsWith('966')) {
+    ownerWhatsApp = '966' + ownerWhatsApp;
+  }
+  
+  const text = `⚠️ الاشتراك منتهي - يرجى التجديد\n\n🔗 رابط تسجيل الدخول:\nhttps://rwqan.replit.app/owner\n\n📲 تواصل مع المالك:\nhttps://wa.me/${ownerWhatsApp}`;
   return sendAdminWhatsAppNotification({
     type: "⚠️ انتهاء اشتراك",
     text,
