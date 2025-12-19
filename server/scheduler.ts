@@ -8,9 +8,6 @@ import { storage } from "./storage";
 import { notifySubscriptionExpired } from "./whatsapp";
 import { googleSheetsService } from "./googleSheets";
 
-// تتبع الإشعارات المُرسلة اليوم لتجنب التكرار في نفس اليوم
-const sentNotificationsToday = new Map<string, string>(); // propertyNumber -> lastSentDate
-
 /**
  * التحقق من أن اليوم يقع ضمن أيام الإرسال
  * النمط: 3 أيام إرسال، 4 أيام توقف، تكرار
@@ -26,6 +23,33 @@ function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
   return positionInCycle <= 3;
 }
 
+/**
+ * جلب الإشعارات المُرسلة اليوم من جدول "تنبيهات الواتساب"
+ * للتأكد من عدم إرسال إشعار مكرر حتى لو أُعيد تشغيل السيرفر
+ */
+async function getTodaysSentNotifications(): Promise<Set<string>> {
+  const sentToday = new Set<string>();
+  try {
+    const notifications = await googleSheetsService.readSheet("تنبيهات الواتساب");
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    for (const row of notifications) {
+      // البحث عن إشعارات "انتهاء اشتراك" المُرسلة اليوم
+      const notificationType = row[2] || ""; // عمود نوع الإشعار
+      const propertyNumber = row[3] || ""; // عمود رقم العقار
+      const createdAt = row[8] || ""; // عمود تاريخ الإنشاء
+      
+      if (notificationType.includes("انتهاء") && createdAt.includes(todayStr)) {
+        sentToday.add(propertyNumber);
+      }
+    }
+    console.log(`📋 [Scheduler] إشعارات اليوم المُرسلة: ${sentToday.size} عقار`);
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في قراءة إشعارات اليوم:", error);
+  }
+  return sentToday;
+}
+
 // تحديث الأيام المتبقية في الشيت + إرسال إشعارات
 async function updateRemainingDaysInSheet() {
   try {
@@ -36,6 +60,9 @@ async function updateRemainingDaysInSheet() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
+    
+    // جلب الإشعارات المُرسلة اليوم من Google Sheets (للتأكد حتى بعد إعادة تشغيل السيرفر)
+    const sentToday = await getTodaysSentNotifications();
     
     let expired = 0;
     let expiringSoon = 0;
@@ -66,10 +93,9 @@ async function updateRemainingDaysInSheet() {
           // التحقق من:
           // 1. العقار موجود
           // 2. اليوم ضمن أيام الإرسال (3 أيام كل أسبوع)
-          // 3. لم يُرسل إشعار لهذا العقار اليوم
+          // 3. لم يُرسل إشعار لهذا العقار اليوم (من Google Sheets)
           // 4. إشعارات الانتهاء غير موقوفة لهذا العقار
-          const lastSentDate = sentNotificationsToday.get(sub.propertyNumber);
-          const alreadySentToday = lastSentDate === todayStr;
+          const alreadySentToday = sentToday.has(sub.propertyNumber);
           const isMuted = (property as any)?.muteExpiryNotification === true;
           
           if (property && shouldSendNotificationToday(daysSinceExpiry) && !alreadySentToday && !isMuted) {
@@ -82,7 +108,7 @@ async function updateRemainingDaysInSheet() {
               });
               if (result.status === "success") {
                 notificationsSent++;
-                sentNotificationsToday.set(sub.propertyNumber, todayStr);
+                sentToday.add(sub.propertyNumber); // إضافة للذاكرة المؤقتة لتجنب التكرار في نفس الدورة
                 console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
               } else {
                 console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
