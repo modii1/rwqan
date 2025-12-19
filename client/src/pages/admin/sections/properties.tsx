@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useLocation } from "wouter"
@@ -33,6 +33,7 @@ interface PropertyData {
   subscriptionType: string;
   subscriptionDate?: string | null;
   imageUrls?: string[];
+  muteExpiryNotification?: boolean;
   prices?: {
     weekday?: string;
     weekend?: string;
@@ -202,6 +203,28 @@ export default function PropertiesSection() {
     },
   });
 
+  const muteExpiryMutation = useMutation({
+    mutationFn: async ({ propertyNumber, muted }: { propertyNumber: string; muted: boolean }) => {
+      const res = await fetch(`/api/admin/properties/${propertyNumber}/mute-expiry`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ muted }),
+      });
+      if (!res.ok) throw new Error("فشل في تعديل حالة الإشعارات");
+      return res.json();
+    },
+    onSuccess: (_, { muted }) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      toast({ 
+        title: muted ? "تم إيقاف الإشعارات ✓" : "تم تفعيل الإشعارات ✓", 
+        description: muted ? "لن يتم إرسال إشعارات انتهاء الاشتراك لهذا العقار" : "سيتم إرسال إشعارات انتهاء الاشتراك لهذا العقار" 
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
   const resetForm = () => {
     setSelectedFacilities([]);
     setPrices({ weekday: "", weekend: "", overnight: "", holidays: "" });
@@ -357,6 +380,24 @@ export default function PropertiesSection() {
                           <UserX className="w-4 h-4 text-orange-500" />
                         </Button>
                       )}
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => muteExpiryMutation.mutate({ 
+                          propertyNumber: p.propertyNumber, 
+                          muted: !p.muteExpiryNotification 
+                        })}
+                        title={p.muteExpiryNotification ? "تفعيل إشعارات انتهاء الاشتراك" : "إيقاف إشعارات انتهاء الاشتراك"}
+                        disabled={muteExpiryMutation.isPending}
+                        data-testid={`button-mute-expiry-${p.propertyNumber}`}
+                      >
+                        {p.muteExpiryNotification ? (
+                          <BellOff className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Bell className="w-4 h-4 text-green-500" />
+                        )}
+                      </Button>
 
                       <Button
                         size="icon"
