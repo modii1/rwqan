@@ -1,12 +1,15 @@
 /**
  * 📅 مهام مجدولة - تحديث الاشتراكات يومياً
  * - تحديث الأيام المتبقية في Google Sheets
- * - إرسال إشعارات للاشتراكات المنتهية قريباً
+ * - إرسال إشعارات للاشتراكات المنتهية (مرة واحدة فقط في يوم الانتهاء)
  */
 
 import { storage } from "./storage";
 import { notifySubscriptionExpired } from "./whatsapp";
 import { googleSheetsService } from "./googleSheets";
+
+// تتبع الإشعارات المُرسلة لتجنب التكرار (يُمسح عند إعادة تشغيل السيرفر لكن يُحفظ في Sheets)
+const sentNotifications = new Set<string>();
 
 // تحديث الأيام المتبقية في الشيت + إرسال إشعارات
 async function updateRemainingDaysInSheet() {
@@ -17,6 +20,7 @@ async function updateRemainingDaysInSheet() {
     const properties = await storage.getProperties();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
     
     let expired = 0;
     let expiringSoon = 0;
@@ -41,27 +45,28 @@ async function updateRemainingDaysInSheet() {
         if (remainingDays < 0) {
           expired++;
           
-          // إرسال إشعار للاشتراكات المنتهية حديثاً (في آخر 3 أيام)
+          // إرسال إشعار فقط إذا انتهى الاشتراك اليوم أو أمس (remainingDays === -1)
+          // ولم يُرسل إشعار له من قبل
           const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
-          if (property) {
-            // إرسال إشعار إذا انتهى الاشتراك في الـ 3 أيام الماضية
-            if (remainingDays >= -3 && remainingDays < 0) {
-              try {
-                console.log(`📤 [Scheduler] إرسال إشعار للعقار ${sub.propertyNumber} (انتهى منذ ${Math.abs(remainingDays)} يوم)`);
-                const result = await notifySubscriptionExpired({
-                  propertyNumber: sub.propertyNumber,
-                  propertyName: property.name || "",
-                  ownerPhone: property.whatsappNumber || "",
-                });
-                if (result.status === "success") {
-                  notificationsSent++;
-                  console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
-                } else {
-                  console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
-                }
-              } catch (err) {
-                console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
+          const notificationKey = `${sub.propertyNumber}-${sub.endDate}`;
+          
+          if (property && remainingDays === -1 && !sentNotifications.has(notificationKey)) {
+            try {
+              console.log(`📤 [Scheduler] إرسال إشعار انتهاء للعقار ${sub.propertyNumber}`);
+              const result = await notifySubscriptionExpired({
+                propertyNumber: sub.propertyNumber,
+                propertyName: property.name || "",
+                ownerPhone: property.whatsappNumber || "",
+              });
+              if (result.status === "success") {
+                notificationsSent++;
+                sentNotifications.add(notificationKey);
+                console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+              } else {
+                console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
               }
+            } catch (err) {
+              console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
             }
           }
         } else if (remainingDays >= 0 && remainingDays <= 7) {
@@ -79,7 +84,7 @@ async function updateRemainingDaysInSheet() {
     console.log(`   - منتهي: ${expired}`);
     console.log(`   - ينتهي قريباً: ${expiringSoon}`);
     console.log(`   - إشعارات مُرسلة: ${notificationsSent}`);
-    console.log(`   - التاريخ الحالي: ${today.toISOString().split('T')[0]}`);
+    console.log(`   - التاريخ الحالي: ${todayStr}`);
     
     return { updated, expired, expiringSoon, notificationsSent };
   } catch (error) {
