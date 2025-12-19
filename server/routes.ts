@@ -1943,6 +1943,19 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 
     console.log(`✅ Payment created (pending): ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
 
+    // إرسال إشعار واتساب للمسؤول عن الدفعة الجديدة
+    try {
+      await notifyNewPayment({
+        propertyNumber,
+        propertyName: propertyName,
+        amount: finalAmount,
+        paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
+        transactionId: payment.id,
+      });
+    } catch (notifyErr) {
+      console.error("Failed to send payment notification:", notifyErr);
+    }
+
     res.json({
       checkoutUrl: paymobResult.checkoutUrl,
       paymentId: payment.id,
@@ -2148,6 +2161,21 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
 
     console.log(`💾 Payment created: ${payment.id}, secondPropertyNumber: ${secondPropertyNumber || 'none'}`);
 
+    // إرسال إشعار واتساب للمسؤول عن الدفعة الجديدة (للتسجيلات الجديدة)
+    if (!action || action === 'new') {
+      try {
+        await notifyNewPayment({
+          propertyNumber,
+          propertyName: property.name || "",
+          amount: finalAmount,
+          paymentMethod: "تحويل بنكي",
+          transactionId: payment.id,
+        });
+      } catch (notifyErr) {
+        console.error("Failed to send payment notification:", notifyErr);
+      }
+    }
+
     // حفظ البيانات للاشتراك/التمديد/الترقية
     // لا تقم بإنشاء أو تعديل الاشتراك إلا إذا كان هناك إجراء محدد (extend أو upgrade)
     if (action === 'extend' || action === 'upgrade') {
@@ -2183,26 +2211,13 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property, receiptUrl);
       console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
 
-      // إرسال إشعار WhatsApp عند رفع الإيصال
-      // Modified WhatsApp notification logic for bank transfers to differentiate between new registrations and renewals/upgrades.
-      if (action === 'extend' || action === 'upgrade') {
-        // للتمديد/الترقية فقط
-        notifyReceiptUpload({
-          propertyNumber,
-          propertyName: property.name || "",
-          ownerPhone: property.whatsappNumber || "",
-          receiptUrl,
-        }).catch(err => console.error("WhatsApp notify error:", err));
-      } else {
-        // تسجيل جديد → إشعار دفعة جديدة
-        notifyNewPayment({
-          propertyNumber,
-          propertyName: property.name || "",
-          amount: finalAmount,
-          paymentMethod: "تحويل بنكي",
-          transactionId: payment.id,
-        }).catch(err => console.error("WhatsApp notify error:", err));
-      }
+      // إرسال إشعار WhatsApp عند رفع الإيصال (للتمديد/الترقية فقط)
+      notifyReceiptUpload({
+        propertyNumber,
+        propertyName: property.name || "",
+        ownerPhone: property.whatsappNumber || "",
+        receiptUrl,
+      }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
     res.json({ ok: true, paymentId: payment.id });
