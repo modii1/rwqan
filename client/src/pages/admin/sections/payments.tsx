@@ -99,10 +99,14 @@ function calculateFees(amount: number, paymentMethod: string) {
 
 function getPackageNameArabic(packageId: string) {
   const packageNames: Record<string, string> = {
+    'pkg-monthly': 'اشتراك شهري',
     'pkg-month': 'اشتراك شهر',
+    'pkg-special': 'اشتراك خاص شهري',
+    'pkg-special-2months': 'اشتراك خاص شهرين',
     'pkg-2months': 'عرض خاص شهرين',
-    'pkg-2properties': 'اشتراك شهر لعقارين',
     'pkg-camps': 'باقة المخيمات',
+    'pkg-2properties': 'اشتراك شهر لعقارين',
+    'pkg-month-2properties': 'اشتراك شهر لعقارين',
     'pkg-free': 'باقة مجانية',
   };
   return packageNames[packageId] || packageId || '-';
