@@ -3536,6 +3536,21 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
   });
 
+  // تحديث العقار المرتبط في الاشتراك
+  app.post("/api/admin/subscription/link", async (req, res) => {
+    try {
+      const { propertyNumber, linkedProperty } = req.body;
+      if (!propertyNumber || !linkedProperty) {
+        return res.status(400).json({ error: "propertyNumber و linkedProperty مطلوبين" });
+      }
+      await googleSheetsService.updateSubscriptionLinkedProperty(propertyNumber, linkedProperty);
+      res.json({ success: true, message: `تم ربط العقار ${propertyNumber} بالعقار ${linkedProperty}` });
+    } catch (error) {
+      console.error("Error linking properties:", error);
+      res.status(500).json({ error: "فشل في ربط العقارات" });
+    }
+  });
+
   // ======================
   // 🏷️ إدارة الخصومات
   // ======================
