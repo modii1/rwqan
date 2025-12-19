@@ -1,15 +1,30 @@
 /**
  * 📅 مهام مجدولة - تحديث الاشتراكات يومياً
  * - تحديث الأيام المتبقية في Google Sheets
- * - إرسال إشعارات للاشتراكات المنتهية (مرة واحدة فقط في يوم الانتهاء)
+ * - إرسال إشعارات للاشتراكات المنتهية (3 أيام متتالية، ثم توقف 4 أيام، ثم تكرار)
  */
 
 import { storage } from "./storage";
 import { notifySubscriptionExpired } from "./whatsapp";
 import { googleSheetsService } from "./googleSheets";
 
-// تتبع الإشعارات المُرسلة لتجنب التكرار (يُمسح عند إعادة تشغيل السيرفر لكن يُحفظ في Sheets)
-const sentNotifications = new Set<string>();
+// تتبع الإشعارات المُرسلة اليوم لتجنب التكرار في نفس اليوم
+const sentNotificationsToday = new Map<string, string>(); // propertyNumber -> lastSentDate
+
+/**
+ * التحقق من أن اليوم يقع ضمن أيام الإرسال
+ * النمط: 3 أيام إرسال، 4 أيام توقف، تكرار
+ * أيام 1-3: إرسال | أيام 4-7: توقف | أيام 8-10: إرسال | أيام 11-14: توقف ...
+ */
+function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
+  if (daysSinceExpiry <= 0) return false;
+  
+  // حساب الموقع في الدورة (كل دورة 7 أيام)
+  const positionInCycle = ((daysSinceExpiry - 1) % 7) + 1;
+  
+  // إرسال في أول 3 أيام من كل دورة
+  return positionInCycle <= 3;
+}
 
 // تحديث الأيام المتبقية في الشيت + إرسال إشعارات
 async function updateRemainingDaysInSheet() {
@@ -45,14 +60,21 @@ async function updateRemainingDaysInSheet() {
         if (remainingDays < 0) {
           expired++;
           
-          // إرسال إشعار فقط إذا انتهى الاشتراك اليوم أو أمس (remainingDays === -1)
-          // ولم يُرسل إشعار له من قبل
+          const daysSinceExpiry = Math.abs(remainingDays);
           const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
-          const notificationKey = `${sub.propertyNumber}-${sub.endDate}`;
           
-          if (property && remainingDays === -1 && !sentNotifications.has(notificationKey)) {
+          // التحقق من:
+          // 1. العقار موجود
+          // 2. اليوم ضمن أيام الإرسال (3 أيام كل أسبوع)
+          // 3. لم يُرسل إشعار لهذا العقار اليوم
+          // 4. إشعارات الانتهاء غير موقوفة لهذا العقار
+          const lastSentDate = sentNotificationsToday.get(sub.propertyNumber);
+          const alreadySentToday = lastSentDate === todayStr;
+          const isMuted = (property as any)?.muteExpiryNotification === true;
+          
+          if (property && shouldSendNotificationToday(daysSinceExpiry) && !alreadySentToday && !isMuted) {
             try {
-              console.log(`📤 [Scheduler] إرسال إشعار انتهاء للعقار ${sub.propertyNumber}`);
+              console.log(`📤 [Scheduler] إرسال إشعار انتهاء للعقار ${sub.propertyNumber} (يوم ${daysSinceExpiry} منذ الانتهاء)`);
               const result = await notifySubscriptionExpired({
                 propertyNumber: sub.propertyNumber,
                 propertyName: property.name || "",
@@ -60,7 +82,7 @@ async function updateRemainingDaysInSheet() {
               });
               if (result.status === "success") {
                 notificationsSent++;
-                sentNotifications.add(notificationKey);
+                sentNotificationsToday.set(sub.propertyNumber, todayStr);
                 console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
               } else {
                 console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
