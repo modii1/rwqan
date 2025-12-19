@@ -5,19 +5,23 @@
  */
 
 import { storage } from "./storage";
+import { notifySubscriptionExpired } from "./whatsapp";
+import { googleSheetsService } from "./googleSheets";
 
-// تحديث الأيام المتبقية في الشيت
+// تحديث الأيام المتبقية في الشيت + إرسال إشعارات
 async function updateRemainingDaysInSheet() {
   try {
     console.log("📅 [Scheduler] بدء تحديث الأيام المتبقية...");
     
     const subscriptions = await storage.getSubscriptions();
+    const properties = await storage.getProperties();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
     let updated = 0;
     let expired = 0;
     let expiringSoon = 0;
+    let notificationsSent = 0;
     
     for (const sub of subscriptions) {
       if (!sub.endDate || !sub.propertyNumber) continue;
@@ -35,6 +39,25 @@ async function updateRemainingDaysInSheet() {
         
         if (remainingDays < 0) {
           expired++;
+          
+          // إرسال إشعار للاشتراكات المنتهية (مرة واحدة فقط)
+          const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+          if (property) {
+            // التحقق من أن الاشتراك انتهى اليوم فقط (لتجنب التكرار)
+            if (remainingDays === -1) {
+              try {
+                await notifySubscriptionExpired({
+                  propertyNumber: sub.propertyNumber,
+                  propertyName: property.name || "",
+                  ownerPhone: property.whatsappNumber || "",
+                });
+                notificationsSent++;
+                console.log(`📲 [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+              } catch (err) {
+                console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
+              }
+            }
+          }
         } else if (remainingDays >= 0 && remainingDays <= 7) {
           expiringSoon++;
         }
@@ -46,9 +69,10 @@ async function updateRemainingDaysInSheet() {
     console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
     console.log(`   - منتهي: ${expired}`);
     console.log(`   - ينتهي قريباً: ${expiringSoon}`);
+    console.log(`   - إشعارات مُرسلة: ${notificationsSent}`);
     console.log(`   - التاريخ الحالي: ${today.toISOString().split('T')[0]}`);
     
-    return { updated, expired, expiringSoon };
+    return { updated, expired, expiringSoon, notificationsSent };
   } catch (error) {
     console.error("❌ [Scheduler] خطأ في تحديث الأيام المتبقية:", error);
     throw error;
