@@ -54,6 +54,9 @@ const SHEETS = {
 // عمود حالة التحقق — العمود 20 (T)
 const COL_VERIFICATION = 20;
 
+// عمود إيقاف إشعار الانتهاء — العمود 21 (U)
+const COL_MUTE_EXPIRY = 21;
+
 // =======================
 // Replit Connectors Auth
 // =======================
@@ -211,6 +214,8 @@ class GoogleSheetsService {
         "آخر تحديث",
         "تاريخ الاشتراك",
         "الرقم السري",
+        "حالة التحقق",
+        "إيقاف إشعار الانتهاء",
       ],
       [SHEETS.SUBSCRIPTIONS]: [
         "رقم العقار",
@@ -525,6 +530,7 @@ class GoogleSheetsService {
       subscriptionDate: row[17] || "",
       pin: row[18] || "",
       verificationStatus: row[COL_VERIFICATION - 1] || undefined,
+      muteExpiryNotification: row[COL_MUTE_EXPIRY - 1] === "true" || row[COL_MUTE_EXPIRY - 1] === true,
     };
 
     return p as Property;
@@ -561,6 +567,7 @@ class GoogleSheetsService {
     p.subscriptionDate || "",
     p.pin || "",
     p.verificationStatus || "pending",
+    p.muteExpiryNotification ? "true" : "false",
   ];
 }
 
@@ -649,6 +656,26 @@ class GoogleSheetsService {
     return currentProperty;
   }
 
+  // ================== تحديث حالة إيقاف إشعار الانتهاء ==================
+  async updateMuteExpiryNotification(
+    propertyNumber: string,
+    muted: boolean
+  ): Promise<Property> {
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+    
+    if (rowIndex === -1) {
+      throw new Error(`Property not found: ${propertyNumber}`);
+    }
+
+    const currentProperty = this.rowToProperty(rows[rowIndex]);
+    (currentProperty as any).muteExpiryNotification = muted;
+
+    const updatedRow = this.propertyToRow(currentProperty);
+    await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, updatedRow);
+
+    return currentProperty;
+  }
 
   async deleteProperty(propertyNumber: string): Promise<void> {
     const rows = await this.readSheet(SHEETS.PROPERTIES);
