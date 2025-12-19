@@ -124,16 +124,16 @@ export function startScheduler() {
     updateRemainingDaysInSheet().catch(console.error);
   }, 60000); // انتظار 60 ثانية لتجنب تجاوز حصة القراءة
   
-  // تحديث كل ساعة (3600000 مللي ثانية)
-  const ONE_HOUR = 60 * 60 * 1000;
+  // تحديث كل 24 ساعة (86400000 مللي ثانية)
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
   
   setInterval(() => {
     const now = new Date();
-    console.log(`🕐 [Scheduler] تشغيل التحديث - ${now.toLocaleString('ar-SA')}`);
+    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('ar-SA')}`);
     updateRemainingDaysInSheet().catch(console.error);
-  }, ONE_HOUR);
+  }, TWENTY_FOUR_HOURS);
   
-  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث كل ساعة");
+  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث كل 24 ساعة");
 }
 
 // تصدير الدالة للاستخدام اليدوي (API endpoint)
