@@ -3096,6 +3096,34 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
   });
 
+  // ================== إيقاف/تفعيل إشعارات انتهاء الاشتراك ==================
+  app.put("/api/admin/properties/:propertyNumber/mute-expiry", async (req, res) => {
+    try {
+      const { propertyNumber } = req.params;
+      const { muted } = req.body;
+
+      if (typeof muted !== "boolean") {
+        return res.status(400).json({ error: "قيمة muted يجب أن تكون true أو false" });
+      }
+
+      const updated = await googleSheetsService.updateMuteExpiryNotification(
+        propertyNumber,
+        muted
+      );
+
+      console.log(`📢 [MuteExpiry] تم ${muted ? "إيقاف" : "تفعيل"} إشعارات انتهاء الاشتراك للعقار ${propertyNumber}`);
+
+      res.json({
+        success: true,
+        message: muted ? "تم إيقاف إشعارات انتهاء الاشتراك" : "تم تفعيل إشعارات انتهاء الاشتراك",
+        property: updated,
+      });
+
+    } catch (err) {
+      console.error("Mute Expiry Error:", err);
+      res.status(500).json({ success: false, message: "فشل في تعديل حالة الإشعارات" });
+    }
+  });
 
   // ===============================
   // 🔵 Logs: جلب سجل التحقق بالكامل
