@@ -3677,12 +3677,14 @@ app.get("/api/paymob/webhook", async (req, res) => {
           const property = await storage.getPropertyByNumber(propertyNumber);
           const payments = await storage.getPayments();
           
-          // البحث عن الدفعة المعلقة الأحدث للعقار (قد لا يتطابق orderId مع intentionId)
+          // البحث عن الدفعة الأحدث للعقار (POST webhook قد يصل قبل GET ويغير الحالة)
+          // لذلك نبحث عن أي دفعة أُنشئت خلال آخر 10 دقائق
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
           const payment = payments
-            .filter(p => p.propertyNumber === propertyNumber && (p.status === "معلق" || p.status === "قيد المراجعة"))
+            .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
             .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
           
-          console.log(`🔍 Looking for payment: propertyNumber=${propertyNumber}, found=${!!payment}, action=${(payment as any)?.action}`);
+          console.log(`🔍 Looking for payment: propertyNumber=${propertyNumber}, found=${!!payment}, action=${(payment as any)?.action}, status=${payment?.status}`);
           
           // حفظ نوع العملية
           paymentAction = (payment as any)?.action || '';
