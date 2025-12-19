@@ -79,10 +79,10 @@ async function sendAdminWhatsAppNotification(options: {
       ownerWhatsApp = '966' + ownerWhatsApp;
     }
     body += `📲 واتساب المالك: https://wa.me/${ownerWhatsApp}\n`;
-    body += `🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner\n`;
   }
   if (text) {
     body += `\nالتفاصيل:\n${text}\n`;
+    body += `\n🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner`;
   }
 
   const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
