@@ -79,7 +79,7 @@ async function sendAdminWhatsAppNotification(options: {
       ownerWhatsApp = '966' + ownerWhatsApp;
     }
     body += `📲 واتساب المالك: https://wa.me/${ownerWhatsApp}\n`;
-    body += `🔗 لوحة تحكم المالك: https://rwqan.replit.app/owner\n`;
+    body += `🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner\n`;
   }
   if (text) {
     body += `\nالتفاصيل:\n${text}\n`;
