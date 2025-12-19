@@ -1388,10 +1388,14 @@ const calculateAnalytics = () => {
 function getPackageNameArabic(packageId: string): string {
   const packageNames: Record<string, string> = {
     'pkg-monthly': 'اشتراك شهري',
+    'pkg-month': 'اشتراك شهر',
     'pkg-special': 'اشتراك خاص شهري',
     'pkg-special-2months': 'اشتراك خاص شهرين',
-    'pkg-camps': 'اشتراك معسكرات شهري',
-    'pkg-free': 'اشتراك مجاني',
+    'pkg-2months': 'عرض خاص شهرين',
+    'pkg-camps': 'باقة المخيمات',
+    'pkg-2properties': 'اشتراك شهر لعقارين',
+    'pkg-month-2properties': 'اشتراك شهر لعقارين',
+    'pkg-free': 'باقة مجانية',
   };
   return packageNames[packageId] || packageId;
 }
@@ -1593,11 +1597,14 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
 
   const getPackageNameArabic = (packageId: string) => {
     const packageNames: Record<string, string> = {
+      'pkg-monthly': 'اشتراك شهري',
       'pkg-month': 'اشتراك شهر',
-      'pkg-2months': 'عرض خاص شهرين',
+      'pkg-special': 'اشتراك خاص شهري',
       'pkg-special-2months': 'اشتراك خاص شهرين',
-      'pkg-2properties': 'اشتراك شهر لعقارين',
+      'pkg-2months': 'عرض خاص شهرين',
       'pkg-camps': 'باقة المخيمات',
+      'pkg-2properties': 'اشتراك شهر لعقارين',
+      'pkg-month-2properties': 'اشتراك شهر لعقارين',
       'pkg-free': 'باقة مجانية',
     };
     return packageNames[packageId] || packageId || 'باقة';
