@@ -1947,7 +1947,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     try {
       await notifyNewPayment({
         propertyNumber,
-        propertyName: propertyName,
+        propertyName: property.name || "",
         amount: finalAmount,
         paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
         transactionId: payment.id,
