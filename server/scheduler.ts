@@ -18,10 +18,12 @@ async function updateRemainingDaysInSheet() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    let updated = 0;
     let expired = 0;
     let expiringSoon = 0;
     let notificationsSent = 0;
+    
+    // تجميع كل التحديثات للتنفيذ دفعة واحدة (batch update)
+    const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
     
     for (const sub of subscriptions) {
       if (!sub.endDate || !sub.propertyNumber) continue;
@@ -33,9 +35,8 @@ async function updateRemainingDaysInSheet() {
         const diffTime = endDate.getTime() - today.getTime();
         const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        // تحديث الأيام المتبقية في الشيت
-        await storage.updateSubscriptionRemainingDays(sub.propertyNumber, Math.max(0, remainingDays));
-        updated++;
+        // تجميع التحديث بدلاً من التنفيذ المباشر
+        batchUpdates.push({ propertyNumber: sub.propertyNumber, remainingDays: Math.max(0, remainingDays) });
         
         if (remainingDays < 0) {
           expired++;
@@ -62,9 +63,12 @@ async function updateRemainingDaysInSheet() {
           expiringSoon++;
         }
       } catch (err) {
-        console.error(`❌ [Scheduler] خطأ في تحديث ${sub.propertyNumber}:`, err);
+        console.error(`❌ [Scheduler] خطأ في معالجة ${sub.propertyNumber}:`, err);
       }
     }
+    
+    // تنفيذ تحديث الأيام المتبقية دفعة واحدة (يقرأ الجدول مرة واحدة فقط)
+    const updated = await storage.updateAllSubscriptionsRemainingDays(batchUpdates);
     
     console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
     console.log(`   - منتهي: ${expired}`);
