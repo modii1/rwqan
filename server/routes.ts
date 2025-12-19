@@ -2388,48 +2388,103 @@ if (!propertyNumber) {
         });
       }
 
-      // البحث عن دفعة معلقة أو مكتملة حديثة
+      // البحث عن دفعة معلقة (قيد التحقق أو قيد المراجعة)
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
-      const validPayment = payments.find(p => 
-        (p.status === "مكتمل" || p.status === "قيد المراجعة") &&
-        p.pendingStartDate && p.pendingEndDate && p.pendingSubscriptionType
+      const pendingPayment = payments.find(p => 
+        (p.status === "قيد التحقق" || p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق")
       );
 
-      // إذا لا توجد دفعة صالحة، نقوم فقط بتحديث حالة التحقق إلى approved
-      if (!validPayment) {
-        // تحديث حالة التحقق حتى بدون دفعة (للعقارات القديمة أو المجانية)
+      if (!pendingPayment) {
+        // تحديث حالة التحقق فقط (للعقارات القديمة أو المجانية)
         await googleSheetsService.updateVerificationStatus(propertyNumber, "approved");
-        console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber} (no payment required)`);
+        console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber} (no pending payment)`);
         
         return res.json({ 
           success: true, 
-          message: "تم التحقق من بيانات العقار بنجاح وتم تحديث الحالة إلى مُعتمد",
+          message: "تم التحقق من بيانات العقار بنجاح",
           verificationOnly: true
         });
       }
 
-  
-      // تحديث حالة الدفع إلى مكتمل إذا كانت قيد المراجعة
-      if (validPayment.status === "قيد المراجعة") {
-        await googleSheetsService.updatePaymentStatus(validPayment.id, "مكتمل");
+      // تحديث حالة الدفع إلى مكتمل
+      await googleSheetsService.updatePaymentStatus(pendingPayment.id, "مكتمل");
+      console.log(`✅ Payment status updated to 'مكتمل' for payment ${pendingPayment.id}`);
+
+      // جلب بيانات الباقة
+      const pkg = await storage.getPackageById(pendingPayment.packageId);
+      if (!pkg) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
       }
 
-      // تحديث حالة التحقق إلى approved عند نجاح التفعيل
+      // حساب تواريخ الاشتراك
+      const today = new Date();
+      const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
+
+      let startDate = today;
+      let endDate = new Date(today.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+
+      // إذا كان هناك اشتراك نشط، ابدأ من تاريخ انتهائه
+      if (currentSubscription && new Date(currentSubscription.endDate) > today) {
+        startDate = new Date(currentSubscription.endDate);
+        endDate = new Date(startDate.getTime() + pkg.duration * 24 * 60 * 60 * 1000);
+      }
+
+      // حساب السعر (نصف السعر إذا كانت باقة عقارين)
+      const isMultiProperty = !!(pendingPayment as any).secondPropertyNumber;
+      const pricePerProperty = isMultiProperty ? pendingPayment.finalAmount / 2 : pendingPayment.finalAmount;
+
+      const subscriptionData = {
+        packageId: pkg.id,
+        price: pricePerProperty,
+        subscriptionType: pkg.type,
+        startDate: startDate.toISOString().split("T")[0],
+        endDate: endDate.toISOString().split("T")[0],
+        paymentId: pendingPayment.id,
+        linkedProperty: isMultiProperty ? (pendingPayment as any).secondPropertyNumber : undefined,
+      };
+
+      // إضافة الاشتراك للشيت
+      await googleSheetsService.addSubscriptionToSheet(
+        propertyNumber,
+        subscriptionData,
+        property,
+        pendingPayment.receiptUrl || ""
+      );
+      console.log(`✅ Subscription activated for property ${propertyNumber}`);
+
+      // إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين
+      if ((pendingPayment as any).secondPropertyNumber) {
+        const secondProperty = await googleSheetsService.getPropertyByNumber((pendingPayment as any).secondPropertyNumber);
+        if (secondProperty) {
+          const secondSubscriptionData = {
+            ...subscriptionData,
+            linkedProperty: propertyNumber,
+          };
+          await googleSheetsService.addSubscriptionToSheet(
+            (pendingPayment as any).secondPropertyNumber,
+            secondSubscriptionData,
+            secondProperty,
+            pendingPayment.receiptUrl || ""
+          );
+          console.log(`✅ Second property subscription activated: ${(pendingPayment as any).secondPropertyNumber}`);
+        }
+      }
+
+      // تحديث حالة التحقق إلى approved
       await googleSheetsService.updateVerificationStatus(propertyNumber, "approved");
       console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber}`);
 
       // إرسال إشعار WhatsApp
-      const packageId = validPayment.pendingPackageId || validPayment.packageId;
       await sendWhatsAppNotification(
-        `🎉 *تم تفعيل اشتراك تلقائياً*\n\n` +
+        `🎉 *تم تفعيل الاشتراك بنجاح*\n\n` +
         `📍 العقار: ${property.name}\n` +
         `🔢 رقم العقار: ${propertyNumber}\n` +
-        `📦 الباقة: ${packageId}\n` +
-        `💵 المبلغ: ${validPayment.finalAmount} ر.س\n` +
-        `📅 من: ${validPayment.pendingStartDate}\n` +
-        `📅 إلى: ${validPayment.pendingEndDate}\n` +
-        `🏷️ نوع الاشتراك: ${validPayment.pendingSubscriptionType}\n\n` +
-        `✅ تم التحقق من بيانات العقار وتفعيل الاشتراك تلقائياً بنجاح`
+        `📦 الباقة: ${pkg.name}\n` +
+        `💵 المبلغ: ${pendingPayment.finalAmount} ر.س\n` +
+        `📅 من: ${subscriptionData.startDate}\n` +
+        `📅 إلى: ${subscriptionData.endDate}\n` +
+        `🏷️ نوع الاشتراك: ${pkg.type}\n\n` +
+        `✅ تم التحقق من البيانات وتفعيل الاشتراك`
       );
 
       res.json({ 
@@ -3844,25 +3899,21 @@ app.post("/api/paymob/webhook", async (req, res) => {
       console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);
     }
 
-    // إرسال إشعار WhatsApp
+    // إرسال إشعار WhatsApp عند نجاح الدفع
     try {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
       const pkg = await storage.getPackageById(payment.packageId);
-      const actionText = isNewRegistration ? "تسجيل جديد" : (payment.action === 'extend' ? "تمديد" : "ترقية");
       
-      await sendWhatsAppNotification(
-        `💳 *دفع إلكتروني ناجح*\n\n` +
-        `📍 العقار: ${property?.name || payment.propertyNumber}\n` +
-        `🔢 رقم العقار: ${payment.propertyNumber}\n` +
-        `📦 الباقة: ${pkg?.name || payment.packageId}\n` +
-        `💵 المبلغ: ${payment.finalAmount} ر.س\n` +
-        `🏦 الصافي: ${netAmount.toFixed(2)} ر.س\n` +
-        `📊 الرسوم: ${totalFees.toFixed(2)} ر.س\n` +
-        `🔄 النوع: ${actionText}\n` +
-        `✅ الحالة: ${newPaymentStatus}`
-      );
+      await notifyNewPayment({
+        propertyNumber: payment.propertyNumber,
+        propertyName: property?.name || payment.propertyNumber,
+        amount: payment.finalAmount,
+        paymentMethod: cardSubType || paymentMethod || "بطاقة",
+        transactionId,
+      });
+      console.log("✅ WhatsApp notification sent for payment:", transactionId);
     } catch (err) {
-      console.log("⚠️ WhatsApp notification failed:", err);
+      console.error("❌ WhatsApp notification failed:", err);
     }
 
     return res.json({ ok: true, paymentId: payment.id });
