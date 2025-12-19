@@ -385,7 +385,7 @@ const startSmartVerification = async () => {
       .map(s => `${s.name}: ${s.message}`);
     
     if (!hasErrors) {
-      // استدعاء API لتفعيل الاشتراك - سيعطي approved
+      // استدعاء API لتفعيل الاشتراك - سيحول الدفع من "قيد التحقق" إلى "مكتمل"
       const response = await apiRequest('POST', '/api/owner/property/activate', {
         propertyNumber: property.propertyNumber,
         status: 'approved'
@@ -394,13 +394,13 @@ const startSmartVerification = async () => {
       
       if (result.success) {
         steps[6].status = 'success';
-        steps[6].message = 'تم اعتماد العقار بنجاح! ✅';
+        steps[6].message = 'تم تفعيل الاشتراك بنجاح! ✅';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
         
         setVerificationResult({
           success: true,
-          summary: 'تم التحقق من جميع بيانات العقار بنجاح وتم اعتماده',
+          summary: 'تم التحقق من جميع البيانات وتفعيل الاشتراك'ات العقار بنجاح وتم اعتماده',
           errors: []
         });
         
