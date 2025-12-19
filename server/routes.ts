@@ -3944,13 +3944,20 @@ app.post("/api/paymob/webhook", async (req, res) => {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
 
       if (property) {
+        // تحقق إذا كانت باقة عقارين
+        const isMultiPropertyPackage = !!(payment as any).secondPropertyNumber;
+        const pricePerProperty = isMultiPropertyPackage 
+          ? (payment.pendingPrice || payment.finalAmount) / 2 
+          : (payment.pendingPrice || payment.finalAmount);
+
         const subscriptionData = {
           packageId: payment.packageId,
-          price: payment.pendingPrice || payment.finalAmount,
+          price: pricePerProperty,
           subscriptionType: payment.pendingSubscriptionType || "موثوق",
           startDate: payment.pendingStartDate,
           endDate: payment.pendingEndDate,
           paymentId: payment.id,
+          linkedProperty: isMultiPropertyPackage ? (payment as any).secondPropertyNumber : undefined,
         };
 
         await googleSheetsService.addSubscriptionToSheet(
@@ -3959,15 +3966,14 @@ app.post("/api/paymob/webhook", async (req, res) => {
           property
         );
 
-        console.log("🎉 Subscription Activated:", payment.propertyNumber);
+        console.log(`🎉 Subscription Activated: ${payment.propertyNumber} (price: ${pricePerProperty})`);
 
         // === إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين ===
-        if ((payment as any).secondPropertyNumber) {
+        if (isMultiPropertyPackage) {
           const secondProperty = await storage.getPropertyByNumber((payment as any).secondPropertyNumber);
           if (secondProperty) {
             const secondSubscriptionData = {
               ...subscriptionData,
-              price: (payment.pendingPrice || payment.finalAmount) / 2,
               linkedProperty: payment.propertyNumber,
             };
             await googleSheetsService.addSubscriptionToSheet(
@@ -3975,13 +3981,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
               secondSubscriptionData,
               secondProperty
             );
-            console.log(`🎉 Second property subscription activated: ${(payment as any).secondPropertyNumber}`);
-
-            // تحديث الاشتراك الأول بربط العقار الثاني
-            await googleSheetsService.updateSubscriptionLinkedProperty(
-              payment.propertyNumber,
-              (payment as any).secondPropertyNumber
-            );
+            console.log(`🎉 Second property subscription activated: ${(payment as any).secondPropertyNumber} (price: ${pricePerProperty})`);
           }
         }
       }
