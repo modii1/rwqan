@@ -404,7 +404,7 @@ export async function notifySubscriptionExpired(data: {
     return { status: "disabled", response: "الإشعار معطل" };
   }
   
-  const text = `⚠️ الاشتراك منتهي - يرجى التجديد\n\n🔗 رابط تسجيل الدخول:\nhttps://rwqan.replit.app/owner`;
+  const text = `⚠️ الاشتراك منتهي - يرجى التجديد\n\n🔗 رابط تسجيل الدخول:\nhttps://rwqan.replit.app/owner\n\n📞 للتواصل واتساب:\nhttps://wa.me/966533220646`;
   return sendAdminWhatsAppNotification({
     type: "⚠️ انتهاء اشتراك",
     text,
