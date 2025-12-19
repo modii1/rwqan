@@ -415,7 +415,7 @@ export async function notifySubscriptionExpired(data: {
 }
 
 /**
- * إشعار دفعة جديدة (Paymob)
+ * إشعار دفعة جديدة (تسجيل جديد - يحتاج تحقق)
  */
 export async function notifyNewPayment(data: {
   propertyNumber: string;
@@ -430,9 +430,9 @@ export async function notifyNewPayment(data: {
     return { status: "disabled", response: "الإشعار معطل" };
   }
   
-  const text = `💳 طريقة الدفع: ${data.paymentMethod}\n💰 المبلغ: ${data.amount} ريال\n🔢 رقم العملية: ${data.transactionId}`;
+  const text = `💳 طريقة الدفع: ${data.paymentMethod}\n💰 المبلغ: ${data.amount} ريال\n🔢 رقم العملية: ${data.transactionId}\n\n⏳ بانتظار التحقق من بيانات العقار`;
   return sendAdminWhatsAppNotification({
-    type: "💳 دفعة جديدة",
+    type: "💳 دفعة جديدة - تسجيل عقار",
     text,
     propertyNumber: data.propertyNumber,
     propertyName: data.propertyName,
