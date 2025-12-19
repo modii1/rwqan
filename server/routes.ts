@@ -3721,7 +3721,7 @@ app.get("/api/paymob/webhook", async (req, res) => {
       let redirectUrl: string;
       if (paymentAction === 'upgrade' || paymentAction === 'extend') {
         // الترقية والتمديد: توجيه للوحة التحكم
-        redirectUrl = `/owner?payment=success`;
+        redirectUrl = `/owner/dashboard?payment=success`;
       } else {
         // تسجيل جديد: توجيه لصفحة المراجعة
         redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
