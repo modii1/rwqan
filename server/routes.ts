@@ -3899,25 +3899,21 @@ app.post("/api/paymob/webhook", async (req, res) => {
       console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);
     }
 
-    // إرسال إشعار WhatsApp
+    // إرسال إشعار WhatsApp عند نجاح الدفع
     try {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
       const pkg = await storage.getPackageById(payment.packageId);
-      const actionText = isNewRegistration ? "تسجيل جديد" : (payment.action === 'extend' ? "تمديد" : "ترقية");
       
-      await sendWhatsAppNotification(
-        `💳 *دفع إلكتروني ناجح*\n\n` +
-        `📍 العقار: ${property?.name || payment.propertyNumber}\n` +
-        `🔢 رقم العقار: ${payment.propertyNumber}\n` +
-        `📦 الباقة: ${pkg?.name || payment.packageId}\n` +
-        `💵 المبلغ: ${payment.finalAmount} ر.س\n` +
-        `🏦 الصافي: ${netAmount.toFixed(2)} ر.س\n` +
-        `📊 الرسوم: ${totalFees.toFixed(2)} ر.س\n` +
-        `🔄 النوع: ${actionText}\n` +
-        `✅ الحالة: ${newPaymentStatus}`
-      );
+      await notifyNewPayment({
+        propertyNumber: payment.propertyNumber,
+        propertyName: property?.name || payment.propertyNumber,
+        amount: payment.finalAmount,
+        paymentMethod: cardSubType || paymentMethod || "بطاقة",
+        transactionId,
+      });
+      console.log("✅ WhatsApp notification sent for payment:", transactionId);
     } catch (err) {
-      console.log("⚠️ WhatsApp notification failed:", err);
+      console.error("❌ WhatsApp notification failed:", err);
     }
 
     return res.json({ ok: true, paymentId: payment.id });
