@@ -566,7 +566,7 @@ class GoogleSheetsService {
     p.lastUpdate || "",
     p.subscriptionDate || "",
     p.pin || "",
-    p.verificationStatus || "pending",
+    p.verificationStatus || "approved", // تغيير الافتراضي من pending إلى approved
     p.muteExpiryNotification ? "true" : "false",
   ];
 }
@@ -669,7 +669,12 @@ class GoogleSheetsService {
     }
 
     const currentProperty = this.rowToProperty(rows[rowIndex]);
+    
+    // الحفاظ على حالة التحقق الحالية
+    const currentVerificationStatus = currentProperty.verificationStatus || rows[rowIndex][COL_VERIFICATION - 1] || 'approved';
+    
     (currentProperty as any).muteExpiryNotification = muted;
+    currentProperty.verificationStatus = currentVerificationStatus as any;
 
     const updatedRow = this.propertyToRow(currentProperty);
     await this.updateRow(SHEETS.PROPERTIES, rowIndex + 2, updatedRow);
