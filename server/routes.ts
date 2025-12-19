@@ -2521,9 +2521,10 @@ if (!propertyNumber) {
       });
     } catch (err: any) {
       console.error("Property activation error:", err);
+      console.error("Property activation error details:", err.message, err.stack);
       res.status(500).json({ 
         success: false, 
-        error: "خطأ في تفعيل الاشتراك" 
+        error: `خطأ في تفعيل الاشتراك: ${err.message || 'خطأ غير معروف'}`
       });
     }
   });
