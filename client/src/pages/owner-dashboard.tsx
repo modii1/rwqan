@@ -55,21 +55,21 @@ export default function OwnerDashboard() {
   const [showRequestsStats, setShowRequestsStats] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [paymentsExpanded, setPaymentsExpanded] = useState(false);
-  
+
   // نافذة رفع الإيصال للتحويل البنكي
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
   const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // نتيجة الفحص النهائية
   const [verificationResult, setVerificationResult] = useState<{
     success: boolean;
     summary: string;
     errors: string[];
   } | null>(null);
-  
+
   // شريط التحقق الذكي - فحص بيانات العقار
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationProgress, setVerificationProgress] = useState(0);
@@ -130,7 +130,7 @@ export default function OwnerDashboard() {
     return `${bestDay} – ${hour12} ${suffix}`;
   }
 
-  
+
   // 1) Session check
   const { data: sessionData, isLoading: isSessionLoading } = useQuery<{
     isLoggedIn: boolean;
@@ -212,20 +212,20 @@ const {
 // دالة التحقق التدريجي الذكي من بيانات العقار
 const startSmartVerification = async () => {
   if (!property) return;
-  
+
   setIsVerifying(true);
   setVerificationProgress(0);
-  
+
   const steps = [...verificationSteps];
   let hasErrors = false;
   const propData = property as any;
-  
+
   try {
     // خطوة 1: التحقق من رقم العقار
     steps[0].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     if (property.propertyNumber && property.propertyNumber.length === 5) {
       steps[0].status = 'success';
       steps[0].message = `رقم العقار: ${property.propertyNumber}`;
@@ -237,12 +237,12 @@ const startSmartVerification = async () => {
     setVerificationProgress(14);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 2: التحقق من رقم الجوال
     steps[1].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     const phoneNumber = propData.whatsappNumber || propData.phone || '';
     if (phoneNumber && phoneNumber.length >= 9) {
       steps[1].status = 'success';
@@ -255,16 +255,16 @@ const startSmartVerification = async () => {
     setVerificationProgress(28);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 3: التحقق من الموقع والاتجاه
     steps[2].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     const hasLocation = property.location && property.location.trim();
     const hasDirection = propData.direction && propData.direction.trim();
     const hasCity = property.city && property.city.trim();
-    
+
     if (hasLocation && hasDirection && hasCity) {
       steps[2].status = 'success';
       steps[2].message = `${property.city} - ${property.location} (${propData.direction})`;
@@ -280,12 +280,12 @@ const startSmartVerification = async () => {
     setVerificationProgress(42);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 4: التحقق من الصور (من R2)
     steps[3].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     let imagesCount = 0;
     try {
       const imagesResponse = await fetch('/api/owner/r2-images');
@@ -297,7 +297,7 @@ const startSmartVerification = async () => {
     } catch (e) {
       console.log('لم يتم جلب الصور من R2');
     }
-    
+
     if (imagesCount >= 3) {
       steps[3].status = 'success';
       steps[3].message = `${imagesCount} صورة`;
@@ -311,12 +311,12 @@ const startSmartVerification = async () => {
     setVerificationProgress(56);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 5: التحقق من النوع والمرافق
     steps[4].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     const facilitiesData = propData.facilities || [];
     let facilitiesCount = 0;
     if (Array.isArray(facilitiesData)) {
@@ -329,7 +329,7 @@ const startSmartVerification = async () => {
         facilitiesCount = facilitiesData.split(',').filter((s: string) => s.trim()).length;
       }
     }
-    
+
     const hasType = property.type && property.type.trim();
     if (hasType && facilitiesCount >= 3) {
       steps[4].status = 'success';
@@ -346,19 +346,19 @@ const startSmartVerification = async () => {
     setVerificationProgress(70);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 6: التحقق من الأسعار
     steps[5].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     const pricesObj = propData.prices || {};
     const hasValidPrices = (
       (pricesObj.weekday && Number(pricesObj.weekday) > 0) ||
       (pricesObj.weekend && Number(pricesObj.weekend) > 0) ||
       (pricesObj.overnight && Number(pricesObj.overnight) > 0)
     );
-    
+
     if (hasValidPrices) {
       steps[5].status = 'success';
       const prices = [];
@@ -373,17 +373,17 @@ const startSmartVerification = async () => {
     setVerificationProgress(84);
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 400));
-    
+
     // خطوة 7: تحديث حالة العقار
     steps[6].status = 'checking';
     setVerificationSteps([...steps]);
     await new Promise(r => setTimeout(r, 600));
-    
+
     // جمع الأخطاء من الخطوات
     const errorsList = steps
       .filter(s => s.status === 'error')
       .map(s => `${s.name}: ${s.message}`);
-    
+
     if (!hasErrors) {
       // استدعاء API لتفعيل الاشتراك - سيعطي approved
       const response = await apiRequest('POST', '/api/owner/property/activate', {
@@ -391,24 +391,24 @@ const startSmartVerification = async () => {
         status: 'approved'
       });
       const result = await response.json();
-      
+
       if (result.success) {
         steps[6].status = 'success';
-        steps[6].message = 'تم اعتماد العقار بنجاح! ✅';
+        steps[6].message = 'تم تفعيل الاشتراك بنجاح! ✅';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
-        
+
         setVerificationResult({
           success: true,
-          summary: 'تم التحقق من جميع بيانات العقار بنجاح وتم اعتماده',
+          summary: 'تم التحقق من جميع البيانات وتفعيل الاشتراك بنجاح',
           errors: []
         });
-        
+
         toast({
           title: "✅ تم الاعتماد بنجاح",
           description: "تم اعتماد عقارك بعد نجاح فحص البيانات",
         });
-        
+
         setTimeout(async () => {
           await queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
           setIsVerifying(false);
@@ -418,13 +418,13 @@ const startSmartVerification = async () => {
         steps[6].message = result.message || 'فشل الاعتماد';
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
-        
+
         setVerificationResult({
           success: false,
           summary: result.message || 'فشل اعتماد العقار',
           errors: [result.message || 'فشل الاعتماد']
         });
-        
+
         setTimeout(() => setIsVerifying(false), 2000);
       }
     } else {
@@ -437,24 +437,24 @@ const startSmartVerification = async () => {
       } catch (e) {
         console.log('فشل تحديث الحالة إلى rejected');
       }
-      
+
       steps[6].status = 'error';
       steps[6].message = 'تم رفض العقار - يوجد بيانات ناقصة';
       setVerificationProgress(100);
       setVerificationSteps([...steps]);
-      
+
       setVerificationResult({
         success: false,
         summary: `فشل التحقق - ${errorsList.length} مشكلة تحتاج إصلاح`,
         errors: errorsList
       });
-      
+
       toast({
         title: "❌ تم رفض العقار",
         description: "يرجى إصلاح الأخطاء في بيانات العقار وإعادة الفحص",
         variant: "destructive",
       });
-      
+
       setTimeout(async () => {
         await queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
         setIsVerifying(false);
@@ -478,28 +478,28 @@ const startSmartVerification = async () => {
 // دالة رفع الإيصال للتحويل البنكي
 const handleReceiptUpload = async () => {
   if (!receiptFile || !selectedPaymentForReceipt) return;
-  
+
   setIsUploadingReceipt(true);
-  
+
   try {
     const formData = new FormData();
     formData.append('paymentId', selectedPaymentForReceipt.id);
     formData.append('receipt', receiptFile);
-    
+
     const response = await fetch('/api/owner/payment/upload-receipt', {
       method: 'POST',
       body: formData,
       credentials: 'include',
     });
-    
+
     const result = await response.json();
-    
+
     if (response.ok) {
       toast({
         title: "✅ تم رفع الإيصال",
         description: "تم رفع إيصال التحويل بنجاح وسيتم مراجعته",
       });
-      
+
       // إغلاق النافذة وإعادة تحميل البيانات
       setShowReceiptDialog(false);
       setSelectedPaymentForReceipt(null);
@@ -624,7 +624,7 @@ console.log("🔍 paymentsData:", paymentsData);
     if (!property.subscriptionType || property.subscriptionType === "عادي") {
       return null;
     }
-    
+
     // استخدام تاريخ الانتهاء من بيانات الاشتراك الحالي
     if (currentSubscription?.endDate) {
       const endDate = new Date(currentSubscription.endDate);
@@ -633,7 +633,7 @@ console.log("🔍 paymentsData:", paymentsData);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       return Math.max(0, diffDays);
     }
-    
+
     return null;
   };
 
@@ -921,14 +921,14 @@ const calculateAnalytics = () => {
 
                         {/* رقم الخطوة */}
                         <div className="text-xs font-bold text-muted-foreground">
-                          {step.step}/6
+                          {step.step}/7
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              
+
               {/* نتيجة الفحص الواضحة للعميل */}
               {verificationResult && !isVerifying && (
                 <div className={`mt-4 p-4 rounded-lg border-2 ${
@@ -957,7 +957,7 @@ const calculateAnalytics = () => {
                       }`}>
                         {verificationResult.summary}
                       </p>
-                      
+
                       {/* قائمة الأخطاء */}
                       {verificationResult.errors.length > 0 && (
                         <div className="mt-3 space-y-1">
@@ -969,7 +969,7 @@ const calculateAnalytics = () => {
                           </ul>
                         </div>
                       )}
-                      
+
                       {/* زر تعديل البيانات */}
                       {!verificationResult.success && (
                         <Button
@@ -1057,7 +1057,7 @@ const calculateAnalytics = () => {
               </div>
             </div>
           )}
-          
+
           {/* محتوى المدفوعات */}
           {paymentsExpanded && (
             <>
@@ -1099,7 +1099,7 @@ const calculateAnalytics = () => {
                         isVerifying={verifyPaymentMutation.isPending}
                       />
                     ))}
-                  
+
                   {/* رسالة إذا لم توجد نتائج بعد الفلترة */}
                   {paymentsData.filter((payment: any) => {
                     if (paymentFilter === 'all') return true;
@@ -1243,7 +1243,7 @@ const calculateAnalytics = () => {
               desc="الاسم – المدينة – الوصف"
               onClick={() => setLocation("/owner/update-property")}
             />
-            
+
             <BigActionButton
               icon={<BarChart2 className="w-6 h-6" />}
               title="الإحصائيات المفصلة"
@@ -1290,10 +1290,10 @@ const calculateAnalytics = () => {
                 رفع إيصال التحويل البنكي
               </DialogTitle>
               <DialogDescription>
-                ارفع صورة إيصال التحويل البنكي للدفعة المعلقة وسيتم مراجعتها
+                ارفع صورة إيصال التحويل البنكي للدفعة المعلقة وسيتم مراجعته
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 py-4">
               {/* معلومات الدفعة */}
               {selectedPaymentForReceipt && (
@@ -1321,7 +1321,7 @@ const calculateAnalytics = () => {
                   )}
                 </div>
               )}
-              
+
               {/* رفع الإيصال */}
               <div className="space-y-2">
                 <label className="block text-sm font-semibold">صورة الإيصال الجديد</label>
@@ -1345,7 +1345,7 @@ const calculateAnalytics = () => {
                   <p className="text-xs text-green-600">تم اختيار: {receiptFile.name}</p>
                 )}
               </div>
-              
+
               {/* أزرار الإجراء */}
               <div className="flex gap-2 pt-4">
                 <Button
@@ -1559,18 +1559,18 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
   const shouldShowRetryButton = (payment: any) => {
     // استثناء التحويل البنكي
     if (payment.paymentMethod === "تحويل بنكي") return false;
-    
+
     // للدفعات الفاشلة، اظهر الزر دائماً
     if (payment.status === "فشل") return true;
-    
+
     // للدفعات المعلقة، اظهر الزر مباشرة (بدون انتظار)
     if (payment.status === "معلق") return true;
-    
+
     // للدفعات الإلكترونية القديمة بحالة "قيد المراجعة" (غير مكتملة)
     if (payment.status === "قيد المراجعة" && payment.paymentMethod !== "تحويل بنكي") {
       return true;
     }
-    
+
     return false;
   };
 
@@ -1799,7 +1799,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 <div className="font-semibold">{payment.amount} ر.س</div>
               </div>
             )}
-            
+
             {/* كود الخصم */}
             {payment.discountCode && (
               <div>
@@ -1807,7 +1807,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 <div className="font-semibold text-green-600">{payment.discountCode}</div>
               </div>
             )}
-            
+
             {/* قيمة الخصم */}
             {payment.discountAmount > 0 && (
               <div>
@@ -1815,7 +1815,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 <div className="font-semibold text-green-600">-{payment.discountAmount} ر.س</div>
               </div>
             )}
-            
+
             {/* المبلغ المدفوع */}
             <div>
               <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
@@ -1835,7 +1835,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 <div className="font-semibold">{payment.pendingEndDate}</div>
               </div>
             )}
-            
+
             {/* نوع الاشتراك */}
             {payment.pendingSubscriptionType && (
               <div>
@@ -1846,7 +1846,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 </Badge>
               </div>
             )}
-            
+
             {/* نوع العملية */}
             {payment.action && (
               <div>
@@ -1858,7 +1858,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
                 </div>
               </div>
             )}
-            
+
             {/* تاريخ الإتمام */}
             {payment.completedAt && (
               <div>
