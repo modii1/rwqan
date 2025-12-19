@@ -145,21 +145,9 @@ async function updateRemainingDaysInSheet() {
 export function startScheduler() {
   console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
   
-  // تحديث عند بدء السيرفر (بعد تأخير لتجنب تجاوز حصص Google Sheets)
-  setTimeout(() => {
-    updateRemainingDaysInSheet().catch(console.error);
-  }, 60000); // انتظار 60 ثانية لتجنب تجاوز حصة القراءة
-  
-  // تحديث كل 24 ساعة (86400000 مللي ثانية)
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-  
-  setInterval(() => {
-    const now = new Date();
-    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('ar-SA')}`);
-    updateRemainingDaysInSheet().catch(console.error);
-  }, TWENTY_FOUR_HOURS);
-  
-  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث كل 24 ساعة");
+  // ⚠️ إيقاف مؤقت لنظام الإشعارات - يتم التحديث يدوياً من لوحة الإدارة
+  console.log("⚠️ [Scheduler] نظام الإشعارات التلقائي متوقف مؤقتاً");
+  console.log("✅ [Scheduler] استخدم لوحة الإدارة لإرسال الإشعارات يدوياً");
 }
 
 // تصدير الدالة للاستخدام اليدوي (API endpoint)
