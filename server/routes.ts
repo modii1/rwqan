@@ -3667,14 +3667,19 @@ app.get("/api/paymob/webhook", async (req, res) => {
       }
     }
 
-    // 🎯 إعادة التوجيه إلى صفحة قيد المراجعة للمالك الجديد
+    // 🎯 إعادة التوجيه بناءً على نوع العملية
     if (success) {
+      let paymentAction = '';
+      
       // 📲 إرسال إشعار واتساب عند نجاح الدفع الإلكتروني + تحديث حالة الدفع
       if (propertyNumber) {
         try {
           const property = await storage.getPropertyByNumber(propertyNumber);
           const payments = await storage.getPayments();
           const payment = payments.find(p => p.propertyNumber === propertyNumber && p.paymobOrderId === orderId);
+          
+          // حفظ نوع العملية
+          paymentAction = (payment as any)?.action || '';
           
           // تحديث حالة الدفع إلى "نجح - قيد التحقق"
           if (payment && payment.status === "معلق") {
@@ -3686,14 +3691,17 @@ app.get("/api/paymob/webhook", async (req, res) => {
             console.log("✅ Payment status updated to 'نجح - قيد التحقق':", payment.id);
           }
           
+          // رسالة مختلفة حسب نوع العملية
+          const actionLabel = paymentAction === 'upgrade' ? 'ترقية' : paymentAction === 'extend' ? 'تمديد' : 'اشتراك جديد';
+          
           await sendWhatsAppNotification(
             `💳 *تم استلام دفعة إلكترونية*\n\n` +
             `🏠 العقار: ${property?.name || propertyNumber}\n` +
             `🔢 رقم العقار: ${propertyNumber}\n` +
             `💰 المبلغ: ${payment?.finalAmount || 'غير محدد'} ر.س\n` +
             `🔢 رقم العملية: ${transactionId}\n` +
-            `📋 الحالة: نجح - قيد التحقق من البيانات\n\n` +
-            `⏳ بانتظار إكمال بيانات العقار من المالك`
+            `📋 نوع العملية: ${actionLabel}\n` +
+            `📋 الحالة: نجح - قيد التحقق من البيانات`
           );
           console.log("✅ WhatsApp notification sent for electronic payment:", transactionId);
         } catch (notifyErr) {
@@ -3701,8 +3709,17 @@ app.get("/api/paymob/webhook", async (req, res) => {
         }
       }
 
-      const redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
-      console.log("🔁 Redirecting to:", redirectUrl);
+      // التوجيه حسب نوع العملية
+      let redirectUrl: string;
+      if (paymentAction === 'upgrade' || paymentAction === 'extend') {
+        // الترقية والتمديد: توجيه للوحة التحكم
+        redirectUrl = `/owner?payment=success`;
+      } else {
+        // تسجيل جديد: توجيه لصفحة المراجعة
+        redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
+      }
+      
+      console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'})`);
       return res.redirect(redirectUrl);
     } else {
       return res.redirect(`/subscription?payment=failed`);
