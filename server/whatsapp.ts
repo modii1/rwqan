@@ -78,7 +78,8 @@ async function sendAdminWhatsAppNotification(options: {
     if (!ownerWhatsApp.startsWith('966')) {
       ownerWhatsApp = '966' + ownerWhatsApp;
     }
-    body += `📲 تواصل مع المالك: https://wa.me/${ownerWhatsApp}\n`;
+    body += `📲 واتساب المالك: https://wa.me/${ownerWhatsApp}\n`;
+    body += `🔗 لوحة تحكم المالك: https://rwqan.replit.app/owner\n`;
   }
   if (text) {
     body += `\nالتفاصيل:\n${text}\n`;
