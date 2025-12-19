@@ -382,12 +382,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const incoming = req.body;
       const mapped: Record<string, any> = {};
+      
+      // خريطة عكسية للترجمة من الإنجليزية للعربية
+      const REVERSE_MAP: Record<string, string> = {
+        name: "اسم العقار",
+        whatsappNumber: "رقم الجوال",
+        location: "الموقع",
+        city: "المنطقة",
+        direction: "الاتجاه",
+        type: "النوع",
+        facilities: "المرافق",
+        imagesLink: "رابط الصور",
+        priceOffer: "سعر العرض",
+        priceWeekdays: "سعر وسط الأسبوع",
+        weekdayPrice: "سعر وسط الأسبوع",
+        priceWeekend: "سعر نهاية الأسبوع",
+        weekendPrice: "سعر نهاية الأسبوع",
+        priceNight: "سعر المبيت",
+        overnightPrice: "سعر المبيت",
+        priceSpecial: "سعر خاص",
+        specialPrice: "سعر خاص",
+        priceHolidays: "سعر الإجازات",
+        holidayPrice: "سعر الإجازات",
+        subscriptionType: "نوع الاشتراك",
+        subscriptionDate: "تاريخ الاشتراك",
+      };
+      
+      // تتبع التغييرات للإشعار
+      const changesForNotification: string[] = [];
 
       for (const key in incoming) {
-        if (SHEET_MAP[key]) mapped[SHEET_MAP[key]] = incoming[key];
+        if (key === "pin") continue; // تخطي الرقم السري
+        
+        if (SHEET_MAP[key]) {
+          mapped[SHEET_MAP[key]] = incoming[key];
+          const arabicName = Object.entries(SHEET_MAP).find(([_, v]) => v === SHEET_MAP[key])?.[0]?.replace(/[^\u0600-\u06FF\s]/g, '').trim() || key;
+          changesForNotification.push(`${arabicName}: ${incoming[key]}`);
+        } else {
+          // المفاتيح الإنجليزية مباشرة
+          mapped[key] = incoming[key];
+          const arabicName = REVERSE_MAP[key] || key;
+          changesForNotification.push(`${arabicName}: ${incoming[key]}`);
+        }
       }
 
       delete mapped.propertyNumber;
+      delete mapped.pin;
 
       const updated = await storage.updateProperty(
         req.params.propertyNumber,
@@ -398,9 +438,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "العقار غير موجود" });
 
       // إرسال إشعار واتساب عند تعديل العقار
-      const changesText = Object.entries(mapped)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join("\n");
+      const changesText = changesForNotification.length > 0 
+        ? changesForNotification.join("\n")
+        : "تم تحديث البيانات";
       notifyPropertyUpdate({
         propertyNumber: req.params.propertyNumber,
         propertyName: updated.name || "",
