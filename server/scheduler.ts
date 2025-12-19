@@ -41,19 +41,24 @@ async function updateRemainingDaysInSheet() {
         if (remainingDays < 0) {
           expired++;
           
-          // إرسال إشعار للاشتراكات المنتهية (مرة واحدة فقط)
+          // إرسال إشعار للاشتراكات المنتهية حديثاً (في آخر 3 أيام)
           const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
           if (property) {
-            // التحقق من أن الاشتراك انتهى اليوم فقط (لتجنب التكرار)
-            if (remainingDays === -1) {
+            // إرسال إشعار إذا انتهى الاشتراك في الـ 3 أيام الماضية
+            if (remainingDays >= -3 && remainingDays < 0) {
               try {
-                await notifySubscriptionExpired({
+                console.log(`📤 [Scheduler] إرسال إشعار للعقار ${sub.propertyNumber} (انتهى منذ ${Math.abs(remainingDays)} يوم)`);
+                const result = await notifySubscriptionExpired({
                   propertyNumber: sub.propertyNumber,
                   propertyName: property.name || "",
                   ownerPhone: property.whatsappNumber || "",
                 });
-                notificationsSent++;
-                console.log(`📲 [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+                if (result.status === "success") {
+                  notificationsSent++;
+                  console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+                } else {
+                  console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
+                }
               } catch (err) {
                 console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
               }
