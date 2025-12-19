@@ -294,7 +294,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const items = await storage.getProperties();
 
     // 🟢 إظهار العقارات المقبولة فقط
-    // 🟢 مع السماح للعقارات القديمة التي لا تحتوي على verificationStatus
+    // 🟢 مع السماح للعقارات القديمة التي لا تحتوي verificationStatus
     const filtered = items.filter((p) => {
       // العقار الجديد: لازم يكون approved
       if (p.verificationStatus) {
@@ -382,7 +382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const incoming = req.body;
       const mapped: Record<string, any> = {};
-      
+
       // خريطة عكسية للترجمة من الإنجليزية للعربية
       const REVERSE_MAP: Record<string, string> = {
         name: "اسم العقار",
@@ -407,13 +407,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subscriptionType: "نوع الاشتراك",
         subscriptionDate: "تاريخ الاشتراك",
       };
-      
+
       // تتبع التغييرات للإشعار
       const changesForNotification: string[] = [];
 
       for (const key in incoming) {
         if (key === "pin") continue; // تخطي الرقم السري
-        
+
         if (SHEET_MAP[key]) {
           mapped[SHEET_MAP[key]] = incoming[key];
           const arabicName = Object.entries(SHEET_MAP).find(([_, v]) => v === SHEET_MAP[key])?.[0]?.replace(/[^\u0600-\u06FF\s]/g, '').trim() || key;
@@ -961,10 +961,10 @@ const request = await storage.createRequest(
   app.post("/api/admin/test-expired-notifications", requireAdmin, async (req, res) => {
     try {
       console.log("🧪 [TEST] بدء اختبار إشعارات الاشتراكات المنتهية...");
-      
+
       const subscriptions = await storage.getSubscriptions();
       const properties = await storage.getProperties();
-      
+
       // البحث عن اشتراكات منتهية
       const expiredSubscriptions = subscriptions.filter(sub => {
         if (!sub.endDate) return false;
@@ -978,14 +978,14 @@ const request = await storage.createRequest(
       console.log(`📊 [TEST] وجد ${expiredSubscriptions.length} اشتراك منتهي`);
 
       const notifications = [];
-      
+
       // إرسال إشعار لكل اشتراك منتهي
       for (const sub of expiredSubscriptions.slice(0, 5)) { // حد أقصى 5 إشعارات للاختبار
         const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
-        
+
         if (property) {
           console.log(`📤 [TEST] إرسال إشعار لـ ${property.name} (${sub.propertyNumber})`);
-          
+
           try {
             const { notifySubscriptionExpired } = await import("./whatsapp");
             const result = await notifySubscriptionExpired({
@@ -993,7 +993,7 @@ const request = await storage.createRequest(
               propertyName: property.name || "",
               ownerPhone: property.whatsappNumber || "",
             });
-            
+
             notifications.push({
               propertyNumber: sub.propertyNumber,
               propertyName: property.name,
@@ -1001,7 +1001,7 @@ const request = await storage.createRequest(
               status: result.status,
               response: result.response,
             });
-            
+
             console.log(`✅ [TEST] تم إرسال الإشعار: ${result.status}`);
           } catch (err: any) {
             console.error(`❌ [TEST] خطأ في إرسال الإشعار:`, err);
@@ -1176,7 +1176,7 @@ const request = await storage.createRequest(
   });
 
   // ======================
-  // ADMIN ROUTES
+  // ADMINROUTES
   // ======================
 
   // Admin: Get all properties
@@ -1943,6 +1943,19 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 
     console.log(`✅ Payment created (pending): ${payment.id}, Checkout URL: ${paymobResult.checkoutUrl}`);
 
+    // إرسال إشعار واتساب للمسؤول عن الدفعة الجديدة
+    try {
+      await notifyNewPayment({
+        propertyNumber,
+        propertyName: propertyName,
+        amount: finalAmount,
+        paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
+        transactionId: payment.id,
+      });
+    } catch (notifyErr) {
+      console.error("Failed to send payment notification:", notifyErr);
+    }
+
     res.json({
       checkoutUrl: paymobResult.checkoutUrl,
       paymentId: payment.id,
@@ -1957,32 +1970,32 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
 app.post("/api/owner/payment/retry", async (req, res) => {
   try {
     const { paymentId } = req.body;
-    
+
     if (!paymentId) {
       return res.status(400).json({ error: "معرف الدفعة مطلوب" });
     }
-    
+
     // جلب الدفعة السابقة
     const payment = await googleSheetsService.getPaymentById(paymentId);
     if (!payment) {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
     }
-    
+
     if (payment.status === "مكتمل") {
       return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
     }
-    
+
     // جلب الباقة
     const pkg = await storage.getPackageById(payment.packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
-    
+
     // جلب بيانات العقار
     const property = await storage.getPropertyByNumber(payment.propertyNumber);
     const phone = property?.whatsappNumber || "0500000000";
     const propertyName = property?.name || "عقار";
-    
+
     // إنشاء رابط دفع جديد
     const paymobResult = await paymobService.createIntention(
       payment.finalAmount,
@@ -1993,14 +2006,14 @@ app.post("/api/owner/payment/retry", async (req, res) => {
       pkg.duration,
       "cards"
     );
-    
+
     // تحديث الدفعة بمعرف Paymob الجديد
     await googleSheetsService.updatePayment(paymentId, {
       paymobOrderId: paymobResult.intentionId,
     });
-    
+
     console.log(`🔄 Payment retry for ${paymentId}, new checkout: ${paymobResult.checkoutUrl}`);
-    
+
     res.json({
       checkoutUrl: paymobResult.checkoutUrl,
       paymentId: paymentId,
@@ -2018,27 +2031,27 @@ app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (r
     if (!propertyNumber) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    
-    const { paymentId } = req.body;
-    
+
+    const { paymentId, action } = req.body; // Add action here
+
     if (!paymentId) {
       return res.status(400).json({ error: "معرف الدفعة مطلوب" });
     }
-    
+
     if (!req.file) {
       return res.status(400).json({ error: "الإيصال مطلوب" });
     }
-    
+
     // جلب الدفعة والتحقق من أنها تخص هذا العقار
     const payment = await googleSheetsService.getPaymentById(paymentId);
     if (!payment) {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
     }
-    
+
     if (payment.propertyNumber !== propertyNumber) {
       return res.status(403).json({ error: "غير مصرح لك" });
     }
-    
+
     // رفع الإيصال إلى R2
     let receiptUrl = "";
     if (req.file && R2_BUCKET) {
@@ -2053,12 +2066,12 @@ app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (r
       );
       receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
     }
-    
+
     // تحديث الدفعة بالإيصال الجديد
     await googleSheetsService.updatePayment(paymentId, {
       receiptUrl: receiptUrl,
     });
-    
+
     // إرسال إشعار WhatsApp
     const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
     await sendWhatsAppNotification(
@@ -2070,9 +2083,9 @@ app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (r
       `🧾 الإيصال: ${receiptUrl}\n\n` +
       `⏳ بانتظار المراجعة والتفعيل`
     );
-    
+
     console.log(`📤 Receipt uploaded for payment ${paymentId}: ${receiptUrl}`);
-    
+
     res.json({ 
       success: true, 
       message: "تم رفع الإيصال بنجاح",
@@ -2145,8 +2158,23 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       receiptUrl,
       secondPropertyNumber: secondPropertyNumber || undefined,
     } as any);
-    
+
     console.log(`💾 Payment created: ${payment.id}, secondPropertyNumber: ${secondPropertyNumber || 'none'}`);
+
+    // إرسال إشعار واتساب للمسؤول عن الدفعة الجديدة (للتسجيلات الجديدة)
+    if (!action || action === 'new') {
+      try {
+        await notifyNewPayment({
+          propertyNumber,
+          propertyName: property.name || "",
+          amount: finalAmount,
+          paymentMethod: "تحويل بنكي",
+          transactionId: payment.id,
+        });
+      } catch (notifyErr) {
+        console.error("Failed to send payment notification:", notifyErr);
+      }
+    }
 
     // حفظ البيانات للاشتراك/التمديد/الترقية
     // لا تقم بإنشاء أو تعديل الاشتراك إلا إذا كان هناك إجراء محدد (extend أو upgrade)
@@ -2183,7 +2211,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
       await googleSheetsService.addSubscriptionToSheet(propertyNumber, subscriptionData, property, receiptUrl);
       console.log(`✅ Subscription saved to الاشتراكات sheet for property ${propertyNumber}`);
 
-      // إرسال إشعار واتساب عند رفع الإيصال
+      // إرسال إشعار WhatsApp عند رفع الإيصال (للتمديد/الترقية فقط)
       notifyReceiptUpload({
         propertyNumber,
         propertyName: property.name || "",
@@ -2278,7 +2306,7 @@ if (!propertyNumber) {
       console.log(`🔍 Fetching payments for property: ${propertyNumber}`);
 
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
-      
+
       console.log(`✅ Found ${payments.length} payments for property: ${propertyNumber}`);
       res.json(payments);
     } catch (err: any) {
@@ -2301,7 +2329,7 @@ if (!propertyNumber) {
   // ======================
   // نظام التحقق الذكي من التحويلات البنكية
   // ======================
-  
+
   // التحقق التلقائي من التحويل البنكي المعلق
   app.get("/api/owner/payment/check-pending", requireOwner, async (req, res) => {
     try {
@@ -2311,7 +2339,7 @@ if (!propertyNumber) {
       }
 
       const payments = await googleSheetsService.getPaymentsByProperty(propertyNumber);
-      
+
       // البحث عن دفعة معلقة (تحويل بنكي)
       const pendingPayment = payments.find(p => 
         (p.status === "قيد المراجعة" || p.status === "معلق") && 
@@ -2324,7 +2352,7 @@ if (!propertyNumber) {
 
       // التحقق التلقائي من البيانات
       const issues: string[] = [];
-      
+
       // 1. التحقق من الإيصال
       if (!pendingPayment.receiptUrl) {
         issues.push("لم يتم رفع إيصال التحويل");
@@ -2342,7 +2370,7 @@ if (!propertyNumber) {
       // 3. التحقق من العمر (أكثر من 7 أيام = تحذير)
       const paymentDate = new Date(pendingPayment.createdAt || "");
       const daysSincePayment = Math.floor((Date.now() - paymentDate.getTime()) / (1000 * 60 * 60 * 24));
-      
+
       if (daysSincePayment > 7) {
         issues.push(`الدفع معلق منذ ${daysSincePayment} يوم - قد تحتاج المتابعة`);
       }
@@ -2380,7 +2408,7 @@ if (!propertyNumber) {
       if (requestedStatus === 'rejected') {
         await googleSheetsService.updateVerificationStatus(propertyNumber, "rejected");
         console.log(`❌ Verification status updated to 'rejected' for property ${propertyNumber}`);
-        
+
         return res.json({ 
           success: true, 
           message: "تم تحديث حالة العقار إلى مرفوض",
@@ -2398,7 +2426,7 @@ if (!propertyNumber) {
         // تحديث حالة التحقق فقط (للعقارات القديمة أو المجانية)
         await googleSheetsService.updateVerificationStatus(propertyNumber, "approved");
         console.log(`✅ Verification status updated to 'approved' for property ${propertyNumber} (no pending payment)`);
-        
+
         return res.json({ 
           success: true, 
           message: "تم التحقق من بيانات العقار بنجاح",
@@ -2527,7 +2555,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
     const property = await googleSheetsService.getPropertyByNumber(payment.propertyNumber);
 
     if (property && payment.packageId) {
-      const pkg = await googleSheetsService.getPackageById(payment.packageId);
+      const pkg = await storage.getPackageById(payment.packageId);
       if (pkg) {
         const today = new Date();
         const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(payment.propertyNumber);
@@ -2544,7 +2572,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
         // حساب السعر لكل عقار (نصف السعر إذا كانت باقة عقارين)
         const isMultiProperty = !!(payment as any).secondPropertyNumber;
         const pricePerProperty = isMultiProperty ? payment.finalAmount / 2 : payment.finalAmount;
-        
+
         const subscriptionData = {
           packageId: pkg.id,
           price: pricePerProperty,
@@ -2552,7 +2580,6 @@ app.post("/api/admin/payment/approve", async (req, res) => {
           startDate: startDate.toISOString().split("T")[0],
           endDate: endDate.toISOString().split("T")[0],
           paymentId: payment.id,
-          linkedProperty: isMultiProperty ? (payment as any).secondPropertyNumber : undefined,
         };
 
         // إضافة الاشتراك للشيت
@@ -2579,7 +2606,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
               payment.receiptUrl || ""
             );
             console.log(`✅ Second property subscription activated: ${(payment as any).secondPropertyNumber}, price: ${pricePerProperty}`);
-            
+
             // === ملء شيت "اشتراكات العقارين" تلقائياً ===
             await googleSheetsService.createMultiPropertySubscription({
               packageId: pkg.id,
@@ -2604,7 +2631,7 @@ app.post("/api/admin/payment/approve", async (req, res) => {
       payment.propertyNumber,
       "approved"
     );
-    
+
     // قبول التحقق للعقار الثاني أيضاً
     if ((payment as any).secondPropertyNumber) {
       await googleSheetsService.updateVerificationStatus(
@@ -3230,24 +3257,24 @@ app.post("/api/whatsapp/send", async (req, res) => {
     try {
       const { paymentId } = req.params;
       console.log(`🔧 Manual payment confirmation for: ${paymentId}`);
-      
+
       // جلب بيانات الدفع
       const payment = await googleSheetsService.getPaymentById(paymentId);
       if (!payment) {
         return res.status(404).json({ error: "الدفعة غير موجودة" });
       }
-      
+
       if (payment.status === "مكتمل") {
         return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
       }
-      
+
       // تحديث حالة الدفع
       await googleSheetsService.updatePayment(paymentId, {
         status: "مكتمل",
         completedAt: new Date().toISOString(),
         paymentMethod: payment.paymentMethod || "تأكيد يدوي",
       });
-      
+
       // تفعيل الاشتراك إذا كانت البيانات موجودة
       if (payment.pendingStartDate && payment.pendingEndDate) {
         const subscriptionData = {
@@ -3258,19 +3285,19 @@ app.post("/api/whatsapp/send", async (req, res) => {
           status: "نشط" as const,
           paymentId: paymentId,
         };
-        
+
         await googleSheetsService.createSubscription(subscriptionData);
-        
+
         // تحديث نوع الاشتراك في العقار
         const subType = payment.pendingSubscriptionType || "موثوق";
         await googleSheetsService.updateProperty(payment.propertyNumber, {
           subscriptionType: subType,
           subscriptionDate: payment.pendingEndDate,
         });
-        
+
         console.log(`✅ Subscription activated for property: ${payment.propertyNumber}`);
       }
-      
+
       res.json({ 
         success: true, 
         message: "تم تأكيد الدفعة وتفعيل الاشتراك بنجاح" 
@@ -3414,11 +3441,11 @@ app.post("/api/whatsapp/send", async (req, res) => {
         if (sub.endDate) {
           const end = new Date(sub.endDate);
           const now = new Date();
-          
+
           // تصفير الوقت للمقارنة بالأيام فقط
           end.setHours(0, 0, 0, 0);
           now.setHours(0, 0, 0, 0);
-          
+
           const diffTime = end.getTime() - now.getTime();
           remainingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
@@ -3433,10 +3460,10 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
         // قراءة البيانات من الاشتراك مباشرة
         const subWithType = sub as any;
-        
+
         // نوع الاشتراك من الشيت مباشرة (العمود 4)
         const displayType = subWithType.subscriptionType || "عادي";
-        
+
         // اسم العقار من الشيت مباشرة (العمود 1) أو من جدول العقارات
         const propertyName = subWithType.propertyName || property?.name || "غير معروف";
 
@@ -3615,6 +3642,10 @@ app.get("/api/paymob/webhook", async (req, res) => {
     if (merchantOrderId && merchantOrderId.includes("-")) {
       propertyNumber = merchantOrderId.split("-")[0];
     }
+    if (!propertyNumber) {
+      propertyNumber =
+        req.query.special_reference as string || ""; // Check for special_reference
+    }
 
     console.log("🏡 Extracted property number:", propertyNumber);
 
@@ -3683,6 +3714,9 @@ app.post("/api/paymob/webhook", async (req, res) => {
       propertyNumber =
         t.payment_key_claims?.extra?.creation_extras?.propertyNumber || "";
     }
+    if (!propertyNumber) {
+      propertyNumber = t.order?.merchant_order_id?.split("-")[0] || ""; // Fallback if merchant_order_id is directly on order
+    }
 
     const paymentMethod = t.source_data?.type || "";
     const cardSubType = t.source_data?.sub_type || "";
@@ -3700,7 +3734,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
     try {
       const { paymobService } = await import("./paymob");
-      
+
       // استخدام inquiryByOrderId لجلب الرسوم الحقيقية
       console.log(`📡 Calling Paymob Inquiry API with order_id: ${paymobOrderId}`);
       const inquiry = await paymobService.inquiryByOrderId(paymobOrderId);
@@ -3802,7 +3836,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
           p.propertyNumber === propertyNumber &&
           (p.status === "معلق" || p.status === "قيد المراجعة")
       ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      
+
       if (pendingPayments.length > 0) {
         payment = pendingPayments[0];
         console.log("✅ Found latest pending payment for property");
@@ -3862,7 +3896,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
           endDate: payment.pendingEndDate,
           paymentId: payment.id,
         };
-        
+
         await googleSheetsService.addSubscriptionToSheet(
           payment.propertyNumber,
           subscriptionData,
@@ -3886,7 +3920,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
               secondProperty
             );
             console.log(`🎉 Second property subscription activated: ${(payment as any).secondPropertyNumber}`);
-            
+
             // تحديث الاشتراك الأول بربط العقار الثاني
             await googleSheetsService.updateSubscriptionLinkedProperty(
               payment.propertyNumber,
@@ -3903,7 +3937,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
     try {
       const property = await storage.getPropertyByNumber(payment.propertyNumber);
       const pkg = await storage.getPackageById(payment.packageId);
-      
+
       await notifyNewPayment({
         propertyNumber: payment.propertyNumber,
         propertyName: property?.name || payment.propertyNumber,
@@ -3929,18 +3963,18 @@ app.post("/api/paymob/webhook", async (req, res) => {
   app.post("/api/admin/test-inquiry", async (req, res) => {
     try {
       const { orderId } = req.body;
-      
+
       if (!orderId) {
         return res.status(400).json({ error: "orderId مطلوب" });
       }
-      
+
       console.log(`🧪 Testing Paymob Inquiry API with order_id: ${orderId}`);
-      
+
       const { paymobService } = await import("./paymob");
       const inquiry = await paymobService.inquiryByOrderId(orderId);
-      
+
       console.log(`📊 Inquiry Result:`, JSON.stringify(inquiry, null, 2));
-      
+
       res.json({
         success: true,
         inquiry
@@ -3971,18 +4005,18 @@ app.post("/api/paymob/webhook", async (req, res) => {
     try {
       const { transactionId } = req.params;
       const { feeAmount, vatAmount, merchantFees, acqFees } = req.body;
-      
+
       if (!transactionId) {
         return res.status(400).json({ error: "معرف المعاملة مطلوب" });
       }
-      
+
       // حساب الإجمالي والصافي
       const totalFees = (feeAmount || 0) + (vatAmount || 0);
-      
+
       console.log(`📝 Updating fees for transaction ${transactionId}:`, {
         feeAmount, vatAmount, totalFees, merchantFees, acqFees
       });
-      
+
       // تحديث الرسوم في Google Sheets
       await googleSheetsService.updatePaymentFees(transactionId, {
         feeAmount: feeAmount || 0,
@@ -3991,7 +4025,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
         merchantFees: merchantFees || 0,
         acqFees: acqFees || 0,
       });
-      
+
       res.json({ 
         success: true, 
         message: "تم تحديث الرسوم بنجاح",
@@ -4008,7 +4042,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
     try {
       console.log("🔧 Setting up payment sheet headers...");
       await googleSheetsService.setupPaymentsSheetHeaders();
-      
+
       console.log("🔧 Initializing fee configs...");
       await googleSheetsService.initializeFeeConfigs();
     } catch (error) {
@@ -4019,7 +4053,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
   // ======================
   // 💰 إعدادات الرسوم (Fee Configurations)
   // ======================
-  
+
   app.get("/api/admin/fee-configs", async (req, res) => {
     try {
       const configs = await googleSheetsService.getFeeConfigs();
@@ -4078,7 +4112,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
   app.post("/api/admin/calculate-fees", async (req, res) => {
     try {
       const { amount, paymentMethod, cardType, useConfigs } = req.body;
-      
+
       if (!amount || amount <= 0) {
         return res.status(400).json({ error: "المبلغ مطلوب ويجب أن يكون أكبر من 0" });
       }
@@ -4089,7 +4123,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
       } else {
         fees = googleSheetsService.calculatePaymentFees(amount, paymentMethod, cardType);
       }
-      
+
       res.json(fees);
     } catch (error: any) {
       console.error("Error calculating fees:", error);
@@ -4128,7 +4162,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
   app.post("/api/admin/expenses", async (req, res) => {
     try {
       const { title, amount, category, description, date } = req.body;
-      
+
       if (!title || !amount || !date) {
         return res.status(400).json({ error: "العنوان والمبلغ والتاريخ مطلوبة" });
       }
@@ -4151,7 +4185,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
     try {
       const { id } = req.params;
       const updates = req.body;
-      
+
       if (updates.amount) {
         updates.amount = parseFloat(updates.amount);
       }
