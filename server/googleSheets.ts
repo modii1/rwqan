@@ -936,6 +936,40 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     }
   }
 
+  /**
+   * تحديث الأيام المتبقية لجميع الاشتراكات دفعة واحدة (batch update)
+   * يقرأ الجدول مرة واحدة فقط ويُحدّث كل الصفوف
+   */
+  async updateAllSubscriptionsRemainingDays(updates: Array<{ propertyNumber: string; remainingDays: number }>): Promise<number> {
+    try {
+      const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+      const updateMap = new Map(updates.map(u => [u.propertyNumber, u.remainingDays]));
+      
+      let updatedCount = 0;
+      const batchUpdates: Array<{ rowIndex: number; row: any[] }> = [];
+      
+      for (let i = 0; i < rows.length; i++) {
+        const propertyNumber = rows[i][0];
+        if (updateMap.has(propertyNumber)) {
+          const remainingDays = updateMap.get(propertyNumber)!;
+          rows[i][7] = Math.max(0, remainingDays);
+          batchUpdates.push({ rowIndex: i + 2, row: rows[i] });
+          updatedCount++;
+        }
+      }
+      
+      // تحديث جميع الصفوف بشكل متتالي (Google Sheets API لا يدعم batch update مباشر)
+      for (const update of batchUpdates) {
+        await this.updateRow(SHEETS.SUBSCRIPTIONS, update.rowIndex, update.row);
+      }
+      
+      return updatedCount;
+    } catch (error) {
+      console.error("❌ خطأ في تحديث الأيام المتبقية (batch):", error);
+      throw error;
+    }
+  }
+
   // ================== الباقات ==================
   
   // قراءة الباقات من ورقة الباقات

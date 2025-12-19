@@ -70,7 +70,7 @@ export function calculateRemainingDays(endDate: any): number {
   const endMidnight = resetToMidnight(end);
   
   const diffTime = endMidnight.getTime() - today.getTime();
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   
   // إذا كان الفرق سالب ← الاشتراك منتهي
   // إذا = 0 ← اليوم الأخير (الاشتراك فعال)
@@ -132,10 +132,12 @@ export function getSubscriptionStatus(
   
   const remainingDays = calculateRemainingDays(endDate);
   
-  // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (سالب)
+  // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (remainingDays < 0)
   if (remainingDays < 0) return 'expired';
   // اليوم الأخير أو باقي 5 أيام أو أقل ← ينتهي قريباً
-  if (remainingDays <= 5) return 'expiring';
+  // إذا كان remainingDays = 0 يعني اليوم هو اليوم الأخير
+  if (remainingDays >= 0 && remainingDays <= 5) return 'expiring';
+  // أكثر من 5 أيام ← نشط
   return 'active';
 }
 

@@ -5,19 +5,25 @@
  */
 
 import { storage } from "./storage";
+import { notifySubscriptionExpired } from "./whatsapp";
+import { googleSheetsService } from "./googleSheets";
 
-// تحديث الأيام المتبقية في الشيت
+// تحديث الأيام المتبقية في الشيت + إرسال إشعارات
 async function updateRemainingDaysInSheet() {
   try {
     console.log("📅 [Scheduler] بدء تحديث الأيام المتبقية...");
     
     const subscriptions = await storage.getSubscriptions();
+    const properties = await storage.getProperties();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    let updated = 0;
     let expired = 0;
     let expiringSoon = 0;
+    let notificationsSent = 0;
+    
+    // تجميع كل التحديثات للتنفيذ دفعة واحدة (batch update)
+    const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
     
     for (const sub of subscriptions) {
       if (!sub.endDate || !sub.propertyNumber) continue;
@@ -27,27 +33,50 @@ async function updateRemainingDaysInSheet() {
         endDate.setHours(0, 0, 0, 0);
         
         const diffTime = endDate.getTime() - today.getTime();
-        const remainingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        // تحديث الأيام المتبقية في الشيت
-        await storage.updateSubscriptionRemainingDays(sub.propertyNumber, remainingDays);
-        updated++;
+        // تجميع التحديث بدلاً من التنفيذ المباشر
+        batchUpdates.push({ propertyNumber: sub.propertyNumber, remainingDays: Math.max(0, remainingDays) });
         
         if (remainingDays < 0) {
           expired++;
-        } else if (remainingDays <= 7) {
+          
+          // إرسال إشعار للاشتراكات المنتهية (مرة واحدة فقط)
+          const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+          if (property) {
+            // التحقق من أن الاشتراك انتهى اليوم فقط (لتجنب التكرار)
+            if (remainingDays === -1) {
+              try {
+                await notifySubscriptionExpired({
+                  propertyNumber: sub.propertyNumber,
+                  propertyName: property.name || "",
+                  ownerPhone: property.whatsappNumber || "",
+                });
+                notificationsSent++;
+                console.log(`📲 [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+              } catch (err) {
+                console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
+              }
+            }
+          }
+        } else if (remainingDays >= 0 && remainingDays <= 7) {
           expiringSoon++;
         }
       } catch (err) {
-        console.error(`❌ [Scheduler] خطأ في تحديث ${sub.propertyNumber}:`, err);
+        console.error(`❌ [Scheduler] خطأ في معالجة ${sub.propertyNumber}:`, err);
       }
     }
+    
+    // تنفيذ تحديث الأيام المتبقية دفعة واحدة (يقرأ الجدول مرة واحدة فقط)
+    const updated = await storage.updateAllSubscriptionsRemainingDays(batchUpdates);
     
     console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
     console.log(`   - منتهي: ${expired}`);
     console.log(`   - ينتهي قريباً: ${expiringSoon}`);
+    console.log(`   - إشعارات مُرسلة: ${notificationsSent}`);
+    console.log(`   - التاريخ الحالي: ${today.toISOString().split('T')[0]}`);
     
-    return { updated, expired, expiringSoon };
+    return { updated, expired, expiringSoon, notificationsSent };
   } catch (error) {
     console.error("❌ [Scheduler] خطأ في تحديث الأيام المتبقية:", error);
     throw error;

@@ -915,6 +915,80 @@ const request = await storage.createRequest(
     }
   });
 
+  // =====================================
+  // 🧪 اختبار إشعارات الاشتراكات المنتهية
+  // =====================================
+  app.post("/api/admin/test-expired-notifications", requireAdmin, async (req, res) => {
+    try {
+      console.log("🧪 [TEST] بدء اختبار إشعارات الاشتراكات المنتهية...");
+      
+      const subscriptions = await storage.getSubscriptions();
+      const properties = await storage.getProperties();
+      
+      // البحث عن اشتراكات منتهية
+      const expiredSubscriptions = subscriptions.filter(sub => {
+        if (!sub.endDate) return false;
+        const endDate = new Date(sub.endDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        return endDate < today;
+      });
+
+      console.log(`📊 [TEST] وجد ${expiredSubscriptions.length} اشتراك منتهي`);
+
+      const notifications = [];
+      
+      // إرسال إشعار لكل اشتراك منتهي
+      for (const sub of expiredSubscriptions.slice(0, 5)) { // حد أقصى 5 إشعارات للاختبار
+        const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+        
+        if (property) {
+          console.log(`📤 [TEST] إرسال إشعار لـ ${property.name} (${sub.propertyNumber})`);
+          
+          try {
+            const { notifySubscriptionExpired } = await import("./whatsapp");
+            const result = await notifySubscriptionExpired({
+              propertyNumber: sub.propertyNumber,
+              propertyName: property.name || "",
+              ownerPhone: property.whatsappNumber || "",
+            });
+            
+            notifications.push({
+              propertyNumber: sub.propertyNumber,
+              propertyName: property.name,
+              endDate: sub.endDate,
+              status: result.status,
+              response: result.response,
+            });
+            
+            console.log(`✅ [TEST] تم إرسال الإشعار: ${result.status}`);
+          } catch (err: any) {
+            console.error(`❌ [TEST] خطأ في إرسال الإشعار:`, err);
+            notifications.push({
+              propertyNumber: sub.propertyNumber,
+              propertyName: property.name,
+              endDate: sub.endDate,
+              status: "error",
+              response: err.message,
+            });
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `تم اختبار ${notifications.length} إشعار من أصل ${expiredSubscriptions.length} اشتراك منتهي`,
+        totalExpired: expiredSubscriptions.length,
+        notificationsSent: notifications.length,
+        notifications,
+      });
+    } catch (error: any) {
+      console.error("❌ [TEST] خطأ في اختبار الإشعارات:", error);
+      res.status(500).json({ error: error.message || "فشل في اختبار الإشعارات" });
+    }
+  });
+
   // المسؤول: جلب الإحصائيات - حساب الـ IPs الفريدة فقط
   app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     try {
