@@ -823,6 +823,12 @@ const calculateAnalytics = () => {
                     منذ {new Date(property.subscriptionDate).toLocaleDateString("en-US")}
                   </span>
                 )}
+                {currentSubscription?.linkedProperty && (
+                  <Badge variant="outline" className="text-xs px-2 py-0.5 border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-900/20">
+                    <Home className="w-3 h-3 ml-1" />
+                    مرتبط: {currentSubscription.linkedProperty}
+                  </Badge>
+                )}
               </div>
 
               {remainingDays !== null && (
