@@ -72,7 +72,14 @@ async function sendAdminWhatsAppNotification(options: {
   body += `نوع الإشعار: ${type}\n\n`;
   if (propertyNumber) body += `رقم العقار: ${propertyNumber}\n`;
   if (propertyName) body += `اسم العقار: ${propertyName}\n`;
-  if (ownerPhone) body += `رقم المالك: ${ownerPhone}\n`;
+  if (ownerPhone) {
+    // تنسيق رقم المالك للواتساب (إزالة الصفر وإضافة 966)
+    let ownerWhatsApp = ownerPhone.replace(/^0/, '966').replace(/[^0-9]/g, '');
+    if (!ownerWhatsApp.startsWith('966')) {
+      ownerWhatsApp = '966' + ownerWhatsApp;
+    }
+    body += `📲 تواصل مع المالك: https://wa.me/${ownerWhatsApp}\n`;
+  }
   if (text) {
     body += `\nالتفاصيل:\n${text}\n`;
   }
@@ -404,13 +411,7 @@ export async function notifySubscriptionExpired(data: {
     return { status: "disabled", response: "الإشعار معطل" };
   }
   
-  // تنسيق رقم المالك للواتساب (إزالة الصفر وإضافة 966)
-  let ownerWhatsApp = data.ownerPhone.replace(/^0/, '966').replace(/[^0-9]/g, '');
-  if (!ownerWhatsApp.startsWith('966')) {
-    ownerWhatsApp = '966' + ownerWhatsApp;
-  }
-  
-  const text = `⚠️ الاشتراك منتهي - يرجى التجديد\n\n🔗 رابط تسجيل الدخول:\nhttps://rwqan.replit.app/owner\n\n📲 تواصل مع المالك:\nhttps://wa.me/${ownerWhatsApp}`;
+  const text = `⚠️ الاشتراك منتهي - يرجى التجديد`;
   return sendAdminWhatsAppNotification({
     type: "⚠️ انتهاء اشتراك",
     text,
