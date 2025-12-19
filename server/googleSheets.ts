@@ -970,7 +970,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
   /**
    * تحديث الأيام المتبقية لجميع الاشتراكات دفعة واحدة (batch update)
-   * يقرأ الجدول مرة واحدة فقط ويُحدّث كل الصفوف
+   * يقرأ الجدول مرة واحدة فقط ويُحدّث كل الصفوف في طلب واحد
    */
   async updateAllSubscriptionsRemainingDays(updates: Array<{ propertyNumber: string; remainingDays: number }>): Promise<number> {
     try {
@@ -978,21 +978,34 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       const updateMap = new Map(updates.map(u => [u.propertyNumber, u.remainingDays]));
       
       let updatedCount = 0;
-      const batchUpdates: Array<{ rowIndex: number; row: any[] }> = [];
+      const batchData: Array<{ range: string; values: any[][] }> = [];
       
       for (let i = 0; i < rows.length; i++) {
         const propertyNumber = rows[i][0];
         if (updateMap.has(propertyNumber)) {
           const remainingDays = updateMap.get(propertyNumber)!;
           rows[i][7] = Math.max(0, remainingDays);
-          batchUpdates.push({ rowIndex: i + 2, row: rows[i] });
+          
+          // إضافة التحديث إلى batch
+          batchData.push({
+            range: `${SHEETS.SUBSCRIPTIONS}!A${i + 2}:ZZ${i + 2}`,
+            values: [rows[i]]
+          });
           updatedCount++;
         }
       }
       
-      // تحديث جميع الصفوف بشكل متتالي (Google Sheets API لا يدعم batch update مباشر)
-      for (const update of batchUpdates) {
-        await this.updateRow(SHEETS.SUBSCRIPTIONS, update.rowIndex, update.row);
+      // تحديث جميع الصفوف في طلب واحد باستخدام batchUpdate
+      if (batchData.length > 0) {
+        const sheets = await this.getSheets();
+        await sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: SHEET_ID,
+          requestBody: {
+            valueInputOption: 'RAW',
+            data: batchData
+          }
+        });
+        console.log(`✅ Updated ${updatedCount} subscriptions in a single batch request`);
       }
       
       return updatedCount;
