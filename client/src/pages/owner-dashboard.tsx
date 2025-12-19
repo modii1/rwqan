@@ -55,6 +55,21 @@ export default function OwnerDashboard() {
   const [showRequestsStats, setShowRequestsStats] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [paymentsExpanded, setPaymentsExpanded] = useState(false);
+  
+  // التحقق من نجاح الدفع عند الوصول من Paymob
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('payment');
+    
+    if (paymentStatus === 'success') {
+      toast({
+        title: "تم الدفع بنجاح!",
+        description: "تم تفعيل اشتراكك بنجاح. شكراً لك!",
+      });
+      // إزالة query param من URL
+      window.history.replaceState({}, '', '/owner');
+    }
+  }, [toast]);
 
   // نافذة رفع الإيصال للتحويل البنكي
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
