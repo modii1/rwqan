@@ -27,15 +27,15 @@ async function updateRemainingDaysInSheet() {
         endDate.setHours(0, 0, 0, 0);
         
         const diffTime = endDate.getTime() - today.getTime();
-        const remainingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
         // تحديث الأيام المتبقية في الشيت
-        await storage.updateSubscriptionRemainingDays(sub.propertyNumber, remainingDays);
+        await storage.updateSubscriptionRemainingDays(sub.propertyNumber, Math.max(0, remainingDays));
         updated++;
         
         if (remainingDays < 0) {
           expired++;
-        } else if (remainingDays <= 7) {
+        } else if (remainingDays >= 0 && remainingDays <= 7) {
           expiringSoon++;
         }
       } catch (err) {
@@ -46,6 +46,7 @@ async function updateRemainingDaysInSheet() {
     console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
     console.log(`   - منتهي: ${expired}`);
     console.log(`   - ينتهي قريباً: ${expiringSoon}`);
+    console.log(`   - التاريخ الحالي: ${today.toISOString().split('T')[0]}`);
     
     return { updated, expired, expiringSoon };
   } catch (error) {
