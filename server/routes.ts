@@ -3676,7 +3676,13 @@ app.get("/api/paymob/webhook", async (req, res) => {
         try {
           const property = await storage.getPropertyByNumber(propertyNumber);
           const payments = await storage.getPayments();
-          const payment = payments.find(p => p.propertyNumber === propertyNumber && p.paymobOrderId === orderId);
+          
+          // البحث عن الدفعة المعلقة الأحدث للعقار (قد لا يتطابق orderId مع intentionId)
+          const payment = payments
+            .filter(p => p.propertyNumber === propertyNumber && (p.status === "معلق" || p.status === "قيد المراجعة"))
+            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+          
+          console.log(`🔍 Looking for payment: propertyNumber=${propertyNumber}, found=${!!payment}, action=${(payment as any)?.action}`);
           
           // حفظ نوع العملية
           paymentAction = (payment as any)?.action || '';
