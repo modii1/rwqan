@@ -48,6 +48,7 @@ export default function SubscriptionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [isElectronicPayment, setIsElectronicPayment] = useState(false);
 
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
@@ -64,6 +65,7 @@ export default function SubscriptionPage() {
     if (paymentSuccess && propertyNum) {
       setRegisteredPropertyNumber(propertyNum);
       setRegistrationSuccess(true);
+      setIsElectronicPayment(true);
     }
   }, []);
 
@@ -228,6 +230,8 @@ export default function SubscriptionPage() {
                 <p className="text-sm text-amber-700">
                   {isFreePackage 
                     ? "سيتم مراجعة عقارك من قبل الإدارة خلال 24 ساعة. ستتمكن من تسجيل الدخول فور قبول العقار."
+                    : isElectronicPayment
+                    ? "تم الدفع بنجاح! سجّل دخول وأكمل بيانات العقار للتفعيل التلقائي."
                     : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."
                   }
                 </p>

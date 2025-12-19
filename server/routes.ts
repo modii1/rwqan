@@ -3668,6 +3668,38 @@ app.get("/api/paymob/webhook", async (req, res) => {
 
     // 🎯 إعادة التوجيه إلى صفحة قيد المراجعة للمالك الجديد
     if (success) {
+      // 📲 إرسال إشعار واتساب عند نجاح الدفع الإلكتروني + تحديث حالة الدفع
+      if (propertyNumber) {
+        try {
+          const property = await storage.getPropertyByNumber(propertyNumber);
+          const payments = await storage.getPayments();
+          const payment = payments.find(p => p.propertyNumber === propertyNumber && p.paymobOrderId === orderId);
+          
+          // تحديث حالة الدفع إلى "نجح - قيد التحقق"
+          if (payment && payment.status === "معلق") {
+            await storage.updatePayment(payment.id, { 
+              status: "نجح - قيد التحقق" as any,
+              transactionId,
+              completedAt: new Date().toISOString()
+            });
+            console.log("✅ Payment status updated to 'نجح - قيد التحقق':", payment.id);
+          }
+          
+          await sendWhatsAppNotification(
+            `💳 *تم استلام دفعة إلكترونية*\n\n` +
+            `🏠 العقار: ${property?.name || propertyNumber}\n` +
+            `🔢 رقم العقار: ${propertyNumber}\n` +
+            `💰 المبلغ: ${payment?.finalAmount || 'غير محدد'} ر.س\n` +
+            `🔢 رقم العملية: ${transactionId}\n` +
+            `📋 الحالة: نجح - قيد التحقق من البيانات\n\n` +
+            `⏳ بانتظار إكمال بيانات العقار من المالك`
+          );
+          console.log("✅ WhatsApp notification sent for electronic payment:", transactionId);
+        } catch (notifyErr) {
+          console.log("⚠️ Failed to send WhatsApp notification:", notifyErr);
+        }
+      }
+
       const redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
       console.log("🔁 Redirecting to:", redirectUrl);
       return res.redirect(redirectUrl);
