@@ -26,6 +26,10 @@ function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
 /**
  * جلب الإشعارات المُرسلة اليوم من جدول "تنبيهات الواتساب"
  * للتأكد من عدم إرسال إشعار مكرر حتى لو أُعيد تشغيل السيرفر
+ * 
+ * هيكل الجدول:
+ * [0] id, [1] propertyNumber, [2] propertyName, [3] ownerPhone,
+ * [4] type, [5] message, [6] status, [7] response, [8] createdAt
  */
 async function getTodaysSentNotifications(): Promise<Set<string>> {
   const sentToday = new Set<string>();
@@ -34,16 +38,16 @@ async function getTodaysSentNotifications(): Promise<Set<string>> {
     const todayStr = new Date().toISOString().split('T')[0];
     
     for (const row of notifications) {
-      // البحث عن إشعارات "انتهاء اشتراك" المُرسلة اليوم
-      const notificationType = row[2] || ""; // عمود نوع الإشعار
-      const propertyNumber = row[3] || ""; // عمود رقم العقار
-      const createdAt = row[8] || ""; // عمود تاريخ الإنشاء
+      const propertyNumber = row[1] || ""; // عمود رقم العقار (index 1)
+      const notificationType = row[4] || ""; // عمود نوع الإشعار (index 4)
+      const createdAt = row[8] || ""; // عمود تاريخ الإنشاء (index 8)
       
+      // البحث عن إشعارات "انتهاء اشتراك" المُرسلة اليوم
       if (notificationType.includes("انتهاء") && createdAt.includes(todayStr)) {
         sentToday.add(propertyNumber);
       }
     }
-    console.log(`📋 [Scheduler] إشعارات اليوم المُرسلة: ${sentToday.size} عقار`);
+    console.log(`📋 [Scheduler] إشعارات انتهاء مُرسلة اليوم: ${sentToday.size} عقار`);
   } catch (error) {
     console.error("❌ [Scheduler] خطأ في قراءة إشعارات اليوم:", error);
   }
@@ -145,9 +149,22 @@ async function updateRemainingDaysInSheet() {
 export function startScheduler() {
   console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
   
-  // ⚠️ إيقاف مؤقت لنظام الإشعارات - يتم التحديث يدوياً من لوحة الإدارة
-  console.log("⚠️ [Scheduler] نظام الإشعارات التلقائي متوقف مؤقتاً");
-  console.log("✅ [Scheduler] استخدم لوحة الإدارة لإرسال الإشعارات يدوياً");
+  // تحديث عند بدء السيرفر (بعد تأخير لتجنب تجاوز حصص Google Sheets)
+  setTimeout(() => {
+    updateRemainingDaysInSheet().catch(console.error);
+  }, 60000); // انتظار 60 ثانية لتجنب تجاوز حصة القراءة
+  
+  // تحديث كل 24 ساعة (86400000 مللي ثانية)
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+  
+  setInterval(() => {
+    const now = new Date();
+    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('ar-SA')}`);
+    updateRemainingDaysInSheet().catch(console.error);
+  }, TWENTY_FOUR_HOURS);
+  
+  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث كل 24 ساعة");
+  console.log("📋 [Scheduler] يتم التحقق من إشعارات اليوم من Google Sheets لمنع التكرار");
 }
 
 // تصدير الدالة للاستخدام اليدوي (API endpoint)
