@@ -127,7 +127,8 @@ export default function AdminSubscriptionsSection() {
 
   const stats = {
     total: subscriptions.length,
-    active: subscriptions.filter(s => s.status === "ساري").length,
+    activePaid: subscriptions.filter(s => s.status === "ساري" && s.price > 0).length,
+    activeFree: subscriptions.filter(s => s.status === "ساري" && s.price === 0).length,
     expiring: subscriptions.filter(s => s.status === "قريب الانتهاء").length,
     expired: subscriptions.filter(s => s.status === "منتهي").length,
   };
@@ -199,22 +200,26 @@ export default function AdminSubscriptionsSection() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4 text-center">
-          <p className="text-3xl font-bold text-[#434040]">{stats.total}</p>
-          <p className="text-sm text-muted-foreground">إجمالي الاشتراكات</p>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="p-3 text-center">
+          <p className="text-2xl font-bold text-[#434040]">{stats.total}</p>
+          <p className="text-xs text-muted-foreground">إجمالي</p>
         </Card>
-        <Card className="p-4 text-center border-green-200 bg-green-50/50">
-          <p className="text-3xl font-bold text-green-600">{stats.active}</p>
-          <p className="text-sm text-muted-foreground">ساري</p>
+        <Card className="p-3 text-center border-green-200 bg-green-50/50">
+          <p className="text-2xl font-bold text-green-600">{stats.activePaid}</p>
+          <p className="text-xs text-muted-foreground">ساري</p>
         </Card>
-        <Card className="p-4 text-center border-orange-200 bg-orange-50/50">
-          <p className="text-3xl font-bold text-orange-600">{stats.expiring}</p>
-          <p className="text-sm text-muted-foreground">ينتهي قريباً</p>
+        <Card className="p-3 text-center border-blue-200 bg-blue-50/50">
+          <p className="text-2xl font-bold text-blue-600">{stats.activeFree}</p>
+          <p className="text-xs text-muted-foreground">نشط مجاني</p>
         </Card>
-        <Card className="p-4 text-center border-red-200 bg-red-50/50">
-          <p className="text-3xl font-bold text-red-600">{stats.expired}</p>
-          <p className="text-sm text-muted-foreground">منتهي</p>
+        <Card className="p-3 text-center border-orange-200 bg-orange-50/50">
+          <p className="text-2xl font-bold text-orange-600">{stats.expiring}</p>
+          <p className="text-xs text-muted-foreground">ينتهي قريباً</p>
+        </Card>
+        <Card className="p-3 text-center border-gray-200 bg-gray-50/50">
+          <p className="text-2xl font-bold text-gray-600">{stats.expired}</p>
+          <p className="text-xs text-muted-foreground">منتهي</p>
         </Card>
       </div>
 

@@ -3439,6 +3439,9 @@ app.post("/api/whatsapp/send", async (req, res) => {
         let remainingDays: number | null = null;
         let status: "ساري" | "منتهي" | "قريب الانتهاء" = "ساري";
 
+        // قراءة البيانات من الاشتراك مباشرة
+        const subWithType = sub as any;
+
         if (sub.endDate) {
           const end = new Date(sub.endDate);
           const now = new Date();
@@ -3458,9 +3461,6 @@ app.post("/api/whatsapp/send", async (req, res) => {
             status = "قريب الانتهاء";
           }
         }
-
-        // قراءة البيانات من الاشتراك مباشرة
-        const subWithType = sub as any;
 
         // نوع الاشتراك من الشيت مباشرة (العمود 4)
         const displayType = subWithType.subscriptionType || "عادي";
