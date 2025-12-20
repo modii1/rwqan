@@ -114,7 +114,8 @@ export default function AdminSubscriptionsSection() {
         sub.subscriptionType.includes(searchQuery);
       
       if (statusFilter === "all") return matchesSearch;
-      if (statusFilter === "active") return matchesSearch && sub.status === "ساري";
+      if (statusFilter === "activePaid") return matchesSearch && sub.status === "ساري" && sub.price > 0;
+      if (statusFilter === "activeFree") return matchesSearch && sub.status === "ساري" && sub.price === 0;
       if (statusFilter === "expiring") return matchesSearch && sub.status === "قريب الانتهاء";
       if (statusFilter === "expired") return matchesSearch && sub.status === "منتهي";
       return matchesSearch;
@@ -237,13 +238,14 @@ export default function AdminSubscriptionsSection() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full md:w-48" data-testid="select-status-filter">
+            <SelectTrigger className="w-full md:w-56" data-testid="select-status-filter">
               <Filter className="w-4 h-4 ml-2" />
               <SelectValue placeholder="فلترة حسب الحالة" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">جميع الحالات</SelectItem>
-              <SelectItem value="active">ساري</SelectItem>
+              <SelectItem value="activePaid">ساري (مدفوع)</SelectItem>
+              <SelectItem value="activeFree">نشط مجاني</SelectItem>
               <SelectItem value="expiring">ينتهي قريباً</SelectItem>
               <SelectItem value="expired">منتهي</SelectItem>
             </SelectContent>
