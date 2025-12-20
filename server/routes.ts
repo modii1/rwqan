@@ -3488,6 +3488,25 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
   });
 
+  // إلغاء الاشتراك
+  app.post("/api/admin/subscription/cancel", async (req, res) => {
+    try {
+      const { propertyNumber, reason } = req.body;
+      
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "رقم العقار مطلوب" });
+      }
+
+      // تحديث الاشتراك في Google Sheets
+      await googleSheetsService.cancelSubscription(propertyNumber, reason);
+
+      res.json({ success: true, message: "تم إلغاء الاشتراك بنجاح" });
+    } catch (error) {
+      console.error("Error canceling subscription:", error);
+      res.status(500).json({ error: "فشل في إلغاء الاشتراك" });
+    }
+  });
+
   // ======================
   // 📦 إدارة الباقات
   // ======================
