@@ -145,25 +145,54 @@ async function updateRemainingDaysInSheet() {
   }
 }
 
+// حساب الوقت التالي للساعة 12 ظهراً بتوقيت السعودية (UTC+3)
+function getNextNoonTime(): { nextNoon: Date; delayMs: number } {
+  const now = new Date();
+  
+  // تحويل الوقت الحالي إلى توقيت السعودية (UTC+3)
+  const saudiTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+  
+  // إنشاء وقت الظهيرة (12:00) لليوم الحالي بتوقيت السعودية
+  const nextNoon = new Date(saudiTime);
+  nextNoon.setHours(12, 0, 0, 0);
+  
+  // إذا مضى وقت الظهيرة اليوم، انتقل إلى غداً
+  if (saudiTime >= nextNoon) {
+    nextNoon.setDate(nextNoon.getDate() + 1);
+  }
+  
+  // حساب الفرق بالميلي ثانية
+  const delayMs = nextNoon.getTime() - saudiTime.getTime();
+  
+  return { nextNoon, delayMs };
+}
+
 // تشغيل المهام المجدولة
 export function startScheduler() {
   console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
   
-  // تحديث عند بدء السيرفر (بعد تأخير لتجنب تجاوز حصص Google Sheets)
+  const { nextNoon, delayMs } = getNextNoonTime();
+  const hoursUntilNoon = (delayMs / (1000 * 60 * 60)).toFixed(2);
+  
+  console.log(`⏰ [Scheduler] وقت التنفيذ المقبل: 12:00 ظهراً بتوقيت السعودية`);
+  console.log(`⏳ [Scheduler] سيتم التحديث بعد ${hoursUntilNoon} ساعة`);
+  console.log(`📅 [Scheduler] التاريخ والوقت: ${nextNoon.toLocaleString('ar-SA')}`);
+  
+  // جدولة التحديث الأول للساعة 12 ظهراً
   setTimeout(() => {
+    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي في الموعد المحدد`);
     updateRemainingDaysInSheet().catch(console.error);
-  }, 60000); // انتظار 60 ثانية لتجنب تجاوز حصة القراءة
+    
+    // بعد التحديث الأول، جدول التحديثات المتكررة كل 24 ساعة
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    setInterval(() => {
+      const now = new Date();
+      console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('ar-SA')}`);
+      updateRemainingDaysInSheet().catch(console.error);
+    }, TWENTY_FOUR_HOURS);
+  }, delayMs);
   
-  // تحديث كل 24 ساعة (86400000 مللي ثانية)
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-  
-  setInterval(() => {
-    const now = new Date();
-    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('ar-SA')}`);
-    updateRemainingDaysInSheet().catch(console.error);
-  }, TWENTY_FOUR_HOURS);
-  
-  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث كل 24 ساعة");
+  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث يومي الساعة 12 ظهراً");
   console.log("📋 [Scheduler] يتم التحقق من إشعارات اليوم من Google Sheets لمنع التكرار");
 }
 
