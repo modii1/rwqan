@@ -896,6 +896,31 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     }
   }
 
+  // إلغاء الاشتراك (تعيين تاريخ الانتهاء لاليوم)
+  async cancelSubscription(propertyNumber: string, reason?: string): Promise<void> {
+    try {
+      const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
+      const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+      
+      if (rowIndex === -1) {
+        console.log(`⚠️ Subscription not found for property ${propertyNumber}`);
+        return;
+      }
+      
+      const row = rows[rowIndex];
+      const today = new Date().toISOString().split('T')[0];
+      
+      row[6] = today; // العمود 6 = تاريخ الانتهاء
+      row[7] = 0;    // العمود 7 = الأيام المتبقية = 0
+      
+      await this.updateRow(SHEETS.SUBSCRIPTIONS, rowIndex + 2, row);
+      console.log(`❌ Cancelled subscription for property ${propertyNumber} (reason: ${reason || 'admin'})`);
+    } catch (error) {
+      console.error(`❌ خطأ في إلغاء الاشتراك للعقار ${propertyNumber}:`, error);
+      throw error;
+    }
+  }
+
   async updateSubscription(
     id: string,
     updates: Partial<Subscription>,
