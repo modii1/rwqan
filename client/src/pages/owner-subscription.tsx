@@ -64,8 +64,9 @@ export default function OwnerSubscriptionPage() {
   const currentPackage = packages.find(p => p.id === currentSubscription?.packageId);
 
   // حساب الأيام المتبقية باستخدام الدوال الآمنة
+  // تمرير تاريخ البداية لحساب صحيح إذا كان الاشتراك في المستقبل
   const daysRemaining = currentSubscription 
-    ? calculateRemainingDays(currentSubscription.endDate)
+    ? calculateRemainingDays(currentSubscription.endDate, currentSubscription.startDate)
     : 0;
 
   // حساب مدة الاشتراك

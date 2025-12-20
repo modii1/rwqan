@@ -635,7 +635,7 @@ console.log("🔍 paymentsData:", paymentsData);
   const isVip = property.subscriptionType === "مميز";
 
   // Calculate subscription progress from actual subscription data
-  const calculateRemainingDays = () => {
+  const calculateRemainingDaysLocal = () => {
     if (!property.subscriptionType || property.subscriptionType === "عادي") {
       return null;
     }
@@ -643,7 +643,23 @@ console.log("🔍 paymentsData:", paymentsData);
     // استخدام تاريخ الانتهاء من بيانات الاشتراك الحالي
     if (currentSubscription?.endDate) {
       const endDate = new Date(currentSubscription.endDate);
+      const startDate = currentSubscription?.startDate ? new Date(currentSubscription.startDate) : null;
       const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      
+      // إذا تاريخ البداية في المستقبل ← أرجع المدة الكاملة للاشتراك
+      if (startDate) {
+        const startMidnight = new Date(startDate);
+        startMidnight.setHours(0, 0, 0, 0);
+        if (startMidnight.getTime() > now.getTime()) {
+          const endMidnight = new Date(endDate);
+          endMidnight.setHours(0, 0, 0, 0);
+          const fullDuration = endMidnight.getTime() - startMidnight.getTime();
+          return Math.ceil(fullDuration / (1000 * 60 * 60 * 24));
+        }
+      }
+      
+      // الحساب العادي: من اليوم لتاريخ الانتهاء
       const diffTime = endDate.getTime() - now.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       return Math.max(0, diffDays);
@@ -663,7 +679,7 @@ console.log("🔍 paymentsData:", paymentsData);
     return 30; // افتراضي
   };
 
-  const remainingDays = calculateRemainingDays();
+  const remainingDays = calculateRemainingDaysLocal();
   const totalDays = calculateTotalDays();
   const usedDays =
     remainingDays !== null ? Math.max(totalDays - remainingDays, 0) : null;
