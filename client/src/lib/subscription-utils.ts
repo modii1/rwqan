@@ -58,17 +58,31 @@ export function resetToMidnight(date: Date): Date {
 /**
  * حساب الأيام المتبقية من تاريخ الانتهاء
  * القاعدة: الاشتراك يبقى فعال طوال يوم الانتهاء (حتى 23:59:59)
- * - إذا اليوم = تاريخ الانتهاء ← 0 (اليوم الأخير، لكن الاشتراك فعال)
- * - إذا تاريخ الانتهاء > اليوم ← عدد الأيام المتبقية
+ * - إذا تاريخ البداية في المستقبل ← الأيام المتبقية = المدة الكاملة (من البداية للنهاية)
+ * - إذا تاريخ البداية في الماضي أو اليوم ← الأيام المتبقية = من اليوم للنهاية
  * - إذا تاريخ الانتهاء < اليوم ← -1 (منتهي)
  */
-export function calculateRemainingDays(endDate: any): number {
+export function calculateRemainingDays(endDate: any, startDate?: any): number {
   const end = parseDate(endDate);
   if (!end) return -1;
   
   const today = resetToMidnight(new Date());
   const endMidnight = resetToMidnight(end);
   
+  // إذا كان تاريخ البداية موجوداً وفي المستقبل
+  if (startDate) {
+    const start = parseDate(startDate);
+    if (start) {
+      const startMidnight = resetToMidnight(start);
+      // إذا تاريخ البداية في المستقبل ← أرجع المدة الكاملة للاشتراك
+      if (startMidnight.getTime() > today.getTime()) {
+        const fullDuration = endMidnight.getTime() - startMidnight.getTime();
+        return Math.ceil(fullDuration / (1000 * 60 * 60 * 24));
+      }
+    }
+  }
+  
+  // الحساب العادي: من اليوم لتاريخ الانتهاء
   const diffTime = endMidnight.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   
