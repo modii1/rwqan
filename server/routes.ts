@@ -3437,12 +3437,16 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
         // حساب الأيام المتبقية - الاشتراك يبقى فعال طوال يوم الانتهاء
         let remainingDays: number | null = null;
-        let status: "ساري" | "منتهي" | "قريب الانتهاء" = "ساري";
+        let status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني" = "ساري";
 
         // قراءة البيانات من الاشتراك مباشرة
         const subWithType = sub as any;
 
-        if (sub.endDate) {
+        // إذا لم يكن هناك تاريخ انتهاء = نشط مجاني (free)
+        if (!sub.endDate || sub.endDate.trim() === "") {
+          status = "نشط مجاني";
+          remainingDays = null;
+        } else {
           const end = new Date(sub.endDate);
           const now = new Date();
 

@@ -41,7 +41,7 @@ interface AdminSubscription {
   startDate: string;
   endDate: string;
   remainingDays: number | null;
-  status: "ساري" | "منتهي" | "قريب الانتهاء";
+  status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني";
 }
 
 export default function AdminSubscriptionsSection() {
@@ -115,6 +115,7 @@ export default function AdminSubscriptionsSection() {
       
       if (statusFilter === "all") return matchesSearch;
       if (statusFilter === "active") return matchesSearch && sub.status === "ساري";
+      if (statusFilter === "activeFree") return matchesSearch && sub.status === "نشط مجاني";
       if (statusFilter === "expiring") return matchesSearch && sub.status === "قريب الانتهاء";
       if (statusFilter === "expired") return matchesSearch && sub.status === "منتهي";
       return matchesSearch;
@@ -127,17 +128,15 @@ export default function AdminSubscriptionsSection() {
 
   const stats = {
     total: subscriptions.length,
-    activePaid: subscriptions.filter(s => s.status === "ساري" && s.price > 0).length,
-    activeFree: subscriptions.filter(s => s.status === "ساري" && s.price === 0).length,
+    activePaid: subscriptions.filter(s => s.status === "ساري").length,
+    activeFree: subscriptions.filter(s => s.status === "نشط مجاني").length,
     expiring: subscriptions.filter(s => s.status === "قريب الانتهاء").length,
     expired: subscriptions.filter(s => s.status === "منتهي").length,
   };
 
   const getStatusBadge = (status: string, remainingDays: number | null) => {
-    const days = remainingDays ?? -1;
-    
-    // منتهي: أيام سالبة فقط (تاريخ الانتهاء قبل اليوم)
-    if (status === "منتهي" || days < 0) {
+    // منتهي
+    if (status === "منتهي") {
       return (
         <Badge className="bg-red-500 text-white flex items-center gap-1">
           <XCircle className="w-3 h-3" />
@@ -145,8 +144,9 @@ export default function AdminSubscriptionsSection() {
         </Badge>
       );
     }
-    // ينتهي قريباً: اليوم الأخير (0) أو باقي 7 أيام أو أقل
-    if (status === "قريب الانتهاء" || days <= 7) {
+    // ينتهي قريباً
+    if (status === "قريب الانتهاء") {
+      const days = remainingDays ?? 0;
       return (
         <Badge className="bg-orange-500 text-white flex items-center gap-1">
           <AlertTriangle className="w-3 h-3" />
@@ -154,6 +154,16 @@ export default function AdminSubscriptionsSection() {
         </Badge>
       );
     }
+    // نشط مجاني
+    if (status === "نشط مجاني") {
+      return (
+        <Badge className="bg-blue-500 text-white flex items-center gap-1">
+          <CheckCircle2 className="w-3 h-3" />
+          نشط مجاني
+        </Badge>
+      );
+    }
+    // ساري (مدفوع)
     return (
       <Badge className="bg-green-500 text-white flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3" />
@@ -244,6 +254,7 @@ export default function AdminSubscriptionsSection() {
             <SelectContent>
               <SelectItem value="all">جميع الحالات</SelectItem>
               <SelectItem value="active">ساري</SelectItem>
+              <SelectItem value="activeFree">نشط مجاني</SelectItem>
               <SelectItem value="expiring">ينتهي قريباً</SelectItem>
               <SelectItem value="expired">منتهي</SelectItem>
             </SelectContent>
