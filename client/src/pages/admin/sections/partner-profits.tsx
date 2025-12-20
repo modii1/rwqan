@@ -103,6 +103,13 @@ export default function PartnerProfitsSection() {
   });
 
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
+  const [isMigrationDialogOpen, setIsMigrationDialogOpen] = useState(false);
+  const [migrationData, setMigrationData] = useState<{
+    paidSubscriptions: any[];
+    totalRevenue: number;
+    partnerShare: number;
+    isLoading: boolean;
+  }>({ paidSubscriptions: [], totalRevenue: 0, partnerShare: 0, isLoading: false });
 
   const createExpenseMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -203,38 +210,33 @@ export default function PartnerProfitsSection() {
     });
   };
 
-  const handleMigration = async () => {
+  // فتح modal الترحيل وجلب البيانات
+  const handleOpenMigration = async () => {
+    setMigrationData(prev => ({ ...prev, isLoading: true }));
+    setIsMigrationDialogOpen(true);
+    
     try {
-      // استدعاء API للحصول على الاشتراكات من شيت "الاشتراكات"
       const response = await fetch('/api/admin/subscriptions');
       const subscriptions = await response.json();
       
       // جمع الاشتراكات التي لها رسوم (price > 0)
-      const paidSubscriptions = subscriptions.filter((sub: any) => sub.price && sub.price > 0);
-      
-      if (paidSubscriptions.length === 0) {
-        toast({
-          title: "لا توجد بيانات",
-          description: "لا توجد اشتراكات قديمة للترحيل",
-          variant: "destructive",
-        });
-        return;
-      }
+      const paidSubscriptions = subscriptions.filter((sub: any) => {
+        const price = parseFloat(String(sub.price || 0));
+        return price > 0;
+      });
       
       // حساب الإجماليات
-      const totalRevenue = paidSubscriptions.reduce((sum: number, sub: any) => sum + (sub.price || 0), 0);
+      const totalRevenue = paidSubscriptions.reduce((sum: number, sub: any) => {
+        const price = parseFloat(String(sub.price || 0));
+        return sum + price;
+      }, 0);
       const partnerShare = totalRevenue * PARTNER_SHARE;
       
-      createMutation.mutate({
-        monthYear: "ترحيل الدورة السابقة",
-        activeSubscriptions: paidSubscriptions.length,
+      setMigrationData({
+        paidSubscriptions,
         totalRevenue,
         partnerShare,
-        partnerPercentage: 50,
-        totalExpenses: 0,
-        netProfitAfterExpenses: partnerShare,
-        transferStatus: "pending",
-        notes: `تم ترحيل ${paidSubscriptions.length} اشتراك من شيت الاشتراكات`,
+        isLoading: false,
       });
     } catch (error) {
       toast({
@@ -242,7 +244,35 @@ export default function PartnerProfitsSection() {
         description: "فشل في جلب بيانات الاشتراكات",
         variant: "destructive",
       });
+      setIsMigrationDialogOpen(false);
+      setMigrationData(prev => ({ ...prev, isLoading: false }));
     }
+  };
+
+  // تنفيذ الترحيل الفعلي
+  const handleConfirmMigration = () => {
+    if (migrationData.paidSubscriptions.length === 0) {
+      toast({
+        title: "لا توجد بيانات",
+        description: "لا توجد اشتراكات قديمة للترحيل",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    createMutation.mutate({
+      monthYear: "ترحيل الدورة السابقة",
+      activeSubscriptions: migrationData.paidSubscriptions.length,
+      totalRevenue: migrationData.totalRevenue,
+      partnerShare: migrationData.partnerShare,
+      partnerPercentage: 50,
+      totalExpenses: 0,
+      netProfitAfterExpenses: migrationData.partnerShare,
+      transferStatus: "pending",
+      notes: `تم ترحيل ${migrationData.paidSubscriptions.length} اشتراك من شيت الاشتراكات | الإجمالي: ${migrationData.totalRevenue.toFixed(2)} ر.س`,
+    });
+    
+    setIsMigrationDialogOpen(false);
   };
 
   const handleMarkTransferred = (profit: PartnerProfit) => {
@@ -725,12 +755,12 @@ export default function PartnerProfitsSection() {
               <Button
                 size="sm"
                 variant="default"
-                onClick={handleMigration}
-                disabled={createMutation.isPending}
+                onClick={handleOpenMigration}
+                disabled={createMutation.isPending || migrationData.isLoading}
                 className="gap-2 bg-amber-600 hover:bg-amber-700"
                 data-testid="button-migration"
               >
-                {createMutation.isPending ? (
+                {migrationData.isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <RefreshCw className="w-4 h-4" />
@@ -755,6 +785,112 @@ export default function PartnerProfitsSection() {
                     onSubmit={(data) => createMutation.mutate(data)}
                     isPending={createMutation.isPending}
                   />
+                </DialogContent>
+              </Dialog>
+
+              {/* Modal تأكيد الترحيل */}
+              <Dialog open={isMigrationDialogOpen} onOpenChange={setIsMigrationDialogOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <RefreshCw className="w-5 h-5 text-amber-600" />
+                      ترحيل الاشتراكات القديمة
+                    </DialogTitle>
+                    <DialogDescription>
+                      سيتم ترحيل جميع الاشتراكات المدفوعة من شيت "الاشتراكات" إلى سجل أرباح الشريك
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  {migrationData.isLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+                      <span className="mr-3 text-muted-foreground">جاري جلب البيانات...</span>
+                    </div>
+                  ) : migrationData.paidSubscriptions.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <AlertCircle className="w-12 h-12 mx-auto mb-3 text-amber-500" />
+                      <p>لا توجد اشتراكات مدفوعة للترحيل</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* ملخص الترحيل */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 text-center">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {migrationData.paidSubscriptions.length}
+                          </div>
+                          <div className="text-xs text-muted-foreground">اشتراك مدفوع</div>
+                        </div>
+                        <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 text-center">
+                          <div className="text-2xl font-bold text-emerald-600" dir="ltr">
+                            {migrationData.totalRevenue.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">ر.س إجمالي الإيرادات</div>
+                        </div>
+                        <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-center">
+                          <div className="text-2xl font-bold text-amber-600" dir="ltr">
+                            {migrationData.partnerShare.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">ر.س حصة الشريك (50%)</div>
+                        </div>
+                      </div>
+
+                      {/* قائمة الاشتراكات */}
+                      <div className="border rounded-lg max-h-60 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 sticky top-0">
+                            <tr>
+                              <th className="p-2 text-right">رقم العقار</th>
+                              <th className="p-2 text-right">اسم العقار</th>
+                              <th className="p-2 text-right">النوع</th>
+                              <th className="p-2 text-left">الرسوم</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {migrationData.paidSubscriptions.map((sub: any, idx: number) => (
+                              <tr key={idx} className="border-t hover:bg-muted/30">
+                                <td className="p-2 font-mono">{sub.propertyNumber}</td>
+                                <td className="p-2">{sub.name || "غير معروف"}</td>
+                                <td className="p-2">
+                                  <Badge variant={sub.subscriptionType === "مميز" ? "default" : "secondary"}>
+                                    {sub.subscriptionType || "عادي"}
+                                  </Badge>
+                                </td>
+                                <td className="p-2 text-left font-semibold text-emerald-600" dir="ltr">
+                                  {parseFloat(String(sub.price || 0)).toFixed(2)} ر.س
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* أزرار التأكيد */}
+                      <div className="flex gap-3 pt-4 border-t">
+                        <Button
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => setIsMigrationDialogOpen(false)}
+                          data-testid="button-cancel-migration"
+                        >
+                          إلغاء
+                        </Button>
+                        <Button
+                          className="flex-1 bg-amber-600 hover:bg-amber-700 gap-2"
+                          onClick={handleConfirmMigration}
+                          disabled={createMutation.isPending}
+                          data-testid="button-confirm-migration"
+                        >
+                          {createMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )}
+                          تأكيد الترحيل
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </DialogContent>
               </Dialog>
             </div>
