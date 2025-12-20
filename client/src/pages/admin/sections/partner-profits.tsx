@@ -203,6 +203,48 @@ export default function PartnerProfitsSection() {
     });
   };
 
+  const handleMigration = async () => {
+    try {
+      // استدعاء API للحصول على الاشتراكات من شيت "الاشتراكات"
+      const response = await fetch('/api/admin/subscriptions');
+      const subscriptions = await response.json();
+      
+      // جمع الاشتراكات التي لها رسوم (price > 0)
+      const paidSubscriptions = subscriptions.filter((sub: any) => sub.price && sub.price > 0);
+      
+      if (paidSubscriptions.length === 0) {
+        toast({
+          title: "لا توجد بيانات",
+          description: "لا توجد اشتراكات قديمة للترحيل",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // حساب الإجماليات
+      const totalRevenue = paidSubscriptions.reduce((sum: number, sub: any) => sum + (sub.price || 0), 0);
+      const partnerShare = totalRevenue * PARTNER_SHARE;
+      
+      createMutation.mutate({
+        monthYear: "ترحيل الدورة السابقة",
+        activeSubscriptions: paidSubscriptions.length,
+        totalRevenue,
+        partnerShare,
+        partnerPercentage: 50,
+        totalExpenses: 0,
+        netProfitAfterExpenses: partnerShare,
+        transferStatus: "pending",
+        notes: `تم ترحيل ${paidSubscriptions.length} اشتراك من شيت الاشتراكات`,
+      });
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "فشل في جلب بيانات الاشتراكات",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleMarkTransferred = (profit: PartnerProfit) => {
     updateMutation.mutate({
       id: profit.id,
@@ -679,6 +721,21 @@ export default function PartnerProfitsSection() {
                   <ArrowUpRight className="w-4 h-4" />
                 )}
                 حفظ الشهر الحالي
+              </Button>
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleMigration}
+                disabled={createMutation.isPending}
+                className="gap-2 bg-amber-600 hover:bg-amber-700"
+                data-testid="button-migration"
+              >
+                {createMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                ترحيل
               </Button>
               <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                 <DialogTrigger asChild>
