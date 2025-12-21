@@ -605,11 +605,20 @@ export default function SubscriptionPage() {
               )}
 
               {/* Submit */}
-              <div className="pt-6 border-t">
+              <div className="flex gap-3 pt-6 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCurrentStep(2)}
+                  className="gap-2"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  السابق
+                </Button>
                 <Button
                   type="submit"
                   disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
-                  className="w-full"
+                  className="flex-1"
                 >
                   {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'تسجيل' : 'ادفع الآن'}
                 </Button>
