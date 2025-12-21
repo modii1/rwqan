@@ -602,7 +602,7 @@ export default function SubscriptionPage() {
                   disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
                   className="flex-1"
                 >
-                  {isSubmitting ? 'جاري المعالجة...' : 'تسجيل'}
+                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'تسجيل' : 'ادفع الآن'}
                 </Button>
               </div>
             </form>
