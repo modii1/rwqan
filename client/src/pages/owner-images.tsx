@@ -209,7 +209,10 @@ export default function OwnerImagesPage() {
 
         {/* ========== رفع صور جديدة ========== */}
         <Card className="p-6">
-          <h2 className="text-xl font-bold mb-4">رفع صور جديدة</h2>
+          <div className="mb-4">
+            <h2 className="text-xl font-bold mb-2">رفع صور جديدة</h2>
+            <p className="text-sm text-muted-foreground">الصور الجديدة سيتم إضافتها إلى القائمة الحالية (لن يتم حذف أي صور قديمة)</p>
+          </div>
 
           <div className="border-2 border-dashed p-8 text-center rounded-lg">
             <Upload className="w-12 h-12 mx-auto mb-3 text-[#b88d2b]" />
@@ -221,14 +224,17 @@ export default function OwnerImagesPage() {
               accept="image/*"
               className="hidden"
               onChange={handleSelectFiles}
+              data-testid="input-image-files"
             />
 
             <Button
               className="bg-[#b88d2b]"
               onClick={() => fileInputRef.current?.click()}
+              data-testid="button-select-images"
             >
-              اختر الصور
+              اختر صور جديدة
             </Button>
+            <p className="text-xs text-muted-foreground mt-3">يمكنك اختيار عدة صور في مرة واحدة</p>
           </div>
 
           {previewUrls.length > 0 && (
