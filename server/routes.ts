@@ -1861,8 +1861,11 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
 
     // جلب بيانات العقار
+    // للتسجيل الجديد (new action)، قد لا يكون العقار موجوداً بعد
     const property = await storage.getPropertyByNumber(propertyNumber);
-    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
+    if (!property && action !== 'new') {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
 
     // حساب السعر النهائي
     let finalAmount = pkg.price;
@@ -1878,11 +1881,15 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     }
 
     // إنشاء طلب دفع مع Paymob
+    // للتسجيل الجديد، قد لا تكون بيانات العقار كاملة بعد
+    const propertyName = property?.name || "عقار جديد";
+    const whatsappNumber = property?.whatsappNumber || "0000000000";
+    
     const paymobResult = await paymobService.createIntention(
       finalAmount,
       propertyNumber,
-      property.name || "عقار",
-      property.whatsappNumber,
+      propertyName,
+      whatsappNumber,
       pkg.name,
       pkg.duration,
       paymentMethod as "cards" | "applepay"
@@ -1947,7 +1954,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     try {
       await notifyNewPayment({
         propertyNumber,
-        propertyName: property.name || "",
+        propertyName: propertyName,
         amount: finalAmount,
         paymentMethod: paymentMethod === "applepay" ? "Apple Pay" : "بطاقة",
         transactionId: payment.id,
