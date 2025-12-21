@@ -45,9 +45,9 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
-      refetchInterval: 1000, // تحديث كل ثانية واحدة (فوري تقريباً)
+      refetchInterval: 30000, // تحديث كل 30 ثانية (لتجنب تجاوز حد Google Sheets API)
       refetchOnWindowFocus: true,  // تحديث فوري عند العودة للنافذة
-      staleTime: 0, // البيانات دائماً قديمة - تحديث مستمر
+      staleTime: 15000, // البيانات صالحة لـ 15 ثانية
       retry: false,
     },
     mutations: {
