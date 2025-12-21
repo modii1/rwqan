@@ -521,7 +521,7 @@ export default function SubscriptionPage() {
                     السابق
                   </Button>
                   <Button type="submit" className="flex-1">
-                    التالي: طريقة الدفع
+                    ادفع الآن
                   </Button>
                 </div>
               </form>
@@ -602,7 +602,7 @@ export default function SubscriptionPage() {
                   disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
                   className="flex-1"
                 >
-                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
+                  {isSubmitting ? 'جاري المعالجة...' : 'تسجيل'}
                 </Button>
               </div>
             </form>
