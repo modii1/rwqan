@@ -288,14 +288,16 @@ export default function AdminSubscriptionsSection() {
                     <span className="text-sm text-muted-foreground">({sub.propertyNumber})</span>
                   </div>
                   <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {formatDate(sub.startDate)} - {formatDate(sub.endDate)}
-                    </span>
+                    {sub.status !== "نشط مجاني" && (
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {formatDate(sub.startDate)} - {formatDate(sub.endDate)}
+                      </span>
+                    )}
                     <Badge className={sub.subscriptionType === "مميز" ? "bg-[#b88d2b] text-white" : "bg-gray-400 text-white"}>
                       {sub.subscriptionType}
                     </Badge>
-                    {sub.price > 0 && (
+                    {sub.status !== "نشط مجاني" && sub.price > 0 && (
                       <span className="text-[#b88d2b] font-semibold">{sub.price} ر.س</span>
                     )}
                   </div>
