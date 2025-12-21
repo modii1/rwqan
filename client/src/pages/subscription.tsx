@@ -539,7 +539,7 @@ export default function SubscriptionPage() {
                     السابق
                   </Button>
                   <Button type="submit" className="flex-1">
-                    ادفع الآن
+                    التالي: طريقة الدفع
                   </Button>
                 </div>
               </form>
