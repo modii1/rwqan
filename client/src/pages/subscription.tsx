@@ -617,10 +617,11 @@ export default function SubscriptionPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
+                  disabled={isSubmitting || (!isFreePackage && !paymentMethod) || (paymentMethod === 'bank' && !receiptFile)}
                   className="flex-1"
+                  data-testid="button-submit-payment"
                 >
-                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'تسجيل' : 'ادفع الآن'}
+                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'تسجيل' : paymentMethod === 'bank' && !receiptFile ? 'رفع الإيصال أولاً' : 'ادفع الآن'}
                 </Button>
               </div>
             </form>

@@ -238,18 +238,28 @@ export function canUpgradeSubscription(status: SubscriptionStatus): boolean {
 }
 
 /**
- * تنسيق التاريخ للعرض
- * الصيغة: 2025/12/17
+ * تنسيق التاريخ للعرض مع الوقت بتوقيت الرياض (UTC+3)
+ * الصيغة: 2025/12/17 14:30
  */
-export function formatDate(dateInput: any): string {
+export function formatDate(dateInput: any, includeTime: boolean = true): string {
   const date = parseDate(dateInput);
   if (!date) return 'غير محدد';
   
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // تحويل إلى توقيت الرياض (UTC+3)
+  const riyadhDate = new Date(date.getTime() + (3 * 60 * 60 * 1000));
   
-  return `${year}/${month}/${day}`;
+  const year = riyadhDate.getUTCFullYear();
+  const month = String(riyadhDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(riyadhDate.getUTCDate()).padStart(2, '0');
+  
+  if (!includeTime) {
+    return `${year}/${month}/${day}`;
+  }
+  
+  const hours = String(riyadhDate.getUTCHours()).padStart(2, '0');
+  const minutes = String(riyadhDate.getUTCMinutes()).padStart(2, '0');
+  
+  return `${year}/${month}/${day} ${hours}:${minutes}`;
 }
 
 /**
