@@ -359,8 +359,12 @@ export default function SubscriptionPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => setSelectedPackageId(pkg.id)}
+                      onClick={() => {
+                        setSelectedPackageId(pkg.id);
+                        setCurrentStep(2);
+                      }}
                       className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}
+                      data-testid={`button-select-package-${pkg.id}`}
                     >
                       اختيار
                     </Button>
