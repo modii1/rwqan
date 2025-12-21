@@ -161,7 +161,10 @@ export default function OwnerImagesPage() {
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        <h1 className="text-3xl font-bold text-[#4a3b2a]">إدارة الصور</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-[#4a3b2a]">إدارة الصور</h1>
+          <p className="text-sm text-muted-foreground">الحد الأقصى: 15 صورة</p>
+        </div>
 
         {/* ========== الصور الحالية ========== */}
         <Card className="p-6">
