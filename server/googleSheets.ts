@@ -767,12 +767,19 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
   async getSubscriptions(): Promise<Subscription[]> {
     // قراءة من ورقة الاشتراكات
+    console.log(`🔍 [DEBUG] محاولة قراءة ورقة: "${SHEETS.SUBSCRIPTIONS}"`);
     const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
     console.log(`📋 Read ${rows.length} subscription(s) from "${SHEETS.SUBSCRIPTIONS}"`);
     
-    return rows
-      .filter(row => row[0] && row[1]) // تحقق من وجود معرف ورقم عقار
-      .map((row) => this.rowToSubscriptionFromSheet(row));
+    if (rows.length === 0) {
+      console.warn(`⚠️ [WARNING] ورقة "${SHEETS.SUBSCRIPTIONS}" فارغة أو غير موجودة!`);
+      console.warn(`📊 أسماء الأوراق المتاحة: ${Object.keys(SHEETS).map(k => SHEETS[k as keyof typeof SHEETS]).join(", ")}`);
+    }
+    
+    const filtered = rows.filter(row => row[0] && row[1]); // تحقق من وجود رقم العقار واسم العقار
+    console.log(`✅ Filtered to ${filtered.length} subscription(s) with valid data`);
+    
+    return filtered.map((row) => this.rowToSubscriptionFromSheet(row));
   }
   
   async getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null> {
