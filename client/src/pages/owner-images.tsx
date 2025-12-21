@@ -209,10 +209,7 @@ export default function OwnerImagesPage() {
 
         {/* ========== رفع صور جديدة ========== */}
         <Card className="p-6">
-          <div className="mb-4">
-            <h2 className="text-xl font-bold mb-2">رفع صور جديدة</h2>
-            <p className="text-sm text-muted-foreground">الصور الجديدة سيتم إضافتها إلى القائمة الحالية (لن يتم حذف أي صور قديمة)</p>
-          </div>
+          <h2 className="text-xl font-bold mb-4">رفع صور جديدة</h2>
 
           <div className="border-2 border-dashed p-8 text-center rounded-lg">
             <Upload className="w-12 h-12 mx-auto mb-3 text-[#b88d2b]" />
@@ -267,8 +264,10 @@ export default function OwnerImagesPage() {
               <Button
                 className="w-full mt-4 bg-[#b88d2b]"
                 onClick={() => uploadMutation.mutate(selectedFiles)}
+                disabled={uploadMutation.isPending}
+                data-testid="button-upload-images"
               >
-                رفع {selectedFiles.length} صورة
+                {uploadMutation.isPending ? 'جاري رفع صور...' : `رفع ${selectedFiles.length} صورة`}
               </Button>
             </>
           )}
