@@ -900,10 +900,12 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
   async cancelSubscription(propertyNumber: string, reason?: string): Promise<void> {
     try {
       const rows = await this.readSheet(SHEETS.SUBSCRIPTIONS);
-      const rowIndex = rows.findIndex((row) => row[0] === propertyNumber);
+      const cleanPropertyNumber = String(propertyNumber).trim();
+      const rowIndex = rows.findIndex((row) => String(row[0]).trim() === cleanPropertyNumber);
       
       if (rowIndex === -1) {
         console.log(`⚠️ Subscription not found for property ${propertyNumber}`);
+        console.log(`📊 Available properties: ${rows.map(r => r[0]).join(", ")}`);
         return;
       }
       
@@ -914,7 +916,9 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       row[7] = 0;    // العمود 7 = الأيام المتبقية = 0
       
       await this.updateRow(SHEETS.SUBSCRIPTIONS, rowIndex + 2, row);
-      console.log(`❌ Cancelled subscription for property ${propertyNumber} (reason: ${reason || 'admin'})`);
+      console.log(`✅ Cancelled subscription for property ${propertyNumber} (reason: ${reason || 'admin'})`);
+      console.log(`   - تاريخ الانتهاء محدّث إلى: ${today}`);
+      console.log(`   - الأيام المتبقية: 0`);
     } catch (error) {
       console.error(`❌ خطأ في إلغاء الاشتراك للعقار ${propertyNumber}:`, error);
       throw error;
