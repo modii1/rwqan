@@ -82,7 +82,10 @@ async function sendAdminWhatsAppNotification(options: {
   }
   if (text) {
     body += `\nالتفاصيل:\n${text}\n`;
-    body += `\n🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner/login`;
+    // أضيف رابط التجديد فقط لإشعارات انتهاء الاشتراك
+    if (type.includes("انتهاء")) {
+      body += `\n🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner/login`;
+    }
   }
 
   const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
