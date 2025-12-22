@@ -1633,8 +1633,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         const time = row[9] || "00:00";
         const deviceType = (row[10] || "desktop") as 'mobile' | 'desktop' | 'tablet';
         
-        // بناء ISO timestamp: YYYY-MM-DDTHH:mm:ssZ
-        const timestamp = `${year}-${month}-${day}T${time}:00Z`;
+        // بناء ISO timestamp بتوقيت الرياض (+03:00) - البيانات المحفوظة هي بتوقيت الرياض
+        const timestamp = `${year}-${month}-${day}T${time}:00+03:00`;
         
         return {
           id: `REQ-${idx}`,
@@ -1656,9 +1656,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
   async createRequest(request: InsertRequest, requestCountFromIP?: number): Promise<Request> {
     try {
-      // الحصول على وقت الرياض (UTC+3)
+      // CRITICAL: استخدام UTC فقط - الواجهة ستتولى التحويل عند العرض
       const utcNow = new Date();
-      const now = new Date(utcNow.getTime() + (3 * 60 * 60 * 1000));
       
       const propertyName = (await this.getPropertyByNumber(request.propertyNumber))?.name || "";
       
@@ -1678,12 +1677,25 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         requestCount++;
       }
       
-      // استخراج التاريخ والوقت بتوقيت الرياض
-      const day = now.getUTCDate();
-      const month = now.getUTCMonth() + 1;
-      const year = now.getUTCFullYear();
-      const hours = String(now.getUTCHours()).padStart(2, "0");
-      const minutes = String(now.getUTCMinutes()).padStart(2, "0");
+      // استخراج التاريخ والوقت بتوقيت الرياض للحفظ في الشيت
+      // نستخدم Intl.DateTimeFormat للحصول على التاريخ والوقت الصحيح
+      const riyadhFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Riyadh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      const parts = riyadhFormatter.formatToParts(utcNow);
+      const getPart = (type: string) => parts.find(p => p.type === type)?.value || '';
+      
+      const day = parseInt(getPart('day'), 10);
+      const month = parseInt(getPart('month'), 10);
+      const year = parseInt(getPart('year'), 10);
+      const hours = getPart('hour').padStart(2, '0');
+      const minutes = getPart('minute').padStart(2, '0');
       const time = `${hours}:${minutes}`;
 
       // صف الشيت بالترتيب الصحيح
