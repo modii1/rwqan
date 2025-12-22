@@ -57,14 +57,36 @@ function getVerificationStatus(p: Property): VerificationStatus {
 
   if (!hasAnyPrice) issues.push("لم يتم إدخال أي أسعار للعقار");
 
+  // التحقق من تاريخ آخر تحديث (أكثر من 3 أشهر)
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  
+  if (p.updatedAt) {
+    const lastUpdate = new Date(p.updatedAt);
+    if (lastUpdate < threeMonthsAgo) {
+      issues.push("لم يُحدّث منذ أكثر من 3 أشهر");
+    }
+  }
+
+  // التحقق من اشتراك منتهي منذ أكثر من 50 يوم (اشتراك عادي/مجاني قديم)
+  const fiftyDaysAgo = new Date();
+  fiftyDaysAgo.setDate(fiftyDaysAgo.getDate() - 50);
+  
+  if (p.subscriptionDate && p.subscriptionType === "عادي") {
+    const subDate = new Date(p.subscriptionDate);
+    if (subDate < fiftyDaysAgo) {
+      issues.push("اشتراك عادي قديم (أكثر من 50 يوم)");
+    }
+  }
+
   let level: Level = "ok";
   if (issues.length > 0) level = "warning";
+  
+  // معايير "مراجعة" الجديدة
   if (
     issues.some((i) =>
-      i.includes("واتساب") ||
-      i.includes("الصور") ||
-      i.includes("اسم العقار") ||
-      i.includes("رقم العقار")
+      i.includes("لم يُحدّث منذ أكثر من 3 أشهر") ||
+      i.includes("اشتراك عادي قديم")
     )
   ) {
     level = "danger";
@@ -75,7 +97,7 @@ function getVerificationStatus(p: Property): VerificationStatus {
       ? "مكتمل"
       : level === "warning"
       ? "يحتاج بيانات"
-      : "حرج – بيانات ناقصة";
+      : "مراجعة";
 
   return { level, label, issues };
 }
@@ -190,8 +212,8 @@ export default function AdminVerificationSection() {
           </Card>
 
           <Card className="p-3">
-            <p className="text-xs text-muted-foreground">حرجة</p>
-            <p className="font-bold text-lg text-red-600">{stats.danger}</p>
+            <p className="text-xs text-muted-foreground">مراجعة</p>
+            <p className="font-bold text-lg text-orange-600">{stats.danger}</p>
           </Card>
 
           <Card className="p-3">
@@ -228,7 +250,7 @@ export default function AdminVerificationSection() {
             تحتاج بيانات
           </Button>
           <Button variant={filter === "danger" ? "default" : "outline"} size="sm" onClick={() => setFilter("danger")}>
-            حرجة
+            مراجعة
           </Button>
         </div>
       </div>
@@ -266,7 +288,7 @@ export default function AdminVerificationSection() {
                         ? "bg-green-600 text-white"
                         : status.level === "warning"
                         ? "bg-yellow-500 text-black"
-                        : "bg-red-600 text-white"
+                        : "bg-orange-600 text-white"
                     }
                   >
                     {status.label}
