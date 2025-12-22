@@ -1633,8 +1633,8 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         const time = row[9] || "00:00";
         const deviceType = (row[10] || "desktop") as 'mobile' | 'desktop' | 'tablet';
         
-        // بناء ISO timestamp - البيانات المحفوظة هي بتوقيت الرياض (لا نضيف Z لأنها ليست UTC)
-        const timestamp = `${year}-${month}-${day}T${time}:00`;
+        // بناء ISO timestamp مع +03:00 للإشارة أن البيانات بتوقيت الرياض
+        const timestamp = `${year}-${month}-${day}T${time}:00+03:00`;
         
         return {
           id: `REQ-${idx}`,
