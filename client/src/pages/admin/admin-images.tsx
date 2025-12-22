@@ -1,16 +1,17 @@
-import { useParams } from "wouter";
+import { useParams, useLocation } from "wouter";
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Upload, Trash2, ExternalLink, X, Loader2 } from "lucide-react";
+import { Upload, Trash2, ExternalLink, X, Loader2, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function AdminImagesPage() {
   const { propertyNumber } = useParams(); // ← رقم العقار من الرابط
   const { toast } = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
+  const [, setLocation] = useLocation();
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<string[]>([]);
@@ -101,6 +102,15 @@ export default function AdminImagesPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto" dir="rtl">
+      <button
+        onClick={() => setLocation("/admin")}
+        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/10 text-primary border border-primary/30 rounded-lg hover:bg-primary/20 transition"
+        data-testid="button-back-admin"
+      >
+        <ArrowRight className="w-4 h-4" />
+        رجوع للوحة التحكم
+      </button>
+
       <h1 className="text-xl font-bold">📸 إدارة صور العقار رقم {propertyNumber}</h1>
 
       {/* صور R2 */}
