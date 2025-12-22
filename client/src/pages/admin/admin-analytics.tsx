@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MessageCircle, BarChart3, Home, LogOut, TrendingUp, Users, Zap, Smartphone, Monitor, Tablet, MapPin, Clock, Eye, Eye as EyeIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { formatLiveSaudiTime } from "@/lib/dateUtils";
 
 export default function AdminAnalytics() {
   const [, setLocation] = useLocation();
@@ -255,17 +256,7 @@ export default function AdminAnalytics() {
                     <td className="p-4 font-mono text-muted-foreground text-xs">{visitor.ipAddress}</td>
                     <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
                     <td className="p-4 text-muted-foreground">
-                      {visitor.timestamp
-                        ? new Date(visitor.timestamp).toLocaleString('en-US', {
-                            timeZone: 'Asia/Riyadh',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true
-                          })
-                        : "-"}
+                      {formatLiveSaudiTime(visitor.timestamp)}
                     </td>
                   </tr>
                 ))}
@@ -300,17 +291,7 @@ export default function AdminAnalytics() {
                     <td className="p-4 font-mono font-semibold">{req.propertyNumber}</td>
                     <td className="p-4 text-foreground">{req.requestCode || req.id}</td>
                     <td className="p-4 text-muted-foreground">
-                      {req.timestamp
-                        ? new Date(req.timestamp).toLocaleString('en-US', {
-                            timeZone: 'Asia/Riyadh',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true
-                          })
-                        : "-"}
+                      {formatLiveSaudiTime(req.timestamp)}
                     </td>
                   </tr>
                 ))}

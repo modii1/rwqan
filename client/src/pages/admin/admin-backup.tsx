@@ -350,7 +350,7 @@ export default function AdminBackup() {
           <Card className="p-4">
             <p className="text-gray-600 text-sm">آخر نسخة</p>
             <p className="text-sm mt-2">
-              {new Date(backups[0]?.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+              {formatLiveSaudiTime(backups[0]?.createdAt)}
             </p>
           </Card>
         </div>
