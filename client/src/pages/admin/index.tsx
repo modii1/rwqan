@@ -247,7 +247,7 @@ export default function AdminDashboard() {
         {activeSection !== "" && (
           <button
             onClick={() => setActiveSection("")}
-            className="flex items-center gap-2 text-sm text-primary hover:text-primary/80 mb-4 transition"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/10 text-primary border border-primary/30 rounded-lg hover:bg-primary/20 mb-4 transition"
             data-testid="button-back"
           >
             <ArrowRight className="w-4 h-4" />
