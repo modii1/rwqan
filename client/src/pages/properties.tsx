@@ -169,6 +169,9 @@ export default function PropertiesPage() {
 
   // تحميل الفلاتر المحفوظة عند فتح الصفحة
   useEffect(() => {
+    // انتظر تحميل العقارات أولاً
+    if (properties.length === 0) return;
+    
     const saved = sessionStorage.getItem("propertyFilters");
     if (saved) {
       const f = JSON.parse(saved);
@@ -188,7 +191,7 @@ export default function PropertiesPage() {
       // لا توجد فلاتر محفوظة - استخدم أعلى سعر فعلي
       setMaxPrice(maxPriceValue);
     }
-  }, [maxPriceValue]);
+  }, [maxPriceValue, properties.length]);
 
   // ✅ دالة استعادة موقع التمرير
   const restoreScrollPosition = () => {
@@ -660,7 +663,7 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى: {(maxPrice ?? maxPriceValue) >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
+              السعر الأقصى: {(maxPrice === null || maxPrice >= maxPriceValue) ? "الكل" : `${maxPrice} ريال`}
             </label>
             <Slider
               value={[Math.min(maxPrice ?? maxPriceValue, maxPriceValue)]}
@@ -1235,7 +1238,7 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى: {(maxPrice ?? maxPriceValue) >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
+                السعر الأقصى: {(maxPrice === null || maxPrice >= maxPriceValue) ? "الكل" : `${maxPrice} ريال`}
               </label>
               <Slider
                 value={[maxPrice ?? maxPriceValue]}
