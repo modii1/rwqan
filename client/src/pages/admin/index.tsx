@@ -615,10 +615,13 @@ function AlertsDashboard() {
             const getColorByCategory = (category: string) => {
               switch (category) {
                 case 'suggestions': return { bg: 'bg-orange-50 dark:bg-orange-950/20', border: 'border-orange-200 dark:border-orange-800', icon: 'bg-orange-500', text: 'text-orange-700 dark:text-orange-400' };
-                case 'subscriptions':
-                case 'expiring': return { bg: 'bg-purple-50 dark:bg-purple-950/20', border: 'border-purple-200 dark:border-purple-800', icon: 'bg-purple-500', text: 'text-purple-700 dark:text-purple-400' };
-                case 'payments': return { bg: 'bg-red-50 dark:bg-red-950/20', border: 'border-red-200 dark:border-red-800', icon: 'bg-red-500', text: 'text-red-700 dark:text-red-400' };
-                case 'new_properties': return { bg: 'bg-emerald-50 dark:bg-emerald-950/20', border: 'border-emerald-200 dark:border-emerald-800', icon: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' };
+                case 'new-subscriptions':
+                case 'expiring-subscriptions':
+                case 'expired-subscriptions': return { bg: 'bg-purple-50 dark:bg-purple-950/20', border: 'border-purple-200 dark:border-purple-800', icon: 'bg-purple-500', text: 'text-purple-700 dark:text-purple-400' };
+                case 'new-payments':
+                case 'pending-payments': return { bg: 'bg-red-50 dark:bg-red-950/20', border: 'border-red-200 dark:border-red-800', icon: 'bg-red-500', text: 'text-red-700 dark:text-red-400' };
+                case 'new-properties':
+                case 'property-updates': return { bg: 'bg-emerald-50 dark:bg-emerald-950/20', border: 'border-emerald-200 dark:border-emerald-800', icon: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' };
                 case 'requests': return { bg: 'bg-blue-50 dark:bg-blue-950/20', border: 'border-blue-200 dark:border-blue-800', icon: 'bg-blue-500', text: 'text-blue-700 dark:text-blue-400' };
                 default: return { bg: 'bg-slate-50 dark:bg-slate-950/20', border: 'border-slate-200 dark:border-slate-800', icon: 'bg-slate-500', text: 'text-slate-700 dark:text-slate-400' };
               }
