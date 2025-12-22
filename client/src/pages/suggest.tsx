@@ -120,15 +120,17 @@ export default function SuggestPage() {
                 type="tel"
                 placeholder="05XXXXXXXX"
                 value={phone}
-                onChange={(e) => setPhone(cleanPhoneNumber(e.target.value))}
+                onChange={(e) => {
+                  const cleaned = cleanPhoneNumber(e.target.value);
+                  setPhone(cleaned);
+                }}
                 required
                 inputMode="numeric"
-                pattern="[0-9]*"
                 maxLength={10}
                 data-testid="input-phone"
               />
-              {phone && !validatePhoneNumber(phone).valid && (
-                <p className="text-xs text-red-500 mt-1">{validatePhoneNumber(phone).error}</p>
+              {phone && phone.length > 0 && phone.length < 10 && (
+                <p className="text-xs text-amber-600 mt-1">رقم الجوال يجب أن يكون 10 أرقام</p>
               )}
             </div>
 

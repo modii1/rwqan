@@ -103,6 +103,44 @@ export default function SubscriptionPage() {
     e.preventDefault();
     if (!selectedPackageId) return;
 
+    // التحقق من صحة البيانات قبل الإرسال
+    if (formData.propertyNumber.length !== 5) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "رقم العقار يجب أن يكون 5 أرقام بالضبط",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (formData.name.trim().length < 3) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "اسم العقار يجب أن يكون 3 أحرف على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const phoneValidation = validatePhoneNumber(formData.whatsappNumber);
+    if (!phoneValidation.valid) {
+      toast({
+        title: "خطأ في رقم الجوال",
+        description: phoneValidation.error || "رقم الجوال غير صحيح - يجب أن يبدأ بـ 05 ويكون 10 أرقام",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (!formData.city || !formData.direction || !formData.type) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "يرجى اختيار المدينة والاتجاه والنوع",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       // التحقق من وجود الإيصال للتحويل البنكي
@@ -113,6 +151,7 @@ export default function SubscriptionPage() {
       // 1️⃣ تسجيل العقار أولاً
       const registrationResponse = await apiRequest('POST', '/api/properties/register', {
         ...formData,
+        whatsappNumber: phoneValidation.cleaned,
         facilities,
         prices,
         subscriptionType: selectedPackage?.type || 'عادي',
@@ -429,11 +468,10 @@ export default function SubscriptionPage() {
                       onChange={(e) => setFormData({ ...formData, whatsappNumber: cleanPhoneNumber(e.target.value) })}
                       required
                       inputMode="numeric"
-                      pattern="[0-9]*"
                       maxLength={10}
                     />
-                    {formData.whatsappNumber && !validatePhoneNumber(formData.whatsappNumber).valid && (
-                      <p className="text-xs text-red-500 mt-1">{validatePhoneNumber(formData.whatsappNumber).error}</p>
+                    {formData.whatsappNumber && formData.whatsappNumber.length > 0 && formData.whatsappNumber.length < 10 && (
+                      <p className="text-xs text-amber-600 mt-1">رقم الجوال يجب أن يكون 10 أرقام</p>
                     )}
                   </div>
                 </div>
