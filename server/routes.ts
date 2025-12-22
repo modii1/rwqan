@@ -484,12 +484,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
   // SMART REQUESTS SYSTEM
   // ======================
-  // دالة للحصول على وقت الرياض (UTC+3)
-  const getRiyadhTime = () => {
-    const now = new Date();
-    const riyadhTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
-    return riyadhTime;
-  };
+  // CRITICAL: لا نضيف 3 ساعات هنا - الخادم يسجل UTC فقط
+  // الواجهة ستتولى التحويل عند العرض باستخدام timeZone: 'Asia/Riyadh'
 
   // في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة) وعدد طلبات كل IP لكل عقار
   const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
@@ -537,19 +533,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // احسب معلومات الوقت بتوقيت الرياض
-      const now_date = getRiyadhTime();
+      // CRITICAL: استخدام UTC فقط - الواجهة ستتولى التحويل
+      const nowTimestamp = Date.now();
+      const nowDate = new Date(nowTimestamp);
+      
+      // للعرض في الـ response فقط - نستخدم تنسيق الرياض
+      const riyadhFormatter = new Intl.DateTimeFormat('ar-SA', {
+        timeZone: 'Asia/Riyadh',
+        weekday: 'long',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      const riyadhTimeDisplay = riyadhFormatter.format(nowDate);
+      
+      // للحفظ في قاعدة البيانات
       const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      const dayOfWeek = daysAr[now_date.getUTCDay()];
-      const hourOfDay = now_date.getUTCHours();
-      const minutes = now_date.getUTCMinutes();
+      // نحتاج اليوم والساعة بتوقيت الرياض للتحليلات
+      const riyadhDate = new Date(nowDate.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+      const dayOfWeek = daysAr[riyadhDate.getDay()];
+      const hourOfDay = riyadhDate.getHours();
 
-      // تحويل الساعة من 24 ساعة إلى 12 ساعة مع AM/PM
-      const hour12 = hourOfDay % 12 || 12;
-      const ampm = hourOfDay >= 12 ? 'م' : 'ص';
-
-      // أنشئ كود طلب فريد
-      const requestCode = `REQ${now_date.getFullYear()}${String(now_date.getMonth() + 1).padStart(2, "0")}${String(now_date.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+      // أنشئ كود طلب فريد (باستخدام توقيت الرياض للكود)
+      const requestCode = `REQ${riyadhDate.getFullYear()}${String(riyadhDate.getMonth() + 1).padStart(2, "0")}${String(riyadhDate.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
       // احسب عدد الطلبات من هذا IP للعقار هذا
       if (!ipPropertyCounter.has(ipAddress)) {
@@ -568,11 +574,11 @@ const request = await storage.createRequest(
   {
     propertyNumber,
     requestCode,
-    timestamp: now_date.toISOString(),
+    timestamp: String(nowTimestamp), // CRITICAL: حفظ epoch milliseconds فقط
     ipAddress,
     dayOfWeek,
     hourOfDay,
-    deviceType, // ← أضف هذا السطر فقط
+    deviceType,
   },
   newCount
 );
@@ -604,7 +610,7 @@ const request = await storage.createRequest(
         ok: true,
         message: "تم تسجيل طلبك بنجاح ✅",
         requestCode,
-        requestTime: `يوم ${dayOfWeek} الساعة ${hour12}:${String(minutes).padStart(2, "0")} ${ampm}`,
+        requestTime: riyadhTimeDisplay,
       });
     } catch (err: any) {
       console.error("Smart request error:", err);
@@ -646,8 +652,7 @@ const request = await storage.createRequest(
                        req.socket.remoteAddress || 
                        'unknown';
 
-      const now_date = getRiyadhTime();
-      const now_timestamp = now_date.getTime();
+      const now_timestamp = Date.now();
 
       // تحقق من آخر زيارة من نفس IP لنفس العقار (من جدول الطلبات فقط للتحقق من 24 ساعة)
       const allRequests = await storage.getRequests();
