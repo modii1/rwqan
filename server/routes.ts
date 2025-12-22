@@ -1174,7 +1174,7 @@ const request = await storage.createRequest(
           message: `${newPropertiesToday.length} عقار تم تسجيله اليوم`,
           count: newPropertiesToday.length,
           icon: 'home-plus',
-          items: newPropertiesToday.slice(0, 15).map(p => ({
+          items: newPropertiesToday.map(p => ({
             propertyNumber: p.propertyNumber,
             name: p.name,
             city: p.city,
@@ -1208,7 +1208,7 @@ const request = await storage.createRequest(
           message: `${updatedProperties.length} عقار تم تحديثه خلال 24 ساعة`,
           count: updatedProperties.length,
           icon: 'edit',
-          items: updatedProperties.slice(0, 15).map(p => ({
+          items: updatedProperties.map(p => ({
             propertyNumber: p.propertyNumber,
             name: p.name,
             city: p.city,
@@ -1233,7 +1233,7 @@ const request = await storage.createRequest(
           message: `${todaySubscriptions.length} عقار بدأ اشتراكه اليوم`,
           count: todaySubscriptions.length,
           icon: 'calendar-check',
-          items: todaySubscriptions.slice(0, 15).map(s => {
+          items: todaySubscriptions.map(s => {
             const prop = properties.find(p => p.propertyNumber === s.propertyNumber);
             return {
               propertyNumber: s.propertyNumber,
@@ -1261,7 +1261,7 @@ const request = await storage.createRequest(
           message: `${todayPayments.length} دفعة جديدة بإجمالي ${totalAmount} ر.س`,
           count: todayPayments.length,
           icon: 'credit-card',
-          items: todayPayments.slice(0, 15).map(p => {
+          items: todayPayments.map(p => {
             const prop = properties.find(pr => pr.propertyNumber === p.propertyNumber);
             return {
               propertyNumber: p.propertyNumber,
@@ -1284,7 +1284,7 @@ const request = await storage.createRequest(
           message: `${pendingPayments.length} دفعة معلقة تحتاج مراجعة عاجلة`,
           count: pendingPayments.length,
           icon: 'alert-circle',
-          items: pendingPayments.slice(0, 15).map(p => {
+          items: pendingPayments.map(p => {
             const prop = properties.find(pr => pr.propertyNumber === p.propertyNumber);
             return {
               propertyNumber: p.propertyNumber,
@@ -1314,7 +1314,7 @@ const request = await storage.createRequest(
           message: `${pendingSuggestions.length} اقتراح ينتظر المراجعة`,
           count: pendingSuggestions.length,
           icon: 'lightbulb',
-          items: pendingSuggestions.slice(0, 15).map(s => ({
+          items: pendingSuggestions.map(s => ({
             name: s.name,
             mobile: s.mobile,
             city: s.city,
@@ -1336,7 +1336,7 @@ const request = await storage.createRequest(
           message: `${todayRequests.length} طلب واتساب جديد`,
           count: todayRequests.length,
           icon: 'message-circle',
-          items: todayRequests.slice(0, 15).map(r => {
+          items: todayRequests.map(r => {
             const prop = properties.find(pr => pr.propertyNumber === r.propertyNumber);
             return {
               propertyNumber: r.propertyNumber,
@@ -1363,7 +1363,7 @@ const request = await storage.createRequest(
           message: `${expiringSoon.length} اشتراك سينتهي خلال 7 أيام`,
           count: expiringSoon.length,
           icon: 'clock',
-          items: expiringSoon.slice(0, 15).map(s => {
+          items: expiringSoon.map(s => {
             const prop = properties.find(pr => pr.propertyNumber === s.propertyNumber);
             return {
               propertyNumber: s.propertyNumber,
@@ -1389,7 +1389,7 @@ const request = await storage.createRequest(
           message: `${recentlyExpired.length} اشتراك انتهى ويحتاج تجديد`,
           count: recentlyExpired.length,
           icon: 'x-circle',
-          items: recentlyExpired.slice(0, 15).map(s => {
+          items: recentlyExpired.map(s => {
             const prop = properties.find(pr => pr.propertyNumber === s.propertyNumber);
             return {
               propertyNumber: s.propertyNumber,
