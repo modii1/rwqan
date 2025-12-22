@@ -178,3 +178,21 @@ export function toGMT3(dateStr: string): Date {
 export function getTodayGMT3(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
 }
+
+/**
+ * تنسيق الوقت للعرض في قوائم الطلبات
+ * @param createdAtMs - epoch milliseconds
+ * @param mode - "UTC" أو "SAUDI"
+ */
+export function formatRequestTime(createdAtMs: number, mode: "UTC" | "SAUDI" = "SAUDI"): string {
+  if (!createdAtMs || isNaN(createdAtMs)) return "-";
+  return new Date(createdAtMs).toLocaleString("en-US", {
+    timeZone: mode === "SAUDI" ? "Asia/Riyadh" : "UTC",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+}

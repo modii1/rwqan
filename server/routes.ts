@@ -901,8 +901,30 @@ const request = await storage.createRequest(
     try {
       const allRequests = await storage.getRequests();
       const totalProps = await storage.getProperties();
+      
+      // تحويل التواريخ إلى epoch milliseconds
+      const formattedRequests = allRequests.slice(-100).reverse().map(r => {
+        let createdAtMs = Date.now();
+        if (r.timestamp) {
+          const parsed = new Date(r.timestamp);
+          if (!isNaN(parsed.getTime())) {
+            createdAtMs = parsed.getTime();
+          }
+        }
+        return {
+          id: r.id,
+          propertyNumber: r.propertyNumber,
+          requestCode: r.requestCode,
+          createdAtMs,
+          deviceType: r.deviceType,
+          ipAddress: r.ipAddress,
+          dayOfWeek: r.dayOfWeek,
+          hourOfDay: r.hourOfDay,
+        };
+      });
+      
       res.json({
-        recentRequests: allRequests.slice(-100), // آخر 100 طلب
+        recentRequests: formattedRequests,
         totalRequests: allRequests.length,
         totalProperties: totalProps.length,
       });
@@ -920,17 +942,25 @@ const request = await storage.createRequest(
       const visitors = allRequests
         .slice(-100) // آخر 100 زائر
         .reverse()
-        .map(req => {
-          const prop = totalProps.find(p => p.propertyNumber === req.propertyNumber);
+        .map(r => {
+          const prop = totalProps.find(p => p.propertyNumber === r.propertyNumber);
+          // تحويل التاريخ إلى epoch milliseconds
+          let createdAtMs = Date.now();
+          if (r.timestamp) {
+            const parsed = new Date(r.timestamp);
+            if (!isNaN(parsed.getTime())) {
+              createdAtMs = parsed.getTime();
+            }
+          }
           return {
-            propertyNumber: req.propertyNumber,
-            propertyName: prop?.name || `عقار ${req.propertyNumber}`,
-            requestCode: req.requestCode,
-            deviceType: req.deviceType || 'desktop',
-            ipAddress: req.ipAddress,
-            timestamp: req.timestamp,
-            dayOfWeek: req.dayOfWeek,
-            hourOfDay: req.hourOfDay,
+            propertyNumber: r.propertyNumber,
+            propertyName: prop?.name || `عقار ${r.propertyNumber}`,
+            requestCode: r.requestCode,
+            deviceType: r.deviceType || 'desktop',
+            ipAddress: r.ipAddress,
+            createdAtMs,
+            dayOfWeek: r.dayOfWeek,
+            hourOfDay: r.hourOfDay,
           };
         });
 
@@ -1104,8 +1134,26 @@ const request = await storage.createRequest(
           };
         });
 
-      // 5. آخر الطلبات
-      const recentRequests = allRequests.slice(-20).reverse();
+      // 5. آخر الطلبات - تحويل التواريخ إلى epoch milliseconds
+      const recentRequests = allRequests.slice(-20).reverse().map(r => {
+        let createdAtMs = Date.now();
+        if (r.timestamp) {
+          const parsed = new Date(r.timestamp);
+          if (!isNaN(parsed.getTime())) {
+            createdAtMs = parsed.getTime();
+          }
+        }
+        return {
+          id: r.id,
+          propertyNumber: r.propertyNumber,
+          requestCode: r.requestCode,
+          createdAtMs,
+          deviceType: r.deviceType,
+          ipAddress: r.ipAddress,
+          dayOfWeek: r.dayOfWeek,
+          hourOfDay: r.hourOfDay,
+        };
+      });
 
       // 6. آخر تحديث
       const lastUpdated = new Date().toLocaleString('ar-SA');

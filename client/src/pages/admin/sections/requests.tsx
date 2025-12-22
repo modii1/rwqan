@@ -6,14 +6,37 @@ import { Loader2 } from "lucide-react";
 
 type AdminRequest = {
   id: string;
-  name: string;
-  phone: string;
-  message: string;
-  createdAt: string;
+  propertyNumber: string;
+  requestCode: string;
+  createdAtMs: number;
+  deviceType?: string;
+  ipAddress?: string;
 };
 
+/**
+ * تنسيق الوقت للعرض
+ * @param createdAtMs - epoch milliseconds
+ * @param mode - "UTC" أو "SAUDI"
+ */
+function formatRequestTime(createdAtMs: number, mode: "UTC" | "SAUDI" = "SAUDI"): string {
+  if (!createdAtMs || isNaN(createdAtMs)) return "-";
+  return new Date(createdAtMs).toLocaleString("en-US", {
+    timeZone: mode === "SAUDI" ? "Asia/Riyadh" : "UTC",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+}
+
 export default function RequestsSection() {
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading } = useQuery<{
+    recentRequests: AdminRequest[];
+    totalRequests: number;
+    totalProperties: number;
+  }>({
     queryKey: ["admin-requests"],
     queryFn: async () => {
       const res = await fetch("/api/admin/requests");
@@ -47,25 +70,17 @@ export default function RequestsSection() {
               <tr>
                 <Th>رقم العقار</Th>
                 <Th>كود الطلب</Th>
-                <Th>التاريخ والوقت</Th>
+                <Th>التاريخ والوقت (توقيت السعودية)</Th>
               </tr>
             </thead>
 
             <tbody>
               {requests && requests.length > 0 ? (
-                requests.map((req: any, idx: number) => (
-                  <tr key={idx} className="border-t hover:bg-muted/40">
+                requests.map((req, idx) => (
+                  <tr key={req.id || idx} className="border-t hover:bg-muted/40" data-testid={`row-request-${req.id || idx}`}>
                     <Td>{req.propertyNumber}</Td>
                     <Td className="font-mono">{req.requestCode || req.id}</Td>
-                    <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', {
-                      timeZone: 'Asia/Riyadh',
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true
-                    }) : '-'}</Td>
+                    <Td>{formatRequestTime(req.createdAtMs, "SAUDI")}</Td>
                   </tr>
                 ))
               ) : (
