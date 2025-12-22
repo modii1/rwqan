@@ -1125,6 +1125,156 @@ const request = await storage.createRequest(
     }
   });
 
+  // ======================
+  // نظام التنبيهات الذكية
+  // ======================
+  app.get("/api/admin/alerts", requireAdmin, async (req, res) => {
+    try {
+      const alerts: Array<{
+        type: 'warning' | 'danger' | 'info' | 'success';
+        category: string;
+        title: string;
+        message: string;
+        count?: number;
+        items?: any[];
+      }> = [];
+
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      // 1. الاشتراكات التي ستنتهي خلال 7 أيام
+      const subscriptions = await storage.getSubscriptions();
+      const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      
+      const expiringSoon = subscriptions.filter(sub => {
+        if (sub.status !== 'active') return false;
+        const endDate = new Date(sub.endDate);
+        return endDate > now && endDate <= sevenDaysLater;
+      });
+
+      if (expiringSoon.length > 0) {
+        alerts.push({
+          type: 'warning',
+          category: 'subscriptions',
+          title: 'اشتراكات ستنتهي قريباً',
+          message: `${expiringSoon.length} اشتراك سينتهي خلال 7 أيام`,
+          count: expiringSoon.length,
+          items: expiringSoon.slice(0, 5).map(s => ({
+            propertyNumber: s.propertyNumber,
+            endDate: s.endDate,
+            daysLeft: Math.ceil((new Date(s.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          }))
+        });
+      }
+
+      // 2. الاشتراكات المنتهية (آخر 7 أيام)
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const recentlyExpired = subscriptions.filter(sub => {
+        if (sub.status !== 'expired') return false;
+        const endDate = new Date(sub.endDate);
+        return endDate >= sevenDaysAgo && endDate < now;
+      });
+
+      if (recentlyExpired.length > 0) {
+        alerts.push({
+          type: 'danger',
+          category: 'subscriptions',
+          title: 'اشتراكات منتهية حديثاً',
+          message: `${recentlyExpired.length} اشتراك انتهى خلال الأسبوع الماضي`,
+          count: recentlyExpired.length,
+          items: recentlyExpired.slice(0, 5).map(s => ({
+            propertyNumber: s.propertyNumber,
+            endDate: s.endDate
+          }))
+        });
+      }
+
+      // 3. المدفوعات المعلقة
+      const payments = await storage.getPayments();
+      const pendingPayments = payments.filter(p => p.status === 'pending');
+
+      if (pendingPayments.length > 0) {
+        alerts.push({
+          type: 'danger',
+          category: 'payments',
+          title: 'مدفوعات تنتظر الموافقة',
+          message: `${pendingPayments.length} دفعة معلقة تحتاج مراجعة`,
+          count: pendingPayments.length,
+          items: pendingPayments.slice(0, 5).map(p => ({
+            propertyNumber: p.propertyNumber,
+            amount: p.finalAmount || p.amount,
+            method: p.paymentMethod,
+            createdAt: p.createdAt
+          }))
+        });
+      }
+
+      // 4. طلبات واتساب اليوم
+      const allRequests = await storage.getRequests();
+      const todayRequests = allRequests.filter(r => {
+        const reqDate = new Date(r.timestamp);
+        return reqDate >= todayStart;
+      });
+
+      if (todayRequests.length > 0) {
+        alerts.push({
+          type: 'info',
+          category: 'requests',
+          title: 'طلبات واتساب اليوم',
+          message: `${todayRequests.length} طلب واتساب جديد اليوم`,
+          count: todayRequests.length,
+          items: todayRequests.slice(0, 5).map(r => ({
+            propertyNumber: r.propertyNumber,
+            requestCode: r.requestCode,
+            timestamp: r.timestamp
+          }))
+        });
+      }
+
+      // 5. إحصائيات سريعة
+      const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
+      const expiredSubscriptions = subscriptions.filter(s => s.status === 'expired').length;
+      const properties = await storage.getProperties();
+      const trustedProperties = properties.filter(p => p.subscriptionType === 'trusted').length;
+
+      // 6. ملخص اليوم
+      const todayPayments = payments.filter(p => {
+        const payDate = new Date(p.createdAt);
+        return payDate >= todayStart;
+      });
+
+      alerts.push({
+        type: 'success',
+        category: 'summary',
+        title: 'ملخص اليوم',
+        message: `${todayRequests.length} طلب | ${todayPayments.length} دفعة | ${activeSubscriptions} نشط`,
+        count: 0,
+        items: [{
+          totalProperties: properties.length,
+          trustedProperties,
+          activeSubscriptions,
+          expiredSubscriptions,
+          todayRequests: todayRequests.length,
+          todayPayments: todayPayments.length,
+          pendingPayments: pendingPayments.length
+        }]
+      });
+
+      res.json({
+        alerts,
+        summary: {
+          totalAlerts: alerts.filter(a => a.type === 'danger' || a.type === 'warning').length,
+          criticalAlerts: alerts.filter(a => a.type === 'danger').length,
+          warningAlerts: alerts.filter(a => a.type === 'warning').length,
+          lastUpdated: new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+        }
+      });
+    } catch (err: any) {
+      console.error("Alerts error:", err);
+      res.status(500).json({ error: "فشل في جلب التنبيهات" });
+    }
+  });
+
   app.post("/api/admin/login", async (req, res) => {
     const { code, password } = req.body;
 
