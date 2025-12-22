@@ -446,7 +446,7 @@ function AlertsDashboard() {
             )}
             <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-xl">
               <Calendar className="w-4 h-4" />
-              <span className="text-sm">{new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Riyadh' })}</span>
+              <span className="text-sm">{new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
             </div>
           </div>
         </div>
@@ -685,16 +685,16 @@ function AlertsDashboard() {
                               <Badge className="text-[9px] py-0 bg-amber-500">متبقي {item.daysLeft} يوم</Badge>
                             )}
                             {item.startDate && (
-                              <span className="text-emerald-600 text-[9px]">بدأ: {new Date(item.startDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-emerald-600 text-[9px]">بدأ: {new Date(item.startDate).toLocaleDateString('en-US')}</span>
                             )}
                             {item.createdAt && (
-                              <span className="text-emerald-600 text-[9px]">أنشئ: {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-emerald-600 text-[9px]">أنشئ: {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                             )}
                             {item.endDate && !item.daysLeft && (
-                              <span className="text-red-600 text-[9px]">انتهى: {new Date(item.endDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-red-600 text-[9px]">انتهى: {new Date(item.endDate).toLocaleDateString('en-US')}</span>
                             )}
                             {item.updatedAt && (
-                              <span className="text-blue-600 text-[9px]">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-blue-600 text-[9px]">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                             )}
                             {item.amount && (
                               <Badge className="text-[9px] py-0 bg-emerald-500">{item.amount} ر.س</Badge>
@@ -711,7 +711,7 @@ function AlertsDashboard() {
                               <span className="text-blue-600 font-mono text-[9px]">{item.requestCode}</span>
                             )}
                             {item.timestamp && (
-                              <span className="text-muted-foreground text-[9px]">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-muted-foreground text-[9px]">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                             )}
                             {item.suggestion && (
                               <span className="text-muted-foreground text-[9px] truncate max-w-[120px]">{item.suggestion}</span>
