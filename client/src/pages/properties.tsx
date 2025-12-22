@@ -663,7 +663,15 @@ export default function PropertiesPage() {
             </label>
             <Slider
               value={[maxPrice]}
-              onValueChange={(value) => setMaxPrice(value[0])}
+              onValueChange={(value) => {
+                const newValue = value[0];
+                // إذا كانت القيمة قريبة جداً من maxPriceValue، اجعلها مساوية له تماماً
+                if (Math.abs(newValue - maxPriceValue) < 100) {
+                  setMaxPrice(maxPriceValue);
+                } else {
+                  setMaxPrice(newValue);
+                }
+              }}
               min={0}
               max={maxPriceValue}
               step={50}
@@ -1238,7 +1246,15 @@ export default function PropertiesPage() {
               </label>
               <Slider
                 value={[maxPrice || maxPriceValue]}
-                onValueChange={(v) => setMaxPrice(v[0])}
+                onValueChange={(v) => {
+                  const newValue = v[0];
+                  // إذا كانت القيمة قريبة جداً من maxPriceValue، اجعلها مساوية له تماماً
+                  if (Math.abs(newValue - maxPriceValue) < 100) {
+                    setMaxPrice(maxPriceValue);
+                  } else {
+                    setMaxPrice(newValue);
+                  }
+                }}
                 min={0}
                 max={maxPriceValue}
                 step={50}
