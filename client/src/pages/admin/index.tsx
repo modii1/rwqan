@@ -582,14 +582,12 @@ function AlertsDashboard() {
               <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-white" />
               </div>
-              <span className="text-white/80 text-sm font-medium">المدفوعات</span>
+              <span className="text-white/80 text-sm font-medium">مدفوعات اليوم</span>
             </div>
-            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.todayPayments || 0}</p>
+            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.todayCompletedPayments || 0}</p>
             <div className="flex items-center gap-3 text-sm">
-              <span className="bg-white/20 text-white px-2 py-0.5 rounded-full text-xs font-medium">اليوم</span>
-              {stats.pendingPayments > 0 && (
-                <span className="bg-red-400/40 text-white px-2 py-0.5 rounded-full text-xs animate-pulse">{stats.pendingPayments} معلقة</span>
-              )}
+              <span className="bg-emerald-400/30 text-white px-2 py-0.5 rounded-full text-xs font-medium">{stats.todayRevenue || 0} ر.س</span>
+              <span className="text-white/70 text-[10px]">تتصفر نهاية اليوم</span>
             </div>
           </div>
         </Card>
@@ -623,8 +621,8 @@ function AlertsDashboard() {
               <Calendar className="w-4 h-4 text-purple-600" />
             </div>
           </div>
-          <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.todaySubscriptions || 0}</p>
-          <p className="text-xs text-purple-700/70 dark:text-purple-400/70 font-medium">اشتراكات اليوم</p>
+          <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.todayCompletedSubscriptions || 0}</p>
+          <p className="text-xs text-purple-700/70 dark:text-purple-400/70 font-medium">اشتراكات اليوم ✓</p>
         </Card>
         
         <Card className="p-3 md:p-4 bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-950/50 dark:to-teal-900/50 border-teal-200 dark:border-teal-800 hover:shadow-lg hover:shadow-teal-500/10 transition-all duration-300" data-testid="stat-week-revenue">

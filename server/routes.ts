@@ -1421,6 +1421,23 @@ const request = await storage.createRequest(
         p.subscriptionType === 'normal' || p.subscriptionType === 'عادي' || p.subscriptionType === 'مجاني'
       ).length;
       
+      // مدفوعات اليوم المكتملة فقط (تتصفر نهاية اليوم)
+      const todayCompletedPayments = payments.filter(p => {
+        const payDate = new Date(p.createdAt);
+        return payDate >= todayStart && (p.status === 'مكتمل' || p.status === 'completed');
+      });
+      
+      // اشتراكات اليوم المكتملة فقط (بناءً على تاريخ البدء)
+      const todayCompletedSubscriptions = subscriptions.filter(s => {
+        if (!s.startDate) return false;
+        const startDate = new Date(s.startDate);
+        if (isNaN(startDate.getTime())) return false;
+        return startDate >= todayStart && (s.status === 'active' || s.status === 'نشط');
+      });
+      
+      // إجمالي مدفوعات اليوم المكتملة
+      const todayRevenue = todayCompletedPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
+      
       // Debug log
       console.log(`📊 [Alerts Stats] Properties: ${properties.length}, Trusted: ${trustedProperties}, Normal: ${normalProperties}`);
       console.log(`📊 [Alerts Stats] Subscriptions: ${subscriptions.length}, Active: ${activeSubscriptions}, Expired: ${expiredSubscriptions}`);
@@ -1459,6 +1476,9 @@ const request = await storage.createRequest(
           pendingPayments: pendingPayments.length,
           todayRequests: todayRequests.length,
           todayPayments: todayPayments.length,
+          todayCompletedPayments: todayCompletedPayments.length,
+          todayCompletedSubscriptions: todayCompletedSubscriptions.length,
+          todayRevenue,
           todayProperties: newPropertiesToday.length,
           todaySubscriptions: todaySubscriptions.length,
           propertyUpdates: updatedProperties.length,
