@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator, Trash2, MinusCircle, Banknote } from "lucide-react";
 import type { PartnerProfit, Payment, Expense } from "@shared/schema";
+import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
 
 // رسوم Paymob
 const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
@@ -553,7 +554,7 @@ export default function PartnerProfitsSection() {
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
                         {expense.description && <span>{expense.description} | </span>}
-                        <span>{new Date(expense.date).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                        <span>{formatLiveSaudiDate(expense.date)}</span>
                       </div>
                     </div>
                   </div>
@@ -655,7 +656,7 @@ export default function PartnerProfitsSection() {
                           </div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {payment.paymentMethod} |{" "}
-                            {new Date(payment.createdAt || "").toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric' })}
+                            {formatLiveSaudiDate(payment.createdAt || "")}
                           </div>
                         </div>
                       </div>

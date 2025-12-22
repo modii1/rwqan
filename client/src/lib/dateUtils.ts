@@ -1,11 +1,69 @@
 /**
  * دوال مساعدة للتعامل مع التواريخ في الواجهة الأمامية
  * 
- * القواعد:
- * - لا تحويلات يدوية للتوقيت
+ * القواعد الحرجة (CRITICAL):
+ * - الخادم يرسل epoch milliseconds فقط
+ * - لا تحويلات يدوية للتوقيت (+3 / -3)
  * - استخدام toLocaleString مع timeZone: 'Asia/Riyadh' للعرض
- * - التواريخ تأتي من الخادم كـ epoch milliseconds أو ISO string
+ * - الوقت المعروض يجب أن يطابق الساعة في السعودية بالضبط
  */
+
+/**
+ * ============================================
+ * الدالة الرئيسية - LIVE SAUDI TIME
+ * ============================================
+ * استخدم هذه الدالة في كل مكان لعرض الوقت الحي
+ */
+export function formatLiveSaudiTime(ms: number | string | Date): string {
+  if (!ms) return '-';
+  
+  const timestamp = typeof ms === 'number' ? ms : new Date(ms).getTime();
+  if (isNaN(timestamp)) return '-';
+  
+  return new Date(timestamp).toLocaleString("ar-SA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+}
+
+/**
+ * عرض التاريخ فقط بتوقيت السعودية
+ */
+export function formatLiveSaudiDate(ms: number | string | Date): string {
+  if (!ms) return '-';
+  
+  const timestamp = typeof ms === 'number' ? ms : new Date(ms).getTime();
+  if (isNaN(timestamp)) return '-';
+  
+  return new Date(timestamp).toLocaleDateString("ar-SA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+}
+
+/**
+ * عرض الوقت فقط بتوقيت السعودية
+ */
+export function formatLiveSaudiTimeOnly(ms: number | string | Date): string {
+  if (!ms) return '-';
+  
+  const timestamp = typeof ms === 'number' ? ms : new Date(ms).getTime();
+  if (isNaN(timestamp)) return '-';
+  
+  return new Date(timestamp).toLocaleTimeString("ar-SA", {
+    timeZone: "Asia/Riyadh",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+}
 
 /**
  * تنسيق التاريخ للعرض بتوقيت الرياض

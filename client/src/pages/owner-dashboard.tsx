@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
+import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1629,22 +1630,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
   };
 
   const formatDate = (dateStr: string) => {
-    if (!dateStr) return "---";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toLocaleString('en-US', {
-        timeZone: 'Asia/Riyadh',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      });
-    } catch {
-      return dateStr;
-    }
+    return formatLiveSaudiTime(dateStr);
   };
 
   const getPackageNameArabic = (packageId: string) => {
