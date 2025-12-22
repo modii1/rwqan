@@ -177,8 +177,15 @@ export default function PropertiesPage() {
       setSelectedDirection(f.selectedDirection || "");
       setSelectedType(f.selectedType || "");
       setSelectedFacilities(f.selectedFacilities || []);
-      setMaxPrice(f.maxPrice || null);
-    } else if (maxPrice === null) {
+      // إذا كان السعر المحفوظ أكبر من الحد الأقصى الحالي، استخدم الحد الأقصى
+      const savedMaxPrice = f.maxPrice || null;
+      if (savedMaxPrice && savedMaxPrice <= maxPriceValue) {
+        setMaxPrice(savedMaxPrice);
+      } else {
+        setMaxPrice(maxPriceValue);
+      }
+    } else {
+      // لا توجد فلاتر محفوظة - استخدم أعلى سعر فعلي
       setMaxPrice(maxPriceValue);
     }
   }, [maxPriceValue]);
