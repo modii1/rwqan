@@ -71,6 +71,29 @@ type AdminSection =
   | "partner-profits"
   | "fee-configs";
 
+// دالة تنسيق التاريخ والوقت - التواريخ مخزنة بتوقيت الرياض، نعرضها بدون تحويل إضافي
+function formatDateTime(dateStr: string, includeTime = true): string {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '-';
+  
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[d.getUTCMonth()];
+  const day = d.getUTCDate();
+  
+  if (!includeTime) {
+    return `${month} ${day}`;
+  }
+  
+  let hours = d.getUTCHours();
+  const minutes = d.getUTCMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  
+  return `${month} ${day} at ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+}
+
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
 
@@ -749,16 +772,16 @@ function AlertsDashboard() {
                               <Badge className="text-[9px] py-0 bg-amber-500">متبقي {item.daysLeft} يوم</Badge>
                             )}
                             {item.startDate && (
-                              <span className="text-emerald-600 text-[9px]">بدأ: {new Date(item.startDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-emerald-600 text-[9px]">بدأ: {formatDateTime(item.startDate, false)}</span>
                             )}
                             {item.createdAt && (
-                              <span className="text-emerald-600 text-[9px]">أنشئ: {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-emerald-600 text-[9px]">أنشئ: {formatDateTime(item.createdAt)}</span>
                             )}
                             {item.endDate && !item.daysLeft && (
-                              <span className="text-red-600 text-[9px]">انتهى: {new Date(item.endDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-red-600 text-[9px]">انتهى: {formatDateTime(item.endDate, false)}</span>
                             )}
                             {item.updatedAt && (
-                              <span className="text-blue-600 text-[9px]">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-blue-600 text-[9px]">تحديث: {formatDateTime(item.updatedAt)}</span>
                             )}
                             {item.lastChanges && (
                               <Badge variant="outline" className="text-[9px] py-0 text-purple-600 border-purple-300">
@@ -780,7 +803,7 @@ function AlertsDashboard() {
                               <span className="text-blue-600 font-mono text-[9px]">{item.requestCode}</span>
                             )}
                             {item.timestamp && (
-                              <span className="text-muted-foreground text-[9px]">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })}</span>
+                              <span className="text-muted-foreground text-[9px]">{formatDateTime(item.timestamp)}</span>
                             )}
                             {item.suggestion && (
                               <span className="text-muted-foreground text-[9px] truncate max-w-[120px]">{item.suggestion}</span>
