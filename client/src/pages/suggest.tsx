@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { cleanPhoneNumber, validatePhoneNumber } from "@/lib/validation";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 
@@ -78,12 +79,18 @@ export default function SuggestPage() {
               <label className="block text-sm font-semibold mb-2">رقم الجوال</label>
               <Input
                 type="tel"
-                placeholder="05xxxxxxxx"
+                placeholder="05XXXXXXXX"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(cleanPhoneNumber(e.target.value))}
                 required
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={10}
                 data-testid="input-phone"
               />
+              {phone && !validatePhoneNumber(phone).valid && (
+                <p className="text-xs text-red-500 mt-1">{validatePhoneNumber(phone).error}</p>
+              )}
             </div>
 
             <div>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Home, Lock } from "lucide-react";
+import { cleanPropertyNumber, validatePropertyNumber } from "@/lib/validation";
 
 export default function OwnerLogin() {
   const [, setLocation] = useLocation();
@@ -157,15 +158,21 @@ export default function OwnerLogin() {
           <TabsContent value="owner">
             <form onSubmit={handleOwnerLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">رقم العقار</label>
+                <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
                 <Input
                   type="text"
                   placeholder="اخر 5 أرقام من جوالك"
                   value={propertyNumber}
-                  onChange={(e) => setPropertyNumber(e.target.value)}
+                  onChange={(e) => setPropertyNumber(cleanPropertyNumber(e.target.value))}
                   disabled={isLoading}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={5}
                   data-testid="input-property-number"
                 />
+                {propertyNumber && propertyNumber.length !== 5 && (
+                  <p className="text-xs text-red-500 mt-1">يجب أن يكون 5 أرقام</p>
+                )}
               </div>
 
               <div>
@@ -174,8 +181,10 @@ export default function OwnerLogin() {
                   type="password"
                   placeholder="••••••"
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, ''))}
                   disabled={isLoading}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   data-testid="input-pin"
                 />
               </div>
