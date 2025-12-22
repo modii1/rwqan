@@ -181,10 +181,8 @@ export default function OwnerLogin() {
                   type="password"
                   placeholder="••••••"
                   value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, ''))}
+                  onChange={(e) => setPin(e.target.value)}
                   disabled={isLoading}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
                   data-testid="input-pin"
                 />
               </div>
