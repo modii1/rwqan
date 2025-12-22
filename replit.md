@@ -65,7 +65,7 @@
 - **Messaging**: Meta WhatsApp Business API for instant notifications to the administrator.
 - **Smart Verification**: Automated bank transfer verification system for subscription activation.
 - **Fee Management**: Customizable Paymob KSA fee configuration via an admin panel.
-- **Date & Time Management**: All dates and times are handled in Riyadh local time (UTC+3) using Gregorian calendar, with dedicated utility functions.
+- **Date & Time Management**: All dates and times are handled in Riyadh local time (UTC) using Gregorian calendar, with dedicated utility functions.
 - **Scheduler**: Daily automated tasks for subscription expiry checks and status updates.
 
 ### Feature Specifications
