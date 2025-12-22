@@ -1140,10 +1140,14 @@ const request = await storage.createRequest(
         icon?: string;
       }> = [];
 
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      // استخدام توقيت الرياض (UTC+3)
+      const nowRiyadh = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+      const todayStart = new Date(nowRiyadh.getFullYear(), nowRiyadh.getMonth(), nowRiyadh.getDate());
+      const sevenDaysAgo = new Date(nowRiyadh.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const oneDayAgo = new Date(nowRiyadh.getTime() - 24 * 60 * 60 * 1000);
+      const now = nowRiyadh;
+      
+      console.log(`🕐 [Alerts] Riyadh time: ${nowRiyadh.toISOString()}, Today start: ${todayStart.toISOString()}`);
 
       // جلب جميع البيانات
       const [subscriptions, payments, allRequests, properties, suggestions] = await Promise.all([
@@ -1160,6 +1164,11 @@ const request = await storage.createRequest(
         const created = new Date(p.createdAt);
         return created >= todayStart;
       });
+      console.log(`🏠 [Alerts] Today properties: ${todayProperties.length}, Total: ${properties.length}`);
+      if (properties.length > 0) {
+        const lastProperty = properties[properties.length - 1];
+        console.log(`🏠 [Alerts] Last property createdAt: ${lastProperty.createdAt}, todayStart: ${todayStart.toISOString()}`);
+      }
       if (todayProperties.length > 0) {
         alerts.push({
           type: 'success',
@@ -1219,7 +1228,12 @@ const request = await storage.createRequest(
       }
 
       // 4. اقتراحات جديدة (غير مقروءة)
-      const pendingSuggestions = suggestions.filter(s => s.status === 'pending' || !s.status);
+      console.log(`📝 [Alerts] Suggestions count: ${suggestions.length}`);
+      if (suggestions.length > 0) {
+        console.log(`📝 [Alerts] Suggestion statuses:`, suggestions.map(s => s.status));
+      }
+      const pendingSuggestions = suggestions.filter(s => s.status === 'pending' || s.status === 'معلق' || !s.status);
+      console.log(`📝 [Alerts] Pending suggestions: ${pendingSuggestions.length}`);
       if (pendingSuggestions.length > 0) {
         alerts.push({
           type: 'info',
