@@ -256,7 +256,14 @@ export default function AdminAnalytics() {
                     <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
                     <td className="p-4 text-muted-foreground">
                       {visitor.timestamp
-                        ? new Date(visitor.timestamp).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })
+                        ? (() => {
+                            const d = new Date(visitor.timestamp);
+                            const gmt3 = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+                            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                            let h = gmt3.getUTCHours(); const m = gmt3.getUTCMinutes().toString().padStart(2, '0');
+                            const ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+                            return `${months[gmt3.getUTCMonth()]} ${gmt3.getUTCDate()}, ${gmt3.getUTCFullYear()} ${h}:${m} ${ampm}`;
+                          })()
                         : "-"}
                     </td>
                   </tr>
@@ -293,7 +300,14 @@ export default function AdminAnalytics() {
                     <td className="p-4 text-foreground">{req.requestCode || req.id}</td>
                     <td className="p-4 text-muted-foreground">
                       {req.timestamp
-                        ? new Date(req.timestamp).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })
+                        ? (() => {
+                            const d = new Date(req.timestamp);
+                            const gmt3 = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+                            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                            let h = gmt3.getUTCHours(); const m = gmt3.getUTCMinutes().toString().padStart(2, '0');
+                            const ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+                            return `${months[gmt3.getUTCMonth()]} ${gmt3.getUTCDate()}, ${gmt3.getUTCFullYear()} ${h}:${m} ${ampm}`;
+                          })()
                         : "-"}
                     </td>
                   </tr>
