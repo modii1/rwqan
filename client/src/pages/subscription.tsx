@@ -412,20 +412,14 @@ export default function SubscriptionPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">الرقم السري (4 أرقام) *</label>
+                    <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
                     <Input
                       type="password"
                       placeholder="اختر رقماً سرياً"
                       value={formData.pin}
-                      onChange={(e) => setFormData({ ...formData, pin: e.target.value.replace(/[^\d]/g, '').slice(0, 6) })}
+                      onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
                       required
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={6}
                     />
-                    {formData.pin && formData.pin.length < 4 && (
-                      <p className="text-xs text-red-500 mt-1">يجب أن يكون 4 أرقام على الأقل</p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">رقم الجوال *</label>
