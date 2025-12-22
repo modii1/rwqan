@@ -104,36 +104,12 @@ export default function SubscriptionPage() {
 
     setIsSubmitting(true);
     try {
-      // 1️⃣ التحقق من الدفع أولاً (قبل التسجيل)
-      if (!isFreePackage) {
-        if (paymentMethod === 'online') {
-          try {
-            const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
-              propertyNumber: formData.propertyNumber,
-              packageId: selectedPackageId,
-              discountCode: validatedDiscount?.code,
-              paymentMethod: 'cards',
-              action: 'new',
-            });
-            const paymentData = await paymentResponse.json();
-            if (!paymentData.checkoutUrl) {
-              throw new Error("لم يتم الحصول على رابط الدفع");
-            }
-          } catch (err: any) {
-            toast({
-              title: "خطأ في الدفع الإلكتروني",
-              description: err.message || "يرجى استخدام التحويل البنكي بدلاً من ذلك أو إعادة المحاولة لاحقاً",
-              variant: "destructive",
-            });
-            setPaymentMethod(null);
-            throw err;
-          }
-        } else if (paymentMethod === 'bank' && !receiptFile) {
-          throw new Error("يرجى تحميل إيصال التحويل البنكي");
-        }
+      // التحقق من وجود الإيصال للتحويل البنكي
+      if (!isFreePackage && paymentMethod === 'bank' && !receiptFile) {
+        throw new Error("يرجى تحميل إيصال التحويل البنكي");
       }
 
-      // 2️⃣ تسجيل العقار (فقط بعد التحقق من الدفع)
+      // 1️⃣ تسجيل العقار أولاً
       const registrationResponse = await apiRequest('POST', '/api/properties/register', {
         ...formData,
         facilities,
@@ -156,7 +132,7 @@ export default function SubscriptionPage() {
         setRegistrationSuccess(true);
       } else {
         if (paymentMethod === 'online') {
-          // الدفع الإلكتروني - إعادة المحاولة لأن التحقق نجح
+          // 2️⃣ الدفع الإلكتروني
           const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
             propertyNumber,
             packageId: selectedPackageId,
