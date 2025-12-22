@@ -914,8 +914,8 @@ export default function PropertiesPage() {
           </div>
         )}
       </div>
-      {/* زر تصفية ثابت فوق الفوتر */}
-      <div className="flex justify-center py-4">
+      {/* زر تصفية متحرك فوق الفوتر */}
+      <div className="sticky bottom-0 flex justify-center py-4 bg-gradient-to-t from-background via-background/95 to-transparent">
         <button
           type="button"
           onClick={() => setShowFiltersModal(true)}
@@ -923,8 +923,9 @@ export default function PropertiesPage() {
             bg-white/80 backdrop-blur-md border border-[#b88d2b]/40
             text-[#b88d2b] font-bold shadow-lg rounded-full
             px-10 py-3 text-lg
-            hover:bg-white transition
+            hover:bg-white transition hover-elevate
           "
+          data-testid="button-filter"
         >
           تصفية
         </button>
