@@ -3533,7 +3533,17 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
   app.post("/api/admin/packages", async (req, res) => {
     try {
-      const newPkg = await storage.createPackage(req.body);
+      // تحويل أسماء الحقول من الفرونت إلى الباكند
+      const pkgData = {
+        name: req.body.name || "",
+        duration: req.body.duration || req.body.durationDays || 30,
+        price: req.body.price || 0,
+        type: req.body.type || "مميز",
+        features: req.body.features || (req.body.description ? [req.body.description] : []),
+        isActive: req.body.isActive !== false,
+        propertyCount: req.body.propertyCount || 1,
+      };
+      const newPkg = await storage.createPackage(pkgData);
       res.json(newPkg);
     } catch (error) {
       console.error("Error creating package:", error);
@@ -3544,7 +3554,22 @@ app.post("/api/whatsapp/send", async (req, res) => {
   app.put("/api/admin/packages/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const updated = await storage.updatePackage(id, req.body);
+      // تحويل أسماء الحقول من الفرونت إلى الباكند
+      const pkgData: any = {};
+      if (req.body.name !== undefined) pkgData.name = req.body.name;
+      if (req.body.duration !== undefined || req.body.durationDays !== undefined) {
+        pkgData.duration = req.body.duration || req.body.durationDays;
+      }
+      if (req.body.price !== undefined) pkgData.price = req.body.price;
+      if (req.body.type !== undefined) pkgData.type = req.body.type;
+      if (req.body.features !== undefined) pkgData.features = req.body.features;
+      if (req.body.description !== undefined && !req.body.features) {
+        pkgData.features = req.body.description ? [req.body.description] : [];
+      }
+      if (req.body.isActive !== undefined) pkgData.isActive = req.body.isActive;
+      if (req.body.propertyCount !== undefined) pkgData.propertyCount = req.body.propertyCount;
+      
+      const updated = await storage.updatePackage(id, pkgData);
       if (!updated) {
         return res.status(404).json({ error: "الباقة غير موجودة" });
       }
@@ -3596,7 +3621,16 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
   app.post("/api/admin/discounts", async (req, res) => {
     try {
-      const newDiscount = await storage.createDiscountCode(req.body);
+      // تحويل نوع الخصم لتتوافق مع schema
+      const discountType = req.body.type === "ثابت" ? "قيمة ثابتة" : req.body.type;
+      const discountData = {
+        code: req.body.code || "",
+        type: discountType,
+        value: req.body.value || 0,
+        expiryDate: req.body.expiryDate,
+        isActive: req.body.isActive !== false,
+      };
+      const newDiscount = await storage.createDiscountCode(discountData);
       res.json(newDiscount);
     } catch (error) {
       console.error("Error creating discount:", error);
@@ -3607,7 +3641,12 @@ app.post("/api/whatsapp/send", async (req, res) => {
   app.put("/api/admin/discounts/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const updated = await storage.updateDiscountCode(id, req.body);
+      // تحويل نوع الخصم إذا موجود
+      const updates: any = { ...req.body };
+      if (updates.type === "ثابت") {
+        updates.type = "قيمة ثابتة";
+      }
+      const updated = await storage.updateDiscountCode(id, updates);
       if (!updated) {
         return res.status(404).json({ error: "كود الخصم غير موجود" });
       }
