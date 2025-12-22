@@ -1158,28 +1158,60 @@ const request = await storage.createRequest(
         storage.getSuggestions()
       ]);
 
-      // 1. عقارات مسجلة اليوم (جديدة) - استخدم createdAt أو subscriptionDate
-      const todayProperties = properties.filter(p => {
-        // استخدم createdAt إذا موجود، وإلا subscriptionDate
-        const dateStr = p.createdAt || (p as any).subscriptionDate;
-        if (!dateStr) return false;
-        const created = new Date(dateStr);
-        if (isNaN(created.getTime())) return false;
-        return created >= todayStart;
+      // 1. اشتراكات جديدة اليوم (عقارات بدأت اشتراكها اليوم)
+      const todaySubscriptions = subscriptions.filter(s => {
+        if (!s.startDate) return false;
+        const startDate = new Date(s.startDate);
+        if (isNaN(startDate.getTime())) return false;
+        return startDate >= todayStart;
       });
-      console.log(`🏠 [Alerts] Today properties: ${todayProperties.length}, Total: ${properties.length}`);
-      if (todayProperties.length > 0) {
+      console.log(`🏠 [Alerts] Today subscriptions: ${todaySubscriptions.length}, Total: ${subscriptions.length}`);
+      if (todaySubscriptions.length > 0) {
+        // جلب معلومات العقارات المرتبطة
+        const todayPropertyNumbers = todaySubscriptions.map(s => s.propertyNumber);
+        const todayPropertiesDetails = properties.filter(p => todayPropertyNumbers.includes(p.propertyNumber));
+        
         alerts.push({
           type: 'success',
-          category: 'new-properties',
-          title: 'عقارات جديدة اليوم',
-          message: `${todayProperties.length} عقار تم تسجيله اليوم`,
-          count: todayProperties.length,
+          category: 'new-subscriptions',
+          title: 'اشتراكات جديدة اليوم',
+          message: `${todaySubscriptions.length} عقار بدأ اشتراكه اليوم`,
+          count: todaySubscriptions.length,
           icon: 'home-plus',
-          items: todayProperties.slice(0, 5).map(p => ({
+          items: todaySubscriptions.slice(0, 5).map(s => {
+            const prop = properties.find(p => p.propertyNumber === s.propertyNumber);
+            return {
+              propertyNumber: s.propertyNumber,
+              name: prop?.name || 'غير معروف',
+              city: prop?.city || '',
+              packageId: s.packageId,
+              type: s.type
+            };
+          })
+        });
+      }
+      
+      // 2. تحديثات العقارات (خلال 24 ساعة) - صور، أسعار، مرافق
+      const updatedProperties = properties.filter(p => {
+        if (!p.updatedAt) return false;
+        const updated = new Date(p.updatedAt);
+        if (isNaN(updated.getTime())) return false;
+        return updated >= oneDayAgo;
+      });
+      console.log(`📝 [Alerts] Updated properties (24h): ${updatedProperties.length}`);
+      if (updatedProperties.length > 0) {
+        alerts.push({
+          type: 'info',
+          category: 'property-updates',
+          title: 'تحديثات العقارات',
+          message: `${updatedProperties.length} عقار تم تحديثه خلال 24 ساعة`,
+          count: updatedProperties.length,
+          icon: 'edit',
+          items: updatedProperties.slice(0, 5).map(p => ({
             propertyNumber: p.propertyNumber,
             name: p.name,
-            city: p.city
+            city: p.city,
+            updatedAt: p.updatedAt
           }))
         });
       }
@@ -1317,27 +1349,7 @@ const request = await storage.createRequest(
         });
       }
 
-      // 8. عقارات تم تحديثها آخر 24 ساعة
-      const recentUpdates = properties.filter(p => {
-        if (!p.updatedAt) return false;
-        const updated = new Date(p.updatedAt);
-        return updated >= oneDayAgo;
-      });
-      if (recentUpdates.length > 0) {
-        alerts.push({
-          type: 'info',
-          category: 'updates',
-          title: 'تحديثات العقارات',
-          message: `${recentUpdates.length} عقار تم تحديثه آخر 24 ساعة`,
-          count: recentUpdates.length,
-          icon: 'edit',
-          items: recentUpdates.slice(0, 5).map(p => ({
-            propertyNumber: p.propertyNumber,
-            name: p.name,
-            updatedAt: p.updatedAt
-          }))
-        });
-      }
+      // 8. تم نقله للقسم 2 (تحديثات العقارات)
 
       // حساب الإحصائيات - دعم القيم العربية والإنجليزية
       const activeSubscriptions = subscriptions.filter(s => 
@@ -1391,12 +1403,12 @@ const request = await storage.createRequest(
           pendingPayments: pendingPayments.length,
           todayRequests: todayRequests.length,
           todayPayments: todayPayments.length,
-          todayProperties: todayProperties.length,
+          todaySubscriptions: todaySubscriptions.length,
+          propertyUpdates: updatedProperties.length,
           weekRequests: weekRequests.length,
           weekPayments: weekPayments.length,
           weekRevenue,
-          pendingSuggestions: pendingSuggestions.length,
-          recentUpdates: recentUpdates.length
+          pendingSuggestions: pendingSuggestions.length
         },
         summary: {
           totalAlerts: criticalCount + warningCount,

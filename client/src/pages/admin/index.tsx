@@ -390,7 +390,8 @@ function AlertsDashboard() {
 
   const getAlertIcon = (category: string) => {
     switch (category) {
-      case 'new-properties': return <Home className="w-5 h-5 text-emerald-500" />;
+      case 'new-subscriptions': return <Home className="w-5 h-5 text-emerald-500" />;
+      case 'property-updates': return <TrendingUp className="w-5 h-5 text-blue-500" />;
       case 'new-payments': return <CreditCard className="w-5 h-5 text-emerald-500" />;
       case 'pending-payments': return <Bell className="w-5 h-5 text-red-500" />;
       case 'suggestions': return <Zap className="w-5 h-5 text-blue-500" />;
@@ -502,9 +503,13 @@ function AlertsDashboard() {
 
       {/* بطاقات إحصائيات إضافية */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3">
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-new-properties">
-          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todayProperties || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">عقار جديد اليوم</p>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-subscriptions">
+          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todaySubscriptions || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">اشتراكات اليوم</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-property-updates">
+          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.propertyUpdates || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">تحديثات العقارات</p>
         </Card>
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-revenue">
           <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.weekRevenue || 0}</p>
@@ -517,10 +522,6 @@ function AlertsDashboard() {
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-suggestions">
           <p className="text-lg md:text-2xl font-bold text-amber-600">{stats.pendingSuggestions || 0}</p>
           <p className="text-[10px] md:text-xs text-muted-foreground">اقتراحات جديدة</p>
-        </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-updates">
-          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.recentUpdates || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">تحديثات 24 ساعة</p>
         </Card>
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-pending">
           <p className="text-lg md:text-2xl font-bold text-red-600">{stats.pendingPayments || 0}</p>
