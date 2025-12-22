@@ -256,7 +256,7 @@ export default function AdminAnalytics() {
                     <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
                     <td className="p-4 text-muted-foreground">
                       {visitor.timestamp
-                        ? new Date(visitor.timestamp).toLocaleString("ar-SA", { timeZone: 'UTC' })
+                        ? new Date(visitor.timestamp).toLocaleString("en-US", { timeZone: 'UTC' })
                         : "-"}
                     </td>
                   </tr>
@@ -293,7 +293,7 @@ export default function AdminAnalytics() {
                     <td className="p-4 text-foreground">{req.requestCode || req.id}</td>
                     <td className="p-4 text-muted-foreground">
                       {req.timestamp
-                        ? new Date(req.timestamp).toLocaleString("ar-SA", { timeZone: 'UTC' })
+                        ? new Date(req.timestamp).toLocaleString("en-US", { timeZone: 'UTC' })
                         : "-"}
                     </td>
                   </tr>

@@ -31,6 +31,8 @@ import {
   Settings2,
   Calendar,
   ChevronDown,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -85,30 +87,83 @@ export default function AdminDashboard() {
 
   const alertCount = alertsData?.summary?.totalAlerts || 0;
 
-  // صوت التنبيه عند زيادة عدد التنبيهات
+  // صوت التنبيه عند زيادة عدد التنبيهات - متوافق مع Safari و Android
   const prevAlertCount = useRef(alertCount);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('adminSoundEnabled') === 'true';
+    }
+    return false;
+  });
   
-  const playAlertSound = useCallback(() => {
+  // تفعيل الصوت عند النقر (مطلوب لـ Safari و iOS)
+  const enableSound = useCallback(() => {
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+      setSoundEnabled(true);
+      localStorage.setItem('adminSoundEnabled', 'true');
       
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.value = 800;
-      oscillator.type = 'sine';
-      
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.5);
+      // تشغيل صوت تأكيد قصير
+      const ctx = audioContextRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 600;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
     } catch (e) {
       console.log('Sound not supported');
     }
   }, []);
+  
+  const disableSound = useCallback(() => {
+    setSoundEnabled(false);
+    localStorage.setItem('adminSoundEnabled', 'false');
+  }, []);
+  
+  const playAlertSound = useCallback(() => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      
+      // نغمة تنبيه مميزة (3 نغمات متصاعدة)
+      const playNote = (freq: number, startTime: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+      };
+      
+      const now = ctx.currentTime;
+      playNote(600, now, 0.15);
+      playNote(800, now + 0.15, 0.15);
+      playNote(1000, now + 0.3, 0.2);
+    } catch (e) {
+      console.log('Sound not supported');
+    }
+  }, [soundEnabled]);
   
   useEffect(() => {
     if (alertCount > prevAlertCount.current && prevAlertCount.current > 0) {
@@ -446,8 +501,21 @@ function AlertsDashboard() {
             )}
             <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-xl">
               <Calendar className="w-4 h-4" />
-              <span className="text-sm">{new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+              <span className="text-sm">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })}</span>
             </div>
+            <button
+              onClick={soundEnabled ? disableSound : enableSound}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${
+                soundEnabled 
+                  ? 'bg-emerald-500 text-white shadow-lg' 
+                  : 'bg-white/20 backdrop-blur-sm text-white hover:bg-white/30'
+              }`}
+              title={soundEnabled ? 'إيقاف صوت التنبيهات' : 'تفعيل صوت التنبيهات'}
+              data-testid="button-toggle-sound"
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              <span className="text-sm hidden md:inline">{soundEnabled ? 'الصوت مفعل' : 'تفعيل الصوت'}</span>
+            </button>
           </div>
         </div>
       </div>
