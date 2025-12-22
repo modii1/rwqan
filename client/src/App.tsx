@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useSessionQuery } from "@/hooks/use-session";
 import { useAnalytics } from "@/hooks/use-analytics";
 import { initGA } from "@/lib/analytics";
-import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard } from "lucide-react";
+import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard, Shield } from "lucide-react";
 import logoIcon from "./assets/logo-icon.png";
 import logoFull from "./assets/logo-full.png";
 
@@ -84,6 +84,13 @@ export default function App() {
   const [, setLocation] = useLocation();
   const { data: session } = useSessionQuery();
   const [appReady, setAppReady] = useState(false);
+
+  // التحقق من الأدمن
+  const { data: adminSession } = useQuery<{ isAdmin: boolean }>({
+    queryKey: ["/api/admin/session"],
+    staleTime: 30000,
+    refetchInterval: 30000,
+  });
 
   useEffect(() => {
     // Initialize Google Analytics when app loads
@@ -185,6 +192,19 @@ export default function App() {
                     className="text-primary"
                   >
                     <LayoutDashboard className="w-5 h-5" />
+                  </Button>
+                )}
+
+                {adminSession?.isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setLocation("/admin")}
+                    title="لوحة الأدمن"
+                    className="text-red-600"
+                    data-testid="button-admin-panel"
+                  >
+                    <Shield className="w-5 h-5" />
                   </Button>
                 )}
 
