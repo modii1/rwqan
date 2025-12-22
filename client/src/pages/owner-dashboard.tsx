@@ -2003,17 +2003,7 @@ function RequestsStatsModal({
                       <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
                         <td className="p-3 font-mono text-primary">{req.requestCode || req.id}</td>
                         <td className="p-3 text-muted-foreground">
-                          {req.timestamp ? (() => {
-                            const d = new Date(req.timestamp);
-                            const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-                            const day = d.getUTCDate();
-                            const year = d.getUTCFullYear();
-                            const hours = d.getUTCHours();
-                            const minutes = d.getUTCMinutes().toString().padStart(2, '0');
-                            const ampm = hours >= 12 ? 'PM' : 'AM';
-                            const hour12 = hours % 12 || 12;
-                            return `${month} ${day}, ${year} at ${hour12}:${minutes} ${ampm}`;
-                          })() : '-'}
+                          {formatLiveSaudiTime(req.timestamp)}
                         </td>
                       </tr>
                     ))}
