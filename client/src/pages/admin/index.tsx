@@ -416,130 +416,199 @@ function AlertsDashboard() {
   };
 
   return (
-    <div className="space-y-4 md:space-y-6">
-      {/* رأس الصفحة مع ملخص التنبيهات */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Bell className="w-5 h-5 md:w-6 md:h-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg md:text-xl font-bold text-foreground">مركز التنبيهات</h1>
-            <p className="text-xs md:text-sm text-muted-foreground">متابعة كل ما يحدث في النظام</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {summary.criticalAlerts > 0 && (
-            <Badge className="bg-red-500 text-white px-2 md:px-3 py-1 text-xs">
-              {summary.criticalAlerts} عاجل
-            </Badge>
-          )}
-          {summary.warningAlerts > 0 && (
-            <Badge className="bg-amber-500 text-white px-2 md:px-3 py-1 text-xs">
-              {summary.warningAlerts} تحذير
-            </Badge>
-          )}
-        </div>
-      </div>
-
-      {/* بطاقات الإحصائيات الكبيرة */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
-        <Card className="p-3 md:p-5 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/50 dark:to-blue-900/50 border-blue-200 dark:border-blue-800" data-testid="stat-properties">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <Home className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
+    <div className="space-y-5 md:space-y-8">
+      {/* رأس الصفحة الاحترافي */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary via-primary/90 to-primary/80 p-4 md:p-6 shadow-lg">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMzYgMzRoLTJ2LTRoMnY0em0wLTZoLTJ2LTRoMnY0em0tNiA2aC0ydi00aDJ2NHptMC02aC0ydi00aDJ2NHoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-30"></div>
+        <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-inner">
+              <LayoutDashboard className="w-7 h-7 md:w-8 md:h-8 text-white" />
             </div>
-            <span className="text-xs md:text-sm font-medium text-blue-700 dark:text-blue-400">العقارات</span>
-          </div>
-          <p className="text-2xl md:text-3xl font-bold text-blue-600">{stats.totalProperties || 0}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] md:text-xs text-emerald-600 font-medium">{stats.trustedProperties || 0} مميز</span>
-            <span className="text-[10px] md:text-xs text-muted-foreground">| {stats.normalProperties || 0} عادي</span>
-          </div>
-        </Card>
-
-        <Card className="p-3 md:p-5 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/50 dark:to-emerald-900/50 border-emerald-200 dark:border-emerald-800" data-testid="stat-subscriptions">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-              <CreditCard className="w-4 h-4 md:w-5 md:h-5 text-emerald-600" />
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-white">لوحة التحكم</h1>
+              <p className="text-sm md:text-base text-white/80">مرحباً بك في مركز إدارة روقان</p>
             </div>
-            <span className="text-xs md:text-sm font-medium text-emerald-700 dark:text-emerald-400">الاشتراكات</span>
           </div>
-          <p className="text-2xl md:text-3xl font-bold text-emerald-600">{stats.activeSubscriptions || 0}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] md:text-xs text-emerald-600 font-medium">نشط</span>
-            <span className="text-[10px] md:text-xs text-red-500">| {stats.expiredSubscriptions || 0} منتهي</span>
-          </div>
-        </Card>
-
-        <Card className="p-3 md:p-5 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950/50 dark:to-amber-900/50 border-amber-200 dark:border-amber-800" data-testid="stat-requests">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-              <MessageCircle className="w-4 h-4 md:w-5 md:h-5 text-amber-600" />
-            </div>
-            <span className="text-xs md:text-sm font-medium text-amber-700 dark:text-amber-400">الطلبات</span>
-          </div>
-          <p className="text-2xl md:text-3xl font-bold text-amber-600">{stats.todayRequests || 0}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] md:text-xs text-amber-600 font-medium">اليوم</span>
-            <span className="text-[10px] md:text-xs text-muted-foreground">| {stats.weekRequests || 0} هذا الأسبوع</span>
-          </div>
-        </Card>
-
-        <Card className="p-3 md:p-5 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950/50 dark:to-purple-900/50 border-purple-200 dark:border-purple-800" data-testid="stat-payments">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-              <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-purple-600" />
-            </div>
-            <span className="text-xs md:text-sm font-medium text-purple-700 dark:text-purple-400">المدفوعات</span>
-          </div>
-          <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.todayPayments || 0}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] md:text-xs text-purple-600 font-medium">اليوم</span>
-            {stats.pendingPayments > 0 && (
-              <span className="text-[10px] md:text-xs text-red-500 font-bold">| {stats.pendingPayments} معلقة</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            {summary.criticalAlerts > 0 && (
+              <div className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-xl shadow-lg animate-pulse">
+                <Bell className="w-4 h-4" />
+                <span className="text-sm font-bold">{summary.criticalAlerts} عاجل</span>
+              </div>
             )}
+            {summary.warningAlerts > 0 && (
+              <div className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl shadow-lg">
+                <Clock className="w-4 h-4" />
+                <span className="text-sm font-bold">{summary.warningAlerts} تحذير</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-xl">
+              <Calendar className="w-4 h-4" />
+              <span className="text-sm">{new Date().toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* بطاقات الإحصائيات الرئيسية */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
+        <Card className="relative overflow-hidden p-4 md:p-6 bg-gradient-to-br from-blue-500 to-blue-600 border-0 shadow-xl shadow-blue-500/20" data-testid="stat-properties">
+          <div className="absolute top-0 left-0 w-20 h-20 bg-white/10 rounded-full -translate-x-10 -translate-y-10"></div>
+          <div className="absolute bottom-0 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-16 translate-y-16"></div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <Home className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white/80 text-sm font-medium">العقارات</span>
+            </div>
+            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.totalProperties || 0}</p>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="bg-emerald-400/30 text-white px-2 py-0.5 rounded-full text-xs font-medium">{stats.trustedProperties || 0} مميز</span>
+              <span className="text-white/70 text-xs">{stats.normalProperties || 0} عادي</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="relative overflow-hidden p-4 md:p-6 bg-gradient-to-br from-emerald-500 to-emerald-600 border-0 shadow-xl shadow-emerald-500/20" data-testid="stat-subscriptions">
+          <div className="absolute top-0 left-0 w-20 h-20 bg-white/10 rounded-full -translate-x-10 -translate-y-10"></div>
+          <div className="absolute bottom-0 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-16 translate-y-16"></div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <CreditCard className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white/80 text-sm font-medium">الاشتراكات</span>
+            </div>
+            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.activeSubscriptions || 0}</p>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="bg-white/20 text-white px-2 py-0.5 rounded-full text-xs font-medium">نشط</span>
+              <span className="bg-red-400/40 text-white px-2 py-0.5 rounded-full text-xs">{stats.expiredSubscriptions || 0} منتهي</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="relative overflow-hidden p-4 md:p-6 bg-gradient-to-br from-amber-500 to-orange-500 border-0 shadow-xl shadow-amber-500/20" data-testid="stat-requests">
+          <div className="absolute top-0 left-0 w-20 h-20 bg-white/10 rounded-full -translate-x-10 -translate-y-10"></div>
+          <div className="absolute bottom-0 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-16 translate-y-16"></div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white/80 text-sm font-medium">الطلبات</span>
+            </div>
+            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.todayRequests || 0}</p>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="bg-white/20 text-white px-2 py-0.5 rounded-full text-xs font-medium">اليوم</span>
+              <span className="text-white/70 text-xs">{stats.weekRequests || 0} هذا الأسبوع</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="relative overflow-hidden p-4 md:p-6 bg-gradient-to-br from-purple-500 to-violet-600 border-0 shadow-xl shadow-purple-500/20" data-testid="stat-payments">
+          <div className="absolute top-0 left-0 w-20 h-20 bg-white/10 rounded-full -translate-x-10 -translate-y-10"></div>
+          <div className="absolute bottom-0 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-16 translate-y-16"></div>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <DollarSign className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white/80 text-sm font-medium">المدفوعات</span>
+            </div>
+            <p className="text-3xl md:text-4xl font-bold text-white mb-2">{stats.todayPayments || 0}</p>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="bg-white/20 text-white px-2 py-0.5 rounded-full text-xs font-medium">اليوم</span>
+              {stats.pendingPayments > 0 && (
+                <span className="bg-red-400/40 text-white px-2 py-0.5 rounded-full text-xs animate-pulse">{stats.pendingPayments} معلقة</span>
+              )}
+            </div>
           </div>
         </Card>
       </div>
 
-      {/* بطاقات إحصائيات إضافية */}
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3">
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-properties">
-          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todayProperties || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">عقارات جديدة</p>
+      {/* بطاقات إحصائيات إضافية ملونة */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/50 dark:to-emerald-900/50 border-emerald-200 dark:border-emerald-800 hover:shadow-lg hover:shadow-emerald-500/10 transition-all duration-300" data-testid="stat-today-properties">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+              <Home className="w-4 h-4 text-emerald-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-emerald-600">{stats.todayProperties || 0}</p>
+          <p className="text-xs text-emerald-700/70 dark:text-emerald-400/70 font-medium">عقارات جديدة</p>
         </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-property-updates">
-          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.propertyUpdates || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">تحديثات العقارات</p>
+        
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/50 dark:to-blue-900/50 border-blue-200 dark:border-blue-800 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300" data-testid="stat-property-updates">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+              <TrendingUp className="w-4 h-4 text-blue-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-blue-600">{stats.propertyUpdates || 0}</p>
+          <p className="text-xs text-blue-700/70 dark:text-blue-400/70 font-medium">تحديثات العقارات</p>
         </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-subscriptions">
-          <p className="text-lg md:text-2xl font-bold text-purple-600">{stats.todaySubscriptions || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">اشتراكات اليوم</p>
+        
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950/50 dark:to-purple-900/50 border-purple-200 dark:border-purple-800 hover:shadow-lg hover:shadow-purple-500/10 transition-all duration-300" data-testid="stat-today-subscriptions">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+              <Calendar className="w-4 h-4 text-purple-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.todaySubscriptions || 0}</p>
+          <p className="text-xs text-purple-700/70 dark:text-purple-400/70 font-medium">اشتراكات اليوم</p>
         </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-revenue">
-          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.weekRevenue || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">إيرادات الأسبوع</p>
+        
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-950/50 dark:to-teal-900/50 border-teal-200 dark:border-teal-800 hover:shadow-lg hover:shadow-teal-500/10 transition-all duration-300" data-testid="stat-week-revenue">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-teal-500/20 flex items-center justify-center">
+              <Wallet className="w-4 h-4 text-teal-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-teal-600">{stats.weekRevenue || 0}</p>
+          <p className="text-xs text-teal-700/70 dark:text-teal-400/70 font-medium">إيرادات الأسبوع</p>
         </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-suggestions">
-          <p className="text-lg md:text-2xl font-bold text-amber-600">{stats.pendingSuggestions || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">اقتراحات جديدة</p>
+        
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950/50 dark:to-amber-900/50 border-amber-200 dark:border-amber-800 hover:shadow-lg hover:shadow-amber-500/10 transition-all duration-300" data-testid="stat-suggestions">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-amber-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-amber-600">{stats.pendingSuggestions || 0}</p>
+          <p className="text-xs text-amber-700/70 dark:text-amber-400/70 font-medium">اقتراحات جديدة</p>
         </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-pending">
-          <p className="text-lg md:text-2xl font-bold text-red-600">{stats.pendingPayments || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">مدفوعات معلقة</p>
+        
+        <Card className="p-3 md:p-4 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-950/50 dark:to-red-900/50 border-red-200 dark:border-red-800 hover:shadow-lg hover:shadow-red-500/10 transition-all duration-300" data-testid="stat-pending">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
+              <Bell className="w-4 h-4 text-red-600" />
+            </div>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-red-600">{stats.pendingPayments || 0}</p>
+          <p className="text-xs text-red-700/70 dark:text-red-400/70 font-medium">مدفوعات معلقة</p>
         </Card>
       </div>
 
       {/* عنوان التنبيهات */}
-      <div className="flex items-center gap-2 pt-2">
-        <Bell className="w-4 h-4 text-primary" />
-        <h2 className="text-sm md:text-base font-bold text-foreground">التنبيهات والأحداث</h2>
-        <Badge variant="outline" className="text-xs">{alerts.length}</Badge>
+      <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Bell className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-base md:text-lg font-bold text-foreground">التنبيهات والأحداث</h2>
+            <p className="text-xs text-muted-foreground">آخر التحديثات في النظام</p>
+          </div>
+        </div>
+        <Badge className="bg-primary/10 text-primary border-primary/20 px-3 py-1">
+          {alerts.length} تنبيه
+        </Badge>
       </div>
 
       {/* قائمة التنبيهات */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
         {alerts.map((alert: any, idx: number) => (
           <Card key={idx} className={`p-3 md:p-4 border-2 ${getAlertStyles(alert.type)}`} data-testid={`alert-${alert.category}`}>
             <div className="flex items-start gap-2 md:gap-3">
