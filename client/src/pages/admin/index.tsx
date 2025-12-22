@@ -51,6 +51,7 @@ import VerificationLogsPage from "./sections/verification-logs";
 import SettingsSection from "./sections/settings";
 import PartnerProfitsSection from "./sections/partner-profits";
 import FeeConfigsSection from "./sections/fee-configs";
+import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
 type AdminSection =
@@ -71,25 +72,6 @@ type AdminSection =
   | "partner-profits"
   | "fee-configs";
 
-// دالة تنسيق التاريخ والوقت بتوقيت الرياض
-function formatDateTime(dateStr: string, includeTime = true): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return '-';
-  
-  if (!includeTime) {
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' });
-  }
-  
-  return d.toLocaleString('en-US', { 
-    month: 'short', 
-    day: 'numeric', 
-    hour: '2-digit', 
-    minute: '2-digit',
-    hour12: true,
-    timeZone: 'Asia/Riyadh'
-  });
-}
 
 export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("");
@@ -519,7 +501,7 @@ function AlertsDashboard() {
             )}
             <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-xl">
               <Calendar className="w-4 h-4" />
-              <span className="text-sm">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Riyadh' })}</span>
+              <span className="text-sm">{formatFullDate(new Date().toISOString())}</span>
             </div>
             <button
               onClick={soundEnabled ? disableSound : enableSound}
@@ -769,16 +751,16 @@ function AlertsDashboard() {
                               <Badge className="text-[9px] py-0 bg-amber-500">متبقي {item.daysLeft} يوم</Badge>
                             )}
                             {item.startDate && (
-                              <span className="text-emerald-600 text-[9px]">بدأ: {formatDateTime(item.startDate, false)}</span>
+                              <span className="text-emerald-600 text-[9px]">بدأ: {formatDateGMT3(item.startDate, false)}</span>
                             )}
                             {item.createdAt && (
-                              <span className="text-emerald-600 text-[9px]">أنشئ: {formatDateTime(item.createdAt)}</span>
+                              <span className="text-emerald-600 text-[9px]">أنشئ: {formatDateGMT3(item.createdAt, true)}</span>
                             )}
                             {item.endDate && !item.daysLeft && (
-                              <span className="text-red-600 text-[9px]">انتهى: {formatDateTime(item.endDate, false)}</span>
+                              <span className="text-red-600 text-[9px]">انتهى: {formatDateGMT3(item.endDate, false)}</span>
                             )}
                             {item.updatedAt && (
-                              <span className="text-blue-600 text-[9px]">تحديث: {formatDateTime(item.updatedAt)}</span>
+                              <span className="text-blue-600 text-[9px]">تحديث: {formatDateGMT3(item.updatedAt, true)}</span>
                             )}
                             {item.lastChanges && (
                               <Badge variant="outline" className="text-[9px] py-0 text-purple-600 border-purple-300">
@@ -800,7 +782,7 @@ function AlertsDashboard() {
                               <span className="text-blue-600 font-mono text-[9px]">{item.requestCode}</span>
                             )}
                             {item.timestamp && (
-                              <span className="text-muted-foreground text-[9px]">{formatDateTime(item.timestamp)}</span>
+                              <span className="text-muted-foreground text-[9px]">{formatDateGMT3(item.timestamp, true)}</span>
                             )}
                             {item.suggestion && (
                               <span className="text-muted-foreground text-[9px] truncate max-w-[120px]">{item.suggestion}</span>

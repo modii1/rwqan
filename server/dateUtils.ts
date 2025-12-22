@@ -1,24 +1,60 @@
 /**
- * دوال مساعدة للتعامل مع التواريخ في توقيت الرياض (UTC+3)
+ * دوال مساعدة للتعامل مع التواريخ في توقيت الرياض (GMT+3)
+ * جميع التواريخ تُخزن وتُعرض بتوقيت الرياض
  */
 
-const RIYADH_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+3 بالميلي ثانية
+const RIYADH_OFFSET_HOURS = 3;
+const RIYADH_OFFSET_MS = RIYADH_OFFSET_HOURS * 60 * 60 * 1000;
 
 /**
- * الحصول على التاريخ والوقت الحالي في الرياض
+ * الحصول على التاريخ والوقت الحالي بتوقيت GMT+3 (الرياض)
  */
-export function getNowInRiyadh(): Date {
+export function getNowGMT3(): Date {
   const now = new Date();
-  const utcTime = now.getTime() + now.getTimezoneOffset() * 60000;
-  return new Date(utcTime + RIYADH_OFFSET_MS);
+  return new Date(now.getTime() + now.getTimezoneOffset() * 60000 + RIYADH_OFFSET_MS);
 }
 
 /**
- * تحويل تاريخ إلى ISO string بتوقيت الرياض
+ * Alias للتوافق مع الكود القديم
+ */
+export function getNowInRiyadh(): Date {
+  return getNowGMT3();
+}
+
+/**
+ * تحويل تاريخ إلى ISO string بتوقيت GMT+3
+ */
+export function toGMT3ISO(date?: Date): string {
+  const d = date || getNowGMT3();
+  return d.toISOString();
+}
+
+/**
+ * Alias للتوافق مع الكود القديم
  */
 export function toRiyadhISO(date?: Date): string {
-  const d = date || getNowInRiyadh();
-  return d.toISOString();
+  return toGMT3ISO(date);
+}
+
+/**
+ * الحصول على تاريخ اليوم بتنسيق YYYY-MM-DD بتوقيت GMT+3
+ */
+export function getTodayDateGMT3(): string {
+  const now = getNowGMT3();
+  return now.toISOString().split('T')[0];
+}
+
+/**
+ * الحصول على الوقت الحالي بتنسيق HH:MM AM/PM بتوقيت GMT+3
+ */
+export function getCurrentTimeGMT3(): string {
+  const now = getNowGMT3();
+  let hours = now.getUTCHours();
+  const minutes = now.getUTCMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes} ${ampm}`;
 }
 
 /**
