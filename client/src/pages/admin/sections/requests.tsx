@@ -63,7 +63,8 @@ export default function RequestsSection() {
                       day: '2-digit',
                       hour: '2-digit',
                       minute: '2-digit',
-                      hour12: true
+                      hour12: true,
+                      timeZone: 'UTC'
                     }) : '-'}</Td>
                   </tr>
                 ))
