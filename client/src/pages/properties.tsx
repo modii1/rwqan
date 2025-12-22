@@ -660,7 +660,7 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى: {maxPrice} ريال
+              السعر الأقصى
             </label>
             <Slider
               value={[maxPrice]}
@@ -1243,7 +1243,7 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى: {maxPrice || maxPriceValue} ريال
+                السعر الأقصى
               </label>
               <Slider
                 value={[maxPrice || maxPriceValue]}
