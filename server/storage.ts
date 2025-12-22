@@ -223,8 +223,7 @@ export class GoogleSheetsStorage implements IStorage {
   }
 
   async getSuggestions(): Promise<Suggestion[]> {
-    // Will be implemented
-    return [];
+    return googleSheetsService.getSuggestions();
   }
 
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {

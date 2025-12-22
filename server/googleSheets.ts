@@ -531,6 +531,8 @@ class GoogleSheetsService {
       pin: row[18] || "",
       verificationStatus: row[COL_VERIFICATION - 1] || undefined,
       muteExpiryNotification: row[COL_MUTE_EXPIRY - 1] === "true" || row[COL_MUTE_EXPIRY - 1] === true,
+      createdAt: row[21] || undefined,
+      updatedAt: row[22] || undefined,
     };
 
     return p as Property;
@@ -568,6 +570,8 @@ class GoogleSheetsService {
     p.pin || "",
     p.verificationStatus || "approved", // تغيير الافتراضي من pending إلى approved
     p.muteExpiryNotification ? "true" : "false",
+    p.createdAt || "",
+    p.updatedAt || "",
   ];
 }
 
@@ -1567,6 +1571,27 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
 
 
   // ================== الاقتراحات / الطلبات ==================
+
+  async getSuggestions(): Promise<Suggestion[]> {
+    try {
+      const rows = await this.readSheet(SHEETS.SUGGESTIONS);
+      if (!rows || rows.length === 0) return [];
+      
+      return rows.map((row) => ({
+        id: row[0] || "",
+        name: row[1] || "",
+        phone: row[2] || "",
+        mobile: row[2] || "", // alias
+        city: row[3] || "",
+        suggestion: row[4] || "",
+        status: row[5] || "جديد",
+        createdAt: row[6] || "",
+      }));
+    } catch (err) {
+      console.error("getSuggestions error:", err);
+      return [];
+    }
+  }
 
   async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {
     const id = `SUG-${Date.now()}`;
