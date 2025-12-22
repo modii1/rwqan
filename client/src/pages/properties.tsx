@@ -89,11 +89,11 @@ const normalizeText = (text: string): string => {
 export default function PropertiesPage() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCity, setSelectedCity] = useState<string>("");
-  const [selectedDirection, setSelectedDirection] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<string>("");
+  const [selectedCity, setSelectedCity] = useState<string>("all");
+  const [selectedDirection, setSelectedDirection] = useState<string>("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [maxPrice, setMaxPrice] = useState<number>(5000);
   const [selectedImage, setSelectedImage] = useState<{
     url: string;
     index: number;
@@ -177,14 +177,14 @@ export default function PropertiesPage() {
     if (saved) {
       const f = JSON.parse(saved);
       setSearchQuery(f.searchQuery || "");
-      setSelectedCity(f.selectedCity || "");
-      setSelectedDirection(f.selectedDirection || "");
-      setSelectedType(f.selectedType || "");
+      setSelectedCity(f.selectedCity || "all");
+      setSelectedDirection(f.selectedDirection || "all");
+      setSelectedType(f.selectedType || "all");
       setSelectedFacilities(f.selectedFacilities || []);
       // تأكد من أن maxPrice لا تتجاوز أعلى سعر فعلي
-      const savedMaxPrice = f.maxPrice ? Math.min(f.maxPrice, maxPriceValue) : null;
+      const savedMaxPrice = f.maxPrice ? Math.min(f.maxPrice, maxPriceValue) : maxPriceValue;
       setMaxPrice(savedMaxPrice);
-    } else if (maxPrice === null) {
+    } else {
       setMaxPrice(maxPriceValue);
     }
   }, [maxPriceValue]);
