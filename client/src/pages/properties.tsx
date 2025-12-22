@@ -89,11 +89,11 @@ const normalizeText = (text: string): string => {
 export default function PropertiesPage() {
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCity, setSelectedCity] = useState<string>("all");
-  const [selectedDirection, setSelectedDirection] = useState<string>("all");
-  const [selectedType, setSelectedType] = useState<string>("all");
+  const [selectedCity, setSelectedCity] = useState<string>("");
+  const [selectedDirection, setSelectedDirection] = useState<string>("");
+  const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-  const [maxPrice, setMaxPrice] = useState<number>(5000);
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [selectedImage, setSelectedImage] = useState<{
     url: string;
     index: number;
@@ -150,25 +150,21 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
-  // حساب أعلى سعر من جميع العقارات - أخذ أعلى سعر لكل عقار أولاً
+  // حساب أعلى سعر من جميع العقارات
   const maxPriceValue = useMemo(() => {
     if (properties.length === 0) return 1000;
     
-    const maxPrices = properties
-      .map(p => {
-        const prices = [
-          parseFloat(p.prices.weekday) || 0,
-          parseFloat(p.prices.weekend) || 0,
-          parseFloat(p.prices.overnight) || 0,
-          parseFloat(p.prices.special) || 0,
-          parseFloat(p.prices.holidays) || 0,
-        ].filter(price => price > 0);
-        
-        return prices.length > 0 ? Math.max(...prices) : 0;
-      })
-      .filter(price => price > 0);
+    const allPrices = properties
+      .flatMap(p => [
+        parseFloat(p.prices.weekday) || 0,
+        parseFloat(p.prices.weekend) || 0,
+        parseFloat(p.prices.overnight) || 0,
+        parseFloat(p.prices.special) || 0,
+        parseFloat(p.prices.holidays) || 0,
+      ])
+      .filter(p => p > 0);
     
-    return maxPrices.length > 0 ? Math.ceil(Math.max(...maxPrices)) : 1000;
+    return allPrices.length > 0 ? Math.ceil(allPrices.reduce((a, b) => Math.max(a, b))) : 1000;
   }, [properties]);
 
   // تحميل الفلاتر المحفوظة عند فتح الصفحة
@@ -177,15 +173,12 @@ export default function PropertiesPage() {
     if (saved) {
       const f = JSON.parse(saved);
       setSearchQuery(f.searchQuery || "");
-      setSelectedCity(f.selectedCity || "all");
-      setSelectedDirection(f.selectedDirection || "all");
-      setSelectedType(f.selectedType || "all");
+      setSelectedCity(f.selectedCity || "");
+      setSelectedDirection(f.selectedDirection || "");
+      setSelectedType(f.selectedType || "");
       setSelectedFacilities(f.selectedFacilities || []);
-      // تأكد من أن maxPrice لا تتجاوز أعلى سعر فعلي
-      const savedMaxPrice = f.maxPrice ? Math.min(f.maxPrice, maxPriceValue) : maxPriceValue;
-      setMaxPrice(savedMaxPrice);
-    } else if (maxPriceValue > 1000) {
-      // تحديث maxPrice فقط إذا تم الحصول على maxPriceValue الفعلي
+      setMaxPrice(f.maxPrice || null);
+    } else if (maxPrice === null) {
       setMaxPrice(maxPriceValue);
     }
   }, [maxPriceValue]);
@@ -483,7 +476,7 @@ export default function PropertiesPage() {
     setSelectedDirection("all");
     setSelectedType("all");
     setSelectedFacilities([]);
-    setMaxPrice(maxPriceValue);
+    setMaxPrice(5000);
     // مسح الفلاتر المحفوظة
     sessionStorage.removeItem("propertyFilters");
   };
@@ -614,7 +607,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="المدينة" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">جميع المدن</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {CITIES.map((city) => (
                   <SelectItem key={city} value={city}>
                     {city}
@@ -632,7 +625,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">جميع الاتجاهات</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {DIRECTIONS.map((dir) => (
                   <SelectItem key={dir} value={dir}>
                     {dir}
@@ -647,7 +640,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="النوع" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">جميع الأنواع</SelectItem>
+                <SelectItem value="all">الكل</SelectItem>
                 {TYPES.map((type) => (
                   <SelectItem key={type} value={type}>
                     {type}
@@ -660,21 +653,13 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى
+              السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
             </label>
             <Slider
               value={[maxPrice]}
-              onValueChange={(value) => {
-                const newValue = value[0];
-                // إذا كانت القيمة قريبة جداً من maxPriceValue، اجعلها مساوية له تماماً
-                if (Math.abs(newValue - maxPriceValue) < 100) {
-                  setMaxPrice(maxPriceValue);
-                } else {
-                  setMaxPrice(newValue);
-                }
-              }}
+              onValueChange={(value) => setMaxPrice(value[0])}
               min={0}
-              max={maxPriceValue}
+              max={5000}
               step={50}
               className="mt-2"
               data-testid="slider-price"
@@ -1187,7 +1172,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="المدينة" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع المدن</SelectItem>
+                  <SelectItem value="all">الكل</SelectItem>
                   {CITIES.map((city) => (
                     <SelectItem key={city} value={city}>
                       {city}
@@ -1210,7 +1195,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="الاتجاه" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع الاتجاهات</SelectItem>
+                  <SelectItem value="all">الكل</SelectItem>
                   {DIRECTIONS.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d}
@@ -1230,7 +1215,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="النوع" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع الأنواع</SelectItem>
+                  <SelectItem value="all">الكل</SelectItem>
                   {TYPES.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
@@ -1243,19 +1228,11 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى
+                السعر الأقصى: {maxPrice === maxPriceValue ? "الكل" : `${maxPrice} ريال`}
               </label>
               <Slider
                 value={[maxPrice || maxPriceValue]}
-                onValueChange={(v) => {
-                  const newValue = v[0];
-                  // إذا كانت القيمة قريبة جداً من maxPriceValue، اجعلها مساوية له تماماً
-                  if (Math.abs(newValue - maxPriceValue) < 100) {
-                    setMaxPrice(maxPriceValue);
-                  } else {
-                    setMaxPrice(newValue);
-                  }
-                }}
+                onValueChange={(v) => setMaxPrice(v[0])}
                 min={0}
                 max={maxPriceValue}
                 step={50}
