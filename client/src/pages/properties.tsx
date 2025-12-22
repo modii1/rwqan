@@ -93,7 +93,7 @@ export default function PropertiesPage() {
   const [selectedDirection, setSelectedDirection] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
-  const [maxPrice, setMaxPrice] = useState<number>(5000);
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [selectedImage, setSelectedImage] = useState<{
     url: string;
     index: number;
@@ -130,6 +130,23 @@ export default function PropertiesPage() {
   // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
   const [visibleCount, setVisibleCount] = useState(24);
 
+  // حساب أعلى سعر من جميع العقارات
+  const maxPriceValue = useMemo(() => {
+    if (properties.length === 0) return 1000;
+    
+    const allPrices = properties
+      .flatMap(p => [
+        parseFloat(p.prices.weekday) || 0,
+        parseFloat(p.prices.weekend) || 0,
+        parseFloat(p.prices.overnight) || 0,
+        parseFloat(p.prices.special) || 0,
+        parseFloat(p.prices.holidays) || 0,
+      ])
+      .filter(p => p > 0);
+    
+    return allPrices.length > 0 ? Math.ceil(allPrices.reduce((a, b) => Math.max(a, b))) : 1000;
+  }, [properties]);
+
   // تحميل الفلاتر المحفوظة عند فتح الصفحة
   useEffect(() => {
     const saved = sessionStorage.getItem("propertyFilters");
@@ -140,9 +157,11 @@ export default function PropertiesPage() {
       setSelectedDirection(f.selectedDirection || "");
       setSelectedType(f.selectedType || "");
       setSelectedFacilities(f.selectedFacilities || []);
-      setMaxPrice(f.maxPrice || 5000);
+      setMaxPrice(f.maxPrice || null);
+    } else if (maxPrice === null) {
+      setMaxPrice(maxPriceValue);
     }
-  }, []);
+  }, [maxPriceValue]);
 
   // تحميل عدد العناصر الظاهرة المحفوظ عند الرجوع من صفحة التفاصيل
   useEffect(() => {
@@ -312,7 +331,7 @@ export default function PropertiesPage() {
       }
 
       // Price filter - إظهار العقارات التي سعرها الرئيسي (المعروض على الكارد) أقل أو يساوي السعر المحدد
-      if (maxPrice < 5000) {
+      if (maxPrice && maxPrice < maxPriceValue) {
         // السعر الرئيسي هو نفسه المعروض على الكارد
         const mainPrice =
           parseFloat(property.prices.weekend) ||
@@ -1209,13 +1228,13 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
+                السعر الأقصى: {maxPrice === maxPriceValue ? "الكل" : `${maxPrice} ريال`}
               </label>
               <Slider
-                value={[maxPrice]}
+                value={[maxPrice || maxPriceValue]}
                 onValueChange={(v) => setMaxPrice(v[0])}
                 min={0}
-                max={5000}
+                max={maxPriceValue}
                 step={50}
               />
             </div>
