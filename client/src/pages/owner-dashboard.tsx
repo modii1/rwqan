@@ -836,7 +836,7 @@ const calculateAnalytics = () => {
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">
-                    منذ {new Date(property.subscriptionDate).toLocaleDateString("en-US")}
+                    منذ {new Date(property.subscriptionDate).toLocaleDateString("en-US", { timeZone: "Asia/Riyadh" })}
                   </span>
                 )}
                 {currentSubscription?.linkedProperty && (
@@ -1577,14 +1577,17 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
   };
 
   const getStatusReason = (status: string, paymentMethod: string, createdAt?: string) => {
+    const isBankTransfer = paymentMethod === "تحويل بنكي";
+    
     switch (status) {
       case "معلق":
-        // الدفعات المعلقة - اظهر رسالة إكمال الدفع مباشرة
-        return "لم يكتمل الدفع - اضغط لإكمال الدفع";
+        return isBankTransfer 
+          ? "في انتظار رفع إيصال التحويل" 
+          : "لم يكتمل الدفع - اضغط لإكمال الدفع";
       case "فشل":
         return "فشل الدفع - اضغط لإعادة المحاولة";
       case "قيد المراجعة":
-        return paymentMethod === "تحويل بنكي" 
+        return isBankTransfer 
           ? "بانتظار مراجعة الإدارة للإيصال" 
           : "لم يكتمل الدفع - اضغط لإكمال الدفع";
       case "نجح - قيد التحقق":
@@ -1596,23 +1599,30 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
     }
   };
 
-  // التحقق من إظهار زر إكمال/إعادة الدفع
+  // التحقق من إظهار زر إكمال/إعادة الدفع (للدفعات الإلكترونية فقط)
   const shouldShowRetryButton = (payment: any) => {
-    // استثناء التحويل البنكي
+    // استثناء التحويل البنكي - يظهر له زر "رفع إيصال" منفصل
     if (payment.paymentMethod === "تحويل بنكي") return false;
 
-    // للدفعات الفاشلة، اظهر الزر دائماً
+    // للدفعات الفاشلة الإلكترونية، اظهر الزر دائماً
     if (payment.status === "فشل") return true;
 
-    // للدفعات المعلقة، اظهر الزر مباشرة (بدون انتظار)
+    // للدفعات المعلقة الإلكترونية، اظهر الزر مباشرة
     if (payment.status === "معلق") return true;
 
-    // للدفعات الإلكترونية القديمة بحالة "قيد المراجعة" (غير مكتملة)
-    if (payment.status === "قيد المراجعة" && payment.paymentMethod !== "تحويل بنكي") {
-      return true;
-    }
+    // للدفعات الإلكترونية بحالة "قيد المراجعة" (غير مكتملة)
+    if (payment.status === "قيد المراجعة") return true;
 
     return false;
+  };
+  
+  // التحقق من إظهار زر رفع إيصال للتحويل البنكي
+  const shouldShowUploadReceiptButton = (payment: any) => {
+    // فقط للتحويل البنكي
+    if (payment.paymentMethod !== "تحويل بنكي") return false;
+    
+    // للحالات: معلق، قيد المراجعة
+    return payment.status === "معلق" || payment.status === "قيد المراجعة";
   };
 
   const formatDate = (dateStr: string) => {
@@ -1734,12 +1744,12 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
           </Button>
         )}
 
-        {/* زر رفع إيصال - للتحويل البنكي قيد المراجعة */}
-        {(payment.status === "قيد المراجعة" && payment.paymentMethod === "تحويل بنكي") && onRetryPayment && (
+        {/* زر رفع إيصال - للتحويل البنكي */}
+        {shouldShowUploadReceiptButton(payment) && onRetryPayment && (
           <Button
             size="sm"
             variant="default"
-            className="bg-primary text-white gap-1 flex-shrink-0"
+            className="bg-amber-600 hover:bg-amber-700 text-white gap-1 flex-shrink-0"
             onClick={() => onRetryPayment(payment)}
             disabled={isRetrying}
             data-testid={`button-upload-receipt-${payment.id}`}
@@ -1749,7 +1759,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             ) : (
               <Receipt className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري الرفع..." : "رفع إيصال جديد"}
+            {isRetrying ? "جاري الرفع..." : "رفع إيصال"}
           </Button>
         )}
 
@@ -2002,7 +2012,7 @@ function RequestsStatsModal({
                       <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
                         <td className="p-3 font-mono text-primary">{req.requestCode || req.id}</td>
                         <td className="p-3 text-muted-foreground">
-                          {req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}
+                          {req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', { timeZone: "Asia/Riyadh", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : '-'}
                         </td>
                       </tr>
                     ))}
