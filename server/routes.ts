@@ -431,7 +431,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // حفظ ملخص التغييرات
       const changesSummary = changesForNotification.map(c => c.split(':')[0].trim()).filter(Boolean).slice(0, 5).join('، ');
-      mapped['آخر التغييرات'] = changesSummary || 'تحديث عام';
+      mapped.lastChanges = changesSummary || 'تحديث عام';
 
       const updated = await storage.updateProperty(
         req.params.propertyNumber,
@@ -1746,7 +1746,7 @@ const request = await storage.createRequest(
       
       // تسجيل التغيير في العقار
       const changeNote = `إضافة ${files.length} صورة جديدة`;
-      await storage.updateProperty(propertyNumber, { 'آخر التغييرات': changeNote });
+      await storage.updateProperty(propertyNumber, { lastChanges: changeNote });
       
       // إشعار واتساب
       const property = await storage.getPropertyByNumber(propertyNumber);
@@ -1848,7 +1848,7 @@ const request = await storage.createRequest(
       
       // إذا لم توجد تغييرات فعلية
       const changesSummary = changes.length > 0 ? changes.slice(0, 3).join(' | ') : 'تحديث عام';
-      updates['آخر التغييرات'] = changesSummary;
+      updates.lastChanges = changesSummary;
       
       console.log(`📝 [Property Update] ${propertyNumber}: ${changesSummary}`);
       
