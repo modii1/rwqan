@@ -10,7 +10,16 @@
 - **Interaction**: The user expects the agent to ask for confirmation before implementing significant architectural changes or refactoring large portions of the codebase.
 - **Language**: All generated content and explanations should be in Arabic.
 
-## Recent Changes (December 17, 2025)
+## Recent Changes (December 22, 2025)
+- **Date/Time Handling Refactor**: Complete overhaul of date/time management:
+  - Server uses UTC with `Date.now()` for timestamp generation
+  - No manual hour additions/subtractions in code
+  - Timestamps stored as epoch milliseconds or ISO strings
+  - Frontend converts to Saudi time only for display using `timeZone: 'Asia/Riyadh'`
+  - Updated all admin and owner pages to use consistent formatting
+  - Utility files: `server/dateUtils.ts`, `client/src/lib/dateUtils.ts`
+
+## Previous Changes (December 17, 2025)
 - **Expense Tracking System**: Added comprehensive expense/cost tracking to deduct from profits:
   - New "التكاليف" (Expenses) sheet in Google Sheets with columns: المعرف, العنوان, المبلغ, التصنيف, الوصف, التاريخ, تاريخ الإنشاء
   - Categories: صيانة, إعلانات, رواتب, استضافة, أخرى
@@ -65,7 +74,12 @@
 - **Messaging**: Meta WhatsApp Business API for instant notifications to the administrator.
 - **Smart Verification**: Automated bank transfer verification system for subscription activation.
 - **Fee Management**: Customizable Paymob KSA fee configuration via an admin panel.
-- **Date & Time Management**: All dates and times are handled in Riyadh local time (UTC) using Gregorian calendar, with dedicated utility functions.
+- **Date & Time Management**: 
+    - Server timezone: UTC (no manual hour additions/subtractions)
+    - Timestamps stored as epoch milliseconds or ISO strings
+    - Frontend displays using `toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })`
+    - Utility functions: `server/dateUtils.ts` and `client/src/lib/dateUtils.ts`
+    - Gregorian calendar for all date displays
 - **Scheduler**: Daily automated tasks for subscription expiry checks and status updates.
 
 ### Feature Specifications
