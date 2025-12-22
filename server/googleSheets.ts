@@ -1633,14 +1633,9 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
         const time = row[9] || "00:00";
         const deviceType = (row[10] || "desktop") as 'mobile' | 'desktop' | 'tablet';
         
-        // بناء ISO timestamp: YYYY-MM-DDTHH:mm:ssZ (UTC)
-        // نحسب الوقت UTC من الوقت المحفوظ (الرياض = UTC+3)
-        // نطرح 3 ساعات للحصول على UTC
-        const [hours, mins] = time.split(':').map(Number);
-        const riyadhDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hours, mins, 0));
-        // نطرح 3 ساعات لتحويل من توقيت الرياض إلى UTC
-        const utcDate = new Date(riyadhDate.getTime() - (3 * 60 * 60 * 1000));
-        const timestamp = utcDate.toISOString();
+        // بناء ISO timestamp: YYYY-MM-DDTHH:mm:ss+03:00
+        // الوقت المحفوظ هو بتوقيت الرياض (+03:00) وليس UTC
+        const timestamp = `${year}-${month}-${day}T${time}:00+03:00`;
         
         return {
           id: `REQ-${idx}`,
