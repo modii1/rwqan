@@ -476,7 +476,7 @@ export default function PropertiesPage() {
     setSelectedDirection("all");
     setSelectedType("all");
     setSelectedFacilities([]);
-    setMaxPrice(5000);
+    setMaxPrice(maxPriceValue);
     // مسح الفلاتر المحفوظة
     sessionStorage.removeItem("propertyFilters");
   };
