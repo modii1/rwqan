@@ -653,13 +653,13 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
+              السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
             </label>
             <Slider
-              value={[maxPrice]}
+              value={[Math.min(maxPrice, maxPriceValue)]}
               onValueChange={(value) => setMaxPrice(value[0])}
               min={0}
-              max={5000}
+              max={maxPriceValue}
               step={50}
               className="mt-2"
               data-testid="slider-price"
