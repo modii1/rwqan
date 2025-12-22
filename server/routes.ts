@@ -1137,69 +1137,78 @@ const request = await storage.createRequest(
         message: string;
         count?: number;
         items?: any[];
+        icon?: string;
       }> = [];
 
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-      // 1. الاشتراكات التي ستنتهي خلال 7 أيام
-      const subscriptions = await storage.getSubscriptions();
-      const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      
-      const expiringSoon = subscriptions.filter(sub => {
-        if (sub.status !== 'active') return false;
-        const endDate = new Date(sub.endDate);
-        return endDate > now && endDate <= sevenDaysLater;
-      });
-
-      if (expiringSoon.length > 0) {
-        alerts.push({
-          type: 'warning',
-          category: 'subscriptions',
-          title: 'اشتراكات ستنتهي قريباً',
-          message: `${expiringSoon.length} اشتراك سينتهي خلال 7 أيام`,
-          count: expiringSoon.length,
-          items: expiringSoon.slice(0, 5).map(s => ({
-            propertyNumber: s.propertyNumber,
-            endDate: s.endDate,
-            daysLeft: Math.ceil((new Date(s.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-          }))
-        });
-      }
-
-      // 2. الاشتراكات المنتهية (آخر 7 أيام)
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const recentlyExpired = subscriptions.filter(sub => {
-        if (sub.status !== 'expired') return false;
-        const endDate = new Date(sub.endDate);
-        return endDate >= sevenDaysAgo && endDate < now;
-      });
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-      if (recentlyExpired.length > 0) {
+      // جلب جميع البيانات
+      const [subscriptions, payments, allRequests, properties, suggestions] = await Promise.all([
+        storage.getSubscriptions(),
+        storage.getPayments(),
+        storage.getRequests(),
+        storage.getProperties(),
+        storage.getSuggestions()
+      ]);
+
+      // 1. عقارات مسجلة اليوم (جديدة)
+      const todayProperties = properties.filter(p => {
+        if (!p.createdAt) return false;
+        const created = new Date(p.createdAt);
+        return created >= todayStart;
+      });
+      if (todayProperties.length > 0) {
         alerts.push({
-          type: 'danger',
-          category: 'subscriptions',
-          title: 'اشتراكات منتهية حديثاً',
-          message: `${recentlyExpired.length} اشتراك انتهى خلال الأسبوع الماضي`,
-          count: recentlyExpired.length,
-          items: recentlyExpired.slice(0, 5).map(s => ({
-            propertyNumber: s.propertyNumber,
-            endDate: s.endDate
+          type: 'success',
+          category: 'new-properties',
+          title: 'عقارات جديدة اليوم',
+          message: `${todayProperties.length} عقار تم تسجيله اليوم`,
+          count: todayProperties.length,
+          icon: 'home-plus',
+          items: todayProperties.slice(0, 5).map(p => ({
+            propertyNumber: p.propertyNumber,
+            name: p.name,
+            city: p.city
           }))
         });
       }
 
-      // 3. المدفوعات المعلقة
-      const payments = await storage.getPayments();
-      const pendingPayments = payments.filter(p => p.status === 'pending');
+      // 2. مدفوعات جديدة اليوم
+      const todayPayments = payments.filter(p => {
+        const payDate = new Date(p.createdAt);
+        return payDate >= todayStart;
+      });
+      if (todayPayments.length > 0) {
+        const totalAmount = todayPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
+        alerts.push({
+          type: 'success',
+          category: 'new-payments',
+          title: 'مدفوعات اليوم',
+          message: `${todayPayments.length} دفعة جديدة بإجمالي ${totalAmount} ر.س`,
+          count: todayPayments.length,
+          icon: 'credit-card',
+          items: todayPayments.slice(0, 5).map(p => ({
+            propertyNumber: p.propertyNumber,
+            amount: p.finalAmount || p.amount,
+            method: p.paymentMethod,
+            status: p.status
+          }))
+        });
+      }
 
+      // 3. المدفوعات المعلقة (تحتاج موافقة)
+      const pendingPayments = payments.filter(p => p.status === 'pending');
       if (pendingPayments.length > 0) {
         alerts.push({
           type: 'danger',
-          category: 'payments',
+          category: 'pending-payments',
           title: 'مدفوعات تنتظر الموافقة',
-          message: `${pendingPayments.length} دفعة معلقة تحتاج مراجعة`,
+          message: `${pendingPayments.length} دفعة معلقة تحتاج مراجعة عاجلة`,
           count: pendingPayments.length,
+          icon: 'alert-circle',
           items: pendingPayments.slice(0, 5).map(p => ({
             propertyNumber: p.propertyNumber,
             amount: p.finalAmount || p.amount,
@@ -1209,20 +1218,38 @@ const request = await storage.createRequest(
         });
       }
 
-      // 4. طلبات واتساب اليوم
-      const allRequests = await storage.getRequests();
+      // 4. اقتراحات جديدة (غير مقروءة)
+      const pendingSuggestions = suggestions.filter(s => s.status === 'pending' || !s.status);
+      if (pendingSuggestions.length > 0) {
+        alerts.push({
+          type: 'info',
+          category: 'suggestions',
+          title: 'اقتراحات جديدة',
+          message: `${pendingSuggestions.length} اقتراح ينتظر المراجعة`,
+          count: pendingSuggestions.length,
+          icon: 'lightbulb',
+          items: pendingSuggestions.slice(0, 5).map(s => ({
+            name: s.name,
+            mobile: s.mobile,
+            city: s.city,
+            suggestion: s.suggestion?.substring(0, 50) + '...'
+          }))
+        });
+      }
+
+      // 5. طلبات واتساب اليوم
       const todayRequests = allRequests.filter(r => {
         const reqDate = new Date(r.timestamp);
         return reqDate >= todayStart;
       });
-
       if (todayRequests.length > 0) {
         alerts.push({
           type: 'info',
           category: 'requests',
           title: 'طلبات واتساب اليوم',
-          message: `${todayRequests.length} طلب واتساب جديد اليوم`,
+          message: `${todayRequests.length} طلب واتساب جديد`,
           count: todayRequests.length,
+          icon: 'message-circle',
           items: todayRequests.slice(0, 5).map(r => ({
             propertyNumber: r.propertyNumber,
             requestCode: r.requestCode,
@@ -1231,42 +1258,118 @@ const request = await storage.createRequest(
         });
       }
 
-      // 5. إحصائيات سريعة
+      // 6. اشتراكات ستنتهي خلال 7 أيام
+      const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const expiringSoon = subscriptions.filter(sub => {
+        if (sub.status !== 'active') return false;
+        const endDate = new Date(sub.endDate);
+        return endDate > now && endDate <= sevenDaysLater;
+      });
+      if (expiringSoon.length > 0) {
+        alerts.push({
+          type: 'warning',
+          category: 'expiring-subscriptions',
+          title: 'اشتراكات ستنتهي قريباً',
+          message: `${expiringSoon.length} اشتراك سينتهي خلال 7 أيام`,
+          count: expiringSoon.length,
+          icon: 'clock',
+          items: expiringSoon.slice(0, 5).map(s => ({
+            propertyNumber: s.propertyNumber,
+            endDate: s.endDate,
+            daysLeft: Math.ceil((new Date(s.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          }))
+        });
+      }
+
+      // 7. اشتراكات منتهية حديثاً
+      const recentlyExpired = subscriptions.filter(sub => {
+        if (sub.status !== 'expired') return false;
+        const endDate = new Date(sub.endDate);
+        return endDate >= sevenDaysAgo && endDate < now;
+      });
+      if (recentlyExpired.length > 0) {
+        alerts.push({
+          type: 'danger',
+          category: 'expired-subscriptions',
+          title: 'اشتراكات منتهية',
+          message: `${recentlyExpired.length} اشتراك انتهى ويحتاج تجديد`,
+          count: recentlyExpired.length,
+          icon: 'x-circle',
+          items: recentlyExpired.slice(0, 5).map(s => ({
+            propertyNumber: s.propertyNumber,
+            endDate: s.endDate
+          }))
+        });
+      }
+
+      // 8. عقارات تم تحديثها آخر 24 ساعة
+      const recentUpdates = properties.filter(p => {
+        if (!p.updatedAt) return false;
+        const updated = new Date(p.updatedAt);
+        return updated >= oneDayAgo;
+      });
+      if (recentUpdates.length > 0) {
+        alerts.push({
+          type: 'info',
+          category: 'updates',
+          title: 'تحديثات العقارات',
+          message: `${recentUpdates.length} عقار تم تحديثه آخر 24 ساعة`,
+          count: recentUpdates.length,
+          icon: 'edit',
+          items: recentUpdates.slice(0, 5).map(p => ({
+            propertyNumber: p.propertyNumber,
+            name: p.name,
+            updatedAt: p.updatedAt
+          }))
+        });
+      }
+
+      // حساب الإحصائيات
       const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
       const expiredSubscriptions = subscriptions.filter(s => s.status === 'expired').length;
-      const properties = await storage.getProperties();
       const trustedProperties = properties.filter(p => p.subscriptionType === 'trusted').length;
+      const normalProperties = properties.filter(p => p.subscriptionType === 'normal').length;
 
-      // 6. ملخص اليوم
-      const todayPayments = payments.filter(p => {
+      // إحصائيات الأسبوع
+      const weekPayments = payments.filter(p => {
         const payDate = new Date(p.createdAt);
-        return payDate >= todayStart;
+        return payDate >= sevenDaysAgo;
       });
+      const weekRequests = allRequests.filter(r => {
+        const reqDate = new Date(r.timestamp);
+        return reqDate >= sevenDaysAgo;
+      });
+      const weekRevenue = weekPayments
+        .filter(p => p.status === 'completed')
+        .reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
 
-      alerts.push({
-        type: 'success',
-        category: 'summary',
-        title: 'ملخص اليوم',
-        message: `${todayRequests.length} طلب | ${todayPayments.length} دفعة | ${activeSubscriptions} نشط`,
-        count: 0,
-        items: [{
-          totalProperties: properties.length,
-          trustedProperties,
-          activeSubscriptions,
-          expiredSubscriptions,
-          todayRequests: todayRequests.length,
-          todayPayments: todayPayments.length,
-          pendingPayments: pendingPayments.length
-        }]
-      });
+      // حساب عدد التنبيهات المهمة
+      const criticalCount = alerts.filter(a => a.type === 'danger').reduce((sum, a) => sum + (a.count || 0), 0);
+      const warningCount = alerts.filter(a => a.type === 'warning').reduce((sum, a) => sum + (a.count || 0), 0);
 
       res.json({
         alerts,
+        stats: {
+          totalProperties: properties.length,
+          trustedProperties,
+          normalProperties,
+          activeSubscriptions,
+          expiredSubscriptions,
+          pendingPayments: pendingPayments.length,
+          todayRequests: todayRequests.length,
+          todayPayments: todayPayments.length,
+          todayProperties: todayProperties.length,
+          weekRequests: weekRequests.length,
+          weekPayments: weekPayments.length,
+          weekRevenue,
+          pendingSuggestions: pendingSuggestions.length,
+          recentUpdates: recentUpdates.length
+        },
         summary: {
-          totalAlerts: alerts.filter(a => a.type === 'danger' || a.type === 'warning').length,
-          criticalAlerts: alerts.filter(a => a.type === 'danger').length,
-          warningAlerts: alerts.filter(a => a.type === 'warning').length,
-          lastUpdated: new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+          totalAlerts: criticalCount + warningCount,
+          criticalAlerts: criticalCount,
+          warningAlerts: warningCount,
+          lastUpdated: new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })
         }
       });
     } catch (err: any) {

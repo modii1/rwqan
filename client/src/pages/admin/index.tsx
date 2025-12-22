@@ -75,6 +75,14 @@ export default function AdminDashboard() {
     queryKey: ["/api/admin/session"],
   });
 
+  // جلب التنبيهات للعداد
+  const { data: alertsData } = useQuery<any>({
+    queryKey: ["/api/admin/alerts"],
+    refetchInterval: 30000,
+  });
+
+  const alertCount = alertsData?.summary?.totalAlerts || 0;
+
   // إعادة التوجيه إذا لم يكن أدمن
   const [, setLocation] = useLocation();
 
@@ -109,16 +117,44 @@ export default function AdminDashboard() {
             <p className="text-[10px] text-muted-foreground">إدارة العقارات</p>
           </div>
         </div>
+        {/* أيقونة التنبيهات مع العداد */}
+        <button
+          onClick={() => setActiveSection("")}
+          className="relative p-2 rounded-lg hover:bg-muted/50 transition"
+          data-testid="button-alerts-mobile"
+        >
+          <Bell className="w-5 h-5 text-muted-foreground" />
+          {alertCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+              {alertCount > 9 ? '9+' : alertCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Sidebar */}
       <aside className="w-full md:w-56 bg-card border-b md:border-b-0 md:border-l px-2 md:px-4 py-3 md:py-6 flex md:flex-col gap-1 md:gap-2 overflow-x-auto md:overflow-visible md:sticky md:top-0 md:h-screen md:border-l">
-        <div className="hidden md:flex items-center gap-2 mb-3 px-2">
-          <LayoutDashboard className="w-5 h-5 text-primary" />
-          <div>
-            <h2 className="text-sm font-bold text-primary">لوحة التحكم</h2>
-            <p className="text-[11px] text-muted-foreground">إدارة الموارد</p>
+        <div className="hidden md:flex items-center justify-between mb-3 px-2">
+          <div className="flex items-center gap-2">
+            <LayoutDashboard className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="text-sm font-bold text-primary">لوحة التحكم</h2>
+              <p className="text-[11px] text-muted-foreground">إدارة الموارد</p>
+            </div>
           </div>
+          {/* أيقونة التنبيهات في السايدبار */}
+          <button
+            onClick={() => setActiveSection("")}
+            className="relative p-1.5 rounded-lg hover:bg-muted/50 transition"
+            data-testid="button-alerts-desktop"
+          >
+            <Bell className="w-4 h-4 text-muted-foreground" />
+            {alertCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                {alertCount > 9 ? '9+' : alertCount}
+              </span>
+            )}
+          </button>
         </div>
 
         <SidebarButton
@@ -296,7 +332,7 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
 function AlertsDashboard() {
   const { data: alertsData, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/alerts"],
-    refetchInterval: 60000, // تحديث كل دقيقة
+    refetchInterval: 30000,
   });
 
   if (isLoading) {
@@ -311,129 +347,204 @@ function AlertsDashboard() {
   }
 
   const alerts = alertsData?.alerts || [];
+  const stats = alertsData?.stats || {};
   const summary = alertsData?.summary || {};
 
-  const getAlertIcon = (type: string) => {
-    switch (type) {
-      case 'danger': return <Bell className="w-5 h-5 text-red-500" />;
-      case 'warning': return <Clock className="w-5 h-5 text-amber-500" />;
-      case 'info': return <MessageCircle className="w-5 h-5 text-blue-500" />;
-      case 'success': return <TrendingUp className="w-5 h-5 text-emerald-500" />;
+  const getAlertIcon = (category: string) => {
+    switch (category) {
+      case 'new-properties': return <Home className="w-5 h-5 text-emerald-500" />;
+      case 'new-payments': return <CreditCard className="w-5 h-5 text-emerald-500" />;
+      case 'pending-payments': return <Bell className="w-5 h-5 text-red-500" />;
+      case 'suggestions': return <Zap className="w-5 h-5 text-blue-500" />;
+      case 'requests': return <MessageCircle className="w-5 h-5 text-blue-500" />;
+      case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-amber-500" />;
+      case 'expired-subscriptions': return <Bell className="w-5 h-5 text-red-500" />;
+      case 'updates': return <TrendingUp className="w-5 h-5 text-blue-500" />;
       default: return <Bell className="w-5 h-5" />;
     }
   };
 
   const getAlertStyles = (type: string) => {
     switch (type) {
-      case 'danger': return 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800';
-      case 'warning': return 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
-      case 'info': return 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800';
-      case 'success': return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800';
+      case 'danger': return 'bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800';
+      case 'warning': return 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800';
+      case 'info': return 'bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800';
+      case 'success': return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800';
       default: return 'bg-muted border-border';
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* رأس التنبيهات */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 md:space-y-6">
+      {/* رأس الصفحة مع ملخص التنبيهات */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Bell className="w-6 h-6 text-primary" />
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Bell className="w-5 h-5 md:w-6 md:h-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">مركز التنبيهات</h1>
-            <p className="text-sm text-muted-foreground">متابعة كل ما يحدث في النظام</p>
+            <h1 className="text-lg md:text-xl font-bold text-foreground">مركز التنبيهات</h1>
+            <p className="text-xs md:text-sm text-muted-foreground">متابعة كل ما يحدث في النظام</p>
           </div>
         </div>
-        {summary.totalAlerts > 0 && (
-          <Badge className="bg-red-500 text-white px-3 py-1">
-            {summary.totalAlerts} تنبيه مهم
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {summary.criticalAlerts > 0 && (
+            <Badge className="bg-red-500 text-white px-2 md:px-3 py-1 text-xs">
+              {summary.criticalAlerts} عاجل
+            </Badge>
+          )}
+          {summary.warningAlerts > 0 && (
+            <Badge className="bg-amber-500 text-white px-2 md:px-3 py-1 text-xs">
+              {summary.warningAlerts} تحذير
+            </Badge>
+          )}
+        </div>
       </div>
 
-      {/* بطاقات الملخص السريع */}
-      {alerts.find((a: any) => a.category === 'summary') && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {(() => {
-            const summaryAlert = alerts.find((a: any) => a.category === 'summary');
-            const summaryData = summaryAlert?.items?.[0] || {};
-            return (
-              <>
-                <Card className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Home className="w-4 h-4 text-blue-600" />
-                    <span className="text-xs text-muted-foreground">العقارات</span>
-                  </div>
-                  <p className="text-2xl font-bold text-blue-600">{summaryData.totalProperties || 0}</p>
-                  <p className="text-xs text-muted-foreground">{summaryData.trustedProperties || 0} مميز</p>
-                </Card>
-                <Card className="p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800">
-                  <div className="flex items-center gap-2 mb-1">
-                    <CreditCard className="w-4 h-4 text-emerald-600" />
-                    <span className="text-xs text-muted-foreground">الاشتراكات</span>
-                  </div>
-                  <p className="text-2xl font-bold text-emerald-600">{summaryData.activeSubscriptions || 0}</p>
-                  <p className="text-xs text-muted-foreground">{summaryData.expiredSubscriptions || 0} منتهي</p>
-                </Card>
-                <Card className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800">
-                  <div className="flex items-center gap-2 mb-1">
-                    <MessageCircle className="w-4 h-4 text-amber-600" />
-                    <span className="text-xs text-muted-foreground">طلبات اليوم</span>
-                  </div>
-                  <p className="text-2xl font-bold text-amber-600">{summaryData.todayRequests || 0}</p>
-                </Card>
-                <Card className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 border-purple-200 dark:border-purple-800">
-                  <div className="flex items-center gap-2 mb-1">
-                    <DollarSign className="w-4 h-4 text-purple-600" />
-                    <span className="text-xs text-muted-foreground">مدفوعات معلقة</span>
-                  </div>
-                  <p className="text-2xl font-bold text-purple-600">{summaryData.pendingPayments || 0}</p>
-                </Card>
-              </>
-            );
-          })()}
-        </div>
-      )}
+      {/* بطاقات الإحصائيات الكبيرة */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
+        <Card className="p-3 md:p-5 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/50 dark:to-blue-900/50 border-blue-200 dark:border-blue-800" data-testid="stat-properties">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+              <Home className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
+            </div>
+            <span className="text-xs md:text-sm font-medium text-blue-700 dark:text-blue-400">العقارات</span>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-blue-600">{stats.totalProperties || 0}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] md:text-xs text-emerald-600 font-medium">{stats.trustedProperties || 0} مميز</span>
+            <span className="text-[10px] md:text-xs text-muted-foreground">| {stats.normalProperties || 0} عادي</span>
+          </div>
+        </Card>
 
-      {/* التنبيهات */}
-      <div className="space-y-3">
-        {alerts.filter((a: any) => a.category !== 'summary').map((alert: any, idx: number) => (
-          <Card key={idx} className={`p-4 border-2 ${getAlertStyles(alert.type)}`}>
-            <div className="flex items-start gap-3">
-              {getAlertIcon(alert.type)}
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-bold text-foreground">{alert.title}</h3>
+        <Card className="p-3 md:p-5 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950/50 dark:to-emerald-900/50 border-emerald-200 dark:border-emerald-800" data-testid="stat-subscriptions">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+              <CreditCard className="w-4 h-4 md:w-5 md:h-5 text-emerald-600" />
+            </div>
+            <span className="text-xs md:text-sm font-medium text-emerald-700 dark:text-emerald-400">الاشتراكات</span>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-emerald-600">{stats.activeSubscriptions || 0}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] md:text-xs text-emerald-600 font-medium">نشط</span>
+            <span className="text-[10px] md:text-xs text-red-500">| {stats.expiredSubscriptions || 0} منتهي</span>
+          </div>
+        </Card>
+
+        <Card className="p-3 md:p-5 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950/50 dark:to-amber-900/50 border-amber-200 dark:border-amber-800" data-testid="stat-requests">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+              <MessageCircle className="w-4 h-4 md:w-5 md:h-5 text-amber-600" />
+            </div>
+            <span className="text-xs md:text-sm font-medium text-amber-700 dark:text-amber-400">الطلبات</span>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-amber-600">{stats.todayRequests || 0}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] md:text-xs text-amber-600 font-medium">اليوم</span>
+            <span className="text-[10px] md:text-xs text-muted-foreground">| {stats.weekRequests || 0} هذا الأسبوع</span>
+          </div>
+        </Card>
+
+        <Card className="p-3 md:p-5 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950/50 dark:to-purple-900/50 border-purple-200 dark:border-purple-800" data-testid="stat-payments">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+              <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-purple-600" />
+            </div>
+            <span className="text-xs md:text-sm font-medium text-purple-700 dark:text-purple-400">المدفوعات</span>
+          </div>
+          <p className="text-2xl md:text-3xl font-bold text-purple-600">{stats.todayPayments || 0}</p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] md:text-xs text-purple-600 font-medium">اليوم</span>
+            {stats.pendingPayments > 0 && (
+              <span className="text-[10px] md:text-xs text-red-500 font-bold">| {stats.pendingPayments} معلقة</span>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* بطاقات إحصائيات إضافية */}
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3">
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-new-properties">
+          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todayProperties || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">عقار جديد اليوم</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-revenue">
+          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.weekRevenue || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">إيرادات الأسبوع</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-payments">
+          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.weekPayments || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">مدفوعات الأسبوع</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-suggestions">
+          <p className="text-lg md:text-2xl font-bold text-amber-600">{stats.pendingSuggestions || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">اقتراحات جديدة</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-updates">
+          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.recentUpdates || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">تحديثات 24 ساعة</p>
+        </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-pending">
+          <p className="text-lg md:text-2xl font-bold text-red-600">{stats.pendingPayments || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">مدفوعات معلقة</p>
+        </Card>
+      </div>
+
+      {/* عنوان التنبيهات */}
+      <div className="flex items-center gap-2 pt-2">
+        <Bell className="w-4 h-4 text-primary" />
+        <h2 className="text-sm md:text-base font-bold text-foreground">التنبيهات والأحداث</h2>
+        <Badge variant="outline" className="text-xs">{alerts.length}</Badge>
+      </div>
+
+      {/* قائمة التنبيهات */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3">
+        {alerts.map((alert: any, idx: number) => (
+          <Card key={idx} className={`p-3 md:p-4 border-2 ${getAlertStyles(alert.type)}`} data-testid={`alert-${alert.category}`}>
+            <div className="flex items-start gap-2 md:gap-3">
+              {getAlertIcon(alert.category)}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <h3 className="text-xs md:text-sm font-bold text-foreground truncate">{alert.title}</h3>
                   {alert.count > 0 && (
-                    <Badge variant="outline" className="text-xs">
+                    <Badge variant="outline" className="text-[10px] md:text-xs flex-shrink-0">
                       {alert.count}
                     </Badge>
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground mb-2">{alert.message}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground mb-2">{alert.message}</p>
                 
                 {/* تفاصيل التنبيه */}
                 {alert.items && alert.items.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {alert.items.map((item: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between text-xs bg-background/50 rounded px-2 py-1.5">
-                        <span className="font-mono font-semibold">#{item.propertyNumber}</span>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {alert.items.slice(0, 3).map((item: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between text-[10px] md:text-xs bg-background/60 rounded px-2 py-1">
+                        {item.propertyNumber && (
+                          <span className="font-mono font-semibold">#{item.propertyNumber}</span>
+                        )}
+                        {item.name && !item.propertyNumber && (
+                          <span className="font-semibold truncate max-w-[100px]">{item.name}</span>
+                        )}
                         {item.daysLeft !== undefined && (
-                          <span className="text-amber-600">متبقي {item.daysLeft} يوم</span>
+                          <span className="text-amber-600 font-medium">متبقي {item.daysLeft} يوم</span>
                         )}
                         {item.endDate && !item.daysLeft && (
                           <span className="text-muted-foreground">{new Date(item.endDate).toLocaleDateString('en-US')}</span>
                         )}
                         {item.amount && (
-                          <span className="text-emerald-600">{item.amount} ر.س</span>
+                          <span className="text-emerald-600 font-medium">{item.amount} ر.س</span>
                         )}
                         {item.requestCode && (
-                          <span className="text-blue-600">{item.requestCode}</span>
+                          <span className="text-blue-600 font-mono">{item.requestCode}</span>
+                        )}
+                        {item.city && (
+                          <span className="text-muted-foreground">{item.city}</span>
                         )}
                       </div>
                     ))}
+                    {alert.items.length > 3 && (
+                      <p className="text-[10px] text-muted-foreground text-center">+{alert.items.length - 3} المزيد</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -441,19 +552,19 @@ function AlertsDashboard() {
           </Card>
         ))}
 
-        {alerts.filter((a: any) => a.category !== 'summary').length === 0 && (
-          <Card className="p-8 text-center border-2 border-dashed">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-4">
-              <TrendingUp className="w-8 h-8 text-emerald-600" />
+        {alerts.length === 0 && (
+          <Card className="p-6 md:p-8 text-center border-2 border-dashed col-span-full">
+            <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-3 md:mb-4">
+              <TrendingUp className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" />
             </div>
-            <h3 className="text-lg font-bold text-foreground mb-2">كل شيء تمام!</h3>
-            <p className="text-sm text-muted-foreground">لا توجد تنبيهات مهمة حالياً</p>
+            <h3 className="text-base md:text-lg font-bold text-foreground mb-2">كل شيء تمام!</h3>
+            <p className="text-xs md:text-sm text-muted-foreground">لا توجد تنبيهات مهمة حالياً</p>
           </Card>
         )}
       </div>
 
       {/* وقت آخر تحديث */}
-      <p className="text-xs text-muted-foreground text-center">
+      <p className="text-[10px] md:text-xs text-muted-foreground text-center pt-2">
         آخر تحديث: {summary.lastUpdated || '-'}
       </p>
     </div>
