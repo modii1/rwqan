@@ -762,6 +762,11 @@ function AlertsDashboard() {
                             {item.updatedAt && (
                               <span className="text-blue-600 text-[9px]">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' })}</span>
                             )}
+                            {item.lastChanges && (
+                              <Badge variant="outline" className="text-[9px] py-0 text-purple-600 border-purple-300">
+                                {item.lastChanges}
+                              </Badge>
+                            )}
                             {item.amount && (
                               <Badge className="text-[9px] py-0 bg-emerald-500">{item.amount} ر.س</Badge>
                             )}
