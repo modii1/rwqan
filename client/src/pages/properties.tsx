@@ -181,7 +181,9 @@ export default function PropertiesPage() {
       setSelectedDirection(f.selectedDirection || "");
       setSelectedType(f.selectedType || "");
       setSelectedFacilities(f.selectedFacilities || []);
-      setMaxPrice(f.maxPrice || null);
+      // تأكد من أن maxPrice لا تتجاوز أعلى سعر فعلي
+      const savedMaxPrice = f.maxPrice ? Math.min(f.maxPrice, maxPriceValue) : null;
+      setMaxPrice(savedMaxPrice);
     } else if (maxPrice === null) {
       setMaxPrice(maxPriceValue);
     }
