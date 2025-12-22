@@ -20,10 +20,49 @@ export default function SuggestPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // التحقق من صحة البيانات قبل الإرسال
+    if (name.trim().length < 3) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "الاسم يجب أن يكون 3 أحرف على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const phoneValidation = validatePhoneNumber(phone);
+    if (!phoneValidation.valid) {
+      toast({
+        title: "خطأ في رقم الجوال",
+        description: phoneValidation.error || "رقم الجوال غير صحيح",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (!city) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "يرجى اختيار المدينة",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (suggestion.trim().length < 10) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "الاقتراح يجب أن يكون 10 أحرف على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsSubmitting(true);
 
     try {
-      await apiRequest('POST', '/api/suggestions', { name, phone, city, suggestion });
+      await apiRequest('POST', '/api/suggestions', { name: name.trim(), phone: phoneValidation.cleaned, city, suggestion: suggestion.trim() });
 
       toast({
         title: "تم إرسال الاقتراح بنجاح ✓",
