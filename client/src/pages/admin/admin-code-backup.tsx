@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -170,7 +171,7 @@ export default function AdminCodeBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {new Date(backup.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                      {formatLiveSaudiTime(backup.createdAt)}
                     </p>
                     <p>
                       الملفات: {backup.fileCount} | الحجم: {backup.totalSize.toFixed(2)} MB

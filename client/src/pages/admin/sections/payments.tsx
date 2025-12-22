@@ -112,20 +112,10 @@ function getPackageNameArabic(packageId: string) {
   return packageNames[packageId] || packageId || '-';
 }
 
+import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
+
 function formatDate(dateStr: string) {
-  if (!dateStr) return "-";
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleDateString('en-US', {
-      timeZone: 'Asia/Riyadh',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  } catch {
-    return dateStr;
-  }
+  return formatLiveSaudiDate(dateStr);
 }
 
 export default function PaymentsSection() {

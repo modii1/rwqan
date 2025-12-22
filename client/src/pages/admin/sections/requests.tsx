@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Th, Td } from "../components/Table";
 import { Loader2 } from "lucide-react";
+import { formatLiveSaudiTime } from "@/lib/dateUtils";
 
 type AdminRequest = {
   id: string;
@@ -57,15 +58,7 @@ export default function RequestsSection() {
                   <tr key={idx} className="border-t hover:bg-muted/40">
                     <Td>{req.propertyNumber}</Td>
                     <Td className="font-mono">{req.requestCode || req.id}</Td>
-                    <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', {
-                      timeZone: 'Asia/Riyadh',
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true
-                    }) : '-'}</Td>
+                    <Td>{formatLiveSaudiTime(req.timestamp)}</Td>
                   </tr>
                 ))
               ) : (

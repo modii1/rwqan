@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
 import {
   Dialog,
   DialogContent,
@@ -62,7 +63,7 @@ export default function AdminBackup() {
     mutationFn: async () => {
       return apiRequest("POST", "/api/backups", {
         backupType,
-        backupName: backupName || `نسخة احتياطية ${new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', month: 'numeric', day: 'numeric', year: 'numeric' })}`,
+        backupName: backupName || `نسخة احتياطية ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh', month: 'numeric', day: 'numeric', year: 'numeric' })}`,
         dataTypes: selectedTypes,
         description: `نسخة احتياطية ${backupType} للبيانات المهمة`,
       });
@@ -280,7 +281,7 @@ export default function AdminBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {new Date(backup.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                      {formatLiveSaudiTime(backup.createdAt)}
                     </p>
                     <p>
                       الحجم: {backup.sizeInMB.toFixed(2)} MB | الملفات:{" "}

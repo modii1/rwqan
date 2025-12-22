@@ -1,0 +1,94 @@
+CRITICAL – GLOBAL TIME HANDLING FOR ENTIRE SYSTEM
+
+This is a FULLY REAL-TIME system.
+Every action (WhatsApp requests, subscriptions, payments, admin logs, analytics)
+must display the ACTUAL current time in Saudi Arabia.
+
+GOAL:
+If any action is created now at 11:35 PM (Saudi time),
+it MUST display exactly:
+11:35 PM
+— everywhere in the system.
+
+NO EXCEPTIONS.
+
+================================================
+
+GLOBAL RULES (MANDATORY):
+
+1) BACKEND (Replit / Node.js / APIs)
+- Server timezone can remain UTC or GMT.
+- ALWAYS generate time using:
+  Date.now()
+- Store and send timestamps as epoch milliseconds ONLY (number).
+- NEVER format dates on the backend.
+- NEVER send human-readable date strings.
+- NEVER add or subtract hours manually (+3 / -3).
+
+Example API response:
+{
+  "createdAtMs": 1766428500000
+}
+
+================================================
+
+2) FRONTEND (ALL PAGES WITHOUT EXCEPTION)
+Applies to:
+- WhatsApp Requests
+- Subscriptions
+- Payments
+- Admin Actions
+- Logs
+- Analytics
+- Any timestamp shown to users or admins
+
+STRICT DISPLAY RULE:
+- ALWAYS display time using Saudi Arabia timezone explicitly.
+- NEVER display UTC or GMT in the UI.
+- NEVER parse formatted date strings.
+
+Use this ONE function globally:
+
+function formatLiveSaudiTime(ms) {
+  return new Date(ms).toLocaleString("ar-SA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+}
+
+Usage everywhere:
+formatLiveSaudiTime(item.createdAtMs)
+
+================================================
+
+EXPECTED BEHAVIOR:
+
+- Action at 11:35 PM → displays 11:35 PM
+- Action at 12:05 AM → displays 12:05 AM
+- Action at 1:20 AM → displays 1:20 AM
+- Date changes naturally at midnight.
+- Displayed time always matches the phone clock in Saudi Arabia.
+
+================================================
+
+ABSOLUTELY FORBIDDEN:
+
+- Using UTC or GMT for UI display
+- Using Asia/Riyadh on backend generation
+- Adding or subtracting hours manually
+- Using strings like:
+  "Dec 22 at 4:54 PM"
+  "2025-12-22 16:54"
+- Cutoff logic or banking/booking logic
+
+================================================
+
+FINAL STATEMENT:
+This system is REAL-TIME and SAUDI-BASED.
+All timestamps must feel LIVE and IMMEDIATE.
+Displayed time must ALWAYS match the current Saudi local time.
