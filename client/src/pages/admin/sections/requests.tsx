@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Th, Td } from "../components/Table";
 import { Loader2 } from "lucide-react";
-import { formatRequestDate } from "@/lib/dateUtils";
+import { formatDate } from "@/lib/dateUtils";
 
 type AdminRequest = {
   id: string;
@@ -58,7 +58,7 @@ export default function RequestsSection() {
                   <tr key={idx} className="border-t hover:bg-muted/40">
                     <Td>{req.propertyNumber}</Td>
                     <Td className="font-mono">{req.requestCode || req.id}</Td>
-                    <Td>{formatRequestDate(req.timestamp, true)}</Td>
+                    <Td>{formatDate(req.timestamp, true)}</Td>
                   </tr>
                 ))
               ) : (
