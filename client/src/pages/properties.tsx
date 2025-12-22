@@ -349,25 +349,7 @@ export default function PropertiesPage() {
       return true;
     });
 
-    // إذا تم تطبيق فلتر السعر، رتب حسب السعر من الأعلى إلى الأدنى
-    if (maxPrice && maxPrice < maxPriceValue) {
-      const verified = filtered.filter((p) => p.subscriptionType === "مميز");
-      const regular = filtered.filter((p) => p.subscriptionType !== "مميز");
-
-      // ترتيب حسب السعر الرئيسي من الأعلى إلى الأدنى
-      const sortByPrice = (a, b) => {
-        const priceA = parseFloat(a.prices.weekend) || parseFloat(a.prices.weekday) || 0;
-        const priceB = parseFloat(b.prices.weekend) || parseFloat(b.prices.weekday) || 0;
-        return priceB - priceA; // من الأعلى إلى الأدنى
-      };
-
-      const sortedVerified = verified.sort(sortByPrice);
-      const sortedRegular = regular.sort(sortByPrice);
-
-      return [...sortedVerified, ...sortedRegular];
-    }
-
-    // ترتيب عشوائي مع الحفاظ على المميز أولاً (بدون فلتر سعر)
+    // ترتيب عشوائي مع الحفاظ على المميز أولاً
     const verified = filtered.filter((p) => p.subscriptionType === "مميز");
     const regular = filtered.filter((p) => p.subscriptionType !== "مميز");
 
