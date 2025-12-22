@@ -255,8 +255,8 @@ export default function AdminAnalytics() {
                     <td className="p-4 font-mono text-muted-foreground text-xs">{visitor.ipAddress}</td>
                     <td className="p-4 text-muted-foreground text-xs">{visitor.dayOfWeek} {visitor.hourOfDay}:00</td>
                     <td className="p-4 text-muted-foreground">
-                      {visitor.createdAtMs
-                        ? new Date(visitor.createdAtMs).toLocaleString('en-US', {
+                      {visitor.timestamp
+                        ? new Date(visitor.timestamp).toLocaleString('en-US', {
                             timeZone: 'Asia/Riyadh',
                             year: 'numeric',
                             month: 'short',
@@ -300,8 +300,8 @@ export default function AdminAnalytics() {
                     <td className="p-4 font-mono font-semibold">{req.propertyNumber}</td>
                     <td className="p-4 text-foreground">{req.requestCode || req.id}</td>
                     <td className="p-4 text-muted-foreground">
-                      {req.createdAtMs
-                        ? new Date(req.createdAtMs).toLocaleString('en-US', {
+                      {req.timestamp
+                        ? new Date(req.timestamp).toLocaleString('en-US', {
                             timeZone: 'Asia/Riyadh',
                             year: 'numeric',
                             month: 'short',
