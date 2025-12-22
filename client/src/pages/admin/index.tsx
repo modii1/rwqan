@@ -555,30 +555,79 @@ function AlertsDashboard() {
                 
                 {/* تفاصيل التنبيه */}
                 {alert.items && alert.items.length > 0 && (
-                  <div className={`space-y-1 ${expandedAlerts[idx] ? 'max-h-64' : 'max-h-24'} overflow-y-auto transition-all duration-300`}>
+                  <div className={`space-y-1.5 ${expandedAlerts[idx] ? 'max-h-80' : 'max-h-32'} overflow-y-auto transition-all duration-300`}>
                     {(expandedAlerts[idx] ? alert.items : alert.items.slice(0, 3)).map((item: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between text-[10px] md:text-xs bg-background/60 rounded px-2 py-1">
-                        {item.propertyNumber && (
-                          <span className="font-mono font-semibold">#{item.propertyNumber}</span>
-                        )}
-                        {item.name && !item.propertyNumber && (
-                          <span className="font-semibold truncate max-w-[100px]">{item.name}</span>
-                        )}
-                        {item.daysLeft !== undefined && (
-                          <span className="text-amber-600 font-medium">متبقي {item.daysLeft} يوم</span>
-                        )}
-                        {item.endDate && !item.daysLeft && (
-                          <span className="text-muted-foreground">{new Date(item.endDate).toLocaleDateString('en-US')}</span>
-                        )}
-                        {item.amount && (
-                          <span className="text-emerald-600 font-medium">{item.amount} ر.س</span>
-                        )}
-                        {item.requestCode && (
-                          <span className="text-blue-600 font-mono">{item.requestCode}</span>
-                        )}
-                        {item.city && (
-                          <span className="text-muted-foreground">{item.city}</span>
-                        )}
+                      <div key={i} className="flex flex-col gap-0.5 text-[10px] md:text-xs bg-background/60 rounded px-2 py-1.5 border border-border/30">
+                        {/* السطر الأول: رقم العقار + الاسم */}
+                        <div className="flex items-center justify-between gap-2">
+                          {item.propertyNumber && (
+                            <span className="font-mono font-bold text-primary">#{item.propertyNumber}</span>
+                          )}
+                          {item.name && (
+                            <span className="font-semibold truncate flex-1 text-foreground">{item.name}</span>
+                          )}
+                          {item.city && (
+                            <span className="text-muted-foreground text-[9px] md:text-[10px]">{item.city}</span>
+                          )}
+                        </div>
+                        
+                        {/* السطر الثاني: التفاصيل الإضافية */}
+                        <div className="flex items-center justify-between gap-2 text-[9px] md:text-[10px]">
+                          {/* نوع الاشتراك */}
+                          {item.type && (
+                            <span className={`px-1.5 py-0.5 rounded ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}`}>
+                              {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
+                            </span>
+                          )}
+                          {/* الباقة */}
+                          {item.packageId && (
+                            <span className="text-blue-600 dark:text-blue-400">{item.packageId}</span>
+                          )}
+                          {/* أيام متبقية */}
+                          {item.daysLeft !== undefined && (
+                            <span className="text-amber-600 font-medium px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/30 rounded">
+                              متبقي {item.daysLeft} يوم
+                            </span>
+                          )}
+                          {/* تاريخ الانتهاء */}
+                          {item.endDate && !item.daysLeft && (
+                            <span className="text-muted-foreground">انتهى: {new Date(item.endDate).toLocaleDateString('en-US')}</span>
+                          )}
+                          {/* تاريخ التحديث */}
+                          {item.updatedAt && (
+                            <span className="text-blue-600 dark:text-blue-400">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                          )}
+                          {/* المبلغ */}
+                          {item.amount && (
+                            <span className="text-emerald-600 font-bold">{item.amount} ر.س</span>
+                          )}
+                          {/* طريقة الدفع */}
+                          {item.method && (
+                            <span className="text-muted-foreground">{item.method === 'bank_transfer' ? 'تحويل بنكي' : item.method === 'card' ? 'بطاقة' : item.method}</span>
+                          )}
+                          {/* حالة الدفع */}
+                          {item.status && (
+                            <span className={`px-1.5 py-0.5 rounded ${item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {item.status === 'completed' ? 'مكتمل' : item.status === 'pending' ? 'معلق' : item.status}
+                            </span>
+                          )}
+                          {/* كود الطلب */}
+                          {item.requestCode && (
+                            <span className="text-blue-600 font-mono font-bold">{item.requestCode}</span>
+                          )}
+                          {/* وقت الطلب */}
+                          {item.timestamp && (
+                            <span className="text-muted-foreground">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                          )}
+                          {/* الاقتراح */}
+                          {item.suggestion && (
+                            <span className="text-muted-foreground truncate max-w-[150px]">{item.suggestion}</span>
+                          )}
+                          {/* الجوال */}
+                          {item.mobile && !item.propertyNumber && (
+                            <span className="text-muted-foreground font-mono">{item.mobile}</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                     {alert.items.length > 3 && (
