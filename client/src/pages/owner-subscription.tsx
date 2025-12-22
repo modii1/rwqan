@@ -29,6 +29,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PriceDisplay } from "@/components/price-display";
+import riyal from "@/components/riyal-symbol.png";
 
 export default function OwnerSubscriptionPage() {
   const [, setLocation] = useLocation();
@@ -260,9 +262,11 @@ export default function OwnerSubscriptionPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
               <p className="text-xs text-muted-foreground mb-1">رسوم الاشتراك</p>
-              <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-price">
-                {(currentSubscription as any)?.price || (currentPackage?.propertyCount && currentPackage.propertyCount > 1 ? currentPackage.price / currentPackage.propertyCount : currentPackage?.price) || 0} ر.س
-              </p>
+              <PriceDisplay 
+                amount={(currentSubscription as any)?.price || (currentPackage?.propertyCount && currentPackage.propertyCount > 1 ? currentPackage.price / currentPackage.propertyCount : currentPackage?.price) || 0}
+                size="lg"
+                textColor="text-[#434040]"
+              />
               {(currentPackage?.propertyCount || 1) > 1 && (
                 <p className="text-xs text-muted-foreground">(لكل عقار)</p>
               )}
@@ -411,11 +415,15 @@ export default function OwnerSubscriptionPage() {
                     <div className="flex items-center justify-between">
                       {(pkg.propertyCount || 1) > 1 ? (
                         <div>
-                          <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price / (pkg.propertyCount || 1)} ر.س<span className="text-sm font-normal text-muted-foreground"> / عقار</span></p>
-                          <p className="text-xs text-muted-foreground">الإجمالي: {pkg.price} ر.س للعقارين</p>
+                          <div className="flex items-center gap-1 text-2xl font-bold text-[#b88d2b] mb-1">
+                            <span>{pkg.price / (pkg.propertyCount || 1)}</span>
+                            <img src={riyal} alt="ريال" className="w-6 h-6" />
+                            <span className="text-sm font-normal text-muted-foreground"> / عقار</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">الإجمالي: {pkg.price} <img src={riyal} alt="ريال" className="w-3 h-3 inline" /> للعقارين</div>
                         </div>
                       ) : (
-                        <p className="text-2xl font-bold text-[#b88d2b]">{pkg.price} ر.س</p>
+                        <PriceDisplay amount={pkg.price} size="xl" textColor="text-[#b88d2b]" />
                       )}
                       {(pkg.propertyCount || 1) > 1 && (
                         <Badge variant="secondary" className="text-xs">
@@ -553,7 +561,7 @@ export default function OwnerSubscriptionPage() {
               </div>
               <div className="flex justify-between border-t pt-3">
                 <span className="text-lg font-bold text-[#434040]">الإجمالي:</span>
-                <span className="text-2xl font-bold text-[#b88d2b]">{paymentInfo.price} ر.س</span>
+                <PriceDisplay amount={paymentInfo.price} size="xl" textColor="text-[#b88d2b]" />
               </div>
               {/* إظهار العقار الثاني إذا كانت باقة عقارين */}
               {secondPropertyInfo && (
