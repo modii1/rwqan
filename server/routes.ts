@@ -1158,17 +1158,16 @@ const request = await storage.createRequest(
         storage.getSuggestions()
       ]);
 
-      // 1. عقارات مسجلة اليوم (جديدة)
+      // 1. عقارات مسجلة اليوم (جديدة) - استخدم createdAt أو subscriptionDate
       const todayProperties = properties.filter(p => {
-        if (!p.createdAt) return false;
-        const created = new Date(p.createdAt);
+        // استخدم createdAt إذا موجود، وإلا subscriptionDate
+        const dateStr = p.createdAt || (p as any).subscriptionDate;
+        if (!dateStr) return false;
+        const created = new Date(dateStr);
+        if (isNaN(created.getTime())) return false;
         return created >= todayStart;
       });
       console.log(`🏠 [Alerts] Today properties: ${todayProperties.length}, Total: ${properties.length}`);
-      if (properties.length > 0) {
-        const lastProperty = properties[properties.length - 1];
-        console.log(`🏠 [Alerts] Last property createdAt: ${lastProperty.createdAt}, todayStart: ${todayStart.toISOString()}`);
-      }
       if (todayProperties.length > 0) {
         alerts.push({
           type: 'success',
