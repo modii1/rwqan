@@ -57,7 +57,15 @@ export default function RequestsSection() {
                   <tr key={idx} className="border-t hover:bg-muted/40">
                     <Td>{req.propertyNumber}</Td>
                     <Td className="font-mono">{req.requestCode || req.id}</Td>
-                    <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('ar-SA') : '-'}</Td>
+                    <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', { 
+                      timeZone: 'Asia/Riyadh',
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true
+                    }) : '-'}</Td>
                   </tr>
                 ))
               ) : (
