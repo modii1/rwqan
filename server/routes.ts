@@ -1158,45 +1158,46 @@ const request = await storage.createRequest(
         storage.getSuggestions()
       ]);
 
-      // 1. اشتراكات جديدة اليوم (عقارات بدأت اشتراكها اليوم)
-      const todaySubscriptions = subscriptions.filter(s => {
-        if (!s.startDate) return false;
-        const startDate = new Date(s.startDate);
-        if (isNaN(startDate.getTime())) return false;
-        return startDate >= todayStart;
+      // 1. عقارات جديدة اليوم (تاريخ الإنشاء - createdAt)
+      const newPropertiesToday = properties.filter(p => {
+        if (!p.createdAt) return false;
+        const created = new Date(p.createdAt);
+        if (isNaN(created.getTime())) return false;
+        return created >= todayStart;
       });
-      console.log(`🏠 [Alerts] Today subscriptions: ${todaySubscriptions.length}, Total: ${subscriptions.length}`);
-      if (todaySubscriptions.length > 0) {
-        // جلب معلومات العقارات المرتبطة
-        const todayPropertyNumbers = todaySubscriptions.map(s => s.propertyNumber);
-        const todayPropertiesDetails = properties.filter(p => todayPropertyNumbers.includes(p.propertyNumber));
-        
+      console.log(`🏠 [Alerts] New properties today (createdAt): ${newPropertiesToday.length}`);
+      if (newPropertiesToday.length > 0) {
         alerts.push({
           type: 'success',
-          category: 'new-subscriptions',
-          title: 'اشتراكات جديدة اليوم',
-          message: `${todaySubscriptions.length} عقار بدأ اشتراكه اليوم`,
-          count: todaySubscriptions.length,
+          category: 'new-properties',
+          title: 'عقارات جديدة اليوم',
+          message: `${newPropertiesToday.length} عقار تم تسجيله اليوم`,
+          count: newPropertiesToday.length,
           icon: 'home-plus',
-          items: todaySubscriptions.slice(0, 5).map(s => {
-            const prop = properties.find(p => p.propertyNumber === s.propertyNumber);
-            return {
-              propertyNumber: s.propertyNumber,
-              name: prop?.name || 'غير معروف',
-              city: prop?.city || '',
-              packageId: s.packageId,
-              type: s.type
-            };
-          })
+          items: newPropertiesToday.slice(0, 5).map(p => ({
+            propertyNumber: p.propertyNumber,
+            name: p.name,
+            city: p.city,
+            createdAt: p.createdAt
+          }))
         });
       }
       
-      // 2. تحديثات العقارات (خلال 24 ساعة) - صور، أسعار، مرافق
+      // 2. تحديثات العقارات (تاريخ التحديث - updatedAt خلال 24 ساعة)
+      // ملاحظة: يجب أن يكون التحديث مختلف عن تاريخ الإنشاء
       const updatedProperties = properties.filter(p => {
         if (!p.updatedAt) return false;
         const updated = new Date(p.updatedAt);
         if (isNaN(updated.getTime())) return false;
-        return updated >= oneDayAgo;
+        // تأكد أن التحديث خلال 24 ساعة
+        if (updated < oneDayAgo) return false;
+        // تأكد أن التحديث ليس نفس تاريخ الإنشاء (عقار جديد)
+        if (p.createdAt) {
+          const created = new Date(p.createdAt);
+          // إذا كان الفرق أقل من دقيقة، فهو عقار جديد وليس تحديث
+          if (Math.abs(updated.getTime() - created.getTime()) < 60000) return false;
+        }
+        return true;
       });
       console.log(`📝 [Alerts] Updated properties (24h): ${updatedProperties.length}`);
       if (updatedProperties.length > 0) {
@@ -1213,6 +1214,36 @@ const request = await storage.createRequest(
             city: p.city,
             updatedAt: p.updatedAt
           }))
+        });
+      }
+      
+      // 3. اشتراكات جديدة اليوم (عقارات بدأت اشتراكها اليوم)
+      const todaySubscriptions = subscriptions.filter(s => {
+        if (!s.startDate) return false;
+        const startDate = new Date(s.startDate);
+        if (isNaN(startDate.getTime())) return false;
+        return startDate >= todayStart;
+      });
+      console.log(`🏠 [Alerts] Today subscriptions: ${todaySubscriptions.length}, Total: ${subscriptions.length}`);
+      if (todaySubscriptions.length > 0) {
+        alerts.push({
+          type: 'success',
+          category: 'new-subscriptions',
+          title: 'اشتراكات جديدة اليوم',
+          message: `${todaySubscriptions.length} عقار بدأ اشتراكه اليوم`,
+          count: todaySubscriptions.length,
+          icon: 'calendar-check',
+          items: todaySubscriptions.slice(0, 5).map(s => {
+            const prop = properties.find(p => p.propertyNumber === s.propertyNumber);
+            return {
+              propertyNumber: s.propertyNumber,
+              name: prop?.name || 'غير معروف',
+              city: prop?.city || '',
+              packageId: s.packageId,
+              type: s.type,
+              startDate: s.startDate
+            };
+          })
         });
       }
 
@@ -1403,6 +1434,7 @@ const request = await storage.createRequest(
           pendingPayments: pendingPayments.length,
           todayRequests: todayRequests.length,
           todayPayments: todayPayments.length,
+          todayProperties: newPropertiesToday.length,
           todaySubscriptions: todaySubscriptions.length,
           propertyUpdates: updatedProperties.length,
           weekRequests: weekRequests.length,
