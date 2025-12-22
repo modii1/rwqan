@@ -116,12 +116,10 @@ function formatDate(dateStr: string) {
   if (!dateStr) return "-";
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      timeZone: "Asia/Riyadh",
-    });
+    // إضافة 3 ساعات لتحويل من UTC إلى GMT+3
+    const gmt3 = new Date(date.getTime() + 3 * 60 * 60 * 1000);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[gmt3.getUTCMonth()]} ${gmt3.getUTCDate()}, ${gmt3.getUTCFullYear()}`;
   } catch {
     return dateStr;
   }

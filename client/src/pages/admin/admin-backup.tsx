@@ -62,7 +62,7 @@ export default function AdminBackup() {
     mutationFn: async () => {
       return apiRequest("POST", "/api/backups", {
         backupType,
-        backupName: backupName || `نسخة احتياطية ${new Date().toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}`,
+        backupName: backupName || `نسخة احتياطية ${(() => { const d = new Date(); const g = new Date(d.getTime() + 3*60*60*1000); return `${g.getUTCMonth()+1}/${g.getUTCDate()}/${g.getUTCFullYear()}`; })()}`,
         dataTypes: selectedTypes,
         description: `نسخة احتياطية ${backupType} للبيانات المهمة`,
       });
@@ -280,7 +280,7 @@ export default function AdminBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {new Date(backup.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
+                      {(() => { const d = new Date(backup.createdAt); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; let h = g.getUTCHours(); const mn = g.getUTCMinutes().toString().padStart(2,'0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()} ${h}:${mn} ${ap}`; })()}
                     </p>
                     <p>
                       الحجم: {backup.sizeInMB.toFixed(2)} MB | الملفات:{" "}
@@ -349,7 +349,7 @@ export default function AdminBackup() {
           <Card className="p-4">
             <p className="text-gray-600 text-sm">آخر نسخة</p>
             <p className="text-sm mt-2">
-              {new Date(backups[0]?.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
+              {(() => { const d = new Date(backups[0]?.createdAt); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; let h = g.getUTCHours(); const mn = g.getUTCMinutes().toString().padStart(2,'0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()} ${h}:${mn} ${ap}`; })()}
             </p>
           </Card>
         </div>

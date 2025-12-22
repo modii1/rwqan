@@ -1631,14 +1631,15 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "---";
     try {
-      // التاريخ مخزن بالفعل بتوقيت الرياض - نعرضه مباشرة بدون تحويل إضافي
       const date = new Date(dateStr);
-      // استخدام UTC لأن التاريخ المخزن هو توقيت الرياض بصيغة ISO
-      const day = date.getUTCDate();
-      const month = date.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-      const year = date.getUTCFullYear();
-      const hours = date.getUTCHours();
-      const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+      // إضافة 3 ساعات لتحويل من UTC إلى GMT+3
+      const gmt3 = new Date(date.getTime() + 3 * 60 * 60 * 1000);
+      const day = gmt3.getUTCDate();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = months[gmt3.getUTCMonth()];
+      const year = gmt3.getUTCFullYear();
+      const hours = gmt3.getUTCHours();
+      const minutes = gmt3.getUTCMinutes().toString().padStart(2, '0');
       const ampm = hours >= 12 ? 'PM' : 'AM';
       const hour12 = hours % 12 || 12;
       return `${month} ${day}, ${year} at ${hour12}:${minutes} ${ampm}`;

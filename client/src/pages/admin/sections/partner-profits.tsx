@@ -553,7 +553,7 @@ export default function PartnerProfitsSection() {
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
                         {expense.description && <span>{expense.description} | </span>}
-                        <span>{new Date(expense.date).toLocaleDateString("en-US", { timeZone: "Asia/Riyadh" })}</span>
+                        <span>{(() => { const d = new Date(expense.date); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()}`; })()}</span>
                       </div>
                     </div>
                   </div>
@@ -655,7 +655,7 @@ export default function PartnerProfitsSection() {
                           </div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {payment.paymentMethod} |{" "}
-                            {new Date(payment.createdAt || "").toLocaleDateString("en-US", { timeZone: "Asia/Riyadh" })}
+                            {(() => { const d = new Date(payment.createdAt || ""); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()}`; })()}
                           </div>
                         </div>
                       </div>
