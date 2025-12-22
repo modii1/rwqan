@@ -184,7 +184,8 @@ export default function PropertiesPage() {
       // تأكد من أن maxPrice لا تتجاوز أعلى سعر فعلي
       const savedMaxPrice = f.maxPrice ? Math.min(f.maxPrice, maxPriceValue) : maxPriceValue;
       setMaxPrice(savedMaxPrice);
-    } else {
+    } else if (maxPriceValue > 1000) {
+      // تحديث maxPrice فقط إذا تم الحصول على maxPriceValue الفعلي
       setMaxPrice(maxPriceValue);
     }
   }, [maxPriceValue]);
