@@ -1279,8 +1279,10 @@ const request = await storage.createRequest(
         });
       }
 
-      // 3. المدفوعات المعلقة (تحتاج موافقة)
-      const pendingPayments = payments.filter(p => p.status === 'pending');
+      // 3. المدفوعات المعلقة (تحتاج موافقة) - تشمل pending و معلق و قيد المراجعة
+      const pendingPayments = payments.filter(p => 
+        p.status === 'pending' || p.status === 'معلق' || p.status === 'قيد المراجعة'
+      );
       if (pendingPayments.length > 0) {
         alerts.push({
           type: 'danger',
