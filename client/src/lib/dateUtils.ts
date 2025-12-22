@@ -1,113 +1,180 @@
 /**
- * دوال مساعدة للتعامل مع التواريخ في توقيت GMT+3 (الرياض)
- * جميع التواريخ تُعرض بتوقيت الرياض
+ * دوال مساعدة للتعامل مع التواريخ في الواجهة الأمامية
+ * 
+ * القواعد:
+ * - لا تحويلات يدوية للتوقيت
+ * - استخدام toLocaleString مع timeZone: 'Asia/Riyadh' للعرض
+ * - التواريخ تأتي من الخادم كـ epoch milliseconds أو ISO string
  */
-
-const RIYADH_OFFSET_HOURS = 3;
-const RIYADH_OFFSET_MS = RIYADH_OFFSET_HOURS * 60 * 60 * 1000;
 
 /**
- * الحصول على التاريخ والوقت الحالي بتوقيت GMT+3 (الرياض)
+ * تنسيق التاريخ للعرض بتوقيت الرياض
  */
-export function getNowGMT3(): Date {
-  const now = new Date();
-  return new Date(now.getTime() + now.getTimezoneOffset() * 60000 + RIYADH_OFFSET_MS);
-}
-
-/**
- * تحويل تاريخ مخزن (UTC) إلى توقيت GMT+3 للعرض
- */
-export function toGMT3(dateStr: string): Date {
-  const d = new Date(dateStr);
-  return new Date(d.getTime() + RIYADH_OFFSET_MS);
-}
-
-/**
- * تنسيق التاريخ بتوقيت GMT+3
- * @param dateStr - تاريخ ISO string
- * @param includeTime - هل نعرض الوقت أيضاً
- */
-export function formatDateGMT3(dateStr: string, includeTime = false): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
+export function formatDate(dateInput: string | number | Date, includeTime = false): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
   if (isNaN(d.getTime())) return '-';
   
-  const gmt3 = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[gmt3.getUTCMonth()];
-  const day = gmt3.getUTCDate();
-  const year = gmt3.getUTCFullYear();
-  
   if (!includeTime) {
-    return `${month} ${day}, ${year}`;
+    return d.toLocaleDateString('en-US', {
+      timeZone: 'Asia/Riyadh',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
   }
   
-  let hours = gmt3.getUTCHours();
-  const minutes = gmt3.getUTCMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12;
-  
-  return `${month} ${day} at ${hours}:${minutes} ${ampm}`;
+  return d.toLocaleString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+/**
+ * تنسيق التاريخ بتوقيت الرياض (Alias للتوافق)
+ */
+export function formatDateGMT3(dateStr: string, includeTime = false): string {
+  return formatDate(dateStr, includeTime);
 }
 
 /**
  * تنسيق التاريخ للعرض المختصر
  */
-export function formatDateShort(dateStr: string): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
+export function formatDateShort(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
   if (isNaN(d.getTime())) return '-';
   
-  const gmt3 = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[gmt3.getUTCMonth()]} ${gmt3.getUTCDate()}`;
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    month: 'short',
+    day: 'numeric'
+  });
 }
 
 /**
- * تنسيق الوقت فقط بتوقيت GMT+3
+ * تنسيق الوقت فقط بتوقيت الرياض
  */
-export function formatTimeGMT3(dateStr: string): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
+export function formatTime(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
   if (isNaN(d.getTime())) return '-';
   
-  const gmt3 = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  let hours = gmt3.getUTCHours();
-  const minutes = gmt3.getUTCMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12;
-  
-  return `${hours}:${minutes} ${ampm}`;
+  return d.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+/**
+ * تنسيق الوقت بتوقيت الرياض (Alias للتوافق)
+ */
+export function formatTimeGMT3(dateStr: string): string {
+  return formatTime(dateStr);
 }
 
 /**
  * تنسيق التاريخ الكامل بالإنجليزية
  */
-export function formatFullDate(dateStr: string): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
+export function formatFullDate(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
   if (isNaN(d.getTime())) return '-';
   
-  const gmt3 = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  
-  return `${days[gmt3.getUTCDay()]}, ${months[gmt3.getUTCMonth()]} ${gmt3.getUTCDate()}, ${gmt3.getUTCFullYear()}`;
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 }
 
 /**
- * الحصول على تاريخ اليوم بتنسيق YYYY-MM-DD
+ * تنسيق التاريخ والوقت الكامل
+ */
+export function formatDateTime(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
+  if (isNaN(d.getTime())) return '-';
+  
+  return d.toLocaleString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+/**
+ * تنسيق التاريخ بالعربية
+ */
+export function formatArabicDate(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
+  if (isNaN(d.getTime())) return '-';
+  
+  return d.toLocaleDateString('ar-SA', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+
+/**
+ * تنسيق التاريخ والوقت بالعربية
+ */
+export function formatArabicDateTime(dateInput: string | number | Date): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
+  if (isNaN(d.getTime())) return '-';
+  
+  return d.toLocaleString('ar-SA', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+/**
+ * الحصول على الوقت الحالي بتوقيت الرياض
+ */
+export function getNowGMT3(): Date {
+  return new Date();
+}
+
+/**
+ * تحويل تاريخ للعرض (Alias للتوافق)
+ */
+export function toGMT3(dateStr: string): Date {
+  return new Date(dateStr);
+}
+
+/**
+ * الحصول على تاريخ اليوم بتنسيق YYYY-MM-DD (بتوقيت الرياض)
  */
 export function getTodayGMT3(): string {
-  const now = getNowGMT3();
-  const year = now.getUTCFullYear();
-  const month = (now.getUTCMonth() + 1).toString().padStart(2, '0');
-  const day = now.getUTCDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
 }

@@ -170,7 +170,7 @@ export default function AdminCodeBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {(() => { const d = new Date(backup.createdAt); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; let h = g.getUTCHours(); const mn = g.getUTCMinutes().toString().padStart(2,'0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()} ${h}:${mn} ${ap}`; })()}
+                      {new Date(backup.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
                     </p>
                     <p>
                       الملفات: {backup.fileCount} | الحجم: {backup.totalSize.toFixed(2)} MB
@@ -264,7 +264,7 @@ export default function AdminCodeBackup() {
           <Card className="p-4">
             <p className="text-gray-600 text-sm">آخر نسخة</p>
             <p className="text-sm mt-2">
-              {(() => { const d = new Date(backups[0]?.createdAt); const g = new Date(d.getTime() + 3*60*60*1000); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; let h = g.getUTCHours(); const mn = g.getUTCMinutes().toString().padStart(2,'0'); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${m[g.getUTCMonth()]} ${g.getUTCDate()}, ${g.getUTCFullYear()} ${h}:${mn} ${ap}`; })()}
+              {new Date(backups[0]?.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
             </p>
           </Card>
         </div>
