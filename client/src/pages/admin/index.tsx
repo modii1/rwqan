@@ -255,11 +255,7 @@ export default function AdminDashboard() {
           </button>
         )}
 
-        {activeSection === "" && (
-          <div className="text-center text-muted-foreground text-sm mt-10 md:mt-20">
-            اختر قسم من القائمة لبدء الإدارة
-          </div>
-        )}
+        {activeSection === "" && <AlertsDashboard />}
 
         {activeSection === "properties" && <PropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
@@ -294,6 +290,173 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
       {icon}
       <span className="hidden md:inline">{label}</span>
     </button>
+  );
+}
+
+function AlertsDashboard() {
+  const { data: alertsData, isLoading } = useQuery<any>({
+    queryKey: ["/api/admin/alerts"],
+    refetchInterval: 60000, // تحديث كل دقيقة
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto mb-3"></div>
+          <p className="text-muted-foreground text-sm">جاري تحميل التنبيهات...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const alerts = alertsData?.alerts || [];
+  const summary = alertsData?.summary || {};
+
+  const getAlertIcon = (type: string) => {
+    switch (type) {
+      case 'danger': return <Bell className="w-5 h-5 text-red-500" />;
+      case 'warning': return <Clock className="w-5 h-5 text-amber-500" />;
+      case 'info': return <MessageCircle className="w-5 h-5 text-blue-500" />;
+      case 'success': return <TrendingUp className="w-5 h-5 text-emerald-500" />;
+      default: return <Bell className="w-5 h-5" />;
+    }
+  };
+
+  const getAlertStyles = (type: string) => {
+    switch (type) {
+      case 'danger': return 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800';
+      case 'warning': return 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
+      case 'info': return 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800';
+      case 'success': return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800';
+      default: return 'bg-muted border-border';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* رأس التنبيهات */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Bell className="w-6 h-6 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-foreground">مركز التنبيهات</h1>
+            <p className="text-sm text-muted-foreground">متابعة كل ما يحدث في النظام</p>
+          </div>
+        </div>
+        {summary.totalAlerts > 0 && (
+          <Badge className="bg-red-500 text-white px-3 py-1">
+            {summary.totalAlerts} تنبيه مهم
+          </Badge>
+        )}
+      </div>
+
+      {/* بطاقات الملخص السريع */}
+      {alerts.find((a: any) => a.category === 'summary') && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {(() => {
+            const summaryAlert = alerts.find((a: any) => a.category === 'summary');
+            const summaryData = summaryAlert?.items?.[0] || {};
+            return (
+              <>
+                <Card className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-900 border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Home className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs text-muted-foreground">العقارات</span>
+                  </div>
+                  <p className="text-2xl font-bold text-blue-600">{summaryData.totalProperties || 0}</p>
+                  <p className="text-xs text-muted-foreground">{summaryData.trustedProperties || 0} مميز</p>
+                </Card>
+                <Card className="p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-950 dark:to-emerald-900 border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CreditCard className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs text-muted-foreground">الاشتراكات</span>
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-600">{summaryData.activeSubscriptions || 0}</p>
+                  <p className="text-xs text-muted-foreground">{summaryData.expiredSubscriptions || 0} منتهي</p>
+                </Card>
+                <Card className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950 dark:to-amber-900 border-amber-200 dark:border-amber-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <MessageCircle className="w-4 h-4 text-amber-600" />
+                    <span className="text-xs text-muted-foreground">طلبات اليوم</span>
+                  </div>
+                  <p className="text-2xl font-bold text-amber-600">{summaryData.todayRequests || 0}</p>
+                </Card>
+                <Card className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950 dark:to-purple-900 border-purple-200 dark:border-purple-800">
+                  <div className="flex items-center gap-2 mb-1">
+                    <DollarSign className="w-4 h-4 text-purple-600" />
+                    <span className="text-xs text-muted-foreground">مدفوعات معلقة</span>
+                  </div>
+                  <p className="text-2xl font-bold text-purple-600">{summaryData.pendingPayments || 0}</p>
+                </Card>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* التنبيهات */}
+      <div className="space-y-3">
+        {alerts.filter((a: any) => a.category !== 'summary').map((alert: any, idx: number) => (
+          <Card key={idx} className={`p-4 border-2 ${getAlertStyles(alert.type)}`}>
+            <div className="flex items-start gap-3">
+              {getAlertIcon(alert.type)}
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-bold text-foreground">{alert.title}</h3>
+                  {alert.count > 0 && (
+                    <Badge variant="outline" className="text-xs">
+                      {alert.count}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mb-2">{alert.message}</p>
+                
+                {/* تفاصيل التنبيه */}
+                {alert.items && alert.items.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {alert.items.map((item: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-background/50 rounded px-2 py-1.5">
+                        <span className="font-mono font-semibold">#{item.propertyNumber}</span>
+                        {item.daysLeft !== undefined && (
+                          <span className="text-amber-600">متبقي {item.daysLeft} يوم</span>
+                        )}
+                        {item.endDate && !item.daysLeft && (
+                          <span className="text-muted-foreground">{new Date(item.endDate).toLocaleDateString('en-US')}</span>
+                        )}
+                        {item.amount && (
+                          <span className="text-emerald-600">{item.amount} ر.س</span>
+                        )}
+                        {item.requestCode && (
+                          <span className="text-blue-600">{item.requestCode}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        ))}
+
+        {alerts.filter((a: any) => a.category !== 'summary').length === 0 && (
+          <Card className="p-8 text-center border-2 border-dashed">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-4">
+              <TrendingUp className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground mb-2">كل شيء تمام!</h3>
+            <p className="text-sm text-muted-foreground">لا توجد تنبيهات مهمة حالياً</p>
+          </Card>
+        )}
+      </div>
+
+      {/* وقت آخر تحديث */}
+      <p className="text-xs text-muted-foreground text-center">
+        آخر تحديث: {summary.lastUpdated || '-'}
+      </p>
+    </div>
   );
 }
 
