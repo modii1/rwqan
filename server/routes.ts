@@ -1743,6 +1743,19 @@ const request = await storage.createRequest(
       // تحويل keys إلى URLs مباشرة
       const uploadedUrls = uploadedKeys.map(key => `${R2_PUBLIC_URL}/${key}`);
       console.log(`✅ [UPLOAD] Done! Uploaded ${files.length} images. URLs:`, uploadedUrls);
+      
+      // تسجيل التغيير في العقار
+      const changeNote = `إضافة ${files.length} صورة جديدة`;
+      await storage.updateProperty(propertyNumber, { 'آخر التغييرات': changeNote });
+      
+      // إشعار واتساب
+      const property = await storage.getPropertyByNumber(propertyNumber);
+      notifyPropertyUpdate({
+        propertyNumber,
+        propertyName: property?.name || '',
+        changes: changeNote,
+      }).catch(err => console.error("WhatsApp notify error:", err));
+      
       res.json({ ok: true, count: files.length, uploaded: uploadedKeys, urls: uploadedUrls });
 
     } catch (err: any) {
@@ -1764,39 +1777,91 @@ const request = await storage.createRequest(
 
       const updates = req.body;
       
-      // تتبع التغييرات وحفظها
-      const FIELD_NAMES: Record<string, string> = {
-        name: 'الاسم',
-        location: 'الموقع',
-        city: 'المدينة',
-        direction: 'الاتجاه',
-        type: 'النوع',
-        facilities: 'المرافق',
-        whatsappNumber: 'رقم الجوال',
-        weekdayPrice: 'سعر وسط الأسبوع',
-        weekendPrice: 'سعر نهاية الأسبوع',
-        overnightPrice: 'سعر المبيت',
-        holidayPrice: 'سعر الإجازات',
-        specialPrice: 'سعر خاص',
-        imagesLink: 'رابط الصور',
-      };
+      // جلب البيانات الحالية للمقارنة
+      const currentProperty = await storage.getPropertyByNumber(propertyNumber);
+      if (!currentProperty) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
       
-      const changedFields = Object.keys(updates)
-        .filter(k => k !== 'pin' && k !== 'propertyNumber')
-        .map(k => FIELD_NAMES[k] || k)
-        .slice(0, 5);
+      // تتبع التغييرات الفعلية
+      const changes: string[] = [];
       
-      updates['آخر التغييرات'] = changedFields.length > 0 ? changedFields.join('، ') : 'تحديث عام';
+      // مقارنة الاسم
+      if (updates.name && updates.name !== currentProperty.name) {
+        changes.push('تغيير الاسم');
+      }
+      
+      // مقارنة الموقع
+      if (updates.location && updates.location !== currentProperty.location) {
+        changes.push('تحديث الموقع');
+      }
+      
+      // مقارنة المدينة
+      if (updates.city && updates.city !== currentProperty.city) {
+        changes.push('تغيير المدينة');
+      }
+      
+      // مقارنة الاتجاه
+      if (updates.direction && updates.direction !== currentProperty.direction) {
+        changes.push('تغيير الاتجاه');
+      }
+      
+      // مقارنة النوع
+      if (updates.type && updates.type !== currentProperty.type) {
+        changes.push('تغيير النوع');
+      }
+      
+      // مقارنة رقم الجوال
+      if (updates.whatsappNumber && updates.whatsappNumber !== currentProperty.whatsappNumber) {
+        changes.push('تحديث رقم الجوال');
+      }
+      
+      // مقارنة المرافق
+      if (updates.facilities) {
+        const oldFacilities = currentProperty.facilities || [];
+        const newFacilities = Array.isArray(updates.facilities) ? updates.facilities : [];
+        const added = newFacilities.filter((f: string) => !oldFacilities.includes(f));
+        const removed = oldFacilities.filter((f: string) => !newFacilities.includes(f));
+        if (added.length > 0) changes.push(`إضافة ${added.length} مرفق`);
+        if (removed.length > 0) changes.push(`حذف ${removed.length} مرفق`);
+      }
+      
+      // مقارنة الأسعار
+      if (updates.prices) {
+        const priceChanges: string[] = [];
+        if (updates.prices.weekday && updates.prices.weekday !== currentProperty.prices?.weekday) {
+          priceChanges.push('وسط الأسبوع');
+        }
+        if (updates.prices.weekend && updates.prices.weekend !== currentProperty.prices?.weekend) {
+          priceChanges.push('نهاية الأسبوع');
+        }
+        if (updates.prices.overnight && updates.prices.overnight !== currentProperty.prices?.overnight) {
+          priceChanges.push('المبيت');
+        }
+        if (updates.prices.holidays && updates.prices.holidays !== currentProperty.prices?.holidays) {
+          priceChanges.push('الإجازات');
+        }
+        if (priceChanges.length > 0) {
+          changes.push(`تحديث أسعار: ${priceChanges.join('، ')}`);
+        }
+      }
+      
+      // إذا لم توجد تغييرات فعلية
+      const changesSummary = changes.length > 0 ? changes.slice(0, 3).join(' | ') : 'تحديث عام';
+      updates['آخر التغييرات'] = changesSummary;
+      
+      console.log(`📝 [Property Update] ${propertyNumber}: ${changesSummary}`);
       
       const updated = await storage.updateProperty(propertyNumber, updates);
       
       // إرسال إشعار واتساب
-      const changesText = changedFields.join('، ') || 'تم تحديث البيانات';
-      notifyPropertyUpdate({
-        propertyNumber,
-        propertyName: updated.name || '',
-        changes: changesText,
-      }).catch(err => console.error("WhatsApp notify error:", err));
+      if (changes.length > 0) {
+        notifyPropertyUpdate({
+          propertyNumber,
+          propertyName: updated.name || '',
+          changes: changes.join('\n'),
+        }).catch(err => console.error("WhatsApp notify error:", err));
+      }
       
       res.json(updated);
     } catch (err: any) {
