@@ -230,6 +230,15 @@ export default function AdminDashboard() {
           active={activeSection === "fee-configs"}
           onClick={() => setActiveSection("fee-configs")}
         />
+
+        <div className="hidden md:block h-px bg-border my-2" />
+
+        <SidebarButton
+          icon={<ArrowRight className="w-4 h-4 text-red-500" />}
+          label="رجوع للموقع"
+          active={false}
+          onClick={() => setLocation("/")}
+        />
       </aside>
 
       {/* المحتوى */}
