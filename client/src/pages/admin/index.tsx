@@ -29,6 +29,7 @@ import {
   Bell,
   Wallet,
   Settings2,
+  Calendar,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -390,7 +391,8 @@ function AlertsDashboard() {
 
   const getAlertIcon = (category: string) => {
     switch (category) {
-      case 'new-subscriptions': return <Home className="w-5 h-5 text-emerald-500" />;
+      case 'new-properties': return <Home className="w-5 h-5 text-emerald-500" />;
+      case 'new-subscriptions': return <Calendar className="w-5 h-5 text-purple-500" />;
       case 'property-updates': return <TrendingUp className="w-5 h-5 text-blue-500" />;
       case 'new-payments': return <CreditCard className="w-5 h-5 text-emerald-500" />;
       case 'pending-payments': return <Bell className="w-5 h-5 text-red-500" />;
@@ -503,21 +505,21 @@ function AlertsDashboard() {
 
       {/* بطاقات إحصائيات إضافية */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3">
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-subscriptions">
-          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todaySubscriptions || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">اشتراكات اليوم</p>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-properties">
+          <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.todayProperties || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">عقارات جديدة</p>
         </Card>
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-property-updates">
           <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.propertyUpdates || 0}</p>
           <p className="text-[10px] md:text-xs text-muted-foreground">تحديثات العقارات</p>
         </Card>
+        <Card className="p-2 md:p-3 text-center border" data-testid="stat-today-subscriptions">
+          <p className="text-lg md:text-2xl font-bold text-purple-600">{stats.todaySubscriptions || 0}</p>
+          <p className="text-[10px] md:text-xs text-muted-foreground">اشتراكات اليوم</p>
+        </Card>
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-revenue">
           <p className="text-lg md:text-2xl font-bold text-emerald-600">{stats.weekRevenue || 0}</p>
           <p className="text-[10px] md:text-xs text-muted-foreground">إيرادات الأسبوع</p>
-        </Card>
-        <Card className="p-2 md:p-3 text-center border" data-testid="stat-week-payments">
-          <p className="text-lg md:text-2xl font-bold text-blue-600">{stats.weekPayments || 0}</p>
-          <p className="text-[10px] md:text-xs text-muted-foreground">مدفوعات الأسبوع</p>
         </Card>
         <Card className="p-2 md:p-3 text-center border" data-testid="stat-suggestions">
           <p className="text-lg md:text-2xl font-bold text-amber-600">{stats.pendingSuggestions || 0}</p>
