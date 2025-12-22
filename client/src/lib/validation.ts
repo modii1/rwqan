@@ -1,9 +1,21 @@
 // نظام التحقق الذكي من البيانات
 
-// تنظيف رقم الجوال - إزالة كل شيء عدا الأرقام
+// تنظيف رقم الجوال - يجب أن يبدأ بـ 0 أو 5 فقط
 export function cleanPhoneNumber(value: string): string {
   // إزالة جميع الأحرف والرموز والمسافات - فقط الأرقام
-  return value.replace(/[^\d]/g, '');
+  const numbersOnly = value.replace(/[^\d]/g, '');
+  
+  // إذا كان فارغاً، نرجع فارغ
+  if (numbersOnly.length === 0) return '';
+  
+  // يجب أن يبدأ بـ 0 أو 5 فقط (أرقام الجوال السعودية)
+  if (numbersOnly[0] !== '0' && numbersOnly[0] !== '5') {
+    // لا نقبل الرقم إذا لم يبدأ بـ 0 أو 5
+    return '';
+  }
+  
+  // الحد الأقصى 10 أرقام
+  return numbersOnly.slice(0, 10);
 }
 
 // تنظيف رقم العقار - 5 أرقام فقط
