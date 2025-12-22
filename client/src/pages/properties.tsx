@@ -482,7 +482,7 @@ export default function PropertiesPage() {
     setSelectedDirection("all");
     setSelectedType("all");
     setSelectedFacilities([]);
-    setMaxPrice(5000);
+    setMaxPrice(maxPriceValue);
     // مسح الفلاتر المحفوظة
     sessionStorage.removeItem("propertyFilters");
   };
@@ -613,7 +613,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="المدينة" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">الكل</SelectItem>
+                <SelectItem value="all">جميع المدن</SelectItem>
                 {CITIES.map((city) => (
                   <SelectItem key={city} value={city}>
                     {city}
@@ -631,7 +631,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="الاتجاه" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">الكل</SelectItem>
+                <SelectItem value="all">جميع الاتجاهات</SelectItem>
                 {DIRECTIONS.map((dir) => (
                   <SelectItem key={dir} value={dir}>
                     {dir}
@@ -646,7 +646,7 @@ export default function PropertiesPage() {
                 <SelectValue placeholder="النوع" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">الكل</SelectItem>
+                <SelectItem value="all">جميع الأنواع</SelectItem>
                 {TYPES.map((type) => (
                   <SelectItem key={type} value={type}>
                     {type}
@@ -659,13 +659,13 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى: {maxPrice === 5000 ? "الكل" : `${maxPrice} ريال`}
+              السعر الأقصى: {maxPrice === maxPriceValue ? `بدون حد (${maxPriceValue} ريال)` : `${maxPrice} ريال`}
             </label>
             <Slider
               value={[maxPrice]}
               onValueChange={(value) => setMaxPrice(value[0])}
               min={0}
-              max={5000}
+              max={maxPriceValue}
               step={50}
               className="mt-2"
               data-testid="slider-price"
@@ -1178,7 +1178,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="المدينة" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="all">جميع المدن</SelectItem>
                   {CITIES.map((city) => (
                     <SelectItem key={city} value={city}>
                       {city}
@@ -1201,7 +1201,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="الاتجاه" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="all">جميع الاتجاهات</SelectItem>
                   {DIRECTIONS.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d}
@@ -1221,7 +1221,7 @@ export default function PropertiesPage() {
                   <SelectValue placeholder="النوع" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="all">جميع الأنواع</SelectItem>
                   {TYPES.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
@@ -1234,7 +1234,7 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى: {maxPrice === maxPriceValue ? "الكل" : `${maxPrice} ريال`}
+                السعر الأقصى: {maxPrice === maxPriceValue ? `بدون حد (${maxPriceValue} ريال)` : `${maxPrice} ريال`}
               </label>
               <Slider
                 value={[maxPrice || maxPriceValue]}
