@@ -102,6 +102,33 @@ export function formatDateGMT3(dateStr: string, includeTime = false): string {
 }
 
 /**
+ * تنسيق التاريخ للطلبات - بدون timezone لأن البيانات محفوظة بتوقيت الرياض أصلاً
+ */
+export function formatRequestDate(dateInput: string | number | Date, includeTime = false): string {
+  if (!dateInput) return '-';
+  
+  const d = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
+  if (isNaN(d.getTime())) return '-';
+  
+  if (!includeTime) {
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
+  
+  return d.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+/**
  * تنسيق التاريخ للعرض المختصر
  */
 export function formatDateShort(dateInput: string | number | Date): string {
