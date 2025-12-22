@@ -156,15 +156,15 @@ export default function PropertiesPage() {
     
     const allPrices = properties
       .flatMap(p => [
-        parseFloat(p.prices.weekday) || 0,
-        parseFloat(p.prices.weekend) || 0,
-        parseFloat(p.prices.overnight) || 0,
-        parseFloat(p.prices.special) || 0,
-        parseFloat(p.prices.holidays) || 0,
+        parseFloat(p.prices?.weekday || '0'),
+        parseFloat(p.prices?.weekend || '0'),
+        parseFloat(p.prices?.overnight || '0'),
+        parseFloat(p.prices?.special || '0'),
+        parseFloat(p.prices?.holidays || '0'),
       ])
       .filter(p => p > 0);
     
-    return allPrices.length > 0 ? Math.ceil(allPrices.reduce((a, b) => Math.max(a, b))) : 1000;
+    return allPrices.length > 0 ? Math.ceil(Math.max(...allPrices)) : 1000;
   }, [properties]);
 
   // تحميل الفلاتر المحفوظة عند فتح الصفحة
@@ -653,10 +653,10 @@ export default function PropertiesPage() {
           {/* Price Range */}
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-2 text-foreground">
-              السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
+              السعر الأقصى: {(maxPrice ?? maxPriceValue) >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
             </label>
             <Slider
-              value={[Math.min(maxPrice, maxPriceValue)]}
+              value={[Math.min(maxPrice ?? maxPriceValue, maxPriceValue)]}
               onValueChange={(value) => setMaxPrice(value[0])}
               min={0}
               max={maxPriceValue}
@@ -1228,10 +1228,10 @@ export default function PropertiesPage() {
             {/* Price Range */}
             <div className="mb-6">
               <label className="text-sm font-semibold mb-2 block">
-                السعر الأقصى: {maxPrice === maxPriceValue ? "الكل" : `${maxPrice} ريال`}
+                السعر الأقصى: {(maxPrice ?? maxPriceValue) >= maxPriceValue ? "الكل" : `${maxPrice} ريال`}
               </label>
               <Slider
-                value={[maxPrice || maxPriceValue]}
+                value={[maxPrice ?? maxPriceValue]}
                 onValueChange={(v) => setMaxPrice(v[0])}
                 min={0}
                 max={maxPriceValue}
