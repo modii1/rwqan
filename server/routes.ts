@@ -1763,7 +1763,41 @@ const request = await storage.createRequest(
       }
 
       const updates = req.body;
+      
+      // تتبع التغييرات وحفظها
+      const FIELD_NAMES: Record<string, string> = {
+        name: 'الاسم',
+        location: 'الموقع',
+        city: 'المدينة',
+        direction: 'الاتجاه',
+        type: 'النوع',
+        facilities: 'المرافق',
+        whatsappNumber: 'رقم الجوال',
+        weekdayPrice: 'سعر وسط الأسبوع',
+        weekendPrice: 'سعر نهاية الأسبوع',
+        overnightPrice: 'سعر المبيت',
+        holidayPrice: 'سعر الإجازات',
+        specialPrice: 'سعر خاص',
+        imagesLink: 'رابط الصور',
+      };
+      
+      const changedFields = Object.keys(updates)
+        .filter(k => k !== 'pin' && k !== 'propertyNumber')
+        .map(k => FIELD_NAMES[k] || k)
+        .slice(0, 5);
+      
+      updates['آخر التغييرات'] = changedFields.length > 0 ? changedFields.join('، ') : 'تحديث عام';
+      
       const updated = await storage.updateProperty(propertyNumber, updates);
+      
+      // إرسال إشعار واتساب
+      const changesText = changedFields.join('، ') || 'تم تحديث البيانات';
+      notifyPropertyUpdate({
+        propertyNumber,
+        propertyName: updated.name || '',
+        changes: changesText,
+      }).catch(err => console.error("WhatsApp notify error:", err));
+      
       res.json(updated);
     } catch (err: any) {
       console.error("Update property error:", err?.message);
