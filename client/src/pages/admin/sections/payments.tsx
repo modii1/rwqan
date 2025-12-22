@@ -116,7 +116,7 @@ function formatDate(dateStr: string) {
   if (!dateStr) return "-";
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString("ar-SA", {
+    return date.toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
