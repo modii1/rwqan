@@ -80,7 +80,7 @@ export default function AdminDashboard() {
   // جلب التنبيهات للعداد
   const { data: alertsData } = useQuery<any>({
     queryKey: ["/api/admin/alerts"],
-    refetchInterval: 30000,
+    refetchInterval: 10000,
   });
 
   const alertCount = alertsData?.summary?.totalAlerts || 0;
@@ -368,7 +368,7 @@ function AlertsDashboard() {
   
   const { data: alertsData, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/alerts"],
-    refetchInterval: 30000,
+    refetchInterval: 10000,
   });
 
   const toggleExpand = (idx: number) => {
