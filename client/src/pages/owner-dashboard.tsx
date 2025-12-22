@@ -1632,17 +1632,16 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
     if (!dateStr) return "---";
     try {
       const date = new Date(dateStr);
-      // إضافة 3 ساعات لتحويل من UTC إلى GMT+3
-      const gmt3 = new Date(date.getTime() + 3 * 60 * 60 * 1000);
-      const day = gmt3.getUTCDate();
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const month = months[gmt3.getUTCMonth()];
-      const year = gmt3.getUTCFullYear();
-      const hours = gmt3.getUTCHours();
-      const minutes = gmt3.getUTCMinutes().toString().padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const hour12 = hours % 12 || 12;
-      return `${month} ${day}, ${year} at ${hour12}:${minutes} ${ampm}`;
+      if (isNaN(date.getTime())) return dateStr;
+      return date.toLocaleString('en-US', {
+        timeZone: 'Asia/Riyadh',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
     } catch {
       return dateStr;
     }

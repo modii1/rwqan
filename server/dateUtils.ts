@@ -1,32 +1,45 @@
 /**
- * دوال مساعدة للتعامل مع التواريخ في توقيت الرياض (GMT+3)
- * جميع التواريخ تُخزن وتُعرض بتوقيت الرياض
+ * دوال مساعدة للتعامل مع التواريخ
+ * 
+ * القواعد:
+ * - الخادم يعمل بتوقيت UTC
+ * - جميع التواريخ تُخزن كـ epoch milliseconds
+ * - لا تحويلات يدوية للتوقيت
  */
-
-const RIYADH_OFFSET_HOURS = 3;
-const RIYADH_OFFSET_MS = RIYADH_OFFSET_HOURS * 60 * 60 * 1000;
 
 /**
- * الحصول على التاريخ والوقت الحالي بتوقيت GMT+3 (الرياض)
+ * الحصول على الوقت الحالي كـ epoch milliseconds
+ */
+export function getNow(): number {
+  return Date.now();
+}
+
+/**
+ * الحصول على الوقت الحالي كـ ISO string
+ */
+export function getNowISO(): string {
+  return new Date().toISOString();
+}
+
+/**
+ * Alias للتوافق مع الكود القديم
  */
 export function getNowGMT3(): Date {
-  const now = new Date();
-  return new Date(now.getTime() + now.getTimezoneOffset() * 60000 + RIYADH_OFFSET_MS);
+  return new Date();
 }
 
 /**
  * Alias للتوافق مع الكود القديم
  */
 export function getNowInRiyadh(): Date {
-  return getNowGMT3();
+  return new Date();
 }
 
 /**
- * تحويل تاريخ إلى ISO string بتوقيت GMT+3
+ * تحويل تاريخ إلى ISO string
  */
 export function toGMT3ISO(date?: Date): string {
-  const d = date || getNowGMT3();
-  return d.toISOString();
+  return (date || new Date()).toISOString();
 }
 
 /**
@@ -37,34 +50,30 @@ export function toRiyadhISO(date?: Date): string {
 }
 
 /**
- * الحصول على تاريخ اليوم بتنسيق YYYY-MM-DD بتوقيت GMT+3
+ * الحصول على تاريخ اليوم بتنسيق YYYY-MM-DD (UTC)
  */
 export function getTodayDateGMT3(): string {
-  const now = getNowGMT3();
-  return now.toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
 }
 
 /**
- * الحصول على الوقت الحالي بتنسيق HH:MM AM/PM بتوقيت GMT+3
+ * الحصول على الوقت الحالي بتنسيق HH:MM AM/PM (توقيت الرياض للعرض)
  */
 export function getCurrentTimeGMT3(): string {
-  const now = getNowGMT3();
-  let hours = now.getUTCHours();
-  const minutes = now.getUTCMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12;
-  return `${hours}:${minutes} ${ampm}`;
+  return new Date().toLocaleString('en-US', {
+    timeZone: 'Asia/Riyadh',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
 }
 
 /**
- * تحويل تاريخ إلى نص مقروء بالعربية
+ * تحويل تاريخ إلى نص مقروء بالعربية (للعرض فقط)
  */
 export function formatArabicDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  return riyadhDate.toLocaleDateString('ar-SA', {
+  return d.toLocaleDateString('ar-SA', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -73,13 +82,11 @@ export function formatArabicDate(date: Date | string): string {
 }
 
 /**
- * تحويل تاريخ إلى نص مقروب بالعربية مع الوقت
+ * تحويل تاريخ إلى نص مقروء بالعربية مع الوقت (للعرض فقط)
  */
 export function formatArabicDateTime(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  
-  return riyadhDate.toLocaleString('ar-SA', {
+  return d.toLocaleString('ar-SA', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -90,45 +97,46 @@ export function formatArabicDateTime(date: Date | string): string {
 }
 
 /**
- * الحصول على بداية اليوم في الرياض
+ * الحصول على بداية اليوم بتوقيت الرياض
  */
 export function getStartOfDayRiyadh(date?: Date): Date {
-  const d = date || getNowInRiyadh();
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  riyadhDate.setHours(0, 0, 0, 0);
-  return riyadhDate;
+  const d = date || new Date();
+  // نحسب بداية اليوم بتوقيت الرياض
+  const riyadhStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  return new Date(riyadhStr + 'T00:00:00+03:00');
 }
 
 /**
- * الحصول على نهاية اليوم في الرياض
+ * الحصول على نهاية اليوم بتوقيت الرياض
  */
 export function getEndOfDayRiyadh(date?: Date): Date {
-  const d = date || getNowInRiyadh();
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  riyadhDate.setHours(23, 59, 59, 999);
-  return riyadhDate;
+  const d = date || new Date();
+  const riyadhStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  return new Date(riyadhStr + 'T23:59:59.999+03:00');
 }
 
 /**
- * الحصول على بداية الشهر في الرياض
+ * الحصول على بداية الشهر بتوقيت الرياض
  */
 export function getStartOfMonthRiyadh(date?: Date): Date {
-  const d = date || getNowInRiyadh();
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  riyadhDate.setDate(1);
-  riyadhDate.setHours(0, 0, 0, 0);
-  return riyadhDate;
+  const d = date || new Date();
+  const riyadhStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  const [year, month] = riyadhStr.split('-');
+  return new Date(`${year}-${month}-01T00:00:00+03:00`);
 }
 
 /**
- * الحصول على نهاية الشهر في الرياض
+ * الحصول على نهاية الشهر بتوقيت الرياض
  */
 export function getEndOfMonthRiyadh(date?: Date): Date {
-  const d = date || getNowInRiyadh();
-  const riyadhDate = new Date(d.getTime() + RIYADH_OFFSET_MS);
-  riyadhDate.setMonth(riyadhDate.getMonth() + 1, 0);
-  riyadhDate.setHours(23, 59, 59, 999);
-  return riyadhDate;
+  const d = date || new Date();
+  const riyadhStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
+  const [year, month] = riyadhStr.split('-');
+  const nextMonth = new Date(`${year}-${month}-01T00:00:00+03:00`);
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  nextMonth.setDate(0);
+  nextMonth.setHours(23, 59, 59, 999);
+  return nextMonth;
 }
 
 /**
