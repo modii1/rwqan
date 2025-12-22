@@ -1261,12 +1261,16 @@ const request = await storage.createRequest(
           message: `${todayPayments.length} دفعة جديدة بإجمالي ${totalAmount} ر.س`,
           count: todayPayments.length,
           icon: 'credit-card',
-          items: todayPayments.slice(0, 5).map(p => ({
-            propertyNumber: p.propertyNumber,
-            amount: p.finalAmount || p.amount,
-            method: p.paymentMethod,
-            status: p.status
-          }))
+          items: todayPayments.slice(0, 5).map(p => {
+            const prop = properties.find(pr => pr.propertyNumber === p.propertyNumber);
+            return {
+              propertyNumber: p.propertyNumber,
+              name: prop?.name || '',
+              amount: p.finalAmount || p.amount,
+              method: p.paymentMethod,
+              status: p.status
+            };
+          })
         });
       }
 
@@ -1280,12 +1284,16 @@ const request = await storage.createRequest(
           message: `${pendingPayments.length} دفعة معلقة تحتاج مراجعة عاجلة`,
           count: pendingPayments.length,
           icon: 'alert-circle',
-          items: pendingPayments.slice(0, 5).map(p => ({
-            propertyNumber: p.propertyNumber,
-            amount: p.finalAmount || p.amount,
-            method: p.paymentMethod,
-            createdAt: p.createdAt
-          }))
+          items: pendingPayments.slice(0, 5).map(p => {
+            const prop = properties.find(pr => pr.propertyNumber === p.propertyNumber);
+            return {
+              propertyNumber: p.propertyNumber,
+              name: prop?.name || '',
+              amount: p.finalAmount || p.amount,
+              method: p.paymentMethod,
+              createdAt: p.createdAt
+            };
+          })
         });
       }
 
@@ -1328,11 +1336,15 @@ const request = await storage.createRequest(
           message: `${todayRequests.length} طلب واتساب جديد`,
           count: todayRequests.length,
           icon: 'message-circle',
-          items: todayRequests.slice(0, 5).map(r => ({
-            propertyNumber: r.propertyNumber,
-            requestCode: r.requestCode,
-            timestamp: r.timestamp
-          }))
+          items: todayRequests.slice(0, 5).map(r => {
+            const prop = properties.find(pr => pr.propertyNumber === r.propertyNumber);
+            return {
+              propertyNumber: r.propertyNumber,
+              name: prop?.name || '',
+              requestCode: r.requestCode,
+              timestamp: r.timestamp
+            };
+          })
         });
       }
 
@@ -1351,11 +1363,15 @@ const request = await storage.createRequest(
           message: `${expiringSoon.length} اشتراك سينتهي خلال 7 أيام`,
           count: expiringSoon.length,
           icon: 'clock',
-          items: expiringSoon.slice(0, 5).map(s => ({
-            propertyNumber: s.propertyNumber,
-            endDate: s.endDate,
-            daysLeft: Math.ceil((new Date(s.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-          }))
+          items: expiringSoon.slice(0, 5).map(s => {
+            const prop = properties.find(pr => pr.propertyNumber === s.propertyNumber);
+            return {
+              propertyNumber: s.propertyNumber,
+              name: prop?.name || '',
+              endDate: s.endDate,
+              daysLeft: Math.ceil((new Date(s.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+            };
+          })
         });
       }
 
@@ -1373,10 +1389,14 @@ const request = await storage.createRequest(
           message: `${recentlyExpired.length} اشتراك انتهى ويحتاج تجديد`,
           count: recentlyExpired.length,
           icon: 'x-circle',
-          items: recentlyExpired.slice(0, 5).map(s => ({
-            propertyNumber: s.propertyNumber,
-            endDate: s.endDate
-          }))
+          items: recentlyExpired.slice(0, 5).map(s => {
+            const prop = properties.find(pr => pr.propertyNumber === s.propertyNumber);
+            return {
+              propertyNumber: s.propertyNumber,
+              name: prop?.name || '',
+              endDate: s.endDate
+            };
+          })
         });
       }
 
