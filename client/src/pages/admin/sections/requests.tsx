@@ -58,7 +58,7 @@ export default function RequestsSection() {
                     <Td>{req.propertyNumber}</Td>
                     <Td className="font-mono">{req.requestCode || req.id}</Td>
                     <Td>{req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', { 
-                      timeZone: 'UTC',
+                      timeZone: 'Asia/Riyadh',
                       year: 'numeric',
                       month: '2-digit',
                       day: '2-digit',
