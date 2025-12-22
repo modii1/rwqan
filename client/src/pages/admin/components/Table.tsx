@@ -9,12 +9,14 @@ export function Th({ children }: any) {
 export function Td({
   children,
   colSpan,
+  className,
 }: {
   children: React.ReactNode;
   colSpan?: number;
+  className?: string;
 }) {
   return (
-    <td className="px-3 py-2 whitespace-nowrap align-middle" colSpan={colSpan}>
+    <td className={`px-3 py-2 whitespace-nowrap align-middle ${className || ''}`} colSpan={colSpan}>
       {children}
     </td>
   );
