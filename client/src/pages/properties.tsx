@@ -130,6 +130,26 @@ export default function PropertiesPage() {
   // عدد العقارات الظاهرة حالياً (لـ infinite scroll)
   const [visibleCount, setVisibleCount] = useState(24);
 
+  // تحميل عدد العناصر الظاهرة المحفوظ عند الرجوع من صفحة التفاصيل
+  useEffect(() => {
+    const savedVisible = sessionStorage.getItem("visibleCount");
+    if (savedVisible) {
+      const n = Number(savedVisible);
+      if (!Number.isNaN(n) && n > 0) {
+        setVisibleCount(n);
+      }
+    }
+  }, []);
+
+  // حفظ عدد العناصر الظاهرة في sessionStorage عند تغيّره
+  useEffect(() => {
+    sessionStorage.setItem("visibleCount", String(visibleCount));
+  }, [visibleCount]);
+
+  const { data: properties = [], isLoading } = useQuery<Property[]>({
+    queryKey: ["/api/properties"],
+  });
+
   // حساب أعلى سعر من جميع العقارات
   const maxPriceValue = useMemo(() => {
     if (properties.length === 0) return 1000;
@@ -162,26 +182,6 @@ export default function PropertiesPage() {
       setMaxPrice(maxPriceValue);
     }
   }, [maxPriceValue]);
-
-  // تحميل عدد العناصر الظاهرة المحفوظ عند الرجوع من صفحة التفاصيل
-  useEffect(() => {
-    const savedVisible = sessionStorage.getItem("visibleCount");
-    if (savedVisible) {
-      const n = Number(savedVisible);
-      if (!Number.isNaN(n) && n > 0) {
-        setVisibleCount(n);
-      }
-    }
-  }, []);
-
-  // حفظ عدد العناصر الظاهرة في sessionStorage عند تغيّره
-  useEffect(() => {
-    sessionStorage.setItem("visibleCount", String(visibleCount));
-  }, [visibleCount]);
-
-  const { data: properties = [], isLoading } = useQuery<Property[]>({
-    queryKey: ["/api/properties"],
-  });
 
   // ✅ دالة استعادة موقع التمرير
   const restoreScrollPosition = () => {
