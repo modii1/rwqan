@@ -429,6 +429,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       delete mapped.propertyNumber;
       delete mapped.pin;
 
+      // حفظ ملخص التغييرات
+      const changesSummary = changesForNotification.map(c => c.split(':')[0].trim()).filter(Boolean).slice(0, 5).join('، ');
+      mapped['آخر التغييرات'] = changesSummary || 'تحديث عام';
+
       const updated = await storage.updateProperty(
         req.params.propertyNumber,
         mapped
@@ -1212,7 +1216,8 @@ const request = await storage.createRequest(
             propertyNumber: p.propertyNumber,
             name: p.name,
             city: p.city,
-            updatedAt: p.updatedAt
+            updatedAt: p.updatedAt,
+            lastChanges: (p as any).lastChanges || ''
           }))
         });
       }

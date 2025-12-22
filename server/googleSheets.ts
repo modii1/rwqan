@@ -533,6 +533,7 @@ class GoogleSheetsService {
       muteExpiryNotification: row[COL_MUTE_EXPIRY - 1] === "true" || row[COL_MUTE_EXPIRY - 1] === true,
       createdAt: row[21] || undefined,
       updatedAt: row[22] || undefined,
+      lastChanges: row[23] || undefined,
     };
 
     return p as Property;
@@ -572,6 +573,7 @@ class GoogleSheetsService {
     p.muteExpiryNotification ? "true" : "false",
     p.createdAt || "",
     p.updatedAt || "",
+    p.lastChanges || "",
   ];
 }
 
