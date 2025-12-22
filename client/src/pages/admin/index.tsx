@@ -391,17 +391,17 @@ function AlertsDashboard() {
 
   const getAlertIcon = (category: string) => {
     switch (category) {
-      case 'new-properties': return <Home className="w-5 h-5 text-emerald-500" />;
-      case 'new-subscriptions': return <Calendar className="w-5 h-5 text-purple-500" />;
-      case 'property-updates': return <TrendingUp className="w-5 h-5 text-blue-500" />;
-      case 'new-payments': return <CreditCard className="w-5 h-5 text-emerald-500" />;
-      case 'pending-payments': return <Bell className="w-5 h-5 text-red-500" />;
-      case 'suggestions': return <Zap className="w-5 h-5 text-blue-500" />;
-      case 'requests': return <MessageCircle className="w-5 h-5 text-blue-500" />;
-      case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-amber-500" />;
-      case 'expired-subscriptions': return <Bell className="w-5 h-5 text-red-500" />;
-      case 'updates': return <TrendingUp className="w-5 h-5 text-blue-500" />;
-      default: return <Bell className="w-5 h-5" />;
+      case 'new-properties': return <Home className="w-5 h-5 text-white" />;
+      case 'new-subscriptions': return <Calendar className="w-5 h-5 text-white" />;
+      case 'property-updates': return <TrendingUp className="w-5 h-5 text-white" />;
+      case 'new-payments': return <CreditCard className="w-5 h-5 text-white" />;
+      case 'pending-payments': return <Bell className="w-5 h-5 text-white" />;
+      case 'suggestions': return <Zap className="w-5 h-5 text-white" />;
+      case 'requests': return <MessageCircle className="w-5 h-5 text-white" />;
+      case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-white" />;
+      case 'expired-subscriptions': return <Bell className="w-5 h-5 text-white" />;
+      case 'updates': return <TrendingUp className="w-5 h-5 text-white" />;
+      default: return <Bell className="w-5 h-5 text-white" />;
     }
   };
 
@@ -591,147 +591,178 @@ function AlertsDashboard() {
         </Card>
       </div>
 
-      {/* عنوان التنبيهات */}
-      <div className="flex items-center justify-between pt-2">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Bell className="w-5 h-5 text-primary" />
+      {/* قسم التنبيهات والأحداث */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-800 via-slate-900 to-slate-800 p-4 md:p-6 shadow-xl">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PHBhdGggZD0iTTAgMGg0MHY0MEgweiIvPjwvZz48L2c+PC9zdmc+')] opacity-50"></div>
+        <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+              <Bell className="w-6 h-6 md:w-7 md:h-7 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg md:text-xl font-bold text-white">التنبيهات والأحداث</h2>
+              <p className="text-sm text-white/60">آخر التحديثات في النظام</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base md:text-lg font-bold text-foreground">التنبيهات والأحداث</h2>
-            <p className="text-xs text-muted-foreground">آخر التحديثات في النظام</p>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm text-white px-4 py-2 rounded-xl">
+              <span className="text-2xl font-bold text-amber-400">{alerts.length}</span>
+              <span className="text-sm text-white/80">تنبيه</span>
+            </div>
+            <div className="text-xs text-white/50">
+              {summary.lastUpdated || '-'}
+            </div>
           </div>
         </div>
-        <Badge className="bg-primary/10 text-primary border-primary/20 px-3 py-1">
-          {alerts.length} تنبيه
-        </Badge>
-      </div>
 
-      {/* قائمة التنبيهات */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-        {alerts.map((alert: any, idx: number) => (
-          <Card key={idx} className={`p-3 md:p-4 border-2 ${getAlertStyles(alert.type)}`} data-testid={`alert-${alert.category}`}>
-            <div className="flex items-start gap-2 md:gap-3">
-              {getAlertIcon(alert.category)}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <h3 className="text-xs md:text-sm font-bold text-foreground truncate">{alert.title}</h3>
-                  {alert.count > 0 && (
-                    <Badge variant="outline" className="text-[10px] md:text-xs flex-shrink-0">
-                      {alert.count}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-[10px] md:text-xs text-muted-foreground mb-2">{alert.message}</p>
+        {/* قائمة التنبيهات */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          {alerts.map((alert: any, idx: number) => {
+            const isExpanded = expandedAlerts[idx];
+            const alertColors: Record<string, { bg: string; border: string; icon: string; badge: string }> = {
+              'danger': { bg: 'from-red-500/20 to-red-600/10', border: 'border-red-500/30', icon: 'bg-red-500', badge: 'bg-red-500' },
+              'warning': { bg: 'from-amber-500/20 to-amber-600/10', border: 'border-amber-500/30', icon: 'bg-amber-500', badge: 'bg-amber-500' },
+              'info': { bg: 'from-blue-500/20 to-blue-600/10', border: 'border-blue-500/30', icon: 'bg-blue-500', badge: 'bg-blue-500' },
+              'success': { bg: 'from-emerald-500/20 to-emerald-600/10', border: 'border-emerald-500/30', icon: 'bg-emerald-500', badge: 'bg-emerald-500' },
+            };
+            const colors = alertColors[alert.type] || alertColors['info'];
+            
+            return (
+              <div 
+                key={idx} 
+                className={`relative overflow-hidden rounded-xl bg-gradient-to-br ${colors.bg} border ${colors.border} backdrop-blur-sm cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-lg`}
+                onClick={() => toggleExpand(idx)}
+                data-testid={`alert-${alert.category}`}
+              >
+                {/* شريط علوي ملون */}
+                <div className={`absolute top-0 right-0 left-0 h-1 ${colors.icon}`}></div>
                 
-                {/* تفاصيل التنبيه */}
-                {alert.items && alert.items.length > 0 && (
-                  <div className={`space-y-1.5 ${expandedAlerts[idx] ? 'max-h-80' : 'max-h-32'} overflow-y-auto transition-all duration-300`}>
-                    {(expandedAlerts[idx] ? alert.items : alert.items.slice(0, 3)).map((item: any, i: number) => (
-                      <div key={i} className="flex flex-col gap-0.5 text-[10px] md:text-xs bg-background/60 rounded px-2 py-1.5 border border-border/30">
-                        {/* السطر الأول: رقم العقار + الاسم */}
-                        <div className="flex items-center justify-between gap-2">
-                          {item.propertyNumber && (
-                            <span className="font-mono font-bold text-primary">#{item.propertyNumber}</span>
-                          )}
-                          {item.name && (
-                            <span className="font-semibold truncate flex-1 text-foreground">{item.name}</span>
-                          )}
-                          {item.city && (
-                            <span className="text-muted-foreground text-[9px] md:text-[10px]">{item.city}</span>
-                          )}
-                        </div>
-                        
-                        {/* السطر الثاني: التفاصيل الإضافية */}
-                        <div className="flex items-center justify-between gap-2 text-[9px] md:text-[10px]">
-                          {/* نوع الاشتراك */}
-                          {item.type && (
-                            <span className={`px-1.5 py-0.5 rounded ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}`}>
-                              {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
-                            </span>
-                          )}
-                          {/* الباقة */}
-                          {item.packageId && (
-                            <span className="text-blue-600 dark:text-blue-400">{item.packageId}</span>
-                          )}
-                          {/* أيام متبقية */}
-                          {item.daysLeft !== undefined && (
-                            <span className="text-amber-600 font-medium px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/30 rounded">
-                              متبقي {item.daysLeft} يوم
-                            </span>
-                          )}
-                          {/* تاريخ الانتهاء */}
-                          {item.endDate && !item.daysLeft && (
-                            <span className="text-muted-foreground">انتهى: {new Date(item.endDate).toLocaleDateString('en-US')}</span>
-                          )}
-                          {/* تاريخ التحديث */}
-                          {item.updatedAt && (
-                            <span className="text-blue-600 dark:text-blue-400">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                          )}
-                          {/* المبلغ */}
-                          {item.amount && (
-                            <span className="text-emerald-600 font-bold">{item.amount} ر.س</span>
-                          )}
-                          {/* طريقة الدفع */}
-                          {item.method && (
-                            <span className="text-muted-foreground">{item.method === 'bank_transfer' ? 'تحويل بنكي' : item.method === 'card' ? 'بطاقة' : item.method}</span>
-                          )}
-                          {/* حالة الدفع */}
-                          {item.status && (
-                            <span className={`px-1.5 py-0.5 rounded ${item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                              {item.status === 'completed' ? 'مكتمل' : item.status === 'pending' ? 'معلق' : item.status}
-                            </span>
-                          )}
-                          {/* كود الطلب */}
-                          {item.requestCode && (
-                            <span className="text-blue-600 font-mono font-bold">{item.requestCode}</span>
-                          )}
-                          {/* وقت الطلب */}
-                          {item.timestamp && (
-                            <span className="text-muted-foreground">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
-                          )}
-                          {/* الاقتراح */}
-                          {item.suggestion && (
-                            <span className="text-muted-foreground truncate max-w-[150px]">{item.suggestion}</span>
-                          )}
-                          {/* الجوال */}
-                          {item.mobile && !item.propertyNumber && (
-                            <span className="text-muted-foreground font-mono">{item.mobile}</span>
-                          )}
+                <div className="p-4">
+                  {/* رأس التنبيه */}
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className={`w-10 h-10 rounded-xl ${colors.icon} flex items-center justify-center shadow-lg flex-shrink-0`}>
+                      {getAlertIcon(alert.category)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm md:text-base font-bold text-white truncate">{alert.title}</h3>
+                        <div className={`${colors.badge} text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-sm`}>
+                          {alert.count}
                         </div>
                       </div>
-                    ))}
-                    {alert.items.length > 3 && (
-                      <button 
-                        onClick={() => toggleExpand(idx)}
-                        className="w-full text-[10px] text-primary hover:text-primary/80 font-medium text-center py-1 hover:bg-primary/5 rounded transition"
-                        data-testid={`button-expand-${idx}`}
-                      >
-                        {expandedAlerts[idx] ? 'عرض أقل ▲' : `+${alert.items.length - 3} المزيد ▼`}
-                      </button>
-                    )}
+                      <p className="text-xs text-white/60 mt-0.5">{alert.message}</p>
+                    </div>
                   </div>
-                )}
+                  
+                  {/* تفاصيل التنبيه - قابلة للتوسيع */}
+                  {alert.items && alert.items.length > 0 && (
+                    <div className={`space-y-2 overflow-hidden transition-all duration-500 ${isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                      <div className="border-t border-white/10 pt-3 mt-2">
+                        {alert.items.map((item: any, i: number) => (
+                          <div key={i} className="flex flex-col gap-1 text-xs bg-white/5 rounded-lg px-3 py-2 mb-2 border border-white/10">
+                            {/* السطر الأول */}
+                            <div className="flex items-center justify-between gap-2">
+                              {item.propertyNumber && (
+                                <span className="font-mono font-bold text-amber-400">#{item.propertyNumber}</span>
+                              )}
+                              {item.name && (
+                                <span className="font-semibold text-white truncate flex-1">{item.name}</span>
+                              )}
+                              {item.city && (
+                                <span className="text-white/50 text-[10px] bg-white/10 px-2 py-0.5 rounded">{item.city}</span>
+                              )}
+                            </div>
+                            
+                            {/* السطر الثاني */}
+                            <div className="flex items-center flex-wrap gap-2 text-[10px]">
+                              {item.type && (
+                                <span className={`px-2 py-0.5 rounded-full ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-500/30 text-amber-300' : 'bg-white/10 text-white/60'}`}>
+                                  {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
+                                </span>
+                              )}
+                              {item.packageId && (
+                                <span className="text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded-full">{item.packageId}</span>
+                              )}
+                              {item.daysLeft !== undefined && (
+                                <span className="text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full font-medium">
+                                  متبقي {item.daysLeft} يوم
+                                </span>
+                              )}
+                              {item.startDate && (
+                                <span className="text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                                  بدأ: {new Date(item.startDate).toLocaleDateString('en-US')}
+                                </span>
+                              )}
+                              {item.createdAt && (
+                                <span className="text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                                  أنشئ: {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                              {item.endDate && !item.daysLeft && (
+                                <span className="text-red-400 bg-red-500/20 px-2 py-0.5 rounded-full">انتهى: {new Date(item.endDate).toLocaleDateString('en-US')}</span>
+                              )}
+                              {item.updatedAt && (
+                                <span className="text-blue-400 bg-blue-500/20 px-2 py-0.5 rounded-full">
+                                  تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                              {item.amount && (
+                                <span className="text-emerald-400 font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full">{item.amount} ر.س</span>
+                              )}
+                              {item.method && (
+                                <span className="text-white/50 bg-white/10 px-2 py-0.5 rounded-full">
+                                  {item.method === 'bank_transfer' ? 'تحويل بنكي' : item.method === 'card' ? 'بطاقة' : item.method}
+                                </span>
+                              )}
+                              {item.status && (
+                                <span className={`px-2 py-0.5 rounded-full ${item.status === 'completed' ? 'bg-emerald-500/30 text-emerald-300' : item.status === 'pending' ? 'bg-amber-500/30 text-amber-300' : 'bg-white/10 text-white/60'}`}>
+                                  {item.status === 'completed' ? 'مكتمل' : item.status === 'pending' ? 'معلق' : item.status}
+                                </span>
+                              )}
+                              {item.requestCode && (
+                                <span className="text-blue-400 font-mono font-bold bg-blue-500/20 px-2 py-0.5 rounded-full">{item.requestCode}</span>
+                              )}
+                              {item.timestamp && (
+                                <span className="text-white/50 bg-white/10 px-2 py-0.5 rounded-full">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                              )}
+                              {item.suggestion && (
+                                <span className="text-white/60 truncate max-w-[200px]">{item.suggestion}</span>
+                              )}
+                              {item.mobile && !item.propertyNumber && (
+                                <span className="text-white/50 font-mono bg-white/10 px-2 py-0.5 rounded-full">{item.mobile}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* زر التوسيع */}
+                  {alert.items && alert.items.length > 0 && (
+                    <div className="flex items-center justify-center mt-2">
+                      <div className={`flex items-center gap-2 text-xs text-white/60 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+                        <span>{isExpanded ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}</span>
+                        <ArrowRight className={`w-4 h-4 transform ${isExpanded ? '-rotate-90' : 'rotate-90'}`} />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </Card>
-        ))}
+            );
+          })}
 
-        {alerts.length === 0 && (
-          <Card className="p-6 md:p-8 text-center border-2 border-dashed col-span-full">
-            <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-3 md:mb-4">
-              <TrendingUp className="w-6 h-6 md:w-8 md:h-8 text-emerald-600" />
+          {alerts.length === 0 && (
+            <div className="col-span-full p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/30">
+                <TrendingUp className="w-8 h-8 text-white" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">كل شيء تمام!</h3>
+              <p className="text-sm text-white/60">لا توجد تنبيهات مهمة حالياً</p>
             </div>
-            <h3 className="text-base md:text-lg font-bold text-foreground mb-2">كل شيء تمام!</h3>
-            <p className="text-xs md:text-sm text-muted-foreground">لا توجد تنبيهات مهمة حالياً</p>
-          </Card>
-        )}
+          )}
+        </div>
       </div>
-
-      {/* وقت آخر تحديث */}
-      <p className="text-[10px] md:text-xs text-muted-foreground text-center pt-2">
-        آخر تحديث: {summary.lastUpdated || '-'}
-      </p>
     </div>
   );
 }
