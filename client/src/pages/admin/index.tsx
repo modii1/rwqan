@@ -71,30 +71,23 @@ type AdminSection =
   | "partner-profits"
   | "fee-configs";
 
-// دالة تنسيق التاريخ والوقت - تحويل من UTC إلى توقيت الرياض (+3 ساعات)
+// دالة تنسيق التاريخ والوقت بتوقيت الرياض
 function formatDateTime(dateStr: string, includeTime = true): string {
   if (!dateStr) return '-';
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return '-';
   
-  // إضافة 3 ساعات لتحويل من UTC إلى توقيت الرياض
-  const riyadhTime = new Date(d.getTime() + 3 * 60 * 60 * 1000);
-  
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[riyadhTime.getUTCMonth()];
-  const day = riyadhTime.getUTCDate();
-  
   if (!includeTime) {
-    return `${month} ${day}`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   }
   
-  let hours = riyadhTime.getUTCHours();
-  const minutes = riyadhTime.getUTCMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12;
-  
-  return `${month} ${day} at ${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+  return d.toLocaleString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit',
+    timeZone: 'UTC'
+  });
 }
 
 export default function AdminDashboard() {
