@@ -330,10 +330,16 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
 }
 
 function AlertsDashboard() {
+  const [expandedAlerts, setExpandedAlerts] = useState<Record<number, boolean>>({});
+  
   const { data: alertsData, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/alerts"],
     refetchInterval: 30000,
   });
+
+  const toggleExpand = (idx: number) => {
+    setExpandedAlerts(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
 
   if (isLoading) {
     return (
@@ -516,8 +522,8 @@ function AlertsDashboard() {
                 
                 {/* تفاصيل التنبيه */}
                 {alert.items && alert.items.length > 0 && (
-                  <div className="space-y-1 max-h-24 overflow-y-auto">
-                    {alert.items.slice(0, 3).map((item: any, i: number) => (
+                  <div className={`space-y-1 ${expandedAlerts[idx] ? 'max-h-64' : 'max-h-24'} overflow-y-auto transition-all duration-300`}>
+                    {(expandedAlerts[idx] ? alert.items : alert.items.slice(0, 3)).map((item: any, i: number) => (
                       <div key={i} className="flex items-center justify-between text-[10px] md:text-xs bg-background/60 rounded px-2 py-1">
                         {item.propertyNumber && (
                           <span className="font-mono font-semibold">#{item.propertyNumber}</span>
@@ -543,7 +549,13 @@ function AlertsDashboard() {
                       </div>
                     ))}
                     {alert.items.length > 3 && (
-                      <p className="text-[10px] text-muted-foreground text-center">+{alert.items.length - 3} المزيد</p>
+                      <button 
+                        onClick={() => toggleExpand(idx)}
+                        className="w-full text-[10px] text-primary hover:text-primary/80 font-medium text-center py-1 hover:bg-primary/5 rounded transition"
+                        data-testid={`button-expand-${idx}`}
+                      >
+                        {expandedAlerts[idx] ? 'عرض أقل ▲' : `+${alert.items.length - 3} المزيد ▼`}
+                      </button>
                     )}
                   </div>
                 )}
