@@ -836,7 +836,10 @@ const calculateAnalytics = () => {
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">
-                    منذ {new Date(property.subscriptionDate).toLocaleDateString("en-US", { timeZone: "Asia/Riyadh" })}
+                    منذ {(() => {
+                      const d = new Date(property.subscriptionDate);
+                      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
+                    })()}
                   </span>
                 )}
                 {currentSubscription?.linkedProperty && (
@@ -1628,15 +1631,17 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "---";
     try {
+      // التاريخ مخزن بالفعل بتوقيت الرياض - نعرضه مباشرة بدون تحويل إضافي
       const date = new Date(dateStr);
-      return date.toLocaleString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "Asia/Riyadh",
-      });
+      // استخدام UTC لأن التاريخ المخزن هو توقيت الرياض بصيغة ISO
+      const day = date.getUTCDate();
+      const month = date.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+      const year = date.getUTCFullYear();
+      const hours = date.getUTCHours();
+      const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const hour12 = hours % 12 || 12;
+      return `${month} ${day}, ${year} at ${hour12}:${minutes} ${ampm}`;
     } catch {
       return dateStr;
     }
@@ -2012,7 +2017,17 @@ function RequestsStatsModal({
                       <tr key={idx} className="border-b border-border/50 hover:bg-primary/5">
                         <td className="p-3 font-mono text-primary">{req.requestCode || req.id}</td>
                         <td className="p-3 text-muted-foreground">
-                          {req.timestamp ? new Date(req.timestamp).toLocaleString('en-US', { timeZone: "Asia/Riyadh", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : '-'}
+                          {req.timestamp ? (() => {
+                            const d = new Date(req.timestamp);
+                            const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+                            const day = d.getUTCDate();
+                            const year = d.getUTCFullYear();
+                            const hours = d.getUTCHours();
+                            const minutes = d.getUTCMinutes().toString().padStart(2, '0');
+                            const ampm = hours >= 12 ? 'PM' : 'AM';
+                            const hour12 = hours % 12 || 12;
+                            return `${month} ${day}, ${year} at ${hour12}:${minutes} ${ampm}`;
+                          })() : '-'}
                         </td>
                       </tr>
                     ))}
