@@ -71,22 +71,25 @@ type AdminSection =
   | "partner-profits"
   | "fee-configs";
 
-// دالة تنسيق التاريخ والوقت - التواريخ مخزنة بتوقيت الرياض، نعرضها بدون تحويل إضافي
+// دالة تنسيق التاريخ والوقت - تحويل من UTC إلى توقيت الرياض (+3 ساعات)
 function formatDateTime(dateStr: string, includeTime = true): string {
   if (!dateStr) return '-';
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return '-';
   
+  // إضافة 3 ساعات لتحويل من UTC إلى توقيت الرياض
+  const riyadhTime = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[d.getUTCMonth()];
-  const day = d.getUTCDate();
+  const month = months[riyadhTime.getUTCMonth()];
+  const day = riyadhTime.getUTCDate();
   
   if (!includeTime) {
     return `${month} ${day}`;
   }
   
-  let hours = d.getUTCHours();
-  const minutes = d.getUTCMinutes().toString().padStart(2, '0');
+  let hours = riyadhTime.getUTCHours();
+  const minutes = riyadhTime.getUTCMinutes().toString().padStart(2, '0');
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
   hours = hours ? hours : 12;
