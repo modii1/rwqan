@@ -1324,11 +1324,29 @@ const request = await storage.createRequest(
         });
       }
 
-      // حساب الإحصائيات
-      const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
-      const expiredSubscriptions = subscriptions.filter(s => s.status === 'expired').length;
-      const trustedProperties = properties.filter(p => p.subscriptionType === 'trusted').length;
-      const normalProperties = properties.filter(p => p.subscriptionType === 'normal').length;
+      // حساب الإحصائيات - دعم القيم العربية والإنجليزية
+      const activeSubscriptions = subscriptions.filter(s => 
+        s.status === 'active' || s.status === 'نشط'
+      ).length;
+      const expiredSubscriptions = subscriptions.filter(s => 
+        s.status === 'expired' || s.status === 'منتهي'
+      ).length;
+      const trustedProperties = properties.filter(p => 
+        p.subscriptionType === 'trusted' || p.subscriptionType === 'مميز'
+      ).length;
+      const normalProperties = properties.filter(p => 
+        p.subscriptionType === 'normal' || p.subscriptionType === 'عادي' || p.subscriptionType === 'مجاني'
+      ).length;
+      
+      // Debug log
+      console.log(`📊 [Alerts Stats] Properties: ${properties.length}, Trusted: ${trustedProperties}, Normal: ${normalProperties}`);
+      console.log(`📊 [Alerts Stats] Subscriptions: ${subscriptions.length}, Active: ${activeSubscriptions}, Expired: ${expiredSubscriptions}`);
+      
+      // عرض جميع القيم الفريدة
+      const uniqueTypes = [...new Set(properties.map(p => p.subscriptionType))];
+      const uniqueStatuses = [...new Set(subscriptions.map(s => s.status))];
+      console.log(`📊 [Alerts Stats] Unique property types:`, uniqueTypes);
+      console.log(`📊 [Alerts Stats] Unique subscription statuses:`, uniqueStatuses);
 
       // إحصائيات الأسبوع
       const weekPayments = payments.filter(p => {
