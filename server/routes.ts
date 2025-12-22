@@ -1232,7 +1232,9 @@ const request = await storage.createRequest(
       if (suggestions.length > 0) {
         console.log(`📝 [Alerts] Suggestion statuses:`, suggestions.map(s => s.status));
       }
-      const pendingSuggestions = suggestions.filter(s => s.status === 'pending' || s.status === 'معلق' || !s.status);
+      const pendingSuggestions = suggestions.filter(s => 
+        s.status === 'pending' || s.status === 'معلق' || s.status === 'جديد' || !s.status
+      );
       console.log(`📝 [Alerts] Pending suggestions: ${pendingSuggestions.length}`);
       if (pendingSuggestions.length > 0) {
         alerts.push({
