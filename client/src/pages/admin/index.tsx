@@ -78,7 +78,7 @@ function formatDateTime(dateStr: string, includeTime = true): string {
   if (isNaN(d.getTime())) return '-';
   
   if (!includeTime) {
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' });
   }
   
   return d.toLocaleString('en-US', { 
@@ -86,7 +86,8 @@ function formatDateTime(dateStr: string, includeTime = true): string {
     day: 'numeric', 
     hour: '2-digit', 
     minute: '2-digit',
-    timeZone: 'UTC'
+    hour12: true,
+    timeZone: 'Asia/Riyadh'
   });
 }
 
