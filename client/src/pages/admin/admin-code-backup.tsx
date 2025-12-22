@@ -170,7 +170,7 @@ export default function AdminCodeBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {new Date(backup.createdAt).toLocaleString("en-US", { timeZone: 'UTC' })}
+                      {new Date(backup.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
                     </p>
                     <p>
                       الملفات: {backup.fileCount} | الحجم: {backup.totalSize.toFixed(2)} MB
@@ -264,7 +264,7 @@ export default function AdminCodeBackup() {
           <Card className="p-4">
             <p className="text-gray-600 text-sm">آخر نسخة</p>
             <p className="text-sm mt-2">
-              {new Date(backups[0]?.createdAt).toLocaleString("en-US", { timeZone: 'UTC' })}
+              {new Date(backups[0]?.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
             </p>
           </Card>
         </div>
