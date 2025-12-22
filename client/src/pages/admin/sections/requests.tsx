@@ -64,7 +64,7 @@ export default function RequestsSection() {
                       hour: '2-digit',
                       minute: '2-digit',
                       hour12: true,
-                      timeZone: 'UTC'
+                      timeZone: 'Asia/Riyadh'
                     }) : '-'}</Td>
                   </tr>
                 ))

@@ -120,7 +120,7 @@ function formatDate(dateStr: string) {
       year: "numeric",
       month: "short",
       day: "numeric",
-      timeZone: "UTC",
+      timeZone: "Asia/Riyadh",
     });
   } catch {
     return dateStr;

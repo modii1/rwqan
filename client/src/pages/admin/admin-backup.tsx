@@ -62,7 +62,7 @@ export default function AdminBackup() {
     mutationFn: async () => {
       return apiRequest("POST", "/api/backups", {
         backupType,
-        backupName: backupName || `نسخة احتياطية ${new Date().toLocaleString("en-US", { timeZone: 'UTC' })}`,
+        backupName: backupName || `نسخة احتياطية ${new Date().toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}`,
         dataTypes: selectedTypes,
         description: `نسخة احتياطية ${backupType} للبيانات المهمة`,
       });
@@ -280,7 +280,7 @@ export default function AdminBackup() {
                   <div className="text-sm text-gray-600 space-y-1">
                     <p>
                       التاريخ:{" "}
-                      {new Date(backup.createdAt).toLocaleString("en-US", { timeZone: 'UTC' })}
+                      {new Date(backup.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
                     </p>
                     <p>
                       الحجم: {backup.sizeInMB.toFixed(2)} MB | الملفات:{" "}
@@ -349,7 +349,7 @@ export default function AdminBackup() {
           <Card className="p-4">
             <p className="text-gray-600 text-sm">آخر نسخة</p>
             <p className="text-sm mt-2">
-              {new Date(backups[0]?.createdAt).toLocaleString("en-US", { timeZone: 'UTC' })}
+              {new Date(backups[0]?.createdAt).toLocaleString("en-US", { timeZone: 'Asia/Riyadh' })}
             </p>
           </Card>
         </div>
