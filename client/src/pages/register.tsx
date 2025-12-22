@@ -56,10 +56,10 @@ export default function RegisterPage() {
       return;
     }
     
-    if (formData.name.trim().length < 3) {
+    if (formData.name.trim().length < 3 || formData.name.trim().length > 25) {
       toast({
         title: "خطأ في البيانات",
-        description: "اسم العقار يجب أن يكون 3 أحرف على الأقل",
+        description: "اسم العقار يجب أن يكون بين 3 و 25 حرف",
         variant: "destructive",
       });
       return;
@@ -241,8 +241,12 @@ export default function RegisterPage() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
+                  maxLength={25}
                   data-testid="input-name"
                 />
+                {formData.name && formData.name.length < 3 && (
+                  <p className="text-xs text-amber-600 mt-1">اسم العقار يجب أن يكون 3 أحرف على الأقل</p>
+                )}
               </div>
 
               <div>

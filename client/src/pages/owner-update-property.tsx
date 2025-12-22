@@ -106,6 +106,17 @@ export default function OwnerUpdateProperty() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // التحقق من صحة اسم العقار
+    if (formData.name.trim().length < 3 || formData.name.trim().length > 25) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "اسم العقار يجب أن يكون بين 3 و 25 حرف",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -205,8 +216,12 @@ export default function OwnerUpdateProperty() {
                   onChange={handleChange}
                   placeholder="اسم العقار"
                   className="mt-1"
+                  maxLength={25}
                   data-testid="input-name"
                 />
+                {formData.name && (formData.name.length < 3 || formData.name.length > 25) && (
+                  <p className="text-xs text-amber-600 mt-1">اسم العقار يجب أن يكون بين 3 و 25 حرف</p>
+                )}
               </div>
 
               <div>
