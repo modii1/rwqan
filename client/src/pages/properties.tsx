@@ -150,21 +150,25 @@ export default function PropertiesPage() {
     queryKey: ["/api/properties"],
   });
 
-  // حساب أعلى سعر من جميع العقارات
+  // حساب أعلى سعر من جميع العقارات - أخذ أعلى سعر لكل عقار أولاً
   const maxPriceValue = useMemo(() => {
     if (properties.length === 0) return 1000;
     
-    const allPrices = properties
-      .flatMap(p => [
-        parseFloat(p.prices.weekday) || 0,
-        parseFloat(p.prices.weekend) || 0,
-        parseFloat(p.prices.overnight) || 0,
-        parseFloat(p.prices.special) || 0,
-        parseFloat(p.prices.holidays) || 0,
-      ])
-      .filter(p => p > 0);
+    const maxPrices = properties
+      .map(p => {
+        const prices = [
+          parseFloat(p.prices.weekday) || 0,
+          parseFloat(p.prices.weekend) || 0,
+          parseFloat(p.prices.overnight) || 0,
+          parseFloat(p.prices.special) || 0,
+          parseFloat(p.prices.holidays) || 0,
+        ].filter(price => price > 0);
+        
+        return prices.length > 0 ? Math.max(...prices) : 0;
+      })
+      .filter(price => price > 0);
     
-    return allPrices.length > 0 ? Math.ceil(allPrices.reduce((a, b) => Math.max(a, b))) : 1000;
+    return maxPrices.length > 0 ? Math.ceil(Math.max(...maxPrices)) : 1000;
   }, [properties]);
 
   // تحميل الفلاتر المحفوظة عند فتح الصفحة
