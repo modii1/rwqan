@@ -35,8 +35,6 @@ import {
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 import PropertiesSection from "./sections/properties";
 import AdminSubscriptionsSection from "./sections/admin-subscriptions";
@@ -366,17 +364,15 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
 }
 
 function AlertsDashboard() {
-  const [selectedAlert, setSelectedAlert] = useState<any>(null);
+  const [expandedAlerts, setExpandedAlerts] = useState<Record<number, boolean>>({});
   
   const { data: alertsData, isLoading } = useQuery<any>({
     queryKey: ["/api/admin/alerts"],
     refetchInterval: 30000,
   });
 
-  const openAlertModal = (alert: any) => {
-    if (alert.items && alert.items.length > 0) {
-      setSelectedAlert(alert);
-    }
+  const toggleExpand = (idx: number) => {
+    setExpandedAlerts(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
   if (isLoading) {
@@ -613,8 +609,9 @@ function AlertsDashboard() {
         </div>
 
         {/* قائمة التنبيهات */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {alerts.map((alert: any, idx: number) => {
+            const isExpanded = expandedAlerts[idx];
             const getColorClasses = (type: string) => {
               switch (type) {
                 case 'danger': return { bg: 'bg-red-50 dark:bg-red-950/20', border: 'border-red-200 dark:border-red-800', icon: 'bg-red-500', text: 'text-red-700 dark:text-red-400' };
@@ -628,11 +625,12 @@ function AlertsDashboard() {
             return (
               <Card 
                 key={idx} 
-                className={`${colors.bg} ${colors.border} border cursor-pointer hover:shadow-md transition-shadow`}
-                onClick={() => openAlertModal(alert)}
+                className={`${colors.bg} ${colors.border} border cursor-pointer`}
+                onClick={() => toggleExpand(idx)}
                 data-testid={`alert-${alert.category}`}
               >
                 <div className="p-3">
+                  {/* رأس التنبيه */}
                   <div className="flex items-center gap-2">
                     <div className={`w-8 h-8 rounded-lg ${colors.icon} flex items-center justify-center flex-shrink-0`}>
                       {getAlertIcon(alert.category)}
@@ -645,16 +643,88 @@ function AlertsDashboard() {
                       <p className="text-[10px] md:text-xs text-muted-foreground">{alert.message}</p>
                     </div>
                     {alert.items && alert.items.length > 0 && (
-                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                      <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                     )}
                   </div>
+                  
+                  {/* تفاصيل التنبيه */}
+                  {alert.items && alert.items.length > 0 && isExpanded && (
+                    <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                      {alert.items.map((item: any, i: number) => (
+                        <div key={i} className="flex flex-col gap-1 text-[10px] md:text-xs bg-background/50 rounded-md p-2 border border-border/30">
+                          {/* السطر الأول */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {item.propertyNumber && (
+                              <span className="font-mono font-bold text-primary">#{item.propertyNumber}</span>
+                            )}
+                            {item.name && (
+                              <span className="font-medium text-foreground">{item.name}</span>
+                            )}
+                            {item.city && (
+                              <Badge variant="outline" className="text-[9px] py-0">{item.city}</Badge>
+                            )}
+                          </div>
+                          
+                          {/* السطر الثاني */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {item.type && (
+                              <Badge variant="secondary" className={`text-[9px] py-0 ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : ''}`}>
+                                {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
+                              </Badge>
+                            )}
+                            {item.packageId && (
+                              <Badge variant="outline" className="text-[9px] py-0 text-blue-600">{item.packageId}</Badge>
+                            )}
+                            {item.daysLeft !== undefined && (
+                              <Badge className="text-[9px] py-0 bg-amber-500">متبقي {item.daysLeft} يوم</Badge>
+                            )}
+                            {item.startDate && (
+                              <span className="text-emerald-600 text-[9px]">بدأ: {new Date(item.startDate).toLocaleDateString('en-US')}</span>
+                            )}
+                            {item.createdAt && (
+                              <span className="text-emerald-600 text-[9px]">أنشئ: {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric' })}</span>
+                            )}
+                            {item.endDate && !item.daysLeft && (
+                              <span className="text-red-600 text-[9px]">انتهى: {new Date(item.endDate).toLocaleDateString('en-US')}</span>
+                            )}
+                            {item.updatedAt && (
+                              <span className="text-blue-600 text-[9px]">تحديث: {new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric' })}</span>
+                            )}
+                            {item.amount && (
+                              <Badge className="text-[9px] py-0 bg-emerald-500">{item.amount} ر.س</Badge>
+                            )}
+                            {item.method && (
+                              <span className="text-muted-foreground text-[9px]">{item.method === 'bank_transfer' ? 'تحويل' : item.method === 'card' ? 'بطاقة' : item.method}</span>
+                            )}
+                            {item.status && (
+                              <Badge variant="secondary" className={`text-[9px] py-0 ${item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'pending' ? 'bg-amber-100 text-amber-700' : ''}`}>
+                                {item.status === 'completed' ? 'مكتمل' : item.status === 'pending' ? 'معلق' : item.status}
+                              </Badge>
+                            )}
+                            {item.requestCode && (
+                              <span className="text-blue-600 font-mono text-[9px]">{item.requestCode}</span>
+                            )}
+                            {item.timestamp && (
+                              <span className="text-muted-foreground text-[9px]">{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                            )}
+                            {item.suggestion && (
+                              <span className="text-muted-foreground text-[9px] truncate max-w-[120px]">{item.suggestion}</span>
+                            )}
+                            {item.mobile && !item.propertyNumber && (
+                              <span className="text-muted-foreground font-mono text-[9px]">{item.mobile}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </Card>
             );
           })}
 
           {alerts.length === 0 && (
-            <Card className="p-6 text-center border-dashed col-span-full">
+            <Card className="p-6 text-center border-dashed">
               <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-3">
                 <TrendingUp className="w-6 h-6 text-emerald-600" />
               </div>
@@ -664,133 +734,6 @@ function AlertsDashboard() {
           )}
         </div>
       </div>
-
-      {/* مودال تفاصيل التنبيه */}
-      <Dialog open={!!selectedAlert} onOpenChange={() => setSelectedAlert(null)}>
-        <DialogContent className="max-w-lg max-h-[85vh] p-0">
-          <DialogHeader className="p-4 pb-2 border-b">
-            <div className="flex items-center gap-3">
-              {selectedAlert && (
-                <>
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    selectedAlert.type === 'danger' ? 'bg-red-500' :
-                    selectedAlert.type === 'warning' ? 'bg-amber-500' :
-                    selectedAlert.type === 'success' ? 'bg-emerald-500' : 'bg-blue-500'
-                  }`}>
-                    {getAlertIcon(selectedAlert.category)}
-                  </div>
-                  <div>
-                    <DialogTitle className="text-base">{selectedAlert.title}</DialogTitle>
-                    <p className="text-xs text-muted-foreground">{selectedAlert.message}</p>
-                  </div>
-                </>
-              )}
-            </div>
-          </DialogHeader>
-          
-          <ScrollArea className="max-h-[60vh] p-4">
-            <div className="space-y-2">
-              {selectedAlert?.items?.map((item: any, i: number) => (
-                <Card key={i} className="p-3 border">
-                  {/* رقم العقار والاسم */}
-                  <div className="flex items-center gap-2 flex-wrap mb-2">
-                    {item.propertyNumber && (
-                      <Badge variant="outline" className="font-mono font-bold text-primary">#{item.propertyNumber}</Badge>
-                    )}
-                    {item.name && (
-                      <span className="font-medium text-foreground text-sm">{item.name}</span>
-                    )}
-                    {item.city && (
-                      <Badge variant="secondary" className="text-xs">{item.city}</Badge>
-                    )}
-                  </div>
-                  
-                  {/* التفاصيل */}
-                  <div className="flex items-center gap-2 flex-wrap text-xs">
-                    {item.type && (
-                      <Badge className={`text-xs ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-500' : 'bg-gray-500'}`}>
-                        {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
-                      </Badge>
-                    )}
-                    {item.packageId && (
-                      <Badge variant="outline" className="text-xs text-blue-600">{item.packageId}</Badge>
-                    )}
-                    {item.daysLeft !== undefined && (
-                      <Badge className="text-xs bg-amber-500">متبقي {item.daysLeft} يوم</Badge>
-                    )}
-                    {item.amount && (
-                      <Badge className="text-xs bg-emerald-500">{item.amount} ر.س</Badge>
-                    )}
-                    {item.status && (
-                      <Badge className={`text-xs ${item.status === 'completed' ? 'bg-emerald-500' : item.status === 'pending' ? 'bg-amber-500' : 'bg-gray-500'}`}>
-                        {item.status === 'completed' ? 'مكتمل' : item.status === 'pending' ? 'معلق' : item.status}
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  {/* معلومات إضافية */}
-                  <div className="mt-2 pt-2 border-t border-border/50 text-[11px] text-muted-foreground space-y-1">
-                    {item.startDate && (
-                      <div className="flex justify-between">
-                        <span>تاريخ البدء:</span>
-                        <span className="text-emerald-600">{new Date(item.startDate).toLocaleDateString('en-US')}</span>
-                      </div>
-                    )}
-                    {item.endDate && (
-                      <div className="flex justify-between">
-                        <span>تاريخ الانتهاء:</span>
-                        <span className="text-red-600">{new Date(item.endDate).toLocaleDateString('en-US')}</span>
-                      </div>
-                    )}
-                    {item.createdAt && (
-                      <div className="flex justify-between">
-                        <span>تاريخ الإنشاء:</span>
-                        <span>{new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                    )}
-                    {item.updatedAt && (
-                      <div className="flex justify-between">
-                        <span>آخر تحديث:</span>
-                        <span className="text-blue-600">{new Date(item.updatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                    )}
-                    {item.method && (
-                      <div className="flex justify-between">
-                        <span>طريقة الدفع:</span>
-                        <span>{item.method === 'bank_transfer' ? 'تحويل بنكي' : item.method === 'card' ? 'بطاقة' : item.method}</span>
-                      </div>
-                    )}
-                    {item.requestCode && (
-                      <div className="flex justify-between">
-                        <span>كود الطلب:</span>
-                        <span className="text-blue-600 font-mono font-bold">{item.requestCode}</span>
-                      </div>
-                    )}
-                    {item.timestamp && (
-                      <div className="flex justify-between">
-                        <span>الوقت:</span>
-                        <span>{new Date(item.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                    )}
-                    {item.suggestion && (
-                      <div className="flex flex-col gap-1">
-                        <span>الاقتراح:</span>
-                        <span className="bg-muted p-2 rounded text-foreground">{item.suggestion}</span>
-                      </div>
-                    )}
-                    {item.mobile && (
-                      <div className="flex justify-between">
-                        <span>الجوال:</span>
-                        <span className="font-mono">{item.mobile}</span>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
