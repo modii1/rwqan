@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { PriceDisplay } from "@/components/price-display";
 import riyal from "@/components/riyal-symbol.png";
+import { cleanPropertyNumber } from "@/lib/validation";
 
 export default function OwnerSubscriptionPage() {
   const [, setLocation] = useLocation();
@@ -452,12 +453,13 @@ export default function OwnerSubscriptionPage() {
                     type="text"
                     value={secondPropertyNumber}
                     onChange={(e) => {
-                      setSecondPropertyNumber(e.target.value);
+                      setSecondPropertyNumber(cleanPropertyNumber(e.target.value));
                       setSecondPropertyError(null);
                     }}
                     placeholder="رقم العقار الثاني (5 أرقام)"
                     className="flex-1 px-4 py-2 border border-input rounded-lg bg-background text-foreground"
                     maxLength={5}
+                    inputMode="numeric"
                     data-testid="input-second-property"
                   />
                   <Button

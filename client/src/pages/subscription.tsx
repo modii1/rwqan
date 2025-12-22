@@ -13,6 +13,7 @@ import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
+import { cleanPropertyNumber, cleanPhoneNumber, validatePropertyNumber, validatePhoneNumber } from "@/lib/validation";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -389,12 +390,17 @@ export default function SubscriptionPage() {
                   <div>
                     <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام) *</label>
                     <Input
-                      placeholder="أخر 5 أرقام من جوالك "
+                      placeholder="أخر 5 أرقام من جوالك"
                       value={formData.propertyNumber}
-                      onChange={(e) => setFormData({ ...formData, propertyNumber: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, propertyNumber: cleanPropertyNumber(e.target.value) })}
                       maxLength={5}
                       required
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                     />
+                    {formData.propertyNumber && formData.propertyNumber.length !== 5 && (
+                      <p className="text-xs text-red-500 mt-1">يجب أن يكون 5 أرقام</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">اسم العقار *</label>
@@ -406,23 +412,35 @@ export default function SubscriptionPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
+                    <label className="block text-sm font-semibold mb-2">الرقم السري (4 أرقام) *</label>
                     <Input
                       type="password"
                       placeholder="اختر رقماً سرياً"
                       value={formData.pin}
-                      onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, pin: e.target.value.replace(/[^\d]/g, '').slice(0, 6) })}
                       required
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
                     />
+                    {formData.pin && formData.pin.length < 4 && (
+                      <p className="text-xs text-red-500 mt-1">يجب أن يكون 4 أرقام على الأقل</p>
+                    )}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">رقم الواتساب *</label>
+                    <label className="block text-sm font-semibold mb-2">رقم الجوال *</label>
                     <Input
-                      placeholder="050xxxxxxx"
+                      placeholder="05XXXXXXXX"
                       value={formData.whatsappNumber}
-                      onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, whatsappNumber: cleanPhoneNumber(e.target.value) })}
                       required
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={10}
                     />
+                    {formData.whatsappNumber && !validatePhoneNumber(formData.whatsappNumber).valid && (
+                      <p className="text-xs text-red-500 mt-1">{validatePhoneNumber(formData.whatsappNumber).error}</p>
+                    )}
                   </div>
                 </div>
 

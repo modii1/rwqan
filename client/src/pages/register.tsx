@@ -9,6 +9,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { FACILITIES } from "@shared/schema";
 import { Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft } from "lucide-react";
+import { cleanPropertyNumber, cleanPhoneNumber, validatePropertyNumber, validatePhoneNumber, validatePin, validatePrice } from "@/lib/validation";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -179,13 +180,18 @@ export default function RegisterPage() {
               <div>
                 <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
                 <Input
-                  placeholder="أخر 5 أرقام من جوالك "
+                  placeholder="أخر 5 أرقام من جوالك"
                   value={formData.propertyNumber}
-                  onChange={(e) => setFormData({ ...formData, propertyNumber: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, propertyNumber: cleanPropertyNumber(e.target.value) })}
                   maxLength={5}
                   required
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   data-testid="input-property-number"
                 />
+                {formData.propertyNumber && formData.propertyNumber.length !== 5 && (
+                  <p className="text-xs text-red-500 mt-1">يجب أن يكون 5 أرقام</p>
+                )}
               </div>
 
               <div>
@@ -200,27 +206,39 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2">الرقم السري</label>
+                <label className="block text-sm font-semibold mb-2">الرقم السري (4 أرقام)</label>
                 <Input
                   type="password"
                   placeholder="اختر رقماً سرياً"
                   value={formData.pin}
-                  onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, pin: e.target.value.replace(/[^\d]/g, '').slice(0, 6) })}
                   required
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
                   data-testid="input-pin"
                 />
+                {formData.pin && formData.pin.length < 4 && (
+                  <p className="text-xs text-red-500 mt-1">يجب أن يكون 4 أرقام على الأقل</p>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2">رقم واتساب</label>
+                <label className="block text-sm font-semibold mb-2">رقم الجوال</label>
                 <Input
                   type="tel"
-                  placeholder="966XXXXXXXXX"
+                  placeholder="05XXXXXXXX"
                   value={formData.whatsappNumber}
-                  onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, whatsappNumber: cleanPhoneNumber(e.target.value) })}
                   required
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
                   data-testid="input-whatsapp"
                 />
+                {formData.whatsappNumber && !validatePhoneNumber(formData.whatsappNumber).valid && (
+                  <p className="text-xs text-red-500 mt-1">{validatePhoneNumber(formData.whatsappNumber).error}</p>
+                )}
               </div>
 
               <div>
