@@ -45,7 +45,7 @@ function getVerificationStatus(p: Property): VerificationStatus {
   if (!p.location?.trim()) issues.push("الموقع غير محدد");
   if (!p.direction?.trim()) issues.push("الاتجاه غير محدد");
   if (!p.type?.trim()) issues.push("نوع العقار غير محدد");
-  if (!p.imagesLink?.trim()) issues.push("لا يوجد رابط للصور");
+  // الصور مخزنة في R2 - لا حاجة للتحقق من imagesLink
 
   const hasAnyPrice =
     !!p.prices?.display ||
@@ -147,11 +147,7 @@ export default function AdminVerificationSection() {
       (p) => !p.property.whatsappNumber
     ).length;
 
-    const noImages = propertiesWithStatus.filter(
-      (p) => !p.property.imagesLink
-    ).length;
-
-    return { total, ok, warn, danger, noWhatsapp, noImages };
+    return { total, ok, warn, danger, noWhatsapp };
   }, [propertiesWithStatus]);
 
   if (isLoading) {
@@ -221,10 +217,6 @@ export default function AdminVerificationSection() {
             <p className="font-bold text-lg text-red-500">{stats.noWhatsapp}</p>
           </Card>
 
-          <Card className="p-3">
-            <p className="text-xs text-muted-foreground">بدون صور</p>
-            <p className="font-bold text-lg text-red-500">{stats.noImages}</p>
-          </Card>
         </div>
       </Card>
 
