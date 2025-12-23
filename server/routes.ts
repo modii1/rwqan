@@ -2148,6 +2148,42 @@ app.get("/api/public/property-images/:propertyNumber", async (req, res) => {
 // 🟣 ADMIN — إدارة صور العقار من R2 (جلب + رفع + حذف)
 // ======================================================
 
+// جلب عدد صور R2 لجميع العقارات (للتحقق)
+app.get("/api/admin/r2-images-count", async (req, res) => {
+  try {
+    // جلب جميع العقارات
+    const properties = await storage.getProperties();
+    const counts: Record<string, number> = {};
+    
+    // التحقق من كل عقار
+    for (const prop of properties) {
+      const propertyNumber = prop.propertyNumber;
+      try {
+        const list = await r2.send(
+          new ListObjectsV2Command({
+            Bucket: R2_BUCKET,
+            Prefix: `${propertyNumber}/`,
+          })
+        );
+        
+        // عد الصور فقط (jpg, png, webp)
+        const imageCount = (list.Contents || []).filter(
+          (obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key)
+        ).length;
+        
+        counts[propertyNumber] = imageCount;
+      } catch {
+        counts[propertyNumber] = 0;
+      }
+    }
+    
+    res.json({ counts });
+  } catch (err) {
+    console.error("R2 COUNT ERROR:", err);
+    res.status(500).json({ error: "Failed to count R2 images" });
+  }
+});
+
 // جلب جميع صور عقار من R2
 app.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
   try {
