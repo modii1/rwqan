@@ -15,9 +15,6 @@ const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'ا�
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
 const TYPES = ['قسم', 'قسمين'] as const;
 
-const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
-
-
 interface PropertyData {
   propertyNumber: string;
   name: string;
@@ -28,11 +25,8 @@ interface PropertyData {
   location?: string;
   whatsappNumber: string;
   facilities: string[] | string;
-  imagesFolderUrl?: string;
-  imagesLink?: string;
   subscriptionType: string;
   subscriptionDate?: string | null;
-  imageUrls?: string[];
   muteExpiryNotification?: boolean;
   prices?: {
     weekday?: string;
@@ -42,35 +36,9 @@ interface PropertyData {
   };
 }
 
-function getImageInfo(imagesLink?: string): { type: 'r2' | 'drive' | 'none'; count: number; driveUrl?: string } {
-  if (!imagesLink) return { type: 'none', count: 0 };
-  const trimmed = imagesLink.trim();
-  
-  if (trimmed.startsWith("[")) {
-    try {
-      const arr = JSON.parse(trimmed);
-      return { type: 'r2', count: Array.isArray(arr) ? arr.length : 0 };
-    } catch {
-      return { type: 'none', count: 0 };
-    }
-  }
-  
-  if (trimmed.includes('drive.google.com')) {
-    return { type: 'drive', count: 1, driveUrl: trimmed };
-  }
-  
-  return { type: 'none', count: 0 };
-}
-
-function getR2Images(propertyNumber: string, count: number): string[] {
-  return Array.from({ length: count }, (_, i) => 
-    `${R2_BASE}/${propertyNumber}/${i + 1}.jpg`
-  );
-}
-
-function hasImages(imagesLink?: string): boolean {
-  const info = getImageInfo(imagesLink);
-  return info.type !== 'none';
+// جميع العقارات تستخدم R2 الآن - أظهر أيقونة الصور دائماً
+function hasImages(): boolean {
+  return true;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -83,7 +51,6 @@ const FIELD_LABELS: Record<string, string> = {
   location: "الموقع / الحي",
   whatsappNumber: "رقم الواتساب",
   facilities: "المرافق",
-  imagesFolderUrl: "رابط الصور",
   subscriptionType: "نوع الاشتراك",
   subscriptionDate: "تاريخ الاشتراك",
   priceWeekday: "سعر وسط الأسبوع",
@@ -103,7 +70,6 @@ export default function PropertiesSection() {
   const [facilitySearch, setFacilitySearch] = useState("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [prices, setPrices] = useState({ weekday: "", weekend: "", overnight: "", holidays: "" });
-  const [showImages, setShowImages] = useState<PropertyData | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
 
   const { data, isLoading } = useQuery<PropertyData[]>({
@@ -130,7 +96,6 @@ export default function PropertiesSection() {
         direction: payload.direction,
         type: payload.type,
         facilities: facilitiesStr,
-        imagesFolderUrl: payload.imagesFolderUrl || "",
         subscriptionType: payload.subscriptionType,
         subscriptionDate: payload.subscriptionDate || "",
         pin: payload.pin || "",
@@ -271,10 +236,8 @@ export default function PropertiesSection() {
       location: "",
       whatsappNumber: "",
       facilities: [],
-      imagesFolderUrl: "",
       subscriptionType: "عادي",
       subscriptionDate: null,
-      imageUrls: [],
     });
   };
 
@@ -356,17 +319,15 @@ export default function PropertiesSection() {
                         <Pencil className="w-4 h-4" />
                       </Button>
 
-                      {hasImages(p.imagesLink) && (
-                        <Button
-                         size="icon"
-                         variant="ghost"
+                      <Button
+                        size="icon"
+                        variant="ghost"
                         onClick={() => setLocation(`/admin/images/${p.propertyNumber}`)}
                         title="إدارة الصور (R2)"
                         data-testid={`button-images-${p.propertyNumber}`}
-                        >
+                      >
                         <Image className="w-4 h-4 text-blue-500" />
-                        </Button>
-                      )}
+                      </Button>
 
                       {(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") && (
                         <Button
@@ -580,17 +541,6 @@ export default function PropertiesSection() {
                     </Select>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                      {FIELD_LABELS.imagesFolderUrl}
-                    </label>
-                    <Input
-                      value={editing.imagesFolderUrl || ""}
-                      onChange={(e) => setEditing({ ...editing, imagesFolderUrl: e.target.value })}
-                      placeholder="رابط مجلد الصور"
-                      data-testid="input-imagesFolderUrl"
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -681,55 +631,24 @@ export default function PropertiesSection() {
                 </div>
               </div>
 
-              {/* Current Images */}
-              {(() => {
-                const info = getImageInfo(editing.imagesLink);
-                if (info.type === 'none') return null;
-                
-                if (info.type === 'drive') {
-                  return (
-                    <div>
-                      <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-                        الصور (Google Drive)
-                      </h3>
-                      <a 
-                        href={info.driveUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
-                      >
-                        <Image className="w-4 h-4" />
-                        فتح مجلد الصور في Google Drive
-                      </a>
-                    </div>
-                  );
-                }
-                
-                const images = getR2Images(editing.propertyNumber, info.count);
-                return (
-                  <div>
-                    <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
-                      الصور الحالية ({info.count})
-                    </h3>
-                    <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                      {images.slice(0, 12).map((url, i) => (
-                        <img
-                          key={i}
-                          src={url}
-                          alt={`صورة ${i + 1}`}
-                          className="w-full h-16 object-cover rounded border"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      ))}
-                      {info.count > 12 && (
-                        <div className="w-full h-16 bg-muted rounded border flex items-center justify-center text-xs">
-                          +{info.count - 12}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
+              {/* إدارة الصور */}
+              <div>
+                <h3 className="text-sm font-bold text-primary mb-3 border-b pb-1">
+                  إدارة الصور
+                </h3>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(null);
+                    resetForm();
+                    setLocation(`/admin/images/${editing.propertyNumber}`);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <Image className="w-4 h-4" />
+                  إدارة صور العقار (R2)
+                </Button>
+              </div>
 
               {/* Buttons */}
               <div className="flex justify-end gap-2 pt-4 border-t">
@@ -751,56 +670,6 @@ export default function PropertiesSection() {
         </DialogContent>
       </Dialog>
 
-      {/* Images Modal */}
-      <Dialog open={!!showImages} onOpenChange={() => setShowImages(null)}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>صور العقار: {showImages?.name}</DialogTitle>
-            <DialogDescription>
-              عرض جميع صور العقار رقم {showImages?.propertyNumber}
-            </DialogDescription>
-          </DialogHeader>
-          {showImages && (() => {
-            const info = getImageInfo(showImages.imagesLink);
-            
-            if (info.type === 'none') {
-              return <p className="text-muted-foreground text-center py-4">لا توجد صور</p>;
-            }
-            
-            if (info.type === 'drive') {
-              return (
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground mb-4">الصور مخزنة في Google Drive</p>
-                  <a 
-                    href={info.driveUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
-                  >
-                    <Image className="w-5 h-5" />
-                    فتح مجلد الصور
-                  </a>
-                </div>
-              );
-            }
-            
-            const images = getR2Images(showImages.propertyNumber, info.count);
-            return (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto">
-                {images.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt={`صورة ${i + 1}`}
-                    className="w-full h-32 object-cover rounded-lg border"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ))}
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
