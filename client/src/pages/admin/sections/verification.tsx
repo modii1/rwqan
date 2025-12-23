@@ -35,7 +35,7 @@ function openWhatsApp(phone: string, text: string) {
 }
 
 // ⬇️ تحليل حالة التحقق
-function getVerificationStatus(p: Property): VerificationStatus {
+function getVerificationStatus(p: Property, imageCount: number): VerificationStatus {
   const issues: string[] = [];
 
   if (!p.name?.trim()) issues.push("اسم العقار غير موجود");
@@ -45,7 +45,10 @@ function getVerificationStatus(p: Property): VerificationStatus {
   if (!p.location?.trim()) issues.push("الموقع غير محدد");
   if (!p.direction?.trim()) issues.push("الاتجاه غير محدد");
   if (!p.type?.trim()) issues.push("نوع العقار غير محدد");
-  // الصور مخزنة في R2 - لا حاجة للتحقق من imagesLink
+  
+  // التحقق من الصور في R2
+  if (imageCount === 0) issues.push("لا توجد صور في R2");
+  else if (imageCount < 3) issues.push(`عدد الصور قليل (${imageCount} فقط، يُفضل 3 على الأقل)`);
 
   const hasAnyPrice =
     !!p.prices?.display ||
@@ -113,13 +116,21 @@ export default function AdminVerificationSection() {
     queryKey: ["/api/admin/properties"],
   });
 
+  // جلب عدد صور R2 لكل عقار
+  const { data: r2CountsData } = useQuery<{ counts: Record<string, number> }>({
+    queryKey: ["/api/admin/r2-images-count"],
+  });
+  
+  const r2Counts = r2CountsData?.counts || {};
+
   const propertiesWithStatus = useMemo(() => {
     if (!data) return [];
     return data.map((p) => ({
       property: p,
-      status: getVerificationStatus(p),
+      status: getVerificationStatus(p, r2Counts[p.propertyNumber] || 0),
+      imageCount: r2Counts[p.propertyNumber] || 0,
     }));
-  }, [data]);
+  }, [data, r2Counts]);
 
   const filtered = useMemo(() => {
     return propertiesWithStatus.filter(({ property, status }) => {
@@ -146,8 +157,12 @@ export default function AdminVerificationSection() {
     const noWhatsapp = propertiesWithStatus.filter(
       (p) => !p.property.whatsappNumber
     ).length;
+    
+    const noImages = propertiesWithStatus.filter(
+      (p) => p.imageCount === 0
+    ).length;
 
-    return { total, ok, warn, danger, noWhatsapp };
+    return { total, ok, warn, danger, noWhatsapp, noImages };
   }, [propertiesWithStatus]);
 
   if (isLoading) {
@@ -215,6 +230,11 @@ export default function AdminVerificationSection() {
           <Card className="p-3">
             <p className="text-xs text-muted-foreground">بدون واتساب</p>
             <p className="font-bold text-lg text-red-500">{stats.noWhatsapp}</p>
+          </Card>
+
+          <Card className="p-3">
+            <p className="text-xs text-muted-foreground">بدون صور (R2)</p>
+            <p className="font-bold text-lg text-red-500">{stats.noImages}</p>
           </Card>
 
         </div>
