@@ -2208,27 +2208,36 @@ app.post(
   }
 );
 
-// حذف صورة معينة من R2
-app.delete(
-  "/api/admin/r2-images/:propertyNumber/:index",
-  async (req, res) => {
-    try {
-      const { propertyNumber, index } = req.params;
+// حذف صورة من R2 باستخدام URL (نفس طريقة المالك)
+app.post("/api/admin/r2-images/:propertyNumber/delete", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    const { url } = req.body;
 
-      await r2.send(
-        new DeleteObjectCommand({
-          Bucket: R2_BUCKET,
-          Key: `${propertyNumber}/${index}.jpg`,
-        })
-      );
-
-      res.json({ ok: true });
-    } catch (err) {
-      console.error("ADMIN R2 DELETE ERROR:", err);
-      res.status(500).json({ error: "Admin delete failed" });
+    if (!url) {
+      return res.status(400).json({ error: "URL مطلوبة" });
     }
+
+    // استخراج الـ key من URL: https://.../{propertyNumber}/{fileName}
+    const fileName = url.split("/").pop();
+    const key = `${propertyNumber}/${fileName}`;
+
+    console.log(`🔴 [ADMIN DELETE] Deleting: ${key}`);
+
+    await r2.send(
+      new DeleteObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: key,
+      })
+    );
+
+    console.log(`✅ [ADMIN DELETE] Deleted: ${key}`);
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("ADMIN R2 DELETE ERROR:", err?.message);
+    res.status(500).json({ error: "فشل الحذف" });
   }
-);
+});
 
 // ======================
 // 💳 PAYMENT ENDPOINTS
