@@ -105,9 +105,11 @@ function getVerificationStatus(p: Property, imageCount: number): VerificationSta
   return { level, label, issues };
 }
 
+type FilterType = Level | "all" | "noImages";
+
 export default function AdminVerificationSection() {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Level | "all">("all");
+  const [filter, setFilter] = useState<FilterType>("all");
   const [loadingApprove, setLoadingApprove] = useState<string | null>(null);
   const [loadingReject, setLoadingReject] = useState<string | null>(null);
   const { toast } = useToast();
@@ -117,7 +119,7 @@ export default function AdminVerificationSection() {
   });
 
   // جلب عدد صور R2 لكل عقار
-  const { data: r2CountsData } = useQuery<{ counts: Record<string, number> }>({
+  const { data: r2CountsData, isLoading: isLoadingR2 } = useQuery<{ counts: Record<string, number> }>({
     queryKey: ["/api/admin/r2-images-count"],
   });
   
@@ -133,8 +135,13 @@ export default function AdminVerificationSection() {
   }, [data, r2Counts]);
 
   const filtered = useMemo(() => {
-    return propertiesWithStatus.filter(({ property, status }) => {
-      if (filter !== "all" && status.level !== filter) return false;
+    return propertiesWithStatus.filter(({ property, status, imageCount }) => {
+      // فلتر "بدون صور"
+      if (filter === "noImages") {
+        if (imageCount > 0) return false;
+      } else if (filter !== "all" && status.level !== filter) {
+        return false;
+      }
 
       const q = search.trim();
       if (!q) return true;
@@ -165,10 +172,13 @@ export default function AdminVerificationSection() {
     return { total, ok, warn, danger, noWhatsapp, noImages };
   }, [propertiesWithStatus]);
 
-  if (isLoading) {
+  if (isLoading || isLoadingR2) {
     return (
-      <div className="flex items-center justify-center h-64" dir="rtl">
+      <div className="flex flex-col items-center justify-center h-64 gap-2" dir="rtl">
         <Loader2 className="w-6 h-6 animate-spin" />
+        <p className="text-sm text-muted-foreground">
+          {isLoadingR2 ? "جاري تحميل بيانات الصور..." : "جاري التحميل..."}
+        </p>
       </div>
     );
   }
@@ -251,7 +261,7 @@ export default function AdminVerificationSection() {
           />
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant={filter === "all" ? "default" : "outline"} size="sm" onClick={() => setFilter("all")}>
             الكل
           </Button>
@@ -263,6 +273,14 @@ export default function AdminVerificationSection() {
           </Button>
           <Button variant={filter === "danger" ? "default" : "outline"} size="sm" onClick={() => setFilter("danger")}>
             مراجعة
+          </Button>
+          <Button 
+            variant={filter === "noImages" ? "default" : "outline"} 
+            size="sm" 
+            onClick={() => setFilter("noImages")}
+            className={filter === "noImages" ? "bg-red-600 hover:bg-red-700" : "border-red-300 text-red-600 hover:bg-red-50"}
+          >
+            بدون صور
           </Button>
         </div>
       </div>
