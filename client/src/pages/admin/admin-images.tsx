@@ -37,8 +37,8 @@ export default function AdminImagesPage() {
   // ============================
   // 2) اختيار صور
   // ============================
-  const handleSelect = (e: any) => {
-    const files = Array.from(e.target.files);
+  const handleSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
     setSelectedFiles(files);
     setPreview(files.map((f) => URL.createObjectURL(f)));
   };
@@ -76,13 +76,17 @@ export default function AdminImagesPage() {
   });
 
   // ============================
-  // 4) حذف صورة
+  // 4) حذف صورة (نفس طريقة المالك)
   // ============================
   const deleteMutation = useMutation({
-    mutationFn: async (index: number) => {
+    mutationFn: async (url: string) => {
       const res = await fetch(
-        `/api/admin/r2-images/${propertyNumber}/${index}`,
-        { method: "DELETE" }
+        `/api/admin/r2-images/${propertyNumber}/delete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        }
       );
       if (!res.ok) throw new Error("فشل في الحذف");
       return res.json();
@@ -91,13 +95,14 @@ export default function AdminImagesPage() {
       toast({ title: "تم حذف الصورة ✓" });
       refetch();
     },
+    onError: (err: Error) => {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    },
   });
 
   const handleDelete = (url: string) => {
-    const file = url.split("/").pop(); // example: 3.jpg
-    const index = Number(file?.replace(".jpg", ""));
-
-    deleteMutation.mutate(index);
+    if (!confirm("هل تريد حذف هذه الصورة؟")) return;
+    deleteMutation.mutate(url);
   };
 
   return (
@@ -125,7 +130,7 @@ export default function AdminImagesPage() {
           </p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {images.map((url, i) => (
+            {images.map((url: string, i: number) => (
               <div key={i} className="relative group">
                 <img src={url} className="w-full h-48 object-cover rounded-lg" />
 
