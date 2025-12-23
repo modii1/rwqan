@@ -7,6 +7,7 @@ import whatsappRoutes, {
   notifyNewPayment,
   notifySmartRequest,
   notifyPropertyVerification,
+  sendWhatsAppNotification,
 } from "./whatsapp";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
