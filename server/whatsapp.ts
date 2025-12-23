@@ -58,6 +58,13 @@ export function clearSettingsCache() {
 /**
  * دالة مساعدة: إرسال رسالة واتساب للمدير + حفظها في Google Sheet
  */
+export async function sendWhatsAppNotification(text: string) {
+  return sendAdminWhatsAppNotification({
+    type: "تنبيه عام",
+    text,
+  });
+}
+
 async function sendAdminWhatsAppNotification(options: {
   type: string; // نوع الإشعار: اشتراك جديد، طلب، إلخ
   text: string; // نص حر إضافي
