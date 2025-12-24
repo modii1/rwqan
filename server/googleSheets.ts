@@ -2381,16 +2381,52 @@ async getWhatsAppLogs() {
   async initializeFeeConfigs(): Promise<void> {
     try {
       const existingConfigs = await this.getFeeConfigs();
-      if (existingConfigs.length === 0) {
-        console.log("🔧 Initializing default fee configs...");
-        for (const config of DEFAULT_FEE_CONFIGS) {
+      const existingIds = new Set(existingConfigs.map(c => c.id));
+      
+      console.log("🔧 Checking fee configs...");
+      let addedCount = 0;
+      
+      for (const config of DEFAULT_FEE_CONFIGS) {
+        const configId = (config as any).id;
+        if (!existingIds.has(configId)) {
           await this.createFeeConfig(config);
+          addedCount++;
+          console.log(`➕ Added missing fee config: ${configId}`);
         }
-        console.log(`✅ Created ${DEFAULT_FEE_CONFIGS.length} default fee configs`);
+      }
+      
+      if (addedCount > 0) {
+        console.log(`✅ Added ${addedCount} new fee configs`);
+      } else {
+        console.log(`✅ All fee configs already exist`);
       }
     } catch (err) {
       console.error("Error initializing fee configs:", err);
     }
+  }
+
+  async removeDuplicateFeeConfigs(): Promise<{ removed: number; kept: string[] }> {
+    const rows = await this.readSheet(SHEETS.FEE_CONFIGS);
+    const seenIds = new Set<string>();
+    const toDelete: number[] = [];
+    const kept: string[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const id = rows[i][0];
+      if (seenIds.has(id)) {
+        toDelete.push(i + 2);
+      } else {
+        seenIds.add(id);
+        kept.push(id);
+      }
+    }
+
+    for (let i = toDelete.length - 1; i >= 0; i--) {
+      await this.deleteRow(SHEETS.FEE_CONFIGS, toDelete[i]);
+    }
+
+    console.log(`🗑️ Removed ${toDelete.length} duplicate fee configs, kept ${kept.length}`);
+    return { removed: toDelete.length, kept };
   }
 
   async getFeeConfigs(): Promise<FeeConfig[]> {

@@ -4196,12 +4196,13 @@ app.post("/api/whatsapp/send", async (req, res) => {
   });
 
   // ======================
-  // 💰 إدارة الاسترجاعات
+  // 💰 إدارة الاسترجاعات (في الذاكرة المؤقتة)
   // ======================
+  const refundsStore: any[] = [];
+  
   app.get("/api/admin/refunds", async (req, res) => {
     try {
-      const refunds = storage.refunds || [];
-      res.json(refunds);
+      res.json(refundsStore);
     } catch (error) {
       console.error("Error fetching refunds:", error);
       res.status(500).json({ error: "فشل في جلب الاسترجاعات" });
@@ -4223,8 +4224,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
         status: "معلق",
         createdAt: new Date().toISOString(),
       };
-      if (!storage.refunds) storage.refunds = [];
-      storage.refunds.push(refund);
+      refundsStore.push(refund);
       res.json(refund);
     } catch (error) {
       console.error("Error creating refund:", error);
@@ -4235,13 +4235,12 @@ app.post("/api/whatsapp/send", async (req, res) => {
   app.put("/api/admin/refunds/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      if (!storage.refunds) storage.refunds = [];
-      const index = storage.refunds.findIndex(r => r.id === id);
+      const index = refundsStore.findIndex(r => r.id === id);
       if (index === -1) {
         return res.status(404).json({ error: "الاسترجاع غير موجود" });
       }
-      storage.refunds[index] = { ...storage.refunds[index], ...req.body };
-      res.json(storage.refunds[index]);
+      refundsStore[index] = { ...refundsStore[index], ...req.body };
+      res.json(refundsStore[index]);
     } catch (error) {
       console.error("Error updating refund:", error);
       res.status(500).json({ error: "فشل في تحديث الاسترجاع" });
@@ -4251,8 +4250,10 @@ app.post("/api/whatsapp/send", async (req, res) => {
   app.delete("/api/admin/refunds/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      if (!storage.refunds) storage.refunds = [];
-      storage.refunds = storage.refunds.filter(r => r.id !== id);
+      const index = refundsStore.findIndex(r => r.id === id);
+      if (index !== -1) {
+        refundsStore.splice(index, 1);
+      }
       res.json({ success: true, message: "تم حذف الاسترجاع بنجاح" });
     } catch (error) {
       console.error("Error deleting refund:", error);
@@ -4839,6 +4840,20 @@ app.post("/api/paymob/webhook", async (req, res) => {
       res.json({ success: true, message: "تم تهيئة إعدادات الرسوم الافتراضية" });
     } catch (error: any) {
       console.error("Error initializing fee configs:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/fee-configs/remove-duplicates", async (req, res) => {
+    try {
+      const result = await googleSheetsService.removeDuplicateFeeConfigs();
+      res.json({ 
+        success: true, 
+        message: `تم حذف ${result.removed} سجل مكرر، وإبقاء ${result.kept.length} سجل`,
+        ...result
+      });
+    } catch (error: any) {
+      console.error("Error removing duplicate fee configs:", error);
       res.status(500).json({ error: error.message });
     }
   });
