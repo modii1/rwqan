@@ -4196,6 +4196,71 @@ app.post("/api/whatsapp/send", async (req, res) => {
   });
 
   // ======================
+  // 💰 إدارة الاسترجاعات
+  // ======================
+  app.get("/api/admin/refunds", async (req, res) => {
+    try {
+      const refunds = storage.refunds || [];
+      res.json(refunds);
+    } catch (error) {
+      console.error("Error fetching refunds:", error);
+      res.status(500).json({ error: "فشل في جلب الاسترجاعات" });
+    }
+  });
+
+  app.post("/api/admin/refunds", async (req, res) => {
+    try {
+      const { paymentId, refundAmount, reason } = req.body;
+      if (!paymentId || !refundAmount) {
+        return res.status(400).json({ error: "paymentId و refundAmount مطلوبين" });
+      }
+      const refund = {
+        id: Math.random().toString(36).substr(2, 9),
+        paymentId,
+        propertyNumber: "",
+        refundAmount,
+        reason: reason || "",
+        status: "معلق",
+        createdAt: new Date().toISOString(),
+      };
+      if (!storage.refunds) storage.refunds = [];
+      storage.refunds.push(refund);
+      res.json(refund);
+    } catch (error) {
+      console.error("Error creating refund:", error);
+      res.status(500).json({ error: "فشل في إنشاء الاسترجاع" });
+    }
+  });
+
+  app.put("/api/admin/refunds/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!storage.refunds) storage.refunds = [];
+      const index = storage.refunds.findIndex(r => r.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: "الاسترجاع غير موجود" });
+      }
+      storage.refunds[index] = { ...storage.refunds[index], ...req.body };
+      res.json(storage.refunds[index]);
+    } catch (error) {
+      console.error("Error updating refund:", error);
+      res.status(500).json({ error: "فشل في تحديث الاسترجاع" });
+    }
+  });
+
+  app.delete("/api/admin/refunds/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!storage.refunds) storage.refunds = [];
+      storage.refunds = storage.refunds.filter(r => r.id !== id);
+      res.json({ success: true, message: "تم حذف الاسترجاع بنجاح" });
+    } catch (error) {
+      console.error("Error deleting refund:", error);
+      res.status(500).json({ error: "فشل في حذف الاسترجاع" });
+    }
+  });
+
+  // ======================
   // 💳 إدارة المدفوعات
   // ======================
   app.get("/api/admin/payments", async (req, res) => {

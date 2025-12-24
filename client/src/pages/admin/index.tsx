@@ -51,6 +51,7 @@ import VerificationLogsPage from "./sections/verification-logs";
 import SettingsSection from "./sections/settings";
 import PartnerProfitsSection from "./sections/partner-profits";
 import FeeConfigsSection from "./sections/fee-configs";
+import RefundsSection from "./sections/refunds";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -62,6 +63,7 @@ type AdminSection =
   | "discounts"
   | "requests"
   | "payments"
+  | "refunds"
   | "analytics"
   | "verification"
   | "verification-logs"
@@ -185,6 +187,13 @@ export default function AdminDashboard() {
         />
 
         <SidebarButton
+          icon={<DollarSign className="w-4 h-4 text-red-600" />}
+          label="الاسترجاعات"
+          active={activeSection === "refunds"}
+          onClick={() => setActiveSection("refunds")}
+        />
+
+        <SidebarButton
           icon={<Gift className="w-4 h-4" />}
           label="الباقات"
           active={activeSection === "packages"}
@@ -302,6 +311,7 @@ export default function AdminDashboard() {
         {activeSection === "properties" && <PropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
         {activeSection === "payments" && <PaymentsSection />}
+        {activeSection === "refunds" && <RefundsSection />}
         {activeSection === "packages" && <PackagesSection />}
         {activeSection === "discounts" && <DiscountsSection />}
         {activeSection === "requests" && <RequestsSection />}
