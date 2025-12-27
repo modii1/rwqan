@@ -5,6 +5,7 @@ interface PriceDisplayProps {
   showSymbol?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   textColor?: string;
+  currencyIcon?: string;
 }
 
 const sizeMap = {
@@ -19,6 +20,7 @@ export function PriceDisplay({
   showSymbol = true,
   size = 'md',
   textColor = 'text-[#434040]',
+  currencyIcon,
 }: PriceDisplayProps) {
   const sizeClass = sizeMap[size];
 
@@ -27,12 +29,12 @@ export function PriceDisplay({
   }
 
   return (
-    <div className="flex items-center gap-1 text-xl font-bold text-[#434040] ml-[30px] mr-[30px]">
-      <span className="text-[#434040]">{amount}</span>
+    <div className={`flex items-center gap-1 font-bold ${textColor}`}>
+      <span>{amount}</span>
       <img
-        src={riyal}
+        src={currencyIcon || riyal}
         alt="ريال سعودي"
-        className={`${sizeClass.img} inline-block`}
+        className={`${sizeClass.img} inline-block object-contain`}
         style={{
           opacity: 0.85,
         }}
