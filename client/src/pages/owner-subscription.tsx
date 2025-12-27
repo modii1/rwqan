@@ -429,7 +429,7 @@ export default function OwnerSubscriptionPage() {
                           </div>
                         </div>
                       ) : (
-                        <PriceDisplay amount={pkg.price} size="xl" textColor="text-[#b88d2b]" currencyIcon="/src/assets/riyal-symbol.png" />
+                        <PriceDisplay amount={pkg.price} size="xl" textColor="text-[#b88d2b]" />
                       )}
                       {(pkg.propertyCount || 1) > 1 && (
                         <Badge variant="secondary" className="text-xs">
