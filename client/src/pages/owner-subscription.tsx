@@ -274,7 +274,7 @@ export default function OwnerSubscriptionPage() {
             </div>
             <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
               <p className="text-xs text-muted-foreground mb-1">المدة</p>
-              <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-duration">
+              <p className="font-bold text-[#434040] text-[17px]" data-testid="text-subscription-duration">
                 {subscriptionDuration || currentPackage?.duration || 0} يوم
               </p>
             </div>
@@ -783,7 +783,6 @@ export default function OwnerSubscriptionPage() {
           </div>
         </div>
       </div>
-
       {/* حوار تأكيد الترقية */}
       <Dialog open={showUpgradeWarning} onOpenChange={setShowUpgradeWarning}>
         <DialogContent className="max-w-md">
