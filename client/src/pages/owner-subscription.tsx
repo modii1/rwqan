@@ -745,15 +745,22 @@ export default function OwnerSubscriptionPage() {
                 <div className="mb-4">
                   {(pkg.propertyCount || 1) > 1 ? (
                     <>
-                      <p className="text-3xl font-bold text-[#b88d2b]">
-                        {pkg.price / (pkg.propertyCount || 1)}<span className="text-sm"> ر.س / عقار</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">الإجمالي: {pkg.price} ر.س للعقارين</p>
+                      <div className="flex items-center gap-1 text-3xl font-bold text-[#b88d2b]">
+                        <span>{pkg.price / (pkg.propertyCount || 1)}</span>
+                        <img src={riyal} alt="ريال" className="w-6 h-6 object-contain" />
+                        <span className="text-sm font-normal text-muted-foreground"> / عقار</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>الإجمالي: {pkg.price}</span>
+                        <img src={riyal} alt="ريال" className="w-3 h-3 object-contain" />
+                        <span>للعقارين</span>
+                      </div>
                     </>
                   ) : (
-                    <p className="text-3xl font-bold text-[#b88d2b]">
-                      {pkg.price}<span className="text-sm"> ر.س</span>
-                    </p>
+                    <div className="flex items-center gap-1 text-3xl font-bold text-[#b88d2b]">
+                      <span>{pkg.price}</span>
+                      <img src={riyal} alt="ريال" className="w-6 h-6 object-contain" />
+                    </div>
                   )}
                   <p className="text-sm text-muted-foreground mt-1">{pkg.duration} يوم</p>
                 </div>
