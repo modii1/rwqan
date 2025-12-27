@@ -27,7 +27,7 @@ export function PriceDisplay({
   }
 
   return (
-    <div className={`flex items-center gap-1 ${sizeClass.text} font-bold ${textColor}`}>
+    <div className="flex items-center gap-1 text-xl font-bold text-[#434040] ml-[30px] mr-[30px]">
       <span className="text-[#434040]">{amount}</span>
       <img
         src={riyal}
