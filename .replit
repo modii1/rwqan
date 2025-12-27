@@ -56,6 +56,8 @@ NODE_ENV = "production"
 
 [userenv.shared]
 VITE_GA_MEASUREMENT_ID = "G-ZVRF0RY5RB"
+PUBLIC_OBJECT_SEARCH_PATHS = "public"
+PRIVATE_OBJECT_DIR = ".private"
 
 [objectStorage]
 defaultBucketID = "replit-objstore-a1429ce2-49c1-4128-a9c7-ee7a94b0bd33"
