@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PriceDisplay } from "@/components/price-display";
-import riyal from "@/components/riyal-symbol.png";
+import riyal from "@/assets/riyal-symbol.png";
 import { cleanPropertyNumber } from "@/lib/validation";
 
 export default function OwnerSubscriptionPage() {
@@ -267,6 +267,7 @@ export default function OwnerSubscriptionPage() {
                 amount={(currentSubscription as any)?.price || (currentPackage?.propertyCount && currentPackage.propertyCount > 1 ? currentPackage.price / currentPackage.propertyCount : currentPackage?.price) || 0}
                 size="lg"
                 textColor="text-[#434040]"
+                currencyIcon="/src/assets/riyal-symbol.png"
               />
               {(currentPackage?.propertyCount || 1) > 1 && (
                 <p className="text-xs text-muted-foreground">(لكل عقار)</p>
@@ -418,10 +419,14 @@ export default function OwnerSubscriptionPage() {
                         <div>
                           <div className="flex items-center gap-1 text-2xl font-bold text-[#b88d2b] mb-1">
                             <span>{pkg.price / (pkg.propertyCount || 1)}</span>
-                            <img src={riyal} alt="ريال" className="w-6 h-6" />
+                            <img src="/src/assets/riyal-symbol.png" alt="ريال" className="w-6 h-6 object-contain" />
                             <span className="text-sm font-normal text-muted-foreground"> / عقار</span>
                           </div>
-                          <div className="text-xs text-muted-foreground">الإجمالي: {pkg.price} <img src={riyal} alt="ريال" className="w-3 h-3 inline" /> للعقارين</div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            الإجمالي: {pkg.price} 
+                            <img src="/src/assets/riyal-symbol.png" alt="ريال" className="w-3 h-3 object-contain inline" /> 
+                            للعقارين
+                          </div>
                         </div>
                       ) : (
                         <PriceDisplay amount={pkg.price} size="xl" textColor="text-[#b88d2b]" />
