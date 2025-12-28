@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Search, KeyRound, Loader2 } from "lucide-react";
 
 // المدن المتاحة
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'] as const;
@@ -25,6 +25,12 @@ export default function OwnerUpdateProperty() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [facilitySearch, setFacilitySearch] = useState("");
+  
+  // حالة تغيير الرقم السري
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   // بيانات النموذج
   const [formData, setFormData] = useState({
@@ -156,6 +162,78 @@ export default function OwnerUpdateProperty() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!currentPassword || !newPassword) {
+      toast({
+        title: "خطأ",
+        description: "الرجاء إدخال الرقم السري الحالي والجديد",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (newPassword.length < 4) {
+      toast({
+        title: "خطأ",
+        description: "الرقم السري يجب أن يكون 4 أرقام على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "خطأ",
+        description: "الرقم السري غير متطابق",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsChangingPassword(true);
+    
+    try {
+      const response = await fetch("/api/owner/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        toast({
+          title: "خطأ",
+          description: data.message || "فشل في تغيير الرقم السري",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      toast({
+        title: "تم بنجاح",
+        description: "تم تغيير الرقم السري بنجاح",
+      });
+      
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      
+    } catch (error) {
+      console.error("Change password error:", error);
+      toast({
+        title: "خطأ",
+        description: "تعذر الاتصال بالخادم",
+        variant: "destructive",
+      });
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -440,6 +518,71 @@ export default function OwnerUpdateProperty() {
             </Button>
           </div>
         </form>
+
+        {/* قسم تغيير الرقم السري */}
+        <Card className="p-4 mt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <KeyRound className="w-5 h-5 text-primary" />
+            <h3 className="font-semibold text-primary">تغيير الرقم السري</h3>
+          </div>
+          
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div>
+              <Label htmlFor="currentPassword">الرقم السري الحالي</Label>
+              <Input
+                id="currentPassword"
+                type="password"
+                placeholder="أدخل الرقم السري الحالي"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                disabled={isChangingPassword}
+                data-testid="input-current-password"
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="newPassword">الرقم السري الجديد</Label>
+              <Input
+                id="newPassword"
+                type="password"
+                placeholder="أدخل الرقم السري الجديد (4 أرقام على الأقل)"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                disabled={isChangingPassword}
+                data-testid="input-new-password"
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="confirmPassword">تأكيد الرقم السري</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                placeholder="أعد إدخال الرقم السري الجديد"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={isChangingPassword}
+                data-testid="input-confirm-password"
+              />
+            </div>
+            
+            <Button
+              type="submit"
+              disabled={isChangingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
+              className="w-full"
+              data-testid="button-change-password"
+            >
+              {isChangingPassword ? (
+                <>
+                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                  جاري التغيير...
+                </>
+              ) : (
+                "تغيير الرقم السري"
+              )}
+            </Button>
+          </form>
+        </Card>
       </div>
     </div>
   );
