@@ -49,6 +49,21 @@ const SHEETS = {
   MULTI_PROPERTY_SUBS: "اشتراكات العقارين",
   FEE_CONFIGS: "إعدادات الرسوم",
   EXPENSES: "التكاليف",
+  OWNERS: "الملاك",
+};
+
+// ثوابت إعادة تعيين كلمة المرور
+const RESET_COOLDOWN_DAYS = 30;
+const CODE_EXPIRY_MINUTES = 10;
+
+// أعمدة ورقة الملاك
+const OWNER_COLS = {
+  OWNER_ID: 0,      // A - رقم العقار
+  PHONE: 1,         // B - رقم الجوال
+  PASSWORD: 2,      // C - الرقم السري
+  RESET_CODE: 3,    // D - رمز إعادة التعيين
+  RESET_EXPIRE: 4,  // E - انتهاء صلاحية الرمز
+  LAST_RESET: 5,    // F - آخر إعادة تعيين
 };
 
 // عمود حالة التحقق — العمود 20 (T)
@@ -2750,6 +2765,196 @@ async getWhatsAppLogs() {
     }
     
     return filtered.reduce((total, e) => total + e.amount, 0);
+  }
+
+  // ============================================================
+  // نظام الملاك وإعادة تعيين كلمة المرور
+  // ============================================================
+
+  async ensureOwnersSheetExists(): Promise<void> {
+    try {
+      const sheets = await getGoogleSheetClient();
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: SHEET_ID,
+      });
+      
+      const existingSheet = spreadsheet.data.sheets?.find(
+        (s: any) => s.properties?.title === SHEETS.OWNERS
+      );
+      
+      if (!existingSheet) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: SHEET_ID,
+          requestBody: {
+            requests: [{
+              addSheet: {
+                properties: { title: SHEETS.OWNERS }
+              }
+            }]
+          }
+        });
+        
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: `${SHEETS.OWNERS}!A1:F1`,
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [["ownerId", "phone", "password", "resetCode", "resetExpire", "lastReset"]]
+          }
+        });
+        
+        console.log("✅ Created owners sheet: الملاك");
+      }
+    } catch (error) {
+      console.error("Error ensuring owners sheet exists:", error);
+    }
+  }
+
+  async getOwnerByPropertyNumber(propertyNumber: string): Promise<{
+    ownerId: string;
+    phone: string;
+    password: string;
+    resetCode: string;
+    resetExpire: string;
+    lastReset: string;
+    rowIndex: number;
+  } | null> {
+    const rows = await this.readSheet(SHEETS.OWNERS);
+    
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i][OWNER_COLS.OWNER_ID]?.toString() === propertyNumber.toString()) {
+        return {
+          ownerId: rows[i][OWNER_COLS.OWNER_ID] || "",
+          phone: rows[i][OWNER_COLS.PHONE] || "",
+          password: rows[i][OWNER_COLS.PASSWORD] || "",
+          resetCode: rows[i][OWNER_COLS.RESET_CODE] || "",
+          resetExpire: rows[i][OWNER_COLS.RESET_EXPIRE] || "",
+          lastReset: rows[i][OWNER_COLS.LAST_RESET] || "",
+          rowIndex: i + 2,
+        };
+      }
+    }
+    
+    return null;
+  }
+
+  async syncOwnerFromProperties(propertyNumber: string): Promise<void> {
+    const property = await this.getPropertyByNumber(propertyNumber);
+    if (!property) return;
+
+    const existingOwner = await this.getOwnerByPropertyNumber(propertyNumber);
+    
+    if (!existingOwner) {
+      await this.appendToSheet(SHEETS.OWNERS, [[
+        propertyNumber,
+        property.whatsappNumber || "",
+        property.pin || "",
+        "",
+        "",
+        ""
+      ]]);
+      console.log(`✅ Synced owner: ${propertyNumber}`);
+    }
+  }
+
+  async updateOwnerResetCode(propertyNumber: string, code: string, expireTime: string, lastReset: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) throw new Error("المالك غير موجود");
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!D${owner.rowIndex}:F${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[code, expireTime, lastReset]]
+      }
+    });
+  }
+
+  async updateOwnerPassword(propertyNumber: string, newPassword: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) throw new Error("المالك غير موجود");
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!C${owner.rowIndex}:E${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[newPassword, "", ""]]
+      }
+    });
+
+    await this.updatePropertyPin(propertyNumber, newPassword);
+  }
+
+  async clearOwnerResetCode(propertyNumber: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return;
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!D${owner.rowIndex}:E${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["", ""]]
+      }
+    });
+  }
+
+  async canSendResetCode(propertyNumber: string): Promise<{ canSend: boolean; remainingDays?: number }> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return { canSend: false };
+
+    if (!owner.lastReset) return { canSend: true };
+
+    const lastResetDate = new Date(owner.lastReset);
+    const now = new Date();
+    const daysDiff = Math.floor((now.getTime() - lastResetDate.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysDiff < RESET_COOLDOWN_DAYS) {
+      return { canSend: false, remainingDays: RESET_COOLDOWN_DAYS - daysDiff };
+    }
+    
+    return { canSend: true };
+  }
+
+  async validateResetCode(propertyNumber: string, code: string): Promise<{ valid: boolean; message?: string }> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return { valid: false, message: "رقم العقار غير موجود" };
+
+    if (!owner.resetCode || owner.resetCode !== code) {
+      return { valid: false, message: "رمز التحقق غير صحيح" };
+    }
+
+    if (owner.resetExpire) {
+      const expireDate = new Date(owner.resetExpire);
+      if (new Date() > expireDate) {
+        await this.clearOwnerResetCode(propertyNumber);
+        return { valid: false, message: "انتهت صلاحية رمز التحقق" };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  async updatePropertyPin(propertyNumber: string, newPin: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    const rowIndex = rows.findIndex(r => r[0]?.toString() === propertyNumber.toString());
+    
+    if (rowIndex === -1) return;
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.PROPERTIES}!S${rowIndex + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[newPin]]
+      }
+    });
   }
   
 }
