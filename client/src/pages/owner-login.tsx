@@ -195,6 +195,18 @@ export default function OwnerLogin() {
               >
                 {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
               </Button>
+              
+              <div className="text-center">
+                <Button
+                  type="button"
+                  variant="link"
+                  onClick={() => setLocation("/forgot-password")}
+                  className="text-sm text-muted-foreground hover:text-primary"
+                  data-testid="link-forgot-password"
+                >
+                  نسيت الرقم السري؟
+                </Button>
+              </div>
             </form>
 
             <div className="mt-6 text-center text-sm text-muted-foreground">

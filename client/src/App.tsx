@@ -31,6 +31,7 @@ import OwnerSubscriptionPage from "@/pages/owner-subscription";
 import SuggestPage from "@/pages/suggest";
 import RegisterPage from "@/pages/register";
 import TestImages from "@/pages/test-images";
+import ForgotPassword from "@/pages/forgot-password";
 import AdminDashboard from "@/pages/admin";
 import AdminImagesPage from "@/pages/admin/admin-images";
 import AdminAnalytics from "@/pages/admin/admin-analytics";
@@ -61,6 +62,7 @@ function Router() {
       <Route path="/subscription" component={SubscriptionPage} />
       <Route path="/suggest" component={SuggestPage} />
       <Route path="/register" component={RegisterPage} />
+      <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/test-images" component={TestImages} />
 
       {/* صفحات الأدمن */}
