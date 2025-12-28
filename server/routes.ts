@@ -275,6 +275,197 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ======================
+  // PASSWORD RESET SYSTEM
+  // ======================
+  
+  // 1️⃣ إرسال رمز إعادة التعيين
+  app.post("/api/auth/send-reset-code", async (req, res) => {
+    try {
+      const { ownerId } = req.body;
+      
+      if (!ownerId) {
+        return res.status(400).json({ success: false, message: "رقم العقار مطلوب" });
+      }
+
+      // التأكد من وجود ورقة الملاك
+      await googleSheetsService.ensureOwnersSheetExists();
+      
+      // مزامنة المالك من بيانات العقارات
+      await googleSheetsService.syncOwnerFromProperties(ownerId);
+      
+      // جلب بيانات المالك
+      const owner = await googleSheetsService.getOwnerByPropertyNumber(ownerId);
+      if (!owner) {
+        return res.status(404).json({ success: false, message: "رقم العقار غير موجود" });
+      }
+      
+      if (!owner.phone) {
+        return res.status(400).json({ success: false, message: "لا يوجد رقم جوال مسجل لهذا العقار" });
+      }
+      
+      // التحقق من مرور 30 يوم
+      const canSend = await googleSheetsService.canSendResetCode(ownerId);
+      if (!canSend.canSend) {
+        return res.status(429).json({ 
+          success: false, 
+          message: `يمكنك إعادة تعيين الرقم السري بعد ${canSend.remainingDays} يوم` 
+        });
+      }
+      
+      // توليد رمز 6 أرقام
+      const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const now = new Date();
+      const expireTime = new Date(now.getTime() + 10 * 60 * 1000); // 10 دقائق
+      
+      // حفظ في الشيت
+      await googleSheetsService.updateOwnerResetCode(
+        ownerId, 
+        resetCode, 
+        expireTime.toISOString(), 
+        now.toISOString()
+      );
+      
+      // إرسال واتساب عبر Enjazatik
+      let cleanPhone = owner.phone.toString().replace(/\D/g, "");
+      if (cleanPhone.startsWith("0")) {
+        cleanPhone = "966" + cleanPhone.substring(1);
+      }
+      if (!cleanPhone.startsWith("966")) {
+        cleanPhone = "966" + cleanPhone;
+      }
+      
+      const ENJAZATIK_URL = process.env.ENJAZATIK_URL;
+      const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN;
+      
+      if (!ENJAZATIK_URL || !ENJAZATIK_TOKEN) {
+        console.error("❌ Missing Enjazatik credentials");
+        // مسح الرمز في حالة عدم وجود الإعدادات
+        await googleSheetsService.clearOwnerResetCode(ownerId);
+        return res.status(500).json({ success: false, message: "إعدادات الإرسال غير مكتملة" });
+      }
+      
+      try {
+        const whatsappResponse = await fetch(ENJAZATIK_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${ENJAZATIK_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            number: cleanPhone,
+            message: `رمز إعادة تعيين الرقم السري لروقان هو: ${resetCode} (صالح 10 دقائق)`
+          })
+        });
+        
+        if (!whatsappResponse.ok) {
+          console.error("❌ WhatsApp send failed:", whatsappResponse.status);
+          await googleSheetsService.clearOwnerResetCode(ownerId);
+          return res.status(500).json({ success: false, message: "فشل في إرسال الرسالة، حاول لاحقاً" });
+        }
+        
+        console.log(`✅ Reset code sent to ${cleanPhone.substring(0, 6)}****`);
+      } catch (whatsappError) {
+        console.error("❌ WhatsApp error:", whatsappError);
+        await googleSheetsService.clearOwnerResetCode(ownerId);
+        return res.status(500).json({ success: false, message: "فشل في إرسال الرسالة، حاول لاحقاً" });
+      }
+      
+      // إخفاء أول أرقام الجوال
+      const maskedPhone = cleanPhone.substring(0, cleanPhone.length - 4).replace(/./g, "*") + cleanPhone.slice(-4);
+      
+      return res.json({ 
+        success: true, 
+        message: `تم إرسال رمز التحقق إلى ${maskedPhone}`,
+        expiresIn: 10
+      });
+      
+    } catch (error: any) {
+      console.error("Send reset code error:", error);
+      return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
+    }
+  });
+  
+  // 2️⃣ تعيين رقم سري جديد
+  app.post("/api/auth/set-new-password", async (req, res) => {
+    try {
+      const { ownerId, resetCode, newPassword } = req.body;
+      
+      if (!ownerId || !resetCode || !newPassword) {
+        return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
+      }
+      
+      if (newPassword.length < 4) {
+        return res.status(400).json({ success: false, message: "الرقم السري يجب أن يكون 4 أرقام على الأقل" });
+      }
+      
+      // التحقق من الرمز
+      const validation = await googleSheetsService.validateResetCode(ownerId, resetCode);
+      if (!validation.valid) {
+        return res.status(400).json({ success: false, message: validation.message });
+      }
+      
+      // تحديث الرقم السري
+      await googleSheetsService.updateOwnerPassword(ownerId, newPassword);
+      
+      console.log(`✅ Password updated for property: ${ownerId}`);
+      
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
+      
+    } catch (error: any) {
+      console.error("Set new password error:", error);
+      return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
+    }
+  });
+  
+  // 3️⃣ تغيير الرقم السري من لوحة المالك
+  app.post("/api/owner/change-password", async (req, res) => {
+    try {
+      const propertyNumber = (req.session as any)?.propertyNumber;
+      if (!propertyNumber) {
+        return res.status(401).json({ success: false, message: "يجب تسجيل الدخول أولاً" });
+      }
+      
+      const { currentPassword, newPassword } = req.body;
+      
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
+      }
+      
+      if (newPassword.length < 4) {
+        return res.status(400).json({ success: false, message: "الرقم السري يجب أن يكون 4 أرقام على الأقل" });
+      }
+      
+      // مزامنة المالك
+      await googleSheetsService.syncOwnerFromProperties(propertyNumber);
+      
+      // جلب بيانات المالك
+      const owner = await googleSheetsService.getOwnerByPropertyNumber(propertyNumber);
+      if (!owner) {
+        return res.status(404).json({ success: false, message: "بيانات المالك غير موجودة" });
+      }
+      
+      // التحقق من الرقم السري الحالي
+      if (owner.password !== currentPassword) {
+        return res.status(400).json({ success: false, message: "الرقم السري الحالي غير صحيح" });
+      }
+      
+      // تحديث الرقم السري
+      await googleSheetsService.updateOwnerPassword(propertyNumber, newPassword);
+      
+      // مسح أي رمز إعادة تعيين موجود
+      await googleSheetsService.clearOwnerResetCode(propertyNumber);
+      
+      console.log(`✅ Password changed for property: ${propertyNumber}`);
+      
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
+      
+    } catch (error: any) {
+      console.error("Change password error:", error);
+      return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
+    }
+  });
+
+  // ======================
   // PUBLIC API
   // ======================
 
