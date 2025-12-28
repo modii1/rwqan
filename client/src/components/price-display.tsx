@@ -27,7 +27,7 @@ export function PriceDisplay({
   }
 
   return (
-    <div className="flex items-center gap-1 text-xl font-bold text-[#434040] ml-[30px] mr-[30px]">
+    <div className="flex items-center gap-1 text-xl font-bold text-[#434040] ml-[0px] mr-[0px] mt-[0px] mb-[0px] pl-[0px] pr-[0px] pt-[0px] pb-[0px] text-center">
       <span className="text-[#434040]">{amount}</span>
       <img
         src={riyal}
