@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Property, FACILITIES } from "@shared/schema";
+import { Property, FACILITIES, AddOnPackage, PropertyAddOn } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ArrowRight, Search, KeyRound, Loader2 } from "lucide-react";
+import { ArrowRight, Search, KeyRound, Loader2, Zap, Clock, CheckCircle, Star, CreditCard } from "lucide-react";
 
 // المدن المتاحة
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'] as const;
@@ -58,6 +59,21 @@ export default function OwnerUpdateProperty() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  // جلب باقات الإضافات المتاحة
+  const { data: addOnPackages = [] } = useQuery<AddOnPackage[]>({
+    queryKey: ["/api/owner/addons"],
+    refetchOnWindowFocus: false,
+  });
+
+  // جلب إضافات العقار الحالية
+  const { data: propertyAddOns = [] } = useQuery<PropertyAddOn[]>({
+    queryKey: ["/api/owner/property-addons"],
+    refetchOnWindowFocus: false,
+  });
+
+  // حالة شراء الإضافة
+  const [purchasingAddonId, setPurchasingAddonId] = useState<string | null>(null);
 
   // تحميل البيانات الحالية
   useEffect(() => {
@@ -234,6 +250,67 @@ export default function OwnerUpdateProperty() {
       });
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  // شراء إضافة
+  const handlePurchaseAddon = async (addonId: string) => {
+    if (!property?.propertyNumber) return;
+    
+    setPurchasingAddonId(addonId);
+    
+    try {
+      const response = await fetch("/api/owner/addons/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          propertyNumber: property.propertyNumber,
+          addOnPackageId: addonId,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        toast({
+          title: "خطأ",
+          description: data.error || "فشل بدء عملية الدفع",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // توجيه للدفع
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      }
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "تعذر الاتصال بالخادم",
+        variant: "destructive",
+      });
+    } finally {
+      setPurchasingAddonId(null);
+    }
+  };
+
+  // التحقق إذا كان العقار لديه إضافة نشطة
+  const hasActiveAddon = (addonId: string) => {
+    return propertyAddOns.some(
+      (a) => a.addOnPackageId === addonId && a.status === "active"
+    );
+  };
+
+  // الحصول على لون الفئة
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case "اعلان": return "bg-amber-500";
+      case "ابراز": return "bg-purple-500";
+      case "تثبيت": return "bg-blue-500";
+      case "توثيق": return "bg-emerald-500";
+      default: return "bg-slate-500";
     }
   };
 
@@ -583,6 +660,119 @@ export default function OwnerUpdateProperty() {
             </Button>
           </form>
         </Card>
+
+        {/* قسم الإضافات */}
+        {addOnPackages.filter(p => p.isActive).length > 0 && (
+          <Card className="p-4 mt-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Zap className="w-5 h-5 text-violet-600" />
+              <h3 className="font-semibold text-violet-600">الإضافات المتاحة</h3>
+            </div>
+            
+            <p className="text-sm text-muted-foreground mb-4">
+              عزز ظهور عقارك واحصل على مزايا إضافية
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {addOnPackages.filter(p => p.isActive).map((addon) => {
+                const isActive = hasActiveAddon(addon.id);
+                const isPurchasing = purchasingAddonId === addon.id;
+                
+                return (
+                  <Card 
+                    key={addon.id} 
+                    className={`p-4 relative overflow-hidden ${isActive ? 'border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20' : ''}`}
+                    data-testid={`addon-card-${addon.id}`}
+                  >
+                    {/* شريط الفئة */}
+                    <div className={`absolute top-0 right-0 left-0 h-1 ${getCategoryColor(addon.category)}`} />
+                    
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-sm">{addon.name}</h4>
+                          <Badge className={`${getCategoryColor(addon.category)} text-white text-xs`}>
+                            {addon.category}
+                          </Badge>
+                        </div>
+                        {addon.description && (
+                          <p className="text-xs text-muted-foreground mt-1">{addon.description}</p>
+                        )}
+                      </div>
+                      
+                      {isActive && (
+                        <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs shrink-0">
+                          <CheckCircle className="w-3 h-3 ml-1" />
+                          مفعّل
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
+                      <div className="flex items-center gap-1">
+                        <Star className="w-3 h-3" />
+                        <span className="font-bold text-foreground">{addon.price} ر.س</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        <span>{addon.durationDays === 0 ? "دائم" : `${addon.durationDays} يوم`}</span>
+                      </div>
+                    </div>
+                    
+                    <Button
+                      onClick={() => handlePurchaseAddon(addon.id)}
+                      disabled={isActive || isPurchasing}
+                      className="w-full"
+                      size="sm"
+                      variant={isActive ? "secondary" : "default"}
+                      data-testid={`button-purchase-addon-${addon.id}`}
+                    >
+                      {isPurchasing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                          جاري التحويل...
+                        </>
+                      ) : isActive ? (
+                        "مفعّل بالفعل"
+                      ) : (
+                        <>
+                          <CreditCard className="w-4 h-4 ml-2" />
+                          شراء الآن
+                        </>
+                      )}
+                    </Button>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* إضافات العقار النشطة */}
+            {propertyAddOns.filter(a => a.status === "active").length > 0 && (
+              <div className="mt-6 pt-4 border-t">
+                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  إضافاتك النشطة
+                </h4>
+                <div className="space-y-2">
+                  {propertyAddOns.filter(a => a.status === "active").map((addon) => {
+                    const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                    return (
+                      <div 
+                        key={addon.id}
+                        className="flex items-center justify-between p-2 bg-emerald-50 dark:bg-emerald-950/30 rounded-md text-sm"
+                      >
+                        <span>{pkg?.name || addon.addOnPackageId}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {addon.endDate ? `ينتهي: ${new Date(addon.endDate).toLocaleDateString('ar-SA')}` : "دائم"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
       </div>
     </div>
   );
