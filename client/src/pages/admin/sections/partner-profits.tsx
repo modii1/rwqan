@@ -508,7 +508,7 @@ export default function PartnerProfitsSection() {
                     إضافة تكلفة
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent dir="rtl">
                   <DialogHeader>
                     <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
                     <DialogDescription>
@@ -775,7 +775,7 @@ export default function PartnerProfitsSection() {
                     إضافة يدوي
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent dir="rtl">
                   <DialogHeader>
                     <DialogTitle>إضافة سجل أرباح يدوي</DialogTitle>
                     <DialogDescription>
@@ -791,7 +791,7 @@ export default function PartnerProfitsSection() {
 
               {/* Modal تأكيد الترحيل */}
               <Dialog open={isMigrationDialogOpen} onOpenChange={setIsMigrationDialogOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                       <RefreshCw className="w-5 h-5 text-amber-600" />

@@ -187,7 +187,7 @@ export default function FeeConfigsSection() {
                 إضافة وسيلة دفع
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="sm:max-w-[425px]" dir="rtl">
               <DialogHeader>
                 <DialogTitle>إضافة وسيلة دفع جديدة</DialogTitle>
               </DialogHeader>

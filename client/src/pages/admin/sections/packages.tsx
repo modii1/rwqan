@@ -329,7 +329,7 @@ export default function PackagesSection() {
 
       {/* Regular Package Dialog */}
       <Dialog open={!!editingPackage} onOpenChange={() => setEditingPackage(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة باقة اشتراك" : "تعديل الباقة"}</DialogTitle>
           </DialogHeader>
@@ -402,7 +402,7 @@ export default function PackagesSection() {
 
       {/* Add-on Package Dialog */}
       <Dialog open={!!editingAddOn} onOpenChange={() => setEditingAddOn(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNewAddOn ? "إضافة باقة إضافية" : "تعديل باقة الإضافة"}</DialogTitle>
           </DialogHeader>
