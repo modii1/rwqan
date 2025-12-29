@@ -5441,11 +5441,19 @@ app.get("/api/owner/property-addons", async (req, res) => {
       }
 
       // رفع الإيصال للتخزين
-      const receiptKey = `addon-receipts/${propertyNumber}/${Date.now()}-${receiptFile.originalname}`;
-      await objectStorage.put(receiptKey, receiptFile.buffer, {
-        httpMetadata: { contentType: receiptFile.mimetype }
-      });
-      const receiptUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/${receiptKey}`;
+      let receiptUrl = "";
+      if (R2_BUCKET) {
+        const receiptKey = `addon-receipts/${propertyNumber}-${Date.now()}.jpg`;
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: receiptKey,
+            Body: receiptFile.buffer,
+            ContentType: receiptFile.mimetype || "image/jpeg",
+          })
+        );
+        receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+      }
 
       // إنشاء سجل إضافة معلق
       const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
