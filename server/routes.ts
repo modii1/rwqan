@@ -4599,15 +4599,35 @@ app.get("/api/paymob/webhook", async (req, res) => {
 
     // 🔍 استخراج رقم العقار من merchant_order_id أو special_reference
     let propertyNumber = "";
-    if (merchantOrderId && merchantOrderId.includes("-")) {
-      propertyNumber = merchantOrderId.split("-")[0];
+    let isAddonPaymentFromRef = false;
+    
+    // التحقق من special_reference أولاً للإضافات
+    const specialRef = req.query.special_reference as string || "";
+    if (specialRef && specialRef.startsWith("addon-")) {
+      // صيغة الإضافات: addon-propertyNumber-timestamp
+      const parts = specialRef.split("-");
+      if (parts.length >= 2) {
+        propertyNumber = parts[1];
+        isAddonPaymentFromRef = true;
+      }
     }
-    if (!propertyNumber) {
-      propertyNumber =
-        req.query.special_reference as string || ""; // Check for special_reference
+    
+    // إذا لم نجد من special_reference، نحاول من merchant_order_id
+    if (!propertyNumber && merchantOrderId && merchantOrderId.includes("-")) {
+      if (merchantOrderId.startsWith("addon-")) {
+        // صيغة الإضافات
+        const parts = merchantOrderId.split("-");
+        if (parts.length >= 2) {
+          propertyNumber = parts[1];
+          isAddonPaymentFromRef = true;
+        }
+      } else {
+        // صيغة الاشتراكات العادية: propertyNumber-timestamp
+        propertyNumber = merchantOrderId.split("-")[0];
+      }
     }
 
-    console.log("🏡 Extracted property number:", propertyNumber);
+    console.log("🏡 Extracted property number:", propertyNumber, "isAddon:", isAddonPaymentFromRef);
 
     // 🔎 استعلام الرسوم (اختياري)
     if (success && orderId) {
@@ -4659,7 +4679,15 @@ app.get("/api/paymob/webhook", async (req, res) => {
           }
           
           // رسالة مختلفة حسب نوع العملية
-          const actionLabel = paymentAction === 'upgrade' ? 'ترقية' : paymentAction === 'extend' ? 'تمديد' : 'اشتراك جديد';
+          const isAddonPayment = payment?.packageId?.startsWith('addon-') || isAddonPaymentFromRef;
+          let actionLabel = 'اشتراك جديد';
+          if (isAddonPayment) {
+            actionLabel = 'شراء إضافة';
+          } else if (paymentAction === 'upgrade') {
+            actionLabel = 'ترقية';
+          } else if (paymentAction === 'extend') {
+            actionLabel = 'تمديد';
+          }
           
           await sendWhatsAppNotification(
             `💳 *تم استلام دفعة إلكترونية*\n\n` +
@@ -4668,7 +4696,7 @@ app.get("/api/paymob/webhook", async (req, res) => {
             `💰 المبلغ: ${payment?.finalAmount || 'غير محدد'} ر.س\n` +
             `🔢 رقم العملية: ${transactionId}\n` +
             `📋 نوع العملية: ${actionLabel}\n` +
-            `📋 الحالة: نجح - قيد التحقق من البيانات`
+            `📋 الحالة: ${isAddonPayment ? 'نجح - قيد مراجعة الإدارة' : 'نجح - قيد التحقق من البيانات'}`
           );
           console.log("✅ WhatsApp notification sent for electronic payment:", transactionId);
         } catch (notifyErr) {
@@ -4679,18 +4707,18 @@ app.get("/api/paymob/webhook", async (req, res) => {
       // التوجيه حسب نوع العملية
       let redirectUrl: string;
       
-      // جلب الدفعة للتحقق من نوع الباقة
-      let isAddonPayment = false;
-      if (propertyNumber) {
+      // التحقق من نوع الباقة (إضافة أم اشتراك)
+      let isAddonPaymentRedirect = isAddonPaymentFromRef;
+      if (!isAddonPaymentRedirect && propertyNumber) {
         const payments = await storage.getPayments();
         const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
         const recentPayment = payments
           .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
           .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-        isAddonPayment = recentPayment?.packageId?.startsWith('addon-') || false;
+        isAddonPaymentRedirect = recentPayment?.packageId?.startsWith('addon-') || false;
       }
       
-      if (isAddonPayment) {
+      if (isAddonPaymentRedirect) {
         // إضافة: توجيه لصفحة الإضافات
         redirectUrl = `/owner/addons?payment=success`;
       } else if (paymentAction === 'upgrade' || paymentAction === 'extend') {
@@ -4701,7 +4729,7 @@ app.get("/api/paymob/webhook", async (req, res) => {
         redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
       }
       
-      console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'}, isAddon: ${isAddonPayment})`);
+      console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'}, isAddon: ${isAddonPaymentRedirect})`);
       return res.redirect(redirectUrl);
     } else {
       return res.redirect(`/subscription?payment=failed`);
