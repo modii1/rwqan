@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PropertyAddOn, AddOnPackage } from "@shared/schema";
@@ -62,6 +63,10 @@ const getStatusBadge = (status: string) => {
 };
 
 export default function OwnerPropertyAddons() {
+  const [location] = useLocation();
+  const searchParams = new URLSearchParams(location.split('?')[1] || '');
+  const paymentSuccess = searchParams.get('payment') === 'success';
+  
   const { data = [] } = useQuery<PropertyAddOn[]>({
     queryKey: ["/api/owner/property-addons"],
   });
@@ -79,6 +84,20 @@ export default function OwnerPropertyAddons() {
   return (
     <div className="p-6 space-y-3" dir="rtl">
       <h1 className="text-xl font-bold mb-4">إضافاتك</h1>
+      
+      {paymentSuccess && (
+        <Card className="p-4 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+          <div className="flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-600" />
+            <div>
+              <div className="font-semibold text-amber-800 dark:text-amber-200">قيد المراجعة</div>
+              <div className="text-sm text-amber-700 dark:text-amber-300">
+                تم استلام الدفع بنجاح! الإضافة قيد المراجعة من قبل الإدارة وسيتم تفعيلها قريباً.
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
       {data.length === 0 ? (
         <p className="text-muted-foreground">لا توجد إضافات</p>
       ) : (
