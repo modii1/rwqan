@@ -968,8 +968,7 @@ const calculateAnalytics = () => {
           </div>
         </Card>
 
-        {/* ===== قسم الإضافات (عرض فقط) - يظهر فقط عند وجود اشتراك نشط ===== */}
-        {currentSubscription && (currentSubscription.status === "active" || currentSubscription.status === "نشط") && (
+        {/* ===== قسم الإضافات (عرض دائماً) ===== */}
         <Card className="p-4 md:p-6 border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/50 to-purple-50/50 dark:from-violet-950/30 dark:to-purple-950/30">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -1167,7 +1166,6 @@ const calculateAnalytics = () => {
             </div>
           )}
         </Card>
-      )}
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
