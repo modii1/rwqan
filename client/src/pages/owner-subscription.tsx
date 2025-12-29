@@ -589,7 +589,7 @@ export default function OwnerSubscriptionPage() {
                         variant="outline"
                         className="text-emerald-600 border-emerald-300 bg-emerald-50"
                       >
-                        <span className="font-medium">{pkg?.name || addon.addOnPackageId}</span>
+                        <span className="font-medium">{pkg?.name || "إضافة"}</span>
                         <span className="text-muted-foreground mr-2">
                           {addon.endDate ? `ينتهي: ${new Date(addon.endDate).toLocaleDateString('en-US')}` : "دائم"}
                         </span>
