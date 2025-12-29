@@ -4842,8 +4842,8 @@ app.post("/api/paymob/webhook", async (req, res) => {
         propertyNumber: addonPropertyNumber,
         addOnPackageId: addonId,
         status: "pending",
-        startDate: null,
-        endDate: null,
+        startDate: undefined,
+        endDate: undefined,
         paymentId,
         source: "paymob",
       });
@@ -5783,10 +5783,11 @@ app.get("/api/owner/property-addons", async (req, res) => {
         propertyNumber,
         addOnPackageId,
         status: "pending",
-        startDate: null,
-        endDate: null,
+        startDate: undefined,
+        endDate: undefined,
         paymentId,
         receiptUrl,
+        source: "bank_transfer",
         createdAt: now.toISOString(),
       });
 

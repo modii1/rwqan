@@ -24,6 +24,12 @@ import type {
   InsertFeeConfig,
   Expense,
   InsertExpense,
+  AddOnPackage,
+  InsertAddOnPackage,
+  PropertyAddOn,
+  InsertPropertyAddOn,
+  AddOnHistory,
+  InsertAddOnHistory,
 } from "@shared/schema";
 import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils";
@@ -1344,7 +1350,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       propertyNumber: String(row[1] || ""),
       addOnPackageId: String(row[2] || ""),
       status: (row[3] as any) || "active",
-      startDate: row[4] || new Date().toISOString(),
+      startDate: row[4] || undefined,
       endDate: row[5] || undefined,
       paymentId: row[6] || undefined,
       source: (row[8] as any) || "system",
@@ -1378,7 +1384,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       id,
       ...addon,
       status: addon.status || "active",
-      startDate: addon.startDate || new Date().toISOString(),
+      startDate: addon.startDate, // يبقى فارغ للطلبات المعلقة
       createdAt: new Date().toISOString(),
       updatedAt: undefined,
     };
