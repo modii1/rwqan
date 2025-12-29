@@ -1003,7 +1003,7 @@ const calculateAnalytics = () => {
                     <div className="flex items-start justify-between gap-3 mt-1">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-2">
-                          <h4 className="font-semibold">{pkg?.name || addon.addOnPackageId}</h4>
+                          <h4 className="font-semibold">{pkg?.name || "إضافة"}</h4>
                           {pkg && (
                             <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
                               {pkg.category}
@@ -1074,7 +1074,7 @@ const calculateAnalytics = () => {
                       <div className="flex items-start justify-between gap-3 mt-1">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 flex-wrap mb-2">
-                            <h4 className="font-semibold">{pkg?.name || addon.addOnPackageId}</h4>
+                            <h4 className="font-semibold">{pkg?.name || "إضافة"}</h4>
                             {pkg && (
                               <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
                                 {pkg.category}
@@ -1143,7 +1143,7 @@ const calculateAnalytics = () => {
                       key={addon.id}
                       className="flex items-center justify-between p-2 bg-muted/30 rounded-md text-sm border border-muted"
                     >
-                      <span className="text-muted-foreground">{pkg?.name || addon.addOnPackageId}</span>
+                      <span className="text-muted-foreground">{pkg?.name || "إضافة"}</span>
                       <span className="text-xs text-muted-foreground">
                         انتهى: {addon.endDate ? new Date(addon.endDate).toLocaleDateString('en-US') : "-"}
                       </span>
