@@ -5226,6 +5226,19 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
 
   // =======================================
+  // ADMIN – Get All Add-On Packages
+  // =======================================
+  app.get("/api/admin/addons", async (req, res) => {
+    try {
+      const packages = await googleSheetsService.getAddOnPackages();
+      res.json(packages);
+    } catch (err) {
+      console.error("Get addon packages error:", err);
+      res.status(500).json({ error: "فشل جلب باقات الإضافات" });
+    }
+  });
+
+  // =======================================
   // ADMIN – Create Add-On Package
   // =======================================
   app.post("/api/admin/addons/create", async (req, res) => {
