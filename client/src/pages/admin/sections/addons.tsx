@@ -30,6 +30,7 @@ import {
 import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
 import type { AddOnPackage, PropertyAddOn } from "@shared/schema";
 import { Th, Td } from "../components/Table";
+import riyal from "@/assets/riyal-symbol.png";
 
 export default function AdminAddonsSection() {
   const { toast } = useToast();
@@ -294,9 +295,9 @@ export default function AdminAddonsSection() {
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <DollarSign className="w-4 h-4" />
-                      <span className="font-semibold text-foreground">{pkg.price} ر.س</span>
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <span className="font-semibold text-foreground">{pkg.price}</span>
+                      <img src={riyal} alt="ريال" className="w-4 h-4 inline-block opacity-85" />
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Calendar className="w-4 h-4" />
@@ -357,8 +358,10 @@ export default function AdminAddonsSection() {
                                 <span className="text-muted-foreground">-</span>
                                 <span className="text-sm">{pkg?.name || addon.addOnPackageId}</span>
                                 {pkg && (
-                                  <Badge variant="outline" className="text-xs">
-                                    {pkg.price} ر.س / {pkg.durationDays === 0 ? "دائم" : `${pkg.durationDays} يوم`}
+                                  <Badge variant="outline" className="text-xs flex items-center gap-1">
+                                    <span>{pkg.price}</span>
+                                    <img src={riyal} alt="ريال" className="w-3 h-3 inline-block opacity-85" />
+                                    <span>/ {pkg.durationDays === 0 ? "دائم" : `${pkg.durationDays} يوم`}</span>
                                   </Badge>
                                 )}
                               </div>
