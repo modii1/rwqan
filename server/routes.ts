@@ -4814,20 +4814,20 @@ app.post("/api/paymob/webhook", async (req, res) => {
         id: paymentId,
         propertyNumber: addonPropertyNumber,
         amount: addonPrice,
-        discountCode: null,
+        discountCode: undefined,
         discountAmount: 0,
         finalAmount: addonPrice,
         paymobOrderId,
         status: "نجح - قيد التحقق",
         paymentMethod: "paymob",
-        receiptUrl: null,
+        receiptUrl: undefined,
         createdAt: new Date().toISOString(),
         packageId: addonId,
         packageName: addonName,
         action: "addon",
-        pendingStartDate: null,
-        pendingEndDate: null,
-        pendingSubscriptionType: null,
+        pendingStartDate: undefined,
+        pendingEndDate: undefined,
+        pendingSubscriptionType: undefined,
         pendingPrice: addonPrice,
         transactionId,
         merchantFees: addonMerchantFees,
@@ -5537,14 +5537,14 @@ app.post("/api/paymob/webhook", async (req, res) => {
         const allPayments = await googleSheetsService.getPayments();
         const pendingPayment = allPayments.find(p => 
           p.action === "addon" && 
-          p.status === "pending" && 
+          (p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") && 
           p.propertyNumber === addon.propertyNumber &&
           p.packageId === addon.addOnPackageId
         );
         
         if (pendingPayment) {
           await googleSheetsService.updatePayment(pendingPayment.id, {
-            status: "completed",
+            status: "مكتمل",
             completedAt: new Date().toISOString(),
           });
           console.log(`✅ Updated addon payment ${pendingPayment.id} to completed`);
@@ -5603,14 +5603,14 @@ app.post("/api/paymob/webhook", async (req, res) => {
         const allPayments = await googleSheetsService.getPayments();
         const pendingPayment = allPayments.find(p => 
           p.action === "addon" && 
-          p.status === "pending" && 
+          (p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") && 
           p.propertyNumber === addon.propertyNumber &&
           p.packageId === addon.addOnPackageId
         );
         
         if (pendingPayment) {
           await googleSheetsService.updatePayment(pendingPayment.id, {
-            status: "rejected",
+            status: "ملغي",
             completedAt: new Date().toISOString(),
           });
           console.log(`❌ Updated addon payment ${pendingPayment.id} to rejected`);
@@ -5761,20 +5761,20 @@ app.get("/api/owner/property-addons", async (req, res) => {
         id: paymentId,
         propertyNumber,
         amount: addon.price,
-        discountCode: null,
+        discountCode: undefined,
         discountAmount: 0,
         finalAmount: addon.price,
-        paymobOrderId: null,
-        status: "pending",
-        paymentMethod: "bank_transfer",
+        paymobOrderId: undefined,
+        status: "قيد المراجعة",
+        paymentMethod: "تحويل بنكي",
         receiptUrl,
         createdAt: now.toISOString(),
         packageId: addOnPackageId,
         packageName: addon.name,
         action: "addon",
-        pendingStartDate: null,
-        pendingEndDate: null,
-        pendingSubscriptionType: null,
+        pendingStartDate: undefined,
+        pendingEndDate: undefined,
+        pendingSubscriptionType: undefined,
         pendingPrice: addon.price,
       });
       
