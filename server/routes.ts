@@ -1607,6 +1607,65 @@ const request = await storage.createRequest(
 
       // 8. تم نقله للقسم 2 (تحديثات العقارات)
 
+      // 9. إضافات معلقة تحتاج موافقة
+      let pendingAddons: any[] = [];
+      let todayAddons: any[] = [];
+      try {
+        const allPropertyAddons = await googleSheetsService.getPropertyAddons();
+        pendingAddons = allPropertyAddons.filter((addon: any) => 
+          addon.status === 'pending' || addon.status === 'معلق'
+        );
+        todayAddons = allPropertyAddons.filter((addon: any) => {
+          if (!addon.createdAt) return false;
+          const createdDate = new Date(addon.createdAt);
+          if (isNaN(createdDate.getTime())) return false;
+          return createdDate >= todayStart;
+        });
+        
+        if (pendingAddons.length > 0) {
+          alerts.push({
+            type: 'danger',
+            category: 'pending-addons',
+            title: 'إضافات تنتظر الموافقة',
+            message: `${pendingAddons.length} طلب إضافة معلق يحتاج مراجعة`,
+            count: pendingAddons.length,
+            icon: 'package',
+            items: pendingAddons.map((addon: any) => {
+              const prop = properties.find(p => p.propertyNumber === addon.propertyNumber);
+              return {
+                propertyNumber: addon.propertyNumber,
+                name: prop?.name || '',
+                addOnPackageId: addon.addOnPackageId,
+                createdAt: addon.createdAt
+              };
+            })
+          });
+        }
+        
+        if (todayAddons.length > 0) {
+          alerts.push({
+            type: 'success',
+            category: 'new-addons',
+            title: 'إضافات جديدة اليوم',
+            message: `${todayAddons.length} طلب إضافة جديد اليوم`,
+            count: todayAddons.length,
+            icon: 'package-plus',
+            items: todayAddons.map((addon: any) => {
+              const prop = properties.find(p => p.propertyNumber === addon.propertyNumber);
+              return {
+                propertyNumber: addon.propertyNumber,
+                name: prop?.name || '',
+                addOnPackageId: addon.addOnPackageId,
+                status: addon.status,
+                createdAt: addon.createdAt
+              };
+            })
+          });
+        }
+      } catch (addonErr) {
+        console.error("Error fetching addons for alerts:", addonErr);
+      }
+
       // حساب الإحصائيات - دعم القيم العربية والإنجليزية
       const activeSubscriptions = subscriptions.filter(s => 
         s.status === 'active' || s.status === 'نشط'
@@ -1685,7 +1744,9 @@ const request = await storage.createRequest(
           weekRequests: weekRequests.length,
           weekPayments: weekPayments.length,
           weekRevenue,
-          pendingSuggestions: pendingSuggestions.length
+          pendingSuggestions: pendingSuggestions.length,
+          pendingAddons: pendingAddons.length,
+          todayAddons: todayAddons.length
         },
         summary: {
           totalAlerts: criticalCount + warningCount,
