@@ -5399,8 +5399,7 @@ app.get("/api/owner/property-addons", async (req, res) => {
         return res.status(404).json({ error: "العقار غير موجود" });
       }
 
-      const paymob = new PaymobService();
-      const { checkoutUrl } = await paymob.initiateAddOnPayment(
+      const { checkoutUrl } = await paymobService.initiateAddOnPayment(
         addon.price,
         propertyNumber,
         property.name,
