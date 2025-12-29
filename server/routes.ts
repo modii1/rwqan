@@ -5226,6 +5226,54 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
 
   // =======================================
+  // ADMIN – Create Add-On Package
+  // =======================================
+  app.post("/api/admin/addons/create", async (req, res) => {
+    try {
+      const { name, description, price, durationDays, category, isActive } = req.body;
+
+      if (!name || !price || !category) {
+        return res.status(400).json({ error: "الاسم والسعر والفئة مطلوبة" });
+      }
+
+      const newPackage = await googleSheetsService.createAddOnPackage({
+        name,
+        description: description || "",
+        price: Number(price),
+        durationDays: Number(durationDays) || 0,
+        category,
+        isActive: isActive !== false,
+      });
+
+      res.json({ ok: true, package: newPackage });
+    } catch (err) {
+      console.error("Create addon package error:", err);
+      res.status(500).json({ error: "فشل إنشاء الباقة" });
+    }
+  });
+
+  // =======================================
+  // ADMIN – Update Add-On Package
+  // =======================================
+  app.put("/api/admin/addons/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+
+      const updated = await googleSheetsService.updateAddOnPackage(id, updates);
+
+      if (!updated) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+
+      res.json({ ok: true, package: updated });
+    } catch (err) {
+      console.error("Update addon package error:", err);
+      res.status(500).json({ error: "فشل تحديث الباقة" });
+    }
+  });
+
+  // =======================================
   // ADMIN – Approve Add-On Bank Transfer
   // =======================================
   app.post("/api/admin/addons/approve", async (req, res) => {
