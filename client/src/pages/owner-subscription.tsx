@@ -510,28 +510,66 @@ export default function OwnerSubscriptionPage() {
                         </div>
                       </div>
                       
-                      <Button
-                        onClick={() => handlePurchaseAddon(addon.id)}
-                        disabled={isActive || isPurchasing}
-                        className="w-full"
-                        size="sm"
-                        variant={isActive ? "secondary" : "default"}
-                        data-testid={`button-purchase-addon-${addon.id}`}
-                      >
-                        {isPurchasing ? (
-                          <>
-                            <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                            جاري التحويل...
-                          </>
-                        ) : isActive ? (
-                          "مفعّل بالفعل"
-                        ) : (
-                          <>
-                            <CreditCard className="w-4 h-4 ml-2" />
-                            شراء الإضافة
-                          </>
-                        )}
-                      </Button>
+                      {isActive ? (
+                        <Badge variant="secondary" className="w-full justify-center py-2">
+                          مفعّل بالفعل
+                        </Badge>
+                      ) : selectedAddonForPurchase === addon.id ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-center text-muted-foreground">اختر طريقة الدفع:</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              onClick={() => handlePurchaseAddon(addon.id)}
+                              disabled={isPurchasing}
+                              size="sm"
+                              className="text-xs"
+                              data-testid={`button-addon-online-${addon.id}`}
+                            >
+                              {isPurchasing ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <CreditCard className="w-3 h-3 ml-1" />
+                                  إلكتروني
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setAddonPaymentMethod('bank');
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              data-testid={`button-addon-bank-${addon.id}`}
+                            >
+                              <Upload className="w-3 h-3 ml-1" />
+                              تحويل بنكي
+                            </Button>
+                          </div>
+                          <Button
+                            onClick={() => {
+                              setSelectedAddonForPurchase(null);
+                              setAddonPaymentMethod(null);
+                            }}
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-xs text-muted-foreground"
+                          >
+                            إلغاء
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => setSelectedAddonForPurchase(addon.id)}
+                          className="w-full"
+                          size="sm"
+                          data-testid={`button-purchase-addon-${addon.id}`}
+                        >
+                          <Zap className="w-4 h-4 ml-2" />
+                          شراء الإضافة
+                        </Button>
+                      )}
                     </Card>
                   );
                 })}
@@ -562,6 +600,139 @@ export default function OwnerSubscriptionPage() {
               </div>
             )}
           </Card>
+        )}
+
+        {/* نافذة التحويل البنكي للإضافات */}
+        {addonPaymentMethod === 'bank' && selectedAddonForPurchase && (
+          <Dialog open={true} onOpenChange={() => {
+            setAddonPaymentMethod(null);
+            setAddonReceiptFile(null);
+          }}>
+            <DialogContent className="max-w-md" dir="rtl">
+              <DialogHeader>
+                <DialogTitle className="text-right">تحويل بنكي للإضافة</DialogTitle>
+                <DialogDescription className="text-right">
+                  {(() => {
+                    const addon = addOnPackages.find(p => p.id === selectedAddonForPurchase);
+                    return addon ? (
+                      <span>
+                        <strong>{addon.name}</strong> - {addon.price} ر.س
+                      </span>
+                    ) : null;
+                  })()}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-muted/50 rounded-lg text-sm">
+                  <p className="font-bold mb-2">معلومات الحساب البنكي:</p>
+                  <p>بنك الراجحي</p>
+                  <p>رقم الحساب: SA0000000000000000000000</p>
+                  <p>اسم المستفيد: روقـان للعقارات</p>
+                </div>
+                
+                <div>
+                  <input
+                    type="file"
+                    ref={addonFileInputRef}
+                    accept="image/*,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setAddonReceiptFile(file);
+                    }}
+                  />
+                  
+                  <Button
+                    variant="outline"
+                    className="w-full h-20 border-dashed"
+                    onClick={() => addonFileInputRef.current?.click()}
+                  >
+                    {addonReceiptFile ? (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                        <span className="text-sm">{addonReceiptFile.name}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <Upload className="w-6 h-6" />
+                        <span className="text-xs">اضغط لرفع إيصال التحويل</span>
+                      </div>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              
+              <DialogFooter className="flex gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAddonPaymentMethod(null);
+                    setAddonReceiptFile(null);
+                    setSelectedAddonForPurchase(null);
+                  }}
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!addonReceiptFile || !selectedAddonForPurchase || !property?.propertyNumber) return;
+                    
+                    setIsUploadingAddonReceipt(true);
+                    try {
+                      const addon = addOnPackages.find(p => p.id === selectedAddonForPurchase);
+                      if (!addon) throw new Error("الإضافة غير موجودة");
+                      
+                      const formData = new FormData();
+                      formData.append('receipt', addonReceiptFile);
+                      formData.append('propertyNumber', property.propertyNumber);
+                      formData.append('addOnPackageId', selectedAddonForPurchase);
+                      formData.append('amount', String(addon.price));
+                      formData.append('paymentMethod', 'bank');
+                      
+                      const response = await fetch('/api/owner/addons/bank-transfer', {
+                        method: 'POST',
+                        body: formData,
+                      });
+                      
+                      const data = await response.json();
+                      
+                      if (response.ok) {
+                        toast({
+                          title: "تم رفع الإيصال بنجاح",
+                          description: "سيتم مراجعة الإيصال وتفعيل الإضافة خلال 24 ساعة",
+                        });
+                        setAddonPaymentMethod(null);
+                        setAddonReceiptFile(null);
+                        setSelectedAddonForPurchase(null);
+                        queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
+                      } else {
+                        throw new Error(data.error || "فشل رفع الإيصال");
+                      }
+                    } catch (error: any) {
+                      toast({
+                        title: "خطأ",
+                        description: error.message || "حدث خطأ أثناء رفع الإيصال",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsUploadingAddonReceipt(false);
+                    }
+                  }}
+                  disabled={!addonReceiptFile || isUploadingAddonReceipt}
+                >
+                  {isUploadingAddonReceipt ? (
+                    <>
+                      <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                      جاري الرفع...
+                    </>
+                  ) : (
+                    "إرسال الإيصال"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* اختيار الباقة */}
