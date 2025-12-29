@@ -1611,7 +1611,7 @@ const request = await storage.createRequest(
       let pendingAddons: any[] = [];
       let todayAddons: any[] = [];
       try {
-        const allPropertyAddons = await googleSheetsService.getPropertyAddons();
+        const allPropertyAddons = await googleSheetsService.getAllPropertyAddOns();
         pendingAddons = allPropertyAddons.filter((addon: any) => 
           addon.status === 'pending' || addon.status === 'معلق'
         );
@@ -4769,6 +4769,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
         propertyNumber: addonPropertyNumber,
         amount: addonPrice,
         discountCode: null,
+        discountAmount: 0,
         finalAmount: addonPrice,
         paymobOrderId,
         status: "completed",
@@ -5676,6 +5677,7 @@ app.get("/api/owner/property-addons", async (req, res) => {
         propertyNumber,
         amount: addon.price,
         discountCode: null,
+        discountAmount: 0,
         finalAmount: addon.price,
         paymobOrderId: null,
         status: "pending",
