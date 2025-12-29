@@ -179,13 +179,13 @@ export const paymentSchema = z.object({
   discountAmount: z.number().default(0),
   finalAmount: z.number(), // السعر بعد الخصم
   paymobOrderId: z.string().optional(),
-  status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة']),
-  paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي']).optional(),
+  status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة', 'نجح - قيد التحقق']),
+  paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي', 'paymob']).optional(),
   receiptUrl: z.string().optional(),
   createdAt: z.string().optional(),
   completedAt: z.string().optional(),
   // بيانات الاشتراك المعلق (يتم حفظها فقط عند نجاح الدفع)
-  action: z.enum(['new', 'extend', 'upgrade']).optional(),
+  action: z.enum(['new', 'extend', 'upgrade', 'addon']).optional(),
   pendingStartDate: z.string().optional(),
   pendingEndDate: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
@@ -466,7 +466,8 @@ export const addOnHistorySchema = z.object({
     "activated", // تفعيل
     "expired",   // انتهاء
     "cancelled", // إلغاء
-    "rejected"
+    "rejected",  // رفض
+    "pending"    // بانتظار المراجعة
   ]),
 
   timestamp: z.string(), // وقت العملية
