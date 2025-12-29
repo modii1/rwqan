@@ -123,6 +123,84 @@ export class PaymobService {
     return this.createIntention(amount, propertyNumber, propertyName, phone, packageName, packageDays, paymentMethod);
   }
 
+  async initiateAddOnPayment(
+    amount: number,
+    propertyNumber: string,
+    propertyName: string,
+    phone: string,
+    addonId: string,
+    addonName: string,
+    addonDays: number,
+    paymentMethod: 'cards' | 'applepay' = 'cards'
+  ) {
+    const integrationId = paymentMethod === 'applepay'
+      ? INTEGRATION_ID_APPLEPAY
+      : INTEGRATION_ID_CARDS;
+
+    let itemName = `${addonName} للعقار ${propertyName}`;
+    if (itemName.length > 50) itemName = itemName.slice(0, 50);
+
+    const amountCents = Math.round(amount * 100);
+
+    const payload = {
+      amount: amountCents,
+      currency: 'SAR',
+      payment_methods: [integrationId],
+      items: [{
+        name: itemName,
+        amount: amountCents,
+        description: 'إضافة للعقار',
+        quantity: 1,
+      }],
+      billing_data: {
+        first_name: propertyName || 'عميل',
+        last_name: 'N/A',
+        email: `${phone}@example.com`,
+        phone_number: phone,
+        country: 'KSA',
+        redirect_url: "https://rwqan.replit.app/api/paymob/webhook",
+      },
+      customer: {
+        first_name: propertyName || 'عميل',
+        last_name: 'N/A',
+        email: `${phone}@example.com`,
+      },
+      special_reference: `addon-${propertyNumber}-${Date.now()}`,
+      extras: {
+        creation_extras: {
+          type: "addon",
+          propertyNumber,
+          addonId,
+          addonName,
+          days: addonDays,
+          price: amount,
+        },
+      },
+    };
+
+    const response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SECRET_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) throw new Error(await response.text());
+
+    const data: IntentionResponse = await response.json();
+
+    const checkoutUrl =
+      `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${data.client_secret}`;
+
+    return {
+      clientSecret: data.client_secret,
+      intentionId: data.id,
+      checkoutUrl,
+    };
+  }
+
   /* ==========================================================
       2) التحقق من Webhook — بدون تعديل
   =========================================================== */
