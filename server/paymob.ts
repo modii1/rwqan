@@ -77,10 +77,13 @@ export class PaymobService {
       special_reference: `${propertyNumber}-${Date.now()}`,
       extras: {
         creation_extras: {
+          type: "subscription",
           propertyNumber,
           packageName,
           days: packageDays,
           price: amount,
+          addonId: undefined,
+
         },
       },
     };

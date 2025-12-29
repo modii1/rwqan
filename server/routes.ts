@@ -2627,7 +2627,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     let price = pkg.price;
     let subscriptionType = pkg.type;
 
-    if (action === 'extend' || action === 'upgrade') {
+if (!isAddon && (action === 'extend' || action === 'upgrade')) {
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
 
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
@@ -2827,6 +2827,8 @@ app.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async (r
 app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
     const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const isAddon = action === "addon";
+
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
@@ -2887,6 +2889,30 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
 
     console.log(`💾 Payment created: ${payment.id}, secondPropertyNumber: ${secondPropertyNumber || 'none'}`);
 
+    // =======================
+    // 🧩 إذا كانت العملية إضافة (Add-On)
+    // =======================
+    if (isAddon) {
+      await googleSheetsService.createPropertyAddOn({
+        propertyNumber,
+        addOnPackageId: packageId,
+        status: "pending",
+        paymentId: payment.id,
+        source: "bank_transfer",
+      });
+
+      await googleSheetsService.logAddOnHistory({
+        propertyNumber,
+        addOnPackageId: packageId,
+        action: "purchased",
+        notes: "تحويل بنكي - بانتظار المراجعة",
+        createdBy: "owner",
+      });
+
+      return res.json({ ok: true, paymentId: payment.id });
+    }
+
+
     // إرسال إشعار واتساب للمسؤول عن الدفعة الجديدة (للتسجيلات الجديدة)
     if (!action || action === 'new') {
       try {
@@ -2904,7 +2930,7 @@ app.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (re
 
     // حفظ البيانات للاشتراك/التمديد/الترقية
     // لا تقم بإنشاء أو تعديل الاشتراك إلا إذا كان هناك إجراء محدد (extend أو upgrade)
-    if (action === 'extend' || action === 'upgrade') {
+if (!isAddon && (action === 'extend' || action === 'upgrade')) {
       const today = new Date();
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
 
@@ -4631,6 +4657,37 @@ app.post("/api/paymob/webhook", async (req, res) => {
     const merchantOrderId =
       t.merchant_order_id || t.order?.merchant_order_id || "";
     const amount = (t.amount_cents || 0) / 100;
+    const creationExtras = t.order?.extras?.creation_extras || {};
+    if (creationExtras?.type === "addon") {
+    const addonId = creationExtras.addonId;
+    const addonPropertyNumber = creationExtras.propertyNumber;
+      if (!isSuccess) return res.json({ ok: true });
+      
+  await googleSheetsService.createPropertyAddOn({
+  propertyNumber: addonPropertyNumber,
+  addOnPackageId: addonId,
+  status: "active",
+  startDate: new Date().toISOString(),
+  endDate: creationExtras.days && creationExtras.days > 0
+    ? new Date(Date.now() + creationExtras.days * 24 * 60 * 60 * 1000).toISOString()
+    : undefined,
+  paymentId: transactionId,
+  source: "paymob",
+});
+
+      // تسجيل العملية في سجل الإضافات
+      await googleSheetsService.logAddOnHistory({
+        propertyNumber: addonPropertyNumber,
+        addOnPackageId: addonId,
+        action: "activated",
+        notes: "تم تفعيل الإضافة بعد الدفع الإلكتروني",
+        createdBy: "system",
+      });
+
+      return res.json({ ok: true });
+
+}
+
 
     // استخراج رقم العقار
     let propertyNumber = "";
@@ -5166,6 +5223,126 @@ app.post("/api/paymob/webhook", async (req, res) => {
       res.status(500).json({ error: error.message });
     }
   });
+
+
+  // =======================================
+  // ADMIN – Approve Add-On Bank Transfer
+  // =======================================
+  app.post("/api/admin/addons/approve", async (req, res) => {
+    try {
+      const { propertyAddOnId } = req.body;
+
+      if (!propertyAddOnId) {
+        return res.status(400).json({ error: "propertyAddOnId مطلوب" });
+      }
+
+      const updated = await googleSheetsService.updatePropertyAddOn(
+        propertyAddOnId,
+        {
+          status: "active",
+          startDate: new Date().toISOString(),
+          source: "admin",
+        }
+      );
+
+      if (!updated) {
+        return res.status(404).json({ error: "الإضافة غير موجودة" });
+      }
+
+      await googleSheetsService.logAddOnHistory({
+        propertyNumber: updated.propertyNumber,
+        addOnPackageId: updated.addOnPackageId,
+        action: "activated",
+        notes: "تم التفعيل بعد التحويل البنكي",
+        createdBy: "admin",
+      });
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Approve addon error:", err);
+      res.status(500).json({ error: "فشل تفعيل الإضافة" });
+    }
+  });
+
+
+  // =======================================
+  // OWNER – Get available Add-On packages
+  // =======================================
+  app.get("/api/owner/addons", async (req, res) => {
+    try {
+      const addons = await googleSheetsService.getAddOnPackages();
+      res.json(addons);
+    } catch (err) {
+      console.error("Get owner addons error:", err);
+      res.status(500).json({ error: "فشل جلب الإضافات" });
+    }
+  });
+
+  // =======================================
+// OWNER – Get Property Add-Ons
+// =======================================
+app.get("/api/owner/property-addons", async (req, res) => {
+  try {
+    // 1️⃣ حاول من session
+    let propertyNumber = (req as any).session?.propertyNumber;
+
+    // 2️⃣ لو ما فيه session خذه من query
+    if (!propertyNumber && req.query.propertyNumber) {
+      propertyNumber = String(req.query.propertyNumber);
+    }
+
+    // 3️⃣ لو ما زال فاضي
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "propertyNumber مطلوب" });
+    }
+
+    const addons = await googleSheetsService.getPropertyAddOns(propertyNumber);
+    res.json(addons);
+  } catch (err) {
+    console.error("Get property addons error:", err);
+    res.status(500).json({ error: "فشل جلب إضافات العقار" });
+  }
+});
+
+  // =======================================
+  // OWNER – Pay Add-On (Paymob)
+  // =======================================
+  app.post("/api/owner/addons/pay", async (req, res) => {
+    try {
+      const { propertyNumber, addOnPackageId } = req.body;
+
+      if (!propertyNumber || !addOnPackageId) {
+        return res.status(400).json({ error: "بيانات ناقصة" });
+      }
+
+      const addon = await googleSheetsService.getAddOnPackageById(addOnPackageId);
+      if (!addon) {
+        return res.status(404).json({ error: "الإضافة غير موجودة" });
+      }
+
+      const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      const paymob = new PaymobService();
+      const { checkoutUrl } = await paymob.initiatePayment(
+        addon.price,
+        propertyNumber,
+        property.name,
+        property.whatsappNumber,
+        addon.name,
+        addon.durationDays
+      );
+
+      res.json({ checkoutUrl });
+    } catch (err) {
+      console.error("Pay addon error:", err);
+      res.status(500).json({ error: "فشل الدفع" });
+    }
+  });
+
+
 
   // ======================
   // DONE

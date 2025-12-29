@@ -1,0 +1,23 @@
+import { useQuery } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
+import { PropertyAddOn } from "@shared/schema";
+
+export default function OwnerPropertyAddons() {
+  const { data = [] } = useQuery<PropertyAddOn[]>({
+    queryKey: ["/api/owner/property-addons"],
+    queryFn: () =>
+      fetch("/api/owner/property-addons?propertyNumber=12345").then(r => r.json()),
+  });
+
+  return (
+    <div className="p-6 space-y-3">
+      {data.map(a => (
+        <Card key={a.id} className="p-4">
+          <div>الحالة: {a.status}</div>
+          <div>بداية: {a.startDate}</div>
+          <div>نهاية: {a.endDate || "دائمة"}</div>
+        </Card>
+      ))}
+    </div>
+  );
+}
