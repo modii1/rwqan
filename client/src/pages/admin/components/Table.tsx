@@ -1,6 +1,6 @@
 export function Th({ children }: any) {
   return (
-    <th className="px-3 py-2 text-[11px] md:text-xs font-bold whitespace-nowrap">
+    <th className="px-3 py-2 text-[11px] md:text-xs font-bold whitespace-nowrap text-right">
       {children}
     </th>
   );
@@ -16,7 +16,7 @@ export function Td({
   className?: string;
 }) {
   return (
-    <td className={`px-3 py-2 whitespace-nowrap align-middle ${className || ''}`} colSpan={colSpan}>
+    <td className={`px-3 py-2 whitespace-nowrap align-middle text-right ${className || ''}`} colSpan={colSpan}>
       {children}
     </td>
   );
