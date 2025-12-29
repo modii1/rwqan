@@ -5490,6 +5490,28 @@ app.post("/api/paymob/webhook", async (req, res) => {
         return res.status(404).json({ error: "فشل تحديث الإضافة" });
       }
 
+      // تحديث سجل الدفع المرتبط ليصبح مكتمل
+      try {
+        const allPayments = await googleSheetsService.getPayments();
+        const pendingPayment = allPayments.find(p => 
+          p.action === "addon" && 
+          p.status === "pending" && 
+          p.propertyNumber === addon.propertyNumber &&
+          p.packageId === addon.addOnPackageId
+        );
+        
+        if (pendingPayment) {
+          await googleSheetsService.updatePayment(pendingPayment.id, {
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          });
+          console.log(`✅ Updated addon payment ${pendingPayment.id} to completed`);
+        }
+      } catch (paymentError) {
+        console.error("Error updating addon payment:", paymentError);
+        // لا نوقف العملية إذا فشل تحديث الدفع
+      }
+
       await googleSheetsService.logAddOnHistory({
         propertyNumber: updated.propertyNumber,
         addOnPackageId: updated.addOnPackageId,
@@ -5532,6 +5554,27 @@ app.post("/api/paymob/webhook", async (req, res) => {
 
       if (!updated) {
         return res.status(404).json({ error: "فشل تحديث الإضافة" });
+      }
+
+      // تحديث سجل الدفع المرتبط ليصبح مرفوض
+      try {
+        const allPayments = await googleSheetsService.getPayments();
+        const pendingPayment = allPayments.find(p => 
+          p.action === "addon" && 
+          p.status === "pending" && 
+          p.propertyNumber === addon.propertyNumber &&
+          p.packageId === addon.addOnPackageId
+        );
+        
+        if (pendingPayment) {
+          await googleSheetsService.updatePayment(pendingPayment.id, {
+            status: "rejected",
+            completedAt: new Date().toISOString(),
+          });
+          console.log(`❌ Updated addon payment ${pendingPayment.id} to rejected`);
+        }
+      } catch (paymentError) {
+        console.error("Error updating addon payment:", paymentError);
       }
 
       await googleSheetsService.logAddOnHistory({

@@ -41,6 +41,13 @@ type Payment = {
   vatAmount?: number;
   totalFees?: number;
   netAmount?: number;
+  action?: string;
+};
+
+type AddOnPackage = {
+  id: string;
+  name: string;
+  price: number;
 };
 
 const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
@@ -97,19 +104,31 @@ function calculateFees(amount: number, paymentMethod: string) {
   };
 }
 
-function getPackageNameArabic(packageId: string) {
-  const packageNames: Record<string, string> = {
-    'pkg-monthly': 'اشتراك شهري',
-    'pkg-month': 'اشتراك شهر',
-    'pkg-special': 'اشتراك خاص شهري',
-    'pkg-special-2months': 'اشتراك خاص شهرين',
-    'pkg-2months': 'عرض خاص شهرين',
-    'pkg-camps': 'باقة المخيمات',
-    'pkg-2properties': 'اشتراك شهر لعقارين',
-    'pkg-month-2properties': 'اشتراك شهر لعقارين',
-    'pkg-free': 'باقة مجانية',
-  };
-  return packageNames[packageId] || packageId || '-';
+const subscriptionPackageNames: Record<string, string> = {
+  'pkg-monthly': 'اشتراك شهري',
+  'pkg-month': 'اشتراك شهر',
+  'pkg-special': 'اشتراك خاص شهري',
+  'pkg-special-2months': 'اشتراك خاص شهرين',
+  'pkg-2months': 'عرض خاص شهرين',
+  'pkg-camps': 'باقة المخيمات',
+  'pkg-2properties': 'اشتراك شهر لعقارين',
+  'pkg-month-2properties': 'اشتراك شهر لعقارين',
+  'pkg-free': 'باقة مجانية',
+};
+
+function getPackageNameArabic(packageId: string, addOnPackages: AddOnPackage[] = []) {
+  // أولاً: تحقق من باقات الاشتراكات
+  if (subscriptionPackageNames[packageId]) {
+    return subscriptionPackageNames[packageId];
+  }
+  
+  // ثانياً: تحقق من باقات الإضافات
+  const addOnPkg = addOnPackages.find(p => p.id === packageId);
+  if (addOnPkg) {
+    return addOnPkg.name;
+  }
+  
+  return packageId || '-';
 }
 
 import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
@@ -173,6 +192,11 @@ export default function PaymentsSection() {
       if (!res.ok) throw new Error("فشل في جلب المدفوعات");
       return res.json();
     },
+  });
+
+  // جلب باقات الإضافات لعرض أسمائها
+  const { data: addOnPackages = [] } = useQuery<AddOnPackage[]>({
+    queryKey: ["/api/owner/addons"],
   });
 
   const completedPayments = (data || []).filter(p => p.status === "مكتمل");
@@ -307,6 +331,7 @@ const totals = completedPayments.reduce((acc, p) => {
             <thead className="bg-muted/50 text-right">
               <tr>
                 <Th>العقار</Th>
+                <Th>النوع</Th>
                 <Th>الباقة</Th>
                 <Th>المبلغ</Th>
                 <Th>طريقة الدفع</Th>
@@ -339,7 +364,19 @@ const totals = completedPayments.reduce((acc, p) => {
                         </div>
                       </Td>
                       <Td>
-                        <span className="text-xs">{getPackageNameArabic(p.packageId || '')}</span>
+                        <Badge 
+                          variant="outline" 
+                          className={`text-[10px] ${
+                            p.action === "addon" 
+                              ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" 
+                              : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                          }`}
+                        >
+                          {p.action === "addon" ? "إضافة" : "اشتراك"}
+                        </Badge>
+                      </Td>
+                      <Td>
+                        <span className="text-xs">{getPackageNameArabic(p.packageId || '', addOnPackages)}</span>
                       </Td>
                       <Td>
                         <PriceDisplay amount={amount} size="sm" />
@@ -405,20 +442,24 @@ const totals = completedPayments.reduce((acc, p) => {
                     {/* صف التفاصيل الموسعة - للمدفوعات المعلقة */}
                     {isExpanded && p.status === "قيد المراجعة" && (
                       <tr key={`${p.id}-pending-details`} className="bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300">
-                        <Td colSpan={9}>
+                        <Td colSpan={10}>
                           <div className="py-4 px-3">
                             <div className="text-sm font-bold mb-3 text-amber-700 dark:text-amber-400">
-                              🔍 تحويل بنكي معلق - يحتاج مراجعة
+                              تحويل بنكي معلق - يحتاج مراجعة
                             </div>
                             
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-xs">
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-xs">
                               <div className="bg-card p-3 rounded border">
                                 <div className="text-muted-foreground mb-1">رقم العقار</div>
                                 <div className="font-bold">{p.propertyNumber}</div>
                               </div>
                               <div className="bg-card p-3 rounded border">
+                                <div className="text-muted-foreground mb-1">النوع</div>
+                                <div className="font-semibold">{p.action === "addon" ? "إضافة" : "اشتراك"}</div>
+                              </div>
+                              <div className="bg-card p-3 rounded border">
                                 <div className="text-muted-foreground mb-1">الباقة</div>
-                                <div className="font-semibold">{getPackageNameArabic(p.packageId || '')}</div>
+                                <div className="font-semibold">{getPackageNameArabic(p.packageId || '', addOnPackages)}</div>
                               </div>
                               <div className="bg-card p-3 rounded border">
                                 <div className="text-muted-foreground mb-1">المبلغ النهائي</div>
@@ -438,7 +479,7 @@ const totals = completedPayments.reduce((acc, p) => {
                                   rel="noreferrer"
                                   className="text-blue-600 underline text-sm hover:text-blue-800"
                                 >
-                                  📎 عرض إيصال التحويل البنكي
+                                  عرض إيصال التحويل البنكي
                                 </a>
                               </div>
                             )}
@@ -457,7 +498,7 @@ const totals = completedPayments.reduce((acc, p) => {
                                 ) : (
                                   <CheckCircle2 className="w-4 h-4 ml-2" />
                                 )}
-                                قبول التحويل وتفعيل الاشتراك
+                                {p.action === "addon" ? "قبول وتفعيل الإضافة" : "قبول التحويل وتفعيل الاشتراك"}
                               </Button>
                               <Button
                                 size="sm"
@@ -494,7 +535,7 @@ const totals = completedPayments.reduce((acc, p) => {
                       
                       return (
                       <tr key={`${p.id}-details`} className="bg-muted/20">
-                        <Td colSpan={9}>
+                        <Td colSpan={10}>
                           <div className="py-3 px-2">
                             {/* رقم المعاملة من Paymob */}
                             {p.transactionId && (
@@ -590,7 +631,7 @@ const totals = completedPayments.reduce((acc, p) => {
 
               {(data || []).length === 0 && (
                 <tr>
-                  <Td colSpan={9}>
+                  <Td colSpan={10}>
                     <div className="p-4 text-center text-xs text-muted-foreground">
                       لا توجد مدفوعات حتى الآن.
                     </div>
