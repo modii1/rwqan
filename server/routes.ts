@@ -5274,6 +5274,19 @@ app.post("/api/paymob/webhook", async (req, res) => {
   });
 
   // =======================================
+  // ADMIN – Get All Property Add-Ons
+  // =======================================
+  app.get("/api/admin/property-addons", async (req, res) => {
+    try {
+      const addons = await googleSheetsService.getAllPropertyAddOns();
+      res.json(addons);
+    } catch (err) {
+      console.error("Get all property addons error:", err);
+      res.status(500).json({ error: "فشل جلب إضافات العقارات" });
+    }
+  });
+
+  // =======================================
   // ADMIN – Approve Add-On Bank Transfer
   // =======================================
   app.post("/api/admin/addons/approve", async (req, res) => {
@@ -5374,11 +5387,12 @@ app.get("/api/owner/property-addons", async (req, res) => {
       }
 
       const paymob = new PaymobService();
-      const { checkoutUrl } = await paymob.initiatePayment(
+      const { checkoutUrl } = await paymob.initiateAddOnPayment(
         addon.price,
         propertyNumber,
         property.name,
-        property.whatsappNumber,
+        property.whatsappNumber || "0500000000",
+        addon.id,
         addon.name,
         addon.durationDays
       );

@@ -1362,6 +1362,15 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
       .filter(row => row[1] === propertyNumber) // رقم العقار
       .map(row => this.rowToPropertyAddOn(row));
   }
+
+  async getAllPropertyAddOns(): Promise<PropertyAddOn[]> {
+    const rows = await this.readSheet(SHEETS.PROPERTY_ADDONS);
+    console.log(
+      `🧩 Read all ${rows.length} property add-on(s) from "${SHEETS.PROPERTY_ADDONS}"`
+    );
+    return rows.map(row => this.rowToPropertyAddOn(row));
+  }
+
   async createPropertyAddOn(addon: InsertPropertyAddOn): Promise<PropertyAddOn> {
     const id = `prop-addon-${Date.now()}`;
 
