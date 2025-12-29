@@ -5310,17 +5310,37 @@ app.post("/api/paymob/webhook", async (req, res) => {
         return res.status(400).json({ error: "propertyAddOnId مطلوب" });
       }
 
+      // جلب الإضافة للحصول على معرف الباقة
+      const addOns = await googleSheetsService.getAllPropertyAddOns();
+      const addon = addOns.find(a => a.id === propertyAddOnId);
+      
+      if (!addon) {
+        return res.status(404).json({ error: "الإضافة غير موجودة" });
+      }
+
+      // جلب باقة الإضافة لحساب تاريخ الانتهاء
+      const pkg = await googleSheetsService.getAddOnPackageById(addon.addOnPackageId);
+      
+      const startDate = new Date();
+      let endDate: Date | null = null;
+      
+      if (pkg && pkg.durationDays > 0) {
+        endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + pkg.durationDays);
+      }
+
       const updated = await googleSheetsService.updatePropertyAddOn(
         propertyAddOnId,
         {
           status: "active",
-          startDate: new Date().toISOString(),
-          source: "admin",
+          startDate: startDate.toISOString(),
+          endDate: endDate ? endDate.toISOString() : null,
+          source: "bank",
         }
       );
 
       if (!updated) {
-        return res.status(404).json({ error: "الإضافة غير موجودة" });
+        return res.status(404).json({ error: "فشل تحديث الإضافة" });
       }
 
       await googleSheetsService.logAddOnHistory({
@@ -5335,6 +5355,50 @@ app.post("/api/paymob/webhook", async (req, res) => {
     } catch (err) {
       console.error("Approve addon error:", err);
       res.status(500).json({ error: "فشل تفعيل الإضافة" });
+    }
+  });
+
+  // =======================================
+  // ADMIN – Reject Add-On (Bank Transfer)
+  // =======================================
+  app.post("/api/admin/addons/reject", async (req, res) => {
+    try {
+      const { propertyAddOnId } = req.body;
+
+      if (!propertyAddOnId) {
+        return res.status(400).json({ error: "propertyAddOnId مطلوب" });
+      }
+
+      const addOns = await googleSheetsService.getAllPropertyAddOns();
+      const addon = addOns.find(a => a.id === propertyAddOnId);
+      
+      if (!addon) {
+        return res.status(404).json({ error: "الإضافة غير موجودة" });
+      }
+
+      const updated = await googleSheetsService.updatePropertyAddOn(
+        propertyAddOnId,
+        {
+          status: "rejected",
+        }
+      );
+
+      if (!updated) {
+        return res.status(404).json({ error: "فشل تحديث الإضافة" });
+      }
+
+      await googleSheetsService.logAddOnHistory({
+        propertyNumber: addon.propertyNumber,
+        addOnPackageId: addon.addOnPackageId,
+        action: "rejected",
+        notes: "تم رفض الطلب",
+        createdBy: "admin",
+      });
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Reject addon error:", err);
+      res.status(500).json({ error: "فشل رفض الإضافة" });
     }
   });
 
