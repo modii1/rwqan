@@ -1053,6 +1053,39 @@ const calculateAnalytics = () => {
             </div>
           )}
 
+          {/* عرض الإضافات المعلقة */}
+          {propertyAddOns.filter(a => a.status === "pending").length > 0 && (
+            <div className="mt-4 pt-4 border-t border-amber-200 dark:border-amber-800">
+              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-amber-600">
+                <Clock className="w-4 h-4" />
+                طلبات معلقة
+              </h4>
+              <div className="space-y-2">
+                {propertyAddOns.filter(a => a.status === "pending").map((addon) => {
+                  const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                  return (
+                    <div 
+                      key={addon.id}
+                      className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-950/30 rounded-md text-sm border border-amber-200 dark:border-amber-800"
+                      data-testid={`addon-pending-${addon.id}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-amber-500 text-white text-xs">بانتظار الموافقة</Badge>
+                        <span className="font-medium">{pkg?.name || addon.addOnPackageId}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {addon.createdAt ? new Date(addon.createdAt).toLocaleDateString('en-US') : ""}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-amber-600 mt-2">
+                سيتم تفعيل الإضافات بعد مراجعة الإدارة للإيصال المرفوع
+              </p>
+            </div>
+          )}
+
           {/* عرض الإضافات المنتهية */}
           {propertyAddOns.filter(a => a.status === "expired").length > 0 && (
             <div className="mt-4 pt-4 border-t border-violet-200 dark:border-violet-800">
