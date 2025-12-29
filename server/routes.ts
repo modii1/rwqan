@@ -4659,34 +4659,119 @@ app.post("/api/paymob/webhook", async (req, res) => {
     const amount = (t.amount_cents || 0) / 100;
     const creationExtras = t.order?.extras?.creation_extras || {};
     if (creationExtras?.type === "addon") {
-    const addonId = creationExtras.addonId;
-    const addonPropertyNumber = creationExtras.propertyNumber;
+      const addonId = creationExtras.addonId;
+      const addonPropertyNumber = creationExtras.propertyNumber;
+      const addonName = creationExtras.addonName || addonId;
+      const addonPrice = creationExtras.price || amount;
+      const addonDays = creationExtras.days || 0;
+      
       if (!isSuccess) return res.json({ ok: true });
       
-  await googleSheetsService.createPropertyAddOn({
-  propertyNumber: addonPropertyNumber,
-  addOnPackageId: addonId,
-  status: "active",
-  startDate: new Date().toISOString(),
-  endDate: creationExtras.days && creationExtras.days > 0
-    ? new Date(Date.now() + creationExtras.days * 24 * 60 * 60 * 1000).toISOString()
-    : undefined,
-  paymentId: transactionId,
-  source: "paymob",
-});
+      console.log(`📦 Processing add-on payment: ${addonId} for property ${addonPropertyNumber}`);
+      
+      // ===============================
+      // حساب الرسوم للإضافات
+      // ===============================
+      let addonMerchantFees = 0;
+      let addonAcqFees = 0;
+      let addonVatAmount = 0;
+      let addonTotalFees = 0;
+      let addonNetAmount = amount;
+      
+      try {
+        const { paymobService } = await import("./paymob");
+        console.log(`📡 Calling Paymob Inquiry API for addon with order_id: ${paymobOrderId}`);
+        const inquiry = await paymobService.inquiryByOrderId(paymobOrderId);
+        
+        if (inquiry?.ok) {
+          addonMerchantFees = inquiry.merchantFees || 0;
+          addonAcqFees = inquiry.acqFees || 0;
+          addonVatAmount = inquiry.vat || 0;
+          addonTotalFees = inquiry.totalFees || 0;
+          addonNetAmount = inquiry.netAmount || (amount - addonTotalFees);
+          console.log(`✅ Got real fees for addon: total=${addonTotalFees}, net=${addonNetAmount}`);
+        } else {
+          // حساب احتياطي: 6.9% شامل الضريبة
+          addonTotalFees = Math.round(amount * 0.069 * 100) / 100;
+          addonNetAmount = Math.round((amount - addonTotalFees) * 100) / 100;
+        }
+      } catch (err) {
+        console.log("❌ Inquiry API Error for addon:", err);
+        addonTotalFees = Math.round(amount * 0.069 * 100) / 100;
+        addonNetAmount = Math.round((amount - addonTotalFees) * 100) / 100;
+      }
+      
+      // إنشاء سجل دفع في جدول المدفوعات
+      const paymentId = `PAY-ADDON-${Date.now()}`;
+      await googleSheetsService.createPayment({
+        id: paymentId,
+        propertyNumber: addonPropertyNumber,
+        amount: addonPrice,
+        discountCode: null,
+        finalAmount: addonPrice,
+        paymobOrderId,
+        status: "completed",
+        paymentMethod: "paymob",
+        receiptUrl: null,
+        createdAt: new Date().toISOString(),
+        packageId: addonId,
+        packageName: addonName,
+        action: "addon",
+        pendingStartDate: null,
+        pendingEndDate: null,
+        pendingSubscriptionType: null,
+        pendingPrice: addonPrice,
+        transactionId,
+        merchantFees: addonMerchantFees,
+        acqFees: addonAcqFees,
+        vatAmount: addonVatAmount,
+        totalFees: addonTotalFees,
+        netAmount: addonNetAmount,
+      });
+      
+      // إنشاء سجل الإضافة
+      const now = new Date();
+      const endDate = addonDays > 0
+        ? new Date(now.getTime() + addonDays * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
+        
+      await googleSheetsService.createPropertyAddOn({
+        propertyNumber: addonPropertyNumber,
+        addOnPackageId: addonId,
+        status: "active",
+        startDate: now.toISOString(),
+        endDate,
+        paymentId,
+        source: "paymob",
+      });
 
       // تسجيل العملية في سجل الإضافات
       await googleSheetsService.logAddOnHistory({
         propertyNumber: addonPropertyNumber,
         addOnPackageId: addonId,
         action: "activated",
-        notes: "تم تفعيل الإضافة بعد الدفع الإلكتروني",
+        notes: `تم تفعيل الإضافة بعد الدفع الإلكتروني - المبلغ: ${addonPrice} ر.س - الرسوم: ${addonTotalFees} ر.س`,
         createdBy: "system",
       });
+      
+      // إرسال إشعار واتساب
+      try {
+        const property = await googleSheetsService.getPropertyByNumber(addonPropertyNumber);
+        await sendWhatsAppNotification(
+          `✅ تم تفعيل إضافة جديدة (دفع إلكتروني)\n` +
+          `العقار: ${addonPropertyNumber} - ${property?.name || ''}\n` +
+          `الإضافة: ${addonName}\n` +
+          `المبلغ: ${addonPrice} ر.س\n` +
+          `الرسوم: ${addonTotalFees} ر.س\n` +
+          `صافي: ${addonNetAmount} ر.س`
+        );
+      } catch (e) {
+        console.error("Failed to send WhatsApp notification for addon:", e);
+      }
 
+      console.log(`✅ Add-on ${addonId} activated for property ${addonPropertyNumber}`);
       return res.json({ ok: true });
-
-}
+    }
 
 
     // استخراج رقم العقار
@@ -5522,6 +5607,28 @@ app.get("/api/owner/property-addons", async (req, res) => {
       // إنشاء سجل إضافة معلق
       const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
       const now = new Date();
+      const paymentId = `PAY-ADDON-${Date.now()}`;
+      
+      // إنشاء سجل دفع في جدول المدفوعات (مثل الاشتراكات)
+      await googleSheetsService.createPayment({
+        id: paymentId,
+        propertyNumber,
+        amount: addon.price,
+        discountCode: null,
+        finalAmount: addon.price,
+        paymobOrderId: null,
+        status: "pending",
+        paymentMethod: "bank_transfer",
+        receiptUrl,
+        createdAt: now.toISOString(),
+        packageId: addOnPackageId,
+        packageName: addon.name,
+        action: "addon",
+        pendingStartDate: null,
+        pendingEndDate: null,
+        pendingSubscriptionType: null,
+        pendingPrice: addon.price,
+      });
       
       await googleSheetsService.createPropertyAddOn({
         id: addOnId,
@@ -5530,7 +5637,7 @@ app.get("/api/owner/property-addons", async (req, res) => {
         status: "pending",
         startDate: null,
         endDate: null,
-        paymentId: null,
+        paymentId,
         receiptUrl,
         createdAt: now.toISOString(),
       });
@@ -5551,7 +5658,8 @@ app.get("/api/owner/property-addons", async (req, res) => {
       res.json({ 
         success: true, 
         message: "تم رفع الإيصال بنجاح، سيتم مراجعته وتفعيل الإضافة",
-        addOnId 
+        addOnId,
+        paymentId
       });
     } catch (err) {
       console.error("Bank transfer addon error:", err);
