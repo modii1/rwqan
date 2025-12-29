@@ -5416,7 +5416,76 @@ app.get("/api/owner/property-addons", async (req, res) => {
     }
   });
 
+  // =======================================
+  // OWNER – Bank Transfer for Add-On
+  // =======================================
+  app.post("/api/owner/addons/bank-transfer", upload.single('receipt'), async (req, res) => {
+    try {
+      const { propertyNumber, addOnPackageId, amount } = req.body;
+      const receiptFile = req.file;
 
+      if (!propertyNumber || !addOnPackageId || !receiptFile) {
+        return res.status(400).json({ error: "بيانات ناقصة" });
+      }
+
+      // التحقق من وجود الإضافة
+      const addon = await googleSheetsService.getAddOnPackageById(addOnPackageId);
+      if (!addon) {
+        return res.status(404).json({ error: "الإضافة غير موجودة" });
+      }
+
+      // التحقق من وجود العقار
+      const property = await googleSheetsService.getPropertyByNumber(propertyNumber);
+      if (!property) {
+        return res.status(404).json({ error: "العقار غير موجود" });
+      }
+
+      // رفع الإيصال للتخزين
+      const receiptKey = `addon-receipts/${propertyNumber}/${Date.now()}-${receiptFile.originalname}`;
+      await objectStorage.put(receiptKey, receiptFile.buffer, {
+        httpMetadata: { contentType: receiptFile.mimetype }
+      });
+      const receiptUrl = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/${receiptKey}`;
+
+      // إنشاء سجل إضافة معلق
+      const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
+      const now = new Date();
+      
+      await googleSheetsService.createPropertyAddOn({
+        id: addOnId,
+        propertyNumber,
+        addOnPackageId,
+        status: "pending",
+        startDate: null,
+        endDate: null,
+        paymentId: null,
+        receiptUrl,
+        createdAt: now.toISOString(),
+      });
+
+      // إرسال إشعار واتساب للإدارة
+      try {
+        await sendWhatsAppNotification(
+          `📦 طلب إضافة جديد (تحويل بنكي)\n` +
+          `العقار: ${propertyNumber} - ${property.name}\n` +
+          `الإضافة: ${addon.name}\n` +
+          `المبلغ: ${addon.price} ر.س\n` +
+          `رابط الإيصال: ${receiptUrl}`
+        );
+      } catch (e) {
+        console.error("Failed to send WhatsApp notification:", e);
+      }
+
+      res.json({ 
+        success: true, 
+        message: "تم رفع الإيصال بنجاح، سيتم مراجعته وتفعيل الإضافة",
+        addOnId 
+      });
+    } catch (err) {
+      console.error("Bank transfer addon error:", err);
+      res.status(500).json({ error: "فشل رفع الإيصال" });
+    }
+  });
 
   // ======================
   // DONE
