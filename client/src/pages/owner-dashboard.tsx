@@ -1621,7 +1621,7 @@ const calculateAnalytics = () => {
                 <div className="p-3 bg-muted/20 rounded-lg text-sm space-y-2">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">المبلغ:</span>
-                    <span className="font-bold">{selectedPaymentForReceipt.finalAmount} ر.س</span>
+                    <span className="font-bold"><PriceDisplay amount={selectedPaymentForReceipt.finalAmount} size="sm" /></span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">الباقة:</span>
@@ -2118,7 +2118,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
             <div>
               <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
-              <div className="font-bold text-primary">{amount} ر.س</div>
+              <div className="font-bold text-primary"><PriceDisplay amount={amount} size="sm" /></div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground mb-1">الباقة</div>
@@ -2157,7 +2157,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             {payment.amount && payment.amount !== amount && (
               <div>
                 <div className="text-xs text-muted-foreground mb-1">المبلغ الأصلي</div>
-                <div className="font-semibold">{payment.amount} ر.س</div>
+                <div className="font-semibold"><PriceDisplay amount={payment.amount} size="sm" /></div>
               </div>
             )}
 
@@ -2173,14 +2173,14 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             {payment.discountAmount > 0 && (
               <div>
                 <div className="text-xs text-muted-foreground mb-1">قيمة الخصم</div>
-                <div className="font-semibold text-green-600">-{payment.discountAmount} ر.س</div>
+                <div className="font-semibold text-green-600">-<PriceDisplay amount={payment.discountAmount} size="sm" /></div>
               </div>
             )}
 
             {/* المبلغ المدفوع */}
             <div>
               <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
-              <div className="font-bold text-primary">{amount} ر.س</div>
+              <div className="font-bold text-primary"><PriceDisplay amount={amount} size="sm" /></div>
             </div>
 
             {/* فترة الاشتراك */}
