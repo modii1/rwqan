@@ -1022,7 +1022,7 @@ const calculateAnalytics = () => {
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Star className="w-3 h-3" />
-                            <span>{pkg?.price || 0} ر.س</span>
+                            <PriceDisplay amount={pkg?.price || 0} size="sm" />
                           </div>
                           <div className="flex items-center gap-1">
                             <Clock className="w-3 h-3" />
