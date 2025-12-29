@@ -426,16 +426,20 @@ export const propertyAddOnSchema = z.object({
     "active",    // نشط
     "expired",   // منتهي
     "cancelled", // ملغي
+    "rejected",  // مرفوض
   ]),
 
-  startDate: z.string(), // تاريخ التفعيل
+  startDate: z.string().optional(), // تاريخ التفعيل (فارغ للمعلقة)
   endDate: z.string().optional(), // فارغ = دائم
 
   paymentId: z.string().optional(), // معرف الدفع (Paymob / تحويل)
+  receiptUrl: z.string().optional(), // رابط إيصال التحويل البنكي
   source: z.enum([
     "paymob",
     "bank_transfer",
+    "bank",
     "admin",
+    "system",
   ]),
 
   createdAt: z.string(),
