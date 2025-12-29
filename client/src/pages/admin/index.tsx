@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Volume2,
   VolumeX,
+  Package,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -477,6 +478,8 @@ function AlertsDashboard() {
       case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-white" />;
       case 'expired-subscriptions': return <Bell className="w-5 h-5 text-white" />;
       case 'updates': return <TrendingUp className="w-5 h-5 text-white" />;
+      case 'pending-addons': return <Package className="w-5 h-5 text-white" />;
+      case 'new-addons': return <Package className="w-5 h-5 text-white" />;
       default: return <Bell className="w-5 h-5 text-white" />;
     }
   };
