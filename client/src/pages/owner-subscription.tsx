@@ -501,8 +501,8 @@ export default function OwnerSubscriptionPage() {
                       
                       <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
                         <div className="flex items-center gap-1">
-                          <Star className="w-3 h-3" />
-                          <span className="font-bold text-foreground">{addon.price} ر.س</span>
+                          <span className="font-bold text-foreground">{addon.price}</span>
+                          <img src={riyal} alt="ريال" className="w-3 h-3 inline-block opacity-85" />
                         </div>
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -615,8 +615,9 @@ export default function OwnerSubscriptionPage() {
                   {(() => {
                     const addon = addOnPackages.find(p => p.id === selectedAddonForPurchase);
                     return addon ? (
-                      <span>
-                        <strong>{addon.name}</strong> - {addon.price} ر.س
+                      <span className="flex items-center gap-1">
+                        <strong>{addon.name}</strong> - {addon.price}
+                        <img src={riyal} alt="ريال" className="w-3 h-3 inline-block opacity-85" />
                       </span>
                     ) : null;
                   })()}
