@@ -1058,29 +1058,71 @@ const calculateAnalytics = () => {
             <div className="mt-4 pt-4 border-t border-amber-200 dark:border-amber-800">
               <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-amber-600">
                 <Clock className="w-4 h-4" />
-                طلبات معلقة
+                طلبات معلقة ({propertyAddOns.filter(a => a.status === "pending").length})
               </h4>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {propertyAddOns.filter(a => a.status === "pending").map((addon) => {
                   const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
                   return (
-                    <div 
+                    <Card 
                       key={addon.id}
-                      className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-950/30 rounded-md text-sm border border-amber-200 dark:border-amber-800"
+                      className="p-4 relative overflow-hidden border-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
                       data-testid={`addon-pending-${addon.id}`}
                     >
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-amber-500 text-white text-xs">بانتظار الموافقة</Badge>
-                        <span className="font-medium">{pkg?.name || addon.addOnPackageId}</span>
+                      <div className="absolute top-0 right-0 left-0 h-1 bg-amber-500" />
+                      
+                      <div className="flex items-start justify-between gap-3 mt-1">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <h4 className="font-semibold">{pkg?.name || addon.addOnPackageId}</h4>
+                            {pkg && (
+                              <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
+                                {pkg.category}
+                              </Badge>
+                            )}
+                            <Badge className="bg-amber-500 text-white text-xs">
+                              <Clock className="w-3 h-3 ml-1" />
+                              بانتظار الموافقة
+                            </Badge>
+                          </div>
+                          
+                          {pkg?.description && (
+                            <p className="text-xs text-muted-foreground mb-2">{pkg.description}</p>
+                          )}
+                          
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1">
+                              <Star className="w-3 h-3" />
+                              <PriceDisplay amount={pkg?.price || 0} size="sm" />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            <span>تاريخ الطلب: </span>
+                            <span className="font-medium">
+                              {addon.createdAt ? new Date(addon.createdAt).toLocaleDateString('en-US') : "-"}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="text-left shrink-0">
+                          <div className="text-xs text-center">
+                            <p className="text-muted-foreground">بعد التفعيل</p>
+                            <p className="font-bold text-amber-600">
+                              {pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {addon.createdAt ? new Date(addon.createdAt).toLocaleDateString('en-US') : ""}
-                      </span>
-                    </div>
+                    </Card>
                   );
                 })}
               </div>
-              <p className="text-xs text-amber-600 mt-2">
+              <p className="text-xs text-amber-600 mt-3 bg-amber-100 dark:bg-amber-900/30 p-2 rounded-md">
                 سيتم تفعيل الإضافات بعد مراجعة الإدارة للإيصال المرفوع
               </p>
             </div>
