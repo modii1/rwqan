@@ -203,7 +203,7 @@ const totals = completedPayments.reduce((acc, p) => {
 
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4" dir="rtl">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">المدفوعات</h2>

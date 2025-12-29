@@ -93,7 +93,7 @@ export default function SettingsSection() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" dir="rtl">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

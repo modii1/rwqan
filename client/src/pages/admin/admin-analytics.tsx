@@ -41,7 +41,7 @@ export default function AdminAnalytics() {
     );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" dir="rtl">
       {/* Header */}
       <header className="border-b border-border shadow-sm bg-gradient-to-r from-primary/5 to-primary/10">
         <div className="max-w-7xl mx-auto px-4 py-6 flex items-center justify-between gap-3">

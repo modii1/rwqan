@@ -70,7 +70,7 @@ export default function DiscountsSection() {
   };
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       {/* ================= عنوان ================= */}
       <div className="flex items-center justify-between gap-2">
         <div>
