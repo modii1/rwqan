@@ -955,116 +955,122 @@ const calculateAnalytics = () => {
           </div>
         </Card>
 
-        {/* ===== قسم الإضافات ===== */}
+        {/* ===== قسم الإضافات (عرض فقط) - يظهر فقط عند وجود اشتراك نشط ===== */}
+        {currentSubscription && currentSubscription.status === "active" && (
         <Card className="p-4 md:p-6 border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/50 to-purple-50/50 dark:from-violet-950/30 dark:to-purple-950/30">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-violet-600" />
-              <h2 className="font-bold text-base md:text-lg text-violet-600">الإضافات</h2>
+              <h2 className="font-bold text-base md:text-lg text-violet-600">إضافاتك</h2>
             </div>
-            <Badge variant="outline" className="text-violet-600 border-violet-300 bg-violet-100 dark:bg-violet-900/30">
-              عزز ظهور عقارك
-            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-violet-600 border-violet-300 hover:bg-violet-100"
+              onClick={() => setLocation("/owner/subscription")}
+              data-testid="button-go-to-addons"
+            >
+              <Plus className="w-4 h-4 ml-1" />
+              شراء إضافات
+            </Button>
           </div>
 
-          {addOnPackages.filter(p => p.isActive).length === 0 ? (
+          {/* عرض الإضافات النشطة فقط */}
+          {propertyAddOns.filter(a => a.status === "active").length === 0 ? (
             <div className="text-center py-6">
               <Zap className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-muted-foreground text-sm">لا توجد إضافات متاحة حالياً</p>
-              <p className="text-xs text-muted-foreground mt-1">سيتم إضافة باقات جديدة قريباً</p>
+              <p className="text-muted-foreground text-sm">لا توجد إضافات نشطة لعقارك</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                اذهب لصفحة الاشتراك لشراء إضافات جديدة
+              </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {addOnPackages.filter(p => p.isActive).map((addon) => {
-                const isActive = hasActiveAddon(addon.id);
-                const isPurchasing = purchasingAddonId === addon.id;
+            <div className="space-y-3">
+              {propertyAddOns.filter(a => a.status === "active").map((addon) => {
+                const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                const endDate = addon.endDate ? new Date(addon.endDate) : null;
+                const now = new Date();
+                const daysLeft = endDate ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
                 
                 return (
                   <Card 
-                    key={addon.id} 
-                    className={`p-4 relative overflow-hidden ${isActive ? 'border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20' : ''}`}
-                    data-testid={`addon-card-${addon.id}`}
+                    key={addon.id}
+                    className="p-4 relative overflow-hidden border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20"
+                    data-testid={`addon-active-${addon.id}`}
                   >
-                    <div className={`absolute top-0 right-0 left-0 h-1 ${getCategoryColor(addon.category)}`} />
+                    <div className={`absolute top-0 right-0 left-0 h-1 ${pkg ? getCategoryColor(pkg.category) : 'bg-emerald-500'}`} />
                     
-                    <div className="flex items-start justify-between gap-2 mb-3 mt-1">
+                    <div className="flex items-start justify-between gap-3 mt-1">
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-semibold text-sm">{addon.name}</h4>
-                          <Badge className={`${getCategoryColor(addon.category)} text-white text-xs`}>
-                            {addon.category}
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <h4 className="font-semibold">{pkg?.name || addon.addOnPackageId}</h4>
+                          {pkg && (
+                            <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
+                              {pkg.category}
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs">
+                            <CheckCircle2 className="w-3 h-3 ml-1" />
+                            نشط
                           </Badge>
                         </div>
-                        {addon.description && (
-                          <p className="text-xs text-muted-foreground mt-1">{addon.description}</p>
+                        
+                        {pkg?.description && (
+                          <p className="text-xs text-muted-foreground mb-2">{pkg.description}</p>
                         )}
+                        
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3 h-3" />
+                            <span>{pkg?.price || 0} ر.س</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}</span>
+                          </div>
+                        </div>
                       </div>
                       
-                      {isActive && (
-                        <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs shrink-0">
-                          <CheckCircle2 className="w-3 h-3 ml-1" />
-                          مفعّل
-                        </Badge>
-                      )}
-                    </div>
-                    
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
-                      <div className="flex items-center gap-1">
-                        <Star className="w-3 h-3" />
-                        <span className="font-bold text-foreground">{addon.price} ر.س</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{addon.durationDays === 0 ? "دائم" : `${addon.durationDays} يوم`}</span>
+                      <div className="text-left shrink-0">
+                        {endDate ? (
+                          <div className="text-xs">
+                            <p className="text-muted-foreground">ينتهي في</p>
+                            <p className="font-bold text-foreground">{endDate.toLocaleDateString('en-US')}</p>
+                            {daysLeft !== null && daysLeft > 0 && (
+                              <p className={`text-xs mt-1 ${daysLeft <= 3 ? 'text-red-500 font-bold' : 'text-emerald-600'}`}>
+                                باقي {daysLeft} يوم
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge className="bg-emerald-500 text-white">دائم</Badge>
+                        )}
                       </div>
                     </div>
-                    
-                    <Button
-                      onClick={() => handlePurchaseAddon(addon.id)}
-                      disabled={isActive || isPurchasing}
-                      className="w-full"
-                      size="sm"
-                      variant={isActive ? "secondary" : "default"}
-                      data-testid={`button-purchase-addon-${addon.id}`}
-                    >
-                      {isPurchasing ? (
-                        <>
-                          <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                          جاري التحويل...
-                        </>
-                      ) : isActive ? (
-                        "مفعّل بالفعل"
-                      ) : (
-                        <>
-                          <CreditCard className="w-4 h-4 ml-2" />
-                          شراء الآن
-                        </>
-                      )}
-                    </Button>
                   </Card>
                 );
               })}
             </div>
           )}
 
-          {/* إضافات العقار النشطة */}
-          {propertyAddOns.filter(a => a.status === "active").length > 0 && (
+          {/* عرض الإضافات المنتهية */}
+          {propertyAddOns.filter(a => a.status === "expired").length > 0 && (
             <div className="mt-4 pt-4 border-t border-violet-200 dark:border-violet-800">
-              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-violet-700 dark:text-violet-300">
-                <CheckCircle2 className="w-4 h-4" />
-                إضافاتك النشطة
+              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-muted-foreground">
+                <XCircle className="w-4 h-4" />
+                إضافات منتهية
               </h4>
               <div className="space-y-2">
-                {propertyAddOns.filter(a => a.status === "active").map((addon) => {
+                {propertyAddOns.filter(a => a.status === "expired").map((addon) => {
                   const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
                   return (
                     <div 
                       key={addon.id}
-                      className="flex items-center justify-between p-2 bg-emerald-50 dark:bg-emerald-950/30 rounded-md text-sm border border-emerald-200 dark:border-emerald-800"
+                      className="flex items-center justify-between p-2 bg-muted/30 rounded-md text-sm border border-muted"
                     >
-                      <span className="font-medium">{pkg?.name || addon.addOnPackageId}</span>
+                      <span className="text-muted-foreground">{pkg?.name || addon.addOnPackageId}</span>
                       <span className="text-xs text-muted-foreground">
-                        {addon.endDate ? `ينتهي: ${new Date(addon.endDate).toLocaleDateString('en-US')}` : "دائم"}
+                        انتهى: {addon.endDate ? new Date(addon.endDate).toLocaleDateString('en-US') : "-"}
                       </span>
                     </div>
                   );
@@ -1073,6 +1079,7 @@ const calculateAnalytics = () => {
             </div>
           )}
         </Card>
+      )}
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
