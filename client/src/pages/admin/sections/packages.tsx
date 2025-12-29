@@ -200,8 +200,8 @@ export default function PackagesSection() {
                 جاري تحميل الباقات...
               </div>
             ) : (
-              <table className="w-full text-xs md:text-sm">
-                <thead className="bg-muted/50 text-right">
+              <table className="w-full text-xs md:text-sm" dir="rtl">
+                <thead className="bg-muted/50">
                   <tr>
                     <Th>اسم الباقة</Th>
                     <Th>السعر (ريال)</Th>
@@ -263,8 +263,8 @@ export default function PackagesSection() {
                 جاري تحميل باقات الإضافات...
               </div>
             ) : (
-              <table className="w-full text-xs md:text-sm">
-                <thead className="bg-muted/50 text-right">
+              <table className="w-full text-xs md:text-sm" dir="rtl">
+                <thead className="bg-muted/50">
                   <tr>
                     <Th>اسم الباقة</Th>
                     <Th>الفئة</Th>
