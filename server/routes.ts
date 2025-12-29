@@ -4678,7 +4678,22 @@ app.get("/api/paymob/webhook", async (req, res) => {
 
       // التوجيه حسب نوع العملية
       let redirectUrl: string;
-      if (paymentAction === 'upgrade' || paymentAction === 'extend') {
+      
+      // جلب الدفعة للتحقق من نوع الباقة
+      let isAddonPayment = false;
+      if (propertyNumber) {
+        const payments = await storage.getPayments();
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const recentPayment = payments
+          .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
+          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+        isAddonPayment = recentPayment?.packageId?.startsWith('addon-') || false;
+      }
+      
+      if (isAddonPayment) {
+        // إضافة: توجيه لصفحة الإضافات
+        redirectUrl = `/owner/addons?payment=success`;
+      } else if (paymentAction === 'upgrade' || paymentAction === 'extend') {
         // الترقية والتمديد: توجيه للوحة التحكم
         redirectUrl = `/owner/dashboard?payment=success`;
       } else {
@@ -4686,7 +4701,7 @@ app.get("/api/paymob/webhook", async (req, res) => {
         redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
       }
       
-      console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'})`);
+      console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'}, isAddon: ${isAddonPayment})`);
       return res.redirect(redirectUrl);
     } else {
       return res.redirect(`/subscription?payment=failed`);
