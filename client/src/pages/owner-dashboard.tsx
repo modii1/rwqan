@@ -63,12 +63,25 @@ export default function OwnerDashboard() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const paymentStatus = urlParams.get('payment');
+    const addonPaymentStatus = urlParams.get('addon_payment');
     
     if (paymentStatus === 'success') {
       toast({
         title: "تم الدفع بنجاح!",
         description: "تم تفعيل اشتراكك بنجاح. شكراً لك!",
       });
+      // إزالة query param من URL
+      window.history.replaceState({}, '', '/owner/dashboard');
+    }
+    
+    if (addonPaymentStatus === 'success') {
+      toast({
+        title: "تم الدفع بنجاح!",
+        description: "تم استلام طلب الإضافة وهو الآن قيد مراجعة الإدارة. سيتم تفعيله قريباً.",
+      });
+      // تحديث بيانات الإضافات
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
       // إزالة query param من URL
       window.history.replaceState({}, '', '/owner/dashboard');
     }

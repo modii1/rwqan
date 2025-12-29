@@ -4719,8 +4719,8 @@ app.get("/api/paymob/webhook", async (req, res) => {
       }
       
       if (isAddonPaymentRedirect) {
-        // إضافة: توجيه لصفحة الإضافات
-        redirectUrl = `/owner/addons?payment=success`;
+        // إضافة: توجيه للوحة التحكم مع تحديد نجاح الدفع
+        redirectUrl = `/owner/dashboard?addon_payment=success`;
       } else if (paymentAction === 'upgrade' || paymentAction === 'extend') {
         // الترقية والتمديد: توجيه للوحة التحكم
         redirectUrl = `/owner/dashboard?payment=success`;
@@ -4808,7 +4808,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
         addonNetAmount = Math.round((amount - addonTotalFees) * 100) / 100;
       }
       
-      // إنشاء سجل دفع في جدول المدفوعات
+      // إنشاء سجل دفع في جدول المدفوعات - بحالة "نجح - قيد التحقق" للمراجعة
       const paymentId = `PAY-ADDON-${Date.now()}`;
       await googleSheetsService.createPayment({
         id: paymentId,
@@ -4818,7 +4818,7 @@ app.post("/api/paymob/webhook", async (req, res) => {
         discountAmount: 0,
         finalAmount: addonPrice,
         paymobOrderId,
-        status: "completed",
+        status: "نجح - قيد التحقق",
         paymentMethod: "paymob",
         receiptUrl: null,
         createdAt: new Date().toISOString(),
@@ -4837,18 +4837,13 @@ app.post("/api/paymob/webhook", async (req, res) => {
         netAmount: addonNetAmount,
       });
       
-      // إنشاء سجل الإضافة
-      const now = new Date();
-      const endDate = addonDays > 0
-        ? new Date(now.getTime() + addonDays * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
-        
+      // إنشاء سجل الإضافة بحالة "pending" للمراجعة من الإدارة
       await googleSheetsService.createPropertyAddOn({
         propertyNumber: addonPropertyNumber,
         addOnPackageId: addonId,
-        status: "active",
-        startDate: now.toISOString(),
-        endDate,
+        status: "pending",
+        startDate: null,
+        endDate: null,
         paymentId,
         source: "paymob",
       });
@@ -4857,27 +4852,28 @@ app.post("/api/paymob/webhook", async (req, res) => {
       await googleSheetsService.logAddOnHistory({
         propertyNumber: addonPropertyNumber,
         addOnPackageId: addonId,
-        action: "activated",
-        notes: `تم تفعيل الإضافة بعد الدفع الإلكتروني - المبلغ: ${addonPrice} ر.س - الرسوم: ${addonTotalFees} ر.س`,
+        action: "pending",
+        notes: `تم استلام الدفع الإلكتروني - المبلغ: ${addonPrice} ر.س - الرسوم: ${addonTotalFees} ر.س - بانتظار مراجعة الإدارة`,
         createdBy: "system",
       });
       
-      // إرسال إشعار واتساب
+      // إرسال إشعار واتساب للإدارة
       try {
         const property = await googleSheetsService.getPropertyByNumber(addonPropertyNumber);
         await sendWhatsAppNotification(
-          `✅ تم تفعيل إضافة جديدة (دفع إلكتروني)\n` +
+          `🔔 طلب إضافة جديد (دفع إلكتروني) - قيد المراجعة\n` +
           `العقار: ${addonPropertyNumber} - ${property?.name || ''}\n` +
           `الإضافة: ${addonName}\n` +
           `المبلغ: ${addonPrice} ر.س\n` +
           `الرسوم: ${addonTotalFees} ر.س\n` +
-          `صافي: ${addonNetAmount} ر.س`
+          `صافي: ${addonNetAmount} ر.س\n` +
+          `📋 الحالة: قيد مراجعة الإدارة`
         );
       } catch (e) {
         console.error("Failed to send WhatsApp notification for addon:", e);
       }
 
-      console.log(`✅ Add-on ${addonId} activated for property ${addonPropertyNumber}`);
+      console.log(`✅ Add-on ${addonId} pending approval for property ${addonPropertyNumber}`);
       return res.json({ ok: true });
     }
 
