@@ -22,7 +22,10 @@ import {
   Zap,
   CheckCircle,
   History,
-  Home
+  Home,
+  X,
+  ExternalLink,
+  Clock
 } from "lucide-react";
 import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
 import type { AddOnPackage, PropertyAddOn } from "@shared/schema";
@@ -43,8 +46,12 @@ export default function AdminAddonsSection() {
     queryKey: ["/api/admin/property-addons"],
   });
 
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+
   const approveMutation = useMutation({
     mutationFn: async (propertyAddOnId: string) => {
+      setApprovingId(propertyAddOnId);
       return apiRequest("POST", "/api/admin/addons/approve", { propertyAddOnId });
     },
     onSuccess: () => {
@@ -54,6 +61,7 @@ export default function AdminAddonsSection() {
       });
       setApproveDialogOpen(false);
       setSelectedAddOnId("");
+      setApprovingId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/property-addons"] });
     },
     onError: (error: any) => {
@@ -62,6 +70,30 @@ export default function AdminAddonsSection() {
         description: error?.message || "حدث خطأ أثناء تفعيل الإضافة",
         variant: "destructive",
       });
+      setApprovingId(null);
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async (propertyAddOnId: string) => {
+      setRejectingId(propertyAddOnId);
+      return apiRequest("POST", "/api/admin/addons/reject", { propertyAddOnId });
+    },
+    onSuccess: () => {
+      toast({
+        title: "تم الرفض",
+        description: "تم رفض طلب الإضافة",
+      });
+      setRejectingId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/property-addons"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "خطأ في الرفض",
+        description: error?.message || "حدث خطأ أثناء رفض الإضافة",
+        variant: "destructive",
+      });
+      setRejectingId(null);
     },
   });
 
@@ -76,6 +108,10 @@ export default function AdminAddonsSection() {
     }
     approveMutation.mutate(selectedAddOnId);
   };
+
+  // فصل الإضافات المعلقة عن الباقي
+  const pendingAddOns = propertyAddOns.filter(a => a.status === "pending");
+  const otherAddOns = propertyAddOns.filter(a => a.status !== "pending");
 
   const filteredPackages = packages.filter(pkg =>
     pkg.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -149,55 +185,6 @@ export default function AdminAddonsSection() {
             تحديث
           </Button>
 
-          <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="gap-2" data-testid="button-approve-addon">
-                <CheckCircle className="w-4 h-4" />
-                تفعيل إضافة
-              </Button>
-            </DialogTrigger>
-            <DialogContent dir="rtl">
-              <DialogHeader>
-                <DialogTitle>تفعيل إضافة بعد التحويل البنكي</DialogTitle>
-                <DialogDescription>
-                  أدخل معرف الإضافة لتفعيلها بعد التأكد من استلام التحويل البنكي
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="addonId">معرف الإضافة (Property Add-On ID)</Label>
-                  <Input
-                    id="addonId"
-                    placeholder="مثال: prop-addon-1234567890"
-                    value={selectedAddOnId}
-                    onChange={(e) => setSelectedAddOnId(e.target.value)}
-                    data-testid="input-addon-id"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    يمكنك الحصول على هذا المعرف من جدول "سجل إضافات العقارات" أدناه
-                  </p>
-                </div>
-                <Button
-                  onClick={handleApprove}
-                  disabled={approveMutation.isPending || !selectedAddOnId}
-                  className="w-full gap-2"
-                  data-testid="button-confirm-approve"
-                >
-                  {approveMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      جاري التفعيل...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      تفعيل الإضافة
-                    </>
-                  )}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
         </div>
       </div>
 
@@ -335,56 +322,151 @@ export default function AdminAddonsSection() {
         </TabsContent>
 
         <TabsContent value="history" className="space-y-4 mt-4">
-          <Card className="overflow-x-auto">
-            {propertyAddOnsLoading ? (
-              <div className="p-4 flex items-center gap-2 text-muted-foreground text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                جاري تحميل سجل الإضافات...
-              </div>
-            ) : (
-              <table className="w-full text-xs md:text-sm" dir="rtl">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <Th>المعرف</Th>
-                    <Th>رقم العقار</Th>
-                    <Th>الباقة</Th>
-                    <Th>الحالة</Th>
-                    <Th>تاريخ البدء</Th>
-                    <Th>تاريخ الانتهاء</Th>
-                    <Th>المصدر</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {propertyAddOns.map((addon) => (
-                    <tr key={addon.id} className="border-t hover:bg-muted/40">
-                      <Td className="font-mono text-xs">{addon.id}</Td>
-                      <Td className="font-medium">{addon.propertyNumber}</Td>
-                      <Td>{getPackageName(addon.addOnPackageId)}</Td>
-                      <Td>{getStatusBadge(addon.status)}</Td>
-                      <Td>{addon.startDate ? formatLiveSaudiDate(addon.startDate) : "-"}</Td>
-                      <Td>{addon.endDate ? formatLiveSaudiDate(addon.endDate) : "دائم"}</Td>
-                      <Td>
-                        <Badge variant="outline" className="text-xs">
-                          {addon.source === "paymob" ? "دفع إلكتروني" : 
-                           addon.source === "admin" ? "تفعيل يدوي" : addon.source}
-                        </Badge>
-                      </Td>
-                    </tr>
-                  ))}
+          {propertyAddOnsLoading ? (
+            <div className="p-4 flex items-center gap-2 text-muted-foreground text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              جاري تحميل سجل الإضافات...
+            </div>
+          ) : (
+            <>
+              {/* طلبات الإضافات المعلقة */}
+              {pendingAddOns.length > 0 && (
+                <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-amber-600" />
+                      طلبات معلقة ({pendingAddOns.length})
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      إضافات بانتظار الموافقة بعد التحويل البنكي
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-3">
+                      {pendingAddOns.map((addon) => {
+                        const pkg = packages.find(p => p.id === addon.addOnPackageId);
+                        return (
+                          <div 
+                            key={addon.id} 
+                            className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 bg-white dark:bg-background rounded-lg border"
+                          >
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge className="bg-amber-500 text-white text-xs">معلق</Badge>
+                                <span className="font-bold">{addon.propertyNumber}</span>
+                                <span className="text-muted-foreground">-</span>
+                                <span className="text-sm">{pkg?.name || addon.addOnPackageId}</span>
+                                {pkg && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {pkg.price} ر.س / {pkg.durationDays === 0 ? "دائم" : `${pkg.durationDays} يوم`}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
+                                <span>المعرف: {addon.id}</span>
+                                {addon.createdAt && (
+                                  <span>التاريخ: {formatLiveSaudiDate(addon.createdAt)}</span>
+                                )}
+                                {(addon as any).receiptUrl && (
+                                  <a 
+                                    href={(addon as any).receiptUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline flex items-center gap-1"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    عرض الإيصال
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => approveMutation.mutate(addon.id)}
+                                disabled={approvingId === addon.id || rejectingId === addon.id}
+                                className="gap-1 bg-emerald-600 hover:bg-emerald-700"
+                                data-testid={`button-approve-${addon.id}`}
+                              >
+                                {approvingId === addon.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Check className="w-3 h-3" />
+                                )}
+                                قبول
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => rejectMutation.mutate(addon.id)}
+                                disabled={approvingId === addon.id || rejectingId === addon.id}
+                                className="gap-1"
+                                data-testid={`button-reject-${addon.id}`}
+                              >
+                                {rejectingId === addon.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <X className="w-3 h-3" />
+                                )}
+                                رفض
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-                  {propertyAddOns.length === 0 && (
+              {/* سجل الإضافات */}
+              <Card className="overflow-x-auto">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">سجل الإضافات</CardTitle>
+                </CardHeader>
+                <table className="w-full text-xs md:text-sm" dir="rtl">
+                  <thead className="bg-muted/50">
                     <tr>
-                      <Td colSpan={7}>
-                        <div className="p-4 text-center text-xs text-muted-foreground">
-                          لا توجد إضافات عقارات مسجلة حالياً
-                        </div>
-                      </Td>
+                      <Th>رقم العقار</Th>
+                      <Th>الباقة</Th>
+                      <Th>الحالة</Th>
+                      <Th>تاريخ البدء</Th>
+                      <Th>تاريخ الانتهاء</Th>
+                      <Th>المصدر</Th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            )}
-          </Card>
+                  </thead>
+                  <tbody>
+                    {otherAddOns.map((addon) => (
+                      <tr key={addon.id} className="border-t hover:bg-muted/40">
+                        <Td className="font-medium">{addon.propertyNumber}</Td>
+                        <Td>{getPackageName(addon.addOnPackageId)}</Td>
+                        <Td>{getStatusBadge(addon.status)}</Td>
+                        <Td>{addon.startDate ? formatLiveSaudiDate(addon.startDate) : "-"}</Td>
+                        <Td>{addon.endDate ? formatLiveSaudiDate(addon.endDate) : "دائم"}</Td>
+                        <Td>
+                          <Badge variant="outline" className="text-xs">
+                            {addon.source === "paymob" ? "دفع إلكتروني" : 
+                             addon.source === "admin" ? "تفعيل يدوي" : 
+                             (addon.source === "bank" || addon.source === "bank_transfer") ? "تحويل بنكي" : addon.source || "-"}
+                          </Badge>
+                        </Td>
+                      </tr>
+                    ))}
+
+                    {otherAddOns.length === 0 && (
+                      <tr>
+                        <Td colSpan={6}>
+                          <div className="p-4 text-center text-xs text-muted-foreground">
+                            لا توجد إضافات عقارات مسجلة حالياً
+                          </div>
+                        </Td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>
