@@ -254,7 +254,7 @@ export default function PropertiesSection() {
   );
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">إدارة العقارات</h2>

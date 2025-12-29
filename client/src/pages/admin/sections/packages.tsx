@@ -163,7 +163,7 @@ export default function PackagesSection() {
   };
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       <div className="flex items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">إدارة الباقات</h2>

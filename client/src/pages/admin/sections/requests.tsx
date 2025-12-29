@@ -26,7 +26,7 @@ export default function RequestsSection() {
   const requests = data?.recentRequests || [];
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       {/* ================= عنوان ================= */}
       <div>
         <h2 className="text-lg font-semibold">طلبات واتساب</h2>
