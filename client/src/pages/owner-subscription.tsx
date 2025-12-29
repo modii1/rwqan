@@ -56,6 +56,11 @@ export default function OwnerSubscriptionPage() {
   // حالة الإضافات
   const [showAddOns, setShowAddOns] = useState(false);
   const [purchasingAddonId, setPurchasingAddonId] = useState<string | null>(null);
+  const [selectedAddonForPurchase, setSelectedAddonForPurchase] = useState<string | null>(null);
+  const [addonPaymentMethod, setAddonPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [addonReceiptFile, setAddonReceiptFile] = useState<File | null>(null);
+  const [isUploadingAddonReceipt, setIsUploadingAddonReceipt] = useState(false);
+  const addonFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
