@@ -2681,6 +2681,9 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     let pendingSubscriptionType: string | undefined;
     let pendingPrice: number | undefined;
 
+    // التحقق إذا كانت الباقة إضافة
+    const isAddon = packageId.startsWith('addon-');
+
     // حساب تواريخ الاشتراك لجميع الحالات
     const today = new Date();
     let startDate = today;
@@ -2688,7 +2691,7 @@ app.post("/api/owner/payment/initiate", async (req, res) => {
     let price = pkg.price;
     let subscriptionType = pkg.type;
 
-if (!isAddon && (action === 'extend' || action === 'upgrade')) {
+    if (!isAddon && (action === 'extend' || action === 'upgrade')) {
       const currentSubscription = await googleSheetsService.getSubscriptionByPropertyNumber(propertyNumber);
 
       // إذا كان التمديد، احتفظ بالسعر ونوع الاشتراك الحالي
