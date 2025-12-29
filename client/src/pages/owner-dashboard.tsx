@@ -1885,28 +1885,34 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
 
   // التحقق من إظهار زر إكمال/إعادة الدفع (للدفعات الإلكترونية فقط)
   const shouldShowRetryButton = (payment: any) => {
+    const method = getPaymentMethodArabic(payment.paymentMethod);
+    const status = getStatusArabic(payment.status);
+    
     // استثناء التحويل البنكي - يظهر له زر "رفع إيصال" منفصل
-    if (payment.paymentMethod === "تحويل بنكي") return false;
+    if (method === "تحويل بنكي") return false;
 
     // للدفعات الفاشلة الإلكترونية، اظهر الزر دائماً
-    if (payment.status === "فشل") return true;
+    if (status === "فشل") return true;
 
     // للدفعات المعلقة الإلكترونية، اظهر الزر مباشرة
-    if (payment.status === "معلق") return true;
+    if (status === "معلق") return true;
 
     // للدفعات الإلكترونية بحالة "قيد المراجعة" (غير مكتملة)
-    if (payment.status === "قيد المراجعة") return true;
+    if (status === "قيد المراجعة") return true;
 
     return false;
   };
   
   // التحقق من إظهار زر رفع إيصال للتحويل البنكي
   const shouldShowUploadReceiptButton = (payment: any) => {
+    const method = getPaymentMethodArabic(payment.paymentMethod);
+    const status = getStatusArabic(payment.status);
+    
     // فقط للتحويل البنكي
-    if (payment.paymentMethod !== "تحويل بنكي") return false;
+    if (method !== "تحويل بنكي") return false;
     
     // للحالات: معلق، قيد المراجعة
-    return payment.status === "معلق" || payment.status === "قيد المراجعة";
+    return status === "معلق" || status === "قيد المراجعة";
   };
 
   const formatDate = (dateStr: string) => {
@@ -1925,11 +1931,41 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
       'pkg-month-2properties': 'اشتراك شهر لعقارين',
       'pkg-free': 'باقة مجانية',
     };
-    return packageNames[packageId] || packageId || 'باقة';
+    if (packageNames[packageId]) return packageNames[packageId];
+    if (packageId?.startsWith('addon-')) return 'إضافة';
+    return 'باقة';
+  };
+  
+  const getPaymentMethodArabic = (method: string) => {
+    switch (method) {
+      case 'bank_transfer': return 'تحويل بنكي';
+      case 'paymob': return 'دفع إلكتروني';
+      case 'cards': return 'بطاقة';
+      case 'apple_pay': return 'Apple Pay';
+      case 'تحويل بنكي': return 'تحويل بنكي';
+      case 'دفع إلكتروني': return 'دفع إلكتروني';
+      default: return method || 'غير محدد';
+    }
+  };
+  
+  const getStatusArabic = (status: string) => {
+    switch (status) {
+      case 'completed': return 'مكتمل';
+      case 'pending': return 'معلق';
+      case 'failed': return 'فشل';
+      case 'cancelled': return 'ملغي';
+      case 'مكتمل': return 'مكتمل';
+      case 'معلق': return 'معلق';
+      case 'فشل': return 'فشل';
+      case 'قيد المراجعة': return 'قيد المراجعة';
+      case 'نجح - قيد التحقق': return 'نجح - قيد التحقق';
+      default: return status || 'غير محدد';
+    }
   };
 
   const amount = payment.finalAmount || payment.amount || 0;
-  const isCompleted = payment.status === "مكتمل";
+  const normalizedStatus = getStatusArabic(payment.status);
+  const isCompleted = normalizedStatus === "مكتمل";
 
   return (
     <div 
@@ -1942,10 +1978,10 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
           <div className="text-center md:text-right min-w-[80px]">
             <div className="font-bold text-primary text-lg">
-              {amount} ر.س
+              <PriceDisplay amount={amount} size="lg" />
             </div>
             {payment.paymentMethod && (
-              <div className="text-xs text-muted-foreground">{payment.paymentMethod}</div>
+              <div className="text-xs text-muted-foreground">{getPaymentMethodArabic(payment.paymentMethod)}</div>
             )}
           </div>
         </div>
@@ -1957,23 +1993,23 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
-                {getStatusIcon(payment.status)}
-                {getDisplayStatus(payment.status)}
+              <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(normalizedStatus)}`}>
+                {getStatusIcon(normalizedStatus)}
+                {getDisplayStatus(normalizedStatus)}
               </Badge>
               <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {formatDate(payment.createdAt)}
             </div>
-            {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt) && (
+            {getStatusReason(normalizedStatus, getPaymentMethodArabic(payment.paymentMethod), payment.createdAt) && (
               <div className={`text-xs mt-1 ${
-                payment.status === "مكتمل" ? "text-green-600 dark:text-green-400" :
-                payment.status === "فشل" ? "text-red-600 dark:text-red-400" :
-                payment.status === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
+                normalizedStatus === "مكتمل" ? "text-green-600 dark:text-green-400" :
+                normalizedStatus === "فشل" ? "text-red-600 dark:text-red-400" :
+                normalizedStatus === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
                 "text-amber-600 dark:text-amber-400"
               }`}>
-                {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt)}
+                {getStatusReason(normalizedStatus, getPaymentMethodArabic(payment.paymentMethod), payment.createdAt)}
               </div>
             )}
           </div>
@@ -1998,7 +2034,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         )}
 
         {/* زر تفاصيل - للدفعات الإلكترونية الناجحة قيد التحقق */}
-        {payment.status === "نجح - قيد التحقق" && (
+        {normalizedStatus === "نجح - قيد التحقق" && (
           <Button
             size="sm"
             variant="ghost"
@@ -2035,7 +2071,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         )}
 
         {/* زر تحقق من الدفع - للدفعات الإلكترونية المعلقة */}
-        {payment.status === "معلق" && payment.paymobOrderId && onVerifyPayment && (
+        {normalizedStatus === "معلق" && payment.paymobOrderId && onVerifyPayment && (
           <Button
             size="sm"
             variant="outline"
@@ -2068,7 +2104,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري التحويل..." : payment.status === "فشل" ? "إعادة الدفع" : (payment.status === "معلق" || payment.status === "قيد المراجعة") ? "إكمال الدفع" : "إعادة الدفع"}
+            {isRetrying ? "جاري التحويل..." : normalizedStatus === "فشل" ? "إعادة الدفع" : (normalizedStatus === "معلق" || normalizedStatus === "قيد المراجعة") ? "إكمال الدفع" : "إعادة الدفع"}
           </Button>
         )}
       </div>
