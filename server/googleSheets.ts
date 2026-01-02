@@ -83,77 +83,86 @@ const COL_VERIFICATION = 20;
 const COL_MUTE_EXPIRY = 21;
 
 // =======================
-// Replit Connectors Auth
+// Service Account Auth (Render and local development)
 // =======================
 
-let connectionSettings: any;
+/**
+ * Determine if the application is running in production (Render).
+ * In production we expect environment variables for service account or a secret file.
+ */
+const isProduction = process.env.NODE_ENV === "production";
 
-async function getAccessToken() {
-  // لو التوكن الكاش شغّال استخدمه
-  if (
-    connectionSettings?.settings?.expires_at &&
-    connectionSettings?.settings?.access_token &&
-    new Date(connectionSettings.settings.expires_at).getTime() > Date.now()
-  ) {
-    return connectionSettings.settings.access_token;
+let cachedSheetsClient: any = null;
+
+/**
+ * Build a Google Sheets client using a service account.
+ *
+ * The service account credentials can be supplied in one of two ways:
+ * - As a JSON string in the environment variable `GOOGLE_SERVICE_ACCOUNT_JSON`.
+ * - As a file path specified in `GOOGLE_SERVICE_ACCOUNT_KEYFILE` (defaults to `/etc/secrets/google.json`).
+ *
+ * The loaded credentials must contain `client_email` and `private_key` properties.
+ */
+async function buildServiceAccountClient() {
+  if (cachedSheetsClient) return cachedSheetsClient;
+
+  let credentials: any = null;
+
+  // Prefer JSON in environment variable
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    } catch (err) {
+      console.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON:", err);
+      throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON");
+    }
   }
 
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? "repl " + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-    ? "depl " + process.env.WEB_REPL_RENEWAL
-    : null;
-
-  if (!xReplitToken || !hostname) {
-    throw new Error("X_REPLIT_TOKEN or hostname not found for repl/depl");
+  // Otherwise load from file
+  if (!credentials) {
+    const fs = await import("fs/promises");
+    const keyPath =
+      process.env.GOOGLE_SERVICE_ACCOUNT_KEYFILE || "/etc/secrets/google.json";
+    try {
+      const file = await fs.readFile(keyPath, "utf8");
+      credentials = JSON.parse(file);
+    } catch (err) {
+      console.error("Failed to read service account file:", err);
+      throw new Error(
+        "Service account credentials not found. Please set GOOGLE_SERVICE_ACCOUNT_JSON or provide a key file.",
+      );
+    }
   }
 
-  const response = await fetch(
-    "https://" +
-      hostname +
-      "/api/v2/connection?include_secrets=true&connector_names=google-sheet",
-    {
-      headers: {
-        Accept: "application/json",
-        X_REPLIT_TOKEN: xReplitToken,
-      },
-    },
-  );
-
-  if (!response.ok) {
+  // Validate credentials
+  const clientEmail = credentials.client_email;
+  const privateKey = credentials.private_key;
+  if (!clientEmail || !privateKey) {
     throw new Error(
-      `Failed to fetch connection settings: ${response.statusText}`,
+      "Service account credentials must include client_email and private_key",
     );
   }
 
-  const data = await response.json();
-  connectionSettings = data.items?.[0];
+  const auth = new google.auth.JWT(
+    clientEmail,
+    undefined,
+    privateKey,
+    ["https://www.googleapis.com/auth/spreadsheets"],
+  );
 
-  if (!connectionSettings?.settings) {
-    throw new Error("Google Sheet not connected or settings missing");
-  }
-
-  const accessToken =
-    connectionSettings.settings.access_token ||
-    connectionSettings.settings.oauth?.credentials?.access_token;
-
-  if (!accessToken) {
-    throw new Error("Access token not found in connection settings");
-  }
-
-  return accessToken;
+  await auth.authorize();
+  cachedSheetsClient = google.sheets({ version: "v4", auth });
+  return cachedSheetsClient;
 }
 
+/**
+ * Get Google Sheets client.
+ *
+ * In production (Render) this always uses the service account.
+ * In development we fall back to service account if available.
+ */
 async function getGoogleSheetClient() {
-  const accessToken = await getAccessToken();
-
-  const oauth2Client = new google.auth.OAuth2();
-  oauth2Client.setCredentials({
-    access_token: accessToken,
-  });
-
-  return google.sheets({ version: "v4", auth: oauth2Client });
+  return buildServiceAccountClient();
 }
 
 // =======================
