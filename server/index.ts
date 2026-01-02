@@ -103,10 +103,9 @@ if (bucketId) {
 
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({ port, host: "0.0.0.0" }, () => {
-    console.log("🚀 Server running on port", port);
-    
-    // تشغيل المهام المجدولة
-    startScheduler();
-  });
+  app.listen(port, "0.0.0.0", () => {
+  console.log("🚀 Server running on port", port);
+  startScheduler();
+});
+
 })();
