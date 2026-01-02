@@ -70,7 +70,7 @@ export default function DiscountsSection() {
   };
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       {/* ================= عنوان ================= */}
       <div className="flex items-center justify-between gap-2">
         <div>
@@ -146,7 +146,7 @@ export default function DiscountsSection() {
 
       {/* ================= مودال إضافة/تعديل ================= */}
       <Dialog open={!!editingCode} onOpenChange={() => setEditingCode(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة كود" : "تعديل الكود"}</DialogTitle>
           </DialogHeader>

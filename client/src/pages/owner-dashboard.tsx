@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
-import { Property } from "@shared/schema";
+import { Property, AddOnPackage, PropertyAddOn } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Upload,
+  Zap,
+  Star,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
@@ -61,12 +63,25 @@ export default function OwnerDashboard() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const paymentStatus = urlParams.get('payment');
+    const addonPaymentStatus = urlParams.get('addon_payment');
     
     if (paymentStatus === 'success') {
       toast({
         title: "تم الدفع بنجاح!",
         description: "تم تفعيل اشتراكك بنجاح. شكراً لك!",
       });
+      // إزالة query param من URL
+      window.history.replaceState({}, '', '/owner/dashboard');
+    }
+    
+    if (addonPaymentStatus === 'success') {
+      toast({
+        title: "تم الدفع بنجاح!",
+        description: "تم استلام طلب الإضافة وهو الآن قيد مراجعة الإدارة. سيتم تفعيله قريباً.",
+      });
+      // تحديث بيانات الإضافات
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
       // إزالة query param من URL
       window.history.replaceState({}, '', '/owner/dashboard');
     }
@@ -212,6 +227,23 @@ const {
   retry: false,
   refetchOnWindowFocus: false,
 });
+
+// 5.0.1) جلب باقات الإضافات المتاحة
+const { data: addOnPackages = [] } = useQuery<AddOnPackage[]>({
+  queryKey: ["/api/owner/addons"],
+  enabled: sessionData?.isLoggedIn === true,
+  refetchOnWindowFocus: false,
+});
+
+// 5.0.2) جلب إضافات العقار الحالية
+const { data: propertyAddOns = [] } = useQuery<PropertyAddOn[]>({
+  queryKey: ["/api/owner/property-addons"],
+  enabled: sessionData?.isLoggedIn === true,
+  refetchOnWindowFocus: false,
+});
+
+// حالة شراء الإضافة
+const [purchasingAddonId, setPurchasingAddonId] = useState<string | null>(null);
 
 // 5.1) التحقق من التحويل البنكي المعلق - نظام ذكي
 const {
@@ -702,6 +734,66 @@ console.log("🔍 paymentsData:", paymentsData);
     });
   };
 
+  // شراء إضافة
+  const handlePurchaseAddon = async (addonId: string) => {
+    if (!property?.propertyNumber) return;
+    
+    setPurchasingAddonId(addonId);
+    
+    try {
+      const response = await fetch("/api/owner/addons/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          propertyNumber: property.propertyNumber,
+          addOnPackageId: addonId,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        toast({
+          title: "خطأ",
+          description: data.error || "فشل بدء عملية الدفع",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      }
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "تعذر الاتصال بالخادم",
+        variant: "destructive",
+      });
+    } finally {
+      setPurchasingAddonId(null);
+    }
+  };
+
+  // التحقق من إضافة نشطة
+  const hasActiveAddon = (addonId: string) => {
+    return propertyAddOns.some(
+      (a) => a.addOnPackageId === addonId && a.status === "active"
+    );
+  };
+
+  // لون الفئة
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case "اعلان": return "bg-amber-500";
+      case "ابراز": return "bg-purple-500";
+      case "تثبيت": return "bg-blue-500";
+      case "توثيق": return "bg-emerald-500";
+      default: return "bg-slate-500";
+    }
+  };
+
   // ===== حساب الإحصائيات من البيانات الفعلية =====
 const calculateAnalytics = () => {
   const now = new Date();
@@ -874,6 +966,205 @@ const calculateAnalytics = () => {
               <span className="md:hidden">إدارة</span>
             </Button>
           </div>
+        </Card>
+
+        {/* ===== قسم الإضافات (عرض دائماً) ===== */}
+        <Card className="p-4 md:p-6 border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/50 to-purple-50/50 dark:from-violet-950/30 dark:to-purple-950/30">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-violet-600" />
+              <h2 className="font-bold text-base md:text-lg text-violet-600">إضافاتك</h2>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-violet-600 border-violet-300 hover:bg-violet-100"
+              onClick={() => setLocation("/owner/subscription")}
+              data-testid="button-go-to-addons"
+            >
+              <Plus className="w-4 h-4 ml-1" />
+              شراء إضافات
+            </Button>
+          </div>
+
+          {/* عرض الإضافات النشطة فقط */}
+          {propertyAddOns.filter(a => a.status === "active").length === 0 ? (
+            <div className="text-center py-6">
+              <Zap className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">لا توجد إضافات نشطة لعقارك</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                اذهب لصفحة الاشتراك لشراء إضافات جديدة
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {propertyAddOns.filter(a => a.status === "active").map((addon) => {
+                const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                const endDate = addon.endDate ? new Date(addon.endDate) : null;
+                const now = new Date();
+                const daysLeft = endDate ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+                
+                return (
+                  <Card 
+                    key={addon.id}
+                    className="p-4 relative overflow-hidden border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20"
+                    data-testid={`addon-active-${addon.id}`}
+                  >
+                    <div className={`absolute top-0 right-0 left-0 h-1 ${pkg ? getCategoryColor(pkg.category) : 'bg-emerald-500'}`} />
+                    
+                    <div className="flex items-start justify-between gap-3 mt-1">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <h4 className="font-semibold">{pkg?.name || "إضافة"}</h4>
+                          {pkg && (
+                            <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
+                              {pkg.category}
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs">
+                            <CheckCircle2 className="w-3 h-3 ml-1" />
+                            نشط
+                          </Badge>
+                        </div>
+                        
+                        {pkg?.description && (
+                          <p className="text-xs text-muted-foreground mb-2">{pkg.description}</p>
+                        )}
+                        
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3 h-3" />
+                            <PriceDisplay amount={pkg?.price || 0} size="sm" />
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="text-left shrink-0">
+                        {endDate ? (
+                          <div className="text-xs">
+                            <p className="text-muted-foreground">ينتهي في</p>
+                            <p className="font-bold text-foreground">{endDate.toLocaleDateString('en-US')}</p>
+                            {daysLeft !== null && daysLeft > 0 && (
+                              <p className={`text-xs mt-1 ${daysLeft <= 3 ? 'text-red-500 font-bold' : 'text-emerald-600'}`}>
+                                باقي {daysLeft} يوم
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge className="bg-emerald-500 text-white">دائم</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {/* عرض الإضافات المعلقة */}
+          {propertyAddOns.filter(a => a.status === "pending").length > 0 && (
+            <div className="mt-4 pt-4 border-t border-amber-200 dark:border-amber-800">
+              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-amber-600">
+                <Clock className="w-4 h-4" />
+                طلبات معلقة ({propertyAddOns.filter(a => a.status === "pending").length})
+              </h4>
+              <div className="space-y-3">
+                {propertyAddOns.filter(a => a.status === "pending").map((addon) => {
+                  const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                  return (
+                    <Card 
+                      key={addon.id}
+                      className="p-4 relative overflow-hidden border-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
+                      data-testid={`addon-pending-${addon.id}`}
+                    >
+                      <div className="absolute top-0 right-0 left-0 h-1 bg-amber-500" />
+                      
+                      <div className="flex items-start justify-between gap-3 mt-1">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <h4 className="font-semibold">{pkg?.name || "إضافة"}</h4>
+                            {pkg && (
+                              <Badge className={`${getCategoryColor(pkg.category)} text-white text-xs`}>
+                                {pkg.category}
+                              </Badge>
+                            )}
+                            <Badge className="bg-amber-500 text-white text-xs">
+                              <Clock className="w-3 h-3 ml-1" />
+                              بانتظار الموافقة
+                            </Badge>
+                          </div>
+                          
+                          {pkg?.description && (
+                            <p className="text-xs text-muted-foreground mb-2">{pkg.description}</p>
+                          )}
+                          
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1">
+                              <Star className="w-3 h-3" />
+                              <PriceDisplay amount={pkg?.price || 0} size="sm" />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            <span>تاريخ الطلب: </span>
+                            <span className="font-medium">
+                              {addon.createdAt ? new Date(addon.createdAt).toLocaleDateString('en-US') : "-"}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="text-left shrink-0">
+                          <div className="text-xs text-center">
+                            <p className="text-muted-foreground">بعد التفعيل</p>
+                            <p className="font-bold text-amber-600">
+                              {pkg?.durationDays === 0 ? "دائم" : `${pkg?.durationDays || 0} يوم`}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-amber-600 mt-3 bg-amber-100 dark:bg-amber-900/30 p-2 rounded-md">
+                سيتم تفعيل الإضافات بعد مراجعة الإدارة للإيصال المرفوع
+              </p>
+            </div>
+          )}
+
+          {/* عرض الإضافات المنتهية */}
+          {propertyAddOns.filter(a => a.status === "expired").length > 0 && (
+            <div className="mt-4 pt-4 border-t border-violet-200 dark:border-violet-800">
+              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-muted-foreground">
+                <XCircle className="w-4 h-4" />
+                إضافات منتهية
+              </h4>
+              <div className="space-y-2">
+                {propertyAddOns.filter(a => a.status === "expired").map((addon) => {
+                  const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                  return (
+                    <div 
+                      key={addon.id}
+                      className="flex items-center justify-between p-2 bg-muted/30 rounded-md text-sm border border-muted"
+                    >
+                      <span className="text-muted-foreground">{pkg?.name || "إضافة"}</span>
+                      <span className="text-xs text-muted-foreground">
+                        انتهى: {addon.endDate ? new Date(addon.endDate).toLocaleDateString('en-US') : "-"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
@@ -1341,7 +1632,7 @@ const calculateAnalytics = () => {
                 <div className="p-3 bg-muted/20 rounded-lg text-sm space-y-2">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">المبلغ:</span>
-                    <span className="font-bold">{selectedPaymentForReceipt.finalAmount} ر.س</span>
+                    <span className="font-bold"><PriceDisplay amount={selectedPaymentForReceipt.finalAmount} size="sm" /></span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">الباقة:</span>
@@ -1605,28 +1896,34 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
 
   // التحقق من إظهار زر إكمال/إعادة الدفع (للدفعات الإلكترونية فقط)
   const shouldShowRetryButton = (payment: any) => {
+    const method = getPaymentMethodArabic(payment.paymentMethod);
+    const status = getStatusArabic(payment.status);
+    
     // استثناء التحويل البنكي - يظهر له زر "رفع إيصال" منفصل
-    if (payment.paymentMethod === "تحويل بنكي") return false;
+    if (method === "تحويل بنكي") return false;
 
     // للدفعات الفاشلة الإلكترونية، اظهر الزر دائماً
-    if (payment.status === "فشل") return true;
+    if (status === "فشل") return true;
 
     // للدفعات المعلقة الإلكترونية، اظهر الزر مباشرة
-    if (payment.status === "معلق") return true;
+    if (status === "معلق") return true;
 
     // للدفعات الإلكترونية بحالة "قيد المراجعة" (غير مكتملة)
-    if (payment.status === "قيد المراجعة") return true;
+    if (status === "قيد المراجعة") return true;
 
     return false;
   };
   
   // التحقق من إظهار زر رفع إيصال للتحويل البنكي
   const shouldShowUploadReceiptButton = (payment: any) => {
+    const method = getPaymentMethodArabic(payment.paymentMethod);
+    const status = getStatusArabic(payment.status);
+    
     // فقط للتحويل البنكي
-    if (payment.paymentMethod !== "تحويل بنكي") return false;
+    if (method !== "تحويل بنكي") return false;
     
     // للحالات: معلق، قيد المراجعة
-    return payment.status === "معلق" || payment.status === "قيد المراجعة";
+    return status === "معلق" || status === "قيد المراجعة";
   };
 
   const formatDate = (dateStr: string) => {
@@ -1645,11 +1942,41 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
       'pkg-month-2properties': 'اشتراك شهر لعقارين',
       'pkg-free': 'باقة مجانية',
     };
-    return packageNames[packageId] || packageId || 'باقة';
+    if (packageNames[packageId]) return packageNames[packageId];
+    if (packageId?.startsWith('addon-')) return 'إضافة';
+    return 'باقة';
+  };
+  
+  const getPaymentMethodArabic = (method: string) => {
+    switch (method) {
+      case 'bank_transfer': return 'تحويل بنكي';
+      case 'paymob': return 'دفع إلكتروني';
+      case 'cards': return 'بطاقة';
+      case 'apple_pay': return 'Apple Pay';
+      case 'تحويل بنكي': return 'تحويل بنكي';
+      case 'دفع إلكتروني': return 'دفع إلكتروني';
+      default: return method || 'غير محدد';
+    }
+  };
+  
+  const getStatusArabic = (status: string) => {
+    switch (status) {
+      case 'completed': return 'مكتمل';
+      case 'pending': return 'معلق';
+      case 'failed': return 'فشل';
+      case 'cancelled': return 'ملغي';
+      case 'مكتمل': return 'مكتمل';
+      case 'معلق': return 'معلق';
+      case 'فشل': return 'فشل';
+      case 'قيد المراجعة': return 'قيد المراجعة';
+      case 'نجح - قيد التحقق': return 'نجح - قيد التحقق';
+      default: return status || 'غير محدد';
+    }
   };
 
   const amount = payment.finalAmount || payment.amount || 0;
-  const isCompleted = payment.status === "مكتمل";
+  const normalizedStatus = getStatusArabic(payment.status);
+  const isCompleted = normalizedStatus === "مكتمل";
 
   return (
     <div 
@@ -1662,10 +1989,10 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
           <div className="text-center md:text-right min-w-[80px]">
             <div className="font-bold text-primary text-lg">
-              {amount} ر.س
+              <PriceDisplay amount={amount} size="lg" />
             </div>
             {payment.paymentMethod && (
-              <div className="text-xs text-muted-foreground">{payment.paymentMethod}</div>
+              <div className="text-xs text-muted-foreground">{getPaymentMethodArabic(payment.paymentMethod)}</div>
             )}
           </div>
         </div>
@@ -1677,23 +2004,23 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(payment.status)}`}>
-                {getStatusIcon(payment.status)}
-                {getDisplayStatus(payment.status)}
+              <Badge className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(normalizedStatus)}`}>
+                {getStatusIcon(normalizedStatus)}
+                {getDisplayStatus(normalizedStatus)}
               </Badge>
               <span className="font-semibold text-sm truncate">{getPackageNameArabic(payment.packageId)}</span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {formatDate(payment.createdAt)}
             </div>
-            {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt) && (
+            {getStatusReason(normalizedStatus, getPaymentMethodArabic(payment.paymentMethod), payment.createdAt) && (
               <div className={`text-xs mt-1 ${
-                payment.status === "مكتمل" ? "text-green-600 dark:text-green-400" :
-                payment.status === "فشل" ? "text-red-600 dark:text-red-400" :
-                payment.status === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
+                normalizedStatus === "مكتمل" ? "text-green-600 dark:text-green-400" :
+                normalizedStatus === "فشل" ? "text-red-600 dark:text-red-400" :
+                normalizedStatus === "نجح - قيد التحقق" ? "text-blue-600 dark:text-blue-400" :
                 "text-amber-600 dark:text-amber-400"
               }`}>
-                {getStatusReason(payment.status, payment.paymentMethod, payment.createdAt)}
+                {getStatusReason(normalizedStatus, getPaymentMethodArabic(payment.paymentMethod), payment.createdAt)}
               </div>
             )}
           </div>
@@ -1718,7 +2045,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         )}
 
         {/* زر تفاصيل - للدفعات الإلكترونية الناجحة قيد التحقق */}
-        {payment.status === "نجح - قيد التحقق" && (
+        {normalizedStatus === "نجح - قيد التحقق" && (
           <Button
             size="sm"
             variant="ghost"
@@ -1755,7 +2082,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
         )}
 
         {/* زر تحقق من الدفع - للدفعات الإلكترونية المعلقة */}
-        {payment.status === "معلق" && payment.paymobOrderId && onVerifyPayment && (
+        {normalizedStatus === "معلق" && payment.paymobOrderId && onVerifyPayment && (
           <Button
             size="sm"
             variant="outline"
@@ -1788,7 +2115,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             ) : (
               <CreditCard className="w-4 h-4" />
             )}
-            {isRetrying ? "جاري التحويل..." : payment.status === "فشل" ? "إعادة الدفع" : (payment.status === "معلق" || payment.status === "قيد المراجعة") ? "إكمال الدفع" : "إعادة الدفع"}
+            {isRetrying ? "جاري التحويل..." : normalizedStatus === "فشل" ? "إعادة الدفع" : (normalizedStatus === "معلق" || normalizedStatus === "قيد المراجعة") ? "إكمال الدفع" : "إعادة الدفع"}
           </Button>
         )}
       </div>
@@ -1802,7 +2129,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
             <div>
               <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
-              <div className="font-bold text-primary">{amount} ر.س</div>
+              <div className="font-bold text-primary"><PriceDisplay amount={amount} size="sm" /></div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground mb-1">الباقة</div>
@@ -1841,7 +2168,7 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             {payment.amount && payment.amount !== amount && (
               <div>
                 <div className="text-xs text-muted-foreground mb-1">المبلغ الأصلي</div>
-                <div className="font-semibold">{payment.amount} ر.س</div>
+                <div className="font-semibold"><PriceDisplay amount={payment.amount} size="sm" /></div>
               </div>
             )}
 
@@ -1857,14 +2184,14 @@ function PaymentRow({ payment, onRetryPayment, isRetrying, onVerifyPayment, isVe
             {payment.discountAmount > 0 && (
               <div>
                 <div className="text-xs text-muted-foreground mb-1">قيمة الخصم</div>
-                <div className="font-semibold text-green-600">-{payment.discountAmount} ر.س</div>
+                <div className="font-semibold text-green-600">-<PriceDisplay amount={payment.discountAmount} size="sm" /></div>
               </div>
             )}
 
             {/* المبلغ المدفوع */}
             <div>
               <div className="text-xs text-muted-foreground mb-1">المبلغ المدفوع</div>
-              <div className="font-bold text-primary">{amount} ر.س</div>
+              <div className="font-bold text-primary"><PriceDisplay amount={amount} size="sm" /></div>
             </div>
 
             {/* فترة الاشتراك */}

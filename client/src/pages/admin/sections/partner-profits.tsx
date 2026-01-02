@@ -333,7 +333,7 @@ export default function PartnerProfitsSection() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" dir="rtl">
       {/* ملخص الأرباح - الصف الأول */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-to-l from-blue-50 to-sky-50 dark:from-blue-950/20 dark:to-sky-950/20 border-blue-200 dark:border-blue-800">
@@ -508,7 +508,7 @@ export default function PartnerProfitsSection() {
                     إضافة تكلفة
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent dir="rtl">
                   <DialogHeader>
                     <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
                     <DialogDescription>
@@ -775,7 +775,7 @@ export default function PartnerProfitsSection() {
                     إضافة يدوي
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent dir="rtl">
                   <DialogHeader>
                     <DialogTitle>إضافة سجل أرباح يدوي</DialogTitle>
                     <DialogDescription>
@@ -791,7 +791,7 @@ export default function PartnerProfitsSection() {
 
               {/* Modal تأكيد الترحيل */}
               <Dialog open={isMigrationDialogOpen} onOpenChange={setIsMigrationDialogOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                       <RefreshCw className="w-5 h-5 text-amber-600" />

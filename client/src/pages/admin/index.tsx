@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Volume2,
   VolumeX,
+  Package,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -52,6 +53,7 @@ import SettingsSection from "./sections/settings";
 import PartnerProfitsSection from "./sections/partner-profits";
 import FeeConfigsSection from "./sections/fee-configs";
 import RefundsSection from "./sections/refunds";
+import AdminAddonsSection from "./sections/addons";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -61,6 +63,7 @@ type AdminSection =
   | "subscriptions"
   | "packages"
   | "discounts"
+  | "addons"
   | "requests"
   | "payments"
   | "refunds"
@@ -208,6 +211,13 @@ export default function AdminDashboard() {
         />
 
         <SidebarButton
+          icon={<Zap className="w-4 h-4 text-violet-600" />}
+          label="الإضافات"
+          active={activeSection === "addons"}
+          onClick={() => setActiveSection("addons")}
+        />
+
+        <SidebarButton
           icon={<Inbox className="w-4 h-4" />}
           label="الطلبات"
           active={activeSection === "requests"}
@@ -314,6 +324,7 @@ export default function AdminDashboard() {
         {activeSection === "refunds" && <RefundsSection />}
         {activeSection === "packages" && <PackagesSection />}
         {activeSection === "discounts" && <DiscountsSection />}
+        {activeSection === "addons" && <AdminAddonsSection />}
         {activeSection === "requests" && <RequestsSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
@@ -467,6 +478,8 @@ function AlertsDashboard() {
       case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-white" />;
       case 'expired-subscriptions': return <Bell className="w-5 h-5 text-white" />;
       case 'updates': return <TrendingUp className="w-5 h-5 text-white" />;
+      case 'pending-addons': return <Package className="w-5 h-5 text-white" />;
+      case 'new-addons': return <Package className="w-5 h-5 text-white" />;
       default: return <Bell className="w-5 h-5 text-white" />;
     }
   };

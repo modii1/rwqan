@@ -1,0 +1,55 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { AddOnPackage } from "@shared/schema";
+
+export default function OwnerAddonsPage() {
+  const { toast } = useToast();
+  const [method, setMethod] = useState<"online" | "bank">("online");
+
+  const { data: addons = [] } = useQuery<AddOnPackage[]>({
+    queryKey: ["/api/owner/addons"],
+  });
+
+  const buy = async (addon: AddOnPackage) => {
+    try {
+      if (method === "bank") {
+        await apiRequest("POST", "/api/owner/addons/bank-transfer", {
+          propertyNumber: "12345",
+          addOnPackageId: addon.id,
+        });
+        toast({ title: "تم الإرسال", description: "بانتظار المراجعة" });
+        return;
+      }
+
+      const res = await apiRequest("POST", "/api/owner/addons/pay", {
+        propertyNumber: "12345",
+        addOnPackageId: addon.id,
+      });
+      const data = await res.json();
+      window.location.href = data.checkoutUrl;
+    } catch {
+      toast({ title: "خطأ", variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex gap-2">
+        <Button onClick={() => setMethod("online")}>دفع إلكتروني</Button>
+        <Button onClick={() => setMethod("bank")} variant="outline">تحويل بنكي</Button>
+      </div>
+
+      {addons.map(a => (
+        <Card key={a.id} className="p-4 space-y-2">
+          <div className="font-bold">{a.name}</div>
+          <div>{a.price} ريال</div>
+          <Button onClick={() => buy(a)}>شراء</Button>
+        </Card>
+      ))}
+    </div>
+  );
+}

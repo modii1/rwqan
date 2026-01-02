@@ -179,13 +179,13 @@ export const paymentSchema = z.object({
   discountAmount: z.number().default(0),
   finalAmount: z.number(), // السعر بعد الخصم
   paymobOrderId: z.string().optional(),
-  status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة']),
-  paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي']).optional(),
+  status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة', 'نجح - قيد التحقق']),
+  paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي', 'paymob']).optional(),
   receiptUrl: z.string().optional(),
   createdAt: z.string().optional(),
   completedAt: z.string().optional(),
   // بيانات الاشتراك المعلق (يتم حفظها فقط عند نجاح الدفع)
-  action: z.enum(['new', 'extend', 'upgrade']).optional(),
+  action: z.enum(['new', 'extend', 'upgrade', 'addon']).optional(),
   pendingStartDate: z.string().optional(),
   pendingEndDate: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
@@ -378,6 +378,121 @@ export const feeConfigSchema = z.object({
 export type FeeConfig = z.infer<typeof feeConfigSchema>;
 export const insertFeeConfigSchema = feeConfigSchema.omit({ id: true, updatedAt: true });
 export type InsertFeeConfig = z.infer<typeof insertFeeConfigSchema>;
+
+
+// =========================
+// Add-On Package Schema (باقات الإضافات)
+// =========================
+export const addOnPackageSchema = z.object({
+  id: z.string(),
+
+  name: z.string(), // اسم الإضافة
+  description: z.string().optional(), // وصف مختصر
+
+  price: z.number(), // السعر
+  durationDays: z.number().default(0), 
+  // 0 = دائم | >0 = عدد أيام
+
+  category: z.string(), 
+  // مثال: اعلان، ابراز، تثبيت، توثيق، غيره
+
+  isActive: z.boolean().default(true), // تفعيل / إيقاف
+
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+export type AddOnPackage = z.infer<typeof addOnPackageSchema>;
+
+export const insertAddOnPackageSchema = addOnPackageSchema.omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAddOnPackage = z.infer<typeof insertAddOnPackageSchema>;
+
+// =========================
+// Property Add-On Schema (إضافات العقارات)
+// =========================
+export const propertyAddOnSchema = z.object({
+  id: z.string(),
+
+  propertyNumber: z.string(), // رقم العقار
+  addOnPackageId: z.string(), // معرف باقة الإضافة
+
+  status: z.enum([
+    "pending",    // بانتظار تحويل بنكي
+    "active",    // نشط
+    "expired",   // منتهي
+    "cancelled", // ملغي
+    "rejected",  // مرفوض
+  ]),
+
+  startDate: z.string().optional(), // تاريخ التفعيل (فارغ للمعلقة)
+  endDate: z.string().optional(), // فارغ = دائم
+
+  paymentId: z.string().optional(), // معرف الدفع (Paymob / تحويل)
+  receiptUrl: z.string().optional(), // رابط إيصال التحويل البنكي
+  source: z.enum([
+    "paymob",
+    "bank_transfer",
+    "bank",
+    "admin",
+    "system",
+  ]),
+
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+export type PropertyAddOn = z.infer<typeof propertyAddOnSchema>;
+
+export const insertPropertyAddOnSchema = propertyAddOnSchema.omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPropertyAddOn = z.infer<typeof insertPropertyAddOnSchema>;
+
+// =========================
+// Add-On History Schema (سجل الإضافات)
+// =========================
+export const addOnHistorySchema = z.object({
+  id: z.string(),
+
+  propertyNumber: z.string(), // رقم العقار
+  addOnPackageId: z.string(), // معرف الإضافة
+
+  action: z.enum([
+    "purchased", // شراء
+    "activated", // تفعيل
+    "expired",   // انتهاء
+    "cancelled", // إلغاء
+    "rejected",  // رفض
+    "pending"    // بانتظار المراجعة
+  ]),
+
+  timestamp: z.string(), // وقت العملية
+  notes: z.string().optional(), // ملاحظات (سبب الإلغاء، آلي، يدوي...)
+
+  createdBy: z.enum([
+    "system",
+    "admin",
+    "owner",
+  ]).default("system"),
+});
+
+export type AddOnHistory = z.infer<typeof addOnHistorySchema>;
+
+export const insertAddOnHistorySchema = addOnHistorySchema.omit({
+  id: true,
+});
+
+export type InsertAddOnHistory = z.infer<typeof insertAddOnHistorySchema>;
+
+
 
 // الرسوم الافتراضية من Paymob KSA
 export const DEFAULT_FEE_CONFIGS: FeeConfig[] = [

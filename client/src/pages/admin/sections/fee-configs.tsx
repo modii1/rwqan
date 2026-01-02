@@ -173,7 +173,7 @@ export default function FeeConfigsSection() {
   }
 
   return (
-    <div className="space-y-6" data-testid="fee-configs-section">
+    <div className="space-y-6" dir="rtl" data-testid="fee-configs-section">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Settings2 className="h-6 w-6 text-[#b88d2b]" />
@@ -187,7 +187,7 @@ export default function FeeConfigsSection() {
                 إضافة وسيلة دفع
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="sm:max-w-[425px]" dir="rtl">
               <DialogHeader>
                 <DialogTitle>إضافة وسيلة دفع جديدة</DialogTitle>
               </DialogHeader>

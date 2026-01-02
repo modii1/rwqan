@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Property, Package, Subscription } from "@shared/schema";
+import { Property, Package, Subscription, AddOnPackage, PropertyAddOn } from "@shared/schema";
 import { 
   CalendarDays, Crown, TrendingUp, Check, Upload, 
-  AlertTriangle, Clock, XCircle, CheckCircle2, Timer, Building2
+  AlertTriangle, Clock, XCircle, CheckCircle2, Timer, Building2,
+  Zap, Star, CreditCard, Loader2
 } from "lucide-react";
 import {
   calculateRemainingDays,
@@ -30,7 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PriceDisplay } from "@/components/price-display";
-import riyal from "@/components/riyal-symbol.png";
+import riyal from "@/assets/riyal-symbol.png";
 import { cleanPropertyNumber } from "@/lib/validation";
 
 export default function OwnerSubscriptionPage() {
@@ -51,6 +52,15 @@ export default function OwnerSubscriptionPage() {
   const [secondPropertyInfo, setSecondPropertyInfo] = useState<{ number: string; name: string; city: string } | null>(null);
   const [isVerifyingSecondProperty, setIsVerifyingSecondProperty] = useState(false);
   const [secondPropertyError, setSecondPropertyError] = useState<string | null>(null);
+  
+  // حالة الإضافات
+  const [showAddOns, setShowAddOns] = useState(false);
+  const [purchasingAddonId, setPurchasingAddonId] = useState<string | null>(null);
+  const [selectedAddonForPurchase, setSelectedAddonForPurchase] = useState<string | null>(null);
+  const [addonPaymentMethod, setAddonPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [addonReceiptFile, setAddonReceiptFile] = useState<File | null>(null);
+  const [isUploadingAddonReceipt, setIsUploadingAddonReceipt] = useState(false);
+  const addonFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: property } = useQuery<Property>({
     queryKey: ["/api/owner/property"],
@@ -64,7 +74,72 @@ export default function OwnerSubscriptionPage() {
     queryKey: ["/api/packages"],
   });
 
+  // جلب باقات الإضافات
+  const { data: addOnPackages = [] } = useQuery<AddOnPackage[]>({
+    queryKey: ["/api/owner/addons"],
+  });
+
+  // جلب إضافات العقار الحالية
+  const { data: propertyAddOns = [] } = useQuery<PropertyAddOn[]>({
+    queryKey: ["/api/owner/property-addons"],
+  });
+
   const currentPackage = packages.find(p => p.id === currentSubscription?.packageId);
+  
+  // دالة لمعرفة لون الفئة
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case "اعلان": return "bg-blue-500";
+      case "ابراز": return "bg-amber-500";
+      case "تثبيت": return "bg-emerald-500";
+      case "توثيق": return "bg-purple-500";
+      default: return "bg-gray-500";
+    }
+  };
+  
+  // التحقق من وجود إضافة نشطة
+  const hasActiveAddon = (addonId: string) => {
+    return propertyAddOns.some(
+      (a) => a.addOnPackageId === addonId && a.status === "active"
+    );
+  };
+  
+  // شراء إضافة
+  const handlePurchaseAddon = async (addonId: string) => {
+    if (!property?.propertyNumber) return;
+    
+    setPurchasingAddonId(addonId);
+    try {
+      const response = await fetch("/api/owner/addons/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyNumber: property.propertyNumber,
+          addOnPackageId: addonId,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else {
+        toast({
+          title: "خطأ",
+          description: data.error || "فشل بدء عملية الدفع",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ أثناء الاتصال بالخادم",
+        variant: "destructive",
+      });
+    } finally {
+      setPurchasingAddonId(null);
+    }
+  };
 
   // حساب الأيام المتبقية باستخدام الدوال الآمنة
   // تمرير تاريخ البداية لحساب صحيح إذا كان الاشتراك في المستقبل
@@ -274,7 +349,7 @@ export default function OwnerSubscriptionPage() {
             </div>
             <div className="text-center p-3 rounded-lg bg-white/50 dark:bg-black/20">
               <p className="text-xs text-muted-foreground mb-1">المدة</p>
-              <p className="text-xl font-bold text-[#434040]" data-testid="text-subscription-duration">
+              <p className="font-bold text-[#434040] text-[17px]" data-testid="text-subscription-duration">
                 {subscriptionDuration || currentPackage?.duration || 0} يوم
               </p>
             </div>
@@ -342,6 +417,7 @@ export default function OwnerSubscriptionPage() {
                   setSelectedAction('upgrade');
                   setSelectedPackageId(null);
                   setPaymentInfo(null);
+                  setShowAddOns(false);
                 }}
                 variant={selectedAction === 'upgrade' ? 'default' : 'outline'}
                 className="flex-1 md:flex-initial"
@@ -351,8 +427,314 @@ export default function OwnerSubscriptionPage() {
                 الترقية إلى باقة أفضل
               </Button>
             )}
+
+            {/* زر الإضافات */}
+            <Button
+              onClick={() => {
+                setShowAddOns(!showAddOns);
+                setSelectedAction(null);
+                setPaymentInfo(null);
+              }}
+              variant={showAddOns ? 'default' : 'outline'}
+              className="flex-1 md:flex-initial bg-violet-600 hover:bg-violet-700 text-white border-violet-600"
+              data-testid="button-show-addons"
+            >
+              <Zap className="w-4 h-4 ml-2" />
+              الإضافات
+            </Button>
           </div>
         </Card>
+
+        {/* قسم الإضافات */}
+        {showAddOns && (
+          <Card className="mb-8 p-6 border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/50 to-purple-50/50 dark:from-violet-950/30 dark:to-purple-950/30">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-violet-600" />
+                <h3 className="text-xl font-bold text-violet-600">باقات الإضافات</h3>
+              </div>
+              <Badge variant="outline" className="text-violet-600 border-violet-300 bg-violet-100 dark:bg-violet-900/30">
+                عزز ظهور عقارك
+              </Badge>
+            </div>
+
+            {addOnPackages.filter(p => p.isActive).length === 0 ? (
+              <div className="text-center py-8">
+                <Zap className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-muted-foreground">لا توجد إضافات متاحة حالياً</p>
+                <p className="text-xs text-muted-foreground mt-1">سيتم إضافة باقات جديدة قريباً</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {addOnPackages.filter(p => p.isActive).map((addon) => {
+                  const isActive = hasActiveAddon(addon.id);
+                  const isPurchasing = purchasingAddonId === addon.id;
+                  
+                  return (
+                    <Card 
+                      key={addon.id} 
+                      className={`p-4 relative overflow-hidden ${isActive ? 'border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20' : ''}`}
+                      data-testid={`addon-card-${addon.id}`}
+                    >
+                      <div className={`absolute top-0 right-0 left-0 h-1 ${getCategoryColor(addon.category)}`} />
+                      
+                      <div className="flex items-start justify-between gap-2 mb-3 mt-1">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-semibold text-sm">{addon.name}</h4>
+                            <Badge className={`${getCategoryColor(addon.category)} text-white text-xs`}>
+                              {addon.category}
+                            </Badge>
+                          </div>
+                          {addon.description && (
+                            <p className="text-xs text-muted-foreground mt-1">{addon.description}</p>
+                          )}
+                        </div>
+                        
+                        {isActive && (
+                          <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs shrink-0">
+                            <CheckCircle2 className="w-3 h-3 ml-1" />
+                            مفعّل
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-foreground">{addon.price}</span>
+                          <img src={riyal} alt="ريال" className="w-3 h-3 inline-block opacity-85" />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{addon.durationDays === 0 ? "دائم" : `${addon.durationDays} يوم`}</span>
+                        </div>
+                      </div>
+                      
+                      {isActive ? (
+                        <Badge variant="secondary" className="w-full justify-center py-2">
+                          مفعّل بالفعل
+                        </Badge>
+                      ) : selectedAddonForPurchase === addon.id ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-center text-muted-foreground">اختر طريقة الدفع:</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              onClick={() => handlePurchaseAddon(addon.id)}
+                              disabled={isPurchasing}
+                              size="sm"
+                              className="text-xs"
+                              data-testid={`button-addon-online-${addon.id}`}
+                            >
+                              {isPurchasing ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <CreditCard className="w-3 h-3 ml-1" />
+                                  إلكتروني
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setAddonPaymentMethod('bank');
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="text-xs"
+                              data-testid={`button-addon-bank-${addon.id}`}
+                            >
+                              <Upload className="w-3 h-3 ml-1" />
+                              تحويل بنكي
+                            </Button>
+                          </div>
+                          <Button
+                            onClick={() => {
+                              setSelectedAddonForPurchase(null);
+                              setAddonPaymentMethod(null);
+                            }}
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-xs text-muted-foreground"
+                          >
+                            إلغاء
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => setSelectedAddonForPurchase(addon.id)}
+                          className="w-full"
+                          size="sm"
+                          data-testid={`button-purchase-addon-${addon.id}`}
+                        >
+                          <Zap className="w-4 h-4 ml-2" />
+                          شراء الإضافة
+                        </Button>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* الإضافات النشطة */}
+            {propertyAddOns.filter(a => a.status === "active").length > 0 && (
+              <div className="mt-6 pt-4 border-t border-violet-200 dark:border-violet-800">
+                <h4 className="font-semibold text-sm text-violet-600 mb-3">إضافاتك النشطة</h4>
+                <div className="flex flex-wrap gap-2">
+                  {propertyAddOns.filter(a => a.status === "active").map((addon) => {
+                    const pkg = addOnPackages.find(p => p.id === addon.addOnPackageId);
+                    return (
+                      <Badge 
+                        key={addon.id}
+                        variant="outline"
+                        className="text-emerald-600 border-emerald-300 bg-emerald-50"
+                      >
+                        <span className="font-medium">{pkg?.name || "إضافة"}</span>
+                        <span className="text-muted-foreground mr-2">
+                          {addon.endDate ? `ينتهي: ${new Date(addon.endDate).toLocaleDateString('en-US')}` : "دائم"}
+                        </span>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* نافذة التحويل البنكي للإضافات */}
+        {addonPaymentMethod === 'bank' && selectedAddonForPurchase && (
+          <Dialog open={true} onOpenChange={() => {
+            setAddonPaymentMethod(null);
+            setAddonReceiptFile(null);
+          }}>
+            <DialogContent className="max-w-md" dir="rtl">
+              <DialogHeader>
+                <DialogTitle className="text-right">تحويل بنكي للإضافة</DialogTitle>
+                <DialogDescription className="text-right">
+                  {(() => {
+                    const addon = addOnPackages.find(p => p.id === selectedAddonForPurchase);
+                    return addon ? (
+                      <span className="flex items-center gap-1">
+                        <strong>{addon.name}</strong> - {addon.price}
+                        <img src={riyal} alt="ريال" className="w-3 h-3 inline-block opacity-85" />
+                      </span>
+                    ) : null;
+                  })()}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-muted/50 rounded-lg text-sm">
+                  <p className="font-bold mb-2">معلومات الحساب البنكي:</p>
+                  <p>بنك الراجحي</p>
+                  <p>رقم الحساب: SA0000000000000000000000</p>
+                  <p>اسم المستفيد: روقـان للعقارات</p>
+                </div>
+                
+                <div>
+                  <input
+                    type="file"
+                    ref={addonFileInputRef}
+                    accept="image/*,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setAddonReceiptFile(file);
+                    }}
+                  />
+                  
+                  <Button
+                    variant="outline"
+                    className="w-full h-20 border-dashed"
+                    onClick={() => addonFileInputRef.current?.click()}
+                  >
+                    {addonReceiptFile ? (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                        <span className="text-sm">{addonReceiptFile.name}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <Upload className="w-6 h-6" />
+                        <span className="text-xs">اضغط لرفع إيصال التحويل</span>
+                      </div>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              
+              <DialogFooter className="flex gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAddonPaymentMethod(null);
+                    setAddonReceiptFile(null);
+                    setSelectedAddonForPurchase(null);
+                  }}
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!addonReceiptFile || !selectedAddonForPurchase || !property?.propertyNumber) return;
+                    
+                    setIsUploadingAddonReceipt(true);
+                    try {
+                      const addon = addOnPackages.find(p => p.id === selectedAddonForPurchase);
+                      if (!addon) throw new Error("الإضافة غير موجودة");
+                      
+                      const formData = new FormData();
+                      formData.append('receipt', addonReceiptFile);
+                      formData.append('propertyNumber', property.propertyNumber);
+                      formData.append('addOnPackageId', selectedAddonForPurchase);
+                      formData.append('amount', String(addon.price));
+                      formData.append('paymentMethod', 'bank');
+                      
+                      const response = await fetch('/api/owner/addons/bank-transfer', {
+                        method: 'POST',
+                        body: formData,
+                      });
+                      
+                      const data = await response.json();
+                      
+                      if (response.ok) {
+                        toast({
+                          title: "تم رفع الإيصال بنجاح",
+                          description: "سيتم مراجعة الإيصال وتفعيل الإضافة خلال 24 ساعة",
+                        });
+                        setAddonPaymentMethod(null);
+                        setAddonReceiptFile(null);
+                        setSelectedAddonForPurchase(null);
+                        queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
+                      } else {
+                        throw new Error(data.error || "فشل رفع الإيصال");
+                      }
+                    } catch (error: any) {
+                      toast({
+                        title: "خطأ",
+                        description: error.message || "حدث خطأ أثناء رفع الإيصال",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsUploadingAddonReceipt(false);
+                    }
+                  }}
+                  disabled={!addonReceiptFile || isUploadingAddonReceipt}
+                >
+                  {isUploadingAddonReceipt ? (
+                    <>
+                      <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                      جاري الرفع...
+                    </>
+                  ) : (
+                    "إرسال الإيصال"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
 
         {/* اختيار الباقة */}
         {selectedAction && !paymentInfo && (
@@ -418,13 +800,20 @@ export default function OwnerSubscriptionPage() {
                         <div>
                           <div className="flex items-center gap-1 text-2xl font-bold text-[#b88d2b] mb-1">
                             <span>{pkg.price / (pkg.propertyCount || 1)}</span>
-                            <img src={riyal} alt="ريال" className="w-6 h-6" />
+                            <img src={riyal} alt="ريال" className="w-6 h-6 object-contain" />
                             <span className="text-sm font-normal text-muted-foreground"> / عقار</span>
                           </div>
-                          <div className="text-xs text-muted-foreground">الإجمالي: {pkg.price} <img src={riyal} alt="ريال" className="w-3 h-3 inline" /> للعقارين</div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            الإجمالي: {pkg.price} 
+                            <img src={riyal} alt="ريال" className="w-3 h-3 object-contain inline" /> 
+                            للعقارين
+                          </div>
                         </div>
                       ) : (
-                        <PriceDisplay amount={pkg.price} size="xl" textColor="text-[#b88d2b]" />
+                        <div className="flex items-center gap-1">
+                          <span className="text-2xl md:text-4xl font-bold text-[#b88d2b]">{pkg.price}</span>
+                          <img src={riyal} alt="ريال" className="w-6 h-6 md:w-8 md:h-8 object-contain" />
+                        </div>
                       )}
                       {(pkg.propertyCount || 1) > 1 && (
                         <Badge variant="secondary" className="text-xs">
@@ -738,15 +1127,22 @@ export default function OwnerSubscriptionPage() {
                 <div className="mb-4">
                   {(pkg.propertyCount || 1) > 1 ? (
                     <>
-                      <p className="text-3xl font-bold text-[#b88d2b]">
-                        {pkg.price / (pkg.propertyCount || 1)}<span className="text-sm"> ر.س / عقار</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">الإجمالي: {pkg.price} ر.س للعقارين</p>
+                      <div className="flex items-center gap-1 text-3xl font-bold text-[#b88d2b]">
+                        <span>{pkg.price / (pkg.propertyCount || 1)}</span>
+                        <img src={riyal} alt="ريال" className="w-6 h-6 object-contain" />
+                        <span className="text-sm font-normal text-muted-foreground"> / عقار</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>الإجمالي: {pkg.price}</span>
+                        <img src={riyal} alt="ريال" className="w-3 h-3 object-contain" />
+                        <span>للعقارين</span>
+                      </div>
                     </>
                   ) : (
-                    <p className="text-3xl font-bold text-[#b88d2b]">
-                      {pkg.price}<span className="text-sm"> ر.س</span>
-                    </p>
+                    <div className="flex items-center gap-1 text-3xl font-bold text-[#b88d2b]">
+                      <span>{pkg.price}</span>
+                      <img src={riyal} alt="ريال" className="w-6 h-6 object-contain" />
+                    </div>
                   )}
                   <p className="text-sm text-muted-foreground mt-1">{pkg.duration} يوم</p>
                 </div>
@@ -769,7 +1165,6 @@ export default function OwnerSubscriptionPage() {
           </div>
         </div>
       </div>
-
       {/* حوار تأكيد الترقية */}
       <Dialog open={showUpgradeWarning} onOpenChange={setShowUpgradeWarning}>
         <DialogContent className="max-w-md">

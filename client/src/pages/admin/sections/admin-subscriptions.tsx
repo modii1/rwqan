@@ -341,7 +341,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Cancel Dialog */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <DialogContent>
+        <DialogContent dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <XCircle className="w-5 h-5" />

@@ -10,7 +10,16 @@
 - **Interaction**: The user expects the agent to ask for confirmation before implementing significant architectural changes or refactoring large portions of the codebase.
 - **Language**: All generated content and explanations should be in Arabic.
 
-## Recent Changes (December 22, 2025)
+## Recent Changes (December 28, 2025)
+- **Password Reset System**: Added WhatsApp-based password reset for property owners:
+  - New "الملاك" (Owners) sheet in Google Sheets with columns: ownerId, phone, password, resetCode, resetExpire, lastReset
+  - API endpoints: POST `/api/auth/send-reset-code`, POST `/api/auth/set-new-password`, POST `/api/owner/change-password`
+  - Forgot password page at `/forgot-password` with 3-step flow (request code → verify → success)
+  - Password change section in owner update property page
+  - WhatsApp delivery via Enjazatik API
+  - Security: 6-digit code, 10-minute expiry, single-use, 30-day cooldown between resets
+
+## Previous Changes (December 22, 2025)
 - **Date/Time Handling Refactor**: Complete overhaul of date/time management:
   - Server uses UTC with `Date.now()` for timestamp generation
   - No manual hour additions/subtractions in code
@@ -123,6 +132,9 @@
     -   `PAYMOB_INTEGRATION_ID_APPLEPAY`
 -   **Replit Object Storage**: Stores payment receipts.
     -   `DEFAULT_OBJECT_STORAGE_BUCKET_ID`
+-   **Enjazatik WhatsApp API**: For sending password reset codes via WhatsApp.
+    -   `ENJAZATIK_URL`
+    -   `ENJAZATIK_TOKEN`
 -   **Google Analytics 4**: For tracking website visitors and statistics.
 -   **Meta WhatsApp Business API**: For sending automated WhatsApp notifications.
     -   `META_WHATSAPP_TOKEN`

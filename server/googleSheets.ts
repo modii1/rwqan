@@ -24,6 +24,12 @@ import type {
   InsertFeeConfig,
   Expense,
   InsertExpense,
+  AddOnPackage,
+  InsertAddOnPackage,
+  PropertyAddOn,
+  InsertPropertyAddOn,
+  AddOnHistory,
+  InsertAddOnHistory,
 } from "@shared/schema";
 import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils";
@@ -49,6 +55,25 @@ const SHEETS = {
   MULTI_PROPERTY_SUBS: "اشتراكات العقارين",
   FEE_CONFIGS: "إعدادات الرسوم",
   EXPENSES: "التكاليف",
+  OWNERS: "الملاك",
+  ADDON_PACKAGES: "باقات الإضافات",
+  PROPERTY_ADDONS: "إضافات العقارات",
+  ADDON_HISTORY: "سجل الإضافات",
+
+};
+
+// ثوابت إعادة تعيين كلمة المرور
+const RESET_COOLDOWN_DAYS = 30;
+const CODE_EXPIRY_MINUTES = 10;
+
+// أعمدة ورقة الملاك
+const OWNER_COLS = {
+  OWNER_ID: 0,      // A - رقم العقار
+  PHONE: 1,         // B - رقم الجوال
+  PASSWORD: 2,      // C - الرقم السري
+  RESET_CODE: 3,    // D - رمز إعادة التعيين
+  RESET_EXPIRE: 4,  // E - انتهاء صلاحية الرمز
+  LAST_RESET: 5,    // F - آخر إعادة تعيين
 };
 
 // عمود حالة التحقق — العمود 20 (T)
@@ -367,6 +392,42 @@ class GoogleSheetsService {
         "التاريخ",
         "تاريخ الإنشاء",
       ],
+
+
+    [SHEETS.ADDON_PACKAGES]: [
+      "المعرف",
+      "الاسم",
+      "الوصف",
+      "السعر",
+      "المدة",
+      "حالة التفعيل",
+      "الفئة",
+      "تاريخ الإنشاء",
+    ],
+
+
+    [SHEETS.PROPERTY_ADDONS]: [
+      "المعرف",
+      "رقم العقار",
+      "معرف الباقة",
+      "الحالة",
+      "تاريخ البدء",
+      "تاريخ الانتهاء",
+      "معرف الدفع",
+      "تاريخ الإنشاء",
+      "جهة الإنشاء",
+    ],
+
+
+    [SHEETS.ADDON_HISTORY]: [
+      "المعرف",
+      "رقم العقار",
+      "معرف الباقة",
+      "الإجراء",
+      "الطابع الزمني",
+      "ملاحظات",
+    ],
+
     };
 
     for (const [sheetName, headerRow] of Object.entries(headers)) {
@@ -1096,6 +1157,7 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     };
   }
 
+
   async getPackages(): Promise<Package[]> {
     const rows = await this.readSheet(SHEETS.PACKAGES);
     console.log(`📦 Read ${rows.length} package(s) from "${SHEETS.PACKAGES}"`);
@@ -1176,6 +1238,264 @@ private subscriptionToRow(propertyNumber: string, subscription: any, property: a
     
     await this.deleteRow(SHEETS.PACKAGES, rowIndex + 2);
   }
+
+  // ================== باقات الإضافات ==================
+  private rowToAddOnPackage(row: any[]): AddOnPackage {
+    const id = row[0] || `addon-${Date.now()}`;
+
+    return {
+      id,
+      name: row[1] || "",
+      description: row[2] || "",
+      price: parseFloat(row[3]) || 0,
+      durationDays: parseInt(row[4]) || 0, // 0 = دائم
+      isActive: row[5] !== "false" && row[5] !== "لا",
+      category: row[6] || "عام",
+      createdAt: row[7] || new Date().toISOString(),
+      updatedAt: undefined,
+    };
+  }
+  async getAddOnPackages(): Promise<AddOnPackage[]> {
+    const rows = await this.readSheet(SHEETS.ADDON_PACKAGES);
+    console.log(`🧩 Read ${rows.length} add-on package(s) from "${SHEETS.ADDON_PACKAGES}"`);
+
+    return rows
+      .filter(row => row[0] && row[1]) // تحقق من وجود معرف واسم
+      .map(row => this.rowToAddOnPackage(row))
+      .filter(pkg => pkg.isActive); // فقط الإضافات المفعّلة
+  }
+  async getAddOnPackageById(id: string): Promise<AddOnPackage | null> {
+    const packages = await this.getAddOnPackages();
+    return packages.find(p => p.id === id) || null;
+  }
+  async createAddOnPackage(pkg: InsertAddOnPackage): Promise<AddOnPackage> {
+    const id = `addon-${Date.now()}`;
+
+    const newPkg: AddOnPackage = {
+      id,
+      ...pkg,
+      isActive: pkg.isActive ?? true,
+      durationDays: pkg.durationDays ?? 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: undefined,
+    };
+
+    const row = [
+      newPkg.id,
+      newPkg.name,
+      newPkg.description || "",
+      newPkg.price.toString(),
+      newPkg.durationDays.toString(),
+      newPkg.isActive ? "نعم" : "لا",
+      newPkg.category,
+      newPkg.createdAt,
+    ];
+
+    await this.appendToSheet(SHEETS.ADDON_PACKAGES, [row]);
+    return newPkg;
+  }
+  async updateAddOnPackage(
+    id: string,
+    updates: Partial<AddOnPackage>
+  ): Promise<AddOnPackage | null> {
+    const rows = await this.readSheet(SHEETS.ADDON_PACKAGES);
+    const rowIndex = rows.findIndex(row => row[0] === id);
+
+    if (rowIndex === -1) {
+      return null;
+    }
+
+    const currentPkg = this.rowToAddOnPackage(rows[rowIndex]);
+    const updatedPkg: AddOnPackage = {
+      ...currentPkg,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const newRow = [
+      updatedPkg.id,
+      updatedPkg.name,
+      updatedPkg.description || "",
+      updatedPkg.price.toString(),
+      updatedPkg.durationDays.toString(),
+      updatedPkg.isActive ? "نعم" : "لا",
+      updatedPkg.category,
+      updatedPkg.createdAt,
+    ];
+
+    await this.updateRow(SHEETS.ADDON_PACKAGES, rowIndex + 2, newRow);
+    return updatedPkg;
+  }
+  async deleteAddOnPackage(id: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.ADDON_PACKAGES);
+    const rowIndex = rows.findIndex(row => row[0] === id);
+
+    if (rowIndex === -1) {
+      throw new Error("باقة الإضافة غير موجودة");
+    }
+
+    await this.deleteRow(SHEETS.ADDON_PACKAGES, rowIndex + 2);
+  }
+
+  // ================== إضافات العقارات ==================
+
+  // قراءة إضافات العقارات من ورقة إضافات العقارات
+  // الأعمدة:
+  // المعرف(0), رقم العقار(1), معرف الباقة(2), الحالة(3),
+  // تاريخ البدء(4), تاريخ الانتهاء(5), معرف الدفع(6),
+  // تاريخ الإنشاء(7), جهة الإنشاء(8)
+  private rowToPropertyAddOn(row: any[]): PropertyAddOn {
+    return {
+      id: row[0] || `prop-addon-${Date.now()}`,
+      propertyNumber: String(row[1] || ""),
+      addOnPackageId: String(row[2] || ""),
+      status: (row[3] as any) || "active",
+      startDate: row[4] || undefined,
+      endDate: row[5] || undefined,
+      paymentId: row[6] || undefined,
+      source: (row[8] as any) || "system",
+      createdAt: row[7] || new Date().toISOString(),
+      updatedAt: undefined,
+    };
+  }
+  async getPropertyAddOns(propertyNumber: string): Promise<PropertyAddOn[]> {
+    const rows = await this.readSheet(SHEETS.PROPERTY_ADDONS);
+    console.log(
+      `🧩 Read ${rows.length} property add-on(s) from "${SHEETS.PROPERTY_ADDONS}"`
+    );
+
+    return rows
+      .filter(row => row[1] === propertyNumber) // رقم العقار
+      .map(row => this.rowToPropertyAddOn(row));
+  }
+
+  async getAllPropertyAddOns(): Promise<PropertyAddOn[]> {
+    const rows = await this.readSheet(SHEETS.PROPERTY_ADDONS);
+    console.log(
+      `🧩 Read all ${rows.length} property add-on(s) from "${SHEETS.PROPERTY_ADDONS}"`
+    );
+    return rows.map(row => this.rowToPropertyAddOn(row));
+  }
+
+  async createPropertyAddOn(addon: InsertPropertyAddOn): Promise<PropertyAddOn> {
+    const id = `prop-addon-${Date.now()}`;
+
+    const newAddOn: PropertyAddOn = {
+      id,
+      ...addon,
+      status: addon.status || "active",
+      startDate: addon.startDate, // يبقى فارغ للطلبات المعلقة
+      createdAt: new Date().toISOString(),
+      updatedAt: undefined,
+    };
+
+    const row = [
+      newAddOn.id,
+      newAddOn.propertyNumber,
+      newAddOn.addOnPackageId,
+      newAddOn.status,
+      newAddOn.startDate,
+      newAddOn.endDate || "",
+      newAddOn.paymentId || "",
+      newAddOn.createdAt,
+      newAddOn.source,
+    ];
+
+    await this.appendToSheet(SHEETS.PROPERTY_ADDONS, [row]);
+    return newAddOn;
+  }
+  async updatePropertyAddOn(
+    id: string,
+    updates: Partial<PropertyAddOn>
+  ): Promise<PropertyAddOn | null> {
+    const rows = await this.readSheet(SHEETS.PROPERTY_ADDONS);
+    const rowIndex = rows.findIndex(row => row[0] === id);
+
+    if (rowIndex === -1) {
+      return null;
+    }
+
+    const currentAddOn = this.rowToPropertyAddOn(rows[rowIndex]);
+    const updatedAddOn: PropertyAddOn = {
+      ...currentAddOn,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const newRow = [
+      updatedAddOn.id,
+      updatedAddOn.propertyNumber,
+      updatedAddOn.addOnPackageId,
+      updatedAddOn.status,
+      updatedAddOn.startDate,
+      updatedAddOn.endDate || "",
+      updatedAddOn.paymentId || "",
+      updatedAddOn.createdAt,
+      updatedAddOn.source,
+    ];
+
+    await this.updateRow(SHEETS.PROPERTY_ADDONS, rowIndex + 2, newRow);
+    return updatedAddOn;
+  }
+  async cancelPropertyAddOn(
+    id: string,
+    reason?: string
+  ): Promise<PropertyAddOn | null> {
+    const updated = await this.updatePropertyAddOn(id, {
+      status: "cancelled",
+      endDate: new Date().toISOString(),
+    });
+
+    if (!updated) {
+      return null;
+    }
+
+    // تسجيل في سجل الإضافات (سيتم ربطه لاحقًا)
+    await this.logAddOnHistory({
+      propertyNumber: updated.propertyNumber,
+      addOnPackageId: updated.addOnPackageId,
+      action: "cancelled",
+      notes: reason || "تم الإلغاء يدويًا",
+    });
+
+    return updated;
+  }
+
+  // ================== سجل الإضافات ==================
+
+  // الأعمدة:
+  // المعرف(0), رقم العقار(1), معرف الباقة(2),
+  // الإجراء(3), الطابع الزمني(4), ملاحظات(5)
+  private rowToAddOnHistory(row: any[]): AddOnHistory {
+    return {
+      id: row[0] || `addon-log-${Date.now()}`,
+      propertyNumber: String(row[1] || ""),
+      addOnPackageId: String(row[2] || ""),
+      action: (row[3] as any) || "activated",
+      timestamp: row[4] || new Date().toISOString(),
+      notes: row[5] || undefined,
+      createdBy: "system",
+    };
+  }
+  async logAddOnHistory(entry: {
+    propertyNumber: string;
+    addOnPackageId: string;
+    action: "purchased" | "activated" | "expired" | "cancelled";
+    notes?: string;
+    createdBy?: "system" | "admin" | "owner";
+  }): Promise<void> {
+    const row = [
+      `addon-log-${Date.now()}`,
+      entry.propertyNumber,
+      entry.addOnPackageId,
+      entry.action,
+      new Date().toISOString(),
+      entry.notes || "",
+    ];
+
+    await this.appendToSheet(SHEETS.ADDON_HISTORY, [row]);
+  }
+
 
   // ================== أكواد الخصم ==================
 
@@ -2750,6 +3070,196 @@ async getWhatsAppLogs() {
     }
     
     return filtered.reduce((total, e) => total + e.amount, 0);
+  }
+
+  // ============================================================
+  // نظام الملاك وإعادة تعيين كلمة المرور
+  // ============================================================
+
+  async ensureOwnersSheetExists(): Promise<void> {
+    try {
+      const sheets = await getGoogleSheetClient();
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: SHEET_ID,
+      });
+      
+      const existingSheet = spreadsheet.data.sheets?.find(
+        (s: any) => s.properties?.title === SHEETS.OWNERS
+      );
+      
+      if (!existingSheet) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: SHEET_ID,
+          requestBody: {
+            requests: [{
+              addSheet: {
+                properties: { title: SHEETS.OWNERS }
+              }
+            }]
+          }
+        });
+        
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: `${SHEETS.OWNERS}!A1:F1`,
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [["ownerId", "phone", "password", "resetCode", "resetExpire", "lastReset"]]
+          }
+        });
+        
+        console.log("✅ Created owners sheet: الملاك");
+      }
+    } catch (error) {
+      console.error("Error ensuring owners sheet exists:", error);
+    }
+  }
+
+  async getOwnerByPropertyNumber(propertyNumber: string): Promise<{
+    ownerId: string;
+    phone: string;
+    password: string;
+    resetCode: string;
+    resetExpire: string;
+    lastReset: string;
+    rowIndex: number;
+  } | null> {
+    const rows = await this.readSheet(SHEETS.OWNERS);
+    
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i][OWNER_COLS.OWNER_ID]?.toString() === propertyNumber.toString()) {
+        return {
+          ownerId: rows[i][OWNER_COLS.OWNER_ID] || "",
+          phone: rows[i][OWNER_COLS.PHONE] || "",
+          password: rows[i][OWNER_COLS.PASSWORD] || "",
+          resetCode: rows[i][OWNER_COLS.RESET_CODE] || "",
+          resetExpire: rows[i][OWNER_COLS.RESET_EXPIRE] || "",
+          lastReset: rows[i][OWNER_COLS.LAST_RESET] || "",
+          rowIndex: i + 2,
+        };
+      }
+    }
+    
+    return null;
+  }
+
+  async syncOwnerFromProperties(propertyNumber: string): Promise<void> {
+    const property = await this.getPropertyByNumber(propertyNumber);
+    if (!property) return;
+
+    const existingOwner = await this.getOwnerByPropertyNumber(propertyNumber);
+    
+    if (!existingOwner) {
+      await this.appendToSheet(SHEETS.OWNERS, [[
+        propertyNumber,
+        property.whatsappNumber || "",
+        property.pin || "",
+        "",
+        "",
+        ""
+      ]]);
+      console.log(`✅ Synced owner: ${propertyNumber}`);
+    }
+  }
+
+  async updateOwnerResetCode(propertyNumber: string, code: string, expireTime: string, lastReset: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) throw new Error("المالك غير موجود");
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!D${owner.rowIndex}:F${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[code, expireTime, lastReset]]
+      }
+    });
+  }
+
+  async updateOwnerPassword(propertyNumber: string, newPassword: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) throw new Error("المالك غير موجود");
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!C${owner.rowIndex}:E${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[newPassword, "", ""]]
+      }
+    });
+
+    await this.updatePropertyPin(propertyNumber, newPassword);
+  }
+
+  async clearOwnerResetCode(propertyNumber: string): Promise<void> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return;
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.OWNERS}!D${owner.rowIndex}:E${owner.rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["", ""]]
+      }
+    });
+  }
+
+  async canSendResetCode(propertyNumber: string): Promise<{ canSend: boolean; remainingDays?: number }> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return { canSend: false };
+
+    if (!owner.lastReset) return { canSend: true };
+
+    const lastResetDate = new Date(owner.lastReset);
+    const now = new Date();
+    const daysDiff = Math.floor((now.getTime() - lastResetDate.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysDiff < RESET_COOLDOWN_DAYS) {
+      return { canSend: false, remainingDays: RESET_COOLDOWN_DAYS - daysDiff };
+    }
+    
+    return { canSend: true };
+  }
+
+  async validateResetCode(propertyNumber: string, code: string): Promise<{ valid: boolean; message?: string }> {
+    const owner = await this.getOwnerByPropertyNumber(propertyNumber);
+    if (!owner) return { valid: false, message: "رقم العقار غير موجود" };
+
+    if (!owner.resetCode || owner.resetCode !== code) {
+      return { valid: false, message: "رمز التحقق غير صحيح" };
+    }
+
+    if (owner.resetExpire) {
+      const expireDate = new Date(owner.resetExpire);
+      if (new Date() > expireDate) {
+        await this.clearOwnerResetCode(propertyNumber);
+        return { valid: false, message: "انتهت صلاحية رمز التحقق" };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  async updatePropertyPin(propertyNumber: string, newPin: string): Promise<void> {
+    const rows = await this.readSheet(SHEETS.PROPERTIES);
+    const rowIndex = rows.findIndex(r => r[0]?.toString() === propertyNumber.toString());
+    
+    if (rowIndex === -1) return;
+
+    const sheets = await getGoogleSheetClient();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEETS.PROPERTIES}!S${rowIndex + 2}`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[newPin]]
+      }
+    });
   }
   
 }

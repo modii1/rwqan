@@ -254,7 +254,7 @@ export default function PropertiesSection() {
   );
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">إدارة العقارات</h2>
@@ -388,7 +388,7 @@ export default function PropertiesSection() {
 
       {/* Edit/Add Dialog */}
       <Dialog open={!!editing} onOpenChange={() => { setEditing(null); resetForm(); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة عقار جديد" : "تعديل العقار"}</DialogTitle>
             <DialogDescription>
@@ -673,7 +673,7 @@ export default function PropertiesSection() {
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent>
+        <DialogContent dir="rtl">
           <DialogHeader>
             <DialogTitle className="text-red-600">تأكيد الحذف</DialogTitle>
             <DialogDescription>

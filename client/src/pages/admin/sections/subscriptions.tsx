@@ -585,7 +585,7 @@ export default function SubscriptionPage() {
 
         {/* Package Details Modal */}
         <Dialog open={!!packageToView} onOpenChange={() => setPackageToView(null)}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md" dir="rtl">
             <DialogHeader>
               <DialogTitle className="text-[#434040]">{packageToView?.name}</DialogTitle>
               <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
