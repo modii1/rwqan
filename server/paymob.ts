@@ -9,6 +9,11 @@ const INTEGRATION_ID_APPLEPAY = parseInt(process.env.PAYMOB_INTEGRATION_ID_APPLE
 
 const PAYMOB_API_URL = 'https://ksa.paymob.com';
 
+// Configure the Paymob redirect URL via environment variable. During development this can be
+// something like "http://localhost:5000/api/paymob/webhook". In production on Render,
+// specify the appropriate domain (e.g. https://your-app.onrender.com/api/paymob/webhook).
+const PAYMOB_REDIRECT_URL = process.env.PAYMOB_REDIRECT_URL || 'https://example.com/api/paymob/webhook';
+
 console.log("🔑 Paymob Config:", {
   hasSecretKey: !!SECRET_KEY,
   secretKeyLength: SECRET_KEY?.length || 0,
@@ -67,7 +72,7 @@ export class PaymobService {
         phone_number: phone,
         country: 'KSA',
         // ⭐⭐⭐ إعادة التوجيه بعد الدفع
-        redirect_url: "https://rwqan.replit.app/api/paymob/webhook",
+        redirect_url: PAYMOB_REDIRECT_URL,
       },
       customer: {
         first_name: propertyName || 'عميل',
@@ -158,7 +163,7 @@ export class PaymobService {
         email: `${phone}@example.com`,
         phone_number: phone,
         country: 'KSA',
-        redirect_url: "https://rwqan.replit.app/api/paymob/webhook",
+        redirect_url: PAYMOB_REDIRECT_URL,
       },
       customer: {
         first_name: propertyName || 'عميل',
