@@ -1,6 +1,6 @@
 import express from "express";
-import { storage } from "./storage";
-import { googleDriveService } from "./googleDrive";
+import { storage } from "./storage.js";
+import { googleDriveService } from "./googleDrive.js";
 
 const router = express.Router();
 

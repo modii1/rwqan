@@ -4,9 +4,9 @@
  * - إرسال إشعارات للاشتراكات المنتهية (3 أيام متتالية، ثم توقف 4 أيام، ثم تكرار)
  */
 
-import { storage } from "./storage";
-import { notifySubscriptionExpired } from "./whatsapp";
-import { googleSheetsService } from "./googleSheets";
+import { storage } from "./storage.js";
+import { notifySubscriptionExpired } from "./whatsapp.js";
+import { googleSheetsService } from "./googleSheets.js";
 
 /**
  * التحقق من أن اليوم يقع ضمن أيام الإرسال

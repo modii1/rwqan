@@ -1,7 +1,7 @@
 // server/whatsapp.ts
 import express from "express";
-import { googleSheetsService } from "./googleSheets";
-import type { NotificationSettings } from "@shared/schema";
+import { googleSheetsService } from "./googleSheets.js";
+import type { NotificationSettings } from "@shared/schema.js";
 
 const router = express.Router();
 

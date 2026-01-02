@@ -2,13 +2,13 @@
 import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
 import cors from "cors";
-import { registerRoutes } from "./routes";
-import { setupVite } from "./vite";
+import { registerRoutes } from "./routes.js";
+import { setupVite } from "./vite.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
-import whatsappRoutes from "./whatsapp";
-import { startScheduler } from "./scheduler";
+import whatsappRoutes from "./whatsapp.js";
+import { startScheduler } from "./scheduler.js";
 import dotenv from "dotenv";
 
 // Load environment variables from .env only during development.
@@ -59,17 +59,10 @@ app.use(
   }),
 );
 
-// =====================================
-// Static storage for Object Storage
-// =====================================
-const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
-if (bucketId) {
-  app.use("/public", express.static(`${bucketId}/public`));
-}
-
 (async () => {
-  // Register all project routes
-  const server = await registerRoutes(app);
+  try {
+    // Register all project routes
+    const server = await registerRoutes(app);
 
 
   // Error Handler
@@ -88,7 +81,7 @@ if (bucketId) {
   if (app.get("env") !== "development") {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const publicPath = path.join(__dirname, "public");
+    const publicPath = path.join(__dirname, "client");
 
     app.use(express.static(publicPath));
 
@@ -101,11 +94,17 @@ if (bucketId) {
     });
   }
 
+  // Health check
+  app.get("/health", (req, res) => res.send("OK"));
+
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
   app.listen(port, "0.0.0.0", () => {
   console.log("🚀 Server running on port", port);
   startScheduler();
-});
-
+  });
+  } catch (error) {
+    console.error("❌ Failed to initialize server:", error);
+    process.exit(1);
+  }
 })();

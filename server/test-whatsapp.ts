@@ -1,5 +1,5 @@
 
-import { notifyNewProperty } from "./whatsapp";
+import { notifyNewProperty } from "./whatsapp.js";
 
 async function testWhatsApp() {
   console.log("🧪 بدء اختبار إشعارات الواتساب...");

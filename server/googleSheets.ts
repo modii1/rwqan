@@ -30,9 +30,9 @@ import type {
   InsertPropertyAddOn,
   AddOnHistory,
   InsertAddOnHistory,
-} from "@shared/schema";
-import { DEFAULT_FEE_CONFIGS } from "@shared/schema";
-import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils";
+} from "@shared/schema.js";
+import { DEFAULT_FEE_CONFIGS } from "@shared/schema.js";
+import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths } from "./dateUtils.js";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 

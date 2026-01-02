@@ -20,7 +20,7 @@ import type {
   InsertBackup,
   CodeBackup,
   InsertCodeBackup,
-} from "@shared/schema";
+} from "@shared/schema.js";
 import fs from "fs";
 import path from "path";
 

@@ -8,7 +8,7 @@ import whatsappRoutes, {
   notifySmartRequest,
   notifyPropertyVerification,
   sendWhatsAppNotification,
-} from "./whatsapp";
+} from "./whatsapp.js";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import cors from "cors";
 import type { CorsOptions } from "cors";
@@ -16,11 +16,11 @@ import type { CorsOptions } from "cors";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 
-import { storage } from "./storage";
-import { googleSheetsService } from "./googleSheets";
-import { googleDriveService } from "./googleDrive";
-import { paymobService } from "./paymob";
-import { updateRemainingDaysInSheet } from "./scheduler";
+import { storage } from "./storage.js";
+import { googleSheetsService } from "./googleSheets.js";
+import { googleDriveService } from "./googleDrive.js";
+import { paymobService } from "./paymob.js";
+import { updateRemainingDaysInSheet } from "./scheduler.js";
 
 import session from "express-session";
 import MemoryStore from "memorystore";
@@ -38,7 +38,7 @@ import {
   insertBackupSchema,
   insertCodeBackupSchema,
   type InsertProperty,
-} from "@shared/schema";
+} from "@shared/schema.js";
 import fs from "fs";
 import path from "path";
 
