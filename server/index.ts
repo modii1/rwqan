@@ -1,3 +1,4 @@
+
 import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
 import cors from "cors";
@@ -8,6 +9,15 @@ import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
 import whatsappRoutes from "./whatsapp";
 import { startScheduler } from "./scheduler";
+import dotenv from "dotenv";
+
+dotenv.config({
+  path: process.env.NODE_ENV === "production"
+    ? "/etc/secrets/Ssssss.env"
+    : ".env",
+});
+
+
 
 const app = express();
 
