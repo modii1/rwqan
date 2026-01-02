@@ -1,23 +1,3 @@
-import dotenv from "dotenv";
-
-dotenv.config({
-  path: process.env.NODE_ENV === "production"
-    ? "/etc/secrets/Ssssss.env"
-    : ".env",
-});
-
-import express, { type ErrorRequestHandler } from "express";
-import session from "express-session";
-import cors from "cors";
-import { registerRoutes } from "./routes";
-import { setupVite } from "./vite";
-import path from "path";
-import { fileURLToPath } from "url";
-import MemoryStore from "memorystore";
-import whatsappRoutes from "./whatsapp";
-import { startScheduler } from "./scheduler";
-
-
 
 import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
@@ -31,11 +11,11 @@ import whatsappRoutes from "./whatsapp";
 import { startScheduler } from "./scheduler";
 import dotenv from "dotenv";
 
-dotenv.config({
-  path: process.env.NODE_ENV === "production"
-    ? "/etc/secrets/Ssssss.env"
-    : ".env",
-});
+// Load environment variables from .env only during development.
+// In production (Render) all configuration is provided via environment variables or secret files.
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config();
+}
 
 
 
