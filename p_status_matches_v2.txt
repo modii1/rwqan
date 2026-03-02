@@ -1,0 +1,87 @@
+﻿
+server\routes.ts:1814:     
+   const isCompleted = 
+p.status === 'مكتمل' || 
+p.status === 'نجح - قيد 
+التحقق' || p.status === 
+'completed';
+server\routes.ts:1877:     
+   p.status === 'pending' 
+|| p.status === 'معلق' || 
+p.status === 'قيد المراجعة'
+server\routes.ts:2081:     
+   return payDate >= 
+todayStart && (p.status 
+=== 'مكتمل' || p.status 
+=== 'completed');
+server\routes.ts:2088:     
+   return payDate >= 
+todayStart && (p.status 
+=== 'مكتمل' || p.status 
+=== 'completed' || 
+p.status === 'نجح - قيد 
+التحقق');
+server\routes.ts:2107:     
+   return payDate >= 
+sevenDaysAgo && (p.status 
+=== 'مكتمل' || p.status 
+=== 'completed');
+server\routes.ts:3952:     
+   (p.status === "قيد 
+المراجعة" || p.status === 
+"معلق") &&
+server\routes.ts:4035:     
+ const completedPayment = 
+payments.find(p => 
+p.status === "مكتمل");
+server\routes.ts:4036:     
+ const cardSuccessPayment 
+= payments.find(p => 
+p.status === "نجح - قيد 
+التحقق");
+server\routes.ts:4037:     
+ const bankTransferPayment 
+= payments.find(p => 
+p.status === "قيد التحقق" 
+&& p.paymentMethod === 
+"تحويل بنكي");
+server\routes.ts:4038:     
+ const cardPendingPayment 
+= payments.find(p => 
+p.status === "قيد 
+المراجعة" && 
+(p.paymentMethod === 
+"بطاقة" || p.paymentMethod 
+=== "Apple Pay"));
+server\routes.ts:6148:     
+       p.status === "قيد 
+الدفع" &&
+server\routes.ts:6336:     
+ console.log("🔍 Available 
+pending payments:", 
+payments.filter(p => 
+p.status === "معلق" || 
+p.status === "قيد 
+المراجعة").map(p => ({
+server\routes.ts:6351:     
+       (p.status === 
+"معلق" || p.status === 
+"قيد المراجعة") &&
+server\routes.ts:6369:     
+       (p.status === 
+"معلق" || p.status === 
+"قيد المراجعة") &&
+server\routes.ts:6380:     
+       (p.status === 
+"معلق" || p.status === 
+"قيد المراجعة")
+server\routes.ts:7021:     
+     (p.status === "قيد 
+المراجعة" || p.status === 
+"نجح - قيد التحقق") &&
+server\routes.ts:7087:     
+     (p.status === "قيد 
+المراجعة" || p.status === 
+"نجح - قيد التحقق") &&
+
+
