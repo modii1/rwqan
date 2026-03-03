@@ -10,7 +10,7 @@ import type {
   PropertyAddOn,
   InsertPropertyAddOn,
   AddOnHistory,
-} from "@shared/schema";
+} from "../../shared/schema";
 
 export class AddOnService {
   // ─── Add-On Packages ─────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  */
 
 import { firebaseService } from "../firebaseService";
-import type { Request as PropertyRequest, InsertRequest } from "@shared/schema";
+import type { Request as PropertyRequest, InsertRequest } from "../../shared/schema";
 
 export class AnalyticsService {
   // ─── Request Recording ──────────────────────────────────────────────────────

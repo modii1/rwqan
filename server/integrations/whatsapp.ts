@@ -1,7 +1,7 @@
 // server/whatsapp.ts
 import express from "express";
 import { firebaseService } from "../firebaseService";
-import type { NotificationSettings } from "@shared/schema";
+import type { NotificationSettings } from "../../shared/schema";
 
 const router = express.Router();
 

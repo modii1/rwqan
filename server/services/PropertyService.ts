@@ -4,7 +4,7 @@
  */
 
 import { firebaseService } from "../firebaseService";
-import type { Property, InsertProperty } from "@shared/schema";
+import type { Property, InsertProperty } from "../../shared/schema";
 import {
   checkPropertyDataComplete,
   detectSensitiveChanges,

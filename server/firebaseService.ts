@@ -35,7 +35,7 @@ import type {
     InsertFeatureFlag,
     OcrResult,
     InsertOcrResult,
-} from "@shared/schema";
+} from "../shared/schema";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate } from "./utils/dateUtils";
 
 export class FirebaseService {

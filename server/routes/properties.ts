@@ -5,7 +5,7 @@ import { Router } from "express";
 import { propertyService, subscriptionService, contentService, notificationService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { googleDriveService } from "../integrations/googleDrive";
-import type { InsertProperty } from "@shared/schema";
+import type { InsertProperty } from "../../shared/schema";
 
 const router = Router();
 

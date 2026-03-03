@@ -5,7 +5,7 @@ import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { propertyService, subscriptionService, discountService, notificationService, contentService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
-import { insertSuggestionSchema, type InsertProperty } from "@shared/schema";
+import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 
 const router = Router();
 

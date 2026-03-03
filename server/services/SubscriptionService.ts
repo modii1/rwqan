@@ -5,7 +5,7 @@
  */
 
 import { firebaseService } from "../firebaseService";
-import type { Subscription, Package } from "@shared/schema";
+import type { Subscription, Package } from "../../shared/schema";
 import {
   calculateSubscriptionEndDate,
   calculateExtensionEndDate,

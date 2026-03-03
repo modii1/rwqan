@@ -7,7 +7,7 @@
 
 import { google } from 'googleapis';
 import { firebaseService } from "../firebaseService";
-import { OcrResult } from "@shared/schema";
+import { OcrResult } from "../../shared/schema";
 
 /**
  * استخراج البيانات من صورة الإيصال

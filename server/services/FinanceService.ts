@@ -9,7 +9,7 @@ import type {
   InsertPartnerProfit,
   Expense,
   InsertExpense,
-} from "@shared/schema";
+} from "../../shared/schema";
 
 export class FinanceService {
   // ─── Partner Profits ─────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
  */
 
 import { firebaseService } from "../firebaseService";
-import type { DiscountCode } from "@shared/schema";
+import type { DiscountCode } from "../../shared/schema";
 
 export interface DiscountApplicationResult {
   valid: boolean;
