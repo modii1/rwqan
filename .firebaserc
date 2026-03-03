@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "rwqan-757"
-  }
+    "default": "rwqan-757",
+    "rwqan": "rwqan-757"
+  },
+  "targets": {},
+  "etags": {}
 }
