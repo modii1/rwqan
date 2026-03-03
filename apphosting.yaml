@@ -12,8 +12,17 @@ scripts:
   buildCommand: npm run build
   runCommand: node dist/server/index.js
 
+# Include all necessary build output
+outputFiles:
+  serverApp:
+    include: [.]
+
 # Environment variables and secrets.
-# env:
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - RUNTIME
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
   # - variable: MESSAGE
