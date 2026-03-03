@@ -119,11 +119,18 @@ export class FirebaseService {
         const snapshot = await this.db
             .collection("subscriptions")
             .where("propertyNumber", "==", propertyNumber)
-            .orderBy("endDate", "desc")
-            .limit(1)
             .get();
 
-        return snapshot.empty ? null : (snapshot.docs[0].data() as Subscription);
+        if (snapshot.empty) return null;
+
+        // Sort in JS to avoid composite index requirement
+        const docs = snapshot.docs.map(doc => doc.data() as Subscription);
+        docs.sort((a, b) => {
+            const dateA = a.endDate ? new Date(a.endDate).getTime() : 0;
+            const dateB = b.endDate ? new Date(b.endDate).getTime() : 0;
+            return dateB - dateA;
+        });
+        return docs[0];
     }
 
     async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
@@ -276,6 +283,27 @@ export class FirebaseService {
         return newPackage;
     }
 
+    async getAllPackages(): Promise<Package[]> {
+        const snapshot = await this.db.collection("packages").get();
+        return snapshot.docs.map((doc) => doc.data() as Package);
+    }
+
+    async updatePackage(id: string, updates: Partial<Package>): Promise<Package | null> {
+        const ref = this.db.collection("packages").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return null;
+        await ref.update(updates);
+        return { ...doc.data(), ...updates } as Package;
+    }
+
+    async deletePackage(id: string): Promise<boolean> {
+        const ref = this.db.collection("packages").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return false;
+        await ref.delete();
+        return true;
+    }
+
     // ================== المدفوعات (Payments) ==================
 
     async getPayments(): Promise<Payment[]> {
@@ -388,12 +416,25 @@ export class FirebaseService {
     // ================== المدونة (Blog Posts) ==================
 
     async getBlogPosts(onlyPublished: boolean = false): Promise<any[]> {
-        let query = this.db.collection("blog_posts").orderBy("createdAt", "desc");
-        if (onlyPublished) {
-            query = (query as any).where("status", "==", "منشور");
+        try {
+            let snapshot;
+            if (onlyPublished) {
+                // Use only where() to avoid requiring a composite index
+                snapshot = await this.db.collection("blog_posts").where("status", "==", "منشور").get();
+            } else {
+                snapshot = await this.db.collection("blog_posts").get();
+            }
+            const posts = snapshot.docs.map(doc => doc.data());
+            // Sort in JS instead of Firestore to avoid composite index requirement
+            return posts.sort((a: any, b: any) => {
+                const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return dateB - dateA;
+            });
+        } catch (err: any) {
+            console.error("getBlogPosts error:", err?.message);
+            return [];
         }
-        const snapshot = await query.get();
-        return snapshot.docs.map(doc => doc.data());
     }
 
     async getBlogPostBySlug(slug: string): Promise<any | null> {

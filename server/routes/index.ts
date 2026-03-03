@@ -32,6 +32,7 @@ import adminSettingsRoutes from "./admin/settings";
 import adminAddonsRoutes from "./admin/addons";
 import adminBackupRoutes from "./admin/backup";
 import adminImagesRoutes from "./admin/images";
+import adminPackagesRoutes from "./admin/packages";
 import adminTestingRoutes from "./admin/testing";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -95,6 +96,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(adminAddonsRoutes);
   app.use(adminBackupRoutes);
   app.use(adminImagesRoutes);
+  app.use(adminPackagesRoutes);
   app.use(adminTestingRoutes);
 
   return createServer(app);

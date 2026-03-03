@@ -21,6 +21,10 @@ export default function RootLayout({
 }>) {
     return (
         <html lang="ar" dir="rtl">
+            <head>
+                <link rel="icon" href="/favicon.png" type="image/png" />
+                <link rel="shortcut icon" href="/favicon.png" type="image/png" />
+            </head>
             <body className="font-sans antialiased bg-background text-foreground">
                 <QueryProvider>
                     <TooltipProvider>

@@ -214,6 +214,11 @@ router.post("/api/properties/register", async (req, res) => {
 // ======================================================
 // 🖼️ PUBLIC — جلب صور العقار من R2 (للصفحة الرئيسية)
 // ======================================================
+// Fallback for requests without propertyNumber param
+router.get("/api/public/property-images", (_req, res) => {
+  res.json({ images: [] });
+});
+
 router.get("/api/public/property-images/:propertyNumber", async (req, res) => {
   try {
     const propertyNumber = req.params.propertyNumber;

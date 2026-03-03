@@ -51,6 +51,9 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
   router.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
     try {
       const propertyNumber = req.params.propertyNumber;
+      if (!propertyNumber || !propertyNumber.trim()) {
+        return res.json({ images: [] });
+      }
       if (!r2 || !R2_BUCKET) return res.json({ images: [] });
 
       const list = await r2.send(
@@ -60,13 +63,20 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
         })
       );
 
-      const images =
-        list.Contents?.map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
+      const images = (list.Contents || [])
+        .filter((obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key))
+        .sort((a, b) => {
+          const numA = parseInt(a.Key?.match(/(\d+)\./)?.[1] || "0");
+          const numB = parseInt(b.Key?.match(/(\d+)\./)?.[1] || "0");
+          return numA - numB;
+        })
+        .map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`);
 
       res.json({ images });
-    } catch (err) {
-      console.error("ADMIN R2 LIST ERROR:", err);
-      res.status(500).json({ error: "Failed to list R2 images" });
+    } catch (err: any) {
+      console.error("ADMIN R2 LIST ERROR:", err?.message || err);
+      // Return empty array instead of 500 to avoid breaking the UI
+      res.json({ images: [] });
     }
   });
 
