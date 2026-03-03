@@ -1,77 +1,101 @@
-import { Router } from "express";
-import type { Express, Request, Response, NextFunction } from "express";
+/**
+ * Routes Index - Assembles all modular route files
+ * 
+ * This replaces the legacy monolithic routes.ts (7700+ lines)
+ * by composing smaller, domain-specific route modules.
+ */
+import type { Express } from "express";
 import { createServer, type Server } from "http";
-
 import cors from "cors";
 import type { CorsOptions } from "cors";
-
 import cookieParser from "cookie-parser";
-
 import { firebaseService } from "../firebaseService";
-import { googleSheetsService } from "../googleSheets";
-import { dbContext } from "../dbConfig";
+import { firebaseService } from "../firebaseService";
+import whatsappRoutes from "../integrations/whatsapp";
 
-import whatsappRoutes from "../whatsapp";
+// Route modules
 import authRoutes from "./auth";
 import ownerRoutes from "./owner";
-import adminRoutes from "./admin";
 import propertiesRoutes from "./properties";
-import subscriptionsRoutes from "./subscriptions";
-import paymentsRoutes from "./payments";
-import requestsRoutes from "./requests";
+import publicRoutes from "./public";
+import trackingRoutes from "./tracking";
+import webhookRoutes from "./webhooks";
 
-declare module 'express-session' {
-  interface SessionData {
-    propertyNumber?: string;
-    isAdmin?: boolean;
-    otp?: string;
-    otpExpiry?: number;
-    lastOtpSent?: number;
-  }
-}
+// Admin route modules
+import adminAnalyticsRoutes from "./admin/analytics";
+import adminPropertiesRoutes from "./admin/properties";
+import adminSubscriptionsRoutes from "./admin/subscriptions";
+import adminPaymentsRoutes from "./admin/payments";
+import adminContentRoutes from "./admin/content";
+import adminFinanceRoutes from "./admin/finance";
+import adminSettingsRoutes from "./admin/settings";
+import adminAddonsRoutes from "./admin/addons";
+import adminBackupRoutes from "./admin/backup";
+import adminImagesRoutes from "./admin/images";
+import adminTestingRoutes from "./admin/testing";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Middleware for cookies
   app.use(cookieParser());
 
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    const dbSource = req.headers['x-db-source'] || req.cookies?.['db_source'] || 'firebase';
-    const service = dbSource === 'firebase' ? (firebaseService as any) : googleSheetsService;
-
-    dbContext.run({ dbService: service }, () => {
+  // Middleware to select database source - Always Firebase
+  app.use((req, res, next) => {
+    dbContext.run({ dbService: firebaseService }, () => {
       next();
     });
   });
 
+  // CORS
   const corsOptions: CorsOptions = {
     origin: true,
     credentials: true,
   };
   app.use(cors(corsOptions));
 
-  app.use("/", authRoutes);
-  app.use("/", ownerRoutes);
-  app.use("/", adminRoutes);
-  app.use("/", propertiesRoutes);
-  app.use("/", subscriptionsRoutes);
-  app.use("/", paymentsRoutes);
-  app.use("/", requestsRoutes);
+  // Initialize DB
+  try {
+    await firebaseService.initializeSheets();
+  } catch (err) {
+    console.error("DB Init Error:", err);
+  }
+
+  // ============================================
+  // Register all route modules
+  // ============================================
+
+  // WhatsApp routes (mounted at /api/whatsapp)
   app.use("/api/whatsapp", whatsappRoutes);
 
-  app.get("/developer-guide", async (_req, res) => {
-    res.redirect("https://example.com/developer-guide");
-  });
+  // Public routes (sitemap, developer-guide, packages, suggestions, etc.)
+  app.use(publicRoutes);
 
-  app.get("/sitemap.xml", async (_req, res) => {
-    res.setHeader("Content-Type", "application/xml");
-    res.send(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://rwqan.sa/</loc>
-    <priority>1.0</priority>
-  </url>
-</urlset>`);
-  });
+  // Auth routes (login, logout, session, password reset)
+  app.use(authRoutes);
 
-  const server = createServer(app);
-  return server;
+  // Tracking routes (smart requests, pageview)
+  app.use(trackingRoutes);
+
+  // Owner routes (property management, images, payments, subscriptions, addons)
+  app.use(ownerRoutes);
+
+  // Public property routes (list, detail, create, update, delete, register)
+  app.use(propertiesRoutes);
+
+  // Webhook routes (Paymob)
+  app.use(webhookRoutes);
+
+  // Admin routes
+  app.use(adminAnalyticsRoutes);
+  app.use(adminPropertiesRoutes);
+  app.use(adminSubscriptionsRoutes);
+  app.use(adminPaymentsRoutes);
+  app.use(adminContentRoutes);
+  app.use(adminFinanceRoutes);
+  app.use(adminSettingsRoutes);
+  app.use(adminAddonsRoutes);
+  app.use(adminBackupRoutes);
+  app.use(adminImagesRoutes);
+  app.use(adminTestingRoutes);
+
+  return createServer(app);
 }

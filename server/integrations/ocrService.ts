@@ -6,7 +6,7 @@
  */
 
 import { google } from 'googleapis';
-import { googleSheetsService } from "./googleSheets";
+import { firebaseService } from "../firebaseService";
 import { OcrResult } from "@shared/schema";
 
 /**
@@ -19,7 +19,7 @@ export async function extractReceiptData(
 ): Promise<OcrResult | null> {
   try {
     // التحقق من تفعيل ميزة OCR
-    const ocrEnabled = await googleSheetsService.getFeatureFlag("FEATURE_OCR_ENABLED");
+    const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
     if (!ocrEnabled) {
       console.log("📷 [OCR] الميزة غير مفعلة");
       return null;
@@ -50,7 +50,7 @@ export async function extractReceiptData(
 
     // حفظ النتيجة في Google Sheets
     if (result) {
-      await googleSheetsService.saveOcrResult(result);
+      await firebaseService.saveOcrResult(result);
       console.log(`📷 [OCR] تم حفظ نتيجة OCR للدفع: ${paymentId}`);
     }
 

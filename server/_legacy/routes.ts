@@ -382,12 +382,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for cookies
   app.use(cookieParser());
 
-  // Middleware to select database source
+  // Middleware to select database source - Always Firebase
   app.use((req: Request, res: Response, next: NextFunction) => {
-    const dbSource = req.headers['x-db-source'] || req.cookies?.['db_source'] || 'firebase';
-    const service = dbSource === 'firebase' ? (firebaseService as any) : googleSheetsService;
-
-    dbContext.run({ dbService: service }, () => {
+    dbContext.run({ dbService: firebaseService }, () => {
       next();
     });
   });

@@ -1,75 +1,127 @@
+/**
+ * Auth Routes - Login, logout, password reset, session checks
+ */
 import { Router } from "express";
-import { storage } from "../storage";
-import type { Request, Response } from "express";
+import { authService } from "../services";
+import { requireOwner, requireAdmin } from "./middleware";
 
 const router = Router();
 
-router.post("/api/auth/send-reset-code", async (req: Request, res: Response) => {
+// Admin credentials
+const ADMIN_CODE = process.env.ADMIN_CODE || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+// ======================
+// OWNER LOGIN/LOGOUT
+// ======================
+router.post("/api/owner/login", async (req, res) => {
+  const { propertyNumber, pin } = req.body;
+  const valid = await authService.validateOwnerPin(propertyNumber, pin);
+  if (!valid)
+    return res.status(401).json({ error: "Invalid Credentials" });
+
+  (req.session as any).propertyNumber = propertyNumber;
+  req.session.save((err: any) => {
+    if (err) return res.status(500).json({ error: "Session save failed" });
+    res.json({ ok: true });
+  });
+});
+
+router.post("/api/owner/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error("Logout error:", err);
+      return res.status(500).json({ error: "Logout failed" });
+    }
+    res.clearCookie("connect.sid");
+    console.log("✅ Logout successful");
+    res.json({ ok: true });
+  });
+});
+
+// ======================
+// ADMIN LOGIN
+// ======================
+router.post("/api/admin/login", async (req, res) => {
+  const { code, password } = req.body;
+  if (code !== ADMIN_CODE || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Invalid Admin Credentials" });
+  }
+  (req.session as any).isAdmin = true;
+  req.session.save((err: any) => {
+    if (err) return res.status(500).json({ error: "Session save failed" });
+    res.json({ ok: true });
+  });
+});
+
+// ======================
+// SESSION CHECKS
+// ======================
+router.get("/api/owner/session", (req, res) => {
+  const isLoggedIn = Boolean((req.session as any).propertyNumber);
+  res.json({ isLoggedIn, propertyNumber: (req.session as any).propertyNumber || null });
+});
+
+router.get("/api/admin/session", (req, res) => {
+  const isAdmin = Boolean((req.session as any).isAdmin);
+  res.json({ isAdmin });
+});
+
+// ======================
+// PASSWORD RESET
+// ======================
+router.post("/api/auth/send-reset-code", async (req, res) => {
   try {
-    const { propertyNumber, whatsappNumber } = req.body;
-    
-    if (!propertyNumber && !whatsappNumber) {
-      return res.status(400).json({ error: "Property number or WhatsApp number required" });
+    const { ownerId } = req.body;
+    if (!ownerId) return res.status(400).json({ success: false, message: "رقم العقار مطلوب" });
+
+    try {
+      const { maskedPhone, expiresIn } = await authService.sendResetCode(ownerId);
+      return res.json({ success: true, message: `تم إرسال رمز التحقق إلى ${maskedPhone}`, expiresIn });
+    } catch (err: any) {
+      const status = err.code || 500;
+      return res.status(status).json({ success: false, message: err.message || "خطأ في النظام" });
     }
-
-    const property = await storage.getPropertyByNumber(propertyNumber || whatsappNumber);
-    if (!property) {
-      return res.status(404).json({ error: "Property not found" });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    (req.session as any).otp = otp;
-    (req.session as any).otpExpiry = Date.now() + 10 * 60 * 1000;
-    (req.session as any).lastOtpSent = Date.now();
-
-    res.json({ 
-      ok: true, 
-      message: "OTP sent to registered WhatsApp number",
-      debugOTP: otp 
-    });
-  } catch (err: any) {
-    console.error("Send reset code error:", err);
-    res.status(500).json({ error: "Failed to send reset code" });
+  } catch (error: any) {
+    console.error("Send reset code error:", error);
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
   }
 });
 
-router.post("/api/auth/set-new-password", async (req: Request, res: Response) => {
+router.post("/api/auth/set-new-password", async (req, res) => {
   try {
-    const { propertyNumber, otp, newPin } = req.body;
+    const { ownerId, resetCode, newPassword } = req.body;
+    if (!ownerId || !resetCode || !newPassword) return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
 
-    if (!propertyNumber || !otp || !newPin) {
-      return res.status(400).json({ error: "Property number, OTP, and new PIN required" });
+    try {
+      await authService.setNewPassword(ownerId, resetCode, newPassword);
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
+    } catch (err: any) {
+      return res.status(err.code || 400).json({ success: false, message: err.message || "خطأ في النظام" });
     }
+  } catch (error: any) {
+    console.error("Set new password error:", error);
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
+  }
+});
 
-    const sessionOTP = (req.session as any).otp;
-    const otpExpiry = (req.session as any).otpExpiry;
+router.post("/api/owner/change-password", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any)?.propertyNumber;
+    if (!propertyNumber) return res.status(401).json({ success: false, message: "يجب تسجيل الدخول أولاً" });
 
-    if (!sessionOTP || !otpExpiry) {
-      return res.status(400).json({ error: "No OTP found. Request a new one." });
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
+
+    try {
+      await authService.changePassword(propertyNumber, currentPassword, newPassword);
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
+    } catch (err: any) {
+      return res.status(err.code || 400).json({ success: false, message: err.message || "خطأ في النظام" });
     }
-
-    if (Date.now() > otpExpiry) {
-      return res.status(400).json({ error: "OTP expired. Request a new one." });
-    }
-
-    if (sessionOTP !== otp) {
-      return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    const property = await storage.getPropertyByNumber(propertyNumber);
-    if (!property) {
-      return res.status(404).json({ error: "Property not found" });
-    }
-
-    await storage.updateProperty(propertyNumber, { pin: newPin });
-
-    (req.session as any).otp = undefined;
-    (req.session as any).otpExpiry = undefined;
-
-    res.json({ ok: true, message: "Password reset successful" });
-  } catch (err: any) {
-    console.error("Set new password error:", err);
-    res.status(500).json({ error: "Failed to reset password" });
+  } catch (error: any) {
+    console.error("Change password error:", error);
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
   }
 });
 

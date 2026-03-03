@@ -14,6 +14,7 @@ import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
+import { Turnstile } from "@marsidev/react-turnstile";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -54,6 +55,7 @@ export default function SubscriptionPage() {
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const { data: rawPackages = [] } = useQuery<Package[]>({
     queryKey: ['/api/packages'],
@@ -96,6 +98,7 @@ export default function SubscriptionPage() {
         facilities,
         prices,
         subscriptionType: selectedPackage?.type || 'عادي',
+        captchaToken,
       });
 
       const registrationData = await registrationResponse.json();
@@ -564,6 +567,16 @@ export default function SubscriptionPage() {
                 </div>
               )}
 
+              {/* CAPTCHA Verification */}
+              <div className="flex justify-center">
+                <Turnstile
+                  siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""}
+                  onSuccess={(token) => setCaptchaToken(token)}
+                  onExpire={() => setCaptchaToken(null)}
+                  onError={() => setCaptchaToken(null)}
+                />
+              </div>
+
               {/* Submit */}
               <div className="flex gap-3 pt-6 border-t">
                 <Button
@@ -577,7 +590,7 @@ export default function SubscriptionPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
+                  disabled={isSubmitting || (!isFreePackage && !paymentMethod) || !captchaToken}
                   className="flex-1"
                 >
                   {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}

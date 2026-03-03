@@ -1,4 +1,4 @@
-import { db } from "./firebase";
+import { db } from "./config/firebase";
 import type {
     Property,
     InsertProperty,
@@ -36,7 +36,7 @@ import type {
     OcrResult,
     InsertOcrResult,
 } from "@shared/schema";
-import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate } from "./dateUtils";
+import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate } from "./utils/dateUtils";
 
 export class FirebaseService {
     private get db() {
@@ -182,6 +182,73 @@ export class FirebaseService {
         });
     }
 
+    async cancelSubscription(propertyNumber: string, reason?: string): Promise<void> {
+        const id = `SUB-${propertyNumber}`;
+        const ref = this.db.collection("subscriptions").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) {
+            console.log(`⚠️ Subscription not found for property ${propertyNumber}`);
+            return;
+        }
+        await ref.update({
+            status: "منتهي",
+            endDate: new Date().toISOString(),
+            cancelledAt: new Date().toISOString(),
+            cancelReason: reason ?? "admin",
+        });
+        console.log(`✅ Subscription cancelled for property ${propertyNumber} (reason: ${reason ?? "admin"})`);
+    }
+
+    async getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]> {
+        const snapshot = await this.db.collection("subscriptions")
+            .where("propertyNumber", "==", propertyNumber)
+            .orderBy("startDate", "desc")
+            .get();
+        return snapshot.docs.map((doc) => doc.data() as Subscription);
+    }
+
+    async getMultiPropertySubscriptions(): Promise<MultiPropertySubscription[]> {
+        const snapshot = await this.db.collection("multi_property_subscriptions")
+            .orderBy("createdAt", "desc")
+            .get();
+        return snapshot.docs.map((doc) => doc.data() as MultiPropertySubscription);
+    }
+
+    async createMultiPropertySubscription(data: InsertMultiPropertySubscription): Promise<MultiPropertySubscription> {
+        const id = `MULTI-${Date.now()}`;
+        const record: MultiPropertySubscription = {
+            id,
+            ...data,
+            createdAt: toRiyadhISO(getNowInRiyadh()),
+        } as MultiPropertySubscription;
+        await this.db.collection("multi_property_subscriptions").doc(id).set(record);
+        return record;
+    }
+
+    /** Alias for addVerificationLog — kept for backward compatibility with existing route code */
+    async addVerificationLogToSheet(log: any): Promise<void> {
+        return this.addVerificationLog(log);
+    }
+
+    async updateAllSubscriptionsRemainingDays(
+        updates: Array<{ propertyNumber: string; remainingDays: number }>
+    ): Promise<number> {
+        const batch = this.db.batch();
+        let count = 0;
+        for (const update of updates) {
+            const snapshot = await this.db.collection("subscriptions")
+                .where("propertyNumber", "==", update.propertyNumber)
+                .where("status", "in", ["نشط", "نشط مجاني", "ساري"])
+                .get();
+            for (const doc of snapshot.docs) {
+                batch.update(doc.ref, { remainingDays: update.remainingDays, updatedAt: new Date().toISOString() });
+                count++;
+            }
+        }
+        await batch.commit();
+        return count;
+    }
+
     // ================== الباقات (Packages) ==================
 
     async getPackages(): Promise<Package[]> {
@@ -241,13 +308,24 @@ export class FirebaseService {
         return doc.data() as Payment;
     }
 
+    async getPaymentsByProperty(propertyNumber: string): Promise<Payment[]> {
+        const snapshot = await this.db.collection("payments")
+            .where("propertyNumber", "==", propertyNumber)
+            .get();
+        const payments = snapshot.docs.map((doc) => doc.data() as Payment);
+        return payments.sort((a, b) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+    }
+
     // ================== الطلبات (Requests) ==================
 
-    async createRequest(request: InsertRequest): Promise<Request> {
+    async createRequest(request: InsertRequest, requestCountFromIP?: number): Promise<Request> {
         const id = `REQ-${Date.now()}`;
         const newRequest: Request = {
             id,
             ...request,
+            ...(requestCountFromIP !== undefined ? { requestCountFromIP } : {}),
             createdAt: new Date().toISOString(),
         } as Request;
 
@@ -272,6 +350,39 @@ export class FirebaseService {
         await ref.update(updates);
         const doc = await ref.get();
         return doc.exists ? (doc.data() as DiscountCode) : null;
+    }
+
+    async getDiscountCodeByCode(code: string): Promise<DiscountCode | null> {
+        const snapshot = await this.db.collection("discounts").where("code", "==", code).limit(1).get();
+        if (!snapshot.empty) return snapshot.docs[0].data() as DiscountCode;
+        // fallback: try by doc ID
+        const doc = await this.db.collection("discounts").doc(code).get();
+        return doc.exists ? (doc.data() as DiscountCode) : null;
+    }
+
+    async createDiscountCode(data: Partial<DiscountCode>): Promise<DiscountCode> {
+        const code = (data.code || `DC-${Date.now()}`).toUpperCase();
+        const discount = { id: code, ...data, code, createdAt: new Date().toISOString() } as DiscountCode;
+        await this.db.collection("discounts").doc(code).set(discount);
+        return discount;
+    }
+
+    async deleteDiscountCode(code: string): Promise<void> {
+        await this.db.collection("discounts").doc(code).delete();
+    }
+
+    // ================== الاقتراحات (Suggestions) ==================
+
+    async getSuggestions(): Promise<any[]> {
+        const snapshot = await this.db.collection("suggestions").orderBy("createdAt", "desc").get();
+        return snapshot.docs.map(doc => doc.data());
+    }
+
+    async createSuggestion(data: any): Promise<any> {
+        const id = `SUG-${Date.now()}`;
+        const suggestion = { id, ...data, createdAt: new Date().toISOString() };
+        await this.db.collection("suggestions").doc(id).set(suggestion);
+        return suggestion;
     }
 
     // ================== المدونة (Blog Posts) ==================
@@ -371,6 +482,52 @@ export class FirebaseService {
         return updatedDoc.data() as PropertyAddOn;
     }
 
+    async cancelPropertyAddOn(addonId: string, reason?: string): Promise<PropertyAddOn | null> {
+        const ref = this.db.collection("property_addons").doc(addonId);
+        const doc = await ref.get();
+        if (!doc.exists) return null;
+        const updates: Partial<PropertyAddOn> = {
+            status: "cancelled" as any,
+            updatedAt: new Date().toISOString(),
+            ...(reason ? { cancellationReason: reason } as any : {}),
+        };
+        await ref.update(updates);
+        const updatedDoc = await ref.get();
+        return updatedDoc.data() as PropertyAddOn;
+    }
+
+    // ================== باقات الإضافات (Add-on Packages) ==================
+
+    async getAddOnPackages(): Promise<AddOnPackage[]> {
+        const snapshot = await this.db.collection("addon_packages").get();
+        return snapshot.docs.map(doc => doc.data() as AddOnPackage);
+    }
+
+    async getAddOnPackageById(id: string): Promise<AddOnPackage | null> {
+        const doc = await this.db.collection("addon_packages").doc(id).get();
+        return doc.exists ? (doc.data() as AddOnPackage) : null;
+    }
+
+    async createAddOnPackage(data: InsertAddOnPackage): Promise<AddOnPackage> {
+        const id = `APKG-${Date.now()}`;
+        const pkg: AddOnPackage = {
+            id,
+            ...data,
+            createdAt: new Date().toISOString(),
+        };
+        await this.db.collection("addon_packages").doc(id).set(pkg);
+        return pkg;
+    }
+
+    async updateAddOnPackage(id: string, updates: Partial<AddOnPackage>): Promise<AddOnPackage | null> {
+        const ref = this.db.collection("addon_packages").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return null;
+        await ref.update({ ...updates, updatedAt: new Date().toISOString() });
+        const updatedDoc = await ref.get();
+        return updatedDoc.data() as AddOnPackage;
+    }
+
     // ================== إعدادات الرسوم ==================
 
     async getFeeConfigs(): Promise<FeeConfig[]> {
@@ -381,6 +538,55 @@ export class FirebaseService {
     async getFeeConfigById(id: string): Promise<FeeConfig | null> {
         const doc = await this.db.collection("fee_configs").doc(id).get();
         return doc.exists ? (doc.data() as FeeConfig) : null;
+    }
+
+    async createFeeConfig(data: Partial<FeeConfig>): Promise<FeeConfig> {
+        const id = `FEE-${Date.now()}`;
+        const config = { id, ...data, createdAt: new Date().toISOString() } as FeeConfig;
+        await this.db.collection("fee_configs").doc(id).set(config);
+        return config;
+    }
+
+    async updateFeeConfig(id: string, updates: Partial<FeeConfig>): Promise<FeeConfig | null> {
+        const ref = this.db.collection("fee_configs").doc(id);
+        await ref.update(updates);
+        const doc = await ref.get();
+        return doc.exists ? (doc.data() as FeeConfig) : null;
+    }
+
+    async deleteFeeConfig(id: string): Promise<void> {
+        await this.db.collection("fee_configs").doc(id).delete();
+    }
+
+    async initializeFeeConfigs(): Promise<void> { return; }
+
+    async removeDuplicateFeeConfigs(): Promise<{ removed: number }> {
+        const snapshot = await this.db.collection("fee_configs").get();
+        const seen = new Map<string, string>();
+        let removed = 0;
+        for (const doc of snapshot.docs) {
+            const key = doc.data().key || doc.id;
+            if (seen.has(key)) {
+                await doc.ref.delete();
+                removed++;
+            } else {
+                seen.set(key, doc.id);
+            }
+        }
+        return { removed };
+    }
+
+    calculatePaymentFees(amount: number, paymentMethod: string, cardType?: string): any {
+        // Paymob fee defaults — override via getFeeConfigs() if needed
+        const rate = paymentMethod === "card" ? 0.028 : 0.02;
+        const feeAmount = Math.round(amount * rate * 100) / 100;
+        const vatAmount = Math.round(feeAmount * 0.15 * 100) / 100;
+        const totalFees = Math.round((feeAmount + vatAmount) * 100) / 100;
+        return { feeAmount, vatAmount, totalFees, merchantFees: feeAmount, acqFees: 0, netAmount: amount - totalFees };
+    }
+
+    async calculatePaymentFeesFromConfigs(amount: number, paymentMethod: string, cardType?: string): Promise<any> {
+        return this.calculatePaymentFees(amount, paymentMethod, cardType);
     }
 
     // ================== التكاليف ==================
@@ -399,6 +605,33 @@ export class FirebaseService {
         } as Expense;
         await this.db.collection("expenses").doc(id).set(newExpense);
         return newExpense;
+    }
+
+    async getExpenseById(id: string): Promise<Expense | null> {
+        const doc = await this.db.collection("expenses").doc(id).get();
+        return doc.exists ? (doc.data() as Expense) : null;
+    }
+
+    async updateExpense(id: string, updates: Partial<Expense>): Promise<Expense> {
+        const ref = this.db.collection("expenses").doc(id);
+        await ref.update(updates);
+        const doc = await ref.get();
+        return doc.data() as Expense;
+    }
+
+    async deleteExpense(id: string): Promise<void> {
+        await this.db.collection("expenses").doc(id).delete();
+    }
+
+    async getTotalExpenses(startDate?: string, endDate?: string): Promise<number> {
+        const expenses = await this.getExpenses();
+        return expenses.reduce((sum, e) => {
+            if (!e.isActive) return sum;
+            const d = e.date || e.createdAt || "";
+            if (startDate && d < startDate) return sum;
+            if (endDate && d > endDate) return sum;
+            return sum + (e.amount || 0);
+        }, 0);
     }
 
     // ================== الحسابات البنكية (Bank Accounts) ==================
@@ -420,6 +653,24 @@ export class FirebaseService {
         return all[0] || null;
     }
 
+    async addBankAccount(data: Partial<BankAccount>): Promise<BankAccount> {
+        const id = `BA-${Date.now()}`;
+        const account = { id, ...data, createdAt: new Date().toISOString() } as BankAccount;
+        await this.db.collection("bank_accounts").doc(id).set(account);
+        return account;
+    }
+
+    async updateBankAccount(id: string, updates: Partial<BankAccount>): Promise<BankAccount> {
+        const ref = this.db.collection("bank_accounts").doc(id);
+        await ref.update(updates);
+        const doc = await ref.get();
+        return doc.data() as BankAccount;
+    }
+
+    async deleteBankAccount(id: string): Promise<void> {
+        await this.db.collection("bank_accounts").doc(id).delete();
+    }
+
     // ================== أعلام الميزات (Feature Flags) ==================
 
     async getFeatureFlags(): Promise<FeatureFlag[]> {
@@ -430,6 +681,23 @@ export class FirebaseService {
     async getFeatureFlag(key: string): Promise<boolean> {
         const snapshot = await this.db.collection("feature_flags").where("key", "==", key).limit(1).get();
         return snapshot.empty ? false : (snapshot.docs[0].data().isEnabled ?? false);
+    }
+
+    async updateFeatureFlag(key: string, isEnabled: boolean): Promise<void> {
+        const snapshot = await this.db.collection("feature_flags").where("key", "==", key).limit(1).get();
+        if (!snapshot.empty) {
+            await snapshot.docs[0].ref.update({ isEnabled, updatedAt: new Date().toISOString() });
+        } else {
+            const id = `FLAG-${Date.now()}`;
+            await this.db.collection("feature_flags").doc(id).set({
+                id, key, isEnabled, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            });
+        }
+    }
+
+    async initializeFeatureFlags(): Promise<void> {
+        // No-op for Firebase - flags are created on first update
+        return;
     }
 
     // ================== أرباح الشريك (Partner Profits) ==================
@@ -448,6 +716,15 @@ export class FirebaseService {
         } as PartnerProfit;
         await this.db.collection("partner_profits").doc(id).set(newProfit);
         return newProfit;
+    }
+
+    async updatePartnerProfit(id: string, updates: Partial<PartnerProfit>): Promise<PartnerProfit | null> {
+        const ref = this.db.collection("partner_profits").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return null;
+        await ref.update({ ...updates, updatedAt: new Date().toISOString() });
+        const updatedDoc = await ref.get();
+        return updatedDoc.data() as PartnerProfit;
     }
 
     async calculateMonthlyProfits(): Promise<{
@@ -735,9 +1012,144 @@ export class FirebaseService {
         return { valid: true };
     }
 
+    // ================== Notification Settings ==================
+
+    async getNotificationSettings(): Promise<NotificationSettings> {
+        try {
+            const doc = await this.db.collection("settings").doc("notification_settings").get();
+            if (doc.exists) {
+                return doc.data() as NotificationSettings;
+            }
+        } catch (err) {
+            console.error("Error loading notification settings from Firebase:", err);
+        }
+
+        return {
+            allNotifications: true,
+            newProperty: true,
+            newSubscription: true,
+            subscriptionRenewal: true,
+            receiptUpload: true,
+            propertyUpdate: true,
+            newPayment: true,
+            smartRequest: true,
+            propertyVerification: true,
+            subscriptionExpired: true,
+        };
+    }
+
+    async saveNotificationSettings(settings: NotificationSettings): Promise<void> {
+        const data = {
+            ...settings,
+            updatedAt: new Date().toISOString(),
+        };
+        await this.db.collection("settings").doc("notification_settings").set(data);
+    }
+
+    // ================== Expired Add-ons ==================
+
+    async updateExpiredAddOns(): Promise<number> {
+        const addons = await this.getAllPropertyAddOns();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let updatedCount = 0;
+
+        for (const addon of addons) {
+            if (addon.status !== "active" || !addon.endDate) continue;
+
+            const endDate = new Date(addon.endDate);
+            endDate.setHours(0, 0, 0, 0);
+
+            if (endDate < today) {
+                await this.updatePropertyAddOn(addon.id, { status: "expired" });
+                await this.logAddOnHistory({
+                    propertyNumber: addon.propertyNumber,
+                    addOnPackageId: addon.addOnPackageId,
+                    timestamp: toRiyadhISO(getNowInRiyadh()),
+                    action: "expired",
+                    notes: "انتهت الإضافة تلقائياً",
+                    createdBy: "system",
+                });
+                updatedCount++;
+                console.log(`⏰ [AddOns] تم تحديث حالة الإضافة ${addon.id} إلى منتهي`);
+            }
+        }
+
+        return updatedCount;
+    }
+
+    async logAddOnHistory(entry: InsertAddOnHistory): Promise<void> {
+        const id = `AH-${Date.now()}`;
+        const log = {
+            id,
+            ...entry,
+            createdAt: new Date().toISOString(),
+        };
+        await this.db.collection("addon_history").doc(id).set(log);
+    }
+
+    // ================== Payment Status ==================
+
+    async updatePaymentStatus(paymentId: string, newStatus: string): Promise<void> {
+        const ref = this.db.collection("payments").doc(paymentId);
+        const doc = await ref.get();
+        if (!doc.exists) {
+            throw new Error(`لم يتم العثور على الدفع: ${paymentId}`);
+        }
+        await ref.update({ status: newStatus });
+        console.log(`✅ Payment status updated → ${paymentId}: ${newStatus}`);
+    }
+
+    // ================== OCR Results ==================
+
+    async saveOcrResult(data: InsertOcrResult): Promise<void> {
+        const id = data.paymentId || `OCR-${Date.now()}`;
+        await this.db.collection("ocr_results").doc(id).set({
+            ...data,
+            createdAt: toRiyadhISO(getNowInRiyadh()),
+        });
+        console.log(`✅ [Firebase] OCR result saved for payment: ${id}`);
+    }
+
+    async getOcrResultByPaymentId(paymentId: string): Promise<OcrResult | null> {
+        const doc = await this.db.collection("ocr_results").doc(paymentId).get();
+        return doc.exists ? (doc.data() as OcrResult) : null;
+    }
+
     // ================== Parity Dummy Methods ==================
     async initializeSheets(): Promise<void> {
         return;
+    }
+
+    async updateAnalyticsRow(): Promise<void> {
+        // No-op for Firebase — analytics are queried live from Firestore
+        return;
+    }
+
+    async updatePaymentFees(transactionId: string, fees: Record<string, number>): Promise<void> {
+        const ref = this.db.collection("payments").doc(transactionId);
+        await ref.update({ ...fees, updatedAt: new Date().toISOString() });
+    }
+
+    async updateSubscriptionLinkedProperty(propertyNumber: string, linkedProperty: string): Promise<void> {
+        const snapshot = await this.db.collection("subscriptions")
+            .where("propertyNumber", "==", propertyNumber).limit(1).get();
+        if (!snapshot.empty) {
+            await snapshot.docs[0].ref.update({ linkedProperty, updatedAt: new Date().toISOString() });
+        }
+    }
+
+    // Async wrappers (no-arg) for FinanceService compatibility
+    async calculateMonthlyExpensesAsync(): Promise<number> {
+        const now = getNowInRiyadh();
+        const monthStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+        const expenses = await this.getExpenses();
+        return this.calculateMonthlyExpenses(expenses, monthStr);
+    }
+
+    async calculateAllTimeExpensesAsync(): Promise<number> {
+        const expenses = await this.getExpenses();
+        return this.calculateAllTimeExpenses(expenses);
     }
 }
 

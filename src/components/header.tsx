@@ -9,32 +9,33 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { useState, useEffect } from "react";
-import { Database, FileSpreadsheet } from "lucide-react";
+// import { Database, FileSpreadsheet } from "lucide-react"; // DB toggle disabled - Firebase only
 
 export function Header() {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { data: session } = useSessionQuery();
-    const [dbSource, setDbSource] = useState<'sheets' | 'firebase'>('sheets');
+    // DB toggle disabled - always use Firebase
+    // const [dbSource, setDbSource] = useState<'sheets' | 'firebase'>('sheets');
 
-    useEffect(() => {
-        const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-            const [key, value] = cookie.trim().split('=');
-            acc[key] = value;
-            return acc;
-        }, {} as Record<string, string>);
+    // useEffect(() => {
+    //     const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+    //         const [key, value] = cookie.trim().split('=');
+    //         acc[key] = value;
+    //         return acc;
+    //     }, {} as Record<string, string>);
+    //
+    //     if (cookies['db_source']) {
+    //         setDbSource(cookies['db_source'] as 'sheets' | 'firebase');
+    //     }
+    // }, []);
 
-        if (cookies['db_source']) {
-            setDbSource(cookies['db_source'] as 'sheets' | 'firebase');
-        }
-    }, []);
-
-    const toggleDbSource = () => {
-        const newSource = dbSource === 'sheets' ? 'firebase' : 'sheets';
-        setDbSource(newSource);
-        document.cookie = `db_source=${newSource}; path=/; max-age=31536000`; // 1 year
-        window.location.reload();
-    };
+    // const toggleDbSource = () => {
+    //     const newSource = dbSource === 'sheets' ? 'firebase' : 'sheets';
+    //     setDbSource(newSource);
+    //     document.cookie = `db_source=${newSource}; path=/; max-age=31536000`;
+    //     window.location.reload();
+    // };
 
     // التحقق من الأدمن
     const { data: adminSession } = useQuery<{ isAdmin: boolean }>({
@@ -82,7 +83,7 @@ export function Header() {
                     />
                 </Link>
                 <nav className="flex items-center gap-2">
-                    {/* Database Toggle (Public) */}
+                    {/* Database Toggle - Disabled (Firebase only)
                     <Button
                         variant="ghost"
                         size="sm"
@@ -95,6 +96,7 @@ export function Header() {
                             {dbSource === 'sheets' ? 'Sheets' : 'Firebase'}
                         </span>
                     </Button>
+                    */}
 
                     <Button
                         variant="ghost"

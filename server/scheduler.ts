@@ -1,6 +1,6 @@
 /**
  * 📅 مهام مجدولة - تحديث الاشتراكات والإضافات يومياً
- * - تحديث الأيام المتبقية في Google Sheets
+ * - تحديث الأيام المتبقية في Firebase
  * - تحديث حالة الإضافات المنتهية
  * - إرسال إشعارات للاشتراكات المنتهية (3 أيام متتالية، ثم توقف 4 أيام، ثم تكرار)
  */
@@ -11,8 +11,8 @@ import {
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
   sendOwnerWhatsApp
-} from "./whatsapp";
-import { googleSheetsService } from "./googleSheets";
+} from "./integrations/whatsapp";
+import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
 
 // رقم افتراضي إضافي يتلقى نسخة من إشعارات المالك
@@ -44,13 +44,13 @@ function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
 async function getTodaysSentNotifications(): Promise<Set<string>> {
   const sentToday = new Set<string>();
   try {
-    const notifications = await googleSheetsService.readSheet("تنبيهات الواتساب");
+    const logs = await firebaseService.getWhatsAppLogs();
     const todayStr = new Date().toISOString().split('T')[0];
     
-    for (const row of notifications) {
-      const propertyNumber = row[1] || ""; // عمود رقم العقار (index 1)
-      const notificationType = row[4] || ""; // عمود نوع الإشعار (index 4)
-      const createdAt = row[8] || ""; // عمود تاريخ الإنشاء (index 8)
+    for (const log of logs) {
+      const propertyNumber = log.propertyNumber || "";
+      const notificationType = log.type || "";
+      const createdAt = log.createdAt || "";
       
       // البحث عن إشعارات "انتهاء اشتراك" المُرسلة اليوم
       if (notificationType.includes("انتهاء") && createdAt.includes(todayStr)) {
@@ -208,7 +208,7 @@ async function updateRemainingDaysInSheet() {
     // =====================
     let expiredAddons = 0;
     try {
-      expiredAddons = await googleSheetsService.updateExpiredAddOns();
+      expiredAddons = await firebaseService.updateExpiredAddOns();
       console.log(`📦 [Scheduler] تم تحديث ${expiredAddons} إضافة منتهية`);
     } catch (addOnError) {
       console.error("❌ [Scheduler] خطأ في تحديث الإضافات:", addOnError);
@@ -241,13 +241,13 @@ async function updateRemainingDaysInSheet() {
 async function expireOldPendingPayments(): Promise<number> {
   try {
     // التحقق من حالة FEATURE_TIMEOUTS
-    const isTimeoutsEnabled = await googleSheetsService.getFeatureFlag("FEATURE_TIMEOUTS");
+    const isTimeoutsEnabled = await firebaseService.getFeatureFlag("FEATURE_TIMEOUTS");
     if (!isTimeoutsEnabled) {
       console.log("⏸️ [Scheduler] ميزة المهلات الزمنية معطلة (FEATURE_TIMEOUTS)");
       return 0;
     }
     
-    const payments = await googleSheetsService.getPayments();
+    const payments = await firebaseService.getPayments();
     const now = Date.now();
     let expiredCount = 0;
     
@@ -263,7 +263,7 @@ async function expireOldPendingPayments(): Promise<number> {
       if (payment.status === "قيد المراجعة" && 
           (payment.paymentMethod === "بطاقة" || payment.paymentMethod === "Apple Pay") &&
           ageMs > CARD_TIMEOUT_MS) {
-        await googleSheetsService.updatePaymentStatus(payment.id, "ملغي - انتهت المهلة");
+        await firebaseService.updatePaymentStatus(payment.id, "ملغي - انتهت المهلة");
         console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);
         expiredCount++;
       }
@@ -272,7 +272,7 @@ async function expireOldPendingPayments(): Promise<number> {
       if (payment.status === "قيد التحقق" && 
           payment.paymentMethod === "تحويل بنكي" &&
           ageMs > BANK_TIMEOUT_MS) {
-        await googleSheetsService.updatePaymentStatus(payment.id, "منتهي الصلاحية");
+        await firebaseService.updatePaymentStatus(payment.id, "منتهي الصلاحية");
         console.log(`⏰ [Scheduler] انتهاء صلاحية تحويل بنكي: ${payment.id}`);
         expiredCount++;
       }
@@ -333,7 +333,7 @@ export function startScheduler() {
   }, delayMs);
   
   console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث يومي الساعة 12 ظهراً");
-  console.log("📋 [Scheduler] يتم التحقق من إشعارات اليوم من Google Sheets لمنع التكرار");
+  console.log("📋 [Scheduler] يتم التحقق من إشعارات اليوم من Firebase لمنع التكرار");
   
   // تشغيل المطابقة التلقائية والتحقق من المهلات كل 15 دقيقة
   const FIFTEEN_MINUTES = 15 * 60 * 1000;
@@ -348,10 +348,7 @@ export function startScheduler() {
     
     // تشغيل المطابقة التلقائية
     try {
-      const result = await runAutoMatch();
-      if (result.matched > 0) {
-        console.log(`✅ [Scheduler] تمت مطابقة ${result.matched} دفعة تلقائياً`);
-      }
+      await runAutoMatch();
     } catch (error) {
       console.error("❌ [Scheduler] خطأ في المطابقة التلقائية:", error);
     }

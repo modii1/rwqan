@@ -8,7 +8,7 @@
  */
 
 import OpenAI from "openai";
-import { googleSheetsService } from "./googleSheets";
+import { firebaseService } from "../firebaseService";
 import { pdfToPng } from "pdf-to-png-converter";
 
 /**
@@ -134,7 +134,7 @@ export async function scanReceiptWithAI(
 ): Promise<AIScanResult | null> {
   try {
     // التحقق من تفعيل ميزة OCR
-    const ocrEnabled = await googleSheetsService.getFeatureFlag("FEATURE_OCR_ENABLED");
+    const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
     if (!ocrEnabled) {
       console.log("🔬 [AI Scanner] الميزة غير مفعلة");
       return null;
@@ -144,7 +144,7 @@ export async function scanReceiptWithAI(
     console.log(`🔬 [AI Scanner] رابط الصورة: ${imageUrl}`);
 
     // جلب الحساب البنكي الافتراضي للمقارنة
-    const bankAccounts = await googleSheetsService.getBankAccounts();
+    const bankAccounts = await firebaseService.getBankAccounts();
     const defaultAccount = bankAccounts.find(a => a.isDefault) || bankAccounts[0];
 
     // تاريخ اليوم بتوقيت السعودية
@@ -438,7 +438,7 @@ export async function scanReceiptWithAI(
  */
 async function saveAIScanResult(result: AIScanResult): Promise<void> {
   try {
-    await googleSheetsService.saveOcrResult({
+    await firebaseService.saveOcrResult({
       paymentId: result.paymentId,
       extractedAmount: result.extractedData.amount || undefined,
       extractedDate: result.extractedData.date || undefined,

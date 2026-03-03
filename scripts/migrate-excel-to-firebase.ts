@@ -142,7 +142,7 @@ function mapOwner(row) {
 }
 
 async function migrateProperties() {
-  console.log('\n📦 Migrating_properties...');
+  console.log('\n📦 Migrating properties...');
   const wb = XLSX.readFile(EXCEL_PATH);
   const sheet = wb.SheetNames.find(n => n.includes('بيانات') || n.includes('عقار'));
   if (!sheet) { console.log('❌ Properties sheet not found'); return; }
@@ -153,10 +153,9 @@ async function migrateProperties() {
   let imported = 0;
   for (const row of data) {
     const property = mapProperty(row);
-    if (property.propertyNumber) {
-      await db.collection('properties').doc(property.propertyNumber).set(property);
-      imported++;
-    }
+    const docId = property.propertyNumber || `prop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('properties').doc(docId).set(property);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} properties`);
 }
@@ -173,10 +172,9 @@ async function migrateSubscriptions() {
   let imported = 0;
   for (const row of data) {
     const sub = mapSubscription(row);
-    if (sub.propertyNumber) {
-      await db.collection('subscriptions').doc(sub.id).set(sub);
-      imported++;
-    }
+    const docId = sub.id || `SUB-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('subscriptions').doc(docId).set(sub);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} subscriptions`);
 }
@@ -193,10 +191,9 @@ async function migratePayments() {
   let imported = 0;
   for (const row of data) {
     const payment = mapPayment(row);
-    if (payment.propertyNumber) {
-      await db.collection('payments').doc(payment.id).set(payment);
-      imported++;
-    }
+    const docId = payment.id || `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('payments').doc(docId).set(payment);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} payments`);
 }
@@ -213,10 +210,9 @@ async function migratePackages() {
   let imported = 0;
   for (const row of data) {
     const pkg = mapPackage(row);
-    if (pkg.name) {
-      await db.collection('packages').doc(pkg.id).set(pkg);
-      imported++;
-    }
+    const docId = pkg.id || `pkg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('packages').doc(docId).set(pkg);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} packages`);
 }
@@ -233,10 +229,9 @@ async function migrateDiscountCodes() {
   let imported = 0;
   for (const row of data) {
     const code = mapDiscountCode(row);
-    if (code.code) {
-      await db.collection('discounts').doc(code.code).set(code);
-      imported++;
-    }
+    const docId = code.code || `disc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('discounts').doc(docId).set(code);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} discount codes`);
 }
@@ -253,10 +248,8 @@ async function migrateRequests() {
   let imported = 0;
   for (const row of data) {
     const req = mapRequest(row);
-    if (req.propertyNumber) {
-      await db.collection('requests').doc(req.id).set(req);
-      imported++;
-    }
+    await db.collection('requests').doc(req.id).set(req);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} requests`);
 }
@@ -273,10 +266,9 @@ async function migrateOwners() {
   let imported = 0;
   for (const row of data) {
     const owner = mapOwner(row);
-    if (owner.ownerId) {
-      await db.collection('owners').doc(owner.ownerId).set(owner);
-      imported++;
-    }
+    const docId = owner.ownerId || `owner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await db.collection('owners').doc(docId).set(owner);
+    imported++;
   }
   console.log(`   ✅ Imported ${imported} owners`);
 }

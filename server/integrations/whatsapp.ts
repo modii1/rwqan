@@ -1,6 +1,6 @@
 // server/whatsapp.ts
 import express from "express";
-import { googleSheetsService } from "./googleSheets";
+import { firebaseService } from "../firebaseService";
 import type { NotificationSettings } from "@shared/schema";
 
 const router = express.Router();
@@ -29,7 +29,7 @@ async function getNotificationSettings(): Promise<NotificationSettings> {
   }
   
   try {
-    cachedSettings = await googleSheetsService.getNotificationSettings();
+    cachedSettings = await firebaseService.getNotificationSettings();
     settingsCacheTime = now;
     return cachedSettings;
   } catch (err) {
@@ -129,7 +129,7 @@ async function sendAdminWhatsAppNotification(options: {
     console.error("❌ WhatsApp send error:", err);
   }
 
-  // حفظ السجل في Google Sheet
+  // حفظ السجل في Firebase
   const log = {
     id: `WA-${Date.now()}`,
     type,
@@ -144,7 +144,7 @@ async function sendAdminWhatsAppNotification(options: {
   };
 
   try {
-    await (googleSheetsService as any).addWhatsAppLog(log);
+    await firebaseService.addWhatsAppLog(log);
   } catch (err) {
     console.error("❌ addWhatsAppLog error:", err);
   }
@@ -190,7 +190,7 @@ router.post("/send-admin", async (req, res) => {
  */
 router.get("/logs", async (_req, res) => {
   try {
-    const logs = (await (googleSheetsService as any).getWhatsAppLogs()) || [];
+    const logs = (await firebaseService.getWhatsAppLogs()) || [];
     res.json(logs);
   } catch (err) {
     console.error("get /logs error:", err);
@@ -203,7 +203,7 @@ router.get("/logs", async (_req, res) => {
  */
 router.get("/stats", async (_req, res) => {
   try {
-    const logs = (await (googleSheetsService as any).getWhatsAppLogs()) || [];
+    const logs = (await firebaseService.getWhatsAppLogs()) || [];
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -241,7 +241,7 @@ router.get("/stats", async (_req, res) => {
  */
 router.get("/requests", async (_req, res) => {
   try {
-    const requests = await googleSheetsService.getRequests();
+    const requests = await firebaseService.getRequests();
     res.json(requests.slice(0, 50)); // آخر 50 طلب
   } catch (err) {
     console.error("get /requests error:", err);

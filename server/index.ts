@@ -2,7 +2,7 @@ import "dotenv/config";
 import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
 import cors from "cors";
-import { registerRoutes } from "./routes";
+import { registerRoutes } from "./routes/index";
 import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
@@ -29,9 +29,7 @@ const handle = nextApp.getRequestHandler();
     // ⚙️ ENVIRONMENT VALIDATION
     // ====================================
     const requiredEnv = [
-      "GOOGLE_SHEET_ID",
-      "GOOGLE_CLIENT_EMAIL",
-      "GOOGLE_PRIVATE_KEY",
+      "FIREBASE_SERVICE_ACCOUNT",
       "PAYMOB_API_KEY",
       "PAYMOB_PUBLIC_KEY",
       "PAYMOB_HMAC_SECRET",

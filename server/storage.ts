@@ -123,10 +123,10 @@ export interface IStorage {
   getActiveSessions(): Promise<number>;
 }
 
-import { googleSheetsService } from './googleSheets';
+import { googleSheetsService } from './_legacy/googleSheets';
 import { firebaseService } from './firebaseService';
-import { db } from './firebase';
-import { dbContext } from './dbConfig';
+import { db } from './config/firebase';
+import { dbContext } from './config/dbConfig';
 
 // Firebase Storage Implementation
 export class FirebaseStorage implements IStorage {
@@ -976,21 +976,8 @@ export class GoogleSheetsStorage implements IStorage {
 }
 
 const firebaseStorage = new FirebaseStorage();
-const googleSheetsStorage = new GoogleSheetsStorage();
+// Google Sheets storage kept as fallback reference - not actively used
+// const googleSheetsStorage = new GoogleSheetsStorage();
 
-// Export the storage instance based on per-request context
-export const storage = new Proxy(firebaseStorage as IStorage, {
-  get(target, prop, receiver) {
-    const context = dbContext.getStore();
-    const service = context?.dbService;
-
-    // Select storage implementation based on the active service
-    const activeStorage = (service === firebaseService) ? firebaseStorage : googleSheetsStorage;
-
-    const value = Reflect.get(activeStorage, prop, receiver);
-    if (typeof value === "function") {
-      return value.bind(activeStorage);
-    }
-    return value;
-  }
-});
+// Always use Firebase storage
+export const storage: IStorage = firebaseStorage;
