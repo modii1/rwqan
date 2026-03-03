@@ -4,6 +4,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import QueryProvider from "@/lib/query-provider";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
     title: "روقـان | نُـزل ورفـاهية",
     description: "نظام إدارة عقارات شامل للشاليهات والاستراحات في منطقة القصيم",
