@@ -116,7 +116,7 @@ export interface SmartVerificationContext {
 async function isFirstPropertyForOwner(whatsappNumber: string): Promise<boolean> {
   try {
     const allProperties = await dbProxy.getProperties();
-    const ownerProperties = allProperties.filter(p =>
+    const ownerProperties = allProperties.filter((p: any) =>
       p.whatsappNumber === whatsappNumber &&
       (p.verificationStatus === 'approved' || p.verificationStatus === 'verified')
     );

@@ -122,7 +122,7 @@ router.post("/api/admin/test-enjazatik", async (req, res) => {
     const targetPhone = phone || "966550805632";
     const testMessage = message || "🔔 اختبار من نظام روقـان\n\nهذه رسالة تجريبية للتأكد من عمل نظام الإشعارات.";
 
-    const { sendOwnerWhatsApp } = await import("../../whatsapp");
+    const { sendOwnerWhatsApp } = await import("../../integrations/whatsapp");
     const result = await sendOwnerWhatsApp(targetPhone, testMessage);
 
     console.log(`📱 [Test] Enjazatik test to ${targetPhone}:`, result);
@@ -151,7 +151,7 @@ router.post("/api/admin/test-inquiry", async (req, res) => {
 
     console.log(`🧪 Testing Paymob Inquiry API with order_id: ${orderId}`);
 
-    const { paymobService } = await import("../../paymob");
+    const { paymobService } = await import("../../integrations/paymob");
     const inquiry = await paymobService.inquiryByOrderId(orderId);
 
     console.log(`📊 Inquiry Result:`, JSON.stringify(inquiry, null, 2));

@@ -101,7 +101,7 @@ router.post("/api/admin/test-expired-notifications", requireAdmin, async (req, r
         console.log(`📤 [TEST] إرسال إشعار لـ ${property.name} (${sub.propertyNumber})`);
 
         try {
-          const { notifySubscriptionExpired } = await import("../../whatsapp");
+          const { notifySubscriptionExpired } = await import("../../integrations/whatsapp");
           const result = await notifySubscriptionExpired({
             propertyNumber: sub.propertyNumber,
             propertyName: property.name || "",

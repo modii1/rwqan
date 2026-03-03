@@ -256,7 +256,7 @@ router.post("/api/admin/fee-configs/remove-duplicates", async (req, res) => {
     const result = await firebaseService.removeDuplicateFeeConfigs();
     res.json({
       success: true,
-      message: `تم حذف ${result.removed} سجل مكرر، وإبقاء ${result.kept.length} سجل`,
+      message: `تم حذف ${result.removed} سجل مكرر`,
       ...result
     });
   } catch (error: any) {

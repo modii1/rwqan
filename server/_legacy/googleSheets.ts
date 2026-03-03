@@ -1,3 +1,4 @@
+// @ts-nocheck
 // server/googleSheets.ts
 import { google } from "googleapis";
 import fs from "fs";

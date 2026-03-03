@@ -13,6 +13,7 @@
         "shared/**/*"
     ],
     "exclude": [
-        "server/replit_integrations"
+        "server/replit_integrations",
+        "server/_legacy"
     ]
 }

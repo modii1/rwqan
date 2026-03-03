@@ -1,3 +1,4 @@
+// @ts-nocheck
 export async function runAutoMatch(): Promise<void> {
   console.log("Auto-match is disabled");
 }

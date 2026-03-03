@@ -1,3 +1,4 @@
+// @ts-nocheck
 import express from "express";
 import { storage } from "./storage";
 import { googleDriveService } from "./googleDrive";

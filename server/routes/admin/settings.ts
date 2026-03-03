@@ -24,7 +24,7 @@ router.put("/api/admin/settings/notifications", async (req, res) => {
     const settings = req.body;
     await firebaseService.saveNotificationSettings(settings);
     // مسح كاش الإعدادات في whatsapp.ts
-    const { clearSettingsCache } = await import("../../whatsapp");
+    const { clearSettingsCache } = await import("../../integrations/whatsapp");
     clearSettingsCache();
     res.json({ success: true, message: "تم حفظ الإعدادات بنجاح" });
   } catch (error) {
@@ -61,7 +61,7 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
       notifyOwnerSubscriptionExpired,
       notifyOwnerSubscriptionExpiringSoon,
       sendOwnerWhatsApp
-    } = await import("../../whatsapp");
+    } = await import("../../integrations/whatsapp");
 
     let result;
     let messageType = "";
@@ -139,7 +139,7 @@ router.post("/api/admin/send-bulk-notifications", async (req, res) => {
     const {
       notifyOwnerSubscriptionExpired,
       notifyOwnerSubscriptionExpiringSoon
-    } = await import("../../whatsapp");
+    } = await import("../../integrations/whatsapp");
 
     let sentCount = 0;
     const errors: string[] = [];
