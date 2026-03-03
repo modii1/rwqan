@@ -53,7 +53,7 @@ import {
   insertBackupSchema,
   insertCodeBackupSchema,
   type InsertProperty,
-} from "@shared/schema";
+} from "../../shared/schema";
 import fs from "fs";
 import path from "path";
 
