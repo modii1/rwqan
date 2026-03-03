@@ -12,6 +12,7 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
@@ -70,6 +71,7 @@ replit-objstore-*
 !date_usages.txt
 
 # screenshots/images from tools
+attached_assets/
 *.png
 !public/**/*.png
 !attached_assets/**/*.png
