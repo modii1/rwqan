@@ -23,7 +23,7 @@ import { firebaseService } from "./firebaseService";
 import { googleDriveService } from "./googleDrive";
 import { paymobService } from "./paymob";
 import { updateRemainingDaysInSheet } from "./scheduler";
-import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "./dateUtils";
+import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
 import { dbContext, dbProxy } from "./dbConfig";
 
 import session from "express-session";

@@ -34,7 +34,7 @@ import type {
   InsertAddOnHistory,
 } from "@shared/schema";
 import { DEFAULT_FEE_CONFIGS, DEFAULT_FEATURE_FLAGS, BankAccount, InsertBankAccount, FeatureFlag, InsertFeatureFlag, OcrResult, InsertOcrResult } from "@shared/schema";
-import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths, parseArabicDate } from "./dateUtils";
+import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths, parseArabicDate } from "../utils/dateUtils";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || "";
 
