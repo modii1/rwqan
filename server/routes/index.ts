@@ -10,7 +10,7 @@ import cors from "cors";
 import type { CorsOptions } from "cors";
 import cookieParser from "cookie-parser";
 import { firebaseService } from "../firebaseService";
-import { firebaseService } from "../firebaseService";
+import { dbContext } from "../config/dbConfig";
 import whatsappRoutes from "../integrations/whatsapp";
 
 // Route modules
