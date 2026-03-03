@@ -7,6 +7,11 @@ runConfig:
   cpu: 2
   memoryMiB: 2048
 
+# Bypass the Firebase Next.js adapter (which breaks Next.js 16)
+scripts:
+  buildCommand: npm run build
+  runCommand: node dist/server/index.js
+
 # Environment variables and secrets.
 # env:
   # Configure environment variables.
