@@ -55,6 +55,7 @@ export interface PropertyDetails {
     subscriptionType: string; // "مميز" أو "عادي"
     phone?: string;
     imageCount: number;
+    imageUrls?: string[];
 }
 
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
@@ -135,6 +136,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                 data.subscriptionType || (data.name ? "مميز" : "عادي"),
                             phone: data.whatsappNumber || "",
                             imageCount: 0,
+                            imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],
                         } as PropertyDetails;
                     }
                 }
@@ -267,7 +269,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
         queryFn: async () => {
             if (!propertyId) return [];
             try {
-                const res = await fetch(`/api/admin/r2-images/${propertyId}`);
+                const res = await fetch(`/api/public/property-images/${propertyId}`);
                 if (res.ok) {
                     const data = await res.json();
                     return data.images || [];
@@ -281,7 +283,18 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
         enabled: !!propertyId,
     });
 
-    const images = r2ImagesData || [];
+    // دمج الصور من R2 + imageUrls من بيانات العقار (بدون تكرار)
+    const images = (() => {
+        const r2Urls = r2ImagesData || [];
+        const propertyUrls = property?.imageUrls || [];
+        const merged = [...r2Urls];
+        for (const url of propertyUrls) {
+            if (url && !merged.includes(url)) {
+                merged.push(url);
+            }
+        }
+        return merged;
+    })();
 
     // إعادة تعيين حالة تحميل الصورة عند تغيير الصورة
     useEffect(() => {

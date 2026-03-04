@@ -47,7 +47,7 @@ export class PropertyService {
 
     if (!options.skipVerification) {
       const hasSensitiveChange = detectSensitiveChanges(current, updates);
-      if (hasSensitiveChange) {
+      if (hasSensitiveChange.length > 0) {
         merged.verificationStatus = "pending";
       }
     }

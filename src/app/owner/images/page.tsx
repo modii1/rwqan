@@ -31,6 +31,35 @@ export default function OwnerImagesPage() {
         queryKey: ["/api/owner/property"],
     });
 
+    // Fetch R2 images as fallback/source of truth
+    const { data: r2Images } = useQuery<string[]>({
+        queryKey: ["owner-r2-images"],
+        queryFn: async () => {
+            try {
+                const res = await fetch("/api/owner/r2-images", { credentials: "include" });
+                if (res.ok) {
+                    const data = await res.json();
+                    return data.images || [];
+                }
+            } catch { /* ignore */ }
+            return [];
+        },
+        enabled: !!property,
+    });
+
+    // Merge images: property.imageUrls + R2 images (deduplicated)
+    const allImages = (() => {
+        const propertyUrls = property?.imageUrls || [];
+        const r2Urls = r2Images || [];
+        const merged = [...propertyUrls];
+        for (const url of r2Urls) {
+            if (!merged.includes(url)) {
+                merged.push(url);
+            }
+        }
+        return merged;
+    })();
+
     // Upload mutation
     const uploadMutation = useMutation({
         mutationFn: async (files: File[]) => {
@@ -49,6 +78,7 @@ export default function OwnerImagesPage() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+            queryClient.invalidateQueries({ queryKey: ["owner-r2-images"] });
             setSelectedFiles([]);
             setPreviews([]);
             toast({ title: "تم رفع الصور بنجاح", description: "تم إضافة الصور إلى ملف العقار" });
@@ -72,6 +102,7 @@ export default function OwnerImagesPage() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+            queryClient.invalidateQueries({ queryKey: ["owner-r2-images"] });
             toast({ title: "تم حذف الصورة", description: "تم حذف الصورة بنجاح" });
         },
         onError: (err: Error) => {
@@ -81,7 +112,7 @@ export default function OwnerImagesPage() {
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
-        const currentCount = property?.imageUrls?.length || 0;
+        const currentCount = allImages.length;
         if (currentCount + files.length > 15) {
             toast({
                 title: "تجاوز الحد الأقصى",
@@ -128,11 +159,11 @@ export default function OwnerImagesPage() {
                 {/* Current Images */}
                 <Card className="p-6">
                     <h2 className="text-xl font-bold mb-4">
-                        الصور الحالية ({property?.imageUrls?.length || 0}/15)
+                        الصور الحالية ({allImages.length}/15)
                     </h2>
-                    {property?.imageUrls && property.imageUrls.length > 0 ? (
+                    {allImages.length > 0 ? (
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            {property.imageUrls.map((url: string, idx: number) => (
+                            {allImages.map((url: string, idx: number) => (
                                 <div key={idx} className="relative group">
                                     <img
                                         src={url}

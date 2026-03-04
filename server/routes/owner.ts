@@ -154,7 +154,7 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       }
     }
 
-    const updated = await propertyService.update(propertyNumber, updates);
+    const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
 
     // إرسال إشعار واتساب
     if (changes.length > 0) {
@@ -689,12 +689,17 @@ router.post("/api/owner/images", requireOwner, upload.array("images"), async (re
     const uploadedUrls = uploadedKeys.map(key => `${R2_PUBLIC_URL}/${key}`);
     console.log(`✅ [UPLOAD] Done! Uploaded ${files.length} images. URLs:`, uploadedUrls);
 
-    // تسجيل التغيير في العقار
+    // تحديث imageUrls في بيانات العقار
+    const property = await propertyService.getByNumber(propertyNumber);
+    const currentUrls = property?.imageUrls || [];
+    const newUrls = [...currentUrls, ...uploadedUrls];
     const changeNote = `إضافة ${files.length} صورة جديدة`;
-    await propertyService.update(propertyNumber, { lastChanges: changeNote });
+    await propertyService.update(propertyNumber, { 
+      imageUrls: newUrls, 
+      lastChanges: changeNote 
+    }, { skipVerification: true });
 
     // إشعار واتساب
-    const property = await propertyService.getByNumber(propertyNumber);
     notifyPropertyUpdate({
       propertyNumber,
       propertyName: property?.name || '',
@@ -716,27 +721,43 @@ router.post("/api/owner/images", requireOwner, upload.array("images"), async (re
 router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber || "";
-    const { url } = req.body;
+    const imageUrl = req.body.imageUrl || req.body.url;
 
-    if (!url) {
+    if (!imageUrl) {
       return res.status(400).json({ error: "URL مطلوبة" });
     }
 
     // استخراج الـ key من URL: https://.../{propertyNumber}/{fileName}
-    const key = `${propertyNumber}/${url.split("/").pop()}`;
+    const urlParts = imageUrl.split("/");
+    const fileName = urlParts.pop();
+    const key = `${propertyNumber}/${fileName}`;
 
     console.log(`🔴 [DELETE] Deleting: ${key}`);
 
-    if (r2) {
-      await r2.send(
-        new DeleteObjectCommand({
-          Bucket: R2_BUCKET,
-          Key: key,
-        })
-      );
+    if (r2 && R2_BUCKET) {
+      try {
+        await r2.send(
+          new DeleteObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: key,
+          })
+        );
+        console.log(`✅ [DELETE] Deleted from R2: ${key}`);
+      } catch (r2Err: any) {
+        console.error(`⚠️ [DELETE] R2 delete error (continuing): ${r2Err?.message}`);
+      }
     }
 
-    console.log(`✅ [DELETE] Deleted: ${key}`);
+    // تحديث imageUrls في بيانات العقار
+    const property = await propertyService.getByNumber(propertyNumber);
+    const currentUrls = property?.imageUrls || [];
+    const updatedUrls = currentUrls.filter((u: string) => u !== imageUrl);
+    await propertyService.update(propertyNumber, { 
+      imageUrls: updatedUrls,
+      lastChanges: 'حذف صورة'
+    }, { skipVerification: true });
+
+    console.log(`✅ [DELETE] Updated imageUrls: ${currentUrls.length} → ${updatedUrls.length}`);
     res.json({ ok: true });
   } catch (err: any) {
     console.error("❌ [DELETE] Error:", err?.message);
