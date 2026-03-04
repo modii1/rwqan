@@ -17,6 +17,14 @@ const EXCEL_PATH = '/home/iheb/Downloads/عقارات القصيم.xlsx';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+function parseFacilities(raw: any): string[] {
+  if (!raw) return [];
+  const str = String(raw).trim();
+  if (!str) return [];
+  // Split on Arabic comma (،) or Latin comma (,)
+  return str.split(/[,،]/).map(s => s.trim()).filter(Boolean);
+}
+
 function parseArabicDate(dateStr: any): string | null {
   if (!dateStr) return null;
   if (dateStr instanceof Date) return dateStr.toISOString().split('T')[0];
@@ -55,7 +63,7 @@ function mapProperty(row: any) {
     city: row['📍 المنطقة'] || 'بريدة',
     direction: row['🧭 الاتجاه'] || 'شمال',
     type: row['🏠 النوع'] || 'قسم',
-    facilities: [],
+    facilities: parseFacilities(row['🔹 المرافق']),
     imagesFolderUrl: row['🔗 رابط الصور'] || '',
     imagesLink: row['🔗 رابط الصور'] || '',
     prices: {

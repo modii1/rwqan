@@ -186,7 +186,8 @@ export default function PropertiesSection() {
   const { data, isLoading } = useQuery<PropertyData[]>({
     queryKey: ["admin-properties"],
     queryFn: async () => {
-      const res = await fetch("/api/properties");
+      // Use admin endpoint so ALL properties are shown (not just approved ones)
+      const res = await fetch("/api/admin/properties");
       if (!res.ok) throw new Error("فشل في جلب العقارات");
       return res.json();
     },
@@ -194,9 +195,10 @@ export default function PropertiesSection() {
 
   const mutation = useMutation({
     mutationFn: async (payload: PropertyData) => {
-      const facilitiesStr = Array.isArray(selectedFacilities) && selectedFacilities.length > 0
-        ? JSON.stringify(selectedFacilities)
-        : typeof payload.facilities === 'string' ? payload.facilities : JSON.stringify(payload.facilities || []);
+      // Send facilities as a native array — the server normalises it on write
+      const facilitiesArr = Array.isArray(selectedFacilities) && selectedFacilities.length > 0
+        ? selectedFacilities
+        : Array.isArray(payload.facilities) ? payload.facilities : [];
 
       const body = {
         propertyNumber: payload.propertyNumber,
@@ -206,7 +208,7 @@ export default function PropertiesSection() {
         city: payload.city,
         direction: payload.direction,
         type: payload.type,
-        facilities: facilitiesStr,
+        facilities: facilitiesArr,
         subscriptionType: payload.subscriptionType,
         subscriptionDate: payload.subscriptionDate || "",
         pin: payload.pin || "",

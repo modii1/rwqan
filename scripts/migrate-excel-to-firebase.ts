@@ -13,7 +13,15 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 db.settings({ ignoreUndefinedProperties: true });
 
-const EXCEL_PATH = '/home/iheb/Downloads/عقارات القصيم.xlsx';
+const EXCEL_PATH = 'PATH_TO_EXCEL_FILE.xlsx'; // <-- Update this to your actual file path
+
+function parseFacilities(raw: any): string[] {
+  if (!raw) return [];
+  const str = String(raw).trim();
+  if (!str) return [];
+  // Split on Arabic comma (،) or Latin comma (,)
+  return str.split(/[,،]/).map(s => s.trim()).filter(Boolean);
+}
 
 function parseArabicDate(dateStr) {
   if (!dateStr) return null;
@@ -32,7 +40,7 @@ function mapProperty(row) {
     city: row['📍 المنطقة'] || 'بريدة',
     direction: row['🧭 الاتجاه'] || 'شمال',
     type: row['🏠 النوع'] || 'قسم',
-    facilities: [],
+    facilities: parseFacilities(row['🔹 المرافق']),
     imagesFolderUrl: row['🔗 رابط الصور'] || '',
     imagesLink: row['🔗 رابط الصور'] || '',
     prices: {

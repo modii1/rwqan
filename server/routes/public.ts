@@ -223,13 +223,25 @@ router.get("/api/public/property-images/:propertyNumber", async (req, res) => {
   try {
     const propertyNumber = req.params.propertyNumber;
 
-    if (!r2 || !R2_BUCKET) return res.json({ images: [] });
+    if (!r2) {
+      console.warn(`[R2 IMAGES] r2 client is null for property ${propertyNumber} — env vars not set`);
+      return res.json({ images: [] });
+    }
+    if (!R2_BUCKET) {
+      console.warn(`[R2 IMAGES] R2_BUCKET_NAME env var not set for property ${propertyNumber}`);
+      return res.json({ images: [] });
+    }
+
+    console.log(`[R2 IMAGES] Listing bucket=${R2_BUCKET} prefix=${propertyNumber}/`);
     const list = await r2.send(
       new ListObjectsV2Command({
         Bucket: R2_BUCKET,
         Prefix: `${propertyNumber}/`,
       })
     );
+
+    const allKeys = list.Contents?.map(o => o.Key) || [];
+    console.log(`[R2 IMAGES] property=${propertyNumber} total objects=${allKeys.length} keys=${JSON.stringify(allKeys.slice(0, 10))}`);
 
     // فلترة الصور فقط (jpg, png, webp) وترتيبها
     const images = (list.Contents || [])
@@ -242,9 +254,10 @@ router.get("/api/public/property-images/:propertyNumber", async (req, res) => {
       })
       .map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`);
 
+    console.log(`[R2 IMAGES] property=${propertyNumber} returning ${images.length} image URLs: ${JSON.stringify(images.slice(0, 3))}`);
     res.json({ images });
   } catch (err) {
-    console.error("PUBLIC R2 LIST ERROR:", err);
+    console.error(`[R2 IMAGES] ERROR for property ${req.params.propertyNumber}:`, err);
     res.json({ images: [] }); // Return empty array on error
   }
 });

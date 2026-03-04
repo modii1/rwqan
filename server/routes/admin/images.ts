@@ -54,7 +54,14 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
       if (!propertyNumber || !propertyNumber.trim()) {
         return res.json({ images: [] });
       }
-      if (!r2 || !R2_BUCKET) return res.json({ images: [] });
+      if (!r2) {
+        console.warn(`[ADMIN R2] r2 client is null for property ${propertyNumber} — env vars not set`);
+        return res.json({ images: [] });
+      }
+      if (!R2_BUCKET) {
+        console.warn(`[ADMIN R2] R2_BUCKET_NAME not set for property ${propertyNumber}`);
+        return res.json({ images: [] });
+      }
 
       const list = await r2.send(
         new ListObjectsV2Command({

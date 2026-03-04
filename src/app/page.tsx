@@ -60,6 +60,7 @@ const SMART_FILTERS = {
     صيف: ["مسبح", "ألعاب مائية", "مكيف", "صيف", "صيفية"],
     مناسبات: ["قاعة", "صالة", "مناسبات", "حفلات"],
     ألعاب: ["ملعب", "ألعاب", "ترامبولين", "زحليقة"],
+    "واي فاي": ["wi-fi", "wifi", "انترنت"],
 };
 
 const PRIORITY_FACILITIES = [
@@ -84,7 +85,7 @@ const PROPERTY_SEARCH_FIELDS: SearchableField<Property>[] = [
     { name: "name", getValue: (p) => p.name, weight: 9 },
     { name: "city", getValue: (p) => p.city, weight: 8 },
     { name: "type", getValue: (p) => p.type, weight: 6 },
-    { name: "facilities", getValue: (p) => p.facilities.join(" "), weight: 4 },
+    { name: "facilities", getValue: (p) => Array.isArray(p.facilities) ? p.facilities.join(" ") : String(p.facilities || ""), weight: 4 },
     { name: "direction", getValue: (p) => p.direction, weight: 3 },
 ];
 
@@ -324,18 +325,38 @@ export default function PropertiesPage() {
 
             // Facilities filter with smart matching and normalization
             if (selectedFacilities.length > 0) {
+                // Defensive: ensure facilityList is always a real string[]
+                let facilityList: string[] = Array.isArray(property.facilities)
+                    ? property.facilities
+                    : [];
+                if (!Array.isArray(property.facilities) && typeof property.facilities === 'string') {
+                    const raw = (property.facilities as string).trim();
+                    if (raw.startsWith('[')) {
+                        try { facilityList = JSON.parse(raw); } catch { facilityList = []; }
+                    } else {
+                        facilityList = raw.split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                }
+
                 const hasAllFacilities = selectedFacilities.every(
                     (selectedFacility) => {
-                        // Direct match
-                        if (property.facilities.includes(selectedFacility)) {
+                        // 1. Direct exact match
+                        if (facilityList.includes(selectedFacility)) {
                             return true;
                         }
 
-                        // Smart match using SMART_FILTERS with normalization
+                        // 2. Prefix/startsWith match (normalised)
+                        const normalizedSelected = normalizeText(selectedFacility);
+                        const prefixMatch = facilityList.some((facility) => {
+                            return normalizeText(facility).startsWith(normalizedSelected);
+                        });
+                        if (prefixMatch) return true;
+
+                        // 3. Smart match using SMART_FILTERS with normalization
                         const smartKeywords =
                             SMART_FILTERS[selectedFacility as keyof typeof SMART_FILTERS];
                         if (smartKeywords) {
-                            return property.facilities.some((facility) => {
+                            return facilityList.some((facility) => {
                                 const normalizedFacility = normalizeText(facility);
                                 return smartKeywords.some((keyword) =>
                                     normalizedFacility.includes(normalizeText(keyword)),

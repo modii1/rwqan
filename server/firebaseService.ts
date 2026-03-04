@@ -46,14 +46,40 @@ export class FirebaseService {
 
     // ================== العقارات (Properties) ==================
 
+    /**
+     * Normalise a raw Firestore document into a Property with facilities as a
+     * proper string[].  The admin form historically stored facilities as a
+     * JSON-stringified array (e.g. '["مسبح","ملعب"]') or a comma-separated
+     * string.  This helper ensures downstream code always gets string[].
+     */
+    private normaliseProperty(raw: FirebaseFirestore.DocumentData): Property {
+        const p = raw as Property;
+        if (p.facilities) {
+            if (typeof p.facilities === 'string') {
+                const trimmed = (p.facilities as string).trim();
+                if (trimmed.startsWith('[')) {
+                    try { p.facilities = JSON.parse(trimmed); } catch { p.facilities = []; }
+                } else {
+                    p.facilities = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+                }
+            }
+            if (!Array.isArray(p.facilities)) {
+                p.facilities = [];
+            }
+        } else {
+            p.facilities = [];
+        }
+        return p;
+    }
+
     async getProperties(): Promise<Property[]> {
         const snapshot = await this.db.collection("properties").get();
-        return snapshot.docs.map((doc) => doc.data() as Property);
+        return snapshot.docs.map((doc) => this.normaliseProperty(doc.data()));
     }
 
     async getPropertyByNumber(propertyNumber: string): Promise<Property | null> {
         const doc = await this.db.collection("properties").doc(propertyNumber).get();
-        return doc.exists ? (doc.data() as Property) : null;
+        return doc.exists ? this.normaliseProperty(doc.data()!) : null;
     }
 
     async createProperty(property: InsertProperty): Promise<Property> {

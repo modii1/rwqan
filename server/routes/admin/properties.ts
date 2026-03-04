@@ -13,7 +13,8 @@ router.put("/api/admin/property/:propertyNumber", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
     const updates = req.body;
-    const updated = await propertyService.update(propertyNumber, updates);
+    // skipVerification: admin edits should not push property back to 'pending'
+    const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
     res.json({ success: true, property: updated });
   } catch (err: any) {
     res.status(500).json({ error: err?.message });
@@ -33,8 +34,8 @@ router.get("/api/admin/properties", async (_req, res) => {
 
 // Admin: Update property
 router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
+  const { propertyNumber } = req.params;
   try {
-    const { propertyNumber } = req.params;
     const body = req.body;
 
     // Convert Arabic keys to English
@@ -44,14 +45,33 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       if (mapped) {
         updates[mapped] = value;
       } else {
-        // Try direct key
+        // Try direct key (includes 'pin', 'priceWeekday', etc.)
         updates[key] = value;
       }
     }
 
-    const updated = await propertyService.update(propertyNumber, updates);
+    // Log PIN changes so they are traceable in server logs
+    if (updates.pin !== undefined) {
+      console.log(`[ADMIN UPDATE] PIN change requested for property ${propertyNumber}`);
+    }
+
+    // Ensure facilities is stored as a native array, not a JSON string
+    if (typeof updates.facilities === 'string') {
+      const trimmed = updates.facilities.trim();
+      if (trimmed.startsWith('[')) {
+        try { updates.facilities = JSON.parse(trimmed); } catch { updates.facilities = []; }
+      } else {
+        updates.facilities = trimmed.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+    }
+
+    // skipVerification=true because admin edits are intentional and should not
+    // revert the property back to 'pending' (the old code had the same behaviour).
+    const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
+    console.log(`[ADMIN UPDATE] property ${propertyNumber} updated fields: ${Object.keys(updates).join(", ")}`);
     res.json(updated);
   } catch (err: any) {
+    console.error(`[ADMIN UPDATE] Error updating property ${propertyNumber}:`, err?.message);
     res.status(500).json({ error: err?.message || "فشل في التحديث" });
   }
 });
