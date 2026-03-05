@@ -23,7 +23,6 @@ export default function SuggestPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // التحقق من صحة البيانات قبل الإرسال
         if (name.trim().length < 3) {
             toast({
                 title: "خطأ في البيانات",
@@ -64,14 +63,18 @@ export default function SuggestPage() {
         setIsSubmitting(true);
 
         try {
-            await apiRequest('POST', '/api/suggestions', { name: name.trim(), phone: phoneValidation.cleaned, city, suggestion: suggestion.trim() });
+            await apiRequest('POST', '/api/suggestions', {
+                name: name.trim(),
+                phone: phoneValidation.cleaned,
+                city,
+                suggestion: suggestion.trim()
+            });
 
             toast({
                 title: "تم إرسال الاقتراح بنجاح ✓",
                 description: "شكراً لك! سنراجع اقتراحك قريباً",
             });
 
-            // Reset form
             setName("");
             setPhone("");
             setCity("");

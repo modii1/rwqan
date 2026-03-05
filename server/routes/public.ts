@@ -124,35 +124,6 @@ router.post("/api/properties/register", async (req, res) => {
   try {
     const data = req.body;
 
-    // ✅ Cloudflare Turnstile CAPTCHA verification
-    const captchaToken = data.captchaToken;
-    if (!captchaToken) {
-      return res.status(400).json({ error: "يرجى إكمال التحقق (CAPTCHA)" });
-    }
-
-    const turnstileSecret = process.env.TURNSTILE_SECRET_KEY;
-    if (turnstileSecret) {
-      try {
-        const captchaResponse = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            secret: turnstileSecret,
-            response: captchaToken,
-          }),
-        });
-        const captchaResult = await captchaResponse.json() as { success: boolean };
-        if (!captchaResult.success) {
-          return res.status(400).json({ error: "فشل التحقق من CAPTCHA، يرجى المحاولة مرة أخرى" });
-        }
-      } catch (captchaErr) {
-        console.error("CAPTCHA verification error:", captchaErr);
-        // Allow registration to continue if Turnstile service is down
-      }
-    } else {
-      console.warn("⚠️ TURNSTILE_SECRET_KEY not set — skipping CAPTCHA verification");
-    }
-
     // Check duplicate property number
     const exists = await propertyService.getByNumber(data.propertyNumber);
     if (exists) {

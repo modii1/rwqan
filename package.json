@@ -80,6 +80,7 @@
     "googleapis": "^166.0.0",
     "iconv-lite": "^0.7.2",
     "input-otp": "^1.4.2",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.453.0",
     "memorystore": "^1.6.7",
     "multer": "^2.0.2",
@@ -114,6 +115,7 @@
     "bufferutil": "^4.0.8"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "cross-env": "^10.1.0",
     "eslint": "^9.39.2",
     "tsx": "^4.21.0",

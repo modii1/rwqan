@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "@shared/schema";
 import { Card } from "@/components/ui/card";
@@ -10,11 +10,65 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft } from "lucide-react";
+import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
-import { Turnstile } from "@marsidev/react-turnstile";
+
+// ─── Visual Captcha helpers ───
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generateCaptchaText(length = 5): string {
+  let text = '';
+  for (let i = 0; i < length; i++) {
+    text += CAPTCHA_CHARS[Math.floor(Math.random() * CAPTCHA_CHARS.length)];
+  }
+  return text;
+}
+
+function drawCaptcha(canvas: HTMLCanvasElement, text: string) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width, h = canvas.height;
+
+  // background
+  const bg = ctx.createLinearGradient(0, 0, w, h);
+  bg.addColorStop(0, '#f0f4f8'); bg.addColorStop(0.5, '#e8edf2'); bg.addColorStop(1, '#dce3ea');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+
+  // noise dots
+  for (let i = 0; i < 80; i++) {
+    ctx.beginPath();
+    ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 2 + 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.random()*150+50},${Math.random()*150+50},${Math.random()*150+50},${Math.random()*0.5+0.2})`;
+    ctx.fill();
+  }
+
+  // interference lines
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.moveTo(Math.random()*w, Math.random()*h);
+    ctx.bezierCurveTo(Math.random()*w,Math.random()*h,Math.random()*w,Math.random()*h,Math.random()*w,Math.random()*h);
+    ctx.strokeStyle = `rgba(${Math.random()*120+80},${Math.random()*120+80},${Math.random()*120+80},${Math.random()*0.4+0.15})`;
+    ctx.lineWidth = Math.random()*1.5+0.5; ctx.stroke();
+  }
+
+  // characters
+  const cw = w / (text.length + 1.5);
+  const colors = ['#2563eb','#7c3aed','#059669','#d97706','#dc2626','#0891b2'];
+  for (let i = 0; i < text.length; i++) {
+    ctx.save();
+    const x = cw*(i+0.8), y = h/2+(Math.random()*12-6);
+    ctx.translate(x, y); ctx.rotate((Math.random()-0.5)*0.5); ctx.scale(0.85+Math.random()*0.35, 0.85+Math.random()*0.35);
+    ctx.font = `bold ${28+Math.floor(Math.random()*8)}px 'Courier New', monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.fillText(text[i], 2, 2);
+    ctx.fillStyle = colors[i%colors.length]; ctx.fillText(text[i], 0, 0);
+    ctx.restore();
+  }
+
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.strokeRect(0,0,w,h);
+}
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
@@ -55,7 +109,38 @@ export default function SubscriptionPage() {
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+
+  // Visual captcha state
+  const captchaCanvasRef = useRef<HTMLCanvasElement>(null);
+  const captchaTextRef = useRef("");
+  const [captchaInput, setCaptchaInput] = useState("");
+  const [captchaKey, setCaptchaKey] = useState(0); // force re-render
+
+  const refreshCaptcha = useCallback(() => {
+    const newText = generateCaptchaText(5);
+    captchaTextRef.current = newText;
+    setCaptchaInput("");
+    setCaptchaKey(k => k + 1);
+    setTimeout(() => {
+      if (captchaCanvasRef.current) drawCaptcha(captchaCanvasRef.current, newText);
+    }, 50);
+  }, []);
+
+  // Redraw captcha when step 3 becomes visible (canvas is now in DOM)
+  useEffect(() => {
+    if (currentStep === 3) {
+      // If captcha text exists but canvas wasn't drawn yet, draw it
+      if (captchaTextRef.current) {
+        setTimeout(() => {
+          if (captchaCanvasRef.current) drawCaptcha(captchaCanvasRef.current, captchaTextRef.current);
+        }, 50);
+      } else {
+        refreshCaptcha();
+      }
+    }
+  }, [currentStep, refreshCaptcha]);
+
+  useEffect(() => { refreshCaptcha(); }, [refreshCaptcha]);
 
   const { data: rawPackages = [] } = useQuery<Package[]>({
     queryKey: ['/api/packages'],
@@ -91,15 +176,29 @@ export default function SubscriptionPage() {
     e.preventDefault();
     if (!selectedPackageId) return;
 
+    // Captcha validation
+    const userInput = captchaInput.trim().toUpperCase();
+    const expected = captchaTextRef.current;
+    if (userInput !== expected) {
+      toast({
+        title: "خطأ في التحقق",
+        description: `الرمز المدخل غير صحيح، حاول مرة أخرى`,
+        variant: "destructive",
+      });
+      refreshCaptcha();
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const registrationResponse = await apiRequest('POST', '/api/properties/register', {
+      const payload = {
         ...formData,
         facilities,
         prices,
         subscriptionType: selectedPackage?.type || 'عادي',
-        captchaToken,
-      });
+      };
+
+      const registrationResponse = await apiRequest('POST', '/api/properties/register', payload);
 
       const registrationData = await registrationResponse.json();
       const propertyNumber = registrationData.propertyNumber;
@@ -153,9 +252,17 @@ export default function SubscriptionPage() {
         }
       }
     } catch (error: any) {
+      let errorMessage = error.message || "حدث خطأ غير متوقع";
+      try {
+        const jsonPart = errorMessage.substring(errorMessage.indexOf('{'));
+        if (jsonPart) {
+          const parsed = JSON.parse(jsonPart);
+          errorMessage = parsed.error || parsed.message || errorMessage;
+        }
+      } catch { /* keep original message */ }
       toast({
         title: "خطأ",
-        description: error.message || "حدث خطأ غير متوقع",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -567,14 +674,32 @@ export default function SubscriptionPage() {
                 </div>
               )}
 
-              {/* CAPTCHA Verification */}
-              <div className="flex justify-center">
-                <Turnstile
-                  siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""}
-                  onSuccess={(token) => setCaptchaToken(token)}
-                  onExpire={() => setCaptchaToken(null)}
-                  onError={() => setCaptchaToken(null)}
+              {/* Visual Captcha */}
+              <div>
+                <label className="block text-sm font-semibold mb-2">رمز التحقق</label>
+                <div className="flex items-center gap-3 mb-2">
+                  <canvas
+                    ref={captchaCanvasRef}
+                    width={220}
+                    height={60}
+                    className="rounded-lg border border-border select-none"
+                    style={{ imageRendering: 'auto' }}
+                  />
+                  <Button type="button" variant="outline" size="icon" onClick={refreshCaptcha} title="تحديث الرمز" className="shrink-0">
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Input
+                  placeholder="أدخل الأحرف الظاهرة أعلاه"
+                  value={captchaInput}
+                  onChange={(e) => setCaptchaInput(e.target.value)}
+                  maxLength={5}
+                  className="tracking-widest text-center font-mono text-lg"
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
                 />
+                <p className="text-xs text-muted-foreground mt-1">أدخل الأحرف والأرقام كما تظهر في الصورة (لا يُفرّق بين الحروف الكبيرة والصغيرة)</p>
               </div>
 
               {/* Submit */}
@@ -590,7 +715,7 @@ export default function SubscriptionPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || (!isFreePackage && !paymentMethod) || !captchaToken}
+                  disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
                   className="flex-1"
                 >
                   {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}

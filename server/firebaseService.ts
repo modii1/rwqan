@@ -174,7 +174,7 @@ export class FirebaseService {
             subscription.status === "نشط";
 
         await this.updateProperty(subscription.propertyNumber, {
-            subscriptionType: isPremium ? "premium" : "normal",
+            subscriptionType: isPremium ? "مميز" : "عادي",
             lastUpdate: toRiyadhISO(getNowInRiyadh()).split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
         });
@@ -396,6 +396,11 @@ export class FirebaseService {
 
     async getDiscountCodes(): Promise<DiscountCode[]> {
         const snapshot = await this.db.collection("discounts").where("isActive", "==", true).get();
+        return snapshot.docs.map((doc) => doc.data() as DiscountCode);
+    }
+
+    async getAllDiscountCodes(): Promise<DiscountCode[]> {
+        const snapshot = await this.db.collection("discounts").get();
         return snapshot.docs.map((doc) => doc.data() as DiscountCode);
     }
 
@@ -1181,6 +1186,17 @@ export class FirebaseService {
     async getOcrResultByPaymentId(paymentId: string): Promise<OcrResult | null> {
         const doc = await this.db.collection("ocr_results").doc(paymentId).get();
         return doc.exists ? (doc.data() as OcrResult) : null;
+    }
+
+    async getAllOcrResults(): Promise<OcrResult[]> {
+        const snapshot = await this.db.collection("ocr_results").get();
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return {
+                ...data,
+                paymentId: data.paymentId || doc.id,
+            } as OcrResult;
+        });
     }
 
     // ================== Parity Dummy Methods ==================

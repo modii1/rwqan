@@ -773,7 +773,7 @@ export default function PropertiesPage() {
                         </p>
                     </Card>
                 ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
+                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                         {visibleProperties.map((property) => {
                             // استخدام الصور الفعلية من R2 أو صورة placeholder
                             const cachedImages = propertyImages.get(property.propertyNumber);
@@ -788,14 +788,14 @@ export default function PropertiesPage() {
                             return (
                                 <Card
                                     key={property.propertyNumber}
-                                    className={`flex flex-col relative overflow-hidden ${property.subscriptionType === "مميز"
+                                    className={`flex flex-col relative overflow-hidden rounded-xl md:rounded-2xl transition-shadow hover:shadow-lg ${property.subscriptionType === "مميز"
                                         ? "property-card-premium"
                                         : "property-card-standard"
                                         }`}
                                     data-testid={`card-property-${property.propertyNumber}`}
                                     data-property-id={property.propertyNumber}
                                 >
-                                    {/* Image Section - Full width at top with swipe support */}
+                                    {/* Image Section */}
                                     <div
                                         className="relative group touch-pan-y"
                                         onTouchStart={(e) => {
@@ -831,7 +831,7 @@ export default function PropertiesPage() {
                                                     }
                                                     alt={property.name}
                                                     loading="lazy"
-                                                    className={`w-full h-48 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${imageTransitioning.has(property.propertyNumber)
+                                                    className={`w-full h-40 md:h-72 object-cover cursor-pointer transition-opacity duration-300 hover:opacity-90 ${imageTransitioning.has(property.propertyNumber)
                                                         ? "opacity-0"
                                                         : "opacity-100"
                                                         }`}
@@ -862,7 +862,7 @@ export default function PropertiesPage() {
                                                         <Button
                                                             variant="secondary"
                                                             size="icon"
-                                                            className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
+                                                            className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md bg-white/95 hover:bg-white border-0"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 nextImage(
@@ -872,14 +872,14 @@ export default function PropertiesPage() {
                                                             }}
                                                             data-testid={`button-next-image-${property.propertyNumber}`}
                                                         >
-                                                            <ChevronLeft className="h-5 w-5" />
+                                                            <ChevronLeft className="h-4 w-4 text-[#434040]" />
                                                         </Button>
 
                                                         {/* السابق (يسار) */}
                                                         <Button
                                                             variant="secondary"
                                                             size="icon"
-                                                            className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg bg-white/90 hover:bg-white"
+                                                            className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md bg-white/95 hover:bg-white border-0"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 prevImage(
@@ -889,7 +889,7 @@ export default function PropertiesPage() {
                                                             }}
                                                             data-testid={`button-prev-image-${property.propertyNumber}`}
                                                         >
-                                                            <ChevronRight className="h-5 w-5" />
+                                                            <ChevronRight className="h-4 w-4 text-[#434040]" />
                                                         </Button>
                                                     </>
                                                 )}
@@ -913,19 +913,19 @@ export default function PropertiesPage() {
                                         ) : (
                                             /* Placeholder عندما لا توجد صور */
                                             <div
-                                                className="w-full h-48 md:h-72 bg-gray-100 flex items-center justify-center cursor-pointer"
+                                                className="w-full h-40 md:h-72 bg-gray-100 flex items-center justify-center cursor-pointer rounded-t-xl md:rounded-t-2xl"
                                                 onClick={(e) => handleCardClick(property.propertyNumber, e)}
                                             >
                                                 <span className="text-gray-400 text-sm">لا توجد صور</span>
                                             </div>
                                         )}
                                     </div>
-                                    {/* Content Section - Flexible grow */}
-                                    <div className="flex flex-col flex-1 p-3 md:p-5">
+                                    {/* Content Section */}
+                                    <div className="flex flex-col flex-1 p-3 md:p-5 gap-1.5 md:gap-2 -mt-[20%]">
                                         {/* Title - Only show for verified properties */}
                                         {property.subscriptionType === "مميز" && (
                                             <h3
-                                                className="text-base md:text-xl font-bold text-[#4a3b2a] mb-2 md:mb-3 line-clamp-1 cursor-pointer hover:text-primary transition-colors"
+                                                className="text-sm md:text-lg font-bold text-[#4a3b2a] line-clamp-1 cursor-pointer hover:text-primary transition-colors"
                                                 onClick={(e) => handleCardClick(property.propertyNumber, e)}
                                             >
                                                 {property.name}
@@ -933,7 +933,7 @@ export default function PropertiesPage() {
                                         )}
 
                                         {/* Location */}
-                                        <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b] mb-2 md:mb-4">
+                                        <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-[#b88d2b]">
                                             <svg
                                                 className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0"
                                                 fill="currentColor"
@@ -945,31 +945,41 @@ export default function PropertiesPage() {
                                                     clipRule="evenodd"
                                                 />
                                             </svg>
-                                            <span className="font-semibold truncate text-[13px]">
+                                            <span className="font-semibold truncate text-[12px] md:text-[13px]">
                                                 {property.location || property.city}
                                             </span>
                                         </div>
 
-                                        {/* Top Facilities - Hidden on small mobile */}
-                                        <div className="hidden md:flex items-center gap-4 lg:gap-6 mb-4 lg:mb-6 text-sm text-[#b88d2b]">
-                                            {topFacilities.map((facility, idx) => (
-                                                <div key={idx} className="flex items-center gap-2">
-                                                    <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
-                                                    <span className="font-semibold text-xs">
-                                                        {facility}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {/* Facilities - Compact on mobile, full on desktop */}
+                                        {topFacilities.length > 0 && (
+                                            <div className="flex items-center gap-2 md:gap-4 lg:gap-6 text-[#b88d2b]">
+                                                {topFacilities.slice(0, 2).map((facility, idx) => (
+                                                    <div key={idx} className="flex items-center gap-1 md:hidden">
+                                                        <Sparkles className="w-2.5 h-2.5" />
+                                                        <span className="font-medium text-[10px] truncate max-w-[60px]">
+                                                            {facility}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                                {topFacilities.map((facility, idx) => (
+                                                    <div key={idx} className="hidden md:flex items-center gap-2">
+                                                        <Sparkles className="w-3 h-3 lg:w-4 lg:h-4" />
+                                                        <span className="font-semibold text-xs">
+                                                            {facility}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
 
-                                        {/* Price and CTA - Always at bottom */}
-                                        <div className="mt-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4">
+                                        {/* Price and CTA */}
+                                        <div className="mt-auto pt-2 md:pt-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 md:gap-4 border-t border-border/30">
                                             {/* Price */}
                                             <PriceDisplay amount={mainPrice} size="xl" />
 
-                                            {/* CTA Button - Fixed at bottom */}
+                                            {/* CTA Button */}
                                             <Button
-                                                className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-6 rounded-lg shadow-md text-xs md:text-sm whitespace-nowrap"
+                                                className="bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold px-3 md:px-6 py-2 md:py-4 rounded-lg shadow-sm text-xs md:text-sm whitespace-nowrap"
                                                 onClick={(e) => handleCardClick(property.propertyNumber, e)}
                                                 data-testid={`button-details-${property.propertyNumber}`}
                                             >

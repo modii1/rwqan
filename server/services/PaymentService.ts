@@ -60,7 +60,7 @@ export class PaymentService {
     const payment = await firebaseService.getPaymentById(paymentId);
     if (!payment) throw new Error("الدفع غير موجود");
 
-    const pendingStatuses = ["قيد المراجعة", "معلق", "قيد التحقق", "pending", "نجح - قيد التحقق"];
+    const pendingStatuses = ["قيد المراجعة", "معلق", "قيد التحقق", "pending", "نجح - قيد التحقق", "مرفوض"];
     if (!pendingStatuses.includes(payment.status)) {
       throw new Error("الدفع ليس معلقاً");
     }

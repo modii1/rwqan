@@ -606,23 +606,24 @@ router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
       new ListObjectsV2Command({
         Bucket: R2_BUCKET,
         Prefix: `${propertyNumber}/`,
-        MaxKeys: 100,
       })
     );
 
-    const count = list.Contents?.length || 0;
-    console.log(`✅ [FETCH] Found ${count} images for ${propertyNumber}`);
-    console.log(`📊 [FETCH] Objects:`, list.Contents?.map(o => o.Key));
+    // Filter to image files only (same as public endpoint)
+    const imageObjects = (list.Contents || [])
+      .filter(obj => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key));
 
-    let images =
-      list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
+    const count = imageObjects.length;
+    console.log(`✅ [FETCH] Found ${count} images for ${propertyNumber}`);
+
+    let images = imageObjects.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`);
 
     // ترتيب حسب رقم الصورة 1,2,3...
     images.sort((a, b) => {
       const aParts = a.split("/").pop() || "";
       const bParts = b.split("/").pop() || "";
-      const na = parseInt(aParts.replace(".jpg", "")) || 0;
-      const nb = parseInt(bParts.replace(".jpg", "")) || 0;
+      const na = parseInt(aParts.replace(/\.(jpg|jpeg|png|webp)$/i, "")) || 0;
+      const nb = parseInt(bParts.replace(/\.(jpg|jpeg|png|webp)$/i, "")) || 0;
       return na - nb;
     });
 
@@ -1126,6 +1127,13 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
     );
 
     if (!pendingPayment) {
+      // Check if there's a recently rejected payment
+      const rejectedPayment = payments.find(p =>
+        p.status === "مرفوض" && p.paymentMethod === "تحويل بنكي"
+      );
+      if (rejectedPayment) {
+        return res.json({ hasPending: false, payment: rejectedPayment });
+      }
       return res.json({ hasPending: false });
     }
 
@@ -1716,16 +1724,26 @@ router.post("/api/owner/payment/upload-receipt", upload.single("receipt"), async
 // ======================================================
 router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const { packageId, discountCode, action, secondPropertyNumber } = req.body;
+    // Use body propertyNumber first, fallback to session/cookie
+    const propertyNumber = req.body.propertyNumber
+      || req.cookies?.ownerPropertyNumber
+      || (req.session as any)?.propertyNumber;
     const isAddon = action === "addon";
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
+    if (!packageId) {
+      return res.status(400).json({ error: "الباقة مطلوبة" });
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: "الإيصال مطلوب" });
     }
+
+    console.log(`🏦 [Bank Transfer] propertyNumber=${propertyNumber}, packageId=${packageId}, action=${action}`);
 
     const pkg = await subscriptionService.getPackageById(packageId);
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
@@ -2048,7 +2066,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
 // ======================================================
 // 🔬 POST /api/owner/payment/:paymentId/rescan - Re-scan receipt with AI
 // ======================================================
-router.post("/api/owner/payment/:paymentId/rescan", requireOwner, async (req, res) => {
+router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
   try {
     const { paymentId } = req.params;
     const propertyNumber = req.cookies?.ownerPropertyNumber || (req.session as any)?.propertyNumber;

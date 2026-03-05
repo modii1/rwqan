@@ -188,7 +188,7 @@ export const paymentSchema = z.object({
   discountAmount: z.number().default(0),
   finalAmount: z.number(), // السعر بعد الخصم
   paymobOrderId: z.string().optional(),
-  status: z.enum(['معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة', 'نجح - قيد التحقق', 'قيد التحقق', 'منتهي الصلاحية', 'ملغي - انتهت المهلة', 'completed', 'نجح', 'نجاح', 'pending', 'قيد الدفع']),
+  status: z.enum(["مرفوض", 'معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة', 'نجح - قيد التحقق', 'قيد التحقق', 'منتهي الصلاحية', 'ملغي - انتهت المهلة', 'completed', 'نجح', 'نجاح', 'pending', 'قيد الدفع']),
   paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي', 'paymob', 'تأكيد يدوي']).optional(),
   receiptUrl: z.string().optional(),
   packageName: z.string().optional(),

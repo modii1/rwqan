@@ -1,14 +1,16 @@
 "use client";
 // client/src/pages/admin/sections/payments.tsx
-import { useState, Fragment } from "react";
+import { useState, Fragment, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, CheckCircle2, XCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, CheckCircle2, XCircle, Search, Filter, X } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { AIReceiptScanner } from "@/components/ai-receipt-scanner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -142,6 +144,12 @@ function formatDate(dateStr: string) {
 
 export default function PaymentsSection() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [methodFilter, setMethodFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const { toast } = useToast();
   
   // Mutation للموافقة على التحويل البنكي
@@ -202,7 +210,68 @@ export default function PaymentsSection() {
     queryKey: ["/api/owner/addons"],
   });
 
-  const completedPayments = (data || []).filter(p => p.status === "مكتمل");
+  // استخراج القيم الفريدة للفلاتر
+  const uniqueStatuses = useMemo(() => {
+    const statuses = new Set((data || []).map(p => p.status));
+    return Array.from(statuses).sort();
+  }, [data]);
+
+  const uniqueMethods = useMemo(() => {
+    const methods = new Set((data || []).map(p => p.paymentMethod || "-").filter(Boolean));
+    return Array.from(methods).sort();
+  }, [data]);
+
+  // تطبيق الفلاتر
+  const filteredData = useMemo(() => {
+    let filtered = data || [];
+
+    // بحث برقم العقار أو اسمه
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter(p =>
+        p.propertyNumber.toLowerCase().includes(q) ||
+        (p.propertyName || "").toLowerCase().includes(q)
+      );
+    }
+
+    // فلتر الحالة
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(p => p.status === statusFilter);
+    }
+
+    // فلتر طريقة الدفع
+    if (methodFilter !== "all") {
+      filtered = filtered.filter(p => (p.paymentMethod || "-") === methodFilter);
+    }
+
+    // فلتر التاريخ من
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      fromDate.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(p => new Date(p.createdAt) >= fromDate);
+    }
+
+    // فلتر التاريخ إلى
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(p => new Date(p.createdAt) <= toDate);
+    }
+
+    return filtered;
+  }, [data, searchQuery, statusFilter, methodFilter, dateFrom, dateTo]);
+
+  const hasActiveFilters = searchQuery || statusFilter !== "all" || methodFilter !== "all" || dateFrom || dateTo;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    setMethodFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const completedPayments = (filteredData || []).filter(p => p.status === "مكتمل");
   
 const totals = completedPayments.reduce((acc, p) => {
   const amount = p.finalAmount || p.amount || 0;
@@ -261,6 +330,98 @@ const totals = completedPayments.reduce((acc, p) => {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* فلاتر البحث */}
+      <Card className="p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* بحث برقم العقار */}
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="بحث برقم العقار..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pr-9 h-9 text-sm"
+            />
+          </div>
+
+          {/* فلتر الحالة */}
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="h-9 px-3 rounded-md border text-sm bg-background min-w-[120px]"
+          >
+            <option value="all">كل الحالات</option>
+            {uniqueStatuses.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          {/* فلتر طريقة الدفع */}
+          <select
+            value={methodFilter}
+            onChange={e => setMethodFilter(e.target.value)}
+            className="h-9 px-3 rounded-md border text-sm bg-background min-w-[120px]"
+          >
+            <option value="all">كل الطرق</option>
+            {uniqueMethods.map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 text-xs"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter className="w-3.5 h-3.5 ml-1" />
+            تاريخ
+          </Button>
+
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 text-xs text-red-600 hover:text-red-700"
+              onClick={clearFilters}
+            >
+              <X className="w-3.5 h-3.5 ml-1" />
+              مسح الفلاتر
+            </Button>
+          )}
+        </div>
+
+        {/* فلاتر التاريخ */}
+        {showFilters && (
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">من:</label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="h-9 text-sm w-auto"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">إلى:</label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="h-9 text-sm w-auto"
+              />
+            </div>
+          </div>
+        )}
+
+        {hasActiveFilters && (
+          <div className="mt-2 text-xs text-muted-foreground">
+            عرض {filteredData.length} من {(data || []).length} عملية
+          </div>
+        )}
+      </Card>
 
       {/* ملخص الأرباح والرسوم */}
       {completedPayments.length > 0 && (
@@ -346,7 +507,7 @@ const totals = completedPayments.reduce((acc, p) => {
             </thead>
 
             <tbody>
-              {(data || []).map((p) => {
+              {(filteredData || []).map((p) => {
                 const amount = p.finalAmount || p.amount || 0;
                 const fees = calculateFees(amount, p.paymentMethod || "default");
                 const isExpanded = expandedRow === p.id;
@@ -393,12 +554,14 @@ const totals = completedPayments.reduce((acc, p) => {
                           variant={
                             p.status === "مكتمل" ? "default" :
                             p.status === "نجح - قيد التحقق" ? "outline" :
-                            p.status === "قيد المراجعة" ? "outline" : "destructive"
+                            p.status === "قيد المراجعة" ? "outline" :
+                            p.status === "مرفوض" ? "destructive" : "destructive"
                           }
                           className={`text-[10px] ${
                             p.status === "مكتمل" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                             p.status === "نجح - قيد التحقق" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" :
                             p.status === "قيد المراجعة" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
+                            p.status === "مرفوض" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                             ""
                           }`}
                         >
@@ -431,7 +594,7 @@ const totals = completedPayments.reduce((acc, p) => {
                       </Td>
                       <Td>{formatDate(p.createdAt)}</Td>
                       <Td>
-                        {(isCompleted || isPendingVerification || p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "معلق") && (
+                        {(isCompleted || isPendingVerification || p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "معلق" || p.status === "مرفوض") && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -449,13 +612,13 @@ const totals = completedPayments.reduce((acc, p) => {
                       </Td>
                     </tr>
                     
-                    {/* صف التفاصيل الموسعة - للمدفوعات المعلقة (كل الحالات المعلقة) */}
-                    {isExpanded && (p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق" || p.status === "معلق") && (
-                      <tr key={`${p.id}-pending-details`} className="bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300">
+                    {/* صف التفاصيل الموسعة - للمدفوعات المعلقة والمرفوضة */}
+                    {isExpanded && (p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق" || p.status === "معلق" || p.status === "مرفوض") && (
+                      <tr key={`${p.id}-pending-details`} className={`${p.status === "مرفوض" ? "bg-red-50 dark:bg-red-900/10 border-t-2 border-red-300" : "bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300"}`}>
                         <Td colSpan={10}>
                           <div className="py-4 px-3">
-                            <div className="text-sm font-bold mb-3 text-amber-700 dark:text-amber-400">
-                              تحويل بنكي معلق - يحتاج مراجعة
+                            <div className={`text-sm font-bold mb-3 ${p.status === "مرفوض" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+                              {p.status === "مرفوض" ? "تحويل بنكي مرفوض" : "تحويل بنكي معلق - يحتاج مراجعة"}
                             </div>
                             
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-xs">
@@ -494,7 +657,20 @@ const totals = completedPayments.reduce((acc, p) => {
                               </div>
                             )}
 
+                            {/* نتائج الفحص الذكي للإيصال */}
+                            {p.receiptUrl && (
+                              <div className="mb-4">
+                                <AIReceiptScanner
+                                  paymentId={p.id}
+                                  receiptUrl={p.receiptUrl}
+                                  autoScan={true}
+                                />
+                              </div>
+                            )}
+
                             <div className="flex gap-3 mt-4">
+                              {/* Accept button: show for pending and rejected (can re-accept a rejected) */}
+                              {p.status !== "مكتمل" && (
                               <Button
                                 size="sm"
                                 variant="default"
@@ -510,6 +686,9 @@ const totals = completedPayments.reduce((acc, p) => {
                                 )}
                                 {p.action === "addon" ? "قبول وتفعيل الإضافة" : "قبول التحويل وتفعيل الاشتراك"}
                               </Button>
+                              )}
+                              {/* Reject button: only show for pending statuses, NOT for already rejected */}
+                              {p.status !== "مرفوض" && p.status !== "مكتمل" && (
                               <Button
                                 size="sm"
                                 variant="destructive"
@@ -524,6 +703,7 @@ const totals = completedPayments.reduce((acc, p) => {
                                 )}
                                 رفض التحويل
                               </Button>
+                              )}
                             </div>
                           </div>
                         </Td>
@@ -639,7 +819,7 @@ const totals = completedPayments.reduce((acc, p) => {
                 );
               })}
 
-              {(data || []).length === 0 && (
+              {(filteredData || []).length === 0 && (
                 <tr>
                   <Td colSpan={10}>
                     <div className="p-4 text-center text-xs text-muted-foreground">

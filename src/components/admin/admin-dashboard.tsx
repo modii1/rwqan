@@ -65,7 +65,7 @@ import AdminBlogSection from "./sections/blog";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
-type AdminSection =
+export type AdminSection =
   | ""
   | "properties"
   | "subscriptions"
@@ -89,8 +89,8 @@ type AdminSection =
   | "blog";
 
 
-export default function AdminDashboard() {
-  const [activeSection, setActiveSection] = useState<AdminSection>("");
+export default function AdminDashboard({ initialSection }: { initialSection?: AdminSection } = {}) {
+  const [activeSection, setActiveSection] = useState<AdminSection>(initialSection || "");
 
   // تحقق جلسة الأدمن
   const { data: adminSession, isLoading } = useQuery<{ isAdmin: boolean }>({

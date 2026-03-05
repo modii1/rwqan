@@ -263,12 +263,13 @@ input[type="search"]::-webkit-search-cancel-button {
 .property-card-premium {
   background: #fffdf0;
   border: 2px solid #e0c97b;
-  box-shadow: 0 0 8px rgba(224,201,123,0.35);
+  box-shadow: 0 2px 12px rgba(224,201,123,0.25);
 }
 
 .property-card-standard {
   background: #fcfbf5;
-  box-shadow: 0 0 6px rgba(192,178,153,0.3);
+  border: 1px solid #e8e0d0;
+  box-shadow: 0 1px 6px rgba(192,178,153,0.2);
 }
 
 .price-box {

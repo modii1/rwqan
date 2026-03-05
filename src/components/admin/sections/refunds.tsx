@@ -1,11 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Loader2, Plus, Trash2, Pencil } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, Search, Filter, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Th, Td } from "../components/Table";
@@ -31,6 +31,11 @@ export default function RefundsSection() {
     refundAmount: 0,
     reason: "",
   });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
   const { data: refunds, isLoading } = useQuery<Refund[]>({
     queryKey: ["/api/admin/refunds"],
@@ -100,15 +105,56 @@ export default function RefundsSection() {
     setIsOpen(true);
   };
 
+  // فلاتر البحث
+  const filteredRefunds = useMemo(() => {
+    let filtered = refunds || [];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter(r =>
+        r.propertyNumber.toLowerCase().includes(q) ||
+        r.paymentId.toLowerCase().includes(q) ||
+        (r.reason || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(r => r.status === statusFilter);
+    }
+
+    if (dateFrom) {
+      const fromDate = new Date(dateFrom);
+      fromDate.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(r => new Date(r.createdAt) >= fromDate);
+    }
+
+    if (dateTo) {
+      const toDate = new Date(dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(r => new Date(r.createdAt) <= toDate);
+    }
+
+    return filtered;
+  }, [refunds, searchQuery, statusFilter, dateFrom, dateTo]);
+
+  const hasActiveFilters = searchQuery || statusFilter !== "all" || dateFrom || dateTo;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
   const startEdit = (refund: Refund) => {
     setEditingId(refund.id);
     setFormData(refund);
     setIsOpen(true);
   };
 
-  const totalRefunded = (refunds || []).reduce((sum, r) => sum + r.refundAmount, 0);
-  const pendingCount = (refunds || []).filter(r => r.status === "معلق").length;
-  const completedCount = (refunds || []).filter(r => r.status === "مكتمل").length;
+  const totalRefunded = (filteredRefunds || []).reduce((sum, r) => sum + r.refundAmount, 0);
+  const pendingCount = (filteredRefunds || []).filter(r => r.status === "معلق").length;
+  const completedCount = (filteredRefunds || []).filter(r => r.status === "مكتمل").length;
 
   return (
     <section className="space-y-4" dir="rtl">
@@ -165,6 +211,82 @@ export default function RefundsSection() {
         </Dialog>
       </div>
 
+      {/* فلاتر البحث */}
+      <Card className="p-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="بحث برقم العقار أو معرف الدفعة..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pr-9 h-9 text-sm"
+            />
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="h-9 px-3 rounded-md border text-sm bg-background min-w-[120px]"
+          >
+            <option value="all">كل الحالات</option>
+            <option value="معلق">معلق</option>
+            <option value="مكتمل">مكتمل</option>
+          </select>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 text-xs"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter className="w-3.5 h-3.5 ml-1" />
+            تاريخ
+          </Button>
+
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 text-xs text-red-600 hover:text-red-700"
+              onClick={clearFilters}
+            >
+              <X className="w-3.5 h-3.5 ml-1" />
+              مسح الفلاتر
+            </Button>
+          )}
+        </div>
+
+        {showFilters && (
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">من:</label>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="h-9 text-sm w-auto"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">إلى:</label>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="h-9 text-sm w-auto"
+              />
+            </div>
+          </div>
+        )}
+
+        {hasActiveFilters && (
+          <div className="mt-2 text-xs text-muted-foreground">
+            عرض {filteredRefunds.length} من {(refunds || []).length} استرجاع
+          </div>
+        )}
+      </Card>
+
       {/* الإحصائيات */}
       <div className="grid grid-cols-3 gap-3">
         <Card className="p-3 text-center">
@@ -202,7 +324,7 @@ export default function RefundsSection() {
               </tr>
             </thead>
             <tbody>
-              {(refunds || []).map((refund) => (
+              {(filteredRefunds || []).map((refund) => (
                 <tr key={refund.id} className="border-t hover:bg-muted/40">
                   <Td>{refund.paymentId}</Td>
                   <Td>#{refund.propertyNumber}</Td>
@@ -229,8 +351,8 @@ export default function RefundsSection() {
             </tbody>
           </table>
         )}
-        {!isLoading && (!refunds || refunds.length === 0) && (
-          <p className="p-4 text-sm text-muted-foreground">لا توجد استرجاعات</p>
+        {!isLoading && (!filteredRefunds || filteredRefunds.length === 0) && (
+          <p className="p-4 text-sm text-muted-foreground">{hasActiveFilters ? "لا توجد نتائج مطابقة للفلاتر" : "لا توجد استرجاعات"}</p>
         )}
       </Card>
     </section>

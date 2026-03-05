@@ -128,52 +128,6 @@ router.delete("/api/properties/:propertyNumber", async (req, res) => {
   }
 });
 
-// REGISTER new property (public)
-router.post("/api/properties/register", async (req, res) => {
-  try {
-    const data = req.body;
-    const exists2 = await propertyService.getByNumber(data.propertyNumber);
-    if (exists2) return res.status(400).json({ error: "رقم العقار مستخدم بالفعل" });
-
-    const prices = {
-      display: "", weekday: data.prices.weekday || "", weekend: data.prices.weekend || "",
-      overnight: data.prices.overnight || "", special: "", holidays: data.prices.holidays || "",
-    };
-
-    const newProperty: InsertProperty = {
-      propertyNumber: String(data.propertyNumber || ""),
-      name: String(data.name || ""),
-      whatsappNumber: String(data.whatsappNumber || ""),
-      location: String(data.location || ""),
-      city: (data.city as any) || "بريدة",
-      direction: (data.direction as any) || "شمال",
-      type: (data.type as any) || "قسم",
-      facilities: Array.isArray(data.facilities) ? data.facilities : [],
-      imagesLink: "",
-      prices,
-      subscriptionType: "عادي",
-      subscriptionDate: "",
-      pin: String(data.pin || ""),
-      imageUrls: [],
-    };
-
-    const created2 = await propertyService.create(newProperty);
-
-    notificationService.newProperty({
-      propertyNumber: data.propertyNumber,
-      propertyName: data.name || "",
-      ownerPhone: data.whatsappNumber || "",
-      city: data.city || "",
-      type: data.type || "",
-    }).catch(err => console.error("❌ WhatsApp notify error:", err));
-
-    res.json(created2);
-  } catch (error) {
-    console.error("Register property error:", error);
-    res.status(500).json({ error: "خطأ أثناء تسجيل العقار" });
-  }
-});
-
 // SUGGESTIONS
 router.post("/api/suggestions", async (req, res) => {
   try {

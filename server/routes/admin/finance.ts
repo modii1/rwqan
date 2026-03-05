@@ -69,7 +69,9 @@ router.put("/api/admin/partner-profits/:id", async (req, res) => {
 
 router.get("/api/admin/discounts", async (req, res) => {
   try {
-    const discounts = await discountService.getAll();
+    // Admin sees ALL discounts (active + inactive)
+    const { firebaseService } = await import("../../firebaseService");
+    const discounts = await firebaseService.getAllDiscountCodes();
     res.json(discounts);
   } catch (error) {
     console.error("Error fetching discounts:", error);

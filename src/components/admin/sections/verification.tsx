@@ -362,69 +362,80 @@ export default function AdminVerificationSection() {
                     {status.label}
                   </Badge>
 
-                  {/* ——— زر قبول ——— */}
-                  <Button
-                    size="sm"
-                    className="bg-green-600 hover:bg-green-700 text-white"
-                    disabled={loadingApprove === property.propertyNumber}
-                    onClick={async () => {
-                      setLoadingApprove(property.propertyNumber);
+                  {/* ——— أزرار التحكم حسب الحالة ——— */}
+                  {(() => {
+                    const vStatus = property.verificationStatus;
+                    const isApproved = vStatus === "approved" || vStatus === "verified";
+                    const isRejected = vStatus === "rejected";
 
-                      try {
-                        const msg = `
+                    return (
+                      <>
+                        {/* ——— زر قبول ——— (لا يظهر إذا مقبول أصلاً) */}
+                        {!isApproved && (
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            disabled={loadingApprove === property.propertyNumber}
+                            onClick={async () => {
+                              setLoadingApprove(property.propertyNumber);
+
+                              try {
+                                const msg = `
 شريكنا العزيز،
 تم *قبول عقاركم* رقم ${property.propertyNumber} (${property.name || ""}).
 
 العقار الآن ظاهر للعملاء في منصة روقـان ✔✨
 `;
-                        openWhatsApp(property.whatsappNumber as any, msg);
+                                openWhatsApp(property.whatsappNumber as any, msg);
 
-                        const res = await fetch(
-                          `/api/admin/properties/${property.propertyNumber}/approve`,
-                          { method: "PUT" },
-                        );
+                                const res = await fetch(
+                                  `/api/admin/properties/${property.propertyNumber}/approve`,
+                                  { method: "PUT" },
+                                );
 
-                        if (!res.ok) throw new Error();
+                                if (!res.ok) throw new Error();
 
-                        toast({
-                          title: "✔️ تم قبول العقار",
-                          description: `تم قبول #${property.propertyNumber} بنجاح`,
-                        });
+                                toast({
+                                  title: "✔️ تم قبول العقار",
+                                  description: `تم قبول #${property.propertyNumber} بنجاح`,
+                                });
 
-                        refetch();
-                      } catch {
-                        toast({
-                          title: "خطأ",
-                          description: "لم يتم قبول العقار",
-                          variant: "destructive",
-                        });
-                      }
+                                refetch();
+                              } catch {
+                                toast({
+                                  title: "خطأ",
+                                  description: "لم يتم قبول العقار",
+                                  variant: "destructive",
+                                });
+                              }
 
-                      setLoadingApprove(null);
-                    }}
-                  >
-                    {loadingApprove === property.propertyNumber ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      "قبول"
-                    )}
-                  </Button>
+                              setLoadingApprove(null);
+                            }}
+                          >
+                            {loadingApprove === property.propertyNumber ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              "قبول"
+                            )}
+                          </Button>
+                        )}
 
-                  {/* ——— زر رفض ——— */}
-                  <Button
-                    size="sm"
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                    disabled={loadingReject === property.propertyNumber}
-                    onClick={async () => {
-                      setLoadingReject(property.propertyNumber);
+                        {/* ——— زر رفض ——— (لا يظهر إذا مرفوض أصلاً) */}
+                        {!isRejected && (
+                          <Button
+                            size="sm"
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            disabled={loadingReject === property.propertyNumber}
+                            onClick={async () => {
+                              setLoadingReject(property.propertyNumber);
 
-                      const autoReason =
-                        status.issues.length > 0
-                          ? status.issues.map((i) => `- ${i}`).join("\n")
-                          : "بيانات غير مكتملة";
+                              const autoReason =
+                                status.issues.length > 0
+                                  ? status.issues.map((i) => `- ${i}`).join("\n")
+                                  : "بيانات غير مكتملة";
 
-                      try {
-                        const msg = `
+                              try {
+                                const msg = `
 شريكنا العزيز،
 تم *رفض عقاركم* رقم ${property.propertyNumber} (${property.name || ""}).
 
@@ -433,43 +444,47 @@ ${autoReason}
 
 نرجو استكمال البيانات ثم طلب التحقق مرة أخرى.
 `;
-                        openWhatsApp(property.whatsappNumber as any, msg);
+                                openWhatsApp(property.whatsappNumber as any, msg);
 
-                        const res = await fetch(
-                          `/api/admin/properties/${property.propertyNumber}/reject`,
-                          {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ reason: autoReason }),
-                          },
-                        );
+                                const res = await fetch(
+                                  `/api/admin/properties/${property.propertyNumber}/reject`,
+                                  {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ reason: autoReason }),
+                                  },
+                                );
 
-                        if (!res.ok) throw new Error();
+                                if (!res.ok) throw new Error();
 
-                        toast({
-                          title: "❌ تم رفض العقار",
-                          description: `تم رفض #${property.propertyNumber}`,
-                          variant: "destructive",
-                        });
+                                toast({
+                                  title: "❌ تم رفض العقار",
+                                  description: `تم رفض #${property.propertyNumber}`,
+                                  variant: "destructive",
+                                });
 
-                        refetch();
-                      } catch {
-                        toast({
-                          title: "خطأ",
-                          description: "لم يتم رفض العقار",
-                          variant: "destructive",
-                        });
-                      }
+                                refetch();
+                              } catch {
+                                toast({
+                                  title: "خطأ",
+                                  description: "لم يتم رفض العقار",
+                                  variant: "destructive",
+                                });
+                              }
 
-                      setLoadingReject(null);
-                    }}
-                  >
-                    {loadingReject === property.propertyNumber ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      "رفض"
-                    )}
-                  </Button>
+                              setLoadingReject(null);
+                            }}
+                          >
+                            {loadingReject === property.propertyNumber ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              "رفض"
+                            )}
+                          </Button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 

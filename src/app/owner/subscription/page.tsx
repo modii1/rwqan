@@ -13,7 +13,17 @@ import { formatDiscount } from "@/lib/currency";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
+  Calendar, Timer, Banknote, Info, X,
 } from "lucide-react";
+
+import {
+  calculateRemainingDays,
+  calculateSubscriptionDuration,
+  getSubscriptionStatus,
+  getStatusInfo,
+  formatDate as formatSubDate,
+  canExtendSubscription,
+} from "@/lib/subscription-utils";
 
 export default function OwnerSubscriptionPage() {
   const router = useRouter();
@@ -28,6 +38,13 @@ export default function OwnerSubscriptionPage() {
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+
+  // Fetch default bank account for bank transfer
+  const { data: bankAccount } = useQuery<any>({
+    queryKey: ["/api/bank-accounts/default"],
+    enabled: paymentMethod === "bank",
+  });
 
   // Auth check
   useEffect(() => {
@@ -77,10 +94,7 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
-  // Payment history
-  const { data: payments } = useQuery<any[]>({
-    queryKey: ["/api/owner/payments"],
-  });
+
 
   // Check pending payment
   const { data: pendingPayment } = useQuery<any>({
@@ -157,7 +171,6 @@ export default function OwnerSubscriptionPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/owner/payment/check-pending"] });
       setPaymentSuccess(true);
     },
@@ -209,18 +222,46 @@ export default function OwnerSubscriptionPage() {
     }
   };
 
-  // Calculate remaining days
-  const getRemainingDays = () => {
-    if (!subscription?.endDate) return 0;
-    const end = new Date(subscription.endDate);
-    const now = new Date();
-    const diff = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    return Math.max(0, diff);
+  // Calculate remaining days using shared subscription-utils
+  const remainingDays = subscription?.endDate
+    ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
+    : 0;
+  const isExpired = remainingDays < 0;
+  const isNearExpiry = remainingDays >= 0 && remainingDays <= 7;
+  const canExtend = subscription?.endDate
+    ? canExtendSubscription(subscription.endDate)
+    : true; // expired = can extend
+
+  // Subscription duration & status
+  const subscriptionDuration = subscription?.startDate && subscription?.endDate
+    ? calculateSubscriptionDuration(subscription.startDate, subscription.endDate)
+    : 0;
+  const subStatus = subscription?.endDate
+    ? getSubscriptionStatus(subscription.endDate, subscription?.status)
+    : 'expired';
+  const statusInfo = getStatusInfo(subStatus);
+
+  // Package name helper
+  const getPackageName = (pkgId?: string) => {
+    const names: Record<string, string> = {
+      'pkg-monthly': 'اشتراك شهري',
+      'pkg-month': 'الباقة الذهبية',
+      'pkg-month1': 'الباقة الفضية',
+      'pkg-special': 'عرض خاص شهرين',
+      'pkg-special-2months': 'عرض خاص شهرين',
+      'pkg-2months': 'عرض خاص شهرين',
+      'pkg-camps': 'باقة المخيمات',
+      'pkg-2properties': 'باقة النخبة - عقارين',
+      'pkg-month-2properties': 'باقة النخبة - عقارين',
+      'pkg-month-2prop': 'باقة النخبة - عقارين',
+      'pkg-free': 'الباقة المجانية',
+    };
+    if (!pkgId) return 'غير محدد';
+    return names[pkgId] || packages.find((p: any) => p.id === pkgId)?.name || pkgId;
   };
 
-  const remainingDays = getRemainingDays();
-  const isExpired = remainingDays <= 0;
-  const isNearExpiry = remainingDays > 0 && remainingDays <= 7;
+  // Current package price from subscription
+  const currentPackageObj = packages.find((p: any) => p.id === subscription?.packageId);
 
   // Filter packages - show upgradable ones
   const availablePackages = packages.filter((pkg: any) => {
@@ -229,11 +270,7 @@ export default function OwnerSubscriptionPage() {
     return true;
   });
 
-  const currentPkgPrice = (() => {
-    if (!subscription?.packageId || !packages) return 0;
-    const cur = packages.find((p: any) => p.id === subscription.packageId);
-    return cur?.price || 0;
-  })();
+  const currentPkgPrice = currentPackageObj?.price || 0;
 
   const getCategoryColor = (cat: string) => {
     switch (cat) {
@@ -329,58 +366,85 @@ export default function OwnerSubscriptionPage() {
 
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
 
-        {/* Current Subscription Status Card */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
+        {/* ===== بطاقة الباقة الحالية ===== */}
+        <Card className="p-6 border-2">
+          <div className="flex items-center justify-between mb-5">
             <h2 className="text-xl font-bold text-[#434040] flex items-center gap-2">
               <Crown className="w-5 h-5 text-[#c9951d]" />
-              الاشتراك الحالي
+              الباقة الحالية
             </h2>
-            {(() => {
-              const status = subscription?.status;
-              if (status === "نشط" || status === "ساري" || status === "active")
-                return <Badge className="bg-[#434040] text-white"><Check className="w-3 h-3 ml-1" />نشط</Badge>;
-              if (status === "نشط مجاني")
-                return <Badge className="bg-[#c9951d] text-white"><Star className="w-3 h-3 ml-1" />مجاني</Badge>;
-              if (status === "منتهي" || status === "expired")
-                return <Badge variant="destructive"><AlertTriangle className="w-3 h-3 ml-1" />منتهي</Badge>;
-              return <Badge variant="secondary">{status}</Badge>;
-            })()}
+            <Badge className={`${statusInfo.bgColor} text-white px-3 py-1`}>
+              {statusInfo.icon} {statusInfo.label}
+            </Badge>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">العقار</p>
-              <p className="font-semibold">{property?.name || property?.propertyNumber}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">نوع الاشتراك</p>
-              <p className="font-semibold">{subscription?.packageType || subscription?.subscriptionType || "مجاني"}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">تاريخ الانتهاء</p>
-              <p className="font-semibold">
-                {subscription?.endDate ? new Date(subscription.endDate).toLocaleDateString("ar-SA") : "—"}
+          {/* اسم الباقة */}
+          <div className="text-center mb-5 pb-4 border-b">
+            <p className="text-2xl font-bold text-[#434040]">{getPackageName(subscription?.packageId)}</p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-5 text-sm">
+            {/* الأيام المتبقية - كبير */}
+            <div className="col-span-2 md:col-span-1 text-center p-4 rounded-xl bg-muted/40">
+              <p className="text-muted-foreground text-xs mb-1">الأيام المتبقية</p>
+              <p className={`text-5xl font-black ${isExpired ? "text-red-500" : isNearExpiry ? "text-amber-500" : "text-[#434040]"}`}>
+                {isExpired ? "0" : remainingDays}
               </p>
+              <p className="text-muted-foreground text-sm mt-1">{isExpired ? "منتهي" : "يوم"}</p>
             </div>
-            <div>
-              <p className="text-muted-foreground">الأيام المتبقية</p>
-              <p className={`font-bold text-lg ${isExpired ? "text-red-500" : isNearExpiry ? "text-amber-500" : "text-[#434040]"}`}>
-                {isExpired ? "منتهي" : `${remainingDays} يوم`}
-              </p>
+
+            {/* تفاصيل الاشتراك */}
+            <div className="col-span-2 grid grid-cols-2 gap-4">
+              <div className="flex items-start gap-2">
+                <Banknote className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-muted-foreground text-xs">رسوم الاشتراك</p>
+                  <p className="font-bold text-[#434040]">{currentPackageObj?.price || 0} <span className="text-xs font-normal text-muted-foreground">ريال سعودي</span></p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Timer className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-muted-foreground text-xs">المدة</p>
+                  <p className="font-bold text-[#434040]">{subscriptionDuration || currentPackageObj?.duration || 30} يوم</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-muted-foreground text-xs">تاريخ البداية</p>
+                  <p className="font-bold text-[#434040] text-xs">{subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-muted-foreground text-xs">تاريخ الانتهاء</p>
+                  <p className="font-bold text-[#434040] text-xs">{subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}</p>
+                </div>
+              </div>
             </div>
           </div>
 
+          {/* Progress bar */}
           {!isExpired && subscription?.startDate && subscription?.endDate && (
             <div className="mt-4">
               <div className="w-full bg-muted rounded-full h-2">
                 <div
                   className={`h-2 rounded-full transition-all ${isNearExpiry ? "bg-amber-500" : "bg-[#434040]"}`}
                   style={{
-                    width: `${Math.max(5, Math.min(100, (remainingDays / Math.max(1, Math.ceil((new Date(subscription.endDate).getTime() - new Date(subscription.startDate).getTime()) / 86400000))) * 100))}%`
+                    width: `${Math.max(5, Math.min(100, (remainingDays / Math.max(1, subscriptionDuration)) * 100))}%`
                   }}
                 />
               </div>
+            </div>
+          )}
+
+          {/* ملاحظة التمديد */}
+          {!canExtend && !isExpired && (
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700 flex items-center gap-2">
+              <Info className="w-4 h-4 flex-shrink-0" />
+              يمكن التمديد عند بقاء 10 أيام أو أقل
             </div>
           )}
 
@@ -397,10 +461,39 @@ export default function OwnerSubscriptionPage() {
               اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة.
             </div>
           )}
+
+          {/* أزرار الترقية والتمديد */}
+          <div className="flex gap-3 mt-5 pt-4 border-t">
+            <Button
+              className="flex-1 bg-[#434040] hover:bg-[#333] gap-2"
+              onClick={() => {
+                setAction("upgrade");
+                setShowUpgradeDialog(true);
+              }}
+            >
+              <Zap className="w-4 h-4" />
+              الترقية إلى باقة أفضل
+            </Button>
+            {canExtend && (
+              <Button
+                variant="outline"
+                className="flex-1 gap-2"
+                onClick={() => {
+                  setAction("extend");
+                  setSelectedPackageId(subscription?.packageId || null);
+                  setCurrentStep(2);
+                  setShowUpgradeDialog(false);
+                }}
+              >
+                <RefreshCcw className="w-4 h-4" />
+                تمديد الاشتراك
+              </Button>
+            )}
+          </div>
         </Card>
 
         {/* Pending Payment Notice */}
-        {pendingPayment && (
+        {pendingPayment?.hasPending && (
           <Card className="p-4 border-amber-300 bg-amber-50">
             <div className="flex items-center gap-2 text-amber-700">
               <Clock className="w-5 h-5" />
@@ -412,61 +505,71 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
-        {/* Step Progress */}
-        <div className="mb-2">
-          <div className="flex items-center justify-between gap-2 mb-4">
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 1 ? "bg-[#434040]" : "bg-muted"}`}>
-                {currentStep > 1 ? "✓" : "1"}
-              </div>
-              <p className="text-xs mt-2 text-center font-semibold">اختيار الباقة</p>
-            </div>
-            <div className={`flex-1 h-1 ${currentStep >= 2 ? "bg-[#434040]" : "bg-muted"}`} />
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 2 ? "bg-[#434040]" : "bg-muted"}`}>
-                2
-              </div>
-              <p className="text-xs mt-2 text-center font-semibold">طريقة الدفع</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Step 1: Action + Package Selection */}
-        {currentStep === 1 && (
-          <Card className="p-8">
-            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: اختر نوع العملية والباقة</h2>
-
-            {/* Action Toggle */}
-            <div className="flex gap-3 mb-6">
-              <div
-                onClick={() => setAction("upgrade")}
-                className={`flex-1 p-4 border-2 rounded-lg cursor-pointer text-center transition ${action === "upgrade" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
-              >
-                <Zap className="w-6 h-6 mx-auto mb-2 text-[#434040]" />
-                <div className="font-semibold">ترقية</div>
-                <p className="text-xs text-muted-foreground">الانتقال إلى باقة أفضل</p>
-              </div>
-              <div
-                onClick={() => setAction("extend")}
-                className={`flex-1 p-4 border-2 rounded-lg cursor-pointer text-center transition ${action === "extend" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
-              >
-                <RefreshCcw className="w-6 h-6 mx-auto mb-2 text-[#434040]" />
-                <div className="font-semibold">تمديد</div>
-                <p className="text-xs text-muted-foreground">تمديد فترة الاشتراك الحالي</p>
+        {/* Rejected Payment Notice */}
+        {pendingPayment && !pendingPayment.hasPending && pendingPayment.payment?.status === "مرفوض" && (
+          <Card className="p-4 border-red-300 bg-red-50">
+            <div className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">تم رفض الدفعة السابقة</p>
+                <p className="text-sm">يرجى إعادة التحويل ورفع إيصال صحيح</p>
               </div>
             </div>
+          </Card>
+        )}
 
-            {/* Package Grid */}
+        {/* ===== نافذة اختيار الباقة للترقية ===== */}
+        {showUpgradeDialog && currentStep === 1 && (
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-[#434040]">اختر الباقة الجديدة</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowUpgradeDialog(false)}>
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            {/* تنبيه مهم - عند الترقية */}
+            {!isExpired && remainingDays > 0 && action === "upgrade" && (
+              <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-bold text-amber-800 mb-2">تنبيه مهم</p>
+                    <p className="text-sm text-amber-700 mb-3">
+                      لديك اشتراك متبقي فيه <span className="font-bold">{remainingDays}</span> يوم. الترقية ستؤدي إلى:
+                    </p>
+                    <ul className="space-y-1.5 text-sm text-amber-700">
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        تصفير العداد الحالي
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        بدء باقة جديدة بالكامل
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                        الأيام المتبقية السابقة لن تُرحّل
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* الباقات المتاحة */}
+            <h3 className="font-semibold text-muted-foreground text-sm mb-3">الباقات المتاحة</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {availablePackages.map((pkg: any) => {
                 const isCurrentPkg = subscription?.packageId === pkg.id;
                 const isDowngrade = action === "upgrade" && pkg.price < currentPkgPrice;
                 const isSelected = selectedPackageId === pkg.id;
+                const isMultiProperty = pkg.id?.includes("2propert") || pkg.id?.includes("2prop");
 
                 return (
                   <div
                     key={pkg.id}
-                    className={`p-5 rounded-lg border-2 transition-all ${isSelected
+                    className={`p-5 rounded-xl border-2 transition-all ${isSelected
                       ? "ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]"
                       : isCurrentPkg
                         ? "border-[#c9951d]/40 bg-[#c9951d]/5"
@@ -474,24 +577,43 @@ export default function OwnerSubscriptionPage() {
                       } ${isDowngrade ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}
                     onClick={() => { if (!isDowngrade) setSelectedPackageId(pkg.id); }}
                   >
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-bold">{pkg.name}</h3>
-                        <PriceDisplay amount={pkg.price} size="lg" />
-                      </div>
+                    {/* اسم الباقة والحالة */}
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-bold text-[#434040]">{pkg.name}</h3>
                       <div className="flex flex-col items-end gap-1">
-                        {isSelected && <Badge className="bg-[#434040] text-white">مختار</Badge>}
-                        {isCurrentPkg && <Badge className="bg-[#c9951d] border-0 text-xs text-white">الحالي</Badge>}
+                        {isSelected && <Badge className="bg-[#434040] text-white text-[10px]">مختار</Badge>}
+                        {isCurrentPkg && <Badge className="bg-[#c9951d] border-0 text-[10px] text-white">الحالي</Badge>}
                       </div>
                     </div>
+
+                    {/* المدة */}
                     <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
+
+                    {/* السعر */}
+                    <div className="flex items-end gap-1 mb-2">
+                      <span className="text-3xl font-black text-[#434040]">{pkg.price}</span>
+                      <span className="text-sm text-muted-foreground mb-1">ريال</span>
+                      {isMultiProperty && (
+                        <span className="text-xs text-muted-foreground mb-1">/ عقار</span>
+                      )}
+                    </div>
+
+                    {/* معلومات الباقة المتعددة */}
+                    {isMultiProperty && (
+                      <div className="text-xs space-y-1 mb-2">
+                        <p className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]">{pkg.price * 2} ريال</span> للعقارين</p>
+                        <p className="text-muted-foreground">2 عقارات</p>
+                      </div>
+                    )}
+
+                    {/* المميزات */}
                     {pkg.type === "مميز" && (
-                      <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
+                      <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-2">مميز</Badge>
                     )}
                     {pkg.features && pkg.features.length > 0 && (
                       <div className="space-y-1 mt-2">
                         {pkg.features.slice(0, 4).map((f: string, i: number) => (
-                          <div key={i} className="text-sm flex items-start gap-2">
+                          <div key={i} className="text-xs flex items-start gap-2">
                             <span className="text-[#434040] font-bold mt-0.5">✓</span>
                             <span>{f}</span>
                           </div>
@@ -506,13 +628,25 @@ export default function OwnerSubscriptionPage() {
               })}
             </div>
 
-            <div className="flex justify-end pt-6 border-t">
+            {/* أزرار المتابعة والإلغاء */}
+            <div className="flex gap-3 pt-4 border-t">
               <Button
-                onClick={() => setCurrentStep(2)}
+                onClick={() => {
+                  if (selectedPackageId) setCurrentStep(2);
+                }}
                 disabled={!selectedPackageId}
-                className="flex-1 md:flex-none bg-[#434040] hover:bg-[#333]"
+                className="flex-1 bg-[#434040] hover:bg-[#333]"
               >
-                التالي: طريقة الدفع
+                متابعة للدفع
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowUpgradeDialog(false);
+                  setSelectedPackageId(null);
+                }}
+              >
+                إلغاء
               </Button>
             </div>
           </Card>
@@ -521,7 +655,9 @@ export default function OwnerSubscriptionPage() {
         {/* Step 2: Payment Method */}
         {currentStep === 2 && selectedPackageId && (
           <Card className="p-8">
-            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 2: طريقة الدفع</h2>
+            <h2 className="text-xl font-bold text-[#434040] mb-6">
+              {action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"} — طريقة الدفع
+            </h2>
             <form onSubmit={handleSubmit} className="space-y-6">
 
               {/* Selected Package Summary */}
@@ -577,10 +713,38 @@ export default function OwnerSubscriptionPage() {
               {/* Bank Receipt */}
               {paymentMethod === "bank" && (
                 <div className="p-4 bg-muted/30 rounded-lg space-y-3">
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                    <p className="font-semibold text-blue-700 mb-1">معلومات التحويل:</p>
-                    <p className="text-blue-600">البنك: الراجحي</p>
-                    <p className="text-blue-600">* يرجى كتابة رقم العقار في ملاحظات التحويل</p>
+                  <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <CreditCard className="w-6 h-6 text-blue-700" />
+                      <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
+                    </div>
+                    {bankAccount ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                          <span className="text-sm font-semibold text-blue-700">البنك</span>
+                          <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                          <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
+                          <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                          <span className="text-sm font-semibold text-blue-700">IBAN</span>
+                          <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                        </div>
+                        {bankAccount.accountNumber && (
+                          <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                            <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
+                            <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
+                    )}
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                      <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة رقم العقار في ملاحظات التحويل</p>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
@@ -604,11 +768,14 @@ export default function OwnerSubscriptionPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setCurrentStep(1)}
+                  onClick={() => {
+                    setCurrentStep(1);
+                    if (action === "upgrade") setShowUpgradeDialog(true);
+                  }}
                   className="gap-2"
                 >
                   <ChevronRight className="w-4 h-4" />
-                  السابق
+                  رجوع
                 </Button>
                 <Button
                   type="submit"
@@ -617,7 +784,7 @@ export default function OwnerSubscriptionPage() {
                 >
                   {cardPaymentMutation.isPending || bankTransferMutation.isPending
                     ? "جاري المعالجة..."
-                    : action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"
+                    : action === "upgrade" ? "متابعة للدفع" : "متابعة للدفع"
                   }
                 </Button>
               </div>
@@ -707,38 +874,7 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
-        {/* Payment History */}
-        {payments && payments.length > 0 && (
-          <Card className="p-6">
-            <h2 className="text-xl font-bold text-[#434040] mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              سجل المدفوعات
-            </h2>
-            <div className="space-y-3">
-              {payments.slice(0, 5).map((payment: any) => (
-                <div key={payment.id} className="flex items-center justify-between p-3 rounded-lg border">
-                  <div>
-                    <p className="font-semibold text-sm">{payment.packageId}</p>
-                    <p className="text-xs text-muted-foreground">{payment.paymentMethod}</p>
-                  </div>
-                  <div className="text-left">
-                    <p className="font-bold text-sm">{payment.finalAmount} ر.س</p>
-                    <Badge
-                      className={`text-xs ${payment.status === "مكتمل"
-                        ? "bg-[#434040] text-white"
-                        : payment.status === "قيد التحقق" || payment.status === "قيد المراجعة"
-                          ? "bg-amber-100 text-amber-800 border-amber-300"
-                          : "bg-red-100 text-red-800 border-red-300"
-                        }`}
-                    >
-                      {payment.status}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
+
       </div>
     </div>
   );

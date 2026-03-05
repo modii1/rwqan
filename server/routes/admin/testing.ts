@@ -34,6 +34,19 @@ router.get("/api/admin/verification/logs", async (req, res) => {
 });
 
 // ======================
+// 📄 نتائج OCR
+// ======================
+router.get("/api/admin/ocr-results", async (req, res) => {
+  try {
+    const results = await firebaseService.getAllOcrResults();
+    res.json(results || []);
+  } catch (error) {
+    console.error("OCR results error:", error);
+    res.status(500).json({ error: "Failed to fetch OCR results" });
+  }
+});
+
+// ======================
 // 🔍 التحقق الذكي من العقار
 // ======================
 router.post("/api/admin/smart-verify", async (req, res) => {

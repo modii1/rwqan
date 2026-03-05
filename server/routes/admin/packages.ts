@@ -12,7 +12,13 @@ const router = Router();
 router.get("/api/admin/packages", async (_req, res) => {
   try {
     const packages = await firebaseService.getAllPackages();
-    res.json(packages);
+    // Map fields for frontend compatibility: duration → durationDays, features → description
+    const mapped = packages.map((pkg: any) => ({
+      ...pkg,
+      durationDays: pkg.durationDays || pkg.duration || 30,
+      description: pkg.description || (pkg.features && pkg.features.length > 0 ? pkg.features.join("، ") : ""),
+    }));
+    res.json(mapped);
   } catch (error) {
     console.error("Error fetching packages:", error);
     res.status(500).json({ error: "فشل في جلب الباقات" });
@@ -22,12 +28,15 @@ router.get("/api/admin/packages", async (_req, res) => {
 // إنشاء باقة جديدة
 router.post("/api/admin/packages", requireAdmin, async (req, res) => {
   try {
+    const durationValue = req.body.duration || req.body.durationDays || 30;
     const pkgData = {
       name: req.body.name || "",
-      duration: req.body.duration || req.body.durationDays || 30,
+      duration: durationValue,
+      durationDays: durationValue,
       price: req.body.price || 0,
       type: req.body.type || "مميز",
       features: req.body.features || (req.body.description ? [req.body.description] : []),
+      description: req.body.description || "",
       isActive: req.body.isActive !== false,
       propertyCount: req.body.propertyCount || 1,
     };
@@ -46,7 +55,9 @@ router.put("/api/admin/packages/:id", requireAdmin, async (req, res) => {
     const pkgData: any = {};
     if (req.body.name !== undefined) pkgData.name = req.body.name;
     if (req.body.duration !== undefined || req.body.durationDays !== undefined) {
-      pkgData.duration = req.body.duration || req.body.durationDays;
+      const dur = req.body.duration || req.body.durationDays;
+      pkgData.duration = dur;
+      pkgData.durationDays = dur;
     }
     if (req.body.price !== undefined) pkgData.price = req.body.price;
     if (req.body.type !== undefined) pkgData.type = req.body.type;
