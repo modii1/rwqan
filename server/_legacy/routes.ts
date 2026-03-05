@@ -3812,7 +3812,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/owner/payment/:paymentId/rescan", requireOwner, async (req, res) => {
     try {
       const { paymentId } = req.params;
-      const propertyNumber = req.cookies?.ownerPropertyNumber || (req.session as any)?.propertyNumber;
+      const propertyNumber = (req as any).propertyNumber;
 
       if (!propertyNumber) {
         return res.status(401).json({ error: "غير مصرح" });
