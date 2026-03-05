@@ -15,6 +15,7 @@ import {
   notifyNewPayment,
 } from "../integrations/whatsapp";
 import { paymobService } from "../integrations/paymob";
+import { scanReceiptWithAI } from "../integrations/aiReceiptScanner";
 
 const router = Router();
 
@@ -125,14 +126,12 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     const changesSummary = changes.length > 0 ? changes.slice(0, 3).join(' | ') : 'تحديث عام';
     updates.lastChanges = changesSummary;
 
-    console.log(`📝 [Property Update] ${propertyNumber}: ${changesSummary}`);
 
     // 🔍 فحص التعديل الحساس
     const sensitiveChanges = detectSensitiveChanges(currentProperty, updates);
     const previousStatus = currentProperty.verificationStatus;
 
     if (sensitiveChanges.length > 0 && previousStatus === 'approved') {
-      console.log(`⚠️ [Sensitive Update] ${propertyNumber}: ${sensitiveChanges.join(', ')}`);
 
       // تطبيق التعديلات أولاً
       const updatedProperty = { ...currentProperty, ...updates };
@@ -147,10 +146,8 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       // تحديث حالة التحقق بناءً على النتيجة
       if (verificationResult.canAutoActivate) {
         updates.verificationStatus = 'approved';
-        console.log(`✅ [Auto-Approved] التعديل الحساس تم قبوله تلقائياً`);
       } else {
         updates.verificationStatus = 'pending';
-        console.log(`⏳ [Pending Review] التعديل الحساس يتطلب مراجعة الأدمن`);
       }
     }
 
@@ -282,7 +279,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-    console.log(`🔍 Looking for subscription for property: ${propertyNumber}`);
 
     // استخدام الدالة الجديدة للبحث عن الاشتراك
     let subscription = null;
@@ -293,7 +289,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
     }
 
     if (!subscription) {
-      console.log(`❌ No subscription found for property: ${propertyNumber}`);
       // إرجاع اشتراك افتراضي مجاني إذا لم يوجد
       return res.json({
         id: `SUB-${propertyNumber}`,
@@ -305,7 +300,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       });
     }
 
-    console.log(`✅ Found subscription for ${propertyNumber}:`, subscription);
     res.json(subscription);
   } catch (err: any) {
     console.error("Get subscription error:", err?.message);
@@ -338,11 +332,8 @@ router.get("/api/owner/payments", requireOwner, async (req, res) => {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-    console.log(`🔍 Fetching payments for property: ${propertyNumber}`);
-
     const payments = await paymentService.getByProperty(propertyNumber);
 
-    console.log(`✅ Found ${payments.length} payments for property: ${propertyNumber}`);
     res.json(payments);
   } catch (err: any) {
     console.error("Get owner payments error:", err?.message);
@@ -486,6 +477,390 @@ router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
   } catch (err: any) {
     console.error("AI Scanner error:", err);
     res.status(500).json({ error: err.message || "خطأ في فحص الإيصال" });
+  }
+});
+
+// ======================================================
+// 💰 GET /api/owner/payment/check-pending - Check for pending bank transfer
+// ======================================================
+router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const payments = await paymentService.getByProperty(propertyNumber);
+
+    // Look for pending bank transfer payment
+    const pendingPayment = payments.find(p =>
+      (p.status === "قيد المراجعة" || p.status === "معلق") &&
+      p.paymentMethod === "تحويل بنكي"
+    );
+
+    if (!pendingPayment) {
+      return res.json({ hasPending: false });
+    }
+
+    // Auto-check for issues
+    const issues: string[] = [];
+
+    if (!pendingPayment.receiptUrl) {
+      issues.push("لم يتم رفع إيصال التحويل");
+    }
+
+    if (!pendingPayment.finalAmount || pendingPayment.finalAmount <= 0) {
+      issues.push("المبلغ غير صحيح");
+    }
+
+    if (!pendingPayment.packageId) {
+      issues.push("لم يتم تحديد الباقة");
+    }
+
+    const paymentDate = new Date(pendingPayment.createdAt || "");
+    const daysSincePayment = Math.floor((Date.now() - paymentDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysSincePayment > 7) {
+      issues.push(`الدفع معلق منذ ${daysSincePayment} يوم - قد تحتاج المتابعة`);
+    }
+
+    return res.json({
+      hasPending: true,
+      payment: pendingPayment,
+      autoCheckPassed: issues.length === 0,
+      issues: issues.length > 0 ? issues : undefined,
+    });
+  } catch (err: any) {
+    console.error("Check pending payment error:", err);
+    res.status(500).json({ error: "خطأ في التحقق من الدفع" });
+  }
+});
+
+// ======================================================
+// 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
+// ======================================================
+router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
+  try {
+    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const isAddon = action === "addon";
+
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "الإيصال مطلوب" });
+    }
+
+    // Get package and property
+    const pkg = await firebaseService.getPackageById(packageId);
+    if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
+
+    // Calculate final price with discount
+    let finalAmount = pkg.price;
+    if (discountCode) {
+      const discount = await firebaseService.getDiscountCodeByCode(discountCode);
+      if (discount && discount.isActive) {
+        if (discount.type === "نسبة") {
+          finalAmount -= (pkg.price * discount.value) / 100;
+        } else {
+          finalAmount -= discount.value;
+        }
+      }
+    }
+
+    // Upload receipt to R2
+    let receiptUrl = "";
+    if (req.file && R2_BUCKET && r2) {
+      const isPdf = req.file.mimetype === 'application/pdf';
+      const ext = isPdf ? 'pdf' : 'jpg';
+      const contentType = isPdf ? 'application/pdf' : 'image/jpeg';
+      const receiptKey = `receipts/${propertyNumber}-${Date.now()}.${ext}`;
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: receiptKey,
+          Body: req.file.buffer,
+          ContentType: contentType,
+        })
+      );
+      receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+    }
+
+    // Generate payment reference
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let paymentReference = 'RWQN-';
+    for (let i = 0; i < 6; i++) {
+      paymentReference += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    // Create payment record
+    const payment = await paymentService.create({
+      propertyNumber,
+      packageId,
+      amount: pkg.price,
+      discountCode: discountCode || "",
+      discountAmount: pkg.price - finalAmount,
+      finalAmount,
+      status: "قيد التحقق",
+      paymentMethod: "تحويل بنكي",
+      receiptUrl,
+      secondPropertyNumber: secondPropertyNumber || undefined,
+      paymentReference,
+    } as any);
+
+
+    // Handle add-on purchase
+    if (isAddon) {
+      await addOnService.purchase({
+        propertyNumber,
+        addOnPackageId: packageId,
+        status: "pending",
+        paymentId: payment.id,
+        source: "bank_transfer",
+      });
+
+      await addOnService.logHistory({
+        propertyNumber,
+        addOnPackageId: packageId,
+        action: "purchased",
+        notes: "تحويل بنكي - بانتظار المراجعة",
+        timestamp: new Date().toISOString(),
+        createdBy: "owner",
+      });
+
+      return res.json({ ok: true, paymentId: payment.id });
+    }
+
+    // Send notification for new subscription
+    if (!action || action === 'new') {
+      try {
+        await notifyNewPayment({
+          propertyNumber,
+          propertyName: property.name || "",
+          amount: finalAmount,
+          paymentMethod: "تحويل بنكي",
+          transactionId: payment.id,
+        });
+      } catch (notifyErr) {
+        console.error("Failed to send payment notification:", notifyErr);
+      }
+    }
+
+    // Handle extension/upgrade - save pending subscription data
+    if (!isAddon && (action === 'extend' || action === 'upgrade')) {
+      const todayBankTransfer = getStartOfDayRiyadh();
+      const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+
+      let bankStartDate = todayBankTransfer;
+      let bankEndDate = calculateSubscriptionEndDate(null, pkg.duration);
+
+      if (action === 'extend' && currentSubscription) {
+        const currentEndDate = new Date(currentSubscription.endDate);
+        if (currentEndDate > todayBankTransfer) {
+          bankStartDate = currentEndDate;
+          bankEndDate = calculateExtensionEndDate(currentEndDate, pkg.duration);
+        }
+      }
+
+      await paymentService.update(payment.id, {
+        action: action,
+        pendingStartDate: formatDateRiyadh(bankStartDate),
+        pendingEndDate: formatDateRiyadh(bankEndDate),
+      });
+
+
+      // Send WhatsApp notification for receipt upload
+      notifyReceiptUpload({
+        propertyNumber,
+        propertyName: property.name || "",
+        ownerPhone: property.whatsappNumber || "",
+        receiptUrl,
+      }).catch(err => console.error("WhatsApp notify error:", err));
+    }
+
+    // AI Receipt Scanning
+    let aiScanResult = null;
+    let autoActivated = false;
+    try {
+      aiScanResult = await scanReceiptWithAI(
+        receiptUrl,
+        payment.id,
+        finalAmount,
+        paymentReference
+      );
+
+      if (aiScanResult) {
+
+        // Auto-activate if confidence is high
+        if (aiScanResult.recommendation === "تفعيل_تلقائي") {
+          await paymentService.setStatus(payment.id, "مكتمل");
+
+          const autoActivateToday = getStartOfDayRiyadh();
+          const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+
+          let startDate = autoActivateToday;
+          let endDate = calculateSubscriptionEndDate(null, pkg.duration);
+
+          if (currentSubscription && new Date(currentSubscription.endDate) > autoActivateToday) {
+            startDate = new Date(currentSubscription.endDate);
+            endDate = calculateExtensionEndDate(startDate, pkg.duration);
+          }
+
+          const isPremiumPackage = pkg.type === "موثوق" || pkg.type === "مميز" || finalAmount > 0;
+
+          const subscriptionData = {
+            packageId: pkg.id,
+            price: finalAmount,
+            subscriptionType: isPremiumPackage ? "مميز" : "عادي",
+            packageType: isPremiumPackage ? "مميز" : "عادي",
+            startDate: formatDateRiyadh(startDate),
+            endDate: formatDateRiyadh(endDate),
+            paymentId: payment.id,
+          };
+
+          await firebaseService.addSubscriptionToSheet(
+            propertyNumber,
+            subscriptionData,
+            property,
+            receiptUrl
+          );
+
+          // Handle second property for multi-property packages
+          if (secondPropertyNumber) {
+            const secondProperty = await firebaseService.getPropertyByNumber(secondPropertyNumber);
+            if (secondProperty) {
+              const pricePerProperty = finalAmount / 2;
+              const secondSubscriptionData = {
+                ...subscriptionData,
+                price: pricePerProperty,
+                linkedProperty: propertyNumber,
+              };
+              await firebaseService.addSubscriptionToSheet(
+                secondPropertyNumber,
+                secondSubscriptionData,
+                secondProperty,
+                receiptUrl
+              );
+
+              await firebaseService.createMultiPropertySubscription({
+                packageId: pkg.id,
+                propertyNumber1: propertyNumber,
+                propertyNumber2: secondPropertyNumber,
+                startDate: formatDateRiyadh(startDate),
+                endDate: formatDateRiyadh(endDate),
+                status: "نشط",
+                paymentId: payment.id,
+              });
+
+              // Auto-verify second property
+              const secondPropertyComplete = await checkPropertyDataComplete(secondProperty);
+              if (secondPropertyComplete.isComplete) {
+                await firebaseService.updateVerificationStatus(secondPropertyNumber, "approved");
+              } else {
+                await firebaseService.updateVerificationStatus(secondPropertyNumber, "pending");
+              }
+            }
+          }
+
+          // Auto-verify first property
+          const propertyComplete = await checkPropertyDataComplete(property);
+          if (propertyComplete.isComplete) {
+            await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+          } else {
+            await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+          }
+
+          autoActivated = true;
+
+          // Send admin notification
+          const verificationStatus1 = propertyComplete.isComplete ? '✅ معتمد' : '⏳ ينتظر مراجعة';
+          let adminNotification =
+            `🤖 *تفعيل تلقائي - تحويل بنكي*\n\n` +
+            `📍 العقار: ${property.name}\n` +
+            `🔢 رقم العقار: ${propertyNumber}\n` +
+            `📦 الباقة: ${pkg.name}\n` +
+            `💵 المبلغ: ${finalAmount} ر.س\n` +
+            `📅 من: ${subscriptionData.startDate}\n` +
+            `📅 إلى: ${subscriptionData.endDate}\n` +
+            `🔬 نسبة التطابق: ${aiScanResult.matchAnalysis.matchScore}%\n` +
+            `📊 حالة التحقق: ${verificationStatus1}\n`;
+
+          if (secondPropertyNumber) {
+            const secondProp = await firebaseService.getPropertyByNumber(secondPropertyNumber);
+            const verificationStatus2 = (await checkPropertyDataComplete(secondProp || {})).isComplete ? '✅ معتمد' : '⏳ ينتظر مراجعة';
+            adminNotification +=
+              `\n🏠 *العقار الثاني:*\n` +
+              `📍 الاسم: ${secondProp?.name || secondPropertyNumber}\n` +
+              `🔢 الرقم: ${secondPropertyNumber}\n` +
+              `📊 حالة التحقق: ${verificationStatus2}\n`;
+          }
+
+          adminNotification += `\n✅ تم تفعيل الاشتراك تلقائياً بعد فحص الإيصال`;
+
+          await sendWhatsAppNotification(adminNotification).catch(err => console.error("WhatsApp notify error:", err));
+
+          // Notify owner
+          if (property.whatsappNumber) {
+            try {
+              await notifyOwnerSubscriptionActivated({
+                ownerPhone: property.whatsappNumber,
+                propertyNumber: propertyNumber,
+                propertyName: property.name || "",
+                endDate: subscriptionData.endDate,
+              });
+            } catch (ownerErr) {
+              console.error("Owner notification error:", ownerErr);
+            }
+          }
+        } else {
+          // Manual approval needed
+          await sendWhatsAppNotification(
+            `⏳ *تحويل بنكي - يحتاج مراجعة*\n\n` +
+            `📍 العقار: ${property.name}\n` +
+            `🔢 رقم العقار: ${propertyNumber}\n` +
+            `📦 الباقة: ${pkg.name}\n` +
+            `💵 المبلغ: ${finalAmount} ر.س\n` +
+            `🧾 رقم المرجع: ${paymentReference}\n` +
+            `🔬 نتيجة الفحص: ${aiScanResult?.recommendation || 'غير معروف'}\n` +
+            `📊 نسبة التطابق: ${aiScanResult?.matchAnalysis?.matchScore || 0}%\n\n` +
+            `⚠️ يحتاج موافقة يدوية من الإدارة`
+          ).catch(err => console.error("WhatsApp notify error:", err));
+        }
+      }
+    } catch (aiErr) {
+      console.error("AI Scanner error:", aiErr);
+      await sendWhatsAppNotification(
+        `⏳ *تحويل بنكي - يحتاج مراجعة*\n\n` +
+        `📍 العقار: ${property.name}\n` +
+        `🔢 رقم العقار: ${propertyNumber}\n` +
+        `📦 الباقة: ${pkg.name}\n` +
+        `💵 المبلغ: ${finalAmount} ر.س\n` +
+        `🧾 رقم المرجع: ${paymentReference}\n` +
+        `🔬 خطأ في فحص الإيصال\n\n` +
+        `⚠️ يحتاج موافقة يدوية من الإدارة`
+      ).catch(err => console.error("WhatsApp notify error:", err));
+    }
+
+    res.json({
+      ok: true,
+      paymentId: payment.id,
+      autoActivated: autoActivated,
+      pendingApproval: !autoActivated,
+      aiScan: aiScanResult ? {
+        recommendation: aiScanResult.recommendation,
+        confidence: aiScanResult.confidence,
+        summary: aiScanResult.summary,
+        matchScore: aiScanResult.matchAnalysis.matchScore,
+        authenticityScore: aiScanResult.authenticityAnalysis.overallScore,
+      } : null
+    });
+  } catch (err: any) {
+    console.error("Bank transfer error:", err);
+    res.status(500).json({ error: "خطأ في معالجة التحويل البنكي" });
   }
 });
 
