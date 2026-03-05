@@ -209,7 +209,7 @@ export class FirebaseService {
             subscription.packageId === "pkg-trusted";
 
         await this.updateProperty(propertyNumber, {
-            subscriptionType: isPremium ? "premium" : "normal",
+            subscriptionType: isPremium ? "مميز" : "عادي",
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
         });
