@@ -82,6 +82,7 @@ export default function OwnerImagesPage() {
             setSelectedFiles([]);
             setPreviews([]);
             toast({ title: "تم رفع الصور بنجاح", description: "تم إضافة الصور إلى ملف العقار" });
+            window.location.reload();
         },
         onError: (err: Error) => {
             toast({ title: "فشل رفع الصور", description: err.message, variant: "destructive" });
@@ -104,6 +105,7 @@ export default function OwnerImagesPage() {
             queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
             queryClient.invalidateQueries({ queryKey: ["owner-r2-images"] });
             toast({ title: "تم حذف الصورة", description: "تم حذف الصورة بنجاح" });
+            window.location.reload();
         },
         onError: (err: Error) => {
             toast({ title: "فشل حذف الصورة", description: err.message, variant: "destructive" });

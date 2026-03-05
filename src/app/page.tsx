@@ -921,7 +921,7 @@ export default function PropertiesPage() {
                                         )}
                                     </div>
                                     {/* Content Section */}
-                                    <div className="flex flex-col flex-1 p-3 md:p-5 gap-1.5 md:gap-2 -mt-[20%]">
+                                    <div className="flex flex-col flex-1 p-3 md:p-5 gap-1.5 md:gap-2 md:-mt-[20%]">
                                         {/* Title - Only show for verified properties */}
                                         {property.subscriptionType === "مميز" && (
                                             <h3

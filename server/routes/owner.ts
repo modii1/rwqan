@@ -7,6 +7,7 @@ import { upload, detectDeviceType, SHEET_MAP } from "../utils/helpers";
 import { checkPropertyDataComplete, detectSensitiveChanges, smartVerification } from "../utils/verification";
 import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
+import { storage } from "../storage";
 import {
   notifyPropertyUpdate,
   sendWhatsAppNotification,
@@ -861,6 +862,145 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
   } catch (err: any) {
     console.error("Bank transfer error:", err);
     res.status(500).json({ error: "خطأ في معالجة التحويل البنكي" });
+  }
+});
+
+// ======================================================
+// 🔵 GET /api/owner/r2-images - Fetch property images from R2
+// ======================================================
+router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+
+    console.log(`🔍 [FETCH] Getting images for property ${propertyNumber}`);
+
+    if (!r2 || !propertyNumber || !R2_BUCKET) {
+      console.error("❌ [FETCH] Missing propertyNumber or R2_BUCKET");
+      return res.json({ images: [] });
+    }
+
+    if (!r2) return res.json({ images: [] });
+    const list = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: `${propertyNumber}/`,
+        MaxKeys: 100,
+      })
+    );
+
+    const count = list.Contents?.length || 0;
+    console.log(`✅ [FETCH] Found ${count} images for ${propertyNumber}`);
+
+    let images =
+      list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
+
+    images.sort((a, b) => {
+      const aParts = a.split("/").pop() || "";
+      const bParts = b.split("/").pop() || "";
+      const na = parseInt(aParts.replace(".jpg", "")) || 0;
+      const nb = parseInt(bParts.replace(".jpg", "")) || 0;
+      return na - nb;
+    });
+
+    console.log(`✅ [FETCH] Returning ${images.length} image URLs`);
+    res.json({ images });
+
+  } catch (err: any) {
+    console.error("❌ [FETCH] Error:", err?.message);
+    res.json({ images: [] });
+  }
+});
+
+// ======================================================
+// 📸 POST /api/owner/images - Upload property images to R2
+// ======================================================
+router.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber || "";
+
+    console.log(`📸 [UPLOAD] Property ${propertyNumber}, Files:`, req.files?.length);
+
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "Property number not found in session" });
+    }
+
+    if (!r2 || !R2_BUCKET) {
+      return res.status(500).json({ error: "R2 bucket not configured" });
+    }
+
+    const files = (req.files as any) || [];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "لا توجد صور تم رفعها" });
+    }
+
+    const uploadedKeys: string[] = [];
+    const timestamp = Date.now();
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const key = `${propertyNumber}/${timestamp}-${i}.jpg`;
+
+      if (r2) {
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: key,
+            Body: file.buffer,
+            ContentType: "image/jpeg",
+            ACL: "public-read",
+          })
+        );
+      }
+      uploadedKeys.push(key);
+    }
+
+    const uploadedUrls = uploadedKeys.map(key => `${R2_PUBLIC_URL}/${key}`);
+
+    const changeNote = `إضافة ${files.length} صورة جديدة`;
+    await storage.updateProperty(propertyNumber, { lastChanges: changeNote });
+
+    const property = await storage.getPropertyByNumber(propertyNumber);
+    notifyPropertyUpdate({
+      propertyNumber,
+      propertyName: property?.name || '',
+      changes: changeNote,
+    }).catch(err => console.error("WhatsApp notify error:", err));
+
+    res.json({ ok: true, count: files.length, uploaded: uploadedKeys, urls: uploadedUrls });
+
+  } catch (err: any) {
+    const errorMsg = err?.message || "فشل الرفع";
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
+// ======================================================
+// 🗑️ POST /api/owner/images/delete - Delete property image from R2
+// ======================================================
+router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber || "";
+    const { url, imageUrl } = req.body;
+    const imageUrlToDelete = url || imageUrl;
+
+    if (!imageUrlToDelete) {
+      return res.status(400).json({ error: "URL مطلوبة" });
+    }
+
+    const key = `${propertyNumber}/${imageUrlToDelete.split("/").pop()}`;
+
+    if (r2) {
+      await r2.send(
+        new DeleteObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: key,
+        })
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: "فشل الحذف" });
   }
 });
 
