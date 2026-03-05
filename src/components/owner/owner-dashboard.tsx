@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
+import { AIReceiptScanner } from "@/components/ai-receipt-scanner";
 import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import {
   calculateRemainingDays,
@@ -66,6 +67,7 @@ export default function OwnerDashboard() {
     "all" | "completed" | "pending"
   >("all");
   const [paymentsExpanded, setPaymentsExpanded] = useState(false);
+  const [highlightPayments, setHighlightPayments] = useState(false);
   const FEATURE_SMART_VERIFICATION = true;
 
   // التحقق من نجاح الدفع عند الوصول من Paymob
@@ -247,17 +249,7 @@ export default function OwnerDashboard() {
     null,
   );
 
-  // 5.1) التحقق من التحويل البنكي المعلق - نظام ذكي
-  const {
-    data: pendingCheckData,
-    isLoading: isPendingCheckLoading,
-    refetch: refetchPendingCheck,
-  } = useQuery<any>({
-    queryKey: ["/api/owner/payment/check-pending"],
-    enabled: sessionData?.isLoggedIn === true,
-    retry: false,
-    staleTime: 1000 * 60 * 5, // 5 دقائق
-  });
+
 
   // دالة التحقق التدريجي الذكي من بيانات العقار
   const startSmartVerification = async () => {
@@ -680,12 +672,6 @@ export default function OwnerDashboard() {
     },
   });
 
-  // ================= DEBUG LOGS =================
-  console.log("🔍 requestsData:", requestsData);
-  console.log("🔍 sessionData:", sessionData);
-  console.log("🔍 isLoggedIn:", sessionData?.isLoggedIn);
-  console.log("🔍 paymentsData:", paymentsData);
-
   useEffect(() => {
     if (!isSessionLoading && sessionData) {
       if (!sessionData.isLoggedIn) {
@@ -928,30 +914,107 @@ export default function OwnerDashboard() {
         </div>
       )}
 
-      {/* ===== تنبيه دفعة قيد المراجعة ===== */}
-      {pendingCheckData?.hasPending && (
-        <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900">
-          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center gap-2 text-xs md:text-sm">
-            <Clock className="w-4 md:w-5 h-4 md:h-5 text-amber-500 flex-shrink-0" />
-            <p className="text-amber-700 dark:text-amber-400 font-medium">
-              {pendingCheckData.action === 'upgrade' && 'لديك طلب ترقية قيد المراجعة'}
-              {pendingCheckData.action === 'extend' && 'لديك طلب تمديد قيد المراجعة'}
-              {(!pendingCheckData.action || pendingCheckData.action === 'new') && 'لديك دفعة قيد المراجعة'}
-              {' '}
-              – <span className="md:inline hidden">سيتم التفعيل بعد مراجعة الإيصال</span>
-            </p>
+      {/* ===== تنبيه دفعة قيد المراجعة (بانتظار رفع الإيصال) ===== */}
+      {paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending") && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/50 dark:to-orange-950/30 border-b border-amber-300 dark:border-amber-800">
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center flex-shrink-0">
+                <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="font-bold text-amber-800 dark:text-amber-300 text-sm md:text-base">
+                  لديك دفعة بانتظار رفع إيصال التحويل
+                </p>
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  يرجى رفع إيصال التحويل البنكي لتفعيل الاشتراك
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
+              onClick={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                setHighlightPayments(true);
+                setTimeout(() => setHighlightPayments(false), 3000);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              عرض التفاصيل
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== تنبيه دفعة قيد التحقق (بعد رفع الإيصال) ===== */}
+      {paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق") && (
+        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/50 dark:to-cyan-950/30 border-b border-blue-300 dark:border-blue-800">
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <p className="font-bold text-blue-800 dark:text-blue-300 text-sm md:text-base">
+                  تم استلام إيصالك وهو قيد التحقق
+                </p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  سيتم مراجعة الإيصال والتفعيل خلال 24 ساعة
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-blue-500 text-blue-700 hover:bg-blue-100 flex-shrink-0"
+              onClick={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                setHighlightPayments(true);
+                setTimeout(() => setHighlightPayments(false), 1000);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              عرض التفاصيل
+            </Button>
           </div>
         </div>
       )}
 
       {/* ===== تنبيه دفعة مرفوضة ===== */}
-      {pendingCheckData && !pendingCheckData.hasPending && pendingCheckData.payment?.status === "مرفوض" && (
-        <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
-          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center gap-2 text-xs md:text-sm">
-            <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-red-500 flex-shrink-0" />
-            <p className="text-red-700 dark:text-red-400 font-medium">
-              تم رفض الدفعة السابقة – <span className="md:inline hidden">يرجى إعادة التحويل ورفع إيصال صحيح</span>
-            </p>
+      {paymentsData?.some((p: any) => p.status === "مرفوض") && (
+        <div className="bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/50 dark:to-rose-950/30 border-b border-red-300 dark:border-red-800">
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="font-bold text-red-800 dark:text-red-300 text-sm md:text-base">
+                  تم رفض إيصال التحويل
+                </p>
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  يرجى إعادة التحويل ورفع إيصال صحيح
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
+              onClick={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                setHighlightPayments(true);
+                setTimeout(() => setHighlightPayments(false), 1000);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              عرض التفاصيل
+            </Button>
           </div>
         </div>
       )}
@@ -1581,7 +1644,14 @@ export default function OwnerDashboard() {
         )}
 
         {/* ===== سجل المدفوعات ===== */}
-        <Card className="p-4 md:p-6">
+        <Card
+          id="payments-section"
+          className={`p-4 md:p-6 transition-all duration-500 ${
+            highlightPayments
+              ? "ring-4 ring-primary/50 ring-offset-2 shadow-lg scale-[1.01]"
+              : ""
+          }`}
+        >
           {/* رأس القسم مع زر التوسيع/الطي */}
           <div className="flex items-center justify-between mb-4">
             <button
@@ -2019,6 +2089,42 @@ export default function OwnerDashboard() {
                   </p>
                 )}
               </div>
+
+              {/* عرض الإيصال المرفوع والفحص الذكي */}
+              {selectedPaymentForReceipt?.receiptUrl && (
+                <div className="space-y-3">
+                  <div className="border rounded-lg overflow-hidden">
+                    <img
+                      src={selectedPaymentForReceipt.receiptUrl}
+                      alt="إيصال التحويل"
+                      className="w-full max-h-48 object-contain bg-gray-50"
+                    />
+                  </div>
+                  <AIReceiptScanner
+                    paymentId={selectedPaymentForReceipt.id}
+                    receiptUrl={selectedPaymentForReceipt.receiptUrl}
+                    autoScan={true}
+                  />
+                </div>
+              )}
+
+              {/* عرض الإيصال المرفوع والفحص الذكي */}
+              {selectedPaymentForReceipt?.receiptUrl && (
+                <div className="space-y-3">
+                  <div className="border rounded-lg overflow-hidden">
+                    <img
+                      src={selectedPaymentForReceipt.receiptUrl}
+                      alt="إيصال التحويل"
+                      className="w-full max-h-48 object-contain bg-gray-50"
+                    />
+                  </div>
+                  <AIReceiptScanner
+                    paymentId={selectedPaymentForReceipt.id}
+                    receiptUrl={selectedPaymentForReceipt.receiptUrl}
+                    autoScan={true}
+                  />
+                </div>
+              )}
 
               {/* أزرار الإجراء */}
               <div className="flex gap-2 pt-4">
