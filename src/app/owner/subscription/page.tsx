@@ -96,9 +96,10 @@ export default function OwnerSubscriptionPage() {
 
 
 
-  // Check pending payment
+  // Check pending payment - only after property is loaded
   const { data: pendingPayment } = useQuery<any>({
     queryKey: ["/api/owner/payment/check-pending"],
+    enabled: !!property?.propertyNumber,
   });
 
   const selectedPackage = packages.find((p: any) => p.id === selectedPackageId);
@@ -498,8 +499,17 @@ export default function OwnerSubscriptionPage() {
             <div className="flex items-center gap-2 text-amber-700">
               <Clock className="w-5 h-5" />
               <div>
-                <p className="font-semibold">لديك دفعة قيد المراجعة</p>
-                <p className="text-sm">سيتم تفعيل اشتراكك بعد مراجعة الإيصال</p>
+                <p className="font-semibold">
+                  {pendingPayment.action === 'upgrade' && 'لديك طلب ترقية قيد المراجعة'}
+                  {pendingPayment.action === 'extend' && 'لديك طلب تمديد قيد المراجعة'}
+                  {pendingPayment.action === 'new' && 'لديك دفعة قيد المراجعة'}
+                  {!pendingPayment.action && 'لديك دفعة قيد المراجعة'}
+                </p>
+                <p className="text-sm">
+                  {pendingPayment.action === 'upgrade' && 'سيتم ترقية اشتراكك بعد مراجعة الإيصال'}
+                  {pendingPayment.action === 'extend' && 'سيتم تمديد اشتراكك بعد مراجعة الإيصال'}
+                  {(!pendingPayment.action || pendingPayment.action === 'new') && 'سيتم تفعيل اشتراكك بعد مراجعة الإيصال'}
+                </p>
               </div>
             </div>
           </Card>

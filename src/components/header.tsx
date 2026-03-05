@@ -43,6 +43,9 @@ export function Header() {
         staleTime: 1000 * 60 * 5, // 5 دقائق
     });
 
+    // Check if user is authenticated (owner or admin)
+    const isAuthenticated = session?.user || adminSession?.isAdmin;
+
     const handleHome = () => {
         // مسح جميع الفلاتر والترتيب العشوائي لإعادة ترتيب جديد
         sessionStorage.removeItem("propertyFilters");
@@ -55,6 +58,7 @@ export function Header() {
 
     const handleLogout = async () => {
         try {
+            // Try owner logout first
             await fetch("/api/owner/logout", {
                 method: "POST",
                 credentials: "include",
@@ -152,12 +156,12 @@ export function Header() {
                     )}
 
                     <Button
-                        variant={session?.user ? "outline" : "default"}
+                        variant={isAuthenticated ? "outline" : "default"}
                         size="icon"
-                        onClick={session?.user ? handleLogout : () => router.push("/owner/login")}
-                        title={session?.user ? "تسجيل الخروج" : "تسجيل الدخول"}
+                        onClick={isAuthenticated ? handleLogout : () => router.push("/owner/login")}
+                        title={isAuthenticated ? "تسجيل الخروج" : "تسجيل الدخول"}
                     >
-                        {session?.user ? (
+                        {isAuthenticated ? (
                             <LogOut className="w-5 h-5" />
                         ) : (
                             <LogIn className="w-5 h-5" />

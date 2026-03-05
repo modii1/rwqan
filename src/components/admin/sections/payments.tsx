@@ -613,7 +613,7 @@ const totals = completedPayments.reduce((acc, p) => {
                     </tr>
                     
                     {/* صف التفاصيل الموسعة - للمدفوعات المعلقة والمرفوضة */}
-                    {isExpanded && (p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق" || p.status === "معلق" || p.status === "مرفوض") && (
+                    {isExpanded && (p.status === "قيد المراجعة" || p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق" || p.status === "معلق" || p.status === "مرفوض" || p.status === "مكتمل") && (
                       <tr key={`${p.id}-pending-details`} className={`${p.status === "مرفوض" ? "bg-red-50 dark:bg-red-900/10 border-t-2 border-red-300" : "bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300"}`}>
                         <Td colSpan={10}>
                           <div className="py-4 px-3">
@@ -703,7 +703,7 @@ const totals = completedPayments.reduce((acc, p) => {
                                 )}
                                 رفض التحويل
                               </Button>
-                              )}
+                            )}
                             </div>
                           </div>
                         </Td>

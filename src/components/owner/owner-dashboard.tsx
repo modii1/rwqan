@@ -928,6 +928,34 @@ export default function OwnerDashboard() {
         </div>
       )}
 
+      {/* ===== تنبيه دفعة قيد المراجعة ===== */}
+      {pendingCheckData?.hasPending && (
+        <div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900">
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center gap-2 text-xs md:text-sm">
+            <Clock className="w-4 md:w-5 h-4 md:h-5 text-amber-500 flex-shrink-0" />
+            <p className="text-amber-700 dark:text-amber-400 font-medium">
+              {pendingCheckData.action === 'upgrade' && 'لديك طلب ترقية قيد المراجعة'}
+              {pendingCheckData.action === 'extend' && 'لديك طلب تمديد قيد المراجعة'}
+              {(!pendingCheckData.action || pendingCheckData.action === 'new') && 'لديك دفعة قيد المراجعة'}
+              {' '}
+              – <span className="md:inline hidden">سيتم التفعيل بعد مراجعة الإيصال</span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ===== تنبيه دفعة مرفوضة ===== */}
+      {pendingCheckData && !pendingCheckData.hasPending && pendingCheckData.payment?.status === "مرفوض" && (
+        <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center gap-2 text-xs md:text-sm">
+            <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-red-500 flex-shrink-0" />
+            <p className="text-red-700 dark:text-red-400 font-medium">
+              تم رفض الدفعة السابقة – <span className="md:inline hidden">يرجى إعادة التحويل ورفع إيصال صحيح</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ===== الهيدر / رأس الصفحة ===== */}
       <header
         className={

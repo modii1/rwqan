@@ -416,15 +416,34 @@ router.put("/api/owner/seo", requireOwner, async (req, res) => {
 });
 
 // ======================================================
-// ✅ POST /api/owner/verify-second-property - Verify second property
+// 🔬 POST /api/owner/payment/:paymentId/rescan - Re-scan receipt with AI
+// Allows both owners (for their own payments) and admins
 // ======================================================
-router.post("/api/owner/verify-second-property", requireOwner, async (req, res) => {
+router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
   try {
+    const { paymentId } = req.params;
     const ownerPropertyNumber = (req.session as any).propertyNumber;
     const { secondPropertyNumber } = req.body;
+    const isAdmin = !!(req.session as any)?.isAdmin;
+    const propertyNumber = req.cookies?.ownerPropertyNumber || (req.session as any)?.propertyNumber;
 
-    if (!secondPropertyNumber) {
-      return res.status(400).json({ error: "رقم العقار الثاني مطلوب" });
+    // Allow admins or authenticated owners
+    if (!isAdmin && !propertyNumber) {
+      return res.status(401).json({ error: "غير مصرح" });
+    }
+
+    // For owners, verify they own this payment
+    let payment;
+    if (!isAdmin && propertyNumber) {
+      const payments = await paymentService.getByProperty(propertyNumber);
+      payment = payments.find(p => p.id === paymentId);
+    } else {
+      // For admins, can scan any payment
+      payment = await paymentService.getById(paymentId);
+    }
+
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
     }
 
     // التحقق من أن العقار الثاني ليس نفس العقار الأول
@@ -1165,6 +1184,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
     return res.json({
       hasPending: true,
       payment: pendingPayment,
+      action: pendingPayment.action || 'new',
       autoCheckPassed: issues.length === 0,
       issues: issues.length > 0 ? issues : undefined,
     });
@@ -2065,18 +2085,28 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
 
 // ======================================================
 // 🔬 POST /api/owner/payment/:paymentId/rescan - Re-scan receipt with AI
+// Allows both owners (for their own payments) and admins
 // ======================================================
 router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
   try {
     const { paymentId } = req.params;
+    const isAdmin = !!(req.session as any)?.isAdmin;
     const propertyNumber = req.cookies?.ownerPropertyNumber || (req.session as any)?.propertyNumber;
 
-    if (!propertyNumber) {
+    // Allow admins or authenticated owners
+    if (!isAdmin && !propertyNumber) {
       return res.status(401).json({ error: "غير مصرح" });
     }
 
-    const payments = await paymentService.getByProperty(propertyNumber);
-    const payment = payments.find(p => p.id === paymentId);
+    // For owners, verify they own this payment
+    let payment;
+    if (!isAdmin && propertyNumber) {
+      const payments = await paymentService.getByProperty(propertyNumber);
+      payment = payments.find(p => p.id === paymentId);
+    } else {
+      // For admins, can scan any payment
+      payment = await paymentService.getById(paymentId);
+    }
 
     if (!payment) {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
