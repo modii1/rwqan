@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
 import { formatDiscount } from "@/lib/currency";
+import { Progress } from "@/components/ui/progress";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
@@ -39,6 +40,15 @@ export default function OwnerSubscriptionPage() {
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [aiScanResult, setAiScanResult] = useState<any>(null);
+
+  interface AIScanResult {
+    recommendation: string;
+    confidence: number;
+    summary: string;
+    matchScore: number;
+    authenticityScore: number;
+  }
 
   // Fetch default bank account for bank transfer
   const { data: bankAccount } = useQuery<any>({
@@ -140,8 +150,16 @@ export default function OwnerSubscriptionPage() {
       return res.json();
     },
     onSuccess: (data) => {
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+      if (data.redirectUrl) {
+        const paymentWindow = window.open(data.redirectUrl, '_blank');
+        if (!paymentWindow) {
+          window.location.href = data.redirectUrl;
+        }
+      } else if (data.checkoutUrl) {
+        const paymentWindow = window.open(data.checkoutUrl, '_blank');
+        if (!paymentWindow) {
+          window.location.href = data.checkoutUrl;
+        }
       }
     },
     onError: (err: Error) => {
@@ -173,6 +191,9 @@ export default function OwnerSubscriptionPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
       queryClient.invalidateQueries({ queryKey: ["/api/owner/payment/check-pending"] });
+      if (data.aiScan) {
+        setAiScanResult(data.aiScan);
+      }
       setPaymentSuccess(true);
     },
     onError: (err: Error) => {
@@ -335,6 +356,60 @@ export default function OwnerSubscriptionPage() {
               </div>
             </div>
           </div>
+
+          {/* AI Scan Results */}
+          {aiScanResult && (
+            <div className={`p-4 rounded-lg border ${
+              aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                ? 'bg-emerald-50 border-emerald-300' 
+                : aiScanResult.recommendation === 'رفض'
+                ? 'bg-red-50 border-red-300'
+                : 'bg-amber-50 border-amber-300'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
+                <Badge variant="outline" className={
+                  aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                    ? 'border-emerald-500 text-emerald-600' 
+                    : aiScanResult.recommendation === 'رفض'
+                    ? 'border-red-500 text-red-600'
+                    : 'border-amber-500 text-amber-600'
+                }>
+                  {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
+                  {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
+                  {aiScanResult.recommendation === 'رفض' && 'غير مطابق'}
+                </Badge>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة الأصالة</span>
+                    <span className="font-bold">{aiScanResult.authenticityScore}%</span>
+                  </div>
+                  <Progress value={aiScanResult.authenticityScore} className="h-2" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة التطابق</span>
+                    <span className="font-bold">{aiScanResult.matchScore}%</span>
+                  </div>
+                  <Progress value={aiScanResult.matchScore} className="h-2" />
+                </div>
+              </div>
+
+              {aiScanResult.summary && (
+                <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                  {aiScanResult.summary}
+                </p>
+              )}
+
+              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+                مستوى الثقة: {aiScanResult.confidence}%
+              </div>
+            </div>
+          )}
+
           <div className="text-sm text-muted-foreground">
             <p className="flex items-center justify-center gap-2">
               <Phone className="w-4 h-4" />للاستفسار: 0533220646
@@ -400,7 +475,7 @@ export default function OwnerSubscriptionPage() {
                 <Banknote className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">رسوم الاشتراك</p>
-                  <p className="font-bold text-[#434040]">{currentPackageObj?.price || 0} <span className="text-xs font-normal text-muted-foreground">ريال سعودي</span></p>
+                  <PriceDisplay amount={currentPackageObj?.price || 0} size="lg" />
                 </div>
               </div>
               <div className="flex items-start gap-2">
@@ -466,7 +541,7 @@ export default function OwnerSubscriptionPage() {
           {/* أزرار الترقية والتمديد */}
           <div className="flex gap-3 mt-5 pt-4 border-t">
             <Button
-              className="flex-1 bg-[#434040] hover:bg-[#333] gap-2"
+              className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2 border-2 border-violet-600 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
               onClick={() => {
                 setAction("upgrade");
                 setShowUpgradeDialog(true);
@@ -478,7 +553,7 @@ export default function OwnerSubscriptionPage() {
             {canExtend && (
               <Button
                 variant="outline"
-                className="flex-1 gap-2"
+                className="flex-1 gap-2 border-2 border-blue-400 shadow-sm hover:shadow-md hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 cursor-pointer bg-white text-blue-700"
                 onClick={() => {
                   setAction("extend");
                   setSelectedPackageId(subscription?.packageId || null);
@@ -601,8 +676,7 @@ export default function OwnerSubscriptionPage() {
 
                     {/* السعر */}
                     <div className="flex items-end gap-1 mb-2">
-                      <span className="text-3xl font-black text-[#434040]">{pkg.price}</span>
-                      <span className="text-sm text-muted-foreground mb-1">ريال</span>
+                      <PriceDisplay amount={pkg.price} size="lg" />
                       {isMultiProperty && (
                         <span className="text-xs text-muted-foreground mb-1">/ عقار</span>
                       )}
@@ -611,7 +685,7 @@ export default function OwnerSubscriptionPage() {
                     {/* معلومات الباقة المتعددة */}
                     {isMultiProperty && (
                       <div className="text-xs space-y-1 mb-2">
-                        <p className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]">{pkg.price * 2} ريال</span> للعقارين</p>
+                        <div className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]"><PriceDisplay amount={pkg.price * 2} size="sm" /></span> للعقارين</div>
                         <p className="text-muted-foreground">2 عقارات</p>
                       </div>
                     )}
@@ -641,22 +715,23 @@ export default function OwnerSubscriptionPage() {
             {/* أزرار المتابعة والإلغاء */}
             <div className="flex gap-3 pt-4 border-t">
               <Button
-                onClick={() => {
-                  if (selectedPackageId) setCurrentStep(2);
-                }}
-                disabled={!selectedPackageId}
-                className="flex-1 bg-[#434040] hover:bg-[#333]"
-              >
-                متابعة للدفع
-              </Button>
-              <Button
                 variant="outline"
                 onClick={() => {
                   setShowUpgradeDialog(false);
                   setSelectedPackageId(null);
                 }}
+                className="border-red-300 text-red-600 hover:bg-red-50"
               >
                 إلغاء
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedPackageId) setCurrentStep(2);
+                }}
+                disabled={!selectedPackageId}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+              >
+                متابعة للدفع
               </Button>
             </div>
           </Card>
@@ -713,7 +788,7 @@ export default function OwnerSubscriptionPage() {
                 <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
                 <div className="flex gap-2">
                   <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
-                  <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
+                  <Button type="button" variant="outline" onClick={validateDiscount} className="border-green-400 text-green-700 hover:bg-green-50">تحقق</Button>
                 </div>
                 {validatedDiscount && (
                   <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
@@ -748,6 +823,21 @@ export default function OwnerSubscriptionPage() {
                             <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
                           </div>
                         )}
+                        {bankAccount.barcodeUrl && (
+                          <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                            <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                            <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
+                          </div>
+                        )}
+                        <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                          <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                          <img 
+                            src="/assets/bank-qr.png" 
+                            alt="QR Code للدفع" 
+                            className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                            onClick={() => window.open('/assets/bank-qr.png', '_blank')}
+                          />
+                        </div>
                       </div>
                     ) : (
                       <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
@@ -765,7 +855,7 @@ export default function OwnerSubscriptionPage() {
                       onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
-                    <Button type="button" variant="outline" onClick={() => receiptInputRef.current?.click()} className="w-full gap-2">
+                    <Button type="button" variant="outline" onClick={() => receiptInputRef.current?.click()} className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
                       <Upload className="w-4 h-4" />
                       {receiptFile ? receiptFile.name : "اختر صورة الإيصال"}
                     </Button>
@@ -870,7 +960,7 @@ export default function OwnerSubscriptionPage() {
                     ) : (
                       <Button
                         size="sm"
-                        className="w-full mt-2 bg-[#434040] hover:bg-[#333]"
+                        className="w-full mt-2 bg-orange-500 hover:bg-orange-600 border-2 border-orange-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
                         disabled={addonPaymentMutation.isPending}
                         onClick={() => addonPaymentMutation.mutate(pkg.id)}
                       >

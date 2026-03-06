@@ -133,12 +133,12 @@ export async function scanReceiptWithAI(
   expectedBeneficiary?: string
 ): Promise<AIScanResult | null> {
   try {
-    // التحقق من تفعيل ميزة OCR
-    const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
-    if (!ocrEnabled) {
-      console.log("🔬 [AI Scanner] الميزة غير مفعلة");
-      return null;
-    }
+    // AI Scanner always runs now
+    // const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
+    // if (!ocrEnabled) {
+    //   console.log("🔬 [AI Scanner] الميزة غير مفعلة");
+    //   return null;
+    // }
 
     console.log(`🔬 [AI Scanner] بدء فحص الإيصال: ${paymentId}`);
     console.log(`🔬 [AI Scanner] رابط الصورة: ${imageUrl}`);
@@ -242,7 +242,9 @@ export async function scanReceiptWithAI(
           return null;
         }
 
-        const base64Image = pngPages[0].content.toString('base64');
+        // تحويل Buffer إلى base64 بشكل صحيح
+        const pngBuffer = Buffer.from(pngPages[0].content);
+        const base64Image = pngBuffer.toString('base64');
         imageDataUrl = `data:image/png;base64,${base64Image}`;
         console.log(`✅ [AI Scanner] تم تحويل PDF إلى صورة بنجاح`);
       } catch (pdfError) {
@@ -250,8 +252,27 @@ export async function scanReceiptWithAI(
         return null;
       }
     } else {
-      // صورة: URL مباشر
-      imageDataUrl = imageUrl;
+      // صورة: تحويل URL إلى base64
+      console.log(`📷 [AI Scanner] تحويل الصورة إلى base64...`);
+      try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+          console.error(`❌ [AI Scanner] فشل تحميل الصورة: ${response.status}`);
+          return null;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const imageBuffer = Buffer.from(arrayBuffer);
+        const base64Image = imageBuffer.toString('base64');
+        
+        // تحديد نوع الصورة من_content-type
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
+        imageDataUrl = `data:${contentType};base64,${base64Image}`;
+        console.log(`✅ [AI Scanner] تم تحويل الصورة إلى base64 بنجاح`);
+      } catch (imgError) {
+        console.error(`❌ [AI Scanner] خطأ في تحويل الصورة:`, imgError);
+        // fallback to URL if conversion fails
+        imageDataUrl = imageUrl;
+      }
     }
 
     console.log(`🖼️ [AI Scanner] إرسال ${isPdf ? 'صورة من PDF' : 'صورة'} للفحص`);

@@ -93,3 +93,101 @@ export function cleanName(value: string): string {
   // السماح بالحروف العربية والإنجليزية والمسافات فقط
   return value.replace(/[^\u0600-\u06FF\u0750-\u077Fa-zA-Z\s]/g, '').trim();
 }
+
+// ═══════════════════════════════════════════════════════════════
+// طبقة التحقق الصارم من المدخلات (للإستخدام في onChange)
+// ═══════════════════════════════════════════════════════════════
+
+// التحقق من المدخلات النصية (姓名، الموقع) -不允许 أرقام
+export function validateTextInput(value: string): string {
+  return value.replace(/[0-9]/g, '');
+}
+
+// التحقق من المدخلات الرقمية (رقم العقار، الرقم السري، الأسعار) -不允许 نص
+export function validateNumericInput(value: string): string {
+  return value.replace(/[^\d]/g, '');
+}
+
+// التحقق من رقم الواتساب مع رسالة خطأ تفصيلية
+export function validateWhatsAppInput(value: string): { 
+  cleaned: string; 
+  error?: string; 
+  isValid: boolean;
+} {
+  // إزالة جميع الأحرف والرموز والمسافات
+  const numbersOnly = value.replace(/[^\d]/g, '');
+  
+  // إذا كان فارغاً
+  if (numbersOnly.length === 0) {
+    return { cleaned: '', isValid: false };
+  }
+  
+  // إذا كان أقل من 10 أرقام - نظهر تحذير
+  if (numbersOnly.length < 10) {
+    return { 
+      cleaned: numbersOnly.slice(0, 10), 
+      error: `رقم غير مكتمل (${numbersOnly.length}/10 أرقام)`,
+      isValid: false 
+    };
+  }
+  
+  // إذا كان أكثر من 10 - نقطع إلى 10
+  const cleaned = numbersOnly.slice(0, 10);
+  
+  // يجب أن يبدأ بـ 05
+  if (!cleaned.startsWith('05')) {
+    return { 
+      cleaned, 
+      error: 'يجب أن يبدأ بـ 05',
+      isValid: false 
+    };
+  }
+  
+  return { cleaned, isValid: true };
+}
+
+// التحقق من رقم العقار (5 أرقام بالضبط)
+export function validatePropertyNumberInput(value: string): { 
+  cleaned: string; 
+  error?: string;
+  isValid: boolean;
+} {
+  const numbersOnly = value.replace(/[^\d]/g, '').slice(0, 5);
+  
+  if (numbersOnly.length === 0) {
+    return { cleaned: '', isValid: false };
+  }
+  
+  if (numbersOnly.length < 5) {
+    return { 
+      cleaned: numbersOnly, 
+      error: `رقم العقار ناقص (${numbersOnly.length}/5)`,
+      isValid: false 
+    };
+  }
+  
+  return { cleaned: numbersOnly, isValid: true };
+}
+
+// التحقق من الرقم السري (PIN)
+export function validatePinInput(value: string): { 
+  cleaned: string; 
+  error?: string;
+  isValid: boolean;
+} {
+  const numbersOnly = value.replace(/[^\d]/g, '');
+  
+  if (numbersOnly.length === 0) {
+    return { cleaned: '', isValid: false };
+  }
+  
+  if (numbersOnly.length < 4) {
+    return { 
+      cleaned: numbersOnly, 
+      error: `رقم سري ناقص (${numbersOnly.length}/4 على الأقل)`,
+      isValid: false 
+    };
+  }
+  
+  return { cleaned: numbersOnly, isValid: true };
+}

@@ -56,7 +56,6 @@ router.get("/api/admin/visitors", requireAdmin, async (req, res) => {
 // =====================================
 router.post("/api/admin/update-remaining-days", requireAdmin, async (req, res) => {
   try {
-    console.log("📅 [API] تشغيل تحديث الأيام المتبقية يدوياً...");
     const result = await updateRemainingDaysInSheet();
     res.json({
       success: true,
@@ -74,7 +73,6 @@ router.post("/api/admin/update-remaining-days", requireAdmin, async (req, res) =
 // =====================================
 router.post("/api/admin/test-expired-notifications", requireAdmin, async (req, res) => {
   try {
-    console.log("🧪 [TEST] بدء اختبار إشعارات الاشتراكات المنتهية...");
 
     const subscriptions = await subscriptionService.getAll();
     const properties = await propertyService.getAll();
@@ -89,7 +87,6 @@ router.post("/api/admin/test-expired-notifications", requireAdmin, async (req, r
       return endDate < today;
     });
 
-    console.log(`📊 [TEST] وجد ${expiredSubscriptions.length} اشتراك منتهي`);
 
     const notifications = [];
 
@@ -98,7 +95,6 @@ router.post("/api/admin/test-expired-notifications", requireAdmin, async (req, r
       const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
 
       if (property) {
-        console.log(`📤 [TEST] إرسال إشعار لـ ${property.name} (${sub.propertyNumber})`);
 
         try {
           const { notifySubscriptionExpired } = await import("../../integrations/whatsapp");
@@ -116,7 +112,6 @@ router.post("/api/admin/test-expired-notifications", requireAdmin, async (req, r
             response: result.response,
           });
 
-          console.log(`✅ [TEST] تم إرسال الإشعار: ${result.status}`);
         } catch (err: any) {
           console.error(`❌ [TEST] خطأ في إرسال الإشعار:`, err);
           notifications.push({
@@ -261,7 +256,6 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     const oneDayAgo = new Date(nowRiyadh.getTime() - 24 * 60 * 60 * 1000);
     const now = nowRiyadh;
 
-    console.log(`🕐 [Alerts] Riyadh time: ${nowRiyadh.toISOString()}, Today start: ${todayStart.toISOString()}`);
 
     // جلب جميع البيانات
     const [subscriptions, payments, allRequests, properties, suggestions] = await Promise.all([
@@ -279,7 +273,6 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
       if (isNaN(created.getTime())) return false;
       return created >= todayStart;
     });
-    console.log(`🏠 [Alerts] New properties today (createdAt): ${newPropertiesToday.length}`);
     if (newPropertiesToday.length > 0) {
       alerts.push({
         type: 'success',
@@ -313,7 +306,6 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
       }
       return true;
     });
-    console.log(`📝 [Alerts] Updated properties (24h): ${updatedProperties.length}`);
     if (updatedProperties.length > 0) {
       alerts.push({
         type: 'info',
@@ -360,7 +352,6 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
       };
     });
 
-    console.log(`🏠 [Alerts] Today subscriptions (from payments): ${todaySubscriptions.length}, Total payments: ${payments.length}`);
     if (todaySubscriptions.length > 0) {
       alerts.push({
         type: 'success',
@@ -427,14 +418,12 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     }
 
     // 4. اقتراحات جديدة (غير مقروءة)
-    console.log(`📝 [Alerts] Suggestions count: ${suggestions.length}`);
     if (suggestions.length > 0) {
       console.log(`📝 [Alerts] Suggestion statuses:`, suggestions.map(s => s.status));
     }
     const pendingSuggestions = suggestions.filter(s =>
       s.status === 'pending' || s.status === 'معلق' || s.status === 'جديد' || !s.status
     );
-    console.log(`📝 [Alerts] Pending suggestions: ${pendingSuggestions.length}`);
     if (pendingSuggestions.length > 0) {
       alerts.push({
         type: 'info',
@@ -466,6 +455,32 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
         count: todayRequests.length,
         icon: 'message-circle',
         items: todayRequests.map(r => {
+          const prop = properties.find(pr => pr.propertyNumber === r.propertyNumber);
+          return {
+            propertyNumber: r.propertyNumber,
+            name: prop?.name || '',
+            requestCode: r.requestCode,
+            timestamp: r.timestamp
+          };
+        })
+      });
+    }
+
+    // 5.1 إشعارات واتساب (جميع الطلبات - للعرض في لوحة التحكم)
+    const totalRequestsCount = allRequests.length;
+    const recentRequests = allRequests.filter(r => {
+      const reqDate = new Date(r.timestamp || "");
+      return reqDate >= sevenDaysAgo;
+    });
+    if (recentRequests.length > 0) {
+      alerts.push({
+        type: 'info',
+        category: 'whatsapp-notifications',
+        title: 'إشعارات واتساب',
+        message: `${recentRequests.length} طلب واتساب خلالآخر 7 أيام`,
+        count: recentRequests.length,
+        icon: 'message-circle',
+        items: recentRequests.slice(0, 10).map(r => {
           const prop = properties.find(pr => pr.propertyNumber === r.propertyNumber);
           return {
             propertyNumber: r.propertyNumber,
@@ -620,15 +635,9 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     // إجمالي مدفوعات اليوم المكتملة
     const todayRevenue = todayCompletedPaymentsStats.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
 
-    // Debug log
-    console.log(`📊 [Alerts Stats] Properties: ${properties.length}, Trusted: ${trustedProperties}, Normal: ${normalProperties}`);
-    console.log(`📊 [Alerts Stats] Subscriptions: ${subscriptions.length}, Active: ${activeSubscriptions}, Expired: ${expiredSubscriptions}`);
-
     // عرض جميع القيم الفريدة
     const uniqueTypes = [...new Set(properties.map(p => p.subscriptionType))];
     const uniqueStatuses = [...new Set(subscriptions.map(s => s.status))];
-    console.log(`📊 [Alerts Stats] Unique property types:`, uniqueTypes);
-    console.log(`📊 [Alerts Stats] Unique subscription statuses:`, uniqueStatuses);
 
     // إحصائيات الأسبوع (مكتملة فقط)
     const weekPayments = payments.filter(p => {

@@ -10,7 +10,6 @@ import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { AIReceiptScanner } from "@/components/ai-receipt-scanner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -654,17 +653,6 @@ const totals = completedPayments.reduce((acc, p) => {
                                 >
                                   عرض إيصال التحويل البنكي
                                 </a>
-                              </div>
-                            )}
-
-                            {/* نتائج الفحص الذكي للإيصال */}
-                            {p.receiptUrl && (
-                              <div className="mb-4">
-                                <AIReceiptScanner
-                                  paymentId={p.id}
-                                  receiptUrl={p.receiptUrl}
-                                  autoScan={true}
-                                />
                               </div>
                             )}
 

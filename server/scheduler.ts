@@ -261,7 +261,7 @@ async function expireOldPendingPayments(): Promise<number> {
       
       // البطاقة: قيد المراجعة لأكثر من 30 دقيقة
       if (payment.status === "قيد المراجعة" && 
-          (payment.paymentMethod === "بطاقة" || payment.paymentMethod === "Apple Pay") &&
+          (payment.paymentMethod === "بطاقة" || payment.paymentMethod === "Apple Pay" || payment.paymentMethod === "paymob") &&
           ageMs > CARD_TIMEOUT_MS) {
         await firebaseService.updatePaymentStatus(payment.id, "ملغي - انتهت المهلة");
         console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);

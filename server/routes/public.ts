@@ -156,6 +156,7 @@ router.post("/api/properties/register", async (req, res) => {
       subscriptionDate: "",
       pin: String(data.pin || ""),
       imageUrls: [],
+      verificationStatus: "pending",
     };
 
     const created = await propertyService.create(newProperty);

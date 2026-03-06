@@ -17,6 +17,10 @@ export class AnalyticsService {
     return firebaseService.getRequests();
   }
 
+  async deleteRequest(propertyNumber: string, requestId: string): Promise<void> {
+    return firebaseService.deleteRequest(propertyNumber, requestId);
+  }
+
   // ─── Analytics Summary ──────────────────────────────────────────────────────
 
   async getAnalytics() {

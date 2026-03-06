@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw } from "lucide-react";
+import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw, CreditCard } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
 import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
+import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
 
 // ─── Visual Captcha helpers ───
 const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -81,6 +83,7 @@ export default function SubscriptionPage() {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [packageToView, setPackageToView] = useState<Package | null>(null);
+  const [showAllPackages, setShowAllPackages] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
@@ -106,9 +109,61 @@ export default function SubscriptionPage() {
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   const [discountCode, setDiscountCode] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+    
+    const propNum = validatePropertyNumber(formData.propertyNumber);
+    if (!propNum.valid) {
+      newErrors.propertyNumber = propNum.error || "رقم العقار غير صالح";
+    }
+    
+    const name = cleanName(formData.name);
+    if (!name || name.length < 2) {
+      newErrors.name = "اسم العقار مطلوب";
+    }
+    
+    const pin = validatePin(formData.pin);
+    if (!pin.valid) {
+      newErrors.pin = pin.error || "الرقم السري غير صالح";
+    }
+    
+    const phone = validatePhoneNumber(formData.whatsappNumber);
+    if (!phone.valid) {
+      newErrors.whatsappNumber = phone.error || "رقم الواتساب غير صالح";
+    }
+    
+    if (!formData.city) {
+      newErrors.city = "المدينة مطلوبة";
+    }
+    if (!formData.direction) {
+      newErrors.direction = "الاتجاه مطلوب";
+    }
+    if (!formData.type) {
+      newErrors.type = "النوع مطلوب";
+    }
+    
+    if (!prices.weekday || parseInt(prices.weekday) < 1) {
+      newErrors.weekday = "سعر وسط الأسبوع مطلوب";
+    }
+    if (!prices.weekend || parseInt(prices.weekend) < 1) {
+      newErrors.weekend = "سعر نهاية الأسبوع مطلوب";
+    }
+    if (!prices.overnight || parseInt(prices.overnight) < 1) {
+      newErrors.overnight = "سعر المبيت مطلوب";
+    }
+    if (!prices.holidays || parseInt(prices.holidays) < 1) {
+      newErrors.holidays = "سعر الإجازات مطلوب";
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+  const [aiScanResult, setAiScanResult] = useState<any>(null);
 
   // Visual captcha state
   const captchaCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -190,6 +245,7 @@ export default function SubscriptionPage() {
     }
 
     setIsSubmitting(true);
+    console.log('Starting submission...', { paymentMethod, isFreePackage });
     try {
       const payload = {
         ...formData,
@@ -198,9 +254,12 @@ export default function SubscriptionPage() {
         subscriptionType: selectedPackage?.type || 'عادي',
       };
 
+      console.log('Registering property...');
       const registrationResponse = await apiRequest('POST', '/api/properties/register', payload);
 
       const registrationData = await registrationResponse.json();
+      console.log('Registration response:', registrationData);
+      
       const propertyNumber = registrationData.propertyNumber;
       setRegisteredPropertyNumber(propertyNumber);
 
@@ -213,6 +272,7 @@ export default function SubscriptionPage() {
         setRegistrationSuccess(true);
       } else {
         if (paymentMethod === 'online') {
+          console.log('Starting payment for property:', propertyNumber);
           try {
             const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
               propertyNumber,
@@ -221,16 +281,33 @@ export default function SubscriptionPage() {
               paymentMethod: 'cards',
             });
             const paymentData = await paymentResponse.json();
-            if (paymentData.checkoutUrl) {
-              // window.location.href = paymentData.checkoutUrl; // Keep this if external URL, otherwise router.push
-              window.location.href = paymentData.checkoutUrl;
+            console.log('Payment response:', paymentData);
+            
+            if (paymentData.redirectUrl) {
+              toast({
+                title: "جاري توجيهك للدفع",
+                description: "سيتم فتح صفحة الدفع في نافذة جديدة",
+              });
+              const paymentWindow = window.open(paymentData.redirectUrl, '_blank');
+              if (!paymentWindow) {
+                window.location.href = paymentData.redirectUrl;
+              }
+            } else if (paymentData.checkoutUrl) {
+              toast({
+                title: "جاري توجيهك للدفع",
+                description: "سيتم فتح صفحة الدفع في نافذة جديدة",
+              });
+              const paymentWindow = window.open(paymentData.checkoutUrl, '_blank');
+              if (!paymentWindow) {
+                window.location.href = paymentData.checkoutUrl;
+              }
             } else {
               throw new Error("لم يتم الحصول على رابط الدفع");
             }
           } catch (err: any) {
             toast({
               title: "خطأ في الدفع الإلكتروني",
-              description: "يرجى استخدام التحويل البنكي بدلاً من ذلك أو إعادة المحاولة لاحقاً",
+              description: err.message || "يرجى استخدام التحويل البنكي بدلاً من ذلك أو إعادة المحاولة لاحقاً",
               variant: "destructive",
             });
             setPaymentMethod(null);
@@ -244,10 +321,14 @@ export default function SubscriptionPage() {
           if (validatedDiscount?.code) {
             formDataUpload.append('discountCode', validatedDiscount.code);
           }
-          await fetch('/api/owner/payment/bank-transfer', {
+          const bankResponse = await fetch('/api/owner/payment/bank-transfer', {
             method: 'POST',
             body: formDataUpload,
           });
+          const bankData = await bankResponse.json();
+          if (bankData.aiScan) {
+            setAiScanResult(bankData.aiScan);
+          }
           setRegistrationSuccess(true);
         }
       }
@@ -332,6 +413,59 @@ export default function SubscriptionPage() {
             </div>
           </div>
 
+          {/* AI Scan Results */}
+          {aiScanResult && (
+            <div className={`p-4 rounded-lg border ${
+              aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                ? 'bg-emerald-50 border-emerald-300' 
+                : aiScanResult.recommendation === 'رفض'
+                ? 'bg-red-50 border-red-300'
+                : 'bg-amber-50 border-amber-300'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
+                <Badge variant="outline" className={
+                  aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                    ? 'border-emerald-500 text-emerald-600' 
+                    : aiScanResult.recommendation === 'رفض'
+                    ? 'border-red-500 text-red-600'
+                    : 'border-amber-500 text-amber-600'
+                }>
+                  {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
+                  {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
+                  {aiScanResult.recommendation === 'رفض' && 'غير مطابق'}
+                </Badge>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة الأصالة</span>
+                    <span className="font-bold">{aiScanResult.authenticityScore}%</span>
+                  </div>
+                  <Progress value={aiScanResult.authenticityScore} className="h-2" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة التطابق</span>
+                    <span className="font-bold">{aiScanResult.matchScore}%</span>
+                  </div>
+                  <Progress value={aiScanResult.matchScore} className="h-2" />
+                </div>
+              </div>
+
+              {aiScanResult.summary && (
+                <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                  {aiScanResult.summary}
+                </p>
+              )}
+
+              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+                مستوى الثقة: {aiScanResult.confidence}%
+              </div>
+            </div>
+          )}
+
           {/* معلومات التواصل */}
           <div className="text-sm text-muted-foreground">
             <p className="flex items-center justify-center gap-2">
@@ -413,7 +547,7 @@ export default function SubscriptionPage() {
           <Card className="p-8">
             <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {packages.map((pkg) => (
+              {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => (
                 <div
                   key={pkg.id}
                   className={`p-5 rounded-lg border-2 transition-all ${selectedPackageId === pkg.id
@@ -451,7 +585,10 @@ export default function SubscriptionPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => setSelectedPackageId(pkg.id)}
+                      onClick={() => {
+                        setSelectedPackageId(pkg.id);
+                        setCurrentStep(2);
+                      }}
                       className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}
                     >
                       اختيار
@@ -460,6 +597,18 @@ export default function SubscriptionPage() {
                 </div>
               ))}
             </div>
+            {packages.length > 4 && (
+              <div className="text-center mb-6">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowAllPackages(!showAllPackages)}
+                  className="border-2 border-[#434040] hover:bg-[#434040] hover:text-white"
+                >
+                  {showAllPackages ? `عرض أقل` : `عرض المزيد (${packages.length} باقة)`}
+                </Button>
+              </div>
+            )}
             <div className="flex justify-end pt-6 border-t">
               <Button
                 onClick={() => setCurrentStep(2)}
@@ -476,7 +625,12 @@ export default function SubscriptionPage() {
         {currentStep === 2 && selectedPackageId && (
           <Card className="p-8">
             <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 2: بيانات العقار</h2>
-            <form onSubmit={(e) => { e.preventDefault(); setCurrentStep(3); }} className="space-y-6">
+            <form onSubmit={(e) => { 
+              e.preventDefault(); 
+              if (validateForm()) {
+                setCurrentStep(3); 
+              }
+            }} className="space-y-6">
 
               {/* Property Info */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -485,19 +639,29 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="أخر 5 أرقام من جوالك "
                     value={formData.propertyNumber}
-                    onChange={(e) => setFormData({ ...formData, propertyNumber: e.target.value })}
+                    onChange={(e) => {
+                      const result = validatePropertyNumberInput(e.target.value);
+                      setFormData({ ...formData, propertyNumber: result.cleaned });
+                      setErrors({...errors, propertyNumber: result.error || ""});
+                    }}
                     maxLength={5}
-                    required
+                    className={errors.propertyNumber ? "border-red-500" : ""}
                   />
+                  {errors.propertyNumber && <p className="text-xs text-red-500 mt-1">{errors.propertyNumber}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">اسم العقار *</label>
                   <Input
                     placeholder="شالية مودي"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
+                    onChange={(e) => {
+                      const cleaned = validateTextInput(e.target.value);
+                      setFormData({ ...formData, name: cleaned });
+                      setErrors({...errors, name: ""});
+                    }}
+                    className={errors.name ? "border-red-500" : ""}
                   />
+                  {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
@@ -505,18 +669,28 @@ export default function SubscriptionPage() {
                     type="password"
                     placeholder="اختر رقماً سرياً"
                     value={formData.pin}
-                    onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
-                    required
+                    onChange={(e) => {
+                      const result = validatePinInput(e.target.value);
+                      setFormData({ ...formData, pin: result.cleaned });
+                      setErrors({...errors, pin: result.error || ""});
+                    }}
+                    className={errors.pin ? "border-red-500" : ""}
                   />
+                  {errors.pin && <p className="text-xs text-red-500 mt-1">{errors.pin}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">رقم الواتساب *</label>
                   <Input
                     placeholder="050xxxxxxx"
                     value={formData.whatsappNumber}
-                    onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-                    required
+                    onChange={(e) => {
+                      const result = validateWhatsAppInput(e.target.value);
+                      setFormData({ ...formData, whatsappNumber: result.cleaned });
+                      setErrors({...errors, whatsappNumber: result.error || ""});
+                    }}
+                    className={errors.whatsappNumber ? "border-red-500" : ""}
                   />
+                  {errors.whatsappNumber && <p className="text-xs text-red-500 mt-1">{errors.whatsappNumber}</p>}
                 </div>
               </div>
 
@@ -569,7 +743,10 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="اكتب اسم الحي أو الموقع"
                     value={formData.location}
-                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    onChange={(e) => {
+                      const cleaned = validateTextInput(e.target.value);
+                      setFormData({ ...formData, location: cleaned });
+                    }}
                   />
                 </div>
               </div>
@@ -580,19 +757,19 @@ export default function SubscriptionPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
-                    <Input type="number" placeholder="500" value={prices.weekday} onChange={(e) => setPrices({ ...prices, weekday: e.target.value })} required />
+                    <Input type="number" placeholder="500" value={prices.weekday} onChange={(e) => setPrices({ ...prices, weekday: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">نهاية الأسبوع</label>
-                    <Input type="number" placeholder="800" value={prices.weekend} onChange={(e) => setPrices({ ...prices, weekend: e.target.value })} required />
+                    <Input type="number" placeholder="800" value={prices.weekend} onChange={(e) => setPrices({ ...prices, weekend: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">مبيت</label>
-                    <Input type="number" placeholder="1200" value={prices.overnight} onChange={(e) => setPrices({ ...prices, overnight: e.target.value })} required />
+                    <Input type="number" placeholder="1200" value={prices.overnight} onChange={(e) => setPrices({ ...prices, overnight: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">إجازات</label>
-                    <Input type="number" placeholder="1000" value={prices.holidays} onChange={(e) => setPrices({ ...prices, holidays: e.target.value })} required />
+                    <Input type="number" placeholder="1000" value={prices.holidays} onChange={(e) => setPrices({ ...prices, holidays: validateNumericInput(e.target.value) })} required />
                   </div>
                 </div>
               </div>
@@ -654,13 +831,47 @@ export default function SubscriptionPage() {
 
                     {/* Bank Receipt */}
                     {paymentMethod === 'bank' && (
-                      <div className="p-4 bg-muted/30 rounded-lg">
-                        <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
-                        <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
-                        <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2">
-                          <Upload className="w-4 h-4" />
-                          {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
-                        </Button>
+                      <div className="p-4 bg-muted/30 rounded-lg space-y-3">
+                        <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+                          <div className="flex items-center gap-2 mb-3">
+                            <CreditCard className="w-6 h-6 text-blue-700" />
+                            <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
+                          </div>
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                              <span className="text-sm font-semibold text-blue-700">البنك</span>
+                              <span className="text-base font-bold text-blue-900">البنك الأهلي</span>
+                            </div>
+                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                              <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
+                              <span className="text-base font-bold text-blue-900">شركة روقان للعقارات</span>
+                            </div>
+                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                              <span className="text-sm font-semibold text-blue-700">IBAN</span>
+                              <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">SA0610000012345678901234</span>
+                            </div>
+                            <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                              <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                              <img 
+                                src="/assets/bank-qr.png" 
+                                alt="QR Code للدفع" 
+                                className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                                onClick={() => window.open('/assets/bank-qr.png', '_blank')}
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                            <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة رقم العقار في ملاحظات التحويل</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
+                          <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
+                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
+                            <Upload className="w-4 h-4" />
+                            {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

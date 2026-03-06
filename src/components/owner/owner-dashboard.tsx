@@ -38,7 +38,6 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
-import { AIReceiptScanner } from "@/components/ai-receipt-scanner";
 import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import {
   calculateRemainingDays,
@@ -63,12 +62,41 @@ export default function OwnerDashboard() {
   const { toast } = useToast();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [showRequestsStats, setShowRequestsStats] = useState(false);
+  const [requestsSearch, setRequestsSearch] = useState("");
+  const [requestsDateFilter, setRequestsDateFilter] = useState<"all" | "today" | "week" | "month">("all");
   const [paymentFilter, setPaymentFilter] = useState<
     "all" | "completed" | "pending"
   >("all");
   const [paymentsExpanded, setPaymentsExpanded] = useState(false);
   const [highlightPayments, setHighlightPayments] = useState(false);
   const FEATURE_SMART_VERIFICATION = true;
+
+  const NOTIFICATION_KEYS = {
+    subscriptionExpiry: "subscription_expiry",
+    paymentPendingReceipt: "payment_pending_receipt",
+    paymentUnderReview: "payment_under_review",
+    paymentRejected: "payment_rejected",
+  };
+
+  // Force re-render when notifications are hidden
+  const [notificationRefresh, setNotificationRefresh] = useState(0);
+
+  // Check if notification should show
+  const shouldShowNotification = (notificationKey: string, isConditionMet: boolean) => {
+    if (!isConditionMet) return false;
+    const key = `notification_${notificationKey}_hidden`;
+    return !localStorage.getItem(key);
+  };
+
+  // Hide notification permanently
+  const hideNotification = (notificationKey: string) => {
+    localStorage.setItem(`notification_${notificationKey}_hidden`, 'true');
+    setNotificationRefresh(prev => prev + 1);
+    toast({
+      title: "تم الإخفاء",
+      description: "لن تظهر هذه الإشعارات مرة أخرى",
+    });
+  };
 
   // التحقق من نجاح الدفع عند الوصول من Paymob
   useEffect(() => {
@@ -672,6 +700,28 @@ export default function OwnerDashboard() {
     },
   });
 
+  // حذف طلب
+  const deleteRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      const response = await apiRequest("DELETE", `/api/owner/requests/${requestId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/requests"] });
+      toast({
+        title: "تم الحذف",
+        description: "تم حذف الطلب بنجاح",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "خطأ",
+        description: error.message || "حدث خطأ في الحذف",
+        variant: "destructive",
+      });
+    },
+  });
+
   useEffect(() => {
     if (!isSessionLoading && sessionData) {
       if (!sessionData.isLoggedIn) {
@@ -901,21 +951,30 @@ export default function OwnerDashboard() {
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* ===== تنبيه أعلى الصفحة عند قرب انتهاء الاشتراك ===== */}
-      {isNearExpiry && (
+      {shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
         <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
-          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center gap-2 text-xs md:text-sm">
-            <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-red-500 flex-shrink-0" />
-            <p className="text-red-700 dark:text-red-400 font-medium">
-              اشتراكك ينتهي بـ{" "}
-              <span className="font-bold">{remainingDays}</span> أيام –{" "}
-              <span className="md:inline hidden">نوصي بتجديده مبكراً</span>
-            </p>
+          <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center justify-between gap-2 text-xs md:text-sm">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-red-500 flex-shrink-0" />
+              <p className="text-red-700 dark:text-red-400 font-medium">
+                اشتراكك ينتهي بـ{" "}
+                <span className="font-bold">{remainingDays}</span> أيام –{" "}
+                <span className="md:inline hidden">نوصي بتجديده مبكراً</span>
+              </p>
+            </div>
+            <button
+              onClick={() => hideNotification(NOTIFICATION_KEYS.subscriptionExpiry)}
+              className="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1"
+              title="إخفاء بشكل دائم"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
 
       {/* ===== تنبيه دفعة قيد المراجعة (بانتظار رفع الإيصال) ===== */}
-      {paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending") && (
+      {shouldShowNotification(NOTIFICATION_KEYS.paymentPendingReceipt, !!(paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending"))) && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/50 dark:to-orange-950/30 border-b border-amber-300 dark:border-amber-800">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -931,26 +990,35 @@ export default function OwnerDashboard() {
                 </p>
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
-              onClick={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                setHighlightPayments(true);
-                setTimeout(() => setHighlightPayments(false), 3000);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
-            >
-              عرض التفاصيل
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
+                onClick={() => {
+                  setPaymentFilter("all");
+                  setPaymentsExpanded(true);
+                  setHighlightPayments(true);
+                  setTimeout(() => setHighlightPayments(false), 3000);
+                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
+                عرض التفاصيل
+              </Button>
+              <button
+                onClick={() => hideNotification(NOTIFICATION_KEYS.paymentPendingReceipt)}
+                className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 p-1"
+                title="إخفاء بشكل دائم"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* ===== تنبيه دفعة قيد التحقق (بعد رفع الإيصال) ===== */}
-      {paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق") && (
+      {shouldShowNotification(NOTIFICATION_KEYS.paymentUnderReview, !!(paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق"))) && (
         <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/50 dark:to-cyan-950/30 border-b border-blue-300 dark:border-blue-800">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -966,26 +1034,35 @@ export default function OwnerDashboard() {
                 </p>
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-blue-500 text-blue-700 hover:bg-blue-100 flex-shrink-0"
-              onClick={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                setHighlightPayments(true);
-                setTimeout(() => setHighlightPayments(false), 1000);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
-            >
-              عرض التفاصيل
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-blue-500 text-blue-700 hover:bg-blue-100 flex-shrink-0"
+                onClick={() => {
+                  setPaymentFilter("all");
+                  setPaymentsExpanded(true);
+                  setHighlightPayments(true);
+                  setTimeout(() => setHighlightPayments(false), 1000);
+                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
+                عرض التفاصيل
+              </Button>
+              <button
+                onClick={() => hideNotification(NOTIFICATION_KEYS.paymentUnderReview)}
+                className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 p-1"
+                title="إخفاء بشكل دائم"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* ===== تنبيه دفعة مرفوضة ===== */}
-      {paymentsData?.some((p: any) => p.status === "مرفوض") && (
+      {shouldShowNotification(NOTIFICATION_KEYS.paymentRejected, !!(paymentsData?.some((p: any) => p.status === "مرفوض"))) && (
         <div className="bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/50 dark:to-rose-950/30 border-b border-red-300 dark:border-red-800">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1001,20 +1078,29 @@ export default function OwnerDashboard() {
                 </p>
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
-              onClick={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                setHighlightPayments(true);
-                setTimeout(() => setHighlightPayments(false), 1000);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
-            >
-              عرض التفاصيل
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-red-500 text-red-700 hover:bg-red-100 flex-shrink-0"
+                onClick={() => {
+                  setPaymentFilter("all");
+                  setPaymentsExpanded(true);
+                  setHighlightPayments(true);
+                  setTimeout(() => setHighlightPayments(false), 1000);
+                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
+                عرض التفاصيل
+              </Button>
+              <button
+                onClick={() => hideNotification(NOTIFICATION_KEYS.paymentRejected)}
+                className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1"
+                title="إخفاء بشكل دائم"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2009,6 +2095,8 @@ export default function OwnerDashboard() {
             requestsData={requestsData}
             requestsLoading={requestsLoading}
             onClose={() => setShowRequestsStats(false)}
+            propertyName={property?.name}
+            onDeleteRequest={(id) => deleteRequestMutation.mutate(id)}
           />
         )}
 
@@ -2090,7 +2178,7 @@ export default function OwnerDashboard() {
                 )}
               </div>
 
-              {/* عرض الإيصال المرفوع والفحص الذكي */}
+              {/* عرض الإيصال المرفوع */}
               {selectedPaymentForReceipt?.receiptUrl && (
                 <div className="space-y-3">
                   <div className="border rounded-lg overflow-hidden">
@@ -2100,15 +2188,10 @@ export default function OwnerDashboard() {
                       className="w-full max-h-48 object-contain bg-gray-50"
                     />
                   </div>
-                  <AIReceiptScanner
-                    paymentId={selectedPaymentForReceipt.id}
-                    receiptUrl={selectedPaymentForReceipt.receiptUrl}
-                    autoScan={true}
-                  />
                 </div>
               )}
 
-              {/* عرض الإيصال المرفوع والفحص الذكي */}
+              {/* عرض الإيصال المرفوع */}
               {selectedPaymentForReceipt?.receiptUrl && (
                 <div className="space-y-3">
                   <div className="border rounded-lg overflow-hidden">
@@ -2118,11 +2201,6 @@ export default function OwnerDashboard() {
                       className="w-full max-h-48 object-contain bg-gray-50"
                     />
                   </div>
-                  <AIReceiptScanner
-                    paymentId={selectedPaymentForReceipt.id}
-                    receiptUrl={selectedPaymentForReceipt.receiptUrl}
-                    autoScan={true}
-                  />
                 </div>
               )}
 
@@ -2858,14 +2936,50 @@ function RequestsStatsModal({
   requestsData,
   requestsLoading,
   onClose,
+  propertyName,
+  onDeleteRequest,
 }: {
   requestsData: any;
   requestsLoading: boolean;
   onClose: () => void;
+  propertyName?: string;
+  onDeleteRequest?: (id: string) => void;
 }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month">("all");
+
+  const filteredRequests = requestsData?.requests?.filter((req: any) => {
+    // Search filter
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      const matchesCode = (req.requestCode || req.id || "").toLowerCase().includes(search);
+      const matchesProperty = (req.propertyNumber || "").toLowerCase().includes(search);
+      if (!matchesCode && !matchesProperty) return false;
+    }
+    
+    // Date filter
+    if (dateFilter !== "all" && req.timestamp) {
+      const reqDate = new Date(req.timestamp);
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      
+      if (dateFilter === "today") {
+        if (reqDate < today) return false;
+      } else if (dateFilter === "week") {
+        const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        if (reqDate < weekAgo) return false;
+      } else if (dateFilter === "month") {
+        const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+        if (reqDate < monthAgo) return false;
+      }
+    }
+    
+    return true;
+  }) || [];
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+      <Card className="w-full max-w-3xl max-h-[80vh] overflow-y-auto">
         <div className="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
           <h2 className="text-lg font-bold text-primary flex items-center gap-2">
             <BarChart2 className="w-5 h-5" />
@@ -2879,44 +2993,84 @@ function RequestsStatsModal({
             ✕
           </button>
         </div>
+        
+        {/* Search and Filters */}
+        <div className="p-4 border-b border-border bg-muted/20">
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              type="text"
+              placeholder="بحث بالرقم أو الكود..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1 px-3 py-2 border rounded-lg text-sm"
+            />
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as any)}
+              className="px-3 py-2 border rounded-lg text-sm"
+            >
+              <option value="all">كل الأوقات</option>
+              <option value="today">اليوم</option>
+              <option value="week">آخر أسبوع</option>
+              <option value="month">آخر شهر</option>
+            </select>
+          </div>
+        </div>
+        
         <div className="p-6">
           {requestsLoading ? (
             <div className="text-center py-12 text-muted-foreground">
               جاري التحميل...
             </div>
-          ) : requestsData?.requests?.length === 0 ? (
+          ) : filteredRequests.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              لا توجد طلبات حتى الآن
+              {searchTerm || dateFilter !== "all" ? "لا توجد نتائج للبحث" : "لا توجد طلبات حتى الآن"}
             </div>
           ) : (
             <>
               <div className="mb-6 p-4 bg-primary/5 rounded-lg border border-primary/15">
                 <p className="text-sm text-muted-foreground mb-2">
-                  إجمالي الطلبات
+                  عدد الطلبات ({filteredRequests.length})
                 </p>
                 <p className="text-2xl font-bold text-primary">
-                  {requestsData?.requests?.length || 0}
+                  {filteredRequests.length}
                 </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="border-b border-border">
                     <tr className="text-muted-foreground">
+                      <th className="text-right p-3">العقار</th>
                       <th className="text-right p-3">الكود</th>
                       <th className="text-right p-3">التاريخ والوقت</th>
+                      <th className="text-right p-3">الإجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {requestsData?.requests?.map((req: any, idx: number) => (
+                    {filteredRequests.map((req: any, idx: number) => (
                       <tr
                         key={idx}
                         className="border-b border-border/50 hover:bg-primary/5"
                       >
+                        <td className="p-3">
+                          <span className="font-medium text-primary">
+                            {propertyName || req.propertyNumber || "-"}
+                          </span>
+                        </td>
                         <td className="p-3 font-mono text-primary">
                           {req.requestCode || req.id}
                         </td>
                         <td className="p-3 text-muted-foreground">
                           {formatLiveSaudiTime(req.timestamp)}
+                        </td>
+                        <td className="p-3">
+                          <button
+                            onClick={() => onDeleteRequest?.(req.id || req.requestCode)}
+                            className="text-red-500 hover:text-red-700 text-sm"
+                            title="حذف"
+                          >
+                            🗑️
+                          </button>
                         </td>
                       </tr>
                     ))}

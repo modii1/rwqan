@@ -57,7 +57,6 @@ import VerificationLogsPage from "./sections/verification-logs";
 import SettingsSection from "./sections/settings";
 import PartnerProfitsSection from "./sections/partner-profits";
 import FeeConfigsSection from "./sections/fee-configs";
-import RefundsSection from "./sections/refunds";
 import AdminAddonsSection from "./sections/addons";
 import BankAccountsSection from "./sections/bank-accounts";
 import FeatureFlagsSection from "./sections/feature-flags";
@@ -74,7 +73,6 @@ export type AdminSection =
   | "addons"
   | "requests"
   | "payments"
-  | "refunds"
   | "analytics"
   | "verification"
   | "verification-logs"
@@ -198,13 +196,6 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           label="المدفوعات"
           active={activeSection === "payments"}
           onClick={() => setActiveSection("payments")}
-        />
-
-        <SidebarButton
-          icon={<DollarSign className="w-4 h-4 text-red-600" />}
-          label="الاسترجاعات"
-          active={activeSection === "refunds"}
-          onClick={() => setActiveSection("refunds")}
         />
 
         <SidebarButton
@@ -353,7 +344,6 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "properties" && <PropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
         {activeSection === "payments" && <PaymentsSection />}
-        {activeSection === "refunds" && <RefundsSection />}
         {activeSection === "packages" && <PackagesSection />}
         {activeSection === "discounts" && <DiscountsSection />}
         {activeSection === "addons" && <AdminAddonsSection />}
@@ -509,6 +499,7 @@ function AlertsDashboard() {
       case 'pending-payments': return <Bell className="w-5 h-5 text-white" />;
       case 'suggestions': return <Zap className="w-5 h-5 text-white" />;
       case 'requests': return <MessageCircle className="w-5 h-5 text-white" />;
+      case 'whatsapp-notifications': return <MessageCircle className="w-5 h-5 text-white" />;
       case 'expiring-subscriptions': return <Clock className="w-5 h-5 text-white" />;
       case 'expired-subscriptions': return <Bell className="w-5 h-5 text-white" />;
       case 'updates': return <TrendingUp className="w-5 h-5 text-white" />;
@@ -744,7 +735,8 @@ function AlertsDashboard() {
                 case 'pending-payments': return { bg: 'bg-red-50 dark:bg-red-950/20', border: 'border-red-200 dark:border-red-800', icon: 'bg-red-500', text: 'text-red-700 dark:text-red-400' };
                 case 'new-properties':
                 case 'property-updates': return { bg: 'bg-emerald-50 dark:bg-emerald-950/20', border: 'border-emerald-200 dark:border-emerald-800', icon: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' };
-                case 'requests': return { bg: 'bg-blue-50 dark:bg-blue-950/20', border: 'border-blue-200 dark:border-blue-800', icon: 'bg-blue-500', text: 'text-blue-700 dark:text-blue-400' };
+                case 'requests': 
+                case 'whatsapp-notifications': return { bg: 'bg-green-50 dark:bg-green-950/20', border: 'border-green-200 dark:border-green-800', icon: 'bg-green-500', text: 'text-green-700 dark:text-green-400' };
                 default: return { bg: 'bg-slate-50 dark:bg-slate-950/20', border: 'border-slate-200 dark:border-slate-800', icon: 'bg-slate-500', text: 'text-slate-700 dark:text-slate-400' };
               }
             };

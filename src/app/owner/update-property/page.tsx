@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Save, ArrowRight, Star, X, Search, Lock } from "lucide-react";
 import { FACILITIES } from "@shared/schema";
 import Link from "next/link";
+import { validateTextInput, validateNumericInput, validateWhatsAppInput } from "@/lib/validation";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -263,7 +264,7 @@ export default function UpdatePropertyPage() {
                                 <label className="block text-sm font-semibold mb-2">اسم العقار</label>
                                 <Input
                                     value={form.name}
-                                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                                    onChange={(e) => setForm({ ...form, name: validateTextInput(e.target.value) })}
                                     placeholder="اسم العقار"
                                     maxLength={25}
                                     data-testid="input-name"
@@ -273,7 +274,7 @@ export default function UpdatePropertyPage() {
                                 <label className="block text-sm font-semibold mb-2">رقم واتساب</label>
                                 <Input
                                     value={form.whatsappNumber}
-                                    onChange={(e) => setForm({ ...form, whatsappNumber: e.target.value })}
+                                    onChange={(e) => setForm({ ...form, whatsappNumber: validateWhatsAppInput(e.target.value).cleaned })}
                                     placeholder="966XXXXXXXXX"
                                     data-testid="input-whatsapp"
                                 />
@@ -282,7 +283,7 @@ export default function UpdatePropertyPage() {
                                 <label className="block text-sm font-semibold mb-2">الموقع / الحي</label>
                                 <Input
                                     value={form.location}
-                                    onChange={(e) => setForm({ ...form, location: e.target.value })}
+                                    onChange={(e) => setForm({ ...form, location: validateTextInput(e.target.value) })}
                                     placeholder="اسم الحي"
                                     data-testid="input-location"
                                 />
@@ -326,7 +327,7 @@ export default function UpdatePropertyPage() {
                                 <Input
                                     type="number"
                                     value={form.prices.weekday}
-                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekday: e.target.value } })}
+                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekday: validateNumericInput(e.target.value) } })}
                                     placeholder="500"
                                 />
                             </div>
@@ -335,7 +336,7 @@ export default function UpdatePropertyPage() {
                                 <Input
                                     type="number"
                                     value={form.prices.weekend}
-                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekend: e.target.value } })}
+                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekend: validateNumericInput(e.target.value) } })}
                                     placeholder="800"
                                 />
                             </div>
@@ -344,7 +345,7 @@ export default function UpdatePropertyPage() {
                                 <Input
                                     type="number"
                                     value={form.prices.overnight}
-                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, overnight: e.target.value } })}
+                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, overnight: validateNumericInput(e.target.value) } })}
                                     placeholder="1200"
                                 />
                             </div>
@@ -353,7 +354,7 @@ export default function UpdatePropertyPage() {
                                 <Input
                                     type="number"
                                     value={form.prices.holidays}
-                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, holidays: e.target.value } })}
+                                    onChange={(e) => setForm({ ...form, prices: { ...form.prices, holidays: validateNumericInput(e.target.value) } })}
                                     placeholder="1000"
                                 />
                             </div>

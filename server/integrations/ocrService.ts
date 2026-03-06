@@ -18,12 +18,12 @@ export async function extractReceiptData(
   paymentId: string
 ): Promise<OcrResult | null> {
   try {
-    // التحقق من تفعيل ميزة OCR
-    const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
-    if (!ocrEnabled) {
-      console.log("📷 [OCR] الميزة غير مفعلة");
-      return null;
-    }
+    // OCR always runs now
+    // const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
+    // if (!ocrEnabled) {
+    //   console.log("📷 [OCR] الميزة غير مفعلة");
+    //   return null;
+    // }
 
     console.log(`📷 [OCR] محاولة استخراج البيانات من: ${imageUrl}`);
 

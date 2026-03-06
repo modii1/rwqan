@@ -392,6 +392,21 @@ export class FirebaseService {
         return snapshot.docs.map((doc) => doc.data() as Request);
     }
 
+    async deleteRequest(propertyNumber: string, requestId: string): Promise<void> {
+        const snapshot = await this.db.collection("requests")
+            .where("propertyNumber", "==", propertyNumber)
+            .get();
+        
+        for (const doc of snapshot.docs) {
+            const data = doc.data() as Request;
+            if (data.id === requestId || data.requestCode === requestId) {
+                await doc.ref.delete();
+                return;
+            }
+        }
+        throw new Error("الطلب غير موجود");
+    }
+
     // ================== أكواد الخصم ==================
 
     async getDiscountCodes(): Promise<DiscountCode[]> {

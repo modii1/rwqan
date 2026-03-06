@@ -267,6 +267,22 @@ router.get("/api/owner/requests", requireOwner, async (req: any, res) => {
 });
 
 // ======================================================
+// 🗑️ DELETE /api/owner/requests/:id - Delete a request
+// ======================================================
+router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => {
+  try {
+    const propertyNumber = req.propertyNumber;
+    const requestId = req.params.id;
+    
+    await analyticsService.deleteRequest(propertyNumber, requestId);
+    res.json({ success: true, message: "تم حذف الطلب بنجاح" });
+  } catch (err) {
+    console.error("Delete request error:", err);
+    res.status(500).json({ error: "فشل في حذف الطلب" });
+  }
+});
+
+// ======================================================
 // 📦 GET /api/owner/current-subscription - Owner's current subscription
 // ======================================================
 router.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
@@ -865,14 +881,10 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
   }
 });
 
-// ======================================================
-// 🔵 GET /api/owner/r2-images - Fetch property images from R2
-// ======================================================
+
 router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber;
-
-    console.log(`🔍 [FETCH] Getting images for property ${propertyNumber}`);
 
     if (!r2 || !propertyNumber || !R2_BUCKET) {
       console.error("❌ [FETCH] Missing propertyNumber or R2_BUCKET");
@@ -889,7 +901,6 @@ router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
     );
 
     const count = list.Contents?.length || 0;
-    console.log(`✅ [FETCH] Found ${count} images for ${propertyNumber}`);
 
     let images =
       list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
@@ -902,11 +913,9 @@ router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
       return na - nb;
     });
 
-    console.log(`✅ [FETCH] Returning ${images.length} image URLs`);
     res.json({ images });
 
   } catch (err: any) {
-    console.error("❌ [FETCH] Error:", err?.message);
     res.json({ images: [] });
   }
 });
@@ -918,7 +927,6 @@ router.post("/api/owner/images", requireOwner, upload.array("images"), async (re
   try {
     const propertyNumber = (req.session as any).propertyNumber || "";
 
-    console.log(`📸 [UPLOAD] Property ${propertyNumber}, Files:`, req.files?.length);
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "Property number not found in session" });
@@ -1001,6 +1009,312 @@ router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: "فشل الحذف" });
+  }
+});
+
+router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const requestedStatus = req.body.status || 'approved';
+    const property = await propertyService.getByNumber(propertyNumber);
+    
+    if (!property) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+
+    if (requestedStatus === 'rejected') {
+      await firebaseService.updateVerificationStatus(propertyNumber, "rejected");
+
+      return res.json({
+        success: true,
+        message: "تم تحديث حالة العقار إلى مرفوض",
+        status: 'rejected'
+      });
+    }
+
+    const payments = await paymentService.getByProperty(propertyNumber);
+
+    const completedPayment = payments.find(p => p.status === "مكتمل");
+    const cardSuccessPayment = payments.find(p => p.status === "نجح - قيد التحقق");
+    const bankTransferPayment = payments.find(p => p.status === "قيد التحقق" && p.paymentMethod === "تحويل بنكي");
+    const cardPendingPayment = payments.find(p => p.status === "قيد المراجعة" && (p.paymentMethod === "بطاقة" || p.paymentMethod === "Apple Pay"));
+
+    let pendingPayment = cardSuccessPayment || bankTransferPayment;
+    let isBankTransfer = !!bankTransferPayment && !cardSuccessPayment;
+
+    if (!pendingPayment) {
+      const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+      const isNewProperty = !currentSubscription || !currentSubscription.endDate;
+      const freePkg = await storage.getPackageById("pkg-free");
+
+      if (!freePkg) {
+        await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+        return res.json({
+          success: true,
+          message: "تم التحقق من بيانات العقار بنجاح",
+          verificationOnly: true
+        });
+      }
+
+      if (isNewProperty) {
+        await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+
+        await sendWhatsAppNotification(
+          `🆕 *طلب عقار جديد - اشتراك مجاني*\n\n` +
+          `📍 العقار: ${property.name}\n` +
+          `🔢 رقم العقار: ${propertyNumber}\n` +
+          `📦 الباقة: ${freePkg.name}\n` +
+          `🏷️ نوع الاشتراك: عادي (مجاني)\n\n` +
+          `⏳ يحتاج موافقة الإدارة لتفعيل الاشتراك`
+        );
+
+        return res.json({
+          success: true,
+          message: "عقارك قيد المراجعة",
+          pendingAdminApproval: true,
+          subscriptionActivated: false,
+          isNewFreeProperty: true
+        });
+      }
+
+      await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+      
+      return res.json({
+        success: true,
+        message: "تم التحقق من بيانات العقار بنجاح",
+        verificationOnly: true,
+        paymentPending: false
+      });
+    }
+
+    const pkg = await storage.getPackageById(pendingPayment.packageId);
+    const paymentStatus = pendingPayment.status;
+
+    const canAutoActivate = !isBankTransfer && (
+      paymentStatus === "مكتمل" ||
+      paymentStatus === "completed" ||
+      paymentStatus === "نجح - قيد التحقق"
+    );
+
+    if (canAutoActivate) {
+
+      if (paymentStatus !== "مكتمل" && paymentStatus !== "completed") {
+        await paymentService.setStatus(pendingPayment.id, "مكتمل");
+      }
+
+      if (!pkg) {
+        return res.status(404).json({ error: "الباقة غير موجودة" });
+      }
+
+      const cardPayToday = getStartOfDayRiyadh();
+      const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+
+      let startDate = cardPayToday;
+      let endDate = calculateSubscriptionEndDate(null, pkg.duration);
+
+      if (currentSubscription && new Date(currentSubscription.endDate) > cardPayToday) {
+        startDate = new Date(currentSubscription.endDate);
+        endDate = calculateExtensionEndDate(startDate, pkg.duration);
+      }
+
+      const isPremiumApproval = pkg.type === "موثوق" || pkg.type === "مميز" || pendingPayment.finalAmount > 0;
+
+      const subscriptionData = {
+        packageId: pkg.id,
+        price: pendingPayment.finalAmount,
+        subscriptionType: isPremiumApproval ? "مميز" : "عادي",
+        packageType: isPremiumApproval ? "مميز" : "عادي",
+        startDate: formatDateRiyadh(startDate),
+        endDate: formatDateRiyadh(endDate),
+        paymentId: pendingPayment.id,
+      };
+
+      await firebaseService.addSubscriptionToSheet(
+        propertyNumber,
+        subscriptionData,
+        property,
+        pendingPayment.receiptUrl || ""
+      );
+
+      if ((pendingPayment as any).secondPropertyNumber) {
+        const secondProperty = await firebaseService.getPropertyByNumber((pendingPayment as any).secondPropertyNumber);
+        if (secondProperty) {
+          const pricePerProperty = pendingPayment.finalAmount / 2;
+          const secondSubscriptionData = {
+            ...subscriptionData,
+            price: pricePerProperty,
+            linkedProperty: propertyNumber,
+          };
+          await firebaseService.addSubscriptionToSheet(
+            (pendingPayment as any).secondPropertyNumber,
+            secondSubscriptionData,
+            secondProperty,
+            pendingPayment.receiptUrl || ""
+          );
+
+          await firebaseService.createMultiPropertySubscription({
+            packageId: pkg.id,
+            propertyNumber1: propertyNumber,
+            propertyNumber2: (pendingPayment as any).secondPropertyNumber,
+            startDate: formatDateRiyadh(startDate),
+            endDate: formatDateRiyadh(endDate),
+            status: "نشط",
+            paymentId: pendingPayment.id,
+          });
+        }
+      }
+
+      await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+      if ((pendingPayment as any).secondPropertyNumber) {
+        await firebaseService.updateVerificationStatus((pendingPayment as any).secondPropertyNumber, "approved");
+      }
+
+      await sendWhatsAppNotification(
+        `🎉 *تم تفعيل الاشتراك بنجاح*\n\n` +
+        `📍 العقار: ${property.name}\n` +
+        `🔢 رقم العقار: ${propertyNumber}\n` +
+        `📦 الباقة: ${pkg.name}\n` +
+        `💵 المبلغ: ${pendingPayment.finalAmount} ر.س\n` +
+        `📅 من: ${subscriptionData.startDate}\n` +
+        `📅 إلى: ${subscriptionData.endDate}\n` +
+        `🏷️ نوع الاشتراك: ${pkg.type}\n\n` +
+        `✅ تم التحقق من البيانات وتفعيل الاشتراك`
+      );
+
+      if (property.whatsappNumber) {
+        try {
+          await notifyOwnerSubscriptionActivated({
+            ownerPhone: property.whatsappNumber,
+            propertyNumber: propertyNumber,
+            propertyName: property.name || "",
+            endDate: subscriptionData.endDate,
+          });
+        } catch (ownerErr) {
+          console.error(`❌ Failed to send owner notification: ${propertyNumber}`, ownerErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "تم تفعيل الاشتراك بنجاح",
+        isBankTransfer: isBankTransfer,
+        pendingAdminApproval: false,
+        subscriptionActivated: true
+      });
+    }
+
+    await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+
+    await sendWhatsAppNotification(
+      `⏳ *طلب اشتراك - يحتاج مراجعة*\n\n` +
+      `📍 العقار: ${property.name}\n` +
+      `🔢 رقم العقار: ${propertyNumber}\n` +
+      `📦 الباقة: ${pkg?.name || pendingPayment.packageId}\n` +
+      `💳 طريقة الدفع: ${pendingPayment.paymentMethod}\n` +
+      `💵 المبلغ: ${pendingPayment.finalAmount} ر.س\n` +
+      `📊 حالة الدفع: ${paymentStatus}\n` +
+      `🧾 الإيصال: ${pendingPayment.receiptUrl ? 'مرفق' : 'غير مرفق'}\n\n` +
+      `⚠️ يحتاج موافقة يدوية من الإدارة`
+    );
+
+    return res.json({
+      success: true,
+      message: "عقارك قيد المراجعة - سيتم تفعيل الاشتراك بعد موافقة الإدارة",
+      isBankTransfer: isBankTransfer,
+      pendingAdminApproval: true,
+      subscriptionActivated: false,
+      paymentStatus: paymentStatus
+    });
+  } catch (err: any) {
+    console.error("Property activation error:", err);
+    res.status(500).json({
+      success: false,
+      error: `خطأ في تفعيل الاشتراك: ${err.message || 'خطأ غير معروف'}`
+    });
+  }
+});
+
+
+router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
+  try {
+    const { packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const propertyNumber = (req.session as any).propertyNumber;
+
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+
+    const pkg = await storage.getPackageById(packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    let finalAmount = pkg.price;
+    let discountAmount = 0;
+
+    if (discountCode) {
+      const discount = await storage.getDiscountCodeByCode(discountCode);
+      if (discount && discount.isActive) {
+        if (discount.type === "نسبة") {
+          discountAmount = (pkg.price * discount.value) / 100;
+          finalAmount -= discountAmount;
+        } else {
+          discountAmount = discount.value;
+          finalAmount -= discountAmount;
+        }
+      }
+    }
+
+    const payment = await paymentService.create({
+      propertyNumber,
+      packageId,
+      amount: pkg.price,
+      discountCode: discountCode || "",
+      discountAmount,
+      finalAmount,
+      status: "قيد المراجعة",
+      paymentMethod: "بطاقة",
+      secondPropertyNumber: secondPropertyNumber || undefined,
+    } as any);
+
+    const paymentReference = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    await paymentService.update(payment.id, { paymentReference });
+
+    const paymobPayment = await paymobService.createIntention(
+      finalAmount,
+      propertyNumber,
+      property.name || "عقار",
+      property.whatsappNumber || "0500000000",
+      pkg.name,
+      pkg.duration || 30
+    );
+
+    await paymentService.update(payment.id, {
+      paymentReference: paymobPayment.intentionId,
+      transactionId: paymobPayment.intentionId,
+    });
+
+    res.json({
+      ok: true,
+      paymentId: payment.id,
+      paymentReference: paymobPayment.intentionId,
+      transactionId: paymobPayment.intentionId,
+      redirectUrl: paymobPayment.checkoutUrl,
+      finalAmount: finalAmount,
+      discountAmount: discountAmount,
+    });
+  } catch (err: any) {
+    console.error("Initiate payment error:", err);
+    res.status(500).json({ error: err.message || "خطأ في بدء الدفع" });
   }
 });
 

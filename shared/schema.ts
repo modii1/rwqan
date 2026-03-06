@@ -572,6 +572,7 @@ export const bankAccountSchema = z.object({
   beneficiaryName: z.string(), // اسم المستفيد
   iban: z.string(), // رقم الآيبان
   accountNumber: z.string().optional(), // رقم الحساب (اختياري)
+  barcodeUrl: z.string().optional(), // رابط باركود الحساب البنكي
   isActive: z.boolean().default(true),
   isDefault: z.boolean().default(false), // الحساب الافتراضي
   createdAt: z.string().optional(),
