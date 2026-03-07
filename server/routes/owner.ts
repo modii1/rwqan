@@ -1318,4 +1318,235 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
   }
 });
 
+// POST /api/owner/payment/retry - Retry failed/pending payment
+router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    const propertyNumber = (req.session as any).propertyNumber;
+
+    if (!paymentId) {
+      return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+    }
+
+    const payment = await paymentService.getById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+
+    if (payment.propertyNumber !== propertyNumber) {
+      return res.status(403).json({ error: "غير مصرح" });
+    }
+
+    if (payment.status === "مكتمل" || payment.status === "completed") {
+      return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
+    }
+
+    const pkg = await storage.getPackageById(payment.packageId);
+    if (!pkg) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
+    const phone = property?.whatsappNumber || "0500000000";
+    const propertyName = property?.name || "عقار";
+
+    const paymobResult = await paymobService.createIntention(
+      payment.finalAmount,
+      payment.propertyNumber,
+      propertyName,
+      phone,
+      pkg.name,
+      pkg.duration || 30,
+      "cards"
+    );
+
+    await paymentService.update(paymentId, {
+      paymentReference: paymobResult.intentionId,
+      transactionId: paymobResult.intentionId,
+    });
+
+    res.json({
+      ok: true,
+      checkoutUrl: paymobResult.checkoutUrl,
+      paymentId: paymentId,
+    });
+  } catch (err: any) {
+    console.error("Payment retry error:", err);
+    res.status(500).json({ error: err.message || "خطأ في إعادة الدفع" });
+  }
+});
+
+// ======================================================
+// التحقق من العقار الثاني (للباقات متعددة العقارات)
+// POST /api/owner/verify-second-property
+// ======================================================
+router.post("/api/owner/verify-second-property", requireOwner, async (req, res) => {
+  try {
+    const ownerPropertyNumber = (req.session as any).propertyNumber;
+    const { secondPropertyNumber } = req.body;
+
+    if (!secondPropertyNumber) {
+      return res.status(400).json({ error: "رقم العقار الثاني مطلوب" });
+    }
+
+    if (secondPropertyNumber === ownerPropertyNumber) {
+      return res.status(400).json({ error: "لا يمكن اختيار نفس العقار" });
+    }
+
+    const ownerProperty = await firebaseService.getPropertyByNumber(ownerPropertyNumber);
+    if (!ownerProperty) {
+      return res.status(404).json({ error: "لم يتم العثور على عقارك" });
+    }
+
+    const secondProperty = await firebaseService.getPropertyByNumber(secondPropertyNumber);
+    if (!secondProperty) {
+      return res.status(404).json({ error: "لم يتم العثور على العقار الثاني" });
+    }
+
+    if (secondProperty.pin !== ownerProperty.pin) {
+      return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
+    }
+
+    const subscription = await subscriptionService.getByProperty(secondPropertyNumber);
+    const isActive = subscription && 
+      (subscription.status === 'نشط' || subscription.status === 'ساري' || subscription.status === 'active') &&
+      new Date(subscription.endDate) > new Date();
+    
+    if (isActive) {
+      return res.status(400).json({
+        error: "العقار الثاني لديه اشتراك نشط بالفعل",
+        existingEndDate: subscription.endDate
+      });
+    }
+
+    res.json({
+      ok: true,
+      property: {
+        number: secondProperty.propertyNumber,
+        name: secondProperty.name,
+        city: secondProperty.city
+      }
+    });
+  } catch (err: any) {
+    console.error("Verify second property error:", err);
+    res.status(500).json({ error: err?.message || "فشل في التحقق" });
+  }
+});
+
+// ======================================================
+// تحضير معلومات الدفع للترقية/التمديد
+// POST /api/owner/subscription/prepare-payment
+// ======================================================
+router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    const { action, packageId } = req.body;
+
+    if (!['extend', 'upgrade'].includes(action)) {
+      return res.status(400).json({ error: "إجراء غير صالح" });
+    }
+
+    const newPackage = await storage.getPackageById(packageId);
+    if (!newPackage) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    res.json({
+      ok: true,
+      paymentRequired: true,
+      action,
+      packageId,
+      packageName: newPackage.name,
+      price: newPackage.price,
+      duration: newPackage.duration,
+      paymentMethods: ["بطاقة", "Apple Pay", "تحويل بنكي"],
+      message: `يجب إتمام الدفع للقيام بـ ${action === 'extend' ? 'التمديد' : 'الترقية'}`
+    });
+  } catch (err: any) {
+    console.error("Subscription prepare payment error:", err);
+    res.status(500).json({ error: err?.message || "فشل في التحضير" });
+  }
+});
+
+// ======================================================
+// تأكيد الاشتراك بعد الدفع الناجح
+// POST /api/owner/subscription/confirm
+// ======================================================
+router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    const { action, packageId, paymentId } = req.body;
+
+    const newPackage = await storage.getPackageById(packageId);
+    if (!newPackage) {
+      return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    console.log(`📦 [Owner Confirm] Package: id=${newPackage.id}, name=${newPackage.name}, type=${newPackage.type}, price=${newPackage.price}`);
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+
+    const subscriptions = await firebaseService.getSubscriptionsByProperty(propertyNumber);
+    console.log(`📋 Found ${subscriptions.length} subscriptions for ${propertyNumber}`);
+
+    const currentSubscription = subscriptions.find(
+      s => (s.status === 'نشط' || s.status === 'نشط مجاني' || s.status === 'ساري' || s.status === 'active') &&
+        new Date(s.endDate) > new Date()
+    );
+
+    console.log(`📋 [Owner Confirm] Current subscription:`, currentSubscription ?
+      `status=${currentSubscription.status}, endDate=${currentSubscription.endDate}` : 'None');
+
+    const confirmToday = getStartOfDayRiyadh();
+    let newStartDate = confirmToday;
+    let newEndDate: Date;
+
+    if (action === 'extend' && currentSubscription) {
+      newStartDate = new Date(currentSubscription.endDate);
+      newEndDate = calculateExtensionEndDate(newStartDate, newPackage.duration);
+      console.log(`📅 [Owner Confirm] Extending from ${currentSubscription.endDate} + ${newPackage.duration} days`);
+    } else {
+      newEndDate = calculateSubscriptionEndDate(null, newPackage.duration);
+      console.log(`📅 [Owner Confirm] New subscription starting today + ${newPackage.duration} days`);
+    }
+
+    const isPremium = newPackage.type === "موثوق" || newPackage.type === "مميز" || newPackage.price > 0;
+
+    const subscriptionData = {
+      propertyNumber,
+      packageId,
+      startDate: newStartDate.toISOString(),
+      endDate: newEndDate.toISOString(),
+      status: 'نشط',
+      paymentId: paymentId || "",
+      price: newPackage.price,
+      packageType: isPremium ? "مميز" : "عادي",
+    };
+
+    await firebaseService.addSubscriptionToSheet(
+      propertyNumber,
+      subscriptionData,
+      property,
+      undefined
+    );
+
+    console.log(`✅ [Owner Confirm] Subscription activated for: ${propertyNumber}`);
+
+    await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+
+    res.json({
+      ok: true,
+      message: `تم ${action === 'extend' ? 'التمديد' : 'الترقية'} بنجاح`,
+      subscription: subscriptionData,
+      endDate: newEndDate,
+    });
+  } catch (err: any) {
+    console.error("Subscription confirm error:", err);
+    res.status(500).json({ error: err?.message || "فشل في التأكيد" });
+  }
+});
+
 export default router;

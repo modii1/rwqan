@@ -7,9 +7,8 @@
  * يدعم: PNG, JPG, JPEG, PDF
  */
 
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { firebaseService } from "../firebaseService";
-import { pdfToPng } from "pdf-to-png-converter";
 
 /**
  * تحميل الملف من URL وتحويله إلى Base64
@@ -56,11 +55,6 @@ async function fetchFileAsBase64(fileUrl: string): Promise<{ base64: string; mim
     return null;
   }
 }
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
 
 export interface AIScanResult {
   paymentId: string;
@@ -216,98 +210,36 @@ export async function scanReceiptWithAI(
 - referenceMatch و ibanMatch اختياريان ومؤشر إضافي فقط
 - ⚠️ المبلغ (amountMatch) شرط أساسي للتفعيل التلقائي`;
 
-    // التحقق من نوع الملف
-    const isPdf = imageUrl.toLowerCase().endsWith('.pdf');
-    let imageDataUrl: string;
+    // Initialize Gemini
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    if (isPdf) {
-      // تحويل PDF إلى صورة
-      console.log(`📄 [AI Scanner] تحويل PDF إلى صورة...`);
-      try {
-        const response = await fetch(imageUrl);
-        if (!response.ok) {
-          console.error(`❌ [AI Scanner] فشل تحميل PDF: ${response.status}`);
-          return null;
-        }
-        const arrayBuffer = await response.arrayBuffer();
-
-        // تحويل أول صفحة من PDF إلى صورة PNG
-        const pngPages = await pdfToPng(arrayBuffer, {
-          viewportScale: 2.0, // جودة عالية
-          pagesToProcess: [1], // أول صفحة فقط
-        });
-
-        if (!pngPages || pngPages.length === 0 || !pngPages[0].content) {
-          console.error(`❌ [AI Scanner] فشل تحويل PDF إلى صورة أو المحتوى فارغ`);
-          return null;
-        }
-
-        // تحويل Buffer إلى base64 بشكل صحيح
-        const pngBuffer = Buffer.from(pngPages[0].content);
-        const base64Image = pngBuffer.toString('base64');
-        imageDataUrl = `data:image/png;base64,${base64Image}`;
-        console.log(`✅ [AI Scanner] تم تحويل PDF إلى صورة بنجاح`);
-      } catch (pdfError) {
-        console.error(`❌ [AI Scanner] خطأ في تحويل PDF:`, pdfError);
-        return null;
-      }
-    } else {
-      // صورة: تحويل URL إلى base64
-      console.log(`📷 [AI Scanner] تحويل الصورة إلى base64...`);
-      try {
-        const response = await fetch(imageUrl);
-        if (!response.ok) {
-          console.error(`❌ [AI Scanner] فشل تحميل الصورة: ${response.status}`);
-          return null;
-        }
-        const arrayBuffer = await response.arrayBuffer();
-        const imageBuffer = Buffer.from(arrayBuffer);
-        const base64Image = imageBuffer.toString('base64');
-        
-        // تحديد نوع الصورة من_content-type
-        const contentType = response.headers.get('content-type') || 'image/jpeg';
-        imageDataUrl = `data:${contentType};base64,${base64Image}`;
-        console.log(`✅ [AI Scanner] تم تحويل الصورة إلى base64 بنجاح`);
-      } catch (imgError) {
-        console.error(`❌ [AI Scanner] خطأ في تحويل الصورة:`, imgError);
-        // fallback to URL if conversion fails
-        imageDataUrl = imageUrl;
-      }
+    // Fetch the image/PDF as base64
+    console.log(`[AI Scanner] Fetching image from: ${imageUrl}`);
+    const fileResponse = await fetch(imageUrl);
+    if (!fileResponse.ok) {
+      console.error(`[AI Scanner] Failed to fetch image: ${fileResponse.status}`);
+      return null;
     }
+    const arrayBuffer = await fileResponse.arrayBuffer();
+    const base64Data = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = imageUrl.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
+    
+    console.log(`[AI Scanner] Sending to Gemini. MimeType: ${mimeType}, Base64 length: ${base64Data.length}`);
 
-    console.log(`🖼️ [AI Scanner] إرسال ${isPdf ? 'صورة من PDF' : 'صورة'} للفحص`);
-    const messageContent: Array<{ type: "text", text: string } | { type: "image_url", image_url: { url: string, detail: "high" } }> = [
+    const result = await model.generateContent([
+      systemPrompt,
       {
-        type: "text" as const,
-        text: "قم بفحص هذا الإيصال البنكي واستخرج كل البيانات المرئية. حلل أصالته وجودته وقارنه بالبيانات المتوقعة.",
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        }
       },
-      {
-        type: "image_url" as const,
-        image_url: {
-          url: imageDataUrl,
-          detail: "high" as const,
-        },
-      },
-    ];
+      "قم بفحص هذا الإيصال البنكي واستخرج كل البيانات المرئية."
+    ]);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: messageContent,
-        },
-      ],
-      max_tokens: 2000,
-      temperature: 0.1,
-    });
-
-    const rawAnalysis = response.choices[0]?.message?.content || "";
-    console.log(`🔬 [AI Scanner] نتيجة التحليل الخام:`, rawAnalysis);
+    const rawAnalysis = result.response.text();
+    console.log(`[AI Scanner] Gemini response received, length: ${rawAnalysis.length} chars`);
 
     // تحليل النتيجة JSON
     let analysisData;
@@ -350,7 +282,7 @@ export async function scanReceiptWithAI(
       };
     }
 
-    const result: AIScanResult = {
+    const scanResult: AIScanResult = {
       paymentId,
       scanDate: new Date().toISOString(),
       extractedData: {
@@ -400,9 +332,9 @@ export async function scanReceiptWithAI(
     // 🎯 تطبيق معايير القبول الجديدة
     // ⚠️ المبلغ شرط أساسي + (اسم المؤسسة أو التاريخ) + ثقة > 80% + جودة ممتازة أو جيدة
     const matchCriteria = {
-      beneficiaryMatch: result.matchAnalysis.beneficiaryMatch,
-      amountMatch: result.matchAnalysis.amountMatch, // ⚠️ شرط أساسي
-      dateMatch: result.matchAnalysis.dateMatch,
+      beneficiaryMatch: scanResult.matchAnalysis.beneficiaryMatch,
+      amountMatch: scanResult.matchAnalysis.amountMatch, // ⚠️ شرط أساسي
+      dateMatch: scanResult.matchAnalysis.dateMatch,
     };
 
     // المبلغ شرط أساسي
@@ -410,44 +342,44 @@ export async function scanReceiptWithAI(
     // واحد على الأقل من: اسم المؤسسة أو التاريخ
     const secondaryMatch = matchCriteria.beneficiaryMatch || matchCriteria.dateMatch;
     const matchCount = Object.values(matchCriteria).filter(Boolean).length;
-    const confidenceOk = result.confidence >= 80;
-    const qualityOk = result.imageQuality.clarity === 'ممتازة' || result.imageQuality.clarity === 'جيدة';
+    const confidenceOk = scanResult.confidence >= 80;
+    const qualityOk = scanResult.imageQuality.clarity === 'ممتازة' || scanResult.imageQuality.clarity === 'جيدة';
 
     console.log(`🔬 [AI Scanner] معايير القبول:`);
     console.log(`   - 💰 المبلغ (أساسي): ${matchCriteria.amountMatch ? '✅' : '❌'}`);
     console.log(`   - 🏢 اسم المؤسسة: ${matchCriteria.beneficiaryMatch ? '✅' : '❌'}`);
     console.log(`   - 📅 التاريخ: ${matchCriteria.dateMatch ? '✅' : '❌'}`);
     console.log(`   - عدد المطابقات: ${matchCount}/3`);
-    console.log(`   - مؤشر الثقة: ${result.confidence}% ${confidenceOk ? '✅' : '❌'}`);
-    console.log(`   - جودة الصورة: ${result.imageQuality.clarity} ${qualityOk ? '✅' : '❌'}`);
+    console.log(`   - مؤشر الثقة: ${scanResult.confidence}% ${confidenceOk ? '✅' : '❌'}`);
+    console.log(`   - جودة الصورة: ${scanResult.imageQuality.clarity} ${qualityOk ? '✅' : '❌'}`);
 
     // القرار النهائي - المبلغ شرط أساسي
     if (amountOk && secondaryMatch && confidenceOk && qualityOk) {
-      result.recommendation = 'تفعيل_تلقائي';
+      scanResult.recommendation = 'تفعيل_تلقائي';
       console.log(`🎉 [AI Scanner] ✅ تفعيل تلقائي - المبلغ مطابق + شرط ثانوي + جودة عالية`);
-    } else if (amountOk && (secondaryMatch || result.confidence >= 60)) {
-      result.recommendation = 'مراجعة_يدوية';
+    } else if (amountOk && (secondaryMatch || scanResult.confidence >= 60)) {
+      scanResult.recommendation = 'مراجعة_يدوية';
       console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - المبلغ مطابق لكن لم يستوف باقي المعايير`);
     } else if (!amountOk) {
-      result.recommendation = 'مراجعة_يدوية';
+      scanResult.recommendation = 'مراجعة_يدوية';
       console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - المبلغ غير مطابق`);
     } else {
-      result.recommendation = 'رفض';
+      scanResult.recommendation = 'رفض';
       console.log(`❌ [AI Scanner] مرفوض - لا يستوفي الحد الأدنى من المعايير`);
     }
 
     // تحديث matchScore بناءً على المعايير الجديدة
     let bonusScore = 0;
-    if (result.matchAnalysis.referenceMatch) bonusScore += 10; // مكافأة الرمز المرجعي
-    if (result.matchAnalysis.ibanMatch) bonusScore += 10; // مكافأة IBAN
-    result.matchAnalysis.matchScore = Math.min(100, (matchCount * 30) + bonusScore);
+    if (scanResult.matchAnalysis.referenceMatch) bonusScore += 10; // مكافأة الرمز المرجعي
+    if (scanResult.matchAnalysis.ibanMatch) bonusScore += 10; // مكافأة IBAN
+    scanResult.matchAnalysis.matchScore = Math.min(100, (matchCount * 30) + bonusScore);
 
     // حفظ نتيجة الفحص
-    await saveAIScanResult(result);
+    await saveAIScanResult(scanResult);
 
-    console.log(`🔬 [AI Scanner] اكتمل الفحص - التوصية: ${result.recommendation}, الثقة: ${result.confidence}%`);
+    console.log(`🔬 [AI Scanner] اكتمل الفحص - التوصية: ${scanResult.recommendation}, الثقة: ${scanResult.confidence}%`);
 
-    return result;
+    return scanResult;
   } catch (error: any) {
     console.error("🔬 [AI Scanner] خطأ في الفحص:", error.message);
     return null;
@@ -457,21 +389,21 @@ export async function scanReceiptWithAI(
 /**
  * حفظ نتيجة فحص AI في Google Sheets
  */
-async function saveAIScanResult(result: AIScanResult): Promise<void> {
+async function saveAIScanResult(scanResult: AIScanResult): Promise<void> {
   try {
     await firebaseService.saveOcrResult({
-      paymentId: result.paymentId,
-      extractedAmount: result.extractedData.amount || undefined,
-      extractedDate: result.extractedData.date || undefined,
-      extractedIban: result.extractedData.receiverIban || undefined,
-      extractedReference: result.extractedData.paymentReference || undefined,
-      extractedBankName: result.extractedData.receiverBank || undefined,
-      extractedBeneficiaryName: result.extractedData.receiverName || undefined,
-      extractedAccountNumber: result.extractedData.receiverAccountNumber || undefined,
-      confidence: result.confidence,
-      rawText: result.summary,
+      paymentId: scanResult.paymentId,
+      extractedAmount: scanResult.extractedData.amount || undefined,
+      extractedDate: scanResult.extractedData.date || undefined,
+      extractedIban: scanResult.extractedData.receiverIban || undefined,
+      extractedReference: scanResult.extractedData.paymentReference || undefined,
+      extractedBankName: scanResult.extractedData.receiverBank || undefined,
+      extractedBeneficiaryName: scanResult.extractedData.receiverName || undefined,
+      extractedAccountNumber: scanResult.extractedData.receiverAccountNumber || undefined,
+      confidence: scanResult.confidence,
+      rawText: scanResult.summary,
     });
-    console.log(`🔬 [AI Scanner] تم حفظ نتيجة الفحص للدفعة: ${result.paymentId}`);
+    console.log(`🔬 [AI Scanner] تم حفظ نتيجة الفحص للدفعة: ${scanResult.paymentId}`);
   } catch (error) {
     console.error("🔬 [AI Scanner] خطأ في حفظ النتيجة:", error);
   }

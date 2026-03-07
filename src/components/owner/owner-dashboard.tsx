@@ -2058,7 +2058,7 @@ export default function OwnerDashboard() {
               icon={<Edit3 className="w-6 h-6" />}
               title="تحديث بيانات العقار"
               desc="الاسم – المدينة – الوصف"
-              onClick={() => router.push("/owner/update-property")}
+              onClick={() => window.location.href = "/owner/update-property"}
             />
 
             <BigActionButton

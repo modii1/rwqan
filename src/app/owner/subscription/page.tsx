@@ -41,6 +41,12 @@ export default function OwnerSubscriptionPage() {
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [aiScanResult, setAiScanResult] = useState<any>(null);
+  
+  // Second property for dual-property packages
+  const [secondPropertyNumber, setSecondPropertyNumber] = useState("");
+  const [secondPropertyVerified, setSecondPropertyVerified] = useState(false);
+  const [secondPropertyError, setSecondPropertyError] = useState("");
+  const [verifyingSecondProperty, setVerifyingSecondProperty] = useState(false);
 
   interface AIScanResult {
     recommendation: string;
@@ -128,6 +134,40 @@ export default function OwnerSubscriptionPage() {
     }
   };
 
+  // Verify second property for dual-property packages
+  const verifySecondProperty = async () => {
+    if (!secondPropertyNumber || secondPropertyNumber.length !== 5) {
+      setSecondPropertyError("رقم العقار يجب أن يكون 5 أرقام");
+      return;
+    }
+    
+    setVerifyingSecondProperty(true);
+    setSecondPropertyError("");
+    
+    try {
+      const res = await fetch("/api/owner/verify-second-property", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secondPropertyNumber }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      
+      if (data.ok) {
+        setSecondPropertyVerified(true);
+        toast({ title: "تم التحقق", description: `العقار الثاني: ${data.property?.name || secondPropertyNumber}` });
+      } else {
+        setSecondPropertyError(data.error || "فشل في التحقق");
+        setSecondPropertyVerified(false);
+      }
+    } catch (error: any) {
+      setSecondPropertyError(error.message || "فشل في التحقق");
+      setSecondPropertyVerified(false);
+    } finally {
+      setVerifyingSecondProperty(false);
+    }
+  };
+
   // Initiate card payment
   const cardPaymentMutation = useMutation({
     mutationFn: async (data: { packageId: string; action: string; discountCode?: string }) => {
@@ -140,6 +180,7 @@ export default function OwnerSubscriptionPage() {
           action: data.action,
           paymentMethod: "cards",
           discountCode: data.discountCode || "",
+          secondPropertyNumber: secondPropertyVerified ? secondPropertyNumber : undefined,
         }),
         credentials: "include",
       });
@@ -176,6 +217,7 @@ export default function OwnerSubscriptionPage() {
       formData.append("action", data.action);
       formData.append("receipt", data.receipt);
       if (data.discountCode) formData.append("discountCode", data.discountCode);
+      if (secondPropertyVerified) formData.append("secondPropertyNumber", secondPropertyNumber);
 
       const res = await fetch("/api/owner/payment/bank-transfer", {
         method: "POST",
@@ -660,7 +702,15 @@ export default function OwnerSubscriptionPage() {
                         ? "border-[#c9951d]/40 bg-[#c9951d]/5"
                         : "border-border hover:border-[#434040]/50"
                       } ${isDowngrade ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}
-                    onClick={() => { if (!isDowngrade) setSelectedPackageId(pkg.id); }}
+                    onClick={() => { 
+                      if (!isDowngrade) {
+                        setSelectedPackageId(pkg.id);
+                        // Reset second property when changing package
+                        setSecondPropertyNumber("");
+                        setSecondPropertyVerified(false);
+                        setSecondPropertyError("");
+                      }
+                    }}
                   >
                     {/* اسم الباقة والحالة */}
                     <div className="flex items-start justify-between mb-2">
@@ -756,6 +806,53 @@ export default function OwnerSubscriptionPage() {
                     <PriceDisplay amount={selectedPackage.price} size="lg" />
                     <p className="text-xs text-muted-foreground">{selectedPackage.duration} يوم</p>
                   </div>
+                </div>
+              )}
+
+              {/* Second Property Input for Dual-Property Packages */}
+              {selectedPackage && (selectedPackage.propertyCount === 2 || selectedPackage.id === 'pkg-month-2properties') && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-3 flex items-center gap-2">
+                    <Crown className="w-5 h-5" />
+                    باقة عقارين - أدخل رقم العقار الثاني
+                  </h4>
+                  <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
+                    هذه الباقة تشمل عقارين بنفس السعر. يجب أن يكون العقار الثاني مسجلاً بنفس الرقم السري.
+                  </p>
+                  <div className="flex gap-2 mb-3">
+                    <Input
+                      type="text"
+                      placeholder="رقم العقار الثاني (5 أرقام)"
+                      maxLength={5}
+                      inputMode="numeric"
+                      value={secondPropertyNumber}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 5);
+                        setSecondPropertyNumber(val);
+                        setSecondPropertyVerified(false);
+                        setSecondPropertyError("");
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={verifySecondProperty}
+                      disabled={secondPropertyNumber.length !== 5 || verifyingSecondProperty}
+                      className="border-blue-400 text-blue-700 hover:bg-blue-50"
+                    >
+                      {verifyingSecondProperty ? "جاري..." : "تحقق"}
+                    </Button>
+                  </div>
+                  {secondPropertyError && (
+                    <p className="text-sm text-red-600 mb-2">{secondPropertyError}</p>
+                  )}
+                  {secondPropertyVerified && (
+                    <div className="flex items-center gap-2 text-green-600 text-sm">
+                      <CheckCircle2 className="w-4 h-4" />
+                      تم التحقق من العقار الثاني بنجاح
+                    </div>
+                  )}
                 </div>
               )}
 
