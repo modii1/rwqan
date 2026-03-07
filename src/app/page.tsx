@@ -688,7 +688,7 @@ export default function PropertiesPage() {
                         </Select>
 
                         {/* Type */}
-                        <Select value={selectedType} onValueChange={setSelectedType}>
+                        <Select value={selectedType && (selectedType === "all" || TYPES.includes(selectedType)) ? selectedType : ""} onValueChange={setSelectedType}>
                             <SelectTrigger data-testid="select-type">
                                 <SelectValue placeholder="النوع" />
                             </SelectTrigger>
@@ -1270,7 +1270,7 @@ export default function PropertiesPage() {
                             <label className="text-sm font-semibold mb-2 block">
                                 نوع العقار
                             </label>
-                            <Select value={selectedType} onValueChange={setSelectedType}>
+                            <Select value={selectedType && (selectedType === "all" || TYPES.includes(selectedType)) ? selectedType : ""} onValueChange={setSelectedType}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="النوع" />
                                 </SelectTrigger>

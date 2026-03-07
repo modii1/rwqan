@@ -617,7 +617,7 @@ export default function PropertiesSection() {
                       {FIELD_LABELS.type}
                     </label>
                     <Select
-                      value={editing.type || ""}
+                      value={String(editing.type) || ""}
                       onValueChange={(v) => setEditing({ ...editing, type: v })}
                     >
                       <SelectTrigger data-testid="select-type">

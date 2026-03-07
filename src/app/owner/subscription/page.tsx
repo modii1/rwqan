@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
-  Calendar, Timer, Banknote, Info, X,
+  Calendar, Timer, Banknote, Info, X, Loader2,
 } from "lucide-react";
 
 import {
@@ -305,6 +305,19 @@ export default function OwnerSubscriptionPage() {
     : 'expired';
   const statusInfo = getStatusInfo(subStatus);
 
+  // Card color mapping based on status
+  const getCardColors = (status: string) => {
+    const colors: Record<string, { border: string; bg: string; text: string }> = {
+      active: { border: 'border-green-500', bg: 'bg-green-50', text: 'text-green-700' },
+      expiring: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
+      expired: { border: 'border-red-400', bg: 'bg-red-50', text: 'text-red-700' },
+      cancelled: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
+      pending: { border: 'border-blue-400', bg: 'bg-blue-50', text: 'text-blue-700' },
+    };
+    return colors[status] || colors.expired;
+  };
+  const cardColors = getCardColors(subStatus);
+
   // Package name helper
   const getPackageName = (pkgId?: string) => {
     const names: Record<string, string> = {
@@ -485,9 +498,9 @@ export default function OwnerSubscriptionPage() {
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
 
         {/* ===== بطاقة الباقة الحالية ===== */}
-        <Card className="p-6 border-2">
+        <Card className={`p-6 border-2 ${cardColors.border} ${cardColors.bg}`}>
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-xl font-bold text-[#434040] flex items-center gap-2">
+            <h2 className={`text-xl font-bold flex items-center gap-2 ${cardColors.text}`}>
               <Crown className="w-5 h-5 text-[#c9951d]" />
               الباقة الحالية
             </h2>
@@ -498,7 +511,7 @@ export default function OwnerSubscriptionPage() {
 
           {/* اسم الباقة */}
           <div className="text-center mb-5 pb-4 border-b">
-            <p className="text-2xl font-bold text-[#434040]">{getPackageName(subscription?.packageId)}</p>
+            <p className={`text-2xl font-bold ${cardColors.text}`}>{getPackageName(subscription?.packageId)}</p>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-5 text-sm">
@@ -524,21 +537,21 @@ export default function OwnerSubscriptionPage() {
                 <Timer className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">المدة</p>
-                  <p className="font-bold text-[#434040]">{subscriptionDuration || currentPackageObj?.duration || 30} يوم</p>
+                  <p className="font-bold text-muted-foreground">{subscriptionDuration || currentPackageObj?.duration || 30} يوم</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
                 <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">تاريخ البداية</p>
-                  <p className="font-bold text-[#434040] text-xs">{subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}</p>
+                  <p className="font-bold text-muted-foreground text-xs">{subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
                 <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">تاريخ الانتهاء</p>
-                  <p className="font-bold text-[#434040] text-xs">{subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}</p>
+                  <p className="font-bold text-muted-foreground text-xs">{subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}</p>
                 </div>
               </div>
             </div>
@@ -939,8 +952,12 @@ export default function OwnerSubscriptionPage() {
                     ) : (
                       <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
                     )}
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
-                      <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة رقم العقار في ملاحظات التحويل</p>
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2">
+                      <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
+                      <ul className="text-sm text-amber-700 space-y-1">
+                        <li>• الرمز المرجعي: <span className="font-mono font-bold">RWQN-MRQDHB</span></li>
+                        <li>• رقم العقار</li>
+                      </ul>
                     </div>
                   </div>
                   <div>
@@ -979,9 +996,12 @@ export default function OwnerSubscriptionPage() {
                   disabled={!paymentMethod || cardPaymentMutation.isPending || bankTransferMutation.isPending || (paymentMethod === "bank" && !receiptFile)}
                   className="flex-1 bg-[#434040] hover:bg-[#333]"
                 >
-                  {cardPaymentMutation.isPending || bankTransferMutation.isPending
-                    ? "جاري المعالجة..."
-                    : action === "upgrade" ? "متابعة للدفع" : "متابعة للدفع"
+                  {cardPaymentMutation.isPending || bankTransferMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                      جاري المعالجة...
+                    </>
+                  ) : action === "upgrade" ? "متابعة للدفع" : "متابعة للدفع"
                   }
                 </Button>
               </div>
