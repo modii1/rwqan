@@ -556,7 +556,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 // 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
 // ======================================================
-router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
+router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
     const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
     const isAddon = action === "addon";
@@ -1239,17 +1239,18 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 });
 
 
-router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
+router.post("/api/owner/payment/initiate", async (req, res) => {
   try {
-    const { packageId, discountCode, action, secondPropertyNumber } = req.body;
-    const propertyNumber = (req.session as any).propertyNumber;
+    const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const sessionPropertyNumber = (req.session as any).propertyNumber;
+    const propertyNumber = bodyPropertyNumber || sessionPropertyNumber;
 
     if (!propertyNumber) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (!property) {
+    if (!property && action !== 'new') {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
@@ -1292,8 +1293,8 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
     const paymobPayment = await paymobService.createIntention(
       finalAmount,
       propertyNumber,
-      property.name || "عقار",
-      property.whatsappNumber || "0500000000",
+      property?.name || "عقار",
+      property?.whatsappNumber || "0500000000",
       pkg.name,
       pkg.duration || 30
     );

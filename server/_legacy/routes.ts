@@ -422,7 +422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
   app.get("/sitemap.xml", async (_req, res) => {
     try {
-      const baseUrl = "https://rwqan.replit.app";
+      const baseUrl = "https://rwqan.sa";
 
       // جلب العقارات النشطة
       const properties = await dbProxy.getProperties();

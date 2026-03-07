@@ -91,7 +91,7 @@ async function sendAdminWhatsAppNotification(options: {
     body += `\nالتفاصيل:\n${text}\n`;
     // أضيف رابط التجديد فقط لإشعارات انتهاء الاشتراك
     if (type.includes("انتهاء")) {
-      body += `\n🔗 جدد اشتراكك الآن: https://rwqan.replit.app/owner/login`;
+      body += `\n🔗 جدد اشتراكك الآن: https://rwqan.sa/owner/login`;
     }
   }
 
@@ -597,7 +597,7 @@ export async function notifyOwnerSubscriptionExpiringSoon(data: {
 اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber} ينتهي خلال ${data.daysLeft} ايام
 
 جدد الان للحفاظ على ظهورك المميز
-https://rwqan.replit.app/owner/login`;
+https://rwqan.sa/owner/login`;
 
   return sendOwnerWhatsApp(data.ownerPhone, message);
 }
@@ -617,7 +617,7 @@ export async function notifyOwnerSubscriptionExpired(data: {
 تم تحويله للعرض العادي
 
 جدد الان لاستعادة المميزات
-https://rwqan.replit.app/owner/login`;
+https://rwqan.sa/owner/login`;
 
   return sendOwnerWhatsApp(data.ownerPhone, message);
 }

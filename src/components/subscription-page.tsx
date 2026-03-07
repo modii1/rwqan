@@ -62,7 +62,7 @@ function drawCaptcha(canvas: HTMLCanvasElement, text: string) {
     ctx.save();
     const x = cw*(i+0.8), y = h/2+(Math.random()*12-6);
     ctx.translate(x, y); ctx.rotate((Math.random()-0.5)*0.5); ctx.scale(0.85+Math.random()*0.35, 0.85+Math.random()*0.35);
-    ctx.font = `bold ${28+Math.floor(Math.random()*8)}px 'Courier New', monospace`;
+    ctx.font = `bold ${28+Math.floor(Math.random()*8)}px 'Tahoma', 'Arial', sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.fillText(text[i], 2, 2);
     ctx.fillStyle = colors[i%colors.length]; ctx.fillText(text[i], 0, 0);
@@ -232,8 +232,8 @@ export default function SubscriptionPage() {
     if (!selectedPackageId) return;
 
     // Captcha validation
-    const userInput = captchaInput.trim().toUpperCase();
-    const expected = captchaTextRef.current;
+    const userInput = captchaInput.trim();
+    const expected = captchaTextRef.current.trim();
     if (userInput !== expected) {
       toast({
         title: "خطأ في التحقق",

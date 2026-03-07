@@ -32,7 +32,7 @@ router.get("/developer-guide", async (_req, res) => {
 // ======================
 router.get("/sitemap.xml", async (_req, res) => {
   try {
-    const baseUrl = "https://rwqan.replit.app";
+    const baseUrl = "https://rwqan.sa";
 
     // جلب العقارات النشطة
     const properties = await propertyService.getAll();

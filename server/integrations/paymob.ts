@@ -67,7 +67,7 @@ export class PaymobService {
         phone_number: phone,
         country: 'KSA',
         // ⭐⭐⭐ إعادة التوجيه بعد الدفع
-        redirect_url: "https://rwqan.replit.app/api/paymob/webhook",
+        redirect_url: "https://rwqan.sa/api/paymob/webhook",
       },
       customer: {
         first_name: propertyName || 'عميل',
@@ -159,7 +159,7 @@ export class PaymobService {
         email: `${phone}@example.com`,
         phone_number: phone,
         country: 'KSA',
-        redirect_url: "https://rwqan.replit.app/api/paymob/webhook",
+        redirect_url: "https://rwqan.sa/api/paymob/webhook",
       },
       customer: {
         first_name: propertyName || 'عميل',
