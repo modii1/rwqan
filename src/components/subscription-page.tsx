@@ -18,7 +18,7 @@ import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
 import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
 
 // ─── Visual Captcha helpers ───
-const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CAPTCHA_CHARS = '23456789';
 
 function generateCaptchaText(length = 5): string {
   let text = '';
