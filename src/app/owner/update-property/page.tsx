@@ -148,8 +148,8 @@ export default function UpdatePropertyPage() {
             }
             return res.json();
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+        onSuccess: (data) => {
+            queryClient.setQueryData(["/api/owner/property"], data);
             toast({ title: "تم تحديث البيانات بنجاح" });
             router.push("/owner/dashboard");
         },

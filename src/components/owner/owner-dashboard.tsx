@@ -2052,7 +2052,7 @@ export default function OwnerDashboard() {
               icon={<ImageIcon className="w-6 h-6" />}
               title="إدارة الصور"
               desc="رفع وتحديث صور العقار"
-              onClick={() => router.push("/owner/images")}
+              onClick={() => window.location.href = "/owner/images"}
             />
             <BigActionButton
               icon={<Edit3 className="w-6 h-6" />}

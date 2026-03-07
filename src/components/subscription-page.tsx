@@ -14,7 +14,7 @@ import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { formatPrice, formatDiscount, getCurrencyLabel } from "@/lib/currency";
+import { formatDiscount, getCurrencyLabel } from "@/lib/currency";
 import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
 
 // ─── Visual Captcha helpers ───
