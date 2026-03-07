@@ -483,7 +483,55 @@ export default function OwnerDashboard() {
 
         if (result.success) {
           // التحقق من الحالات المختلفة
-          if (result.pendingAdminApproval) {
+          if (result.alreadyApproved) {
+            // العقار معتمد مسبقاً - لا حاجة لتغيير الحالة
+            steps[6].status = "success";
+            steps[6].message = "العقار معتمد مسبقاً ✅";
+            setVerificationProgress(100);
+            setVerificationSteps([...steps]);
+
+            setVerificationResult({
+              success: true,
+              summary: result.message || "عقارك معتمد مسبقاً",
+              errors: [],
+            });
+
+            toast({
+              title: "✅ العقار معتمد",
+              description: result.message || "عقارك معتمد مسبقاً ولا يحتاج إعادة مراجعة",
+            });
+
+            setTimeout(async () => {
+              await queryClient.invalidateQueries({
+                queryKey: ["/api/owner/property"],
+              });
+              setIsVerifying(false);
+            }, 2000);
+          } else if (result.alreadyPending) {
+            // العقار قيد المراجعة مسبقاً
+            steps[6].status = "success";
+            steps[6].message = "العقار قيد المراجعة مسبقاً ⏳";
+            setVerificationProgress(100);
+            setVerificationSteps([...steps]);
+
+            setVerificationResult({
+              success: true,
+              summary: result.message || "عقارك قيد المراجعة مسبقاً",
+              errors: [],
+            });
+
+            toast({
+              title: "⏳ قيد المراجعة",
+              description: result.message || "عقارك قيد المراجعة مسبقاً",
+            });
+
+            setTimeout(async () => {
+              await queryClient.invalidateQueries({
+                queryKey: ["/api/owner/property"],
+              });
+              setIsVerifying(false);
+            }, 2000);
+          } else if (result.pendingAdminApproval) {
             // عقار جديد مجاني - بانتظار موافقة الإدارة
             steps[6].status = "success";
             steps[6].message = "عقارك قيد المراجعة ⏳";
@@ -1505,71 +1553,48 @@ export default function OwnerDashboard() {
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
-          <>
-            {/* للعقارات المعتمدة - إظهار بطاقة مختلفة مع تحذير */}
-            {property.verificationStatus === "approved" ? (
-              <Card className="p-4 md:p-6 border-2 border-green-300 bg-gradient-to-r from-green-50/50 to-emerald-50/50 dark:from-green-900/20 dark:to-emerald-900/20">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div>
-                    <h3 className="font-bold text-lg md:text-xl text-green-600 flex items-center gap-2">
-                      <CheckCircle2 className="w-6 h-6" />
-                      العقار معتمد ✓
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      تم اعتماد بيانات عقارك ولا يحتاج لتحقق إضافي
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      toast({
-                        title: "⚠️ العقار معتمد بالفعل",
-                        description:
-                          "لا يمكن إعادة التحقق من العقارات المعتمدة. إذا قمت بتعديل البيانات ستتغير الحالة وستحتاج لإعادة التحقق.",
-                        variant: "destructive",
-                      });
-                    }}
-                    className="text-green-600 border-green-300 flex-shrink-0"
-                    data-testid="button-verification-approved-info"
-                  >
-                    <InfoIcon className="w-4 h-4 ml-2" />
-                    معلومات
-                  </Button>
-                </div>
-              </Card>
-            ) : (
-              /* للعقارات pending أو rejected أو incomplete - إظهار قسم التحقق الذكي */
-              <Card className="p-4 md:p-6 border-2 border-[#17a2b8] bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/20 dark:to-blue-900/20">
-                <div className="space-y-4">
-                  {/* العنوان والزر */}
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold text-lg md:text-xl text-[#17a2b8] flex items-center gap-2">
+          <Card className={`p-4 md:p-6 border-2 ${property.verificationStatus === "approved" ? "border-green-300 bg-gradient-to-r from-green-50/50 to-emerald-50/50 dark:from-green-900/20 dark:to-emerald-900/20" : "border-[#17a2b8] bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/20 dark:to-blue-900/20"}`}>
+            <div className="space-y-4">
+              {/* العنوان والزر */}
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${property.verificationStatus === "approved" ? "text-green-600" : "text-[#17a2b8]"}`}>
+                    {property.verificationStatus === "approved" ? (
+                      <>
+                        <CheckCircle2 className="w-6 h-6" />
+                        العقار معتمد ✓
+                      </>
+                    ) : (
+                      <>
                         <Activity className="w-6 h-6 animate-pulse" />
                         التحقق الذكي من بيانات العقار
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        فحص ذكي لجميع بيانات عقارك وتفعيل تلقائي للاشتراك عند
-                        النجاح
-                      </p>
-                      {property.verificationStatus === "rejected" && (
-                        <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          العقار مرفوض - يرجى تصحيح البيانات وإعادة التحقق
-                        </p>
-                      )}
-                    </div>
-                    {!isVerifying && (
-                      <Button
-                        onClick={startSmartVerification}
-                        className="bg-[#17a2b8] hover:bg-[#138496] text-white flex-shrink-0"
-                        data-testid="button-start-verification"
-                      >
-                        <Activity className="w-4 h-4 ml-2" />
-                        بدء التحقق الذكي
-                      </Button>
+                      </>
                     )}
-                  </div>
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {property.verificationStatus === "approved" 
+                      ? "تم اعتماد بيانات عقارك - يمكنك إعادة التحقق بعد أي تعديل"
+                      : "فحص ذكي لجميع بيانات عقارك - يحتاج موافقة الإدارة"
+                    }
+                  </p>
+                  {property.verificationStatus === "rejected" && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      العقار مرفوض - يرجى تصحيح البيانات وإعادة التحقق
+                    </p>
+                  )}
+                </div>
+                {!isVerifying && (
+                  <Button
+                    onClick={startSmartVerification}
+                    className={`${property.verificationStatus === "approved" ? "bg-green-600 hover:bg-green-700" : "bg-[#17a2b8] hover:bg-[#138496]"} text-white flex-shrink-0`}
+                    data-testid="button-start-verification"
+                  >
+                    <Activity className="w-4 h-4 ml-2" />
+                    بدء التحقق الذكي
+                  </Button>
+                )}
+              </div>
 
                   {/* شريط التقدم والنسبة المئوية */}
                   {isVerifying && (
@@ -1725,8 +1750,6 @@ export default function OwnerDashboard() {
                   )}
                 </div>
               </Card>
-            )}
-          </>
         )}
 
         {/* ===== سجل المدفوعات ===== */}

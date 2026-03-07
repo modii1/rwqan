@@ -147,6 +147,11 @@ export function getSubscriptionStatus(
   endDate: any, 
   storedStatus?: string
 ): SubscriptionStatus {
+  // إذا لم يكن هناك اشتراك نشط أو هو placeholder
+  if (!storedStatus || storedStatus === 'غير نشط' || storedStatus === 'inactive') {
+    return 'pending';
+  }
+  
   // إذا كانت الحالة موقوف أو قيد المراجعة، نرجعها مباشرة
   if (storedStatus === 'موقوف' || storedStatus === 'cancelled') return 'cancelled';
   if (storedStatus === 'قيد المراجعة' || storedStatus === 'معلق' || storedStatus === 'pending') return 'pending';
@@ -214,9 +219,9 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
     pending: {
       status: 'pending',
       label: 'قيد المراجعة',
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-500',
-      borderColor: 'border-blue-500',
+      color: 'text-amber-600',
+      bgColor: 'bg-amber-500',
+      borderColor: 'border-amber-500',
       icon: '⏳',
     },
   };

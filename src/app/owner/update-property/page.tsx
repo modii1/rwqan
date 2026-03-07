@@ -150,7 +150,16 @@ export default function UpdatePropertyPage() {
         },
         onSuccess: (data) => {
             queryClient.setQueryData(["/api/owner/property"], data);
-            toast({ title: "تم تحديث البيانات بنجاح" });
+            
+            if (data.needsManualVerification) {
+                toast({ 
+                    title: "تم التحديث - يحتاج تحقق يدوي",
+                    description: "تم تحديث العقار لكن التحقق الذكي فشل. يرجى تشغيل التحقق الذكي من لوحة التحكم",
+                    variant: "default"
+                });
+            } else {
+                toast({ title: "تم تحديث البيانات بنجاح" });
+            }
             router.push("/owner/dashboard");
         },
         onError: (err: Error) => {

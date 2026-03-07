@@ -131,24 +131,23 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     // 🔍 فحص التعديل الحساس
     const sensitiveChanges = detectSensitiveChanges(currentProperty, updates);
     const previousStatus = currentProperty.verificationStatus;
+    let needsManualVerification = false;
 
+    // عند تحديث العقار، يتم فحصه ذكياً
     if (sensitiveChanges.length > 0 && previousStatus === 'approved') {
-
-      // تطبيق التعديلات أولاً
       const updatedProperty = { ...currentProperty, ...updates };
 
-      // فحص ذكي للتعديل الحساس
       const verificationResult = await smartVerification({
         property: updatedProperty,
         isSensitiveUpdate: true,
         previousVerificationStatus: previousStatus
       });
 
-      // تحديث حالة التحقق بناءً على النتيجة
       if (verificationResult.canAutoActivate) {
         updates.verificationStatus = 'approved';
       } else {
         updates.verificationStatus = 'pending';
+        needsManualVerification = true;
       }
     }
 
@@ -163,7 +162,10 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
-    res.json(updated);
+    res.json({
+      ...updated,
+      needsManualVerification
+    });
   } catch (err: any) {
     console.error("Update property error:", err?.message);
     res.status(500).json({ error: err?.message || "فشل في تحديث البيانات" });
@@ -306,14 +308,15 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
     }
 
     if (!subscription) {
-      // إرجاع اشتراك افتراضي مجاني إذا لم يوجد
+      // إرجاع اشتراك افتراضي مجاني إذا لم يوجد - مع توضيح أنه غير نشط
       return res.json({
         id: `SUB-${propertyNumber}`,
         propertyNumber,
         packageId: "pkg-free",
         startDate: new Date().toISOString(),
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        status: "نشط",
+        status: "غير نشط",
+        isPlaceholder: true,
       });
     }
 
@@ -330,7 +333,8 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       packageId: "pkg-free",
       startDate: new Date().toISOString(),
       endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      status: "نشط",
+      status: "غير نشط",
+      isPlaceholder: true,
     });
   }
 });
@@ -1048,8 +1052,28 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 
     if (!pendingPayment) {
       const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
-      const isNewProperty = !currentSubscription || !currentSubscription.endDate;
+      const isNewProperty = !currentSubscription?.endDate;
       const freePkg = await storage.getPackageById("pkg-free");
+
+      const currentStatus = property.verificationStatus || "pending";
+
+      if (currentStatus === "approved") {
+        return res.json({
+          success: true,
+          message: "تم التحقق من بيانات العقار - العقار معتمد مسبقاً",
+          alreadyApproved: true,
+          verificationOnly: true
+        });
+      }
+
+      if (currentStatus === "pending") {
+        return res.json({
+          success: true,
+          message: "عقارك قيد المراجعة مسبقاً",
+          alreadyPending: true,
+          verificationOnly: true
+        });
+      }
 
       if (!freePkg) {
         await firebaseService.updateVerificationStatus(propertyNumber, "approved");

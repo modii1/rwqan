@@ -312,7 +312,7 @@ export default function OwnerSubscriptionPage() {
       expiring: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
       expired: { border: 'border-red-400', bg: 'bg-red-50', text: 'text-red-700' },
       cancelled: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
-      pending: { border: 'border-blue-400', bg: 'bg-blue-50', text: 'text-blue-700' },
+      pending: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
     };
     return colors[status] || colors.expired;
   };
