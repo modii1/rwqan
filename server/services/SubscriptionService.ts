@@ -21,7 +21,10 @@ export class SubscriptionService {
   }
 
   async getByProperty(propertyNumber: string): Promise<Subscription | null> {
-    return firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    console.log(`[SUBSCRIPTION_SERVICE] getByProperty called for: ${propertyNumber}`);
+    const result = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    console.log(`[SUBSCRIPTION_SERVICE] getByProperty result for ${propertyNumber}:`, result);
+    return result;
   }
 
   async getPaymentsByProperty(propertyNumber: string) {

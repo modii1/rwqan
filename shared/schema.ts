@@ -49,7 +49,7 @@ export const subscriptionSchema = z.object({
   packageId: z.string(),
   startDate: z.string(),
   endDate: z.string(),
-  status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'active', 'expired', 'cancelled', 'rejected']),
+  status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'غير نشط', 'active', 'expired', 'cancelled', 'rejected']),
   paymentId: z.string().optional(),
   linkedProperty: z.string().optional(), // رقم العقار المرتبط (لباقات العقارين)
   linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة

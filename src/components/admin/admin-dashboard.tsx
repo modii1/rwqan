@@ -103,8 +103,14 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
 
   const alertCount = alertsData?.summary?.totalAlerts || 0;
 
-  // إعادة التوجيه إذا لم يكن أدمن
+  // إعادة التوجيه إذا لم يكن أدمن - في useEffect لتجنب تحديث الحالة أثناء الـ render
   const router = useRouter();
+  useEffect(() => {
+    if (isLoading) return;
+    if (!adminSession?.isAdmin) {
+      router.push("/owner/login");
+    }
+  }, [adminSession, isLoading, router]);
 
   if (isLoading) {
     return (
@@ -119,9 +125,8 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
     );
   }
 
-  // لو مو أدمن → رجوع لصفحة تسجيل الدخول
+  // إذا لم يكن أدمن، لا تعرض شيء (سيتم التوجيه عبر useEffect)
   if (!adminSession?.isAdmin) {
-    router.push("/owner/login");
     return null;
   }
 

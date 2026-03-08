@@ -426,10 +426,37 @@ export default function OwnerSubscriptionPage() {
   const subscriptionDuration = subscription?.startDate && subscription?.endDate
     ? calculateSubscriptionDuration(subscription.startDate, subscription.endDate)
     : 0;
-  const subStatus = subscription?.endDate
-    ? getSubscriptionStatus(subscription.endDate, subscription?.status, subscription?.isPlaceholder)
-    : 'expired';
-  const statusInfo = getStatusInfo(subStatus);
+  
+  // Determine subscription status based on pending payment from check-pending API
+  // AND property verification status
+  let subStatus: string;
+  
+  // First check: if property is rejected → show rejected
+  if (property?.verificationStatus === 'rejected') {
+    console.log("[DEBUG] Property is rejected, showing rejected status");
+    subStatus = 'rejected';
+  }
+  // Second check: if property is pending → show pending
+  else if (property?.verificationStatus === 'pending') {
+    console.log("[DEBUG] Property is pending, showing pending status");
+    subStatus = 'pending';
+  }
+  // Third check: if there's a pending payment → pending (قيد المراجعة)
+  else if (pendingPayment?.hasPending) {
+    console.log("[DEBUG] Has pending payment, showing pending status");
+    subStatus = 'pending';
+  } 
+  // Fourth check: if subscription exists and is active → show based on subscription
+  else if (subscription?.endDate) {
+    // Use the utility function for normal status
+    subStatus = getSubscriptionStatus(subscription.endDate, subscription?.status);
+    console.log("[DEBUG] Using subscription status:", subStatus);
+  } else {
+    // No subscription → inactive (غير نشط)
+    console.log("[DEBUG] No subscription, showing inactive");
+    subStatus = 'inactive';
+  }
+  const statusInfo = getStatusInfo(subStatus as any);
 
   // Card color mapping based on status
   const getCardColors = (status: string) => {
@@ -439,6 +466,8 @@ export default function OwnerSubscriptionPage() {
       expired: { border: 'border-red-400', bg: 'bg-red-50', text: 'text-red-700' },
       cancelled: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
       pending: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
+      inactive: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
+      rejected: { border: 'border-red-600', bg: 'bg-red-50', text: 'text-red-700' },
     };
     return colors[status] || colors.expired;
   };

@@ -1042,13 +1042,14 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
+    // Owner requesting rejection sets to pending - admin decides final status
     if (requestedStatus === 'rejected') {
-      await firebaseService.updateVerificationStatus(propertyNumber, "rejected");
+      await firebaseService.updateVerificationStatus(propertyNumber, "pending");
 
       return res.json({
         success: true,
-        message: "تم تحديث حالة العقار إلى مرفوض",
-        status: 'rejected'
+        message: "تم تحديث حالة العقار إلى قيد المراجعة",
+        status: 'pending'
       });
     }
 

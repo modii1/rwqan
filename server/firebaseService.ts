@@ -85,7 +85,7 @@ export class FirebaseService {
     async createProperty(property: InsertProperty): Promise<Property> {
         const now = new Date().toISOString();
         const newProperty: Property = {
-            verificationStatus: "approved", // Default for migration/legacy
+            verificationStatus: "pending", // Default for new properties - requires admin approval
             ...property,
             createdAt: now,
             updatedAt: now,
@@ -142,12 +142,18 @@ export class FirebaseService {
     }
 
     async getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null> {
+        console.log(`[FIREBASE] getSubscriptionByPropertyNumber called for: ${propertyNumber}`);
         const snapshot = await this.db
             .collection("subscriptions")
             .where("propertyNumber", "==", propertyNumber)
             .get();
 
-        if (snapshot.empty) return null;
+        console.log(`[FIREBASE] getSubscriptionByPropertyNumber - found ${snapshot.size} docs for: ${propertyNumber}`);
+        
+        if (snapshot.empty) {
+            console.log(`[FIREBASE] No subscription found for: ${propertyNumber}`);
+            return null;
+        }
 
         // Sort in JS to avoid composite index requirement
         const docs = snapshot.docs.map(doc => doc.data() as Subscription);
@@ -156,6 +162,8 @@ export class FirebaseService {
             const dateB = b.endDate ? new Date(b.endDate).getTime() : 0;
             return dateB - dateA;
         });
+        
+        console.log(`[FIREBASE] Subscription found for ${propertyNumber}:`, docs[0]);
         return docs[0];
     }
 
@@ -230,6 +238,63 @@ export class FirebaseService {
             cancelReason: reason ?? "admin",
         });
         console.log(`✅ Subscription cancelled for property ${propertyNumber} (reason: ${reason ?? "admin"})`);
+    }
+
+    async activateSubscription(
+        propertyNumber: string,
+        data: {
+            status: string;
+            subscriptionType: string;
+            packageId: string;
+            startDate?: string;
+            endDate?: string;
+        }
+    ): Promise<void> {
+        console.log(`[FIREBASE] activateSubscription called for: ${propertyNumber} with data:`, data);
+        
+        const id = `SUB-${propertyNumber}`;
+        const ref = this.db.collection("subscriptions").doc(id);
+        const doc = await ref.get();
+        
+        console.log(`[FIREBASE] activateSubscription - doc exists: ${doc.exists} for: ${propertyNumber}`);
+        
+        const updates: any = {
+            status: data.status,
+            subscriptionType: data.subscriptionType,
+            packageId: data.packageId,
+        };
+        
+        // If no startDate provided, use now
+        if (!data.startDate) {
+            updates.startDate = new Date().toISOString();
+        } else {
+            updates.startDate = data.startDate;
+        }
+        
+        // If no endDate provided, set to 30 days from now (for free subscription)
+        if (!data.endDate) {
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() + 30);
+            updates.endDate = endDate.toISOString();
+        } else {
+            updates.endDate = data.endDate;
+        }
+        
+        console.log(`[FIREBASE] activateSubscription - updates to apply:`, updates);
+        
+        if (doc.exists) {
+            await ref.update(updates);
+            console.log(`✅ [FIREBASE] Subscription activated for property ${propertyNumber}`);
+        } else {
+            // Create new subscription if doesn't exist
+            await ref.set({
+                id,
+                propertyNumber,
+                ...updates,
+                createdAt: new Date().toISOString(),
+            });
+            console.log(`✅ [FIREBASE] New subscription created and activated for property ${propertyNumber}`);
+        }
     }
 
     async getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]> {

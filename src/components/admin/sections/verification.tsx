@@ -11,6 +11,8 @@ import type { Property } from "@shared/schema";
 
 type Level = "ok" | "warning" | "danger";
 
+type FilterType = Level | "all" | "noImages" | "pending" | "approved" | "rejected";
+
 type VerificationStatus = {
   level: Level;
   label: string;
@@ -108,8 +110,6 @@ function getVerificationStatus(
   return { level, label, issues };
 }
 
-type FilterType = Level | "all" | "noImages";
-
 export default function AdminVerificationSection() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
@@ -141,8 +141,17 @@ export default function AdminVerificationSection() {
 
   const filtered = useMemo(() => {
     return propertiesWithStatus.filter(({ property, status, imageCount }) => {
-      // فلتر "بدون صور"
-      if (filter === "noImages") {
+      // فلتر حسب حالة التحقق (pending, approved, rejected)
+      if (filter === "pending") {
+        const vStatus = property.verificationStatus;
+        if (vStatus !== "pending") return false;
+      } else if (filter === "approved") {
+        const vStatus = property.verificationStatus;
+        if (vStatus !== "approved" && vStatus !== "verified") return false;
+      } else if (filter === "rejected") {
+        const vStatus = property.verificationStatus;
+        if (vStatus !== "rejected") return false;
+      } else if (filter === "noImages") {
         if (imageCount > 0) return false;
       } else if (filter !== "all" && status.level !== filter) {
         return false;
@@ -180,7 +189,18 @@ export default function AdminVerificationSection() {
       (p) => p.imageCount === 0,
     ).length;
 
-    return { total, ok, warn, danger, noWhatsapp, noImages };
+    // Stats based on verificationStatus
+    const pending = propertiesWithStatus.filter(
+      (p) => p.property.verificationStatus === "pending",
+    ).length;
+    const approved = propertiesWithStatus.filter(
+      (p) => p.property.verificationStatus === "approved" || p.property.verificationStatus === "verified",
+    ).length;
+    const rejected = propertiesWithStatus.filter(
+      (p) => p.property.verificationStatus === "rejected",
+    ).length;
+
+    return { total, ok, warn, danger, noWhatsapp, noImages, pending, approved, rejected };
   }, [propertiesWithStatus]);
 
   if (isLoading || isLoadingR2) {
@@ -230,7 +250,7 @@ export default function AdminVerificationSection() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3 text-center">
           <Card className="p-3">
             <p className="text-xs text-muted-foreground">إجمالي العقارات</p>
             <p className="font-bold text-lg">{stats.total}</p>
@@ -259,6 +279,21 @@ export default function AdminVerificationSection() {
           <Card className="p-3">
             <p className="text-xs text-muted-foreground">بدون صور (R2)</p>
             <p className="font-bold text-lg text-red-500">{stats.noImages}</p>
+          </Card>
+
+          <Card className="p-3 bg-blue-50 border-blue-200">
+            <p className="text-xs text-blue-600">قيد المراجعة</p>
+            <p className="font-bold text-lg text-blue-600">{stats.pending}</p>
+          </Card>
+
+          <Card className="p-3 bg-green-50 border-green-200">
+            <p className="text-xs text-green-600">معتمد</p>
+            <p className="font-bold text-lg text-green-600">{stats.approved}</p>
+          </Card>
+
+          <Card className="p-3 bg-red-50 border-red-200">
+            <p className="text-xs text-red-600">مرفوض</p>
+            <p className="font-bold text-lg text-red-600">{stats.rejected}</p>
           </Card>
         </div>
       </Card>
@@ -315,6 +350,42 @@ export default function AdminVerificationSection() {
           >
             بدون صور
           </Button>
+          <Button
+            variant={filter === "pending" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilter("pending")}
+            className={
+              filter === "pending"
+                ? "bg-blue-600 hover:bg-blue-700"
+                : "border-blue-300 text-blue-600 hover:bg-blue-50"
+            }
+          >
+            قيد المراجعة
+          </Button>
+          <Button
+            variant={filter === "approved" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilter("approved")}
+            className={
+              filter === "approved"
+                ? "bg-green-600 hover:bg-green-700"
+                : "border-green-300 text-green-600 hover:bg-green-50"
+            }
+          >
+            معتمد
+          </Button>
+          <Button
+            variant={filter === "rejected" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilter("rejected")}
+            className={
+              filter === "rejected"
+                ? "bg-red-600 hover:bg-red-700"
+                : "border-red-300 text-red-600 hover:bg-red-50"
+            }
+          >
+            مرفوض
+          </Button>
         </div>
       </div>
 
@@ -341,6 +412,22 @@ export default function AdminVerificationSection() {
                     </span>
                     <Badge variant="outline">
                       {property.city || "غير محدد"}
+                    </Badge>
+                    {/* حالة التحقق الفعلية */}
+                    <Badge
+                      className={
+                        property.verificationStatus === "approved" || property.verificationStatus === "verified"
+                          ? "bg-green-600 text-white"
+                          : property.verificationStatus === "rejected"
+                            ? "bg-red-600 text-white"
+                            : "bg-blue-600 text-white"
+                      }
+                    >
+                      {property.verificationStatus === "approved" || property.verificationStatus === "verified"
+                        ? "معتمد"
+                        : property.verificationStatus === "rejected"
+                          ? "مرفوض"
+                          : "قيد المراجعة"}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">

@@ -133,11 +133,13 @@ export function calculateSubscriptionDuration(startDate: any, endDate: any): num
  * حالات الاشتراك المدعومة
  */
 export type SubscriptionStatus = 
-  | 'active'      // مفعل - الاشتراك نشط
-  | 'expiring'    // ينتهي قريباً - ≤ 5 أيام
-  | 'expired'     // منتهي - الأيام = 0
-  | 'cancelled'   // موقوف - ألغاه الإدارة
-  | 'pending';    // قيد المراجعة - في انتظار التحقق
+  | 'active'      // مفعل
+  | 'expiring'    // ينتهي قريباً
+  | 'expired'     // منتهي
+  | 'cancelled'   // موقوف
+  | 'pending'     // قيد المراجعة
+  | 'inactive'    // غير نشط
+  | 'rejected';   // مرفوض
 
 /**
  * تحديد حالة الاشتراك بناءً على الأيام المتبقية والحالة المخزنة
@@ -148,13 +150,14 @@ export function getSubscriptionStatus(
   storedStatus?: string,
   isPlaceholder?: boolean
 ): SubscriptionStatus {
-  // إذا لم يكن هناك اشتراك نشط أو هو placeholder
-  if (!storedStatus || storedStatus === 'غير نشط' || storedStatus === 'inactive') {
-    // إذا كان اشتراك placeholder وحزمة مجانية، نعتبره نشط
-    if (storedStatus === 'غير نشط' && isPlaceholder) {
-      return 'active';
-    }
-    return 'pending';
+  // إذا الحالة "غير نشط" → غير نشط
+  if (storedStatus === 'غير نشط' || storedStatus === 'inactive') {
+    return 'inactive';
+  }
+  
+  // إذا لم يكن هناك اشتراك نشط
+  if (!storedStatus || storedStatus === '') {
+    return 'inactive';
   }
   
   // إذا كانت الحالة موقوف أو قيد المراجعة، نرجعها مباشرة
@@ -166,12 +169,11 @@ export function getSubscriptionStatus(
   // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (remainingDays < 0)
   if (remainingDays < 0) return 'expired';
   // اليوم الأخير أو باقي 5 أيام أو أقل ← ينتهي قريباً
-  // إذا كان remainingDays = 0 يعني اليوم هو اليوم الأخير
   if (remainingDays >= 0 && remainingDays <= 5) return 'expiring';
   // أكثر من 5 أيام ← نشط
   return 'active';
 }
-
+   
 /**
  * معلومات حالة الاشتراك للعرض
  */
@@ -228,6 +230,22 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
       bgColor: 'bg-amber-500',
       borderColor: 'border-amber-500',
       icon: '⏳',
+    },
+    inactive: {
+      status: 'inactive',
+      label: 'غير نشط',
+      color: 'text-gray-600',
+      bgColor: 'bg-gray-400',
+      borderColor: 'border-gray-400',
+      icon: '○',
+    },
+    rejected: {
+      status: 'rejected',
+      label: 'مرفوض',
+      color: 'text-red-700',
+      bgColor: 'bg-red-600',
+      borderColor: 'border-red-600',
+      icon: '✗',
     },
   };
   

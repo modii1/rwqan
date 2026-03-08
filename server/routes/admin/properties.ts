@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
-import { propertyService, analyticsService } from "../../services";
+import { propertyService, analyticsService, subscriptionService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
 import { SHEET_MAP } from "../../utils/helpers";
@@ -133,18 +133,46 @@ router.delete("/api/admin/properties/:propertyNumber", async (req, res) => {
 router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
+    console.log(`[APPROVE] Starting approval for property: ${propertyNumber}`);
 
     // تحديث الحالة في الشيت
     const updated = await firebaseService.updateVerificationStatus(
       propertyNumber,
       "approved"
     );
+    console.log(`[APPROVE] Verification status updated to approved for: ${propertyNumber}`);
 
     // تسجيل العملية داخل storage
     await analyticsService.addVerificationLog({
       propertyNumber,
       action: "approved",
     });
+
+    // Check if there's a placeholder subscription and activate it
+    console.log(`[APPROVE] Checking for existing subscription for: ${propertyNumber}`);
+    const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+    console.log(`[APPROVE] Current subscription:`, currentSubscription);
+
+    if (currentSubscription && currentSubscription.status === "غير نشط") {
+      console.log(`[APPROVE] Found placeholder subscription, activating for: ${propertyNumber}`);
+      // Update the placeholder subscription to active
+      await firebaseService.activateSubscription(propertyNumber, {
+        status: "نشط",
+        subscriptionType: "عادي",
+        packageId: "pkg-free",
+      });
+      console.log(`[APPROVE] ✅ Subscription activated for property: ${propertyNumber}`);
+    } else if (!currentSubscription) {
+      console.log(`[APPROVE] No subscription found for: ${propertyNumber}, creating new one`);
+      await firebaseService.activateSubscription(propertyNumber, {
+        status: "نشط",
+        subscriptionType: "عادي",
+        packageId: "pkg-free",
+      });
+      console.log(`[APPROVE] ✅ New subscription created and activated for: ${propertyNumber}`);
+    } else {
+      console.log(`[APPROVE] Subscription already active or not a placeholder: ${propertyNumber}, status: ${currentSubscription?.status}`);
+    }
 
     // إرسال إشعار واتساب عند قبول العقار
     const property = await propertyService.getByNumber(propertyNumber);
@@ -155,6 +183,7 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       admin: "Admin",
     }).catch(err => console.error("WhatsApp notify error:", err));
 
+    console.log(`[APPROVE] Completed for property: ${propertyNumber}`);
     res.json({
       success: true,
       message: "تم قبول العقار",
@@ -162,7 +191,7 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     });
 
   } catch (err) {
-    console.error("Approve Error:", err);
+    console.error("[APPROVE] Error:", err);
     res.status(500).json({ success: false, message: "فشل في قبول العقار" });
   }
 });
@@ -171,12 +200,14 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
     const { reason } = req.body;
+    console.log(`[REJECT] Starting rejection for property: ${propertyNumber}, reason: ${reason}`);
 
     // تحديث الحالة في الشيت
     const updated = await firebaseService.updateVerificationStatus(
       propertyNumber,
       "rejected"
     );
+    console.log(`[REJECT] Verification status updated to rejected for: ${propertyNumber}`);
 
     // تسجيل العملية داخل storage
     await analyticsService.addVerificationLog({
@@ -185,6 +216,11 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
       reason: reason || "",
       admin: "Admin",
     });
+
+    // Cancel/deactivate the subscription when property is rejected
+    console.log(`[REJECT] Cancelling subscription for: ${propertyNumber}`);
+    await firebaseService.cancelSubscription(propertyNumber, reason || "رفض العقار من الإدارة");
+    console.log(`[REJECT] Subscription cancelled for: ${propertyNumber}`);
 
     // إرسال إشعار واتساب عند رفض العقار
     const property = await propertyService.getByNumber(propertyNumber);
@@ -195,6 +231,13 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
       reason: reason || "",
       admin: "Admin",
     }).catch(err => console.error("WhatsApp notify error:", err));
+
+    console.log(`[REJECT] Completed for property: ${propertyNumber}`);
+    res.json({
+      success: true,
+      message: "تم رفض العقار",
+      property: updated,
+    });
 
     res.json({
       success: true,

@@ -178,11 +178,12 @@ export class PaymentService {
 
     const payment = await firebaseService.getPaymentById(paymentId);
     if (payment?.propertyNumber) {
-      await firebaseService.updateVerificationStatus(payment.propertyNumber, "rejected");
+      // Set to pending - admin should manually review and decide to reject or approve
+      await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
       await firebaseService.addVerificationLog({
         date: new Date().toISOString(),
         propertyNumber: payment.propertyNumber,
-        action: "رفض التحقق",
+        action: "رفض الدفع - قيد المراجعة",
         reason: "إيصال دفع غير صحيح",
         admin: "النظام",
       });
