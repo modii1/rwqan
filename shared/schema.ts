@@ -52,6 +52,8 @@ export const subscriptionSchema = z.object({
   status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'active', 'expired', 'cancelled', 'rejected']),
   paymentId: z.string().optional(),
   linkedProperty: z.string().optional(), // رقم العقار المرتبط (لباقات العقارين)
+  linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة
+  propertyCount: z.number().optional(), // عدد العقارات في الاشتراك
   createdAt: z.string().optional(),
   cancelledAt: z.string().optional(),
   cancelReason: z.string().optional(),
@@ -68,12 +70,14 @@ export const packageSchema = z.object({
   id: z.string(),
   name: z.string(),
   duration: z.number(), // بالأيام
-  price: z.number(), // بالريال
+  price: z.number(), // السعر الإجمالي للباقة
+  pricePerProperty: z.number().optional(), // السعر لكل عقار (مثلاً 25 ريال)
   type: z.enum(['عادي', 'مميز', 'موثوق', 'premium', 'trusted', 'normal', 'free', 'مجاني']),
   features: z.array(z.string()).default([]),
   description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),
-  propertyCount: z.number().default(1), // عدد العقارات (1 = عقار واحد، 2 = عقارين)
+  propertyCount: z.number().default(1), // عدد العقارات الافتراضي
+  maxProperties: z.number().optional(), // الحد الأقصى للعقارات المسموح بها
   createdAt: z.string().optional(),
 });
 
@@ -202,7 +206,9 @@ export const paymentSchema = z.object({
   pendingEndDate: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
   pendingPrice: z.number().optional(),
-  secondPropertyNumber: z.string().optional(), // رقم العقار الثاني (لباقات العقارين)
+  secondPropertyNumber: z.string().optional(), // رقم العقار الثاني (لباقات العقارين) - للتوافق مع الكود القديم
+  additionalProperties: z.array(z.string()).optional(), // مصفوفة العقارات الإضافية
+  linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة (بما فيها الرئيسي)
   // بيانات Paymob Transaction
   transactionId: z.string().optional(),
   merchantFees: z.number().optional(), // رسوم التاجر (merchant_fees)
@@ -345,7 +351,10 @@ export const multiPropertySubscriptionSchema = z.object({
   id: z.string(),
   packageId: z.string(),
   propertyNumber1: z.string(), // رقم العقار الأول
-  propertyNumber2: z.string(), // رقم العقار الثاني
+  propertyNumber2: z.string().optional(), // رقم العقار الثاني (للتوافق مع الكود القديم)
+  additionalProperties: z.array(z.string()).optional(), // مصفوفة العقارات الإضافية
+  linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة
+  propertyCount: z.number().optional(), // عدد العقارات
   startDate: z.string(),
   endDate: z.string(),
   status: z.enum(['نشط', 'منتهي', 'معلق']),

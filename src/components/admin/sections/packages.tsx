@@ -19,8 +19,11 @@ type AdminPackage = {
   id: string;
   name: string;
   price: number;
+  pricePerProperty?: number;
   durationDays: number;
   description?: string;
+  propertyCount?: number;
+  maxProperties?: number;
 };
 
 type AddOnPackage = {
@@ -206,7 +209,9 @@ export default function PackagesSection() {
                   <tr>
                     <Th>اسم الباقة</Th>
                     <Th>السعر (ريال)</Th>
+                    <Th>سعر للعقار</Th>
                     <Th>مدة الاشتراك (يوم)</Th>
+                    <Th>الحد الأقصى</Th>
                     <Th>الوصف</Th>
                     <Th>تحكم</Th>
                   </tr>
@@ -216,7 +221,9 @@ export default function PackagesSection() {
                     <tr key={pkg.id} className="border-t hover:bg-muted/40">
                       <Td>{pkg.name}</Td>
                       <Td>{pkg.price}</Td>
+                      <Td>{pkg.pricePerProperty || "-"}</Td>
                       <Td>{pkg.durationDays}</Td>
+                      <Td>{pkg.maxProperties || "-"}</Td>
                       <Td className="max-w-xs truncate">{pkg.description || "-"}</Td>
                       <Td>
                         <Button
@@ -358,6 +365,32 @@ export default function PackagesSection() {
                   onChange={(e) => setEditingPackage({ ...editingPackage, price: Number(e.target.value || 0) })}
                   data-testid="input-package-price"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                  السعر لكل عقار (ريال)
+                </label>
+                <Input
+                  type="number"
+                  value={editingPackage.pricePerProperty || ""}
+                  onChange={(e) => setEditingPackage({ ...editingPackage, pricePerProperty: Number(e.target.value || 0) || undefined })}
+                  placeholder="25"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">يُستخدم لحساب سعر باقات متعددة العقارات</p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                  الحد الأقصى للعقارات
+                </label>
+                <Input
+                  type="number"
+                  value={editingPackage.maxProperties || ""}
+                  onChange={(e) => setEditingPackage({ ...editingPackage, maxProperties: Number(e.target.value || 0) || undefined })}
+                  placeholder="2"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">عدد العقارات المسموح بها في هذه الباقة</p>
               </div>
 
               <div>

@@ -394,7 +394,7 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
 
     // 3. المدفوعات المعلقة (تحتاج موافقة) - تشمل pending و معلق و قيد المراجعة
     const pendingPayments = payments.filter(p =>
-      p.status === 'pending' || p.status === 'معلق' || p.status === 'قيد المراجعة'
+      p.status === 'pending' || p.status === 'معلق' || p.status === 'قيد المراجعة' || p.status === 'نجح - قيد التحقق'
     );
     if (pendingPayments.length > 0) {
       alerts.push({
@@ -467,7 +467,6 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     }
 
     // 5.1 إشعارات واتساب (جميع الطلبات - للعرض في لوحة التحكم)
-    const totalRequestsCount = allRequests.length;
     const recentRequests = allRequests.filter(r => {
       const reqDate = new Date(r.timestamp || "");
       return reqDate >= sevenDaysAgo;

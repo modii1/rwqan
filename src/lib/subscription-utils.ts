@@ -145,10 +145,15 @@ export type SubscriptionStatus =
  */
 export function getSubscriptionStatus(
   endDate: any, 
-  storedStatus?: string
+  storedStatus?: string,
+  isPlaceholder?: boolean
 ): SubscriptionStatus {
   // إذا لم يكن هناك اشتراك نشط أو هو placeholder
   if (!storedStatus || storedStatus === 'غير نشط' || storedStatus === 'inactive') {
+    // إذا كان اشتراك placeholder وحزمة مجانية، نعتبره نشط
+    if (storedStatus === 'غير نشط' && isPlaceholder) {
+      return 'active';
+    }
     return 'pending';
   }
   

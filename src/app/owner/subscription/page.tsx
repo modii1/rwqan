@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
-  Calendar, Timer, Banknote, Info, X, Loader2,
+  Calendar, Timer, Banknote, Info, X, Loader2, Plus,
 } from "lucide-react";
 
 import {
@@ -42,11 +42,9 @@ export default function OwnerSubscriptionPage() {
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [aiScanResult, setAiScanResult] = useState<any>(null);
   
-  // Second property for dual-property packages
-  const [secondPropertyNumber, setSecondPropertyNumber] = useState("");
-  const [secondPropertyVerified, setSecondPropertyVerified] = useState(false);
-  const [secondPropertyError, setSecondPropertyError] = useState("");
-  const [verifyingSecondProperty, setVerifyingSecondProperty] = useState(false);
+  // Additional properties for multi-property packages
+  const [additionalProperties, setAdditionalProperties] = useState<Array<{ number: string; verified: boolean; error: string; verifying: boolean }>>([]);
+  const [verifyingProperty, setVerifyingProperty] = useState<number | null>(null);
 
   // Add-on purchase flow
   const [addOnStep, setAddOnStep] = useState<1 | 2>(1);
@@ -142,43 +140,81 @@ export default function OwnerSubscriptionPage() {
     }
   };
 
-  // Verify second property for dual-property packages
-  const verifySecondProperty = async () => {
-    if (!secondPropertyNumber || secondPropertyNumber.length !== 5) {
-      setSecondPropertyError("رقم العقار يجب أن يكون 5 أرقام");
+  // Add a new additional property
+  const addAdditionalProperty = () => {
+    const maxProps = (selectedPackage as any)?.maxProperties || 2;
+    if (additionalProperties.length >= maxProps - 1) {
+      toast({ title: "الحد الأقصى", description: `الحد الأقصى للعقارات الإضافية هو ${maxProps - 1}`, variant: "destructive" });
+      return;
+    }
+    setAdditionalProperties([...additionalProperties, { number: "", verified: false, error: "", verifying: false }]);
+  };
+
+  // Remove an additional property
+  const removeAdditionalProperty = (index: number) => {
+    setAdditionalProperties(additionalProperties.filter((_, i) => i !== index));
+  };
+
+  // Update additional property number
+  const updateAdditionalPropertyNumber = (index: number, value: string) => {
+    const cleaned = value.replace(/\D/g, '').slice(0, 5);
+    const updated = [...additionalProperties];
+    updated[index] = { ...updated[index], number: cleaned, verified: false, error: "" };
+    setAdditionalProperties(updated);
+  };
+
+  // Verify an additional property
+  const verifyAdditionalProperty = async (index: number) => {
+    const prop = additionalProperties[index];
+    if (!prop.number || prop.number.length !== 5) {
+      const updated = [...additionalProperties];
+      updated[index] = { ...updated[index], error: "رقم العقار يجب أن يكون 5 أرقام" };
+      setAdditionalProperties(updated);
       return;
     }
     
-    setVerifyingSecondProperty(true);
-    setSecondPropertyError("");
+    setVerifyingProperty(index);
+    const updated = [...additionalProperties];
+    updated[index] = { ...updated[index], error: "", verifying: true };
+    setAdditionalProperties(updated);
     
     try {
       const res = await fetch("/api/owner/verify-second-property", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secondPropertyNumber }),
+        body: JSON.stringify({ secondPropertyNumber: prop.number }),
         credentials: "include",
       });
       const data = await res.json();
       
       if (data.ok) {
-        setSecondPropertyVerified(true);
-        toast({ title: "تم التحقق", description: `العقار الثاني: ${data.property?.name || secondPropertyNumber}` });
+        updated[index] = { ...updated[index], verified: true, verifying: false };
+        setAdditionalProperties(updated);
+        toast({ title: "تم التحقق", description: `العقار: ${data.property?.name || prop.number}` });
       } else {
-        setSecondPropertyError(data.error || "فشل في التحقق");
-        setSecondPropertyVerified(false);
+        updated[index] = { ...updated[index], error: data.error || "فشل في التحقق", verified: false, verifying: false };
+        setAdditionalProperties(updated);
       }
     } catch (error: any) {
-      setSecondPropertyError(error.message || "فشل في التحقق");
-      setSecondPropertyVerified(false);
+      updated[index] = { ...updated[index], error: error.message || "فشل في التحقق", verified: false, verifying: false };
+      setAdditionalProperties(updated);
     } finally {
-      setVerifyingSecondProperty(false);
+      setVerifyingProperty(null);
     }
+  };
+
+  // Calculate total price based on additional properties
+  const calculateTotalPrice = () => {
+    if (!selectedPackage) return 0;
+    const pricePerProperty = (selectedPackage as any).pricePerProperty || 25;
+    const propertyCount = 1 + additionalProperties.filter(p => p.verified).length;
+    return pricePerProperty * propertyCount;
   };
 
   // Initiate card payment
   const cardPaymentMutation = useMutation({
     mutationFn: async (data: { packageId: string; action: string; discountCode?: string }) => {
+      const verifiedProperties = additionalProperties.filter(p => p.verified).map(p => p.number);
       const res = await fetch("/api/owner/payment/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -188,7 +224,7 @@ export default function OwnerSubscriptionPage() {
           action: data.action,
           paymentMethod: "cards",
           discountCode: data.discountCode || "",
-          secondPropertyNumber: secondPropertyVerified ? secondPropertyNumber : undefined,
+          additionalProperties: verifiedProperties.length > 0 ? verifiedProperties : undefined,
         }),
         credentials: "include",
       });
@@ -225,7 +261,8 @@ export default function OwnerSubscriptionPage() {
       formData.append("action", data.action);
       formData.append("receipt", data.receipt);
       if (data.discountCode) formData.append("discountCode", data.discountCode);
-      if (secondPropertyVerified) formData.append("secondPropertyNumber", secondPropertyNumber);
+      const verifiedProperties = additionalProperties.filter(p => p.verified).map(p => p.number);
+      if (verifiedProperties.length > 0) formData.append("additionalProperties", JSON.stringify(verifiedProperties));
 
       const res = await fetch("/api/owner/payment/bank-transfer", {
         method: "POST",
@@ -914,10 +951,6 @@ export default function OwnerSubscriptionPage() {
                     onClick={() => { 
                       if (!isDowngrade) {
                         setSelectedPackageId(pkg.id);
-                        // Reset second property when changing package
-                        setSecondPropertyNumber("");
-                        setSecondPropertyVerified(false);
-                        setSecondPropertyError("");
                       }
                     }}
                   >
@@ -1018,48 +1051,88 @@ export default function OwnerSubscriptionPage() {
                 </div>
               )}
 
-              {/* Second Property Input for Dual-Property Packages */}
-              {selectedPackage && (selectedPackage.propertyCount === 2 || selectedPackage.id === 'pkg-month-2properties') && (
+              {/* Additional Properties Input for Multi-Property Packages */}
+              {selectedPackage && ((selectedPackage as any).maxProperties > 1 || selectedPackage.propertyCount === 2 || selectedPackage.id === 'pkg-month-2properties') && (
                 <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-3 flex items-center gap-2">
                     <Crown className="w-5 h-5" />
-                    باقة عقارين - أدخل رقم العقار الثاني
+                    ربط عقارات إضافية
                   </h4>
                   <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
-                    هذه الباقة تشمل عقارين بنفس السعر. يجب أن يكون العقار الثاني مسجلاً بنفس الرقم السري.
+                    يمكنك ربط حتى {(selectedPackage as any).maxProperties || 2} عقار. السعر: 25 ريال لكل عقار إضافي.
                   </p>
-                  <div className="flex gap-2 mb-3">
-                    <Input
-                      type="text"
-                      placeholder="رقم العقار الثاني (5 أرقام)"
-                      maxLength={5}
-                      inputMode="numeric"
-                      value={secondPropertyNumber}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '').slice(0, 5);
-                        setSecondPropertyNumber(val);
-                        setSecondPropertyVerified(false);
-                        setSecondPropertyError("");
-                      }}
-                      className="flex-1"
-                    />
+                  
+                  {/* Dynamic property list */}
+                  {additionalProperties.map((prop, index) => (
+                    <div key={index} className="flex gap-2 mb-3 items-start">
+                      <div className="flex-1">
+                        <div className="flex gap-2">
+                          <Input
+                            type="text"
+                            placeholder={`رقم العقار الإضافي ${index + 1} (5 أرقام)`}
+                            maxLength={5}
+                            inputMode="numeric"
+                            value={prop.number}
+                            onChange={(e) => updateAdditionalPropertyNumber(index, e.target.value)}
+                            className="flex-1"
+                            disabled={prop.verified}
+                          />
+                          {!prop.verified ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => verifyAdditionalProperty(index)}
+                              disabled={prop.number.length !== 5 || prop.verifying || verifyingProperty !== null}
+                              className="border-blue-400 text-blue-700 hover:bg-blue-50"
+                            >
+                              {prop.verifying ? "..." : "تحقق"}
+                            </Button>
+                          ) : (
+                            <div className="flex items-center gap-1 text-green-600 px-2">
+                              <CheckCircle2 className="w-4 h-4" />
+                            </div>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeAdditionalProperty(index)}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        {prop.error && (
+                          <p className="text-sm text-red-600 mt-1">{prop.error}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Add more properties button */}
+                  {additionalProperties.filter(p => p.verified).length < ((selectedPackage as any).maxProperties || 2) - 1 && (
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={verifySecondProperty}
-                      disabled={secondPropertyNumber.length !== 5 || verifyingSecondProperty}
-                      className="border-blue-400 text-blue-700 hover:bg-blue-50"
+                      onClick={addAdditionalProperty}
+                      className="border-blue-400 text-blue-700 hover:bg-blue-50 w-full"
                     >
-                      {verifyingSecondProperty ? "جاري..." : "تحقق"}
+                      <Plus className="w-4 h-4 mr-2" />
+                      إضافة عقار آخر
                     </Button>
-                  </div>
-                  {secondPropertyError && (
-                    <p className="text-sm text-red-600 mb-2">{secondPropertyError}</p>
                   )}
-                  {secondPropertyVerified && (
-                    <div className="flex items-center gap-2 text-green-600 text-sm">
-                      <CheckCircle2 className="w-4 h-4" />
-                      تم التحقق من العقار الثاني بنجاح
+
+                  {/* Price summary */}
+                  {additionalProperties.filter(p => p.verified).length > 0 && (
+                    <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-blue-800 dark:text-blue-200">
+                          {1 + additionalProperties.filter(p => p.verified).length} عقار × {(selectedPackage as any).pricePerProperty || 25} ريال
+                        </span>
+                        <span className="font-bold text-blue-900 dark:text-blue-100">
+                          {calculateTotalPrice()} ريال
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>

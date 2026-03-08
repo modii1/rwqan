@@ -101,6 +101,14 @@ async function sendAdminWhatsAppNotification(options: {
   let responseText = "";
 
   try {
+    console.log("📲 WhatsApp API call - URL:", url);
+    console.log("📲 WhatsApp API call - Phone ID:", WHATSAPP_PHONE_NUMBER_ID ? "present" : "MISSING");
+    console.log("📲 WhatsApp API call - Token:", WHATSAPP_ACCESS_TOKEN ? `present (${WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...)` : "MISSING");
+    console.log("📲 WhatsApp API call - Admin:", ADMIN_WHATSAPP);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+    
     const resp = await fetch(url, {
       method: "POST",
       headers: {
@@ -116,17 +124,32 @@ async function sendAdminWhatsAppNotification(options: {
           body,
         },
       }),
+      signal: controller.signal,
     });
-
+    
+    clearTimeout(timeoutId);
+    
+    console.log("📲 WhatsApp API response status:", resp.status, resp.statusText);
+    
     const data = await resp.json().catch(() => ({}));
     status = resp.ok ? "success" : "error";
-    responseText = JSON.stringify(data).slice(0, 1000); // لا نطوّل كثير
+    responseText = JSON.stringify(data).slice(0, 1000);
 
     console.log("📲 WhatsApp API response:", status, responseText);
   } catch (err: any) {
     status = "error";
-    responseText = String(err?.message || err);
+    const errorMessage = err?.message || String(err);
+    const isTimeout = err?.cause?.code === 'ETIMEDOUT' || errorMessage.includes('ETIMEDOUT');
+    
+    responseText = isTimeout ? `TIMEOUT: ${errorMessage}` : errorMessage;
+    
     console.error("❌ WhatsApp send error:", err);
+    console.error("❌ WhatsApp error cause:", err?.cause);
+    console.error("❌ Is timeout error:", isTimeout);
+    
+    if (isTimeout) {
+      console.error("🔴 WhatsApp API is unreachable! Check server network/firewall settings.");
+    }
   }
 
   // حفظ السجل في Firebase

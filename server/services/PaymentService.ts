@@ -51,7 +51,7 @@ export class PaymentService {
   /**
    * Approve a pending bank-transfer payment.
    * - Activates (or extends) the subscription for the property.
-   * - If payment is for two properties, activates both and creates a multi-property record.
+   * - If payment is for multiple properties, activates all and creates multi-property records.
    * - Auto-approves verification for the property.
    * - Logs the verification action.
    * - Sends a WhatsApp notification to the owner.
@@ -82,8 +82,14 @@ export class PaymentService {
           endDate = calculateExtensionEndDate(startDate, pkg.duration);
         }
 
-        const isMultiProperty = !!(payment as any).secondPropertyNumber;
-        const pricePerProperty = isMultiProperty ? payment.finalAmount / 2 : payment.finalAmount;
+        const additionalProps = (payment as any).additionalProperties || [];
+        const secondProp = (payment as any).secondPropertyNumber;
+        if (secondProp && !additionalProps.includes(secondProp)) {
+          additionalProps.push(secondProp);
+        }
+        const totalProperties = 1 + additionalProps.length;
+        
+        const pricePerProperty = (payment.finalAmount || pkg.price) / totalProperties;
         const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
 
         const subscriptionData = {
@@ -103,26 +109,31 @@ export class PaymentService {
           payment.receiptUrl ?? ""
         );
 
-        if ((payment as any).secondPropertyNumber) {
-          const secondProperty = await firebaseService.getPropertyByNumber((payment as any).secondPropertyNumber);
-          if (secondProperty) {
+        // Activate all additional properties
+        for (const propNumber of additionalProps) {
+          const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
+          if (additionalProperty) {
             await firebaseService.addSubscriptionToSheet(
-              (payment as any).secondPropertyNumber,
+              propNumber,
               { ...subscriptionData, linkedProperty: payment.propertyNumber },
-              secondProperty,
+              additionalProperty,
               payment.receiptUrl ?? ""
             );
-
-            await firebaseService.createMultiPropertySubscription({
-              packageId: pkg.id,
-              propertyNumber1: payment.propertyNumber,
-              propertyNumber2: (payment as any).secondPropertyNumber,
-              startDate: subscriptionData.startDate,
-              endDate: subscriptionData.endDate,
-              status: "نشط",
-              paymentId: payment.id,
-            });
           }
+        }
+
+        // Create multi-property subscription record
+        if (additionalProps.length > 0) {
+          await firebaseService.createMultiPropertySubscription({
+            packageId: pkg.id,
+            propertyNumber1: payment.propertyNumber,
+            propertyNumber2: additionalProps[0],
+            additionalProperties: additionalProps,
+            startDate: subscriptionData.startDate,
+            endDate: subscriptionData.endDate,
+            status: "نشط",
+            paymentId: payment.id,
+          });
         }
       }
     }
@@ -175,6 +186,9 @@ export class PaymentService {
         reason: "إيصال دفع غير صحيح",
         admin: "النظام",
       });
+      
+      // Cancel the subscription when payment is rejected
+      await firebaseService.cancelSubscription(payment.propertyNumber, "تم رفض الدفع");
     }
   }
 

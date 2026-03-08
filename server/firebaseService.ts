@@ -380,7 +380,7 @@ export class FirebaseService {
             id,
             ...request,
             ...(requestCountFromIP !== undefined ? { requestCountFromIP } : {}),
-            createdAt: new Date().toISOString(),
+            timestamp: new Date().toISOString(), // Changed from createdAt to timestamp
         } as Request;
 
         await this.db.collection("requests").doc(id).set(newRequest);
@@ -902,7 +902,7 @@ export class FirebaseService {
         });
 
         const pendingPayments = payments.filter(p =>
-            p.status === "قيد المراجعة" || p.status === "معلق"
+            p.status === "قيد المراجعة" || p.status === "معلق" || p.status === "نجح - قيد التحقق"
         ).length;
 
         const calculateNetProfit = (paymentsList: any[]) => {

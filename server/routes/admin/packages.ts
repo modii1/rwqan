@@ -34,11 +34,13 @@ router.post("/api/admin/packages", requireAdmin, async (req, res) => {
       duration: durationValue,
       durationDays: durationValue,
       price: req.body.price || 0,
+      pricePerProperty: req.body.pricePerProperty || undefined,
       type: req.body.type || "مميز",
       features: req.body.features || (req.body.description ? [req.body.description] : []),
       description: req.body.description || "",
       isActive: req.body.isActive !== false,
       propertyCount: req.body.propertyCount || 1,
+      maxProperties: req.body.maxProperties || undefined,
     };
     const newPkg = await firebaseService.createPackage(pkgData);
     res.json(newPkg);
@@ -60,6 +62,7 @@ router.put("/api/admin/packages/:id", requireAdmin, async (req, res) => {
       pkgData.durationDays = dur;
     }
     if (req.body.price !== undefined) pkgData.price = req.body.price;
+    if (req.body.pricePerProperty !== undefined) pkgData.pricePerProperty = req.body.pricePerProperty || null;
     if (req.body.type !== undefined) pkgData.type = req.body.type;
     if (req.body.features !== undefined) pkgData.features = req.body.features;
     if (req.body.description !== undefined && !req.body.features) {
@@ -67,6 +70,7 @@ router.put("/api/admin/packages/:id", requireAdmin, async (req, res) => {
     }
     if (req.body.isActive !== undefined) pkgData.isActive = req.body.isActive;
     if (req.body.propertyCount !== undefined) pkgData.propertyCount = req.body.propertyCount;
+    if (req.body.maxProperties !== undefined) pkgData.maxProperties = req.body.maxProperties || null;
 
     const updated = await firebaseService.updatePackage(id, pkgData);
     if (!updated) {

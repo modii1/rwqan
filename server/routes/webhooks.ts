@@ -505,13 +505,14 @@ const router = Router();
         const property = await propertyService.getByNumber(payment.propertyNumber);
 
         if (property) {
-          // تحقق إذا كانت باقة عقارين
-          const isMultiPropertyPackage = !!(payment as any).secondPropertyNumber;
-          const pricePerProperty = isMultiPropertyPackage
-            ? (payment.pendingPrice || payment.finalAmount) / 2
-            : (payment.pendingPrice || payment.finalAmount);
-
-          // تحديد نوع الاشتراك (مميز إذا مدفوع)
+          const additionalProps = (payment as any).additionalProperties || [];
+          const secondProp = (payment as any).secondPropertyNumber;
+          if (secondProp && !additionalProps.includes(secondProp)) {
+            additionalProps.push(secondProp);
+          }
+          const totalProperties = 1 + additionalProps.length;
+          
+          const pricePerProperty = (payment.pendingPrice || payment.finalAmount) / totalProperties;
           const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "موثوق" || payment.pendingSubscriptionType === "مميز";
 
           const subscriptionData = {
@@ -522,7 +523,7 @@ const router = Router();
             startDate: payment.pendingStartDate,
             endDate: payment.pendingEndDate,
             paymentId: payment.id,
-            linkedProperty: isMultiPropertyPackage ? (payment as any).secondPropertyNumber : undefined,
+            linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
           };
 
           console.log(`📦 [Webhook] Payment: ${payment.id}, isPremium: ${isPremiumPayment}, subscriptionType: ${subscriptionData.subscriptionType}`);
@@ -535,21 +536,35 @@ const router = Router();
 
           console.log(`🎉 Subscription Activated: ${payment.propertyNumber} (price: ${pricePerProperty}, type: ${subscriptionData.subscriptionType})`);
 
-          // === إضافة اشتراك للعقار الثاني إذا كانت باقة عقارين ===
-          if (isMultiPropertyPackage) {
-            const secondProperty = await propertyService.getByNumber((payment as any).secondPropertyNumber);
-            if (secondProperty) {
-              const secondSubscriptionData = {
+          // === إضافة اشتراك للعقارات الإضافية ===
+          for (const propNumber of additionalProps) {
+            const additionalProperty = await propertyService.getByNumber(propNumber);
+            if (additionalProperty) {
+              const additionalSubscriptionData = {
                 ...subscriptionData,
                 linkedProperty: payment.propertyNumber,
               };
               await firebaseService.addSubscriptionToSheet(
-                (payment as any).secondPropertyNumber,
-                secondSubscriptionData,
-                secondProperty
+                propNumber,
+                additionalSubscriptionData,
+                additionalProperty
               );
-              console.log(`🎉 Second property subscription activated: ${(payment as any).secondPropertyNumber} (price: ${pricePerProperty})`);
+              console.log(`🎉 Additional property subscription activated: ${propNumber} (price: ${pricePerProperty})`);
             }
+          }
+
+          // Create multi-property subscription record
+          if (additionalProps.length > 0) {
+            await firebaseService.createMultiPropertySubscription({
+              packageId: payment.packageId,
+              propertyNumber1: payment.propertyNumber,
+              propertyNumber2: additionalProps[0],
+              additionalProperties: additionalProps,
+              startDate: subscriptionData.startDate,
+              endDate: subscriptionData.endDate,
+              status: "نشط",
+              paymentId: payment.id,
+            });
           }
         }
       } else if (isNewRegistration) {

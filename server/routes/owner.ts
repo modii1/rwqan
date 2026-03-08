@@ -562,7 +562,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
   try {
-    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
     const isAddon = action === "addon";
 
     if (!propertyNumber) {
@@ -580,13 +580,23 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
     if (!property) return res.status(404).json({ error: "العقار غير موجود" });
 
-    // Calculate final price with discount
-    let finalAmount = pkg.price;
+    // Handle multiple additional properties
+    const allAdditionalProps = additionalProperties || [];
+    if (secondPropertyNumber && !allAdditionalProps.includes(secondPropertyNumber)) {
+      allAdditionalProps.push(secondPropertyNumber);
+    }
+    
+    // Calculate final price based on number of properties
+    const pricePerProperty = pkg.pricePerProperty || 25;
+    const propertyCount = 1 + allAdditionalProps.length;
+    let finalAmount = pricePerProperty * propertyCount;
+    
+    // Apply discount
     if (discountCode) {
       const discount = await firebaseService.getDiscountCodeByCode(discountCode);
       if (discount && discount.isActive) {
         if (discount.type === "نسبة") {
-          finalAmount -= (pkg.price * discount.value) / 100;
+          finalAmount -= (pricePerProperty * propertyCount * discount.value) / 100;
         } else {
           finalAmount -= discount.value;
         }
@@ -622,14 +632,16 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
-      amount: pkg.price,
+      amount: pricePerProperty * propertyCount,
       discountCode: discountCode || "",
-      discountAmount: pkg.price - finalAmount,
+      discountAmount: (pricePerProperty * propertyCount) - finalAmount,
       finalAmount,
       status: "قيد التحقق",
       paymentMethod: "تحويل بنكي",
       receiptUrl,
       secondPropertyNumber: secondPropertyNumber || undefined,
+      additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
+      linkedProperties: [propertyNumber, ...allAdditionalProps],
       paymentReference,
     } as any);
 
@@ -1265,7 +1277,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 
 router.post("/api/owner/payment/initiate", async (req, res) => {
   try {
-    const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber } = req.body;
+    const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
     const sessionPropertyNumber = (req.session as any).propertyNumber;
     const propertyNumber = bodyPropertyNumber || sessionPropertyNumber;
 
@@ -1283,18 +1295,27 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
 
-    let finalAmount = pkg.price;
+    // Handle multiple additional properties
+    const allAdditionalProps = additionalProperties || [];
+    if (secondPropertyNumber && !allAdditionalProps.includes(secondPropertyNumber)) {
+      allAdditionalProps.push(secondPropertyNumber);
+    }
+    
+    // Calculate final price based on number of properties
+    const pricePerProperty = pkg.pricePerProperty || 25;
+    const propertyCount = 1 + allAdditionalProps.length;
+    let finalAmount = pricePerProperty * propertyCount;
     let discountAmount = 0;
 
     if (discountCode) {
       const discount = await storage.getDiscountCodeByCode(discountCode);
       if (discount && discount.isActive) {
         if (discount.type === "نسبة") {
-          discountAmount = (pkg.price * discount.value) / 100;
+          discountAmount = (pricePerProperty * propertyCount * discount.value) / 100;
           finalAmount -= discountAmount;
         } else {
           discountAmount = discount.value;
-          finalAmount -= discountAmount;
+          finalAmount -= discount.value;
         }
       }
     }
@@ -1302,13 +1323,15 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
-      amount: pkg.price,
+      amount: pricePerProperty * propertyCount,
       discountCode: discountCode || "",
       discountAmount,
       finalAmount,
       status: "قيد المراجعة",
       paymentMethod: "بطاقة",
       secondPropertyNumber: secondPropertyNumber || undefined,
+      additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
+      linkedProperties: [propertyNumber, ...allAdditionalProps],
     } as any);
 
     const paymentReference = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
