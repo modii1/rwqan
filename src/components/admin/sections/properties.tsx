@@ -544,7 +544,7 @@ export default function PropertiesSection() {
                       value={editing.name}
                       onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                       placeholder="اسم العقار"
-                      maxLength={25}
+                      maxLength={20}
                       data-testid="input-name"
                     />
                   </div>

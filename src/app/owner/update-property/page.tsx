@@ -275,7 +275,7 @@ export default function UpdatePropertyPage() {
                                     value={form.name}
                                     onChange={(e) => setForm({ ...form, name: validateTextInput(e.target.value) })}
                                     placeholder="اسم العقار"
-                                    maxLength={25}
+                                    maxLength={20}
                                     data-testid="input-name"
                                 />
                             </div>

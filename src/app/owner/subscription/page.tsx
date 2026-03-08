@@ -48,6 +48,14 @@ export default function OwnerSubscriptionPage() {
   const [secondPropertyError, setSecondPropertyError] = useState("");
   const [verifyingSecondProperty, setVerifyingSecondProperty] = useState(false);
 
+  // Add-on purchase flow
+  const [addOnStep, setAddOnStep] = useState<1 | 2>(1);
+  const [selectedAddOn, setSelectedAddOn] = useState<any>(null);
+  const [addOnPaymentMethod, setAddOnPaymentMethod] = useState<"online" | "bank" | null>(null);
+  const [addOnReceiptFile, setAddOnReceiptFile] = useState<File | null>(null);
+  const [addOnPaymentSuccess, setAddOnPaymentSuccess] = useState(false);
+  const [addOnAiScanResult, setAddOnAiScanResult] = useState<any>(null);
+
   interface AIScanResult {
     recommendation: string;
     confidence: number;
@@ -59,7 +67,7 @@ export default function OwnerSubscriptionPage() {
   // Fetch default bank account for bank transfer
   const { data: bankAccount } = useQuery<any>({
     queryKey: ["/api/bank-accounts/default"],
-    enabled: paymentMethod === "bank",
+    enabled: paymentMethod === "bank" || addOnPaymentMethod === "bank",
   });
 
   // Auth check
@@ -271,6 +279,66 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
+  // Add-on online payment with discount support
+  const addonOnlinePaymentMutation = useMutation({
+    mutationFn: async (data: { addOnPackageId: string; discountCode?: string }) => {
+      const res = await fetch("/api/owner/addons/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          propertyNumber: property?.propertyNumber,
+          addOnPackageId: data.addOnPackageId,
+          discountCode: data.discountCode || "",
+        }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "فشل في الدفع");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Add-on bank transfer
+  const addonBankTransferMutation = useMutation({
+    mutationFn: async (data: { addOnPackageId: string; receipt: File }) => {
+      const formData = new FormData();
+      formData.append("propertyNumber", property?.propertyNumber || "");
+      formData.append("addOnPackageId", data.addOnPackageId);
+      formData.append("receipt", data.receipt);
+
+      const res = await fetch("/api/owner/addons/bank-transfer", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "فشل في إرسال التحويل");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
+      if (data.aiScan) {
+        setAddOnAiScanResult(data.aiScan);
+      }
+      setAddOnPaymentSuccess(true);
+    },
+    onError: (err: Error) => {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    },
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPackageId) return;
@@ -283,6 +351,26 @@ export default function OwnerSubscriptionPage() {
         return;
       }
       bankTransferMutation.mutate({ packageId: selectedPackageId, action, receipt: receiptFile, discountCode: validatedDiscount?.code });
+    }
+  };
+
+  // Handle add-on purchase submit
+  const handleAddOnSubmit = async () => {
+    if (!selectedAddOn) return;
+
+    if (addOnPaymentMethod === "online") {
+      addonOnlinePaymentMutation.mutate({ 
+        addOnPackageId: selectedAddOn.id
+      });
+    } else if (addOnPaymentMethod === "bank") {
+      if (!addOnReceiptFile) {
+        toast({ title: "مطلوب", description: "يرجى رفع إيصال التحويل", variant: "destructive" });
+        return;
+      }
+      addonBankTransferMutation.mutate({ 
+        addOnPackageId: selectedAddOn.id,
+        receipt: addOnReceiptFile
+      });
     }
   };
 
@@ -358,6 +446,114 @@ export default function OwnerSubscriptionPage() {
       default: return "bg-slate-500";
     }
   };
+
+  // Add-on Payment Success Screen
+  if (addOnPaymentSuccess) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
+        <Card className="max-w-lg w-full p-8 text-center space-y-6">
+          <div className="flex justify-center">
+            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+              <Clock className="w-10 h-10 text-[#c9951d]" />
+            </div>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-[#434040] mb-2">تم استلام طلبك بنجاح!</h1>
+            <p className="text-muted-foreground">طلب شراء إضافة قيد المراجعة</p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Home className="w-4 h-4" />رقم العقار
+              </span>
+              <span className="font-bold text-lg">{property?.propertyNumber}</span>
+            </div>
+            {selectedAddOn && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">الإضافة</span>
+                <Badge className="bg-[#c9951d] text-white">{selectedAddOn.name}</Badge>
+              </div>
+            )}
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-right">
+                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
+                <p className="text-sm text-amber-700">
+                  تم استلام إيصال الدفع. سيتم تفعيل الإضافة بعد التحقق من التحويل البنكي خلال 24 ساعة.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Scan Results */}
+          {addOnAiScanResult && (
+            <div className={`p-4 rounded-lg border ${
+              addOnAiScanResult.recommendation === 'تفعيل_تلقائي' 
+                ? 'bg-emerald-50 border-emerald-300' 
+                : addOnAiScanResult.recommendation === 'رفض'
+                ? 'bg-red-50 border-red-300'
+                : 'bg-amber-50 border-amber-300'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
+                <Badge variant="outline" className={
+                  addOnAiScanResult.recommendation === 'تفعيل_تلقائي' 
+                    ? 'border-emerald-500 text-emerald-600' 
+                    : addOnAiScanResult.recommendation === 'رفض'
+                    ? 'border-red-500 text-red-600'
+                    : 'border-amber-500 text-amber-600'
+                }>
+                  {addOnAiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
+                  {addOnAiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
+                  {addOnAiScanResult.recommendation === 'رفض' && 'غير مطابق'}
+                </Badge>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة الأصالة</span>
+                    <span className="font-bold">{addOnAiScanResult.authenticityScore}%</span>
+                  </div>
+                  <Progress value={addOnAiScanResult.authenticityScore} className="h-2" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">نسبة التطابق</span>
+                    <span className="font-bold">{addOnAiScanResult.matchScore}%</span>
+                  </div>
+                  <Progress value={addOnAiScanResult.matchScore} className="h-2" />
+                </div>
+              </div>
+
+              {addOnAiScanResult.summary && (
+                <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                  {addOnAiScanResult.summary}
+                </p>
+              )}
+
+              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+                مستوى الثقة: {addOnAiScanResult.confidence}%
+              </div>
+            </div>
+          )}
+
+          <div className="text-sm text-muted-foreground">
+            <p className="flex items-center justify-center gap-2">
+              <Phone className="w-4 h-4" />للاستفسار: 0533220646
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            <Button onClick={() => { setAddOnPaymentSuccess(false); setSelectedAddOn(null); setAddOnStep(1); setAddOnAiScanResult(null); }} className="w-full bg-[#434040] hover:bg-[#333]">
+              العودة لصفحة الاشتراك
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (subLoading) {
     return (
@@ -536,7 +732,7 @@ export default function OwnerSubscriptionPage() {
               <div className="flex items-start gap-2">
                 <Timer className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-muted-foreground text-xs">المدة</p>
+                  <p className="text-muted-foreground text-xs">مدة الاشتراك</p>
                   <p className="font-bold text-muted-foreground">{subscriptionDuration || currentPackageObj?.duration || 30} يوم</p>
                 </div>
               </div>
@@ -1009,6 +1205,164 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
+        {/* ===== Add-on Payment Flow (Step 1 & 2) ===== */}
+        {selectedAddOn && (
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-[#434040]">شراء إضافة - {selectedAddOn.name}</h2>
+              <Button variant="ghost" size="icon" onClick={() => { setSelectedAddOn(null); setAddOnStep(1); }}>
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            {/* Add-on Summary */}
+            <div className="p-4 bg-muted/30 rounded-lg flex items-center justify-between mb-6">
+              <div>
+                <p className="text-sm text-muted-foreground">الإضافة</p>
+                <p className="font-bold">{selectedAddOn.name}</p>
+                {selectedAddOn.category && (
+                  <Badge className={`${getCategoryColor(selectedAddOn.category)} text-white text-xs mt-1`}>
+                    {selectedAddOn.category}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-left">
+                <PriceDisplay amount={selectedAddOn.price} size="lg" />
+                <p className="text-xs text-muted-foreground">{selectedAddOn.duration} يوم</p>
+              </div>
+            </div>
+
+            {/* Step 2: Payment Method */}
+            <div>
+              <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
+              <div className="space-y-3">
+                <div
+                  onClick={() => { setAddOnPaymentMethod("online"); setAddOnStep(2); }}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "online" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                >
+                  <div className="font-semibold flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-[#434040]" />
+                    الدفع الإلكتروني
+                  </div>
+                  <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay — تفعيل فوري</p>
+                </div>
+                <div
+                  onClick={() => { setAddOnPaymentMethod("bank"); setAddOnStep(2); }}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "bank" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                >
+                  <div className="font-semibold">تحويل بنكي</div>
+                  <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل — خلال 24 ساعة</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bank Transfer Details */}
+            {addOnPaymentMethod === "bank" && (
+              <div className="mt-4 p-4 bg-muted/30 rounded-lg space-y-3">
+                <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <CreditCard className="w-6 h-6 text-blue-700" />
+                    <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
+                  </div>
+                  {bankAccount ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                        <span className="text-sm font-semibold text-blue-700">البنك</span>
+                        <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                        <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
+                        <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                        <span className="text-sm font-semibold text-blue-700">IBAN</span>
+                        <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                      </div>
+                      {bankAccount.accountNumber && (
+                        <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                          <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
+                          <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                        </div>
+                      )}
+                      {bankAccount.barcodeUrl && (
+                        <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                          <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                          <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
+                        </div>
+                      )}
+                      <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                        <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                        <img 
+                          src="/assets/bank-qr.png" 
+                          alt="QR Code للدفع" 
+                          className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                          onClick={() => window.open('/assets/bank-qr.png', '_blank')}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
+                  )}
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2">
+                    <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
+                    <ul className="text-sm text-amber-700 space-y-1">
+                      <li>• الرمز المرجعي: <span className="font-mono font-bold">RWQN-MRQDHB</span></li>
+                      <li>• رقم العقار</li>
+                    </ul>
+                  </div>
+                </div>
+                
+                {/* Receipt Upload */}
+                <div>
+                  <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setAddOnReceiptFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                    id="add-on-receipt"
+                  />
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => document.getElementById('add-on-receipt')?.click()}
+                    className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {addOnReceiptFile ? addOnReceiptFile.name : "اختر صورة الإيصال"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Submit Buttons */}
+            <div className="flex gap-3 pt-6 border-t mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setSelectedAddOn(null); setAddOnStep(1); }}
+                className="gap-2"
+              >
+                <ChevronRight className="w-4 h-4" />
+                رجوع
+              </Button>
+              <Button
+                type="button"
+                disabled={!addOnPaymentMethod || addonOnlinePaymentMutation.isPending || addonBankTransferMutation.isPending || (addOnPaymentMethod === "bank" && !addOnReceiptFile)}
+                onClick={handleAddOnSubmit}
+                className="flex-1 bg-[#434040] hover:bg-[#333]"
+              >
+                {(addonOnlinePaymentMutation.isPending || addonBankTransferMutation.isPending) ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                    جاري المعالجة...
+                  </>
+                ) : addOnPaymentMethod === "online" ? "دفع إلكتروني" : "تأكيد التحويل"}
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {/* Add-ons Section */}
         {addOnPackages && addOnPackages.length > 0 && (
           <Card className="p-6">
@@ -1079,7 +1433,12 @@ export default function OwnerSubscriptionPage() {
                         size="sm"
                         className="w-full mt-2 bg-orange-500 hover:bg-orange-600 border-2 border-orange-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
                         disabled={addonPaymentMutation.isPending}
-                        onClick={() => addonPaymentMutation.mutate(pkg.id)}
+                        onClick={() => {
+                          setSelectedAddOn(pkg);
+                          setAddOnStep(1);
+                          setAddOnPaymentMethod(null);
+                          setAddOnReceiptFile(null);
+                        }}
                       >
                         شراء الإضافة
                       </Button>

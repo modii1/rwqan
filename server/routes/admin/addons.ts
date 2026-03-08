@@ -8,6 +8,7 @@ import { sendWhatsAppNotification } from "../../integrations/whatsapp";
 import { upload } from "../../utils/helpers";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { scanReceiptWithAI } from "../../integrations/aiReceiptScanner";
 
 const router = Router();
 
@@ -291,7 +292,7 @@ router.get("/api/owner/property-addons", async (req, res) => {
 // =======================================
 router.post("/api/owner/addons/pay", async (req, res) => {
   try {
-    const { propertyNumber, addOnPackageId } = req.body;
+    const { propertyNumber, addOnPackageId, discountCode } = req.body;
 
     if (!propertyNumber || !addOnPackageId) {
       return res.status(400).json({ error: "بيانات ناقصة" });
@@ -390,7 +391,7 @@ router.post("/api/owner/addons/pay", async (req, res) => {
 // =======================================
 router.post("/api/owner/addons/bank-transfer", upload.single('receipt'), async (req, res) => {
   try {
-    const { propertyNumber, addOnPackageId, amount } = req.body;
+    const { propertyNumber, addOnPackageId, amount, discountCode } = req.body;
     const receiptFile = req.file;
 
     if (!propertyNumber || !addOnPackageId || !receiptFile) {
@@ -467,15 +468,37 @@ router.post("/api/owner/addons/bank-transfer", upload.single('receipt'), async (
       createdAt: now.toISOString(),
     });
 
+    // AI Receipt Scanning
+    let aiScanResult = null;
+    try {
+      aiScanResult = await scanReceiptWithAI(
+        receiptUrl,
+        paymentId,
+        addon.price,
+        propertyNumber
+      );
+
+      if (aiScanResult) {
+        console.log(`🔬 [AI Scanner] تم فحص إيصال الإضافة: ${paymentId}, التوصية: ${aiScanResult.recommendation}`);
+      }
+    } catch (aiError) {
+      console.error("AI scan error for addon:", aiError);
+    }
+
     // إرسال إشعار واتساب للإدارة
     try {
-      await sendWhatsAppNotification(
-        `📦 طلب إضافة جديد (تحويل بنكي)\n` +
+      let notificationMessage = `📦 طلب إضافة جديد (تحويل بنكي)\n` +
         `العقار: ${propertyNumber} - ${property.name}\n` +
         `الإضافة: ${addon.name}\n` +
         `المبلغ: ${addon.price} ر.س\n` +
-        `رابط الإيصال: ${receiptUrl}`
-      );
+        `رابط الإيصال: ${receiptUrl}`;
+      
+      if (aiScanResult) {
+        notificationMessage += `\n🔬 نتيجة الفحص: ${aiScanResult.recommendation}\n` +
+          `📊 نسبة التطابق: ${aiScanResult.matchAnalysis?.matchScore || 0}%`;
+      }
+      
+      await sendWhatsAppNotification(notificationMessage);
     } catch (e) {
       console.error("Failed to send WhatsApp notification:", e);
     }
@@ -484,7 +507,14 @@ router.post("/api/owner/addons/bank-transfer", upload.single('receipt'), async (
       success: true,
       message: "تم رفع الإيصال بنجاح، سيتم مراجعته وتفعيل الإضافة",
       addOnId,
-      paymentId
+      paymentId,
+      aiScan: aiScanResult ? {
+        recommendation: aiScanResult.recommendation,
+        confidence: aiScanResult.confidence,
+        summary: aiScanResult.summary,
+        matchScore: aiScanResult.matchAnalysis?.matchScore,
+        authenticityScore: aiScanResult.authenticityAnalysis?.overallScore,
+      } : null
     });
   } catch (err) {
     console.error("Bank transfer addon error:", err);

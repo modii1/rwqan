@@ -6,7 +6,7 @@ import { createInsertSchema } from "drizzle-zod";
 // =========================
 export const propertySchema = z.object({
   propertyNumber: z.string(), // رقم العقار (5 أرقام)
-  name: z.string(),
+  name: z.string().max(20, "اسم العقار يجب ألا يتجاوز 20 حرف"),
   whatsappNumber: z.string(), // رقم واتساب للتواصل
   location: z.string().optional(), // الموقع (رابط خرائط)
   city: z.enum(['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'عيون الجواء', 'رياض الخبراء']),
@@ -231,7 +231,7 @@ export const analyticsSchema = z.object({
     tablet: z.number(),
   }),
   cities: z.array(z.object({
-    name: z.string(),
+  name: z.string().max(20, "اسم العقار يجب ألا يتجاوز 20 حرف"),
     count: z.number(),
   })),
   lastUpdated: z.string(),
