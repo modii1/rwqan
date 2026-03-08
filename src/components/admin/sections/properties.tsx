@@ -547,6 +547,7 @@ export default function PropertiesSection() {
                       maxLength={20}
                       data-testid="input-name"
                     />
+                    <span className="text-xs text-muted-foreground">{editing.name?.length || 0}/20 حرف</span>
                   </div>
 
                   <div>

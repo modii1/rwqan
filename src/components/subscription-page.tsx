@@ -654,6 +654,7 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="شالية مودي"
                     value={formData.name}
+                    maxLength={20}
                     onChange={(e) => {
                       const cleaned = validateTextInput(e.target.value);
                       setFormData({ ...formData, name: cleaned });
@@ -662,6 +663,7 @@ export default function SubscriptionPage() {
                     className={errors.name ? "border-red-500" : ""}
                   />
                   {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+                  <p className="text-xs text-muted-foreground mt-1">{formData.name.length}/20 حرف</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
