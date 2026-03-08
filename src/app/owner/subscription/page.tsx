@@ -415,10 +415,11 @@ export default function OwnerSubscriptionPage() {
   const remainingDays = subscription?.endDate
     ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
     : 0;
+  
   const isExpired = remainingDays < 0;
   const isNearExpiry = remainingDays >= 0 && remainingDays <= 7;
   const canExtend = subscription?.endDate
-    ? canExtendSubscription(subscription.endDate)
+    ? canExtendSubscription(subscription.endDate, subscription?.status)
     : true; // expired = can extend
 
   // Subscription duration & status
@@ -426,7 +427,7 @@ export default function OwnerSubscriptionPage() {
     ? calculateSubscriptionDuration(subscription.startDate, subscription.endDate)
     : 0;
   const subStatus = subscription?.endDate
-    ? getSubscriptionStatus(subscription.endDate, subscription?.status)
+    ? getSubscriptionStatus(subscription.endDate, subscription?.status, subscription?.isPlaceholder)
     : 'expired';
   const statusInfo = getStatusInfo(subStatus);
 

@@ -317,7 +317,11 @@ export default function UpdatePropertyPage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-2">النوع</label>
-                                <Select value={TYPES.includes(form.type) ? form.type : ""} onValueChange={(v) => setForm({ ...form, type: v })}>
+                                <Select value={form.type} onValueChange={(v) => {
+                                    if (TYPES.includes(v)) {
+                                        setForm({ ...form, type: v });
+                                    }
+                                }}>
                                     <SelectTrigger><SelectValue placeholder="اختر النوع" /></SelectTrigger>
                                     <SelectContent>
                                         {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
