@@ -544,10 +544,10 @@ export default function PropertiesSection() {
                       value={editing.name}
                       onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                       placeholder="اسم العقار"
-                      maxLength={20}
+                      maxLength={30}
                       data-testid="input-name"
                     />
-                    <span className="text-xs text-muted-foreground">{editing.name?.length || 0}/20 حرف</span>
+                    <span className="text-xs text-muted-foreground">{editing.name?.length || 0}/30 حرف</span>
                   </div>
 
                   <div>
@@ -581,7 +581,7 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.city || ""}
-                      onValueChange={(v) => setEditing({ ...editing, city: v })}
+                      onValueChange={(v) => { if (v) setEditing({ ...editing, city: v }); }}
                     >
                       <SelectTrigger data-testid="select-city">
                         <SelectValue placeholder="اختر المدينة" />
@@ -600,7 +600,7 @@ export default function PropertiesSection() {
                     </label>
                     <Select
                       value={editing.direction || ""}
-                      onValueChange={(v) => setEditing({ ...editing, direction: v })}
+                      onValueChange={(v) => { if (v) setEditing({ ...editing, direction: v }); }}
                     >
                       <SelectTrigger data-testid="select-direction">
                         <SelectValue placeholder="اختر الاتجاه" />

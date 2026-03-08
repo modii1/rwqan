@@ -275,10 +275,10 @@ export default function UpdatePropertyPage() {
                                     value={form.name}
                                     onChange={(e) => setForm({ ...form, name: validateTextInput(e.target.value) })}
                                     placeholder="اسم العقار"
-                                    maxLength={20}
+                                    maxLength={30}
                                     data-testid="input-name"
                                 />
-                                <span className="text-xs text-muted-foreground">{form.name?.length || 0}/20 حرف</span>
+                                <span className="text-xs text-muted-foreground">{form.name?.length || 0}/30 حرف</span>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-2">رقم واتساب</label>
@@ -300,29 +300,47 @@ export default function UpdatePropertyPage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-2">المدينة</label>
-                                <Select value={form.city} onValueChange={(v) => setForm({ ...form, city: v })}>
+                                <Select 
+                                    value={form.city || ""} 
+                                    onValueChange={(v) => { 
+                                        if (v) {
+                                            setForm((prev: any) => ({ ...prev, city: v }));
+                                        }
+                                    }}
+                                >
                                     <SelectTrigger><SelectValue placeholder="اختر المدينة" /></SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent position="popper" sideOffset={4}>
                                         {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
                             </div>
+
                             <div>
                                 <label className="block text-sm font-semibold mb-2">الاتجاه</label>
-                                <Select value={form.direction} onValueChange={(v) => setForm({ ...form, direction: v })}>
+                                <Select 
+                                    value={form.direction || ""}
+                                    onValueChange={(v) => { 
+                                        if (v) {
+                                            setForm((prev: any) => ({ ...prev, direction: v }));
+                                        }
+                                    }}
+                                >
                                     <SelectTrigger><SelectValue placeholder="اختر الاتجاه" /></SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent position="popper" sideOffset={4}>
                                         {DIRECTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-2">النوع</label>
-                                <Select value={form.type} onValueChange={(v) => {
-                                    if (TYPES.includes(v)) {
-                                        setForm({ ...form, type: v });
-                                    }
-                                }}>
+                                <Select 
+                                    value={form.type || ""} 
+                                    onValueChange={(v) => {
+                                        if (v && TYPES.includes(v)) {
+                                            setForm((prev: any) => ({ ...prev, type: v }));
+                                        }
+                                    }}
+                                >
                                     <SelectTrigger><SelectValue placeholder="اختر النوع" /></SelectTrigger>
                                     <SelectContent>
                                         {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}

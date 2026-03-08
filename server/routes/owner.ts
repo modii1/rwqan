@@ -58,9 +58,9 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     console.log(`[PROPERTY_UPDATE] Property: ${propertyNumber}, Name: "${updates.name}", Length: ${updates.name?.length || 0}`);
 
     // Validate name length
-    if (updates.name && updates.name.length > 20) {
+    if (updates.name && updates.name.length > 30) {
       console.log(`[PROPERTY_UPDATE] Validation failed: name too long (${updates.name.length} chars)`);
-      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 20 حرف" });
+      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 30 حرف" });
     }
 
     // جلب البيانات الحالية للمقارنة

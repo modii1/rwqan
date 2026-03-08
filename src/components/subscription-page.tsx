@@ -654,7 +654,7 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="شالية مودي"
                     value={formData.name}
-                    maxLength={20}
+                    maxLength={30}
                     onChange={(e) => {
                       const cleaned = validateTextInput(e.target.value);
                       setFormData({ ...formData, name: cleaned });
@@ -663,7 +663,7 @@ export default function SubscriptionPage() {
                     className={errors.name ? "border-red-500" : ""}
                   />
                   {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
-                  <p className="text-xs text-muted-foreground mt-1">{formData.name.length}/20 حرف</p>
+                  <p className="text-xs text-muted-foreground mt-1">{formData.name.length}/30 حرف</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
@@ -702,7 +702,7 @@ export default function SubscriptionPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-semibold mb-2">المدينة *</label>
-                    <Select value={formData.city} onValueChange={(value) => setFormData({ ...formData, city: value })}>
+                    <Select value={formData.city || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, city: value }); }}>
                       <SelectTrigger>
                         <SelectValue placeholder="اختر" />
                       </SelectTrigger>
@@ -715,7 +715,7 @@ export default function SubscriptionPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">الاتجاه *</label>
-                    <Select value={formData.direction} onValueChange={(value) => setFormData({ ...formData, direction: value })}>
+                    <Select value={formData.direction || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, direction: value }); }}>
                       <SelectTrigger>
                         <SelectValue placeholder="اختر" />
                       </SelectTrigger>
@@ -728,7 +728,7 @@ export default function SubscriptionPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">النوع *</label>
-                    <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                    <Select value={formData.type || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, type: value }); }}>
                       <SelectTrigger>
                         <SelectValue placeholder="اختر" />
                       </SelectTrigger>

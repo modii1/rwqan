@@ -42,9 +42,9 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
     console.log(`[ADMIN_PROPERTY_UPDATE] Property: ${propertyNumber}, Name: "${body.name}", Length: ${body.name?.length || 0}`);
 
     // Validate name length
-    if (body.name && body.name.length > 20) {
+    if (body.name && body.name.length > 30) {
       console.log(`[ADMIN_PROPERTY_UPDATE] Validation failed: name too long (${body.name.length} chars)`);
-      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 20 حرف" });
+      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 30 حرف" });
     }
 
     // Convert Arabic keys to English
@@ -94,9 +94,9 @@ router.post("/api/admin/properties", async (req, res) => {
     console.log(`[ADMIN_PROPERTY_CREATE] Name: "${body.name}", Length: ${body.name?.length || 0}`);
 
     // Validate name length
-    if (body.name && body.name.length > 20) {
+    if (body.name && body.name.length > 30) {
       console.log(`[ADMIN_PROPERTY_CREATE] Validation failed: name too long (${body.name.length} chars)`);
-      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 20 حرف" });
+      return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 30 حرف" });
     }
 
     // Convert Arabic keys to English

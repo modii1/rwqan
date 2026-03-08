@@ -516,13 +516,13 @@ export default function OwnerDashboard() {
 
             setVerificationResult({
               success: true,
-              summary: result.message || "عقارك قيد المراجعة مسبقاً",
+              summary: result.message || "عقارك قيد المراجعة من فريقنا",
               errors: [],
             });
 
             toast({
               title: "⏳ قيد المراجعة",
-              description: result.message || "عقارك قيد المراجعة مسبقاً",
+              description: result.message || "عقارك قيد المراجعة من فريقنا",
             });
 
             setTimeout(async () => {
