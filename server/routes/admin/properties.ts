@@ -355,6 +355,185 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
   }
 });
 
+// ==========================
+//   الموافقة على عقار إضافي (مضاف من مالك آخر)
+// ==========================
+router.put("/api/admin/properties/:propertyNumber/approve-additional", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    console.log(`[APPROVE_ADDITIONAL] Starting approval for additional property: ${propertyNumber}`);
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "العقار غير موجود" });
+    }
+
+    const mainPropertyNumber = property.pendingApprovalFrom;
+    if (!mainPropertyNumber) {
+      return res.status(400).json({ success: false, message: "هذا العقار ليس لديه طلب إضافة من عقار آخر" });
+    }
+
+    const mainProperty = await firebaseService.getPropertyByNumber(mainPropertyNumber);
+    if (!mainProperty) {
+      return res.status(404).json({ success: false, message: "العقار الرئيسي غير موجود" });
+    }
+
+    // Get the main property subscription to copy dates
+    const mainSubscription = await subscriptionService.getByProperty(mainPropertyNumber);
+    if (!mainSubscription) {
+      return res.status(400).json({ success: false, message: "العقار الرئيسي ليس لديه اشتراك نشط" });
+    }
+
+    // Update additional property status
+    await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+    await firebaseService.updateProperty(propertyNumber, {
+      pendingApprovalFrom: undefined,
+      subscriptionType: mainProperty.subscriptionType || "عادي"
+    });
+
+    // Create subscription for the additional property with same dates as main
+    const subscriptionData = {
+      packageId: mainSubscription.packageId,
+      price: mainSubscription.price || 0,
+      subscriptionType: mainSubscription.subscriptionType || "عادي",
+      packageType: mainSubscription.packageType || "عادي",
+      startDate: mainSubscription.startDate,
+      endDate: mainSubscription.endDate,
+      linkedProperty: mainPropertyNumber,
+      status: "نشط"
+    };
+
+    await firebaseService.addSubscriptionToSheet(
+      propertyNumber,
+      subscriptionData,
+      property,
+      ""
+    );
+
+    // Log the verification
+    await analyticsService.addVerificationLog({
+      propertyNumber,
+      action: "approved",
+      reason: "تمت الموافقة على إضافة العقار من قبل الأدمن",
+      admin: "Admin",
+    });
+
+    // Send notification to additional property owner
+    if (property.whatsappNumber) {
+      notifyPropertyVerification({
+        propertyNumber,
+        propertyName: property.name || "",
+        action: "قبول",
+        admin: "Admin",
+      }).catch(err => console.error("WhatsApp notify error:", err));
+    }
+
+    console.log(`[APPROVE_ADDITIONAL] Completed for property: ${propertyNumber}, linked to: ${mainPropertyNumber}`);
+    res.json({
+      success: true,
+      message: "تمت الموافقة على إضافة العقار الإضافي",
+      property: property,
+      subscription: subscriptionData
+    });
+
+  } catch (err) {
+    console.error("[APPROVE_ADDITIONAL] Error:", err);
+    res.status(500).json({ success: false, message: "فشل في الموافقة على العقار الإضافي" });
+  }
+});
+
+// ==========================
+//   رفض عقار إضافي (مضاف من مالك آخر)
+// ==========================
+router.put("/api/admin/properties/:propertyNumber/reject-additional", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    const { reason } = req.body;
+    console.log(`[REJECT_ADDITIONAL] Starting rejection for additional property: ${propertyNumber}, reason: ${reason}`);
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ success: false, message: "العقار غير موجود" });
+    }
+
+    const mainPropertyNumber = property.pendingApprovalFrom;
+    if (!mainPropertyNumber) {
+      return res.status(400).json({ success: false, message: "هذا العقار ليس لديه طلب إضافة من عقار آخر" });
+    }
+
+    // Update additional property status - reset to no pending approval
+    await firebaseService.updateProperty(propertyNumber, {
+      pendingApprovalFrom: undefined
+    });
+
+    // Log the rejection
+    await analyticsService.addVerificationLog({
+      propertyNumber,
+      action: "rejected",
+      reason: reason || "تم رفض طلب إضافة العقار من قبل الأدمن",
+      admin: "Admin",
+    });
+
+    // Send notification to additional property owner
+    if (property.whatsappNumber) {
+      notifyPropertyVerification({
+        propertyNumber,
+        propertyName: property.name || "",
+        action: "رفض",
+        reason: reason || "",
+        admin: "Admin",
+      }).catch(err => console.error("WhatsApp notify error:", err));
+    }
+
+    console.log(`[REJECT_ADDITIONAL] Completed for property: ${propertyNumber}`);
+    res.json({
+      success: true,
+      message: "تم رفض طلب إضافة العقار الإضافي",
+      property: property
+    });
+
+  } catch (err) {
+    console.error("[REJECT_ADDITIONAL] Error:", err);
+    res.status(500).json({ success: false, message: "فشل في رفض العقار الإضافي" });
+  }
+});
+
+// ==========================
+//   الحصول على قائمة الطلبات الإضافية المعلقة
+// ==========================
+router.get("/api/admin/additional-property-requests", async (req, res) => {
+  try {
+    const properties = await firebaseService.getProperties();
+    const pendingRequests = properties.filter((p: any) => 
+      p.pendingApprovalFrom && p.pendingApprovalFrom.length > 0
+    );
+
+    const requestsWithMain = await Promise.all(
+      pendingRequests.map(async (p: any) => {
+        const mainProperty = await firebaseService.getPropertyByNumber(p.pendingApprovalFrom);
+        return {
+          propertyNumber: p.propertyNumber,
+          name: p.name,
+          city: p.city,
+          verificationStatus: p.verificationStatus,
+          pendingApprovalFrom: p.pendingApprovalFrom,
+          mainPropertyName: mainProperty?.name || p.pendingApprovalFrom,
+          requestedAt: p.updatedAt || p.createdAt
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      requests: requestsWithMain
+    });
+
+  } catch (err) {
+    console.error("[GET_ADDITIONAL_REQUESTS] Error:", err);
+    res.status(500).json({ success: false, message: "فشل في جلب الطلبات" });
+  }
+});
+
 // ================== إيقاف/تفعيل إشعارات انتهاء الاشتراك ==================
 router.put("/api/admin/properties/:propertyNumber/mute-expiry", async (req, res) => {
   try {

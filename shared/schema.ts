@@ -32,6 +32,8 @@ export const propertySchema = z.object({
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
   lastChanges: z.string().optional(), // آخر التغييرات
+  addedByOwner: z.string().optional(), // رقم العقار المالك الذي أضاف هذا العقار (للباقات المتعددة)
+  pendingApprovalFrom: z.string().optional(), // العقار المرسل طلب الإضافة
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
@@ -56,6 +58,11 @@ export const subscriptionSchema = z.object({
   linkedProperty: z.string().optional(), // رقم العقار المرتبط (لباقات العقارين)
   linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة
   propertyCount: z.number().optional(), // عدد العقارات في الاشتراك
+  additionalPropertiesPendingApproval: z.array(z.object({
+    propertyNumber: z.string(),
+    status: z.enum(['pending', 'approved', 'rejected']),
+    requestedAt: z.string(),
+  })).optional(), // العقارات الإضافية في انتظار موافقة الأدمن
   createdAt: z.string().optional(),
   cancelledAt: z.string().optional(),
   cancelReason: z.string().optional(),

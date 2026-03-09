@@ -124,24 +124,22 @@ export class PaymentService {
           subscriptionType: isPremium ? "مميز" : "عادي" 
         });
 
-        // Activate all additional properties
+        // Mark additional properties as pending approval (don't activate yet)
         for (const propNumber of additionalProps) {
           const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
           if (additionalProperty) {
-            await firebaseService.addSubscriptionToSheet(
-              propNumber,
-              { ...subscriptionData, linkedProperty: payment.propertyNumber },
-              additionalProperty,
-              payment.receiptUrl ?? ""
-            );
-            // Update additional property's subscriptionType
-            await firebaseService.updateProperty(propNumber, { 
-              subscriptionType: isPremium ? "مميز" : "عادي" 
+            // Mark as pending admin approval
+            await firebaseService.updateProperty(propNumber, {
+              pendingApprovalFrom: payment.propertyNumber,
+              subscriptionType: isPremium ? "مميز" : "عادي"
             });
+            
+            // Set verification status to pending
+            await firebaseService.updateVerificationStatus(propNumber, "pending");
           }
         }
 
-        // Create multi-property subscription record
+        // Create multi-property subscription record with pending status
         if (additionalProps.length > 0) {
           await firebaseService.createMultiPropertySubscription({
             packageId: pkg.id,
@@ -152,17 +150,20 @@ export class PaymentService {
             endDate: subscriptionData.endDate,
             status: "نشط",
             paymentId: payment.id,
+            additionalPropertiesPendingApproval: additionalProps.map(pn => ({
+              propertyNumber: pn,
+              status: "pending",
+              requestedAt: new Date().toISOString()
+            }))
           });
         }
       }
     }
 
-    // Verification
+    // Verification - only for main property, additional properties need admin approval
     await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
-    if ((payment as any).secondPropertyNumber) {
-      await firebaseService.updateVerificationStatus((payment as any).secondPropertyNumber, "approved");
-    }
-
+    
+    // Log verification for main property
     await firebaseService.addVerificationLog({
       date: new Date().toISOString(),
       propertyNumber: payment.propertyNumber,
@@ -185,6 +186,24 @@ export class PaymentService {
           });
         } catch (err) {
           console.error("❌ Failed to send owner notification:", err);
+        }
+      }
+    }
+
+    // Notify additional property owners about pending approval
+    const additionalProps = (payment as any).additionalProperties || [];
+    for (const propNumber of additionalProps) {
+      const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
+      if (additionalProperty && additionalProperty.whatsappNumber) {
+        try {
+          await notifyOwnerSubscriptionActivated({
+            ownerPhone: additionalProperty.whatsappNumber,
+            propertyNumber: propNumber,
+            propertyName: additionalProperty.name ?? "",
+            endDate: formatDateRiyadh(new Date()),
+          });
+        } catch (err) {
+          console.error("❌ Failed to send additional property owner notification:", err);
         }
       }
     }

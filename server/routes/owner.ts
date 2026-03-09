@@ -590,21 +590,50 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     if (!property) return res.status(404).json({ error: "العقار غير موجود" });
 
     // Handle multiple additional properties
-    const allAdditionalProps = additionalProperties || [];
-    if (secondPropertyNumber && !allAdditionalProps.includes(secondPropertyNumber)) {
-      allAdditionalProps.push(secondPropertyNumber);
+    let allAdditionalProps: string[] = [];
+    
+    // Parse additionalProperties if it's a string (JSON stringified from frontend)
+    if (additionalProperties) {
+      if (typeof additionalProperties === 'string') {
+        try {
+          allAdditionalProps = JSON.parse(additionalProperties);
+        } catch (e) {
+          console.log("[BANK_TRANSFER] Failed to parse additionalProperties:", additionalProperties);
+          allAdditionalProps = [];
+        }
+      } else if (Array.isArray(additionalProperties)) {
+        allAdditionalProps = additionalProperties;
+      }
+    }
+    
+    // Parse secondPropertyNumber if it's a string
+    let parsedSecondPropertyNumber = secondPropertyNumber;
+    if (typeof secondPropertyNumber === 'string') {
+      try {
+        parsedSecondPropertyNumber = JSON.parse(secondPropertyNumber);
+      } catch (e) {
+        // Keep as is
+      }
+    }
+    
+    if (parsedSecondPropertyNumber && !allAdditionalProps.includes(parsedSecondPropertyNumber)) {
+      allAdditionalProps.push(parsedSecondPropertyNumber);
     }
     
     // Calculate final price based on number of properties
+    // Pricing model: 50 SAR for main property + 25 SAR for each additional property
     const basePrice = pkg.price || 0;
-    const propertyCount = 1 + allAdditionalProps.length;
+    const additionalPropertyCount = allAdditionalProps.length;
     
-    // For multi-property packages (e.g., pkg-month-2properties), divide by property count
-    // For single-property packages, use full price
     let finalAmount;
-    if (pkg.propertyCount && pkg.propertyCount > 1) {
-      finalAmount = basePrice / propertyCount;
+    if (additionalPropertyCount > 0) {
+      // New pricing: 50 for main + 25 for each additional
+      finalAmount = 50 + (additionalPropertyCount * 25);
+    } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
+      // For multi-property packages without additional props selected
+      finalAmount = pkg.pricePerProperty;
     } else {
+      // Regular package price
       finalAmount = basePrice;
     }
     
@@ -1316,21 +1345,50 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     }
 
     // Handle multiple additional properties
-    const allAdditionalProps = additionalProperties || [];
-    if (secondPropertyNumber && !allAdditionalProps.includes(secondPropertyNumber)) {
-      allAdditionalProps.push(secondPropertyNumber);
+    let allAdditionalProps: string[] = [];
+    
+    // Parse additionalProperties if it's a string (JSON stringified from frontend)
+    if (additionalProperties) {
+      if (typeof additionalProperties === 'string') {
+        try {
+          allAdditionalProps = JSON.parse(additionalProperties);
+        } catch (e) {
+          console.log("[CARD_PAYMENT] Failed to parse additionalProperties:", additionalProperties);
+          allAdditionalProps = [];
+        }
+      } else if (Array.isArray(additionalProperties)) {
+        allAdditionalProps = additionalProperties;
+      }
+    }
+    
+    // Parse secondPropertyNumber if it's a string
+    let parsedSecondPropertyNumber = secondPropertyNumber;
+    if (typeof secondPropertyNumber === 'string') {
+      try {
+        parsedSecondPropertyNumber = JSON.parse(secondPropertyNumber);
+      } catch (e) {
+        // Keep as is
+      }
+    }
+    
+    if (parsedSecondPropertyNumber && !allAdditionalProps.includes(parsedSecondPropertyNumber)) {
+      allAdditionalProps.push(parsedSecondPropertyNumber);
     }
     
     // Calculate final price based on number of properties
+    // Pricing model: 50 SAR for main property + 25 SAR for each additional property
     const basePrice = pkg.price || 0;
-    const propertyCount = 1 + allAdditionalProps.length;
+    const additionalPropertyCount = allAdditionalProps.length;
     
-    // For multi-property packages (e.g., pkg-month-2properties), divide by property count
-    // For single-property packages, use full price
     let finalAmount;
-    if (pkg.propertyCount && pkg.propertyCount > 1) {
-      finalAmount = basePrice / propertyCount;
+    if (additionalPropertyCount > 0) {
+      // New pricing: 50 for main + 25 for each additional
+      finalAmount = 50 + (additionalPropertyCount * 25);
+    } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
+      // For multi-property packages without additional props selected
+      finalAmount = pkg.pricePerProperty;
     } else {
+      // Regular package price
       finalAmount = basePrice;
     }
     let discountAmount = 0;
@@ -1458,6 +1516,47 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
 // التحقق من العقار الثاني (للباقات متعددة العقارات)
 // POST /api/owner/verify-second-property
 // ======================================================
+
+function checkPropertyUserDataComplete(property: any): { isComplete: boolean; missingFields: string[] } {
+  const missingFields: string[] = [];
+  
+  if (!property.name || property.name.trim() === '') {
+    missingFields.push('name');
+  }
+  if (!property.whatsappNumber || property.whatsappNumber.trim() === '') {
+    missingFields.push('whatsappNumber');
+  }
+  if (!property.city) {
+    missingFields.push('city');
+  }
+  if (!property.direction) {
+    missingFields.push('direction');
+  }
+  if (!property.type) {
+    missingFields.push('type');
+  }
+  if (!property.prices?.weekday || property.prices.weekday.trim() === '') {
+    missingFields.push('prices.weekday');
+  }
+  if (!property.prices?.weekend || property.prices.weekend.trim() === '') {
+    missingFields.push('prices.weekend');
+  }
+  if (!property.prices?.overnight || property.prices.overnight.trim() === '') {
+    missingFields.push('prices.overnight');
+  }
+  if (!property.prices?.holidays || property.prices.holidays.trim() === '') {
+    missingFields.push('prices.holidays');
+  }
+  if (!property.facilities || property.facilities.length === 0) {
+    missingFields.push('facilities');
+  }
+  
+  return {
+    isComplete: missingFields.length === 0,
+    missingFields
+  };
+}
+
 router.post("/api/owner/verify-second-property", requireOwner, async (req, res) => {
   try {
     const ownerPropertyNumber = (req.session as any).propertyNumber;
@@ -1485,6 +1584,20 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
       return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
     }
 
+    const userDataCheck = checkPropertyUserDataComplete(secondProperty);
+    if (!userDataCheck.isComplete) {
+      return res.status(400).json({
+        error: "بيانات العقار غير مكتملة",
+        incomplete: true,
+        missingFields: userDataCheck.missingFields,
+        property: {
+          number: secondProperty.propertyNumber,
+          name: secondProperty.name,
+          city: secondProperty.city
+        }
+      });
+    }
+
     const subscription = await subscriptionService.getByProperty(secondPropertyNumber);
     const isActive = subscription && 
       (subscription.status === 'نشط' || subscription.status === 'ساري' || subscription.status === 'active') &&
@@ -1508,6 +1621,81 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
   } catch (err: any) {
     console.error("Verify second property error:", err);
     res.status(500).json({ error: err?.message || "فشل في التحقق" });
+  }
+});
+
+// ======================================================
+// طلب إضافة عقار إضافي (يتطلب موافقة الأدمن)
+// POST /api/owner/request-additional-property
+// ======================================================
+router.post("/api/owner/request-additional-property", requireOwner, async (req, res) => {
+  try {
+    const ownerPropertyNumber = (req.session as any).propertyNumber;
+    const { additionalPropertyNumber } = req.body;
+
+    if (!additionalPropertyNumber) {
+      return res.status(400).json({ error: "رقم العقار الإضافي مطلوب" });
+    }
+
+    const ownerProperty = await firebaseService.getPropertyByNumber(ownerPropertyNumber);
+    if (!ownerProperty) {
+      return res.status(404).json({ error: "لم يتم العثور على عقارك" });
+    }
+
+    const additionalProperty = await firebaseService.getPropertyByNumber(additionalPropertyNumber);
+    if (!additionalProperty) {
+      return res.status(404).json({ error: "لم يتم العثور على العقار الإضافي" });
+    }
+
+    if (additionalProperty.pin !== ownerProperty.pin) {
+      return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
+    }
+
+    await firebaseService.updateProperty(additionalPropertyNumber, {
+      pendingApprovalFrom: ownerPropertyNumber
+    });
+
+    res.json({
+      ok: true,
+      message: "تم إرسال طلب إضافة العقار الإضافي. في انتظار موافقة الأدمن.",
+      additionalProperty: {
+        number: additionalProperty.propertyNumber,
+        name: additionalProperty.name,
+        pendingApprovalFrom: ownerPropertyNumber
+      }
+    });
+  } catch (err: any) {
+    console.error("Request additional property error:", err);
+    res.status(500).json({ error: err?.message || "فشل في إرسال الطلب" });
+  }
+});
+
+// ======================================================
+// استعلام عن حالة الطلبات الإضافية للعقار
+// GET /api/owner/additional-property-requests
+// ======================================================
+router.get("/api/owner/additional-property-requests", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    
+    const properties = await firebaseService.getProperties();
+    const pendingRequests = properties.filter((p: any) => 
+      p.pendingApprovalFrom === propertyNumber
+    );
+
+    res.json({
+      ok: true,
+      requests: pendingRequests.map((p: any) => ({
+        propertyNumber: p.propertyNumber,
+        name: p.name,
+        city: p.city,
+        verificationStatus: p.verificationStatus,
+        requestedAt: p.updatedAt || p.createdAt
+      }))
+    });
+  } catch (err: any) {
+    console.error("Get additional property requests error:", err);
+    res.status(500).json({ error: err?.message || "فشل في جلب الطلبات" });
   }
 });
 

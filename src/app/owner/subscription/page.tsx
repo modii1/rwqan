@@ -16,6 +16,7 @@ import {
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
   Calendar, Timer, Banknote, Info, X, Loader2, Plus,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 import {
   calculateRemainingDays,
@@ -43,8 +44,10 @@ export default function OwnerSubscriptionPage() {
   const [aiScanResult, setAiScanResult] = useState<any>(null);
   
   // Additional properties for multi-property packages
-  const [additionalProperties, setAdditionalProperties] = useState<Array<{ number: string; verified: boolean; error: string; verifying: boolean }>>([]);
+  const [additionalProperties, setAdditionalProperties] = useState<Array<{ number: string; verified: boolean; error: string; verifying: boolean; incomplete?: boolean; missingFields?: string[] }>>([]);
   const [verifyingProperty, setVerifyingProperty] = useState<number | null>(null);
+  const [showIncompleteDataDialog, setShowIncompleteDataDialog] = useState(false);
+  const [incompletePropertyData, setIncompletePropertyData] = useState<any>(null);
 
   // Get current subscription for linked properties
   const { data: currentSubscription } = useQuery<any>({
@@ -63,6 +66,19 @@ export default function OwnerSubscriptionPage() {
       return res.json();
     },
     enabled: !!currentSubscription?.linkedProperty,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Get additional property requests pending approval
+  const { data: additionalPropertyRequests, refetch: refetchAdditionalRequests } = useQuery<any>({
+    queryKey: ["/api/owner/additional-property-requests"],
+    queryFn: async () => {
+      const res = await fetch("/api/owner/additional-property-requests", { credentials: "include" });
+      if (!res.ok) return { requests: [] };
+      const data = await res.json();
+      return data;
+    },
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -209,15 +225,20 @@ export default function OwnerSubscriptionPage() {
       const data = await res.json();
       
       if (data.ok) {
-        updated[index] = { ...updated[index], verified: true, verifying: false };
+        updated[index] = { ...updated[index], verified: true, verifying: false, incomplete: false };
         setAdditionalProperties(updated);
         toast({ title: "تم التحقق", description: `العقار: ${data.property?.name || prop.number}` });
+      } else if (data.incomplete) {
+        updated[index] = { ...updated[index], verified: false, verifying: false, incomplete: true, missingFields: data.missingFields };
+        setAdditionalProperties(updated);
+        setIncompletePropertyData(data);
+        setShowIncompleteDataDialog(true);
       } else {
-        updated[index] = { ...updated[index], error: data.error || "فشل في التحقق", verified: false, verifying: false };
+        updated[index] = { ...updated[index], error: data.error || "فشل في التحقق", verified: false, verifying: false, incomplete: false };
         setAdditionalProperties(updated);
       }
     } catch (error: any) {
-      updated[index] = { ...updated[index], error: error.message || "فشل في التحقق", verified: false, verifying: false };
+      updated[index] = { ...updated[index], error: error.message || "فشل في التحقق", verified: false, verifying: false, incomplete: false };
       setAdditionalProperties(updated);
     } finally {
       setVerifyingProperty(null);
@@ -225,11 +246,10 @@ export default function OwnerSubscriptionPage() {
   };
 
   // Calculate total price based on additional properties
+  // Main property: 50 SAR, each additional property: 25 SAR
   const calculateTotalPrice = () => {
-    if (!selectedPackage) return 0;
-    const pricePerProperty = (selectedPackage as any).pricePerProperty || 25;
-    const propertyCount = 1 + additionalProperties.filter(p => p.verified).length;
-    return pricePerProperty * propertyCount;
+    const verifiedCount = additionalProperties.filter(p => p.verified).length;
+    return 50 + (verifiedCount * 25);
   };
 
   // Initiate card payment
@@ -764,8 +784,63 @@ export default function OwnerSubscriptionPage() {
     );
   }
 
+  // Incomplete Data Dialog
+  const getMissingFieldLabel = (field: string) => {
+    const labels: Record<string, string> = {
+      name: "اسم العقار",
+      whatsappNumber: "رقم الواتساب",
+      city: "المدينة",
+      direction: "الاتجاه",
+      type: "نوع العقار",
+      'prices.weekday': "سعر وسط الأسبوع",
+      'prices.weekend': "سعر نهاية الأسبوع",
+      'prices.overnight': "سعر المبيت",
+      'prices.holidays': "سعر الإجازات",
+      facilities: "المرافق"
+    };
+    return labels[field] || field;
+  };
+
   return (
     <div className="min-h-screen bg-background">
+      {/* Incomplete Data Dialog */}
+      <Dialog open={showIncompleteDataDialog} onOpenChange={setShowIncompleteDataDialog}>
+        <DialogContent className="max-w-md" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="w-5 h-5" />
+              بيانات العقار الإضافي غير مكتملة
+            </DialogTitle>
+            <DialogDescription className="text-right">
+              <p className="mb-3">العقار الإضافي ({incompletePropertyData?.property?.number}) لديه بيانات ناقصة. يجب إكمال بيانات هذا العقار أولاً.</p>
+              <p className="font-semibold mb-2">الحقول الناقصة:</p>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            {incompletePropertyData?.missingFields?.map((field: string, idx: number) => (
+              <div key={idx} className="flex items-center gap-2 text-sm bg-amber-50 p-2 rounded">
+                <X className="w-4 h-4 text-red-500 flex-shrink-0" />
+                <span>{getMissingFieldLabel(field)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="bg-blue-50 p-3 rounded-lg mt-3">
+            <p className="text-sm text-blue-800">
+              <strong>ملاحظة:</strong> يجب على مالك العقار الإضافي إكمال بياناته في صفحة "تحديث بيانات العقار" أولاً، ثم حاول الإضافة مرة أخرى.
+            </p>
+          </div>
+          <div className="flex gap-3 pt-4 border-t">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowIncompleteDataDialog(false)}
+              className="flex-1"
+            >
+              إغلاق
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <header className="bg-card border-b border-border shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
@@ -939,6 +1014,35 @@ export default function OwnerSubscriptionPage() {
                 <p className="text-sm">يرجى إعادة التحويل ورفع إيصال صحيح</p>
               </div>
             </div>
+          </Card>
+        )}
+
+        {/* Pending Additional Property Requests */}
+        {additionalPropertyRequests?.requests?.length > 0 && (
+          <Card className="p-4 border-blue-300 bg-blue-50">
+            <div className="flex items-center gap-2 text-blue-700 mb-3">
+              <Clock className="w-5 h-5" />
+              <p className="font-semibold">عقارات في انتظار الموافقة</p>
+            </div>
+            <div className="space-y-2">
+              {additionalPropertyRequests.requests.map((req: any, idx: number) => (
+                <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
+                  <div className="flex items-center gap-2">
+                    <Home className="w-4 h-4 text-blue-600" />
+                    <div>
+                      <p className="font-bold text-sm">{req.propertyNumber}</p>
+                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    قيد الانتظار
+                  </Badge>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-3">
+              سيتم تفعيل هذه العقارات بعد موافقة الإدارة
+            </p>
           </Card>
         )}
 
@@ -1136,7 +1240,7 @@ export default function OwnerSubscriptionPage() {
                   )}
                   
                   <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
-                    يمكنك ربط حتى {(selectedPackage as any).maxProperties || 2} عقار. السعر: 25 ريال لكل عقار إضافي.
+                    يمكنك ربط حتى {(selectedPackage as any).maxProperties || 2} عقار. السعر: 50 ريال للعقار الرئيسي + 25 ريال لكل عقار إضافي.
                   </p>
                   
                   {/* Dynamic property list */}
@@ -1202,13 +1306,21 @@ export default function OwnerSubscriptionPage() {
                   {/* Price summary */}
                   {additionalProperties.filter(p => p.verified).length > 0 && (
                     <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-blue-800 dark:text-blue-200">
-                          {1 + additionalProperties.filter(p => p.verified).length} عقار × {(selectedPackage as any).pricePerProperty || 25} ريال
-                        </span>
-                        <span className="font-bold text-blue-900 dark:text-blue-100">
-                          {calculateTotalPrice()} ريال
-                        </span>
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-blue-800 dark:text-blue-200">العقار الرئيسي</span>
+                          <span className="font-bold">50 ريال</span>
+                        </div>
+                        {additionalProperties.filter(p => p.verified).map((p, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-sm">
+                            <span className="text-blue-800 dark:text-blue-200">عقار إضافي ({p.number})</span>
+                            <span className="font-bold">25 ريال</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between items-center pt-2 border-t border-blue-300">
+                          <span className="font-bold text-blue-900 dark:text-blue-100">الإجمالي</span>
+                          <span className="font-bold text-blue-900 dark:text-blue-100">{calculateTotalPrice()} ريال</span>
+                        </div>
                       </div>
                     </div>
                   )}

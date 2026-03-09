@@ -4,10 +4,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
@@ -184,6 +185,59 @@ export default function PropertiesSection() {
   const [prices, setPrices] = useState({ weekday: "", weekend: "", overnight: "", holidays: "" });
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
   const [linkedPropertyView, setLinkedPropertyView] = useState<{ propertyNumber: string; subscription: any } | null>(null);
+  const [showAdditionalRequests, setShowAdditionalRequests] = useState(false);
+
+  // Query for additional property requests
+  const { data: additionalRequests, isLoading: additionalRequestsLoading, refetch: refetchAdditionalRequests } = useQuery<any[]>({
+    queryKey: ["admin-additional-property-requests"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/additional-property-requests");
+      if (!res.ok) throw new Error("فشل في جلب الطلبات");
+      const data = await res.json();
+      return data.requests || [];
+    },
+    enabled: showAdditionalRequests,
+  });
+
+  // Approve additional property mutation
+  const approveAdditionalMutation = useMutation({
+    mutationFn: async (propertyNumber: string) => {
+      const res = await fetch(`/api/admin/properties/${propertyNumber}/approve-additional`, {
+        method: "PUT",
+      });
+      if (!res.ok) throw new Error("فشل في الموافقة");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-additional-property-requests"] });
+      toast({ title: "تم الموافقة ✓", description: "تمت الموافقة على إضافة العقار" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Reject additional property mutation
+  const rejectAdditionalMutation = useMutation({
+    mutationFn: async ({ propertyNumber, reason }: { propertyNumber: string; reason?: string }) => {
+      const res = await fetch(`/api/admin/properties/${propertyNumber}/reject-additional`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) throw new Error("فشل في الرفض");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-additional-property-requests"] });
+      toast({ title: "تم الرفض ✓", description: "تم رفض طلب إضافة العقار" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
 
   const { data, isLoading } = useQuery<PropertyData[]>({
     queryKey: ["admin-properties"],
@@ -385,6 +439,19 @@ export default function PropertiesSection() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button 
+            onClick={() => {
+              setShowAdditionalRequests(!showAdditionalRequests);
+              if (!showAdditionalRequests) {
+                refetchAdditionalRequests();
+              }
+            }} 
+            variant="outline" 
+            size="sm"
+            className={showAdditionalRequests ? "bg-blue-50 border-blue-300" : ""}
+          >
+            <Clock className="w-4 h-4 ml-1" /> طلبات الإضافة
+          </Button>
           <Input
             placeholder="بحث بالاسم / رقم العقار / المدينة"
             value={filter}
@@ -397,6 +464,64 @@ export default function PropertiesSection() {
           </Button>
         </div>
       </div>
+
+      {/* Additional Property Requests Section */}
+      {showAdditionalRequests && (
+        <Card className="p-4 border-blue-300 bg-blue-50">
+          <h3 className="font-bold text-blue-800 mb-4 flex items-center gap-2">
+            <Home className="w-5 h-5" />
+            طلبات إضافة عقارات إضافية (في انتظار الموافقة)
+          </h3>
+          
+          {additionalRequestsLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              جاري التحميل...
+            </div>
+          ) : additionalRequests && additionalRequests.length > 0 ? (
+            <div className="space-y-3">
+              {additionalRequests.map((req: any) => (
+                <div key={req.propertyNumber} className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="font-bold">{req.propertyNumber}</p>
+                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
+                      <p className="text-xs text-blue-600 mt-1">
+                        مضاف من العقار: {req.pendingApprovalFrom} ({req.mainPropertyName})
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => approveAdditionalMutation.mutate(req.propertyNumber)}
+                      disabled={approveAdditionalMutation.isPending}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Check className="w-4 h-4 ml-1" /> موافقة
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (confirm("هل أنت متأكد من رفض هذا الطلب؟")) {
+                          rejectAdditionalMutation.mutate({ propertyNumber: req.propertyNumber });
+                        }
+                      }}
+                      disabled={rejectAdditionalMutation.isPending}
+                      className="border-red-300 text-red-600 hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4 ml-1" /> رفض
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">لا توجد طلبات في انتظار الموافقة</p>
+          )}
+        </Card>
+      )}
 
       <Card className="overflow-x-auto">
         {isLoading ? (

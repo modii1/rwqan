@@ -38,7 +38,6 @@ const handle = nextApp.getRequestHandler();
     const missingEnv = requiredEnv.filter(k => !process.env[k]);
     if (missingEnv.length > 0) {
       console.warn("⚠️ [Server] Some environment variables are missing:", missingEnv.join(", "));
-      console.warn("👉 Please check your .env file or Replit Secrets.");
     }
 
     // JSON settings
