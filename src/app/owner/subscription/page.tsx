@@ -48,6 +48,7 @@ export default function OwnerSubscriptionPage() {
   const [verifyingProperty, setVerifyingProperty] = useState<number | null>(null);
   const [showIncompleteDataDialog, setShowIncompleteDataDialog] = useState(false);
   const [incompletePropertyData, setIncompletePropertyData] = useState<any>(null);
+  const [showAdditionalPropertyError, setShowAdditionalPropertyError] = useState(false);
 
   // Get current subscription for linked properties
   const { data: currentSubscription } = useQuery<any>({
@@ -227,6 +228,7 @@ export default function OwnerSubscriptionPage() {
       if (data.ok) {
         updated[index] = { ...updated[index], verified: true, verifying: false, incomplete: false };
         setAdditionalProperties(updated);
+        setShowAdditionalPropertyError(false); // Clear error when property is verified
         toast({ title: "تم التحقق", description: `العقار: ${data.property?.name || prop.number}` });
       } else if (data.incomplete) {
         updated[index] = { ...updated[index], verified: false, verifying: false, incomplete: true, missingFields: data.missingFields };
@@ -246,10 +248,14 @@ export default function OwnerSubscriptionPage() {
   };
 
   // Calculate total price based on additional properties
-  // Main property: 50 SAR, each additional property: 25 SAR
+  // Formula: pkg-price + (addedPropertyCount * propertyPrice)
   const calculateTotalPrice = () => {
     const verifiedCount = additionalProperties.filter(p => p.verified).length;
-    return 50 + (verifiedCount * 25);
+    if (!selectedPackage) return 0;
+    const pkgPrice = (selectedPackage as any).price || 25;
+    const propertyPrice = pkgPrice || 25;
+    // First property = pkgPrice, each additional adds propertyPrice
+    return pkgPrice + (verifiedCount * propertyPrice);
   };
 
   // Initiate card payment
@@ -420,6 +426,25 @@ export default function OwnerSubscriptionPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPackageId) return;
+
+    // Check if selected package requires additional property
+    const isMultiPropertyPackage = selectedPackage && (
+      (selectedPackage as any).maxProperties > 1 || 
+      selectedPackage.propertyCount === 2 || 
+      selectedPackage.id === 'pkg-month-2properties'
+    );
+    
+    const verifiedAdditionalCount = additionalProperties.filter(p => p.verified).length;
+    
+    if (isMultiPropertyPackage && verifiedAdditionalCount === 0) {
+      setShowAdditionalPropertyError(true);
+      toast({ 
+        title: "خطأ في البيانات", 
+        description: "يجب إضافة عقار إضافي واحد على الأقل للباقات المتعددة", 
+        variant: "destructive" 
+      });
+      return;
+    }
 
     if (paymentMethod === "online") {
       cardPaymentMutation.mutate({ packageId: selectedPackageId, action, discountCode: validatedDiscount?.code });
@@ -1239,8 +1264,8 @@ export default function OwnerSubscriptionPage() {
                     </div>
                   )}
                   
-                  <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
-                    يمكنك ربط حتى {(selectedPackage as any).maxProperties || 2} عقار. السعر: 50 ريال للعقار الرئيسي + 25 ريال لكل عقار إضافي.
+                  <p className={`text-sm mb-4 ${showAdditionalPropertyError ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-amber-700 dark:text-amber-300'}`}>
+                    ⚠️ يجب إضافة عقار إضافي واحد على الأقل لهذه الباقة
                   </p>
                   
                   {/* Dynamic property list */}
@@ -1309,12 +1334,12 @@ export default function OwnerSubscriptionPage() {
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-blue-800 dark:text-blue-200">العقار الرئيسي</span>
-                          <span className="font-bold">50 ريال</span>
+                          <span className="font-bold">{(selectedPackage as any)?.price || 25} ريال</span>
                         </div>
                         {additionalProperties.filter(p => p.verified).map((p, idx) => (
                           <div key={idx} className="flex justify-between items-center text-sm">
                             <span className="text-blue-800 dark:text-blue-200">عقار إضافي ({p.number})</span>
-                            <span className="font-bold">25 ريال</span>
+                            <span className="font-bold">{(selectedPackage as any)?.price || 25} ريال</span>
                           </div>
                         ))}
                         <div className="flex justify-between items-center pt-2 border-t border-blue-300">

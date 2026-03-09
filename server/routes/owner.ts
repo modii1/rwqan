@@ -627,13 +627,14 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     
     let finalAmount;
     if (additionalPropertyCount > 0) {
-      // New pricing: 50 for main + 25 for each additional
-      finalAmount = 50 + (additionalPropertyCount * 25);
+      // Formula: pkg-price + (addedPropertyCount * propertyPrice)
+      const propertyPrice = basePrice || 25;
+      finalAmount = basePrice + (additionalPropertyCount * propertyPrice);
     } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
       // For multi-property packages without additional props selected
       finalAmount = pkg.pricePerProperty;
     } else {
-      // Regular package price
+      // Regular package price (just the first property)
       finalAmount = basePrice;
     }
     
@@ -1382,13 +1383,14 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     
     let finalAmount;
     if (additionalPropertyCount > 0) {
-      // New pricing: 50 for main + 25 for each additional
-      finalAmount = 50 + (additionalPropertyCount * 25);
+      // Formula: pkg-price + (addedPropertyCount * propertyPrice)
+      const propertyPrice = basePrice || 25;
+      finalAmount = basePrice + (additionalPropertyCount * propertyPrice);
     } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
       // For multi-property packages without additional props selected
       finalAmount = pkg.pricePerProperty;
     } else {
-      // Regular package price
+      // Regular package price (just the first property)
       finalAmount = basePrice;
     }
     let discountAmount = 0;
