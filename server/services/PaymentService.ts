@@ -57,22 +57,32 @@ export class PaymentService {
    * - Sends a WhatsApp notification to the owner.
    */
   async approveBankTransfer(paymentId: string): Promise<void> {
+    console.log(`[approveBankTransfer] Starting for paymentId: ${paymentId}`);
     const payment = await firebaseService.getPaymentById(paymentId);
     if (!payment) throw new Error("الدفع غير موجود");
 
+    console.log(`[approveBankTransfer] Found payment: id=${payment.id}, propertyNumber="${payment.propertyNumber}", status="${payment.status}", packageId="${payment.packageId}"`);
+
     const pendingStatuses = ["قيد المراجعة", "معلق", "قيد التحقق", "pending", "نجح - قيد التحقق", "مرفوض"];
     if (!pendingStatuses.includes(payment.status)) {
+      console.log(`[approveBankTransfer] ⚠️ Payment status "${payment.status}" not in pending statuses: ${pendingStatuses.join(", ")}`);
       throw new Error("الدفع ليس معلقاً");
     }
 
     await firebaseService.updatePaymentStatus(paymentId, "مكتمل");
+    console.log(`[approveBankTransfer] ✅ Payment status updated to "مكتمل"`);
 
     const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
+    console.log(`[approveBankTransfer] Property found: ${property?.name}, packageId from payment: ${payment.packageId}`);
+    
     if (property && payment.packageId) {
+      console.log(`[approveBankTransfer] Processing subscription for packageId: ${payment.packageId}`);
       const pkg = await firebaseService.getPackageById(payment.packageId);
       if (pkg) {
+        console.log(`[approveBankTransfer] Package found: ${pkg.name}, type: ${pkg.type}, price: ${pkg.price}, duration: ${pkg.duration}`);
         const today = getStartOfDayRiyadh();
         const currentSub = await firebaseService.getSubscriptionByPropertyNumber(payment.propertyNumber);
+        console.log(`[approveBankTransfer] Current subscription: ${currentSub ? `exists (status: ${currentSub.status})` : "none"}`);
 
         let startDate = today;
         let endDate = calculateSubscriptionEndDate(null, pkg.duration);
@@ -109,6 +119,11 @@ export class PaymentService {
           payment.receiptUrl ?? ""
         );
 
+        // Update property's subscriptionType to match the package
+        await firebaseService.updateProperty(payment.propertyNumber, { 
+          subscriptionType: isPremium ? "مميز" : "عادي" 
+        });
+
         // Activate all additional properties
         for (const propNumber of additionalProps) {
           const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
@@ -119,6 +134,10 @@ export class PaymentService {
               additionalProperty,
               payment.receiptUrl ?? ""
             );
+            // Update additional property's subscriptionType
+            await firebaseService.updateProperty(propNumber, { 
+              subscriptionType: isPremium ? "مميز" : "عادي" 
+            });
           }
         }
 

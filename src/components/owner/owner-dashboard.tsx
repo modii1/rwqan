@@ -258,7 +258,21 @@ export default function OwnerDashboard() {
     refetchOnWindowFocus: false,
   });
 
-  // 5.0.1) جلب باقات الإضافات المتاحة
+  // 5.0.1) جلب بيانات الاشتراك للعقار المربوط
+  const { data: linkedPropertySubscription } = useQuery<any>({
+    queryKey: ["linked-property-subscription", currentSubscription?.linkedProperty],
+    queryFn: async () => {
+      if (!currentSubscription?.linkedProperty) return null;
+      const res = await fetch(`/api/owner/subscription/${currentSubscription.linkedProperty}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: sessionData?.isLoggedIn === true && !!currentSubscription?.linkedProperty,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // 5.0.2) جلب باقات الإضافات المتاحة
   const { data: addOnPackages = [] } = useQuery<AddOnPackage[]>({
     queryKey: ["/api/owner/addons"],
     enabled: sessionData?.isLoggedIn === true,
@@ -1223,13 +1237,15 @@ export default function OwnerDashboard() {
                   </span>
                 )}
                 {currentSubscription?.linkedProperty && (
-                  <Badge
-                    variant="outline"
-                    className="text-xs px-2 py-0.5 border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
-                  >
-                    <Home className="w-3 h-3 ml-1" />
-                    مرتبط: {currentSubscription.linkedProperty}
-                  </Badge>
+                  <div className="mt-2">
+                    <Badge
+                      variant="outline"
+                      className="text-xs px-2 py-0.5 border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                    >
+                      <Home className="w-3 h-3 ml-1" />
+                      مرتبط: {currentSubscription.linkedProperty}
+                    </Badge>
+                  </div>
                 )}
               </div>
 
@@ -1982,6 +1998,134 @@ export default function OwnerDashboard() {
               />
             </div>
           </Card>
+
+          {/* ===== العقارات المربوطة ===== */}
+          {currentSubscription?.propertyCount && currentSubscription.propertyCount > 1 && (
+            <>
+              {currentSubscription?.linkedProperty && linkedPropertySubscription?.found ? (
+                <Card className="p-6 border-2 border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-blue-900/20 dark:to-indigo-900/20">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Home className="w-5 h-5 text-blue-600" />
+                    <h2 className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                      العقارات المربوطة
+                    </h2>
+                    <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                      {linkedPropertySubscription.property?.name || currentSubscription.linkedProperty}
+                    </Badge>
+                  </div>
+                
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* رقم العقار */}
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                      <div className="text-xs text-muted-foreground mb-1">رقم العقار</div>
+                      <div className="font-bold text-lg text-blue-600">{currentSubscription.linkedProperty}</div>
+                    </div>
+
+                    {/* نوع الاشتراك */}
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                      <div className="text-xs text-muted-foreground mb-1">نوع الاشتراك</div>
+                      <div className={`font-bold ${
+                        linkedPropertySubscription.subscription.subscriptionType === 'مميز' || 
+                        linkedPropertySubscription.subscription.subscriptionType === 'موثوق'
+                          ? 'text-amber-600' 
+                          : 'text-blue-600'
+                      }`}>
+                        {linkedPropertySubscription.subscription.subscriptionType === 'موثوق' ? 'موثوق' : 
+                        linkedPropertySubscription.subscription.subscriptionType === 'مميز' ? 'مميز' : 
+                        linkedPropertySubscription.subscription.subscriptionType || 'عادي'}
+                      </div>
+                    </div>
+
+                    {/* حالة الاشتراك */}
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                      <div className="text-xs text-muted-foreground mb-1">الحالة</div>
+                      <div className={`font-bold ${
+                        linkedPropertySubscription.subscription.status === 'نشط' || 
+                        linkedPropertySubscription.subscription.status === 'ساري'
+                          ? 'text-green-600'
+                          : 'text-red-600'
+                      }`}>
+                        {linkedPropertySubscription.subscription.status === 'نشط' ? 'نشط' : 
+                        linkedPropertySubscription.subscription.status === 'ساري' ? 'ساري' :
+                        linkedPropertySubscription.subscription.status === 'منتهي' ? 'منتهي' :
+                        linkedPropertySubscription.subscription.status || '-'}
+                      </div>
+                    </div>
+
+                    {/* تاريخ الانتهاء */}
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 shadow-sm">
+                      <div className="text-xs text-muted-foreground mb-1">
+                        {linkedPropertySubscription.subscription.endDate ? (
+                          new Date(linkedPropertySubscription.subscription.endDate) > new Date() ? 'متبقي' : 'منتهي منذ'
+                        ) : 'ينتهي'}
+                      </div>
+                      <div className="font-bold">
+                        {linkedPropertySubscription.subscription.endDate && (
+                          <>
+                            {(() => {
+                              const endDate = new Date(linkedPropertySubscription.subscription.endDate);
+                              const today = new Date();
+                              const diffTime = endDate.getTime() - today.getTime();
+                              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                              if (diffDays >= 0) {
+                                return <span className="text-green-600">{diffDays} يوم</span>;
+                              } else {
+                                return <span className="text-red-600">{Math.abs(diffDays)} يوم</span>;
+                              }
+                            })()}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* additional property info */}
+                  {linkedPropertySubscription.property && (
+                    <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-700">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">المدينة: </span>
+                          <span className="font-medium">{linkedPropertySubscription.property.city || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">الاتجاه: </span>
+                          <span className="font-medium">{linkedPropertySubscription.property.direction || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">من: </span>
+                          <span className="font-medium">
+                            {linkedPropertySubscription.subscription.startDate 
+                              ? new Date(linkedPropertySubscription.subscription.startDate).toLocaleDateString('ar-SA')
+                              : '-'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">إلى: </span>
+                          <span className="font-medium">
+                            {linkedPropertySubscription.subscription.endDate 
+                              ? new Date(linkedPropertySubscription.subscription.endDate).toLocaleDateString('ar-SA')
+                              : '-'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              ) : (
+                <Card className="p-6 border-2 border-dashed border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10">
+                  <div className="flex items-center gap-3">
+                    <Home className="w-5 h-5 text-blue-400" />
+                    <div>
+                      <h3 className="font-medium text-blue-600 dark:text-blue-400">العقارات المربوطة</h3>
+                      <p className="text-sm text-muted-foreground">
+                        يمكنك ربط عقار آخر باشتراكك للوصول إلى باقة العقارين
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
 
           {/* ===== أداء العقار ===== */}
           <Card className="p-6">

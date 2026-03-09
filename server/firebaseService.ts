@@ -204,6 +204,7 @@ export class FirebaseService {
             id,
             propertyNumber,
             packageId: subscriptionData.packageId || "pkg-free",
+            subscriptionType: subscriptionData.subscriptionType || "عادي",
             startDate: subscriptionData.startDate,
             endDate: subscriptionData.endDate,
             status: status as any,
@@ -212,12 +213,9 @@ export class FirebaseService {
 
         await this.db.collection("subscriptions").doc(id).set(subscription);
 
-        // Sync with property
-        const isPremium = subscription.packageId?.includes("premium") ||
-            subscription.packageId === "pkg-trusted";
-
+        // Sync with property - use the subscriptionType from the passed data
         await this.updateProperty(propertyNumber, {
-            subscriptionType: isPremium ? "مميز" : "عادي",
+            subscriptionType: subscriptionData.subscriptionType || "عادي",
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
         });
@@ -248,6 +246,9 @@ export class FirebaseService {
             packageId: string;
             startDate?: string;
             endDate?: string;
+            linkedProperty?: string;
+            propertyCount?: number;
+            linkedProperties?: string[];
         }
     ): Promise<void> {
         console.log(`[FIREBASE] activateSubscription called for: ${propertyNumber} with data:`, data);
@@ -263,6 +264,17 @@ export class FirebaseService {
             subscriptionType: data.subscriptionType,
             packageId: data.packageId,
         };
+        
+        // Add linked property info if provided
+        if (data.linkedProperty) {
+            updates.linkedProperty = data.linkedProperty;
+        }
+        if (data.propertyCount) {
+            updates.propertyCount = data.propertyCount;
+        }
+        if (data.linkedProperties && data.linkedProperties.length > 0) {
+            updates.linkedProperties = data.linkedProperties;
+        }
         
         // If no startDate provided, use now
         if (!data.startDate) {
@@ -416,7 +428,11 @@ export class FirebaseService {
             discountAmount: payment.discountAmount || 0,
         } as Payment;
 
+        console.log(`[DEBUG createPayment] Creating payment: id=${id}, propertyNumber="${payment.propertyNumber}", packageId="${payment.packageId}", status="${payment.status}"`);
+        
         await this.db.collection("payments").doc(id).set(newPayment);
+        
+        console.log(`[DEBUG createPayment] ✅ Payment created successfully: ${id} for property: ${payment.propertyNumber}`);
         return newPayment;
     }
 
@@ -428,10 +444,16 @@ export class FirebaseService {
     }
 
     async getPaymentsByProperty(propertyNumber: string): Promise<Payment[]> {
+        console.log(`[DEBUG getPaymentsByProperty] Querying for propertyNumber: "${propertyNumber}"`);
         const snapshot = await this.db.collection("payments")
             .where("propertyNumber", "==", propertyNumber)
             .get();
-        const payments = snapshot.docs.map((doc) => doc.data() as Payment);
+        const payments = snapshot.docs.map((doc) => {
+            const data = doc.data() as Payment;
+            console.log(`[DEBUG getPaymentsByProperty] Found payment: ${data.id}, propertyNumber: "${data.propertyNumber}", status: ${data.status}, packageId: ${data.packageId}`);
+            return data;
+        });
+        console.log(`[DEBUG getPaymentsByProperty] Total payments found for "${propertyNumber}": ${payments.length}`);
         return payments.sort((a, b) =>
             new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );

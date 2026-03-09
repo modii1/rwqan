@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
@@ -30,6 +30,7 @@ interface PropertyData {
   subscriptionType: string;
   subscriptionDate?: string | null;
   muteExpiryNotification?: boolean;
+  linkedProperty?: string;
   prices?: {
     weekday?: string;
     weekend?: string;
@@ -182,6 +183,7 @@ export default function PropertiesSection() {
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [prices, setPrices] = useState({ weekday: "", weekend: "", overnight: "", holidays: "" });
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
+  const [linkedPropertyView, setLinkedPropertyView] = useState<{ propertyNumber: string; subscription: any } | null>(null);
 
   const { data, isLoading } = useQuery<PropertyData[]>({
     queryKey: ["admin-properties"],
@@ -422,10 +424,30 @@ export default function PropertiesSection() {
                   <Td>{p.city}</Td>
                   <Td>{p.type}</Td>
                   <Td>
-                    <span className={`px-2 py-0.5 rounded text-xs ${(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"
-                      }`}>
-                      {p.subscriptionType}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"
+                        }`}>
+                        {p.subscriptionType}
+                      </span>
+                      {p.linkedProperty && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const linkedProp = p.linkedProperty!;
+                              const res = await fetch(`/api/admin/property/${linkedProp}/subscription`);
+                              const data = await res.json();
+                              setLinkedPropertyView({ propertyNumber: linkedProp, subscription: data });
+                            } catch (err) {
+                              console.error("Failed to fetch linked property subscription:", err);
+                            }
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1"
+                        >
+                          <Link className="w-3 h-3" />
+                          مربوط بـ: {p.linkedProperty}
+                        </button>
+                      )}
+                    </div>
                   </Td>
                   <Td>
                     <div className="flex items-center gap-1">
@@ -819,6 +841,109 @@ export default function PropertiesSection() {
               {deleteMutation.isPending && <Loader2 className="w-4 h-4 ml-1 animate-spin" />}
               نعم، احذف
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Linked Property Subscription Details */}
+      <Dialog open={!!linkedPropertyView} onOpenChange={() => setLinkedPropertyView(null)}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Home className="w-5 h-5 text-blue-500" />
+              بيانات العقار المربوط
+            </DialogTitle>
+            <DialogDescription>
+              معلومات الاشتراك للعقار رقم: {linkedPropertyView?.propertyNumber}
+            </DialogDescription>
+          </DialogHeader>
+          {linkedPropertyView?.subscription?.found ? (
+            <div className="space-y-3 mt-4">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">اسم العقار:</span>
+                <span className="font-medium">{linkedPropertyView.subscription.property?.name || '-'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">المدينة:</span>
+                <span className="font-medium">{linkedPropertyView.subscription.property?.city || '-'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">نوع الاشتراك:</span>
+                <span className={`font-medium px-2 py-0.5 rounded text-xs ${
+                  linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' || 
+                  linkedPropertyView.subscription.subscription.subscriptionType === 'موثوق'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    : 'bg-muted'
+                }`}>
+                  {linkedPropertyView.subscription.subscription.subscriptionType === 'موثوق' ? 'موثوق' : 
+                   linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' ? 'مميز' : 
+                   linkedPropertyView.subscription.subscription.subscriptionType || 'عادي'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">الحالة:</span>
+                <span className={`font-medium ${
+                  linkedPropertyView.subscription.subscription.status === 'نشط' || 
+                  linkedPropertyView.subscription.subscription.status === 'ساري'
+                    ? 'text-green-600'
+                    : 'text-red-600'
+                }`}>
+                  {linkedPropertyView.subscription.subscription.status === 'نشط' ? 'نشط' : 
+                   linkedPropertyView.subscription.subscription.status === 'ساري' ? 'ساري' :
+                   linkedPropertyView.subscription.subscription.status === 'منتهي' ? 'منتهي' :
+                   linkedPropertyView.subscription.subscription.status || '-'}
+                </span>
+              </div>
+              {linkedPropertyView.subscription.subscription.startDate && (
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">من:</span>
+                  <span className="font-medium">
+                    {new Date(linkedPropertyView.subscription.subscription.startDate).toLocaleDateString('ar-SA')}
+                  </span>
+                </div>
+              )}
+              {linkedPropertyView.subscription.subscription.endDate && (
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">إلى:</span>
+                  <span className="font-medium">
+                    {new Date(linkedPropertyView.subscription.subscription.endDate).toLocaleDateString('ar-SA')}
+                  </span>
+                </div>
+              )}
+              {(() => {
+                const endDate = linkedPropertyView?.subscription?.subscription?.endDate 
+                  ? new Date(linkedPropertyView.subscription.subscription.endDate) 
+                  : null;
+                const today = new Date();
+                if (endDate) {
+                  const diffTime = endDate.getTime() - today.getTime();
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  if (diffDays >= 0) {
+                    return (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">متبقي:</span>
+                        <span className="font-medium text-green-600">{diffDays} يوم</span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">منذ:</span>
+                        <span className="font-medium text-red-600">{Math.abs(diffDays)} يوم</span>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
+            </div>
+          ) : (
+            <div className="text-center py-4 text-muted-foreground">
+              <p>لا توجد بيانات اشتراك للعقار المربوط</p>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setLinkedPropertyView(null)}>إغلاق</Button>
           </div>
         </DialogContent>
       </Dialog>

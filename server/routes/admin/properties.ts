@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
-import { propertyService, analyticsService, subscriptionService } from "../../services";
+import { propertyService, analyticsService, subscriptionService, paymentService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
 import { SHEET_MAP } from "../../utils/helpers";
 import { notifyPropertyVerification } from "../../integrations/whatsapp";
+import { storage } from "../../storage";
 
 const router = Router();
 
@@ -166,31 +167,116 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       action: "approved",
     });
 
+    // Check for paid/completed payments for this property
+    console.log(`[APPROVE] Checking for payments for property: ${propertyNumber}`);
+    let subscriptionType = "عادي";
+    let packageId = "pkg-free";
+    let validPayment: any = null;
+    let linkedProperty: string | undefined;
+    let propertyCount: number | undefined;
+    let linkedProperties: string[] | undefined;
+
+    try {
+      console.log(`[APPROVE] Calling paymentService.getByProperty(${propertyNumber})...`);
+      const payments = await paymentService.getByProperty(propertyNumber);
+      console.log(`[APPROVE] getByProperty returned ${payments.length} payments`);
+      
+      // Log all payments found
+      payments.forEach((p, idx) => {
+        console.log(`[APPROVE] Payment[${idx}]: id=${p.id}, propertyNumber="${p.propertyNumber}", status="${p.status}", packageId="${p.packageId}", amount=${p.finalAmount}`);
+      });
+      
+      // First look for completed payments
+      let validPayment = payments.find(p => 
+        p.status === "مكتمل" || 
+        (p.status as string) === "Approved" || 
+        p.status === "completed"
+      );
+
+      // If no completed payment, look for pending payments
+      if (!validPayment) {
+        validPayment = payments.find(p => 
+          p.status === "قيد التحقق" || 
+          p.status === "قيد المراجعة" || 
+          p.status === "معلق" ||
+          p.status === "pending"
+        );
+        
+        if (validPayment) {
+          console.log(`[APPROVE] Found pending payment: ${validPayment.id}, auto-approving it...`);
+          // Auto-update payment status to مكتمل
+          await paymentService.setStatus(validPayment.id, "مكتمل");
+          console.log(`[APPROVE] ✅ Payment ${validPayment.id} auto-approved`);
+        }
+      }
+      
+      if (validPayment && validPayment.packageId) {
+        packageId = validPayment.packageId;
+        console.log(`[APPROVE] ✅ Using payment: ${validPayment.id}, packageId: ${packageId}, amount: ${validPayment.finalAmount}`);
+        
+        // Get package to determine if premium
+        const pkg = await storage.getPackageById(packageId);
+        if (pkg) {
+          if (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0) {
+            subscriptionType = "مميز";
+            console.log(`[APPROVE] Package is premium: ${pkg.name}, type: ${pkg.type}, price: ${pkg.price}`);
+          }
+        }
+      } else {
+        console.log(`[APPROVE] No valid payment found, using default pkg-free`);
+      }
+    } catch (payErr) {
+      console.error(`[APPROVE] Error checking payments:`, payErr);
+    }
+
     // Check if there's a placeholder subscription and activate it
     console.log(`[APPROVE] Checking for existing subscription for: ${propertyNumber}`);
     const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
     console.log(`[APPROVE] Current subscription:`, currentSubscription);
 
+    // Get linked property info from payment
+    if (validPayment) {
+      linkedProperty = (validPayment as any).secondPropertyNumber || (validPayment as any).linkedProperty;
+      linkedProperties = (validPayment as any).linkedProperties || (validPayment as any).additionalProperties;
+      if (linkedProperties && Array.isArray(linkedProperties)) {
+        propertyCount = linkedProperties.length + 1;
+      } else if (linkedProperty) {
+        propertyCount = 2;
+      }
+    }
+
     if (currentSubscription && currentSubscription.status === "غير نشط") {
       console.log(`[APPROVE] Found placeholder subscription, activating for: ${propertyNumber}`);
-      // Update the placeholder subscription to active
+      // Update the placeholder subscription to active with correct package
       await firebaseService.activateSubscription(propertyNumber, {
         status: "نشط",
-        subscriptionType: "عادي",
-        packageId: "pkg-free",
+        subscriptionType,
+        packageId,
+        linkedProperty: linkedProperty || "",
+        propertyCount,
+        linkedProperties,
       });
-      console.log(`[APPROVE] ✅ Subscription activated for property: ${propertyNumber}`);
+      console.log(`[APPROVE] ✅ Subscription activated for property: ${propertyNumber}, package: ${packageId}, type: ${subscriptionType}, linkedProperty: ${linkedProperty}`);
     } else if (!currentSubscription) {
       console.log(`[APPROVE] No subscription found for: ${propertyNumber}, creating new one`);
       await firebaseService.activateSubscription(propertyNumber, {
         status: "نشط",
-        subscriptionType: "عادي",
-        packageId: "pkg-free",
+        subscriptionType,
+        packageId,
+        linkedProperty: linkedProperty || "",
+        propertyCount,
+        linkedProperties,
       });
-      console.log(`[APPROVE] ✅ New subscription created and activated for: ${propertyNumber}`);
+      console.log(`[APPROVE] ✅ New subscription created and activated for: ${propertyNumber}, package: ${packageId}, type: ${subscriptionType}, linkedProperty: ${linkedProperty}`);
     } else {
       console.log(`[APPROVE] Subscription already active or not a placeholder: ${propertyNumber}, status: ${currentSubscription?.status}`);
     }
+
+    // Also update the property's subscriptionType to match the package
+    await firebaseService.updateProperty(propertyNumber, { 
+      subscriptionType: subscriptionType as "عادي" | "مميز" | "موثوق" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
+    });
+    console.log(`[APPROVE] Property subscriptionType updated to: ${subscriptionType}`);
 
     // إرسال إشعار واتساب عند قبول العقار
     const property = await propertyService.getByNumber(propertyNumber);
@@ -295,6 +381,51 @@ router.put("/api/admin/properties/:propertyNumber/mute-expiry", async (req, res)
   } catch (err) {
     console.error("Mute Expiry Error:", err);
     res.status(500).json({ success: false, message: "فشل في تعديل حالة الإشعارات" });
+  }
+});
+
+// Admin: Get subscription data for a property
+router.get("/api/admin/property/:propertyNumber/subscription", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    
+    if (!propertyNumber || propertyNumber.length !== 5) {
+      return res.status(400).json({ error: "رقم العقار غير صحيح" });
+    }
+
+    const subscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    
+    if (!subscription) {
+      return res.json({ 
+        found: false, 
+        propertyNumber,
+        subscription: null 
+      });
+    }
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    
+    res.json({
+      found: true,
+      propertyNumber,
+      subscription: {
+        subscriptionType: subscription.subscriptionType || subscription.packageType || 'عادي',
+        status: subscription.status,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        packageId: subscription.packageId,
+        propertyCount: subscription.propertyCount,
+        linkedProperty: subscription.linkedProperty,
+      },
+      property: property ? {
+        name: property.name,
+        city: property.city,
+        verificationStatus: property.verificationStatus,
+      } : null
+    });
+  } catch (err: any) {
+    console.error("Get subscription error:", err);
+    res.status(500).json({ error: err?.message || "فشل في جلب بيانات الاشتراك" });
   }
 });
 

@@ -524,6 +524,8 @@ const router = Router();
             endDate: payment.pendingEndDate,
             paymentId: payment.id,
             linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
+            linkedProperty: additionalProps.length > 0 ? additionalProps[0] : undefined,
+            propertyCount: totalProperties,
           };
 
           console.log(`📦 [Webhook] Payment: ${payment.id}, isPremium: ${isPremiumPayment}, subscriptionType: ${subscriptionData.subscriptionType}`);

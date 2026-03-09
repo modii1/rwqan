@@ -307,7 +307,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-
     // استخدام الدالة الجديدة للبحث عن الاشتراك
     let subscription = null;
     try {
@@ -318,7 +317,7 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
 
     if (!subscription) {
       // إرجاع اشتراك افتراضي مجاني إذا لم يوجد - مع توضيح أنه غير نشط
-      return res.json({
+      const defaultSub = {
         id: `SUB-${propertyNumber}`,
         propertyNumber,
         packageId: "pkg-free",
@@ -326,7 +325,8 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         status: "غير نشط",
         isPlaceholder: true,
-      });
+      };
+      return res.json(defaultSub);
     }
 
     res.json(subscription);
@@ -638,6 +638,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     }
 
     // Create payment record
+    console.log(`[BANK_TRANSFER] Creating payment for propertyNumber: "${propertyNumber}", packageId: "${packageId}"`);
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
@@ -653,6 +654,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
       linkedProperties: [propertyNumber, ...allAdditionalProps],
       paymentReference,
     } as any);
+    console.log(`[BANK_TRANSFER] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
 
     // Handle add-on purchase
@@ -1330,6 +1332,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       }
     }
 
+    console.log(`[CARD_PAYMENT] Creating payment for propertyNumber: "${propertyNumber}", packageId: "${packageId}"`);
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
@@ -1343,6 +1346,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       linkedProperties: [propertyNumber, ...allAdditionalProps],
     } as any);
+    console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
     const paymentReference = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     await paymentService.update(payment.id, { paymentReference });
@@ -1581,6 +1585,7 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       status: 'نشط',
       paymentId: paymentId || "",
       price: newPackage.price,
+      subscriptionType: isPremium ? "مميز" : "عادي",
       packageType: isPremium ? "مميز" : "عادي",
     };
 
@@ -1593,6 +1598,11 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
 
     console.log(`✅ [Owner Confirm] Subscription activated for: ${propertyNumber}`);
 
+    // Update property's subscriptionType to match the package
+    await firebaseService.updateProperty(propertyNumber, { 
+      subscriptionType: isPremium ? "مميز" : "عادي" 
+    });
+
     await firebaseService.updateVerificationStatus(propertyNumber, "approved");
 
     res.json({
@@ -1604,6 +1614,51 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
   } catch (err: any) {
     console.error("Subscription confirm error:", err);
     res.status(500).json({ error: err?.message || "فشل في التأكيد" });
+  }
+});
+
+// GET /api/owner/subscription/:propertyNumber - Get subscription data for any property
+router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    
+    if (!propertyNumber || propertyNumber.length !== 5) {
+      return res.status(400).json({ error: "رقم العقار غير صحيح" });
+    }
+
+    const subscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    
+    if (!subscription) {
+      return res.json({ 
+        found: false, 
+        propertyNumber,
+        subscription: null 
+      });
+    }
+
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    
+    res.json({
+      found: true,
+      propertyNumber,
+      subscription: {
+        subscriptionType: subscription.subscriptionType || subscription.packageType || 'عادي',
+        status: subscription.status,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        packageId: subscription.packageId,
+        propertyCount: subscription.propertyCount,
+        linkedProperty: subscription.linkedProperty,
+      },
+      property: property ? {
+        name: property.name,
+        city: property.city,
+        verificationStatus: property.verificationStatus,
+      } : null
+    });
+  } catch (err: any) {
+    console.error("Get subscription error:", err);
+    res.status(500).json({ error: err?.message || "فشل في جلب بيانات الاشتراك" });
   }
 });
 

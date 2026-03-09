@@ -46,6 +46,27 @@ export default function OwnerSubscriptionPage() {
   const [additionalProperties, setAdditionalProperties] = useState<Array<{ number: string; verified: boolean; error: string; verifying: boolean }>>([]);
   const [verifyingProperty, setVerifyingProperty] = useState<number | null>(null);
 
+  // Get current subscription for linked properties
+  const { data: currentSubscription } = useQuery<any>({
+    queryKey: ["/api/owner/current-subscription"],
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Get linked property subscription data
+  const { data: linkedPropertySubscription } = useQuery<any>({
+    queryKey: ["linked-property-subscription", currentSubscription?.linkedProperty],
+    queryFn: async () => {
+      if (!currentSubscription?.linkedProperty) return null;
+      const res = await fetch(`/api/owner/subscription/${currentSubscription.linkedProperty}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!currentSubscription?.linkedProperty,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
   // Add-on purchase flow
   const [addOnStep, setAddOnStep] = useState<1 | 2>(1);
   const [selectedAddOn, setSelectedAddOn] = useState<any>(null);
@@ -800,7 +821,7 @@ export default function OwnerSubscriptionPage() {
                 <Timer className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">مدة الاشتراك</p>
-                  <p className="font-bold text-muted-foreground">{subscriptionDuration || currentPackageObj?.duration || 30} يوم</p>
+                  <p className="font-bold text-muted-foreground">{currentPackageObj?.duration || subscriptionDuration || 30} يوم</p>
                 </div>
               </div>
               <div className="flex items-start gap-2">
@@ -1088,6 +1109,32 @@ export default function OwnerSubscriptionPage() {
                     <Crown className="w-5 h-5" />
                     ربط عقارات إضافية
                   </h4>
+                  
+                  {/* Show current linked property */}
+                  {currentSubscription?.linkedProperty && (
+                    <div className="mb-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-700">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Home className="w-4 h-4 text-blue-600" />
+                          <span className="font-medium">العقار المربوط:</span>
+                          <span className="font-bold text-blue-600">{currentSubscription.linkedProperty}</span>
+                        </div>
+                        {linkedPropertySubscription?.found && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <Badge variant={linkedPropertySubscription.subscription.status === 'نشط' ? 'default' : 'secondary'}>
+                              {linkedPropertySubscription.subscription.status === 'نشط' ? 'نشط' : 
+                               linkedPropertySubscription.subscription.status === 'ساري' ? 'ساري' : 
+                               linkedPropertySubscription.subscription.status || '-'}
+                            </Badge>
+                            <span className="text-muted-foreground">
+                              {linkedPropertySubscription.subscription.subscriptionType}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
                   <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
                     يمكنك ربط حتى {(selectedPackage as any).maxProperties || 2} عقار. السعر: 25 ريال لكل عقار إضافي.
                   </p>

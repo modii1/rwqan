@@ -96,6 +96,11 @@ export class SubscriptionService {
       receiptUrl ?? ""
     );
 
+    // Update property's subscriptionType to match the package
+    await firebaseService.updateProperty(propertyNumber, { 
+      subscriptionType: isPremium ? "مميز" : "عادي" 
+    });
+
     return {
       startDate: subscriptionData.startDate,
       endDate: subscriptionData.endDate,
