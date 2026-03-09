@@ -650,9 +650,9 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
-      amount: pricePerProperty * propertyCount,
+      amount: finalAmount,
       discountCode: discountCode || "",
-      discountAmount: (pricePerProperty * propertyCount) - finalAmount,
+      discountAmount: 0,
       finalAmount,
       status: "قيد التحقق",
       paymentMethod: "تحويل بنكي",
