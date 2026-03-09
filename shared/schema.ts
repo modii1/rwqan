@@ -33,7 +33,7 @@ export const propertySchema = z.object({
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
   lastChanges: z.string().optional(), // آخر التغييرات
   addedByOwner: z.string().optional(), // رقم العقار المالك الذي أضاف هذا العقار (للباقات المتعددة)
-  pendingApprovalFrom: z.string().optional(), // العقار المرسل طلب الإضافة
+  pendingApprovalFrom: z.string().optional() || null, // العقار المرسل طلب الإضافة
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

@@ -1681,17 +1681,47 @@ router.get("/api/owner/additional-property-requests", requireOwner, async (req, 
     const propertyNumber = (req.session as any).propertyNumber;
     
     const properties = await firebaseService.getProperties();
+    
+    // Get properties pending approval (under review)
     const pendingRequests = properties.filter((p: any) => 
       p.pendingApprovalFrom === propertyNumber
     );
 
+    // Get properties that are already linked/approved (has linkedProperty pointing to this property)
+    const subscriptions = await firebaseService.getSubscriptions();
+    
+    const linkedSubscriptions = subscriptions.filter((s: any) => 
+      s.linkedProperty === propertyNumber && s.status === 'نشط'
+    );
+    
+    const approvedPropertyNumbers = linkedSubscriptions.map((s: any) => s.propertyNumber);
+    
+    // Filter pendingRequests to exclude properties that already have subscriptions (are already linked/approved)
+    const filteredPendingRequests = pendingRequests.filter((p: any) => 
+      !approvedPropertyNumbers.includes(p.propertyNumber)
+    );
+    
+    // Get the full property details for approved properties
+    const approvedProperties = properties.filter((p: any) => 
+      approvedPropertyNumbers.includes(p.propertyNumber)
+    );
+
     res.json({
       ok: true,
-      requests: pendingRequests.map((p: any) => ({
+      pendingRequests: filteredPendingRequests.map((p: any) => ({
         propertyNumber: p.propertyNumber,
         name: p.name,
         city: p.city,
         verificationStatus: p.verificationStatus,
+        status: 'pending',
+        requestedAt: p.updatedAt || p.createdAt
+      })),
+      approvedRequests: approvedProperties.map((p: any) => ({
+        propertyNumber: p.propertyNumber,
+        name: p.name,
+        city: p.city,
+        verificationStatus: p.verificationStatus,
+        status: 'approved',
         requestedAt: p.updatedAt || p.createdAt
       }))
     });

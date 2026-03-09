@@ -361,7 +361,6 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
 router.put("/api/admin/properties/:propertyNumber/approve-additional", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
-    console.log(`[APPROVE_ADDITIONAL] Starting approval for additional property: ${propertyNumber}`);
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
     if (!property) {
@@ -387,7 +386,7 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
     // Update additional property status
     await firebaseService.updateVerificationStatus(propertyNumber, "approved");
     await firebaseService.updateProperty(propertyNumber, {
-      pendingApprovalFrom: undefined,
+      pendingApprovalFrom: "",
       subscriptionType: mainProperty.subscriptionType || "عادي"
     });
 
@@ -411,6 +410,19 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
       ""
     );
 
+    // Update main property's subscription to include the new additional property in linkedProperties array
+    const mainPropertySubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
+    if (mainPropertySubscription) {
+      const currentLinkedProperties = mainPropertySubscription.linkedProperties || [];
+      if (!currentLinkedProperties.includes(propertyNumber)) {
+        const updatedLinkedProperties = [...currentLinkedProperties, propertyNumber];
+        await firebaseService.updateSubscription(mainPropertySubscription.id, {
+          linkedProperties: updatedLinkedProperties,
+          propertyCount: updatedLinkedProperties.length + 1
+        });
+      }
+    }
+
     // Log the verification
     await analyticsService.addVerificationLog({
       propertyNumber,
@@ -429,7 +441,6 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
       }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
-    console.log(`[APPROVE_ADDITIONAL] Completed for property: ${propertyNumber}, linked to: ${mainPropertyNumber}`);
     res.json({
       success: true,
       message: "تمت الموافقة على إضافة العقار الإضافي",
@@ -464,7 +475,7 @@ router.put("/api/admin/properties/:propertyNumber/reject-additional", async (req
 
     // Update additional property status - reset to no pending approval
     await firebaseService.updateProperty(propertyNumber, {
-      pendingApprovalFrom: undefined
+      pendingApprovalFrom: ""
     });
 
     // Log the rejection

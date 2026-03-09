@@ -209,6 +209,7 @@ export class FirebaseService {
             endDate: subscriptionData.endDate,
             status: status as any,
             paymentId: subscriptionData.paymentId,
+            linkedProperty: subscriptionData.linkedProperty || undefined,
             linkedProperties: subscriptionData.linkedProperties || undefined,
             propertyCount: subscriptionData.propertyCount || 1,
         };
@@ -1324,6 +1325,13 @@ export class FirebaseService {
         if (!snapshot.empty) {
             await snapshot.docs[0].ref.update({ linkedProperty, updatedAt: new Date().toISOString() });
         }
+    }
+
+    async updateSubscription(id: string, updates: Partial<Subscription>): Promise<void> {
+        await this.db.collection("subscriptions").doc(id).update({
+            ...updates,
+            updatedAt: new Date().toISOString()
+        });
     }
 
     // Async wrappers (no-arg) for FinanceService compatibility

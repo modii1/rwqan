@@ -1042,15 +1042,15 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
-        {/* Pending Additional Property Requests */}
-        {additionalPropertyRequests?.requests?.length > 0 && (
+        {/* Pending Additional Property Requests (Under Review) */}
+        {additionalPropertyRequests?.pendingRequests?.length > 0 && (
           <Card className="p-4 border-blue-300 bg-blue-50">
             <div className="flex items-center gap-2 text-blue-700 mb-3">
               <Clock className="w-5 h-5" />
-              <p className="font-semibold">عقارات في انتظار الموافقة</p>
+              <p className="font-semibold">عقارات قيد المراجعة</p>
             </div>
             <div className="space-y-2">
-              {additionalPropertyRequests.requests.map((req: any, idx: number) => (
+              {additionalPropertyRequests.pendingRequests.map((req: any, idx: number) => (
                 <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
                   <div className="flex items-center gap-2">
                     <Home className="w-4 h-4 text-blue-600" />
@@ -1068,6 +1068,32 @@ export default function OwnerSubscriptionPage() {
             <p className="text-xs text-blue-600 mt-3">
               سيتم تفعيل هذه العقارات بعد موافقة الإدارة
             </p>
+          </Card>
+        )}
+
+        {/* Approved Linked Properties */}
+        {additionalPropertyRequests?.approvedRequests?.length > 0 && (
+          <Card className="p-4 border-green-300 bg-green-50">
+            <div className="flex items-center gap-2 text-green-700 mb-3">
+              <CheckCircle2 className="w-5 h-5" />
+              <p className="font-semibold">العقارات المرتبطة</p>
+            </div>
+            <div className="space-y-2">
+              {additionalPropertyRequests.approvedRequests.map((req: any, idx: number) => (
+                <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
+                  <div className="flex items-center gap-2">
+                    <Home className="w-4 h-4 text-green-600" />
+                    <div>
+                      <p className="font-bold text-sm">{req.propertyNumber}</p>
+                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
+                    تم الربط
+                  </Badge>
+                </div>
+              ))}
+            </div>
           </Card>
         )}
 
