@@ -392,9 +392,10 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
     });
 
     // Create subscription for the additional property with same dates as main
+    // Price is 0 since the main property already paid for all properties
     const subscriptionData = {
       packageId: mainSubscription.packageId,
-      price: mainSubscription.price || 0,
+      price: 0,
       subscriptionType: mainSubscription.subscriptionType || "عادي",
       packageType: mainSubscription.packageType || "عادي",
       startDate: mainSubscription.startDate,

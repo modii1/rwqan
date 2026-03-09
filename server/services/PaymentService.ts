@@ -139,7 +139,7 @@ export class PaymentService {
           }
         }
 
-        // Create multi-property subscription record with pending status
+        // Create multi-property subscription record
         if (additionalProps.length > 0) {
           await firebaseService.createMultiPropertySubscription({
             packageId: pkg.id,
@@ -150,11 +150,6 @@ export class PaymentService {
             endDate: subscriptionData.endDate,
             status: "نشط",
             paymentId: payment.id,
-            additionalPropertiesPendingApproval: additionalProps.map(pn => ({
-              propertyNumber: pn,
-              status: "pending",
-              requestedAt: new Date().toISOString()
-            }))
           });
         }
       }
