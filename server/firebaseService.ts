@@ -209,6 +209,8 @@ export class FirebaseService {
             endDate: subscriptionData.endDate,
             status: status as any,
             paymentId: subscriptionData.paymentId,
+            linkedProperties: subscriptionData.linkedProperties || undefined,
+            propertyCount: subscriptionData.propertyCount || 1,
         };
 
         await this.db.collection("subscriptions").doc(id).set(subscription);

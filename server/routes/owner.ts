@@ -596,16 +596,24 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     }
     
     // Calculate final price based on number of properties
-    const pricePerProperty = pkg.pricePerProperty || 25;
+    const basePrice = pkg.price || 0;
     const propertyCount = 1 + allAdditionalProps.length;
-    let finalAmount = pricePerProperty * propertyCount;
+    
+    // For multi-property packages (e.g., pkg-month-2properties), divide by property count
+    // For single-property packages, use full price
+    let finalAmount;
+    if (pkg.propertyCount && pkg.propertyCount > 1) {
+      finalAmount = basePrice / propertyCount;
+    } else {
+      finalAmount = basePrice;
+    }
     
     // Apply discount
     if (discountCode) {
       const discount = await firebaseService.getDiscountCodeByCode(discountCode);
       if (discount && discount.isActive) {
         if (discount.type === "نسبة") {
-          finalAmount -= (pricePerProperty * propertyCount * discount.value) / 100;
+          finalAmount -= (finalAmount * discount.value) / 100;
         } else {
           finalAmount -= discount.value;
         }
@@ -651,7 +659,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
       receiptUrl,
       secondPropertyNumber: secondPropertyNumber || undefined,
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
-      linkedProperties: [propertyNumber, ...allAdditionalProps],
+      linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       paymentReference,
     } as any);
     console.log(`[BANK_TRANSFER] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
@@ -1314,16 +1322,24 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     }
     
     // Calculate final price based on number of properties
-    const pricePerProperty = pkg.pricePerProperty || 25;
+    const basePrice = pkg.price || 0;
     const propertyCount = 1 + allAdditionalProps.length;
-    let finalAmount = pricePerProperty * propertyCount;
+    
+    // For multi-property packages (e.g., pkg-month-2properties), divide by property count
+    // For single-property packages, use full price
+    let finalAmount;
+    if (pkg.propertyCount && pkg.propertyCount > 1) {
+      finalAmount = basePrice / propertyCount;
+    } else {
+      finalAmount = basePrice;
+    }
     let discountAmount = 0;
 
     if (discountCode) {
       const discount = await storage.getDiscountCodeByCode(discountCode);
       if (discount && discount.isActive) {
         if (discount.type === "نسبة") {
-          discountAmount = (pricePerProperty * propertyCount * discount.value) / 100;
+          discountAmount = (finalAmount * discount.value) / 100;
           finalAmount -= discountAmount;
         } else {
           discountAmount = discount.value;
@@ -1336,7 +1352,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
-      amount: pricePerProperty * propertyCount,
+      amount: finalAmount,
       discountCode: discountCode || "",
       discountAmount,
       finalAmount,
@@ -1344,7 +1360,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       paymentMethod: "بطاقة",
       secondPropertyNumber: secondPropertyNumber || undefined,
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
-      linkedProperties: [propertyNumber, ...allAdditionalProps],
+      linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
     } as any);
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 

@@ -163,6 +163,12 @@ export default function SubscriptionPage() {
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'bank' | null>(null);
+
+  // Fetch default bank account for bank transfer
+  const { data: bankAccount } = useQuery<any>({
+    queryKey: ["/api/bank-accounts/default"],
+    enabled: paymentMethod === "bank",
+  });
   const [aiScanResult, setAiScanResult] = useState<any>(null);
 
   // Visual captcha state
@@ -840,27 +846,45 @@ export default function SubscriptionPage() {
                             <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
                           </div>
                           <div className="space-y-3">
-                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                              <span className="text-sm font-semibold text-blue-700">البنك</span>
-                              <span className="text-base font-bold text-blue-900">البنك الأهلي</span>
-                            </div>
-                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                              <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
-                              <span className="text-base font-bold text-blue-900">شركة روقان للعقارات</span>
-                            </div>
-                            <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                              <span className="text-sm font-semibold text-blue-700">IBAN</span>
-                              <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">SA0610000012345678901234</span>
-                            </div>
-                            <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                              <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
-                              <img 
-                                src="/assets/bank-qr.png" 
-                                alt="QR Code للدفع" 
-                                className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
-                                onClick={() => window.open('/assets/bank-qr.png', '_blank')}
-                              />
-                            </div>
+                            {bankAccount ? (
+                              <>
+                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                                  <span className="text-sm font-semibold text-blue-700">البنك</span>
+                                  <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                                </div>
+                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                                  <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
+                                  <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                                </div>
+                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                                  <span className="text-sm font-semibold text-blue-700">IBAN</span>
+                                  <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                                </div>
+                                {bankAccount.accountNumber && (
+                                  <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
+                                    <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
+                                    <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                                  </div>
+                                )}
+                                {bankAccount.barcodeUrl && (
+                                  <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                                    <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                                    <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
+                                  </div>
+                                )}
+                                <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
+                                  <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                                  <img 
+                                    src="/assets/bank-qr.png" 
+                                    alt="QR Code للدفع" 
+                                    className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                                    onClick={() => window.open('/assets/bank-qr.png', '_blank')}
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
+                            )}
                           </div>
                           <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
                             <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة رقم العقار في ملاحظات التحويل</p>

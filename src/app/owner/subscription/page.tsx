@@ -892,7 +892,7 @@ export default function OwnerSubscriptionPage() {
             {canExtend && (
               <Button
                 variant="outline"
-                className="flex-1 gap-2 border-2 border-blue-400 shadow-sm hover:shadow-md hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 cursor-pointer bg-white text-blue-700"
+                className="flex-1 md:flex-none min-w-0 gap-2 border-2 border-blue-400 shadow-sm hover:shadow-md hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 cursor-pointer bg-white text-blue-700"
                 onClick={() => {
                   setAction("extend");
                   setSelectedPackageId(subscription?.packageId || null);
