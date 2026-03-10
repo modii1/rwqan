@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
-  Calendar, Timer, Banknote, Info, X, Loader2, Plus,
+  Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -91,6 +91,7 @@ export default function OwnerSubscriptionPage() {
   const [addOnReceiptFile, setAddOnReceiptFile] = useState<File | null>(null);
   const [addOnPaymentSuccess, setAddOnPaymentSuccess] = useState(false);
   const [addOnAiScanResult, setAddOnAiScanResult] = useState<any>(null);
+  const [unlinkPropertyDialog, setUnlinkPropertyDialog] = useState<{ open: boolean; propertyNumber: string; propertyName: string }>({ open: false, propertyNumber: "", propertyName: "" });
 
   interface AIScanResult {
     recommendation: string;
@@ -417,6 +418,29 @@ export default function OwnerSubscriptionPage() {
         setAddOnAiScanResult(data.aiScan);
       }
       setAddOnPaymentSuccess(true);
+    },
+    onError: (err: Error) => {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Unlink property mutation
+  const unlinkPropertyMutation = useMutation({
+    mutationFn: async (linkedPropertyNumber: string) => {
+      const res = await fetch(`/api/owner/subscription/linked-properties/${linkedPropertyNumber}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "فشل في فصل العقار");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/additional-property-requests"] });
+      toast({ title: "نجاح", description: data.message });
     },
     onError: (err: Error) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
@@ -1071,6 +1095,30 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
+        {/* If this property is linked to a main property */}
+        {currentSubscription?.linkedToMain && (
+          <Card className="p-4 border-blue-300 bg-blue-50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-blue-700">
+                <Home className="w-5 h-5" />
+                <div>
+                  <p className="font-semibold">مرتبط بعقار رئيسي</p>
+                  <p className="text-sm">
+                    رقم العقار: <span className="font-bold">{currentSubscription.linkedToMain.propertyNumber}</span>
+                    {currentSubscription.linkedToMain.name && (
+                      <> - <span>{currentSubscription.linkedToMain.name}</span></>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
+                {currentSubscription.linkedToMain.subscriptionStatus === 'نشط' ? 'نشط' : 
+                 currentSubscription.linkedToMain.subscriptionStatus || 'غير نشط'}
+              </Badge>
+            </div>
+          </Card>
+        )}
+
         {/* Approved Linked Properties */}
         {additionalPropertyRequests?.approvedRequests?.length > 0 && (
           <Card className="p-4 border-green-300 bg-green-50">
@@ -1088,14 +1136,53 @@ export default function OwnerSubscriptionPage() {
                       <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
                     </div>
                   </div>
-                  <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
-                    تم الربط
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
+                      تم الربط
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => {
+                        setUnlinkPropertyDialog({ open: true, propertyNumber: req.propertyNumber, propertyName: req.name });
+                      }}
+                      title="فصل العقار"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
           </Card>
         )}
+
+        {/* ===== نافذة تأكيد فصل العقار ===== */}
+        <Dialog open={unlinkPropertyDialog.open} onOpenChange={(open) => setUnlinkPropertyDialog({ ...unlinkPropertyDialog, open })}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>فصل العقار المرتبط</DialogTitle>
+              <DialogDescription>
+                هل أنت متأكد من فصل العقار رقم {unlinkPropertyDialog.propertyNumber} ({unlinkPropertyDialog.propertyName})؟
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-3 mt-4">
+              <Button variant="outline" onClick={() => setUnlinkPropertyDialog({ ...unlinkPropertyDialog, open: false })}>
+                إلغاء
+              </Button>
+              <Button 
+                variant="destructive"
+                onClick={() => {
+                  unlinkPropertyMutation.mutate(unlinkPropertyDialog.propertyNumber);
+                  setUnlinkPropertyDialog({ ...unlinkPropertyDialog, open: false });
+                }}
+              >
+                فصل العقار
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* ===== نافذة اختيار الباقة للترقية ===== */}
         {showUpgradeDialog && currentStep === 1 && (

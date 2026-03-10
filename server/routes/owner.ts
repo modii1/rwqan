@@ -298,7 +298,6 @@ router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => 
 // ======================================================
 router.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
   try {
-    // اقرأ رقم العقار من الكوكي وليس السيشن
     const propertyNumber =
       req.cookies?.ownerPropertyNumber ||
       (req.session as any)?.propertyNumber;
@@ -307,7 +306,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-    // استخدام الدالة الجديدة للبحث عن الاشتراك
     let subscription = null;
     try {
       subscription = await subscriptionService.getByProperty(propertyNumber);
@@ -316,7 +314,6 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
     }
 
     if (!subscription) {
-      // إرجاع اشتراك افتراضي مجاني إذا لم يوجد - مع توضيح أنه غير نشط
       const defaultSub = {
         id: `SUB-${propertyNumber}`,
         propertyNumber,
@@ -329,10 +326,24 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       return res.json(defaultSub);
     }
 
-    res.json(subscription);
+    let linkedToMain = null;
+    if (subscription.linkedProperty) {
+      const mainProperty = await firebaseService.getPropertyByNumber(subscription.linkedProperty);
+      const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(subscription.linkedProperty);
+      linkedToMain = {
+        propertyNumber: subscription.linkedProperty,
+        name: mainProperty?.name || subscription.linkedProperty,
+        city: mainProperty?.city,
+        subscriptionStatus: mainSubscription?.status || 'غير نشط'
+      };
+    }
+
+    res.json({
+      ...subscription,
+      linkedToMain
+    });
   } catch (err: any) {
     console.error("Get subscription error:", err?.message);
-    // Return a default free subscription instead of 500
     const propertyNumber =
       req.cookies?.ownerPropertyNumber ||
       (req.session as any)?.propertyNumber || "unknown";
@@ -1393,6 +1404,21 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       // Regular package price (just the first property)
       finalAmount = basePrice;
     }
+
+    // Check if this is a package downgrade (for extend/upgrade actions)
+    let downgradeWarning = null;
+    let willAutoUnlink = 0;
+    if (action === 'upgrade' || action === 'extend') {
+      const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+      const currentLinkedCount = currentSubscription?.linkedProperties?.length || 0;
+      const newPackageMaxProps = (pkg as any).maxProperties || 1;
+      
+      if (currentLinkedCount > newPackageMaxProps) {
+        willAutoUnlink = currentLinkedCount - newPackageMaxProps;
+        downgradeWarning = `سيتم فصل ${willAutoUnlink} عقار تلقائياً لأن الباقة الجديدة لا تدعم هذا العدد`;
+      }
+    }
+
     let discountAmount = 0;
 
     if (discountCode) {
@@ -1449,6 +1475,8 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       redirectUrl: paymobPayment.checkoutUrl,
       finalAmount: finalAmount,
       discountAmount: discountAmount,
+      downgradeWarning,
+      willAutoUnlink,
     });
   } catch (err: any) {
     console.error("Initiate payment error:", err);
@@ -1732,6 +1760,53 @@ router.get("/api/owner/additional-property-requests", requireOwner, async (req, 
 });
 
 // ======================================================
+// فصل عقار مرتبط من العقار الرئيسي
+// DELETE /api/owner/subscription/linked-properties/:propertyNumber
+// ======================================================
+router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requireOwner, async (req, res) => {
+  try {
+    const mainPropertyNumber = (req.session as any).propertyNumber;
+    const linkedPropertyNumber = req.params.propertyNumber;
+
+    const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
+    if (!mainSubscription) {
+      return res.status(404).json({ success: false, message: "العقار الرئيسي ليس لديه اشتراك" });
+    }
+
+    const currentLinkedProperties = mainSubscription.linkedProperties || [];
+    
+    if (!currentLinkedProperties.includes(linkedPropertyNumber)) {
+      return res.status(400).json({ success: false, message: "العقار غير مرتبط بعقارك" });
+    }
+
+    const updatedLinkedProperties = currentLinkedProperties.filter((p: string) => p !== linkedPropertyNumber);
+    await firebaseService.updateSubscription(mainSubscription.id, {
+      linkedProperties: updatedLinkedProperties,
+      propertyCount: updatedLinkedProperties.length + 1
+    });
+
+    const linkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(linkedPropertyNumber);
+    if (linkedSubscription) {
+      await firebaseService.updateSubscription(linkedSubscription.id, {
+        linkedProperty: ""
+      });
+    }
+
+    await firebaseService.updateProperty(linkedPropertyNumber, {
+      pendingApprovalFrom: ""
+    });
+
+    res.json({
+      success: true,
+      message: `تم فصل العقار ${linkedPropertyNumber} من عقارك`
+    });
+  } catch (err: any) {
+    console.error("Unlink property error:", err);
+    res.status(500).json({ success: false, message: "فشل في فصل العقار المرتبط" });
+  }
+});
+
+// ======================================================
 // تحضير معلومات الدفع للترقية/التمديد
 // POST /api/owner/subscription/prepare-payment
 // ======================================================
@@ -1749,6 +1824,19 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req,
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
 
+    // Check if new package can accommodate current linked properties
+    const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    const currentLinkedCount = currentSubscription?.linkedProperties?.length || 0;
+    const newPackageMaxProps = (newPackage as any).maxProperties || 1;
+    
+    let warning = null;
+    let willAutoUnlink = 0;
+    
+    if (currentLinkedCount > newPackageMaxProps) {
+      willAutoUnlink = currentLinkedCount - newPackageMaxProps;
+      warning = `سيتم فصل ${willAutoUnlink} عقار تلقائياً لأن الباقة الجديدة لا تدعم هذا العدد`;
+    }
+
     res.json({
       ok: true,
       paymentRequired: true,
@@ -1758,7 +1846,11 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req,
       price: newPackage.price,
       duration: newPackage.duration,
       paymentMethods: ["بطاقة", "Apple Pay", "تحويل بنكي"],
-      message: `يجب إتمام الدفع للقيام بـ ${action === 'extend' ? 'التمديد' : 'الترقية'}`
+      message: `يجب إتمام الدفع للقيام بـ ${action === 'extend' ? 'التمديد' : 'الترقية'}`,
+      warning,
+      willAutoUnlink,
+      currentLinkedCount,
+      newPackageMaxProps
     });
   } catch (err: any) {
     console.error("Subscription prepare payment error:", err);
@@ -1823,6 +1915,8 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       price: newPackage.price,
       subscriptionType: isPremium ? "مميز" : "عادي",
       packageType: isPremium ? "مميز" : "عادي",
+      linkedProperties: currentSubscription?.linkedProperties || undefined,
+      propertyCount: (currentSubscription?.linkedProperties?.length || 0) + 1,
     };
 
     await firebaseService.addSubscriptionToSheet(
@@ -1833,6 +1927,57 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     );
 
     console.log(`✅ [Owner Confirm] Subscription activated for: ${propertyNumber}`);
+
+    // Auto-renew linked properties with same dates
+    const currentLinkedProperties = currentSubscription?.linkedProperties || [];
+    if (currentLinkedProperties.length > 0) {
+      console.log(`🔗 [Owner Confirm] Auto-renewing ${currentLinkedProperties.length} linked properties`);
+      
+      for (const linkedPropNum of currentLinkedProperties) {
+        const linkedProperty = await firebaseService.getPropertyByNumber(linkedPropNum);
+        const linkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(linkedPropNum);
+        
+        if (linkedSubscription) {
+          await firebaseService.updateSubscription(linkedSubscription.id, {
+            startDate: newStartDate.toISOString(),
+            endDate: newEndDate.toISOString(),
+            packageId: packageId,
+            subscriptionType: isPremium ? "مميز" : "عادي",
+            packageType: isPremium ? "مميز" : "عادي",
+            status: 'نشط'
+          });
+          console.log(`✅ [Owner Confirm] Updated linked property ${linkedPropNum} subscription to match main property dates`);
+        }
+      }
+    }
+
+    // Auto-unlink excess properties if new package has fewer slots
+    const maxProperties = (newPackage as any).maxProperties || 1;
+    const linkedPropertiesAfterRenew = currentSubscription?.linkedProperties || [];
+    
+    if (currentSubscription && linkedPropertiesAfterRenew.length > maxProperties) {
+      const toUnlink = linkedPropertiesAfterRenew.slice(maxProperties);
+      console.log(`🔗 [Owner Confirm] Auto-unlinking ${toUnlink.length} properties due to package downgrade`);
+      
+      const remainingLinked = linkedPropertiesAfterRenew.slice(0, maxProperties);
+      
+      // Update main property's linkedProperties
+      await firebaseService.updateSubscription(currentSubscription.id, {
+        linkedProperties: remainingLinked,
+        propertyCount: maxProperties + 1
+      });
+      
+      // Clear linkedProperty on unlinked subscriptions (keep subscriptions as-is)
+      for (const propNum of toUnlink) {
+        const unlinkedSub = await firebaseService.getSubscriptionByPropertyNumber(propNum);
+        if (unlinkedSub) {
+          await firebaseService.updateSubscription(unlinkedSub.id, {
+            linkedProperty: ""
+          });
+          console.log(`✅ [Owner Confirm] Unlinked property ${propNum} - subscription kept active until expiry`);
+        }
+      }
+    }
 
     // Update property's subscriptionType to match the package
     await firebaseService.updateProperty(propertyNumber, { 

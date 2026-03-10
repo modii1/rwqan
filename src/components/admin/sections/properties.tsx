@@ -194,7 +194,19 @@ export default function PropertiesSection() {
       const res = await fetch("/api/admin/additional-property-requests");
       if (!res.ok) throw new Error("فشل في جلب الطلبات");
       const data = await res.json();
-      return data.requests || [];
+      // Support both old format (requests) and new format (pendingRequests)
+      return data.pendingRequests || data.requests || [];
+    },
+    enabled: showAdditionalRequests,
+  });
+
+  // Query for all linked properties relationships
+  const { data: linkedPropertiesData } = useQuery<any>({
+    queryKey: ["admin-linked-properties"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/additional-property-requests");
+      if (!res.ok) throw new Error("فشل في جلب البيانات");
+      return res.json();
     },
     enabled: showAdditionalRequests,
   });

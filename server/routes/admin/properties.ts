@@ -511,11 +511,14 @@ router.put("/api/admin/properties/:propertyNumber/reject-additional", async (req
 });
 
 // ==========================
-//   الحصول على قائمة الطلبات الإضافية المعلقة
+//   الحصول على قائمة الطلبات الإضافية المعلقة + العقارات المرتبطة
 // ==========================
 router.get("/api/admin/additional-property-requests", async (req, res) => {
   try {
     const properties = await firebaseService.getProperties();
+    const subscriptions = await firebaseService.getSubscriptions();
+    
+    // Properties pending approval
     const pendingRequests = properties.filter((p: any) => 
       p.pendingApprovalFrom && p.pendingApprovalFrom.length > 0
     );
@@ -524,6 +527,7 @@ router.get("/api/admin/additional-property-requests", async (req, res) => {
       pendingRequests.map(async (p: any) => {
         const mainProperty = await firebaseService.getPropertyByNumber(p.pendingApprovalFrom);
         return {
+          type: 'pending',
           propertyNumber: p.propertyNumber,
           name: p.name,
           city: p.city,
@@ -535,9 +539,65 @@ router.get("/api/admin/additional-property-requests", async (req, res) => {
       })
     );
 
+    // Get all linked properties (properties that have linkedProperty set)
+    const linkedProperties = subscriptions.filter((s: any) => 
+      s.linkedProperty && s.status === 'نشط'
+    );
+
+    const linkedRequests = await Promise.all(
+      linkedProperties.map(async (s: any) => {
+        const mainProperty = await firebaseService.getPropertyByNumber(s.linkedProperty);
+        const additionalProperty = await firebaseService.getPropertyByNumber(s.propertyNumber);
+        return {
+          type: 'linked',
+          propertyNumber: s.propertyNumber,
+          name: additionalProperty?.name || s.propertyNumber,
+          city: additionalProperty?.city,
+          linkedTo: s.linkedProperty,
+          mainPropertyName: mainProperty?.name || s.linkedProperty,
+          status: s.status,
+          endDate: s.endDate
+        };
+      })
+    );
+
+    // Get main properties (properties that have linkedProperties array)
+    const mainProperties = subscriptions.filter((s: any) => 
+      s.linkedProperties && s.linkedProperties.length > 0
+    );
+
+    const mainRequests = await Promise.all(
+      mainProperties.map(async (s: any) => {
+        const mainProperty = await firebaseService.getPropertyByNumber(s.propertyNumber);
+        const linkedPropsDetails = await Promise.all(
+          s.linkedProperties.map(async (propNum: string) => {
+            const prop = await firebaseService.getPropertyByNumber(propNum);
+            return {
+              propertyNumber: propNum,
+              name: prop?.name || propNum,
+              city: prop?.city
+            };
+          })
+        );
+        return {
+          type: 'main',
+          propertyNumber: s.propertyNumber,
+          name: mainProperty?.name || s.propertyNumber,
+          city: mainProperty?.city,
+          linkedProperties: s.linkedProperties,
+          linkedPropertiesDetails: linkedPropsDetails,
+          propertyCount: s.propertyCount,
+          status: s.status,
+          endDate: s.endDate
+        };
+      })
+    );
+
     res.json({
       success: true,
-      requests: requestsWithMain
+      pendingRequests: requestsWithMain,
+      linkedProperties: linkedRequests,
+      mainProperties: mainRequests
     });
 
   } catch (err) {
