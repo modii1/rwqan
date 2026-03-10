@@ -84,6 +84,7 @@ export default function SubscriptionPage() {
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [packageToView, setPackageToView] = useState<Package | null>(null);
   const [showAllPackages, setShowAllPackages] = useState(true);
+  const [expandedPackages, setExpandedPackages] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
@@ -553,7 +554,12 @@ export default function SubscriptionPage() {
           <Card className="p-8">
             <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => (
+              {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => {
+                const isExpanded = expandedPackages.has(pkg.id);
+                const featuresToShow = isExpanded ? pkg.features : (pkg.features || []).slice(0, 4);
+                const hasMoreFeatures = (pkg.features?.length || 0) > 4;
+
+                return (
                 <div
                   key={pkg.id}
                   className={`p-5 rounded-lg border-2 transition-all ${selectedPackageId === pkg.id
@@ -578,6 +584,40 @@ export default function SubscriptionPage() {
                   {pkg.type === 'مميز' && (
                     <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
                   )}
+                  
+                  {/* Features List */}
+                  {pkg.features && pkg.features.length > 0 && (
+                    <div className="mb-3">
+                      <ul className="space-y-1">
+                        {featuresToShow.map((feature, idx) => (
+                          <li key={idx} className="text-xs flex items-start gap-1.5">
+                            <span className="text-[#c9951d] font-bold mt-0.5">•</span>
+                            <span className="text-muted-foreground leading-tight">{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {hasMoreFeatures && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedPackages(prev => {
+                              const newSet = new Set(prev);
+                              if (newSet.has(pkg.id)) {
+                                newSet.delete(pkg.id);
+                              } else {
+                                newSet.add(pkg.id);
+                              }
+                              return newSet;
+                            });
+                          }}
+                          className="text-xs text-[#c9951d] font-semibold hover:underline mt-1"
+                        >
+                          {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <Button
                       type="button"
@@ -601,7 +641,7 @@ export default function SubscriptionPage() {
                     </Button>
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
             <div className="flex justify-end pt-6 border-t">
               <Button
