@@ -603,18 +603,6 @@ export default function SubscriptionPage() {
                 </div>
               ))}
             </div>
-            {packages.length > 4 && (
-              <div className="text-center mb-6">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowAllPackages(!showAllPackages)}
-                  className="border-2 border-[#434040] hover:bg-[#434040] hover:text-white"
-                >
-                  {showAllPackages ? `عرض أقل` : `عرض المزيد (${packages.length} باقة)`}
-                </Button>
-              </div>
-            )}
             <div className="flex justify-end pt-6 border-t">
               <Button
                 onClick={() => setCurrentStep(2)}
