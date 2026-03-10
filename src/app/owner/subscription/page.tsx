@@ -49,6 +49,7 @@ export default function OwnerSubscriptionPage() {
   const [showIncompleteDataDialog, setShowIncompleteDataDialog] = useState(false);
   const [incompletePropertyData, setIncompletePropertyData] = useState<any>(null);
   const [showAdditionalPropertyError, setShowAdditionalPropertyError] = useState(false);
+  const [expandedPackages, setExpandedPackages] = useState<Set<string>>(new Set());
 
   // Get current subscription for linked properties
   const { data: currentSubscription } = useQuery<any>({
@@ -1231,6 +1232,9 @@ export default function OwnerSubscriptionPage() {
                 const isDowngrade = action === "upgrade" && pkg.price < currentPkgPrice;
                 const isSelected = selectedPackageId === pkg.id;
                 const isMultiProperty = pkg.id?.includes("2propert") || pkg.id?.includes("2prop");
+                const isExpanded = expandedPackages.has(pkg.id);
+                const featuresToShow = isExpanded ? pkg.features : (pkg.features || []).slice(0, 4);
+                const hasMoreFeatures = (pkg.features?.length || 0) > 4;
 
                 return (
                   <div
@@ -1281,12 +1285,32 @@ export default function OwnerSubscriptionPage() {
                     )}
                     {pkg.features && pkg.features.length > 0 && (
                       <div className="space-y-1 mt-2">
-                        {pkg.features.slice(0, 4).map((f: string, i: number) => (
+                        {featuresToShow.map((f: string, i: number) => (
                           <div key={i} className="text-xs flex items-start gap-2">
                             <span className="text-[#434040] font-bold mt-0.5">✓</span>
                             <span>{f}</span>
                           </div>
                         ))}
+                        {hasMoreFeatures && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedPackages(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(pkg.id)) {
+                                  newSet.delete(pkg.id);
+                                } else {
+                                  newSet.add(pkg.id);
+                                }
+                                return newSet;
+                              });
+                            }}
+                            className="text-xs text-[#c9951d] font-semibold hover:underline mt-1"
+                          >
+                            {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
+                          </button>
+                        )}
                       </div>
                     )}
                     {isDowngrade && (
