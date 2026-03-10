@@ -586,6 +586,17 @@ export default function OwnerSubscriptionPage() {
   // Current package price from subscription
   const currentPackageObj = packages.find((p: any) => p.id === subscription?.packageId);
 
+  // Get package type (مميز/عادي) based on package's type from packages API
+  const getPackageType = () => {
+    // Check the package's type from packages API, not subscription status
+    const packageType = currentPackageObj?.type;
+    if (packageType === 'مميز') {
+      return { type: 'مميز', isPremium: true };
+    }
+    return { type: 'عادي', isPremium: false };
+  };
+  const packageType = getPackageType();
+
   // Filter packages - show upgradable ones
   const availablePackages = packages.filter((pkg: any) => {
     if (!pkg.isActive) return false;
@@ -913,9 +924,16 @@ export default function OwnerSubscriptionPage() {
               <Crown className="w-5 h-5 text-[#c9951d]" />
               الباقة الحالية
             </h2>
-            <Badge className={`${statusInfo.bgColor} text-white px-3 py-1`}>
-              {statusInfo.icon} {statusInfo.label}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge className={packageType.isPremium ? 'bg-[#c9951d] text-white px-3 py-1' : 'bg-gray-400 text-white px-3 py-1'}>
+                {packageType.type}
+              </Badge>
+              {isExpired && currentPackageObj && (
+                <span className="text-sm text-muted-foreground">
+                  <PriceDisplay amount={currentPackageObj.price} size="sm" />
+                </span>
+              )}
+            </div>
           </div>
 
           {/* اسم الباقة */}

@@ -24,9 +24,31 @@ function parseFacilities(raw: any): string[] {
 
 function parseArabicDate(dateStr: any): string | null {
   if (!dateStr) return null;
-  if (dateStr instanceof Date) return dateStr.toISOString().split('T')[0];
-  const parsed = new Date(dateStr);
-  if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
+  
+  // If it's a number, treat as Excel serial date
+  if (typeof dateStr === 'number') {
+    // Excel serial date: days since 1900-01-01
+    // Formula: date = new Date((serial - 25569) * 86400 * 1000)
+    const ms = (dateStr - 25569) * 86400 * 1000;
+    const date = new Date(ms);
+    if (!isNaN(date.getTime()) && date.getFullYear() >= 1970) {
+      return date.toISOString().split('T')[0];
+    }
+    return null;
+  }
+  
+  if (dateStr instanceof Date) {
+    if (dateStr.getFullYear() < 1970) return null;
+    return dateStr.toISOString().split('T')[0];
+  }
+  const str = String(dateStr).trim();
+  if (!str) return null;
+  // Fix malformed formats like "2025-/09/21" -> "2025-09-21"
+  const cleaned = str.replace(/-\//g, '-').replace(/\//g, '-');
+  const parsed = new Date(cleaned);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1970) {
+    return parsed.toISOString().split('T')[0];
+  }
   return null;
 }
 
@@ -104,8 +126,8 @@ function mapSubscription(row: any) {
     id: `SUB-${propertyNumber}`,
     propertyNumber,
     packageId,
-    startDate: parseArabicDate(row['تاريخ البداية']) || new Date().toISOString().split('T')[0],
-    endDate: parseArabicDate(row['تاريخ الانتهاء']) || new Date().toISOString().split('T')[0],
+    startDate: parseArabicDate(row['تاريخ البداية']) || null,
+    endDate: parseArabicDate(row['تاريخ الانتهاء']) || null,
     status: row['رابط الإيصال'] ? 'نشط' : 'منتهي',
     receiptUrl: row['رابط الإيصال'] || '',
     muteExpiryFlag: parseBool(row['علم انتهاء الاشتراك']),
