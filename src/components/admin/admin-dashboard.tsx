@@ -685,7 +685,7 @@ function AlertsDashboard() {
               <Wallet className="w-4 h-4 text-teal-600" />
             </div>
           </div>
-          <p className="text-2xl md:text-3xl font-bold text-teal-600">{(stats.weekRevenue || 0).toFixed(3)}</p>
+          <p className="text-2xl md:text-3xl font-bold text-teal-600">{(stats.weekRevenue || 0)}</p>
           <p className="text-xs text-teal-700/70 dark:text-teal-400/70 font-medium">إيرادات الأسبوع</p>
         </Card>
 

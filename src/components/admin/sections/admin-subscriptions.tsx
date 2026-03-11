@@ -464,9 +464,14 @@ export default function AdminSubscriptionsSection() {
                         {formatDate(sub.startDate)} - {formatDate(sub.endDate)}
                       </span>
                     )}
-                    <Badge className={sub.subscriptionType === "مميز" ? "bg-[#b88d2b] text-white" : "bg-gray-400 text-white"}>
-                      {sub.subscriptionType}
-                    </Badge>
+                    {(() => {
+                      const isPremium = sub.status !== "منتهي" && sub.status !== "نشط مجاني";
+                      return (
+                        <Badge className={isPremium ? "bg-[#b88d2b] text-white" : "bg-gray-400 text-white"}>
+                          {isPremium ? "مميز" : sub.subscriptionType}
+                        </Badge>
+                      );
+                    })()}
                     {sub.status !== "نشط مجاني" && sub.price > 0 && (
                       <span className="text-[#b88d2b] font-semibold">{sub.price} ر.س</span>
                     )}
