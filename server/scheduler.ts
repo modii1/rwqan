@@ -355,7 +355,53 @@ export function startScheduler() {
   }, FIFTEEN_MINUTES);
   
   console.log("🔄 [Scheduler] فحص الدفعات كل 15 دقيقة");
+
+  // تشغيل فحص تخفيض الاشتراكات المنتهية كل 30 دقيقة
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  setInterval(() => {
+    console.log("⬇️ [Scheduler] فحص الاشتراكات المنتهية...");
+    downgradeExpiredSubscriptions().catch(console.error);
+  }, THIRTY_MINUTES);
+
+  // تشغيل فوري عند البدء
+  setTimeout(() => {
+    downgradeExpiredSubscriptions().catch(console.error);
+  }, 5000);
+
+  console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
+}
+
+// خفض الاشتراكات المنتهية من مميز إلى عادي
+async function downgradeExpiredSubscriptions(): Promise<number> {
+  try {
+    const subscriptions = await firebaseService.getSubscriptions();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let downgraded = 0;
+
+    for (const sub of subscriptions) {
+      if (!sub.endDate || sub.subscriptionType !== "مميز") continue;
+      
+      const endDate = new Date(sub.endDate);
+      endDate.setHours(0, 0, 0, 0);
+      
+      if (endDate < today) {
+        await firebaseService.updateSubscription(sub.id, { subscriptionType: "عادي" });
+        await firebaseService.updateProperty(sub.propertyNumber, { subscriptionType: "عادي" });
+        console.log(`⬇️ [Scheduler] تم تخفيض اشتراك ${sub.propertyNumber} من مميز إلى عادي`);
+        downgraded++;
+      }
+    }
+    
+    if (downgraded > 0) {
+      console.log(`⬇️ [Scheduler] تم تخفيض ${downgraded} اشتراك منتهي`);
+    }
+    return downgraded;
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في تخفيض الاشتراكات:", error);
+    return 0;
+  }
 }
 
 // تصدير الدوال للاستخدام اليدوي (API endpoint)
-export { updateRemainingDaysInSheet, expireOldPendingPayments };
+export { updateRemainingDaysInSheet, expireOldPendingPayments, downgradeExpiredSubscriptions };
