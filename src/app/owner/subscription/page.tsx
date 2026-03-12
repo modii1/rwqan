@@ -938,11 +938,6 @@ export default function OwnerSubscriptionPage() {
               <Badge className={`${subStatusDisplay.bgColor} ${subStatusDisplay.textColor} px-3 py-1`}>
                 {subStatusDisplay.label}
               </Badge>
-              {isExpired && currentPackageObj && (
-                <span className="text-sm text-muted-foreground">
-                  <PriceDisplay amount={currentPackageObj.price} size="sm" />
-                </span>
-              )}
             </div>
           </div>
 
