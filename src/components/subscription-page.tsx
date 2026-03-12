@@ -209,7 +209,10 @@ export default function SubscriptionPage() {
   });
 
   // التأكد من عدم تكرار الباقات (حل لمشكلة Duplicate Keys)
-  const packages = Array.from(new Map(rawPackages.map(pkg => [pkg.id, pkg])).values());
+  // Hide باقة النخبة packages on initial signup (only available for upgrades)
+  const ELITE_PACKAGE_IDS = ['pkg-2properties', 'pkg-month-2properties', 'pkg-month-2prop'];
+  const packages = Array.from(new Map(rawPackages.map(pkg => [pkg.id, pkg])).values())
+    .filter(pkg => !ELITE_PACKAGE_IDS.includes(pkg.id));
 
   const selectedPackage = packages.find(p => p.id === selectedPackageId);
   const isFreePackage = selectedPackage?.price === 0;

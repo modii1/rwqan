@@ -586,16 +586,26 @@ export default function OwnerSubscriptionPage() {
   // Current package price from subscription
   const currentPackageObj = packages.find((p: any) => p.id === subscription?.packageId);
 
-  // Get package type (مميز/عادي) based on package's type from packages API
-  const getPackageType = () => {
-    // Check the package's type from packages API, not subscription status
-    const packageType = currentPackageObj?.type;
-    if (packageType === 'مميز') {
-      return { type: 'مميز', isPremium: true };
+  // Get subscription status with custom Arabic labels for display
+  const getSubscriptionDisplayStatus = () => {
+    const status = subscription?.status;
+    const isFree = status === 'نشط مجاني';
+    
+    if (subStatus === 'expired') {
+      return { label: 'منتهي', bgColor: 'bg-red-500', textColor: 'text-white' };
     }
-    return { type: 'عادي', isPremium: false };
+    if (subStatus === 'expiring') {
+      return { label: 'ينتهي قريباً', bgColor: 'bg-amber-500', textColor: 'text-white' };
+    }
+    if (isFree) {
+      return { label: 'نشط مجاني', bgColor: 'bg-blue-500', textColor: 'text-white' };
+    }
+    if (subStatus === 'active') {
+      return { label: 'مفعل', bgColor: 'bg-green-500', textColor: 'text-white' };
+    }
+    return { label: 'غير نشط', bgColor: 'bg-gray-400', textColor: 'text-white' };
   };
-  const packageType = getPackageType();
+  const subStatusDisplay = getSubscriptionDisplayStatus();
 
   // Filter packages - show upgradable ones
   const availablePackages = packages.filter((pkg: any) => {
@@ -925,8 +935,8 @@ export default function OwnerSubscriptionPage() {
               الباقة الحالية
             </h2>
             <div className="flex items-center gap-2">
-              <Badge className={packageType.isPremium ? 'bg-[#c9951d] text-white px-3 py-1' : 'bg-gray-400 text-white px-3 py-1'}>
-                {packageType.type}
+              <Badge className={`${subStatusDisplay.bgColor} ${subStatusDisplay.textColor} px-3 py-1`}>
+                {subStatusDisplay.label}
               </Badge>
               {isExpired && currentPackageObj && (
                 <span className="text-sm text-muted-foreground">
