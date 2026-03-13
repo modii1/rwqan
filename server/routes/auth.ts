@@ -8,8 +8,8 @@ import { requireOwner, requireAdmin } from "./middleware";
 const router = Router();
 
 // Admin credentials
-const ADMIN_CODE = process.env.ADMIN_CODE || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_CODE = process.env.ADMIN_CODE || "Rwq";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Qw@123";
 
 // ======================
 // OWNER LOGIN/LOGOUT
