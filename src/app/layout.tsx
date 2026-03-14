@@ -22,8 +22,8 @@ export default function RootLayout({
     return (
         <html lang="ar" dir="rtl">
             <head>
-                <link rel="icon" href="/favicon.png" type="image/png" />
-                <link rel="shortcut icon" href="/favicon.png" type="image/png" />
+                <link rel="icon" href="/assets/rwqan-logo.jpeg" type="image/jpeg" />
+                <link rel="shortcut icon" href="/assets/rwqan-logo.jpeg" type="image/jpeg" />
             </head>
             <body className="font-sans antialiased bg-background text-foreground">
                 <QueryProvider>
