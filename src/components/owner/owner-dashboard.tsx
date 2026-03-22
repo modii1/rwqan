@@ -839,8 +839,6 @@ export default function OwnerDashboard() {
 
   // ================== من هنا يبدأ الذكاء البصري للوحة ==================
 
-  const isVip = property.subscriptionType === "مميز";
-
   // استخدام الأيام المتبقية من شيت الاشتراكات مباشرة (العمود H)
   // إذا لم تكن موجودة، نحسبها محلياً كـ fallback
   const calculateRemainingDaysLocal = () => {
@@ -889,6 +887,8 @@ export default function OwnerDashboard() {
 
   const isNearExpiry =
     remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
+
+  const isVip = property.subscriptionType === "مميز" && (remainingDays === null || remainingDays >= 0);
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
   const subscriptionButtonLabel = isVip ? "إدارة الاشتراك" : "ترقية الاشتراك";
@@ -1239,7 +1239,7 @@ export default function OwnerDashboard() {
                   variant={isVip ? "default" : "secondary"}
                   className="text-xs md:text-sm px-3 md:px-4 py-1"
                 >
-                  {property.subscriptionType}
+                  {remainingDays !== null && remainingDays < 0 ? "عادي" : property.subscriptionType}
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">
