@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { propertyService } from "../../services";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
-import { upload } from "../../utils/helpers";
+import { uploadImages } from "../../utils/helpers";
 import {
   PutObjectCommand,
   DeleteObjectCommand,
@@ -90,7 +90,7 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
   // رفع صور جديدة لعقار من لوحة التحكم
   router.post(
     "/api/admin/r2-images/:propertyNumber",
-    upload.array("images"),
+    uploadImages.array("images"),
     async (req, res) => {
       try {
         const propertyNumber = req.params.propertyNumber;

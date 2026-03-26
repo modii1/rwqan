@@ -3,7 +3,7 @@ import { requireOwner } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
-import { upload, detectDeviceType, SHEET_MAP } from "../utils/helpers";
+import { upload, uploadImages, detectDeviceType, SHEET_MAP } from "../utils/helpers";
 import { checkPropertyDataComplete, detectSensitiveChanges, smartVerification } from "../utils/verification";
 import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
@@ -999,7 +999,7 @@ router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
 // ======================================================
 // 📸 POST /api/owner/images - Upload property images to R2
 // ======================================================
-router.post("/api/owner/images", requireOwner, upload.array("images"), async (req, res) => {
+router.post("/api/owner/images", requireOwner, uploadImages.array("images"), async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber || "";
 

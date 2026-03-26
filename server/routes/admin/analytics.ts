@@ -537,7 +537,8 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
           return {
             propertyNumber: s.propertyNumber,
             name: prop?.name || '',
-            endDate: s.endDate
+            endDate: s.endDate,
+            type: 'عادي'
           };
         })
       });

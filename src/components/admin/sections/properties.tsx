@@ -29,6 +29,7 @@ interface PropertyData {
   whatsappNumber: string;
   facilities: string[] | string;
   subscriptionType: string;
+  subscriptionStatus?: string | null;
   subscriptionDate?: string | null;
   muteExpiryNotification?: boolean;
   linkedProperty?: string;
@@ -562,10 +563,14 @@ export default function PropertiesSection() {
                   <Td>{p.type}</Td>
                   <Td>
                     <div className="flex flex-col gap-1">
-                      <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"
-                        }`}>
-                        {p.subscriptionType}
-                      </span>
+                      {(() => {
+                        const displayType = (p.subscriptionStatus === 'expired' || p.subscriptionStatus === 'منتهي') ? 'عادي' : p.subscriptionType;
+                        return (
+                          <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${(displayType === "موثوق" || displayType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"}`}>
+                            {displayType}
+                          </span>
+                        );
+                      })()}
                       {p.linkedProperty && (
                         <button
                           onClick={async () => {

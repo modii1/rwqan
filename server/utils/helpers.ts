@@ -3,7 +3,14 @@
  */
 import multer from "multer";
 
-export const upload = multer({ storage: multer.memoryStorage() });
+export const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
+export const uploadImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
 
 // Google Sheet column mapping (legacy, still used for admin property update translations)
 export const SHEET_MAP: Record<string, string> = {

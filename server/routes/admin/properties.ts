@@ -26,7 +26,19 @@ router.put("/api/admin/property/:propertyNumber", async (req, res) => {
 router.get("/api/admin/properties", async (_req, res) => {
   try {
     const items = await propertyService.getAll();
-    res.json(items);
+    
+    // Fetch subscription status for each property
+    const subscriptions = await firebaseService.getSubscriptions();
+    
+    const itemsWithSubscriptionStatus = items.map(property => {
+      const sub = subscriptions.find(s => s.propertyNumber === property.propertyNumber);
+      return {
+        ...property,
+        subscriptionStatus: sub?.status || null
+      };
+    });
+    
+    res.json(itemsWithSubscriptionStatus);
   } catch (err) {
     console.error("Admin get properties error:", err);
     res.status(500).json({ error: "فشل في جلب العقارات" });
