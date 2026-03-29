@@ -116,10 +116,21 @@ export default function PropertiesPage() {
     const [propertyImages, setPropertyImages] = useState<Map<string, string[]>>(new Map());
     const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
 
-    // مفتاح عشوائي ثابت طوال الجلسة (يتغير فقط عند تحديث الصفحة بالكامل)
+    // مفتاح عشوائي: جديد عند التحديث، ثابت عند الرجوع من /property/*
     const [shuffleKey] = useState(() => {
         if (typeof window === "undefined") return Date.now();
-        return Date.now();
+        
+        const savedKey = sessionStorage.getItem("homeShuffleKey");
+        
+        if (savedKey) {
+            sessionStorage.removeItem("homeShuffleKey");
+            sessionStorage.setItem("shuffleKey", savedKey);
+            return parseInt(savedKey);
+        }
+        
+        const key = Date.now();
+        sessionStorage.setItem("shuffleKey", String(key));
+        return key;
     });
 
     // لزر التصفية الثابت وزر الصعود للأعلى
@@ -590,6 +601,7 @@ export default function PropertiesPage() {
                 offsetFromTop: rect.top
             }));
         }
+        sessionStorage.setItem("homeShuffleKey", String(shuffleKey));
         router.push(`/property/${propertyNumber}`);
     };
 
