@@ -119,11 +119,7 @@ export default function PropertiesPage() {
     // مفتاح عشوائي ثابت طوال الجلسة (يتغير فقط عند تحديث الصفحة بالكامل)
     const [shuffleKey] = useState(() => {
         if (typeof window === "undefined") return Date.now();
-        const saved = sessionStorage.getItem("shuffleKey");
-        if (saved) return parseInt(saved);
-        const newKey = Date.now();
-        sessionStorage.setItem("shuffleKey", String(newKey));
-        return newKey;
+        return Date.now();
     });
 
     // لزر التصفية الثابت وزر الصعود للأعلى
