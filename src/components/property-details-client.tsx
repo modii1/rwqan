@@ -52,7 +52,10 @@ export interface PropertyDetails {
         overnight: string;
         holidays: string;
     };
-    subscriptionType: string; // "مميز" أو "عادي"
+    subscriptionType: string;
+    subscriptionStatus?: string;
+    subscriptionEndDate?: string;
+    isSubscriptionExpired?: boolean;
     phone?: string;
     imageCount: number;
     imageUrls?: string[];
@@ -61,6 +64,7 @@ export interface PropertyDetails {
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
 function isVerified(property: PropertyDetails) {
+    if (property.isSubscriptionExpired) return false;
     return property.subscriptionType?.trim().includes("مميز");
 }
 
@@ -133,7 +137,10 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                 holidays: "",
                             },
                             subscriptionType:
-                                data.subscriptionType || (data.name ? "مميز" : "عادي"),
+                                data.isSubscriptionExpired ? "عادي" : (data.subscriptionType || (data.name ? "مميز" : "عادي")),
+                            subscriptionStatus: data.subscriptionStatus,
+                            subscriptionEndDate: data.subscriptionEndDate,
+                            isSubscriptionExpired: data.isSubscriptionExpired,
                             phone: data.whatsappNumber || "",
                             imageCount: 0,
                             imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],

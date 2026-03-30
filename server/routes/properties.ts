@@ -13,7 +13,35 @@ const router = Router();
 router.get("/api/properties", async (_req, res) => {
   try {
     const items = await propertyService.getAll();
-    const filtered = items.filter((p) => {
+    const now = new Date();
+    
+    const withSubscriptionStatus = await Promise.all(
+      items.map(async (p) => {
+        const subscription = await subscriptionService.getByProperty(p.propertyNumber);
+        
+        let isSubscriptionExpired = false;
+        if (!subscription) {
+          isSubscriptionExpired = true;
+        } else if (subscription.status === "منتهي") {
+          isSubscriptionExpired = true;
+        } else if (subscription.endDate) {
+          const endDate = new Date(subscription.endDate);
+          isSubscriptionExpired = endDate < now;
+        } else {
+          isSubscriptionExpired = true;
+        }
+        
+        return {
+          ...p,
+          subscriptionStatus: subscription?.status || null,
+          subscriptionEndDate: subscription?.endDate || null,
+          isSubscriptionExpired,
+          subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+        };
+      })
+    );
+
+    const filtered = withSubscriptionStatus.filter((p) => {
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });
@@ -33,7 +61,32 @@ router.get("/api/properties/:id", async (req, res) => {
     if (p.verificationStatus && p.verificationStatus !== "approved") {
       return res.status(403).json({ error: "هذا العقار غير متاح حالياً", status: p.verificationStatus });
     }
-    return res.json(p);
+
+    // Check subscription status
+    const subscription = await subscriptionService.getByProperty(req.params.id);
+    
+    const now = new Date();
+    let isSubscriptionExpired = false;
+    if (!subscription) {
+      isSubscriptionExpired = true;
+    } else if (subscription.status === "منتهي") {
+      isSubscriptionExpired = true;
+    } else if (subscription.endDate) {
+      const endDate = new Date(subscription.endDate);
+      isSubscriptionExpired = endDate < now;
+    } else {
+      isSubscriptionExpired = true;
+    }
+
+    const response = {
+      ...p,
+      subscriptionStatus: subscription?.status || null,
+      subscriptionEndDate: subscription?.endDate || null,
+      isSubscriptionExpired,
+      subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+    };
+
+    return res.json(response);
   } catch (err) {
     console.error("Property Fetch Error:", err);
     res.status(500).json({ error: "خطأ غير معروف" });
