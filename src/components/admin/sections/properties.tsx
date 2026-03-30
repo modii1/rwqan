@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock, Star } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
@@ -331,6 +331,25 @@ export default function PropertiesSection() {
     },
   });
 
+  const upgradeToPremiumMutation = useMutation({
+    mutationFn: async (propertyNumber: string) => {
+      const res = await fetch(`/api/admin/properties/${propertyNumber}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionType: "مميز" }),
+      });
+      if (!res.ok) throw new Error("فشل في ترقية الاشتراك");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      toast({ title: "تم الترقية ✓", description: "تم تحويل الاشتراك إلى مميز" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
   const stopSubscriptionMutation = useMutation({
     mutationFn: async (propertyNumber: string) => {
       const res = await fetch(`/api/admin/properties/${propertyNumber}`, {
@@ -623,6 +642,19 @@ export default function PropertiesSection() {
                           data-testid={`button-stop-sub-${p.propertyNumber}`}
                         >
                           <UserX className="w-4 h-4 text-orange-500" />
+                        </Button>
+                      )}
+
+                      {p.subscriptionType === "عادي" && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => upgradeToPremiumMutation.mutate(p.propertyNumber)}
+                          title="ترقية إلى مميز"
+                          disabled={upgradeToPremiumMutation.isPending}
+                          data-testid={`button-upgrade-${p.propertyNumber}`}
+                        >
+                          <Star className="w-4 h-4 text-yellow-500" />
                         </Button>
                       )}
 

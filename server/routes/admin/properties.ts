@@ -62,6 +62,7 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
 
     // Convert Arabic keys to English
     const updates: any = {};
+    console.log(`[ADMIN_PROPERTY_UPDATE] Raw body keys: ${Object.keys(body).join(", ")}`);
     for (const [key, value] of Object.entries(body)) {
       const mapped = SHEET_MAP[key];
       if (mapped) {
@@ -71,6 +72,7 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
         updates[key] = value;
       }
     }
+    console.log(`[ADMIN_PROPERTY_UPDATE] Processed updates: ${JSON.stringify(updates)}`);
 
     // Log PIN changes so they are traceable in server logs
     if (updates.pin !== undefined) {
@@ -91,6 +93,30 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
     // revert the property back to 'pending' (the old code had the same behaviour).
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
     console.log(`[ADMIN UPDATE] property ${propertyNumber} updated fields: ${Object.keys(updates).join(", ")}`);
+
+    // If subscriptionType was changed, also update the subscription document
+    if (updates.subscriptionType) {
+      console.log(`[ADMIN UPDATE] subscriptionType changed to: ${updates.subscriptionType}`);
+      try {
+        const subscription = await subscriptionService.getByProperty(propertyNumber);
+        if (subscription) {
+          const isPremium = updates.subscriptionType === "مميز" || updates.subscriptionType === "موثوق";
+          const newStatus = isPremium ? "ساري" : "منتهي";
+          const packageId = isPremium ? "pkg-premium-admin" : "pkg-free";
+          await firebaseService.activateSubscription(propertyNumber, {
+            subscriptionType: updates.subscriptionType,
+            status: newStatus,
+            packageId: packageId,
+          });
+          console.log(`[ADMIN UPDATE] Subscription updated for ${propertyNumber}: type=${updates.subscriptionType}, status=${newStatus}, packageId=${packageId}`);
+        } else {
+          console.log(`[ADMIN UPDATE] No subscription found for ${propertyNumber}`);
+        }
+      } catch (subErr) {
+        console.error(`[ADMIN UPDATE] Error updating subscription:`, subErr);
+      }
+    }
+
     res.json(updated);
   } catch (err: any) {
     console.error(`[ADMIN UPDATE] Error updating property ${propertyNumber}:`, err?.message);
