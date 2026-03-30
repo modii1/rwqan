@@ -3,7 +3,7 @@ import { requireAdmin } from "../middleware";
 import { propertyService, analyticsService, subscriptionService, paymentService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
-import { SHEET_MAP } from "../../utils/helpers";
+import { SHEET_MAP, normalizePhoneNumber } from "../../utils/helpers";
 import { notifyPropertyVerification } from "../../integrations/whatsapp";
 import { storage } from "../../storage";
 
@@ -89,6 +89,17 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       }
     }
 
+    // Validate and normalize phone number
+    if (updates.whatsappNumber) {
+      try {
+        updates.whatsappNumber = normalizePhoneNumber(updates.whatsappNumber);
+        console.log(`[ADMIN UPDATE] Phone normalized to: ${updates.whatsappNumber}`);
+      } catch (err: any) {
+        console.log(`[ADMIN UPDATE] Phone validation failed: ${err.message}`);
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     // skipVerification=true because admin edits are intentional and should not
     // revert the property back to 'pending' (the old code had the same behaviour).
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
@@ -156,6 +167,17 @@ router.post("/api/admin/properties", async (req, res) => {
         data[mapped] = value;
       } else {
         data[key] = value;
+      }
+    }
+
+    // Validate and normalize phone number
+    if (data.whatsappNumber) {
+      try {
+        data.whatsappNumber = normalizePhoneNumber(data.whatsappNumber);
+        console.log(`[ADMIN_PROPERTY_CREATE] Phone normalized to: ${data.whatsappNumber}`);
+      } catch (err: any) {
+        console.log(`[ADMIN_PROPERTY_CREATE] Phone validation failed: ${err.message}`);
+        return res.status(400).json({ error: err.message });
       }
     }
 

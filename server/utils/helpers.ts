@@ -56,3 +56,36 @@ export function parseFeatures(val: any): string[] {
   } catch { }
   return String(val).split("\n");
 }
+
+/**
+ * Normalize Saudi phone number
+ * - Accepts 9 or 10 digits (with leading 0)
+ * - If 10 digits starting with 0, removes the leading 0
+ * - Returns 9-digit format (05xxxxxxxx -> 5xxxxxxxx)
+ */
+export function normalizePhoneNumber(phone: string | undefined | null): string {
+  if (!phone) return "";
+  
+  // Remove any non-digits
+  const digits = phone.replace(/\D/g, "");
+  
+  // If starts with 966, remove it
+  let cleaned = digits.startsWith("966") ? digits.slice(3) : digits;
+  
+  // If still starts with 0, remove it (10 digits with leading 0 -> 9 digits)
+  if (cleaned.startsWith("0")) {
+    cleaned = cleaned.slice(1);
+  }
+  
+  // Validate it's exactly 9 digits
+  if (cleaned.length !== 9) {
+    throw new Error(`رقم الجوال يجب أن يكون 9 أرقام`);
+  }
+  
+  // Must start with 5 (Saudi mobile)
+  if (!cleaned.startsWith("5")) {
+    throw new Error(`رقم الجوال يجب أن يبدأ بـ 5`);
+  }
+  
+  return cleaned;
+}

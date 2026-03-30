@@ -3,7 +3,7 @@ import { requireOwner } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
-import { upload, uploadImages, detectDeviceType, SHEET_MAP } from "../utils/helpers";
+import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
 import { checkPropertyDataComplete, detectSensitiveChanges, smartVerification } from "../utils/verification";
 import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
@@ -61,6 +61,17 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     if (updates.name && updates.name.length > 30) {
       console.log(`[PROPERTY_UPDATE] Validation failed: name too long (${updates.name.length} chars)`);
       return res.status(400).json({ error: "اسم العقار يجب ألا يتجاوز 30 حرف" });
+    }
+
+    // Validate and normalize phone number
+    if (updates.whatsappNumber) {
+      try {
+        updates.whatsappNumber = normalizePhoneNumber(updates.whatsappNumber);
+        console.log(`[PROPERTY_UPDATE] Phone normalized to: ${updates.whatsappNumber}`);
+      } catch (err: any) {
+        console.log(`[PROPERTY_UPDATE] Phone validation failed: ${err.message}`);
+        return res.status(400).json({ error: err.message });
+      }
     }
 
     // جلب البيانات الحالية للمقارنة
