@@ -99,18 +99,28 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       console.log(`[ADMIN UPDATE] subscriptionType changed to: ${updates.subscriptionType}`);
       try {
         const subscription = await subscriptionService.getByProperty(propertyNumber);
+        const isPremium = updates.subscriptionType === "مميز" || updates.subscriptionType === "موثوق";
+        
         if (subscription) {
-          const isPremium = updates.subscriptionType === "مميز" || updates.subscriptionType === "موثوق";
           const newStatus = isPremium ? "ساري" : "منتهي";
           const packageId = isPremium ? "pkg-premium-admin" : "pkg-free";
+          
           await firebaseService.activateSubscription(propertyNumber, {
             subscriptionType: updates.subscriptionType,
             status: newStatus,
             packageId: packageId,
           });
-          console.log(`[ADMIN UPDATE] Subscription updated for ${propertyNumber}: type=${updates.subscriptionType}, status=${newStatus}, packageId=${packageId}`);
+          console.log(`[ADMIN UPDATE] Subscription updated for ${propertyNumber}: type=${updates.subscriptionType}, status=${newStatus}`);
         } else {
-          console.log(`[ADMIN UPDATE] No subscription found for ${propertyNumber}`);
+          console.log(`[ADMIN UPDATE] No subscription found for ${propertyNumber}, creating one`);
+          const newStatus = isPremium ? "ساري" : "منتهي";
+          const packageId = isPremium ? "pkg-premium-admin" : "pkg-free";
+          
+          await firebaseService.activateSubscription(propertyNumber, {
+            subscriptionType: updates.subscriptionType,
+            status: newStatus,
+            packageId: packageId,
+          });
         }
       } catch (subErr) {
         console.error(`[ADMIN UPDATE] Error updating subscription:`, subErr);

@@ -343,6 +343,7 @@ export default function PropertiesSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
       toast({ title: "تم الترقية ✓", description: "تم تحويل الاشتراك إلى مميز" });
     },
     onError: (error: Error) => {
@@ -362,6 +363,7 @@ export default function PropertiesSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
       toast({ title: "تم إيقاف الاشتراك ✓", description: "تم تحويل الاشتراك إلى عادي" });
     },
     onError: (error: Error) => {
