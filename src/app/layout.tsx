@@ -24,6 +24,7 @@ export default function RootLayout({
             <head>
                 <link rel="icon" href="/assets/rwqan-logo.jpeg" type="image/jpeg" />
                 <link rel="shortcut icon" href="/assets/rwqan-logo.jpeg" type="image/jpeg" />
+                <meta name="google-site-verification" content="YP-NxidFz8ZdzkgmHj24_gsaL0okWiIW5G4o7kkcetY" />
             </head>
             <body className="font-sans antialiased bg-background text-foreground">
                 <QueryProvider>
