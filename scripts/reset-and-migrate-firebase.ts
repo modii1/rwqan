@@ -685,7 +685,7 @@ async function migrateExpenses() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('🚀 Starting reset & migration to Firebase...');
+  console.log('🚀 Starting reset & migration to Firebase....');
   console.log('   Project:', serviceAccount.project_id);
   try {
     await deleteAll();
