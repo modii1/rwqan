@@ -123,7 +123,7 @@ export default function SuggestPage() {
                             <label className="block text-sm font-semibold mb-2">رقم الجوال</label>
                             <Input
                                 type="tel"
-                                placeholder="05XXXXXXXX"
+                                placeholder="5XXXXXXXX"
                                 value={phone}
                                 onChange={(e) => {
                                     const cleaned = cleanPhoneNumber(e.target.value);
@@ -135,7 +135,7 @@ export default function SuggestPage() {
                                 data-testid="input-phone"
                             />
                             {phone && phone.length > 0 && phone.length < 10 && (
-                                <p className="text-xs text-amber-600 mt-1">رقم الجوال يجب أن يكون 10 أرقام</p>
+                                <p className="text-xs text-amber-600 mt-1">رقم الجوال يجب أن يكون 9 أرقام (5XXXXXXXX)</p>
                             )}
                         </div>
 

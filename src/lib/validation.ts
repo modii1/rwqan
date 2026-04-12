@@ -1,6 +1,6 @@
 // نظام التحقق الذكي من البيانات
 
-// تنظيف رقم الجوال - يجب أن يبدأ بـ 0 أو 5 فقط
+// تنظيف رقم الجوال - يجب أن يبدأ بـ 5 فقط (بدون صفر في البداية)
 export function cleanPhoneNumber(value: string): string {
   // إزالة جميع الأحرف والرموز والمسافات - فقط الأرقام
   const numbersOnly = value.replace(/[^\d]/g, '');
@@ -8,14 +8,13 @@ export function cleanPhoneNumber(value: string): string {
   // إذا كان فارغاً، نرجع فارغ
   if (numbersOnly.length === 0) return '';
   
-  // يجب أن يبدأ بـ 0 أو 5 فقط (أرقام الجوال السعودية)
-  if (numbersOnly[0] !== '0' && numbersOnly[0] !== '5') {
-    // لا نقبل الرقم إذا لم يبدأ بـ 0 أو 5
+  // يجب أن يبدأ بـ 5 فقط (أرقام الجوال السعودية بدون 0)
+  if (numbersOnly[0] !== '5') {
     return '';
   }
   
-  // الحد الأقصى 10 أرقام
-  return numbersOnly.slice(0, 10);
+  // الحد الأقصى 9 أرقام (5XXXXXXXX)
+  return numbersOnly.slice(0, 9);
 }
 
 // تنظيف رقم العقار - 5 أرقام فقط
@@ -26,7 +25,7 @@ export function cleanPropertyNumber(value: string): string {
   return numbersOnly.slice(0, 5);
 }
 
-// التحقق من صحة رقم الجوال السعودي
+// التحقق من صحة رقم الجوال السعودي (صيغة 5XXXXXXXX - 9 أرقام)
 export function validatePhoneNumber(value: string): { valid: boolean; error?: string; cleaned: string } {
   const cleaned = cleanPhoneNumber(value);
   
@@ -34,22 +33,17 @@ export function validatePhoneNumber(value: string): { valid: boolean; error?: st
     return { valid: false, error: 'رقم الجوال مطلوب', cleaned };
   }
   
-  // يجب أن يبدأ بـ 05 أو 5
-  if (!cleaned.startsWith('05') && !cleaned.startsWith('5')) {
-    return { valid: false, error: 'رقم الجوال يجب أن يبدأ بـ 05', cleaned };
+  // يجب أن يبدأ بـ 5
+  if (!cleaned.startsWith('5')) {
+    return { valid: false, error: 'رقم الجوال يجب أن يبدأ بـ 5', cleaned };
   }
   
-  // إذا بدأ بـ 5 فقط، نضيف 0 في البداية
-  const normalized = cleaned.startsWith('5') && !cleaned.startsWith('05') 
-    ? '0' + cleaned 
-    : cleaned;
-  
-  // يجب أن يكون 10 أرقام
-  if (normalized.length !== 10) {
-    return { valid: false, error: 'رقم الجوال يجب أن يكون 10 أرقام', cleaned: normalized };
+  // يجب أن يكون 9 أرقام بالضبط (5XXXXXXXX)
+  if (cleaned.length !== 9) {
+    return { valid: false, error: 'رقم الجوال يجب أن يكون 9 أرقام (مثال: 5XXXXXXXX)', cleaned };
   }
   
-  return { valid: true, cleaned: normalized };
+  return { valid: true, cleaned };
 }
 
 // التحقق من صحة رقم العقار
@@ -122,26 +116,26 @@ export function validateWhatsAppInput(value: string): {
     return { cleaned: '', isValid: false };
   }
   
-  // إذا كان أقل من 10 أرقام - نظهر تحذير
-  if (numbersOnly.length < 10) {
+  // يجب أن يبدأ بـ 5
+  if (numbersOnly[0] !== '5') {
+    return {
+      cleaned: '',
+      error: 'يجب أن يبدأ بـ 5',
+      isValid: false
+    };
+  }
+
+  // إذا كان أقل من 9 أرقام - نظهر تحذير
+  if (numbersOnly.length < 9) {
     return { 
-      cleaned: numbersOnly.slice(0, 10), 
-      error: `رقم غير مكتمل (${numbersOnly.length}/10 أرقام)`,
+      cleaned: numbersOnly.slice(0, 9), 
+      error: `رقم غير مكتمل (${numbersOnly.length}/9 أرقام)`,
       isValid: false 
     };
   }
   
-  // إذا كان أكثر من 10 - نقطع إلى 10
-  const cleaned = numbersOnly.slice(0, 10);
-  
-  // يجب أن يبدأ بـ 05
-  if (!cleaned.startsWith('05')) {
-    return { 
-      cleaned, 
-      error: 'يجب أن يبدأ بـ 05',
-      isValid: false 
-    };
-  }
+  // إذا كان أكثر من 9 - نقطع إلى 9
+  const cleaned = numbersOnly.slice(0, 9);
   
   return { cleaned, isValid: true };
 }

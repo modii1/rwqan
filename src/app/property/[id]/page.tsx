@@ -7,7 +7,36 @@ interface PageProps {
     }>;
 }
 
-// دالة لجلب البيانات من Google Apps Script (للخادم فقط من أجل Metadata)
+// جلب بيانات العقار من API الخادم المحلي (أسرع وأكثر موثوقية)
+async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
+    try {
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
+            `http://localhost:${process.env.PORT || 5000}`;
+        const res = await fetch(`${baseUrl}/api/properties/${id}`, {
+            next: { revalidate: 300 },
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || data.error) return null;
+        return {
+            propertyNumber: data.propertyNumber || id,
+            name: data.name || "",
+            city: data.city || "",
+            direction: data.direction || "",
+            location: data.location || "",
+            type: data.type || "",
+            facilities: Array.isArray(data.facilities) ? data.facilities : [],
+            prices: data.prices || { weekday: "", weekend: "", overnight: "", holidays: "" },
+            subscriptionType: data.isSubscriptionExpired ? "عادي" : (data.subscriptionType || "مميز"),
+            phone: data.whatsappNumber || "",
+            imageCount: 0,
+        } as PropertyDetails;
+    } catch {
+        return null;
+    }
+}
+
+// دالة لجلب البيانات من Google Apps Script (للخادم فقط من أجل Metadata) - fallback
 async function getPropertyFromScript(id: string): Promise<PropertyDetails | null> {
     try {
         const res = await fetch(
@@ -75,7 +104,8 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { id } = await params;
-    const property = await getPropertyFromScript(id);
+    // Try our own API first (fast, reliable), then fall back to Google Apps Script
+    const property = await getPropertyFromApi(id) ?? await getPropertyFromScript(id);
 
     if (!property) {
         return {

@@ -87,10 +87,19 @@ export class PaymentService {
         let startDate = today;
         let endDate = calculateSubscriptionEndDate(null, pkg.duration);
 
-        if (currentSub && new Date(currentSub.endDate) > today) {
+        // For upgrades/changes use the pending dates saved at payment creation time
+        const pendingStart = (payment as any).pendingStartDate;
+        const pendingEnd = (payment as any).pendingEndDate;
+        if (pendingStart && pendingEnd) {
+          startDate = new Date(pendingStart);
+          endDate = new Date(pendingEnd);
+        } else if ((payment as any).action === 'extend' && currentSub && new Date(currentSub.endDate) > today) {
+          // Extend only: append after current subscription ends
           startDate = new Date(currentSub.endDate);
           endDate = calculateExtensionEndDate(startDate, pkg.duration);
         }
+        // For multi-property packages OR new subscriptions → always start from today
+        // This prevents double-counting remaining days on main property
 
         const additionalProps = (payment as any).additionalProperties || [];
         const secondProp = (payment as any).secondPropertyNumber;
@@ -124,18 +133,27 @@ export class PaymentService {
           subscriptionType: isPremium ? "مميز" : "عادي" 
         });
 
-        // Mark additional properties as pending approval (don't activate yet)
+        // Activate linked/additional properties with the SAME subscription dates
         for (const propNumber of additionalProps) {
           const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
           if (additionalProperty) {
-            // Mark as pending admin approval
+            // Create a real subscription for the linked property (same dates as main)
+            await firebaseService.addSubscriptionToSheet(
+              propNumber,
+              {
+                ...subscriptionData,
+                linkedProperty: payment.propertyNumber,
+              },
+              additionalProperty,
+              payment.receiptUrl ?? ""
+            );
+
+            // Approve the linked property
             await firebaseService.updateProperty(propNumber, {
-              pendingApprovalFrom: payment.propertyNumber,
+              pendingApprovalFrom: undefined,
               subscriptionType: isPremium ? "مميز" : "عادي"
             });
-            
-            // Set verification status to pending
-            await firebaseService.updateVerificationStatus(propNumber, "pending");
+            await firebaseService.updateVerificationStatus(propNumber, "approved");
           }
         }
 
@@ -155,7 +173,7 @@ export class PaymentService {
       }
     }
 
-    // Verification - only for main property, additional properties need admin approval
+    // Verification - approve main property (linked properties already approved above)
     await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
     
     // Log verification for main property

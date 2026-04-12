@@ -720,7 +720,7 @@ export default function SubscriptionPage() {
                 <div>
                   <label className="block text-sm font-semibold mb-2">رقم الواتساب *</label>
                   <Input
-                    placeholder="050xxxxxxx"
+                    placeholder="5xxxxxxxx"
                     value={formData.whatsappNumber}
                     onChange={(e) => {
                       const result = validateWhatsAppInput(e.target.value);

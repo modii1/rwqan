@@ -81,8 +81,13 @@ router.get("/api/admin/subscriptions", async (req, res) => {
       // قراءة البيانات من الاشتراك مباشرة
       const subWithType = sub as any;
 
+      // إذا تم إلغاء الاشتراك يدوياً (موقوف أو ملغى) → منتهي مباشرة
+      if (sub.status === "منتهي" || (subWithType as any).cancelledAt) {
+        status = "منتهي";
+        remainingDays = -1;
+      }
       // إذا لم يكن هناك تاريخ انتهاء = نشط مجاني (free)
-      if (!sub.endDate || sub.endDate.trim() === "") {
+      else if (!sub.endDate || sub.endDate.trim() === "") {
         status = "نشط مجاني";
         remainingDays = null;
       } else {

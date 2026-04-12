@@ -1035,7 +1035,7 @@ export default function OwnerSubscriptionPage() {
               }}
             >
               <Zap className="w-4 h-4" />
-              الترقية إلى باقة أفضل
+              تغيير الباقة
             </Button>
             {canExtend && (
               <Button
@@ -1211,7 +1211,7 @@ export default function OwnerSubscriptionPage() {
         {/* ===== نافذة اختيار الباقة للترقية ===== */}
         {showUpgradeDialog && currentStep === 1 && (
           <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-[#434040]">اختر الباقة الجديدة</h2>
               <Button variant="ghost" size="icon" onClick={() => setShowUpgradeDialog(false)}>
                 <X className="w-5 h-5" />
@@ -1226,7 +1226,7 @@ export default function OwnerSubscriptionPage() {
                   <div>
                     <p className="font-bold text-amber-800 mb-2">تنبيه مهم</p>
                     <p className="text-sm text-amber-700 mb-3">
-                      لديك اشتراك متبقي فيه <span className="font-bold">{remainingDays}</span> يوم. الترقية ستؤدي إلى:
+                      لديك اشتراك متبقي فيه <span className="font-bold">{remainingDays}</span> يوم. تغيير الباقة سيؤدي إلى:
                     </p>
                     <ul className="space-y-1.5 text-sm text-amber-700">
                       <li className="flex items-center gap-2">
@@ -1235,11 +1235,11 @@ export default function OwnerSubscriptionPage() {
                       </li>
                       <li className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                        بدء باقة جديدة بالكامل
+                        بدء باقة جديدة من اليوم
                       </li>
                       <li className="flex items-center gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                        الأيام المتبقية السابقة لن تُرحّل
+                        الأيام المتبقية السابقة لن تُرحّل (ينطبق على الترقية والتخفيض)
                       </li>
                     </ul>
                   </div>
@@ -1262,17 +1262,13 @@ export default function OwnerSubscriptionPage() {
                 return (
                   <div
                     key={pkg.id}
-                    className={`p-5 rounded-xl border-2 transition-all ${isSelected
+                    className={`p-5 rounded-xl border-2 transition-all cursor-pointer ${isSelected
                       ? "ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]"
                       : isCurrentPkg
                         ? "border-[#c9951d]/40 bg-[#c9951d]/5"
                         : "border-border hover:border-[#434040]/50"
-                      } ${isDowngrade ? "opacity-40 pointer-events-none" : "cursor-pointer"}`}
-                    onClick={() => { 
-                      if (!isDowngrade) {
-                        setSelectedPackageId(pkg.id);
-                      }
-                    }}
+                      }`}
+                    onClick={() => setSelectedPackageId(pkg.id)}
                   >
                     {/* اسم الباقة والحالة */}
                     <div className="flex items-start justify-between mb-2">
@@ -1337,7 +1333,7 @@ export default function OwnerSubscriptionPage() {
                       </div>
                     )}
                     {isDowngrade && (
-                      <p className="text-xs text-red-500 mt-2">لا يمكن الترقية لباقة أقل</p>
+                      <p className="text-xs text-blue-500 mt-2">تخفيض الباقة - ستبدأ من اليوم</p>
                     )}
                   </div>
                 );
