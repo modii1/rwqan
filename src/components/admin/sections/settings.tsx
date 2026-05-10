@@ -5,6 +5,8 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Bell, BellOff, Save, Loader2, MessageCircle, Home, CreditCard, Receipt, Edit, DollarSign, Smartphone, ShieldCheck, Clock } from "lucide-react";
@@ -35,6 +37,14 @@ export default function SettingsSection() {
     smartRequest: true,
     propertyVerification: true,
     subscriptionExpired: true,
+    smartSchedule: {
+      enabled: true,
+      sendDays: ["Sunday", "Wednesday"],
+      sendTimes: { Sunday: "09:00", Wednesday: "21:00" },
+      batchSize: 10,
+      slotIntervalMinutes: 60,
+      dailyMaxRecipients: 50,
+    },
   });
 
   const { data: savedSettings, isLoading } = useQuery<NotificationSettings>({
@@ -82,6 +92,8 @@ export default function SettingsSection() {
   };
 
   const handleSave = () => {
+    // Prune complex objects for the API (it only expects what NotificationSettings expects)
+    const { smartSchedule, ...baseSettings } = settings;
     saveMutation.mutate(settings);
   };
 
@@ -173,6 +185,199 @@ export default function SettingsSection() {
               )}
               حفظ الإعدادات
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 📅 Smart Schedule Config Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="w-5 h-5 text-blue-600" />
+            جدولة إشعارات انتهاء الاشتراك (Smart Schedule)
+          </CardTitle>
+          <CardDescription>
+            تحكم في توقيت وتكرار إرسال رسائل التذكير للعملاء منتهي الإشتراك لتجنب Spam
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">
+            <div className="flex items-center gap-3">
+              {settings.smartSchedule?.enabled ? (
+                <Clock className="w-6 h-6 text-blue-600" />
+              ) : (
+                <Clock className="w-6 h-6 text-muted-foreground" />
+              )}
+              <div>
+                <Label className="text-base font-semibold">تفعيل الجدولة الذكية</Label>
+                <p className="text-sm text-muted-foreground">
+                  إرسال الرسائل مرتين أسبوعياً فقط ( الأحد صباحاً والأربعاء مساءً )
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={settings.smartSchedule?.enabled ?? true}
+              onCheckedChange={(checked) =>
+                setSettings((prev) => ({
+                  ...prev,
+                  smartSchedule: { ...prev.smartSchedule!, enabled: checked },
+                }))
+              }
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label>عدد العملاء لكل دفعة</Label>
+              <Input
+                type="number"
+                min={1}
+                max={200}
+                value={settings.smartSchedule?.batchSize ?? 10}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    smartSchedule: { ...prev.smartSchedule!, batchSize: Number(e.target.value) },
+                  }))
+                }
+                className="w-full"
+              />
+              <p className="text-sm text-muted-foreground">
+                عدد الإشعارات المرسلة في كل ساعة (مثلاً 10)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>الفاصل بين الدفعات (دقيقة)</Label>
+              <Input
+                type="number"
+                min={10}
+                max={180}
+                value={settings.smartSchedule?.slotIntervalMinutes ?? 60}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    smartSchedule: { ...prev.smartSchedule!, slotIntervalMinutes: Number(e.target.value) },
+                  }))
+                }
+                className="w-full"
+              />
+              <p className="text-sm text-muted-foreground">
+                المدة بين كل دفعة والتالية (مثلاً 60 دقيقة)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>الحد الأقصى يومياً</Label>
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                value={settings.smartSchedule?.dailyMaxRecipients ?? 50}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    smartSchedule: { ...prev.smartSchedule!, dailyMaxRecipients: Number(e.target.value) },
+                  }))
+                }
+                className="w-full"
+              />
+              <p className="text-sm text-muted-foreground">
+                لا تُرسل أكثر من هذا العدد في اليوم
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>يوم الإرسال الأول (مثلاً الأحد)</Label>
+              <Select
+                value={(settings.smartSchedule?.sendDays?.[0] ?? "Sunday")}
+                onValueChange={(val) =>
+                  setSettings((prev) => {
+                    const days = [...(prev.smartSchedule?.sendDays ?? [])];
+                    days[0] = val;
+                    return { ...prev, smartSchedule: { ...prev.smartSchedule!, sendDays: days } };
+                  })
+                }
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Sunday">الأحد</SelectItem>
+                  <SelectItem value="Monday">الإثنين</SelectItem>
+                  <SelectItem value="Tuesday">الثلاثاء</SelectItem>
+                  <SelectItem value="Wednesday">الأربعاء</SelectItem>
+                  <SelectItem value="Thursday">الخميس</SelectItem>
+                  <SelectItem value="Friday">الجمعة</SelectItem>
+                  <SelectItem value="Saturday">السبت</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>وقت الإرسال أول يوم (HH:MM)</Label>
+              <Input
+                type="time"
+                value={settings.smartSchedule?.sendTimes?.[(settings.smartSchedule?.sendDays?.[0] ?? "Sunday")] ?? "09:00"}
+                onChange={(e) =>
+                  setSettings((prev) => {
+                    const day = prev.smartSchedule?.sendDays?.[0] ?? "Sunday";
+                    return {
+                      ...prev,
+                      smartSchedule: {
+                        ...prev.smartSchedule!,
+                        sendTimes: { ...prev.smartSchedule!.sendTimes, [day]: e.target.value },
+                      },
+                    };
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>يوم الإرسال الثاني (مثلاً الأربعاء)</Label>
+              <Select
+                value={(settings.smartSchedule?.sendDays?.[1] ?? "Wednesday")}
+                onValueChange={(val) =>
+                  setSettings((prev) => {
+                    const days = [...(prev.smartSchedule?.sendDays ?? [])];
+                    days[1] = val;
+                    return { ...prev, smartSchedule: { ...prev.smartSchedule!, sendDays: days } };
+                  })
+                }
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Sunday">الأحد</SelectItem>
+                  <SelectItem value="Monday">الإثنين</SelectItem>
+                  <SelectItem value="Tuesday">الثلاثاء</SelectItem>
+                  <SelectItem value="Wednesday">الأربعاء</SelectItem>
+                  <SelectItem value="Thursday">الخميس</SelectItem>
+                  <SelectItem value="Friday">الجمعة</SelectItem>
+                  <SelectItem value="Saturday">السبت</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>وقت الإرسال ثاني يوم (HH:MM)</Label>
+              <Input
+                type="time"
+                value={settings.smartSchedule?.sendTimes?.[(settings.smartSchedule?.sendDays?.[1] ?? "Wednesday")] ?? "21:00"}
+                onChange={(e) =>
+                  setSettings((prev) => {
+                    const day = prev.smartSchedule?.sendDays?.[1] ?? "Wednesday";
+                    return {
+                      ...prev,
+                      smartSchedule: {
+                        ...prev.smartSchedule!,
+                        sendTimes: { ...prev.smartSchedule!.sendTimes, [day]: e.target.value },
+                      },
+                    };
+                  })
+                }
+                className="w-full"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

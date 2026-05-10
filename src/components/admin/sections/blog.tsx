@@ -238,13 +238,19 @@ export default function AdminBlogSection() {
             <Card key={post.id} className="p-4">
               <div className="flex items-start gap-4">
                 {post.coverImage ? (
-                  <img
-                    src={post.coverImage}
-                    alt={post.title}
-                    className="w-20 h-20 object-cover rounded-lg"
-                  />
+                  <div className="relative group">
+                    <img
+                      src={post.coverImage}
+                      alt={post.title}
+                      className="w-24 h-24 object-cover rounded-lg"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-lg transition-colors" />
+                  </div>
                 ) : (
-                  <div className="w-20 h-20 bg-muted rounded-lg flex items-center justify-center">
+                  <div className="w-24 h-24 bg-muted rounded-lg flex items-center justify-center">
                     <ImageIcon className="w-8 h-8 text-muted-foreground" />
                   </div>
                 )}

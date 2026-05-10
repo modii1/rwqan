@@ -325,6 +325,17 @@ export const notificationSettingsSchema = z.object({
   smartRequest: z.boolean().default(true), // إشعار طلب واتساب
   propertyVerification: z.boolean().default(true), // إشعار تحقق
   subscriptionExpired: z.boolean().default(true), // إشعار انتهاء اشتراك
+  smartSchedule: z.object({
+    enabled: z.boolean().default(true),
+    sendDays: z.array(z.string()).default(["Sunday", "Wednesday"]),
+    sendTimes: z.record(z.string()).default({
+      Sunday: "09:00",
+      Wednesday: "21:00",
+    }),
+    batchSize: z.number().default(10),
+    slotIntervalMinutes: z.number().default(60),
+    dailyMaxRecipients: z.number().default(50),
+  }).optional(),
   updatedAt: z.string().optional(),
 });
 

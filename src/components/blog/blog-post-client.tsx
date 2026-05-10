@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, Calendar, User, BookOpen, Share2 } from "lucide-react";
+import { ArrowRight, Calendar, User, BookOpen, Share2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -52,48 +52,7 @@ export function BlogPostClient({ slug }: { slug: string }) {
 
     useEffect(() => {
         if (post) {
-            // document.title handled by generateMetadata in page.tsx theoretically,
-            // but since we fetch client side, we can update it here too.
             document.title = post.metaTitle || `${post.title} | روقان`;
-
-            // ... (Rest of meta tag injection logic omitted as Next.js should handle it via generateMetadata if we moved fetch to server, but for now client side is fine)
-
-            const script = document.createElement("script");
-            script.type = "application/ld+json";
-            script.id = "blog-schema";
-            script.textContent = JSON.stringify({
-                "@context": "https://schema.org",
-                "@type": "BlogPosting",
-                "headline": post.title,
-                "description": post.metaDescription || post.excerpt,
-                "image": post.coverImage || "",
-                "author": {
-                    "@type": "Person",
-                    "name": post.author
-                },
-                "publisher": {
-                    "@type": "Organization",
-                    "name": "روقان",
-                    "logo": {
-                        "@type": "ImageObject",
-                        "url": `${window.location.origin}/logo.png`
-                    }
-                },
-                "datePublished": post.publishedAt,
-                "mainEntityOfPage": {
-                    "@type": "WebPage",
-                    "@id": window.location.href
-                }
-            });
-
-            const oldScript = document.getElementById("blog-schema");
-            if (oldScript) oldScript.remove();
-            document.head.appendChild(script);
-
-            return () => {
-                const s = document.getElementById("blog-schema");
-                if (s) s.remove();
-            };
         }
     }, [post]);
 
@@ -120,7 +79,7 @@ export function BlogPostClient({ slug }: { slug: string }) {
                 <div className="max-w-3xl mx-auto">
                     <div className="animate-pulse space-y-6">
                         <div className="h-8 bg-muted rounded w-3/4"></div>
-                        <div className="h-64 bg-muted rounded"></div>
+                        <div className="h-64 bg-muted rounded-xl"></div>
                         <div className="space-y-3">
                             <div className="h-4 bg-muted rounded"></div>
                             <div className="h-4 bg-muted rounded w-5/6"></div>
@@ -140,7 +99,7 @@ export function BlogPostClient({ slug }: { slug: string }) {
                     <h3 className="text-lg font-semibold text-foreground mb-2">المقال غير موجود</h3>
                     <p className="text-muted-foreground mb-4">عذراً، لم نتمكن من العثور على هذا المقال</p>
                     <Link href="/blog">
-                        <Button data-testid="button-back-to-blog">العودة للمدونة</Button>
+                        <Button data-testid="button-back-to-blog" className="rounded-xl">العودة للمدونة</Button>
                     </Link>
                 </Card>
             </div>
@@ -149,40 +108,45 @@ export function BlogPostClient({ slug }: { slug: string }) {
 
     return (
         <div className="min-h-screen bg-background" dir="rtl">
-            <header className="bg-card border-b border-border sticky top-0 z-50">
+            {/* Enhanced Header */}
+            <header className="header-glass border-b border-border/50 sticky top-0 z-50">
                 <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-                    <Link href="/blog" legacyBehavior>
-                        <a className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition" data-testid="link-back-blog">
-                            <ArrowRight className="w-4 h-4" />
-                            <span>المدونة</span>
-                        </a>
+                    <Link href="/blog" className="flex items-center gap-2 text-muted-foreground hover:text-primary transition-all duration-300 bg-muted/50 px-4 py-2 rounded-xl hover:bg-muted">
+                        <ChevronRight className="w-4 h-4" />
+                        <span className="text-sm font-medium">المدونة</span>
                     </Link>
-                    <Button variant="ghost" size="icon" onClick={handleShare} data-testid="button-share">
-                        <Share2 className="w-5 h-5" />
+                    <Button variant="ghost" size="icon" onClick={handleShare} data-testid="button-share" className="rounded-xl hover:bg-primary/10 transition-colors">
+                        <Share2 className="w-5 h-5 text-foreground/70" />
                     </Button>
                 </div>
             </header>
 
             <article className="max-w-3xl mx-auto px-4 py-8">
                 {post.coverImage && (
-                    <div className="aspect-video rounded-lg overflow-hidden mb-6">
+                    <div className="relative rounded-2xl overflow-hidden mb-8 bg-muted group">
                         <img
                             src={post.coverImage}
                             alt={post.title}
-                            className="w-full h-full object-cover"
+                            className="w-full h-auto max-h-[500px] object-cover transition-transform duration-500 group-hover:scale-105"
                         />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent"></div>
+                        <div className="absolute bottom-0 right-0 left-0 p-6">
+                            <h1 className="text-2xl md:text-3xl font-bold text-white mb-2 drop-shadow-lg">{post.title}</h1>
+                        </div>
                     </div>
                 )}
 
-                <h1 className="text-3xl font-bold text-foreground mb-4">{post.title}</h1>
+                {!post.coverImage && (
+                    <h1 className="text-3xl font-bold text-foreground mb-6">{post.title}</h1>
+                )}
 
                 <div className="flex items-center gap-4 text-sm text-muted-foreground mb-6">
-                    <span className="flex items-center gap-1">
+                    <span className="flex items-center gap-1.5 bg-muted/50 px-3 py-1.5 rounded-lg">
                         <User className="w-4 h-4" />
                         {post.author}
                     </span>
                     {post.publishedAt && (
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1.5 bg-muted/50 px-3 py-1.5 rounded-lg">
                             <Calendar className="w-4 h-4" />
                             {formatDate(post.publishedAt)}
                         </span>
@@ -190,9 +154,9 @@ export function BlogPostClient({ slug }: { slug: string }) {
                 </div>
 
                 {post.keywords && post.keywords.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-6">
+                    <div className="flex flex-wrap gap-2 mb-8">
                         {post.keywords.map((keyword, i) => (
-                            <Badge key={i} variant="secondary">
+                            <Badge key={i} variant="secondary" className="bg-primary/5 text-primary border-none hover:bg-primary/10 transition-colors rounded-full px-4 py-1">
                                 {keyword}
                             </Badge>
                         ))}
@@ -200,16 +164,17 @@ export function BlogPostClient({ slug }: { slug: string }) {
                 )}
 
                 <div
-                    className="prose prose-lg dark:prose-invert max-w-none"
+                    className="prose prose-lg dark:prose-invert max-w-none blog-content"
                     dangerouslySetInnerHTML={{ __html: post.content }}
                 />
             </article>
 
-            <footer className="bg-card border-t border-border py-6 mt-12">
+            <footer className="bg-muted/30 border-t border-border/50 py-8 mt-12">
                 <div className="max-w-3xl mx-auto px-4 text-center">
                     <Link href="/blog">
-                        <Button variant="outline" data-testid="button-more-articles">
+                        <Button variant="outline" data-testid="button-more-articles" className="rounded-xl border-border/50 hover:bg-muted/50 transition-all duration-300">
                             المزيد من المقالات
+                            <ArrowRight className="w-4 h-4 ml-2" />
                         </Button>
                     </Link>
                 </div>

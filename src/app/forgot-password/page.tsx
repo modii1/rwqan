@@ -152,7 +152,7 @@ export default function ForgotPassword() {
 
     return (
         <div className="min-h-screen bg-background flex items-center justify-center p-4">
-            <Card className="w-full max-w-md p-8">
+            <Card className="w-full max-w-md p-8 glass-premium border-primary/20 shadow-golden-lg hover:shadow-golden transition-shadow duration-300">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-4">
                         <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">

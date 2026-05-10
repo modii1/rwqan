@@ -516,16 +516,15 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
             <EdgeSwipeIndicator />
 
             {/* ===== Header ===== */}
-            <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
+            <header className="header-glass border-b border-border/50 shadow-soft sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
                     {/* زر الرجوع */}
                     <Link href="/">
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" className="rounded-xl hover:bg-primary/10 transition-colors">
                             <ArrowRight className="w-5 h-5" />
                         </Button>
                     </Link>
 
-                    {/* الاسم + الرقم */}
                     <div className="flex-1">
                         <h1 className="text-lg font-bold text-primary truncate">
                             {displayName || `عقار رقم ${property.propertyNumber}`}
@@ -537,7 +536,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
 
                     {/* شارة موثوق */}
                     {isVerified(property) && (
-                        <Badge className="bg-primary/10 text-primary border-primary/30 text-xs">
+                        <Badge className="bg-primary/10 text-primary border-primary/30 text-xs glass-sm px-3 py-1">
                             مميز
                         </Badge>
                     )}
@@ -550,13 +549,13 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                     {/* ===== الصور ===== */}
                     <div className="lg:col-span-2 space-y-4">
                         <Card
-                            className={`overflow-hidden ${isVerified(property) ? "ring-2 ring-primary/20" : ""
+                            className={`overflow-hidden shadow-soft hover:shadow-card-hover transition-shadow duration-300 ${isVerified(property) ? "ring-2 ring-primary/20" : ""
                                 }`}
                         >
                             {images.length > 0 ? (
                                 <>
                                     <div
-                                        className="relative aspect-video bg-muted select-none"
+                                        className="relative aspect-video bg-muted select-none img-zoom"
                                         onTouchStart={handleTouchStart}
                                         onTouchEnd={handleTouchEnd}
                                     >
@@ -596,7 +595,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                                             (prev) => (prev + 1) % images.length,
                                                         )
                                                     }
-                                                    className="absolute inset-y-0 right-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
+                                                    className="absolute inset-y-0 right-2 my-auto h-10 w-10 rounded-full glass-md flex items-center justify-center text-foreground text-sm hover:bg-background/90 transition-all duration-200 hover:scale-105 shadow-lg"
                                                 >
                                                     {/* شكل جديد للسهم ← للداخل (Next) */}
                                                     <svg
@@ -624,7 +623,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                                                 (prev - 1 + images.length) % images.length,
                                                         )
                                                     }
-                                                    className="absolute inset-y-0 left-2 my-auto h-9 w-9 rounded-full bg-background/80 shadow flex items-center justify-center text-foreground text-sm hover:bg-background"
+                                                    className="absolute inset-y-0 left-2 my-auto h-10 w-10 rounded-full glass-md flex items-center justify-center text-foreground text-sm hover:bg-background/90 transition-all duration-200 hover:scale-105 shadow-lg"
                                                 >
                                                     {/* شكل جديد للسهم → للخارج (Prev) */}
                                                     <svg
@@ -647,14 +646,14 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                     </div>
 
                                     {images.length > 1 && (
-                                        <div className="p-4 bg-muted/30 flex gap-2 overflow-x-auto">
+                                                    <div className="p-4 bg-muted/20 flex gap-2 overflow-x-auto custom-scrollbar">
                                             {images.map((img, idx) => (
                                                 <button
                                                     key={idx}
                                                     onClick={() => setSelectedImage(idx)}
-                                                    className={`flex-shrink-0 w-20 h-20 rounded-md overflow-hidden transition-all ${selectedImage === idx
-                                                            ? "ring-2 ring-primary"
-                                                            : "opacity-60 hover:opacity-100"
+                                                    className={`flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden transition-all duration-300 ${selectedImage === idx
+                                                            ? "ring-2 ring-primary shadow-golden scale-105"
+                                                            : "opacity-60 hover:opacity-100 hover:scale-105"
                                                         }`}
                                                     data-testid={`button-thumbnail-${idx}`}
                                                     type="button"

@@ -6,7 +6,7 @@ import { registerRoutes } from "./routes/index";
 import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
-import { startScheduler } from "./scheduler";
+import { startSmartScheduler } from "./smartScheduler";
 import next from "next";
 import cookieParser from "cookie-parser";
 
@@ -108,8 +108,8 @@ const handle = nextApp.getRequestHandler();
     server.listen({ port, host: "0.0.0.0" }, () => {
       console.log(`🚀 Server running on port ${port}`);
 
-      // التشغيل المهام المجدولة
-      startScheduler();
+      // Smart non-spam scheduler (twice weekly with staggered batches)
+      startSmartScheduler();
     });
   } catch (e) {
     console.error("❌ FATAL STARTUP ERROR:", e);

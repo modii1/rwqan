@@ -572,6 +572,7 @@ export default function PropertiesSection() {
                 <Th>المدينة</Th>
                 <Th>النوع</Th>
                 <Th>نوع الاشتراك</Th>
+                <Th>العقارات المضافة</Th>
                 <Th>تحكم</Th>
               </tr>
             </thead>
@@ -611,6 +612,16 @@ export default function PropertiesSection() {
                         </button>
                       )}
                     </div>
+                  </Td>
+                  <Td>
+                    {p.linkedProperty ? (
+                      <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs">
+                        <Link className="w-3 h-3" />
+                        مضاف
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </Td>
                   <Td>
                     <div className="flex items-center gap-1">
@@ -694,7 +705,7 @@ export default function PropertiesSection() {
 
               {items.length === 0 && (
                 <tr>
-                  <Td colSpan={6}>
+                  <Td colSpan={7}>
                     <div className="p-4 text-center text-xs text-muted-foreground">لا توجد عقارات.</div>
                   </Td>
                 </tr>

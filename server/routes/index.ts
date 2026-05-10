@@ -34,6 +34,7 @@ import adminBackupRoutes from "./admin/backup";
 import adminImagesRoutes from "./admin/images";
 import adminPackagesRoutes from "./admin/packages";
 import adminTestingRoutes from "./admin/testing";
+import adminLinkedPropertiesRoutes from "./admin/linked-properties";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for cookies
@@ -88,6 +89,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin routes
   app.use(adminAnalyticsRoutes);
   app.use(adminPropertiesRoutes);
+  app.use(adminLinkedPropertiesRoutes);
   app.use(adminSubscriptionsRoutes);
   app.use(adminPaymentsRoutes);
   app.use(adminContentRoutes);

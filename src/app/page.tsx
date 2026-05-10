@@ -634,9 +634,12 @@ export default function PropertiesPage() {
                 </Card>
 
                 {/* Filters */}
-                <Card id="filters-section" className="p-4 md:p-6 mb-6 bg-muted/30">
+                <Card id="filters-section" className="p-4 md:p-6 mb-6 glass-premium border-primary/20 shadow-soft hover:shadow-card-hover transition-shadow duration-300">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-bold text-primary">الفلاتر</h2>
+                        <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+                            <div className="w-1 h-5 bg-primary rounded-full"></div>
+                            الفلاتر
+                        </h2>
                         <Button
                             variant="ghost"
                             size="sm"
@@ -657,7 +660,7 @@ export default function PropertiesPage() {
                                 placeholder="بحث شامل..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pr-10"
+                                className="pr-10 rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
                                 data-testid="input-search"
                             />
                         </div>

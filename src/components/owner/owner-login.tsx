@@ -128,10 +128,10 @@ export default function OwnerLogin() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md p-8">
+      <Card className="w-full max-w-md p-8 glass-premium border-primary/20 shadow-golden-lg hover:shadow-golden transition-shadow duration-300">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center shadow-golden">
               <Home className="w-8 h-8 text-primary" />
             </div>
           </div>
@@ -142,13 +142,13 @@ export default function OwnerLogin() {
         </div>
 
         <Tabs value={mode} onValueChange={(v) => setMode(v as "owner" | "admin")} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="owner" className="gap-2">
+          <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50 p-1 rounded-xl">
+            <TabsTrigger value="owner" className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
               <Home className="w-4 h-4" />
               <span className="hidden sm:inline">صاحب العقار</span>
               <span className="sm:hidden">ملاك</span>
             </TabsTrigger>
-            <TabsTrigger value="admin" className="gap-2">
+            <TabsTrigger value="admin" className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
               <Lock className="w-4 h-4" />
               <span className="hidden sm:inline">المسؤول</span>
               <span className="sm:hidden">أدمن</span>
@@ -159,7 +159,7 @@ export default function OwnerLogin() {
           <TabsContent value="owner">
             <form onSubmit={handleOwnerLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام)</label>
+                <label className="block text-sm font-semibold mb-2 text-foreground">رقم العقار (5 أرقام)</label>
                 <Input
                   type="text"
                   placeholder="اخر 5 أرقام من جوالك"
@@ -170,6 +170,7 @@ export default function OwnerLogin() {
                   pattern="[0-9]*"
                   maxLength={5}
                   data-testid="input-property-number"
+                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
                 />
                 {propertyNumber && propertyNumber.length !== 5 && (
                   <p className="text-xs text-red-500 mt-1">يجب أن يكون 5 أرقام</p>
@@ -177,7 +178,7 @@ export default function OwnerLogin() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2">الرقم السري</label>
+                <label className="block text-sm font-semibold mb-2 text-foreground">الرقم السري</label>
                 <Input
                   type="password"
                   placeholder="••••••"
@@ -185,16 +186,22 @@ export default function OwnerLogin() {
                   onChange={(e) => setPin(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-pin"
+                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full gradient-golden"
+                className="w-full rounded-xl h-12 text-base font-bold gradient-golden shadow-golden hover:shadow-golden-lg transition-all duration-300"
                 disabled={isLoading}
                 data-testid="button-login"
               >
-                {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    جاري تسجيل الدخول...
+                  </span>
+                ) : "تسجيل الدخول"}
               </Button>
 
               <div className="text-center">
@@ -202,7 +209,7 @@ export default function OwnerLogin() {
                   type="button"
                   variant="link"
                   onClick={() => router.push("/forgot-password")}
-                  className="text-sm text-muted-foreground hover:text-primary"
+                  className="text-sm text-muted-foreground hover:text-primary transition-colors duration-200"
                   data-testid="link-forgot-password"
                 >
                   نسيت الرقم السري؟
@@ -210,12 +217,12 @@ export default function OwnerLogin() {
               </div>
             </form>
 
-            <div className="mt-6 text-center text-sm text-muted-foreground">
+            <div className="mt-6 text-center text-sm text-muted-foreground pt-4 border-t border-border/30">
               <p>ليس لديك حساب؟</p>
               <Button
                 variant="ghost"
                 onClick={() => router.push("/subscription")}
-                className="text-primary underline"
+                className="text-primary hover:text-primary/80 transition-colors duration-200"
                 data-testid="link-register"
               >
                 سجل معنا الآن
@@ -227,7 +234,7 @@ export default function OwnerLogin() {
           <TabsContent value="admin">
             <form onSubmit={handleAdminLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">كود المسؤول</label>
+                <label className="block text-sm font-semibold mb-2 text-foreground">كود المسؤول</label>
                 <Input
                   type="text"
                   placeholder="أدخل كود المسؤول"
@@ -235,11 +242,12 @@ export default function OwnerLogin() {
                   onChange={(e) => setAdminCode(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-admin-code"
+                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2">كلمة المرور</label>
+                <label className="block text-sm font-semibold mb-2 text-foreground">كلمة المرور</label>
                 <Input
                   type="password"
                   placeholder="••••••"
@@ -247,16 +255,22 @@ export default function OwnerLogin() {
                   onChange={(e) => setAdminPassword(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-admin-password"
+                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full gradient-golden"
+                className="w-full rounded-xl h-12 text-base font-bold gradient-golden shadow-golden hover:shadow-golden-lg transition-all duration-300"
                 disabled={isLoading}
                 data-testid="button-admin-login"
               >
-                {isLoading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    جاري تسجيل الدخول...
+                  </span>
+                ) : "تسجيل الدخول"}
               </Button>
             </form>
           </TabsContent>

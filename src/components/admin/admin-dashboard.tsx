@@ -39,6 +39,7 @@ import {
   Building2,
   Flag,
   FileText,
+  Link,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -61,12 +62,14 @@ import AdminAddonsSection from "./sections/addons";
 import BankAccountsSection from "./sections/bank-accounts";
 import FeatureFlagsSection from "./sections/feature-flags";
 import AdminBlogSection from "./sections/blog";
+import AdminLinkedPropertiesSection from "./sections/linked-properties";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
 export type AdminSection =
   | ""
   | "properties"
+  | "linked-properties"
   | "subscriptions"
   | "packages"
   | "discounts"
@@ -187,6 +190,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           label="العقارات"
           active={activeSection === "properties"}
           onClick={() => setActiveSection("properties")}
+        />
+
+        <SidebarButton
+          icon={<Link className="w-4 h-4 text-amber-600" />}
+          label="العقارات المضافة"
+          active={activeSection === "linked-properties"}
+          onClick={() => setActiveSection("linked-properties")}
         />
 
         <SidebarButton
@@ -347,6 +357,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "" && <AlertsDashboard />}
 
         {activeSection === "properties" && <PropertiesSection />}
+        {activeSection === "linked-properties" && <AdminLinkedPropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
         {activeSection === "payments" && <PaymentsSection />}
         {activeSection === "packages" && <PackagesSection />}
