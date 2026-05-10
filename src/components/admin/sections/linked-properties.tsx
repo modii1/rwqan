@@ -25,9 +25,9 @@ interface LinkedProperty {
   mainPropertyWhatsapp: string;
   verificationStatus: string;
   subscriptionStatus: string;
-  endDate: string | null;
-  startDate: string | null;
-  packageId: string | null;
+  endDate: string | undefined;
+  startDate: string | undefined;
+  packageId: string | undefined;
   facilities: string[];
   location?: string;
   prices?: {
@@ -152,7 +152,7 @@ export default function LinkedPropertiesSection() {
     }
   };
 
-  const formatDate = (dateStr: string | null) => {
+  const formatDate = (dateStr: string | undefined | null) => {
     if (!dateStr) return "-";
     return new Date(dateStr).toLocaleDateString('ar-SA');
   };

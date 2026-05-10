@@ -34,6 +34,7 @@ export const propertySchema = z.object({
   lastChanges: z.string().optional(), // آخر التغييرات
   addedByOwner: z.string().optional(), // رقم العقار المالك الذي أضاف هذا العقار (للباقات المتعددة)
   pendingApprovalFrom: z.string().optional() || null, // العقار المرسل طلب الإضافة
+  linkedProperty: z.string().optional(), // رقم العقار الرئيسي المرتبط به (للعقارات المضافة)
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
