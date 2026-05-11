@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LinkIcon } from "lucide-react";
 
@@ -55,6 +56,8 @@ export default function LinkedPropertiesSection() {
   const [editingProperty, setEditingProperty] = useState<LinkedProperty | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<LinkedProperty | null>(null);
   const [unlinkConfirm, setUnlinkConfirm] = useState<LinkedProperty | null>(null);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroup, setNewGroup] = useState({ propertyNumber1: "", propertyNumber2: "", packageId: "" });
 
   // Fetch linked properties
   const { data, isLoading, refetch } = useQuery<LinkedPropertiesResponse>({
@@ -62,6 +65,16 @@ export default function LinkedPropertiesSection() {
     queryFn: async () => {
       const res = await fetch("/api/admin/linked-properties");
       if (!res.ok) throw new Error("فشل في جلب العقارات المضافة");
+      return res.json();
+    },
+  });
+
+  // Fetch packages for group creation
+  const { data: packages } = useQuery<any[]>({
+    queryKey: ["admin-packages"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/packages");
+      if (!res.ok) throw new Error("فشل في جلب الباقات");
       return res.json();
     },
   });
@@ -127,6 +140,32 @@ export default function LinkedPropertiesSection() {
     },
   });
 
+  // Create Group mutation
+  const createGroupMutation = useMutation({
+    mutationFn: async (data: { propertyNumber1: string; propertyNumber2: string; packageId: string }) => {
+      const res = await fetch("/api/admin/linked-properties/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "فشل في إنشاء المجموعة");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "تم الإنشاء ✓", description: "تم إنشاء مجموعة العقارات بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["admin-linked-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      setShowCreateGroup(false);
+      setNewGroup({ propertyNumber1: "", propertyNumber2: "", packageId: "" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredData = (data?.data || []).filter((p) => {
     if (!filter) return true;
     const normalizedFilter = filter.toLowerCase();
@@ -171,6 +210,10 @@ export default function LinkedPropertiesSection() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button onClick={() => setShowCreateGroup(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            إنشاء مجموعة
+          </Button>
           <div className="relative">
             <Search className="w-4 h-4 absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -512,6 +555,75 @@ export default function LinkedPropertiesSection() {
               {unlinkMutation.isPending && <Loader2 className="w-4 h-4 ml-1 animate-spin" />}
               فك الارتباط
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Group Dialog */}
+      <Dialog open={showCreateGroup} onOpenChange={setShowCreateGroup}>
+        <DialogContent className="max-w-lg" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary" />
+              إنشاء مجموعة عقارات مرتبطة
+            </DialogTitle>
+            <DialogDescription>
+              أدخل أرقام العقارين لربطهما في مجموعة واحدة (باقة نخبة)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-1 block">رقم العقار الرئيسي</label>
+              <Input
+                placeholder="مثال: 12345"
+                value={newGroup.propertyNumber1}
+                onChange={(e) => setNewGroup({ ...newGroup, propertyNumber1: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">رقم العقار الثاني (المضاف)</label>
+              <Input
+                placeholder="مثال: 67890"
+                value={newGroup.propertyNumber2}
+                onChange={(e) => setNewGroup({ ...newGroup, propertyNumber2: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">الباقة</label>
+              <Select
+                value={newGroup.packageId}
+                onValueChange={(val) => setNewGroup({ ...newGroup, packageId: val })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر الباقة" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(packages || []).map((pkg: any) => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name} - {pkg.price} ريال ({pkg.duration} يوم)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setShowCreateGroup(false)}>
+                إلغاء
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!newGroup.propertyNumber1 || !newGroup.propertyNumber2) {
+                    toast({ title: "خطأ", description: "أدخل أرقام العقارين", variant: "destructive" });
+                    return;
+                  }
+                  createGroupMutation.mutate(newGroup);
+                }}
+                disabled={createGroupMutation.isPending}
+              >
+                {createGroupMutation.isPending && <Loader2 className="w-4 h-4 ml-1 animate-spin" />}
+                إنشاء المجموعة
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

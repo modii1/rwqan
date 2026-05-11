@@ -217,11 +217,18 @@ export class FirebaseService {
         await this.db.collection("subscriptions").doc(id).set(subscription);
 
         // Sync with property - use the subscriptionType from the passed data
-        await this.updateProperty(propertyNumber, {
+        const propertyUpdates: any = {
             subscriptionType: subscriptionData.subscriptionType || "عادي",
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
-        });
+        };
+
+        // Also sync linkedProperty to the property document
+        if (subscriptionData.linkedProperty) {
+            propertyUpdates.linkedProperty = subscriptionData.linkedProperty;
+        }
+
+        await this.updateProperty(propertyNumber, propertyUpdates);
     }
 
     async cancelSubscription(propertyNumber: string, reason?: string): Promise<void> {
@@ -336,6 +343,14 @@ export class FirebaseService {
         } as MultiPropertySubscription;
         await this.db.collection("multi_property_subscriptions").doc(id).set(record);
         return record;
+    }
+
+    async updateMultiPropertySubscription(id: string, updates: Partial<MultiPropertySubscription>): Promise<void> {
+        await this.db.collection("multi_property_subscriptions").doc(id).update(updates);
+    }
+
+    async deleteMultiPropertySubscription(id: string): Promise<void> {
+        await this.db.collection("multi_property_subscriptions").doc(id).delete();
     }
 
     /** Alias for addVerificationLog — kept for backward compatibility with existing route code */

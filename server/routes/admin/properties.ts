@@ -257,7 +257,7 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       });
       
       // First look for completed payments
-      let validPayment = payments.find(p => 
+      validPayment = payments.find(p => 
         p.status === "مكتمل" || 
         (p.status as string) === "Approved" || 
         p.status === "completed"
@@ -407,12 +407,6 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
     }).catch(err => console.error("WhatsApp notify error:", err));
 
     console.log(`[REJECT] Completed for property: ${propertyNumber}`);
-    res.json({
-      success: true,
-      message: "تم رفض العقار",
-      property: updated,
-    });
-
     res.json({
       success: true,
       message: "تم رفض العقار",

@@ -216,4 +216,126 @@ router.get("/api/packages", async (req, res) => {
   }
 });
 
+// GET /api/search - Search with query params
+router.get("/api/search", async (req, res) => {
+  try {
+    const { search, city, direction, type, facilities, maxPrice } = req.query;
+    let items = await propertyService.getAll();
+    const now = new Date();
+    
+    items = items.filter((p) => {
+      if (p.verificationStatus) return p.verificationStatus === "approved";
+      return true;
+    });
+
+    // Apply subscription status
+    items = await Promise.all(items.map(async (p) => {
+      const subscription = await subscriptionService.getByProperty(p.propertyNumber);
+      let isSubscriptionExpired = false;
+      if (!subscription) {
+        isSubscriptionExpired = true;
+      } else if (subscription.status === "منتهي") {
+        isSubscriptionExpired = true;
+      } else if (subscription.endDate) {
+        const endDate = new Date(subscription.endDate);
+        isSubscriptionExpired = endDate < now;
+      } else {
+        isSubscriptionExpired = true;
+      }
+      return {
+        ...p,
+        subscriptionStatus: subscription?.status || null,
+        subscriptionEndDate: subscription?.endDate || null,
+        isSubscriptionExpired,
+        subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+      };
+    }));
+
+    // Filter by city
+    if (city && city !== "all" && city !== "") {
+      items = items.filter(p => p.city === city);
+    }
+
+    // Filter by direction
+    if (direction && direction !== "all" && direction !== "") {
+      items = items.filter(p => p.direction === direction);
+    }
+
+    // Filter by type
+    if (type && type !== "all" && type !== "") {
+      items = items.filter(p => p.type === type);
+    }
+
+    // Filter by facilities
+    if (facilities) {
+      const facilityList: string[] = Array.isArray(facilities) 
+        ? (facilities as string[]).map(String)
+        : [String(facilities)];
+      items = items.filter(p => {
+        const propFacilities: string[] = Array.isArray(p.facilities) ? p.facilities : [];
+        return facilityList.every((f: string) => 
+          propFacilities.some((pf: string) => pf.includes(f) || f.includes(pf))
+        );
+      });
+    }
+
+    // Filter by max price (weekend price)
+    if (maxPrice && !isNaN(Number(maxPrice))) {
+      const price = Number(maxPrice);
+      items = items.filter(p => {
+        const propPrice = parseFloat(p.prices?.weekend || p.prices?.weekday || "0");
+        return propPrice <= price;
+      });
+    }
+
+    // Apply text search
+    if (search && typeof search === "string" && search.trim()) {
+      const query = search.toLowerCase().trim();
+      items = items.filter(p => {
+        const searchable = [
+          p.propertyNumber, p.name, p.city, p.direction, p.type,
+          ...(Array.isArray(p.facilities) ? p.facilities : [])
+        ].join(" ").toLowerCase();
+        return searchable.includes(query);
+      });
+    }
+
+    res.json(items);
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json({ error: "فشل في البحث" });
+  }
+});
+
+// GET /api/cities - Returns cities with count and random property image
+router.get("/api/cities", async (_req, res) => {
+  try {
+    const items = await propertyService.getAll();
+    const now = new Date();
+
+    // Only approved properties
+    const approved = items.filter((p) => {
+      if (p.verificationStatus) return p.verificationStatus === "approved";
+      return true;
+    });
+
+    const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
+
+    const result = CITIES.map((city) => {
+      const cityProperties = approved.filter((p) => p.city === city);
+      const randomProperty = cityProperties[Math.floor(Math.random() * cityProperties.length)];
+      return {
+        name: city,
+        count: cityProperties.length,
+        image: randomProperty?.imageUrls?.[0] || "/assets/placeholder-property.jpg",
+      };
+    }).filter((c) => c.count > 0);
+
+    res.json(result);
+  } catch (err) {
+    console.error("Cities fetch error:", err);
+    res.status(500).json({ error: "فشل في جلب المدن" });
+  }
+});
+
 export default router;
