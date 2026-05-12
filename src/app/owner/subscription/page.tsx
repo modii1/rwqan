@@ -1831,7 +1831,7 @@ export default function OwnerSubscriptionPage() {
                         </div>
                         {addon.endDate && (
                           <span className="text-xs text-muted-foreground">
-                            حتى {new Date(addon.endDate).toLocaleDateString("ar-SA")}
+                            حتى {new Date(addon.endDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' })}
                           </span>
                         )}
                       </div>

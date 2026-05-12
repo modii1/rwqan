@@ -193,7 +193,7 @@ export default function AdminBlogSection() {
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "-";
     try {
-      return new Date(dateStr).toLocaleDateString("ar-SA");
+      return new Date(dateStr).toLocaleDateString("en-US", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" });
     } catch {
       return dateStr;
     }

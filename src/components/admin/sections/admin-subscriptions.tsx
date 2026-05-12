@@ -33,8 +33,22 @@ import {
   calculateRemainingDays,
   getSubscriptionStatus,
   getStatusInfo,
-  formatDate,
 } from "@/lib/subscription-utils";
+
+// Override formatDate to always show English numbers
+function formatDate(dateStr: any): string {
+  if (!dateStr) return "-";
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch {
+    return String(dateStr);
+  }
+}
 
 interface AdminSubscription {
   id: string;
@@ -168,12 +182,12 @@ export default function AdminSubscriptionsSection() {
 
   const filteredSubscriptions = subscriptions
     .filter(sub => {
-      const normalizedQuery = normalizeArabicText(searchQuery);
+      const normalizedQuery = searchQuery.toLowerCase();
       const matchesSearch = !searchQuery || 
-        normalizeArabicText(sub.propertyNumber).includes(normalizedQuery) ||
-        normalizeArabicText(sub.name).includes(normalizedQuery) ||
-        normalizeArabicText(sub.subscriptionType).includes(normalizedQuery) ||
-        normalizeArabicText(sub.status).includes(normalizedQuery);
+        sub.propertyNumber.includes(searchQuery) ||
+        sub.name.toLowerCase().includes(normalizedQuery) ||
+        (sub.subscriptionType || "").toLowerCase().includes(normalizedQuery) ||
+        sub.status.toLowerCase().includes(normalizedQuery);
       
       if (statusFilter === "all") return matchesSearch;
       if (statusFilter === "active") return matchesSearch && sub.status === "ساري";

@@ -167,6 +167,8 @@ export default function LinkedPropertiesSection() {
   });
 
   const filteredData = (data?.data || []).filter((p) => {
+    // Skip properties that are linked to themselves (self-linking)
+    if (p.propertyNumber && p.linkedProperty && p.propertyNumber === p.linkedProperty) return false;
     if (!filter) return true;
     const normalizedFilter = filter.toLowerCase();
     return (
@@ -193,7 +195,7 @@ export default function LinkedPropertiesSection() {
 
   const formatDate = (dateStr: string | undefined | null) => {
     if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString('ar-SA');
+      return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   return (

@@ -7,5 +7,9 @@ export const metadata: Metadata = {
 };
 
 export default function AdminPage() {
-    return <AdminDashboard />;
+    return (
+        <div className="min-h-screen flex flex-col">
+            <AdminDashboard />
+        </div>
+    );
 }

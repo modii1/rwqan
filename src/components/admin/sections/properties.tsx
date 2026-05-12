@@ -1085,7 +1085,7 @@ export default function PropertiesSection() {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">من:</span>
                   <span className="font-medium">
-                    {new Date(linkedPropertyView.subscription.subscription.startDate).toLocaleDateString('ar-SA')}
+                    {new Date(linkedPropertyView.subscription.subscription.startDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' })}
                   </span>
                 </div>
               )}
@@ -1093,7 +1093,7 @@ export default function PropertiesSection() {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">إلى:</span>
                   <span className="font-medium">
-                    {new Date(linkedPropertyView.subscription.subscription.endDate).toLocaleDateString('ar-SA')}
+                    {new Date(linkedPropertyView.subscription.subscription.endDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' })}
                   </span>
                 </div>
               )}

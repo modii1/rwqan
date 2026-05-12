@@ -6,7 +6,7 @@ import { propertyService } from "../../services";
 const router = Router();
 
 // All linked-properties routes require admin authentication
-router.use(requireAdmin);
+router.use("/api/admin", requireAdmin);
 
 // ==========================
 //   العقارات المضافة / العقارات المرتبطة

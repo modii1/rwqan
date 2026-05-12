@@ -18,11 +18,15 @@ import {
     Search,
     X,
     MapPin,
-    Home,
     Star,
     ChevronLeft,
     ChevronRight,
     Sparkles,
+    Snowflake,
+    Flame,
+    Waves,
+    Wifi,
+    Dumbbell
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,6 +41,19 @@ const FACILITIES = [
     "مناسبات", "شتاء", "صيف", "مكيف", "واي فاي",
 ];
 
+const FEATURE_ICONS: Record<string, React.ReactNode> = {
+    "مسبح": <Waves className="w-5 h-5 text-blue-500" />,
+    "بدون مسبح": <Waves className="w-5 h-5 text-gray-400" />,
+    "مبيت": <Star className="w-5 h-5 text-purple-500" />,
+    "ألعاب مائية": <Waves className="w-5 h-5 text-cyan-500" />,
+    "ملعب": <Dumbbell className="w-5 h-5 text-orange-500" />,
+    "مناسبات": <Star className="w-5 h-5 text-pink-500" />,
+    "شتاء": <Snowflake className="w-5 h-5 text-blue-400" />,
+    "صيف": <Flame className="w-5 h-5 text-red-500" />,
+    "مكيف": <Sparkles className="w-5 h-5 text-green-500" />,
+    "واي فاي": <Wifi className="w-5 h-5 text-indigo-500" />,
+};
+
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
 function getPropertyImage(propertyNumber: string, index: number = 0) {
@@ -46,7 +63,6 @@ function getPropertyImage(propertyNumber: string, index: number = 0) {
 export default function HomePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const filtersRef = useRef<HTMLDivElement>(null);
 
     const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
     const [selectedCity, setSelectedCity] = useState(searchParams.get("city") || "");
@@ -59,7 +75,6 @@ export default function HomePage() {
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [showFilters, setShowFilters] = useState(false);
-    const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
     const [visibleCount, setVisibleCount] = useState(24);
 
     const { data: allProperties = [], isLoading } = useQuery<Property[]>({
@@ -74,7 +89,7 @@ export default function HomePage() {
         return prices.length > 0 ? Math.ceil(Math.max(...prices)) : 500;
     }, [allProperties]);
 
-const initializedRef = useRef(false);
+    const initializedRef = useRef(false);
     useEffect(() => {
         if (initializedRef.current) {
             if (maxPrice > maxPriceValue) setMaxPrice(maxPriceValue);
@@ -134,6 +149,10 @@ const initializedRef = useRef(false);
                 if (price > maxPrice) return false;
             }
             return true;
+        }).sort((a, b) => {
+            const aPremium = a.subscriptionType === "مميز" ? 1 : 0;
+            const bPremium = b.subscriptionType === "مميز" ? 1 : 0;
+            return bPremium - aPremium;
         });
     }, [allProperties, searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, maxPriceValue]);
 
@@ -296,7 +315,7 @@ const initializedRef = useRef(false);
             </section>
 
             {/* Filters Bar */}
-            <div ref={filtersRef} className="sticky top-[70px] z-40 bg-white border-b border-gray-100 shadow-sm">
+            <div className="sticky top-[70px] z-40 bg-white border-b border-gray-100 shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 py-3">
                     <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
                         <button

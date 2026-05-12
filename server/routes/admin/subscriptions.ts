@@ -6,7 +6,7 @@ import { firebaseService } from "../../firebaseService";
 const router = Router();
 
 // All admin subscription routes require admin authentication
-router.use(requireAdmin);
+router.use("/api/admin", requireAdmin);
 
 // ======================
 // 🏠🏠 اشتراكات العقارين

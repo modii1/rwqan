@@ -27,11 +27,7 @@ function formatDate(dateStr: string): string {
     if (!dateStr) return "";
     try {
         const date = new Date(dateStr);
-        return date.toLocaleDateString("ar-SA", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-        });
+        return date.toLocaleDateString("en-US", { timeZone: "Asia/Riyadh", year: "numeric", month: "long", day: "numeric" });
     } catch {
         return dateStr;
     }
