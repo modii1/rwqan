@@ -114,10 +114,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         };
     }
 
-    const title = `${property.name || "عقار"} - ${property.city || ""} | روقان`;
-    const description = property.name
+    const isPremium = property.subscriptionType?.includes("مميز");
+    const title = isPremium
+        ? `${property.name || "عقار"} - ${property.city || ""} | روقان`
+        : `عقار رقم ${property.propertyNumber} - ${property.city || ""} | روقان`;
+    const description = isPremium && property.name
         ? `${property.name} في ${property.city}${property.direction ? ` - ${property.direction}` : ""}. ${property.type || ""} للإيجار مع ${property.facilities?.length || 0} مرافق. احجز الآن في روقان.`
-        : `عقار للإيجار في ${property.city || "القصيم"} | روقان`;
+        : `عقار رقم ${property.propertyNumber} للإيجار في ${property.city || "القصيم"} | روقان`;
 
     const ogImage = `https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev/${property.propertyNumber}/1.jpg`;
 

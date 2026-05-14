@@ -387,7 +387,7 @@ export default function UpdatePropertyPage() {
                                     type="number"
                                     value={form.prices.holidays}
                                     onChange={(e) => setForm({ ...form, prices: { ...form.prices, holidays: validateNumericInput(e.target.value) } })}
-                                    placeholder="1000"
+                                    placeholder="2600"
                                 />
                             </div>
                         </div>

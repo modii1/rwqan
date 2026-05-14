@@ -36,6 +36,19 @@ const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "ا�
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 
+// City-specific images from Unsplash (Saudi Arabia / Arabian Peninsula themed)
+const CITY_IMAGES: Record<string, string> = {
+    "بريدة": "https://images.unsplash.com/photo-1580418827495-f2df08f05e3c?w=600&h=450&fit=crop",
+    "عنيزة": "https://images.unsplash.com/photo-1548013146-72479768bada?w=600&h=450&fit=crop",
+    "الرس": "https://images.unsplash.com/photo-1597659840241-37e2b9c2f55f?w=600&h=450&fit=crop",
+    "البكيرية": "https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=600&h=450&fit=crop",
+    "المذنب": "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=600&h=450&fit=crop",
+    "البدائع": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=450&fit=crop",
+    "الاسياح": "https://images.unsplash.com/photo-1473773508845-188df29842c1?w=600&h=450&fit=crop",
+    "رياض الخبراء": "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=450&fit=crop",
+    "عيون الجواء": "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=600&h=450&fit=crop"
+};
+
 const FACILITIES = [
     "مسبح", "بدون مسبح", "مبيت", "ألعاب مائية", "ملعب",
     "مناسبات", "شتاء", "صيف", "مكيف", "واي فاي",
@@ -71,7 +84,7 @@ export default function HomePage() {
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
-    const [maxPrice, setMaxPrice] = useState<number>(500);
+    const [maxPrice, setMaxPrice] = useState<number>(99999);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [showFilters, setShowFilters] = useState(false);
@@ -92,7 +105,7 @@ export default function HomePage() {
     const initializedRef = useRef(false);
     useEffect(() => {
         if (initializedRef.current) {
-            if (maxPrice > maxPriceValue) setMaxPrice(maxPriceValue);
+            setMaxPrice(maxPriceValue);
         }
     }, [maxPriceValue]);
 
@@ -379,30 +392,42 @@ export default function HomePage() {
 
                             <div className="col-span-2 md:col-span-4 lg:col-span-5">
                                 <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">
-                                    السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `${maxPrice} ر.س`}
+                                    السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `حتى ${maxPrice} ر.س`}
                                 </label>
-                                <div className="flex flex-wrap gap-2">
-                                    {[
-                                        { label: "الكل", value: maxPriceValue },
-                                        { label: "حتى 200", value: 200 },
-                                        { label: "حتى 300", value: 300 },
-                                        { label: "حتى 400", value: 400 },
-                                        { label: "حتى 500", value: 500 },
-                                        { label: "حتى 750", value: 750 },
-                                        { label: "حتى 1000", value: 1000 },
-                                    ].map(opt => (
-                                        <button
-                                            key={opt.value}
-                                            onClick={() => setMaxPrice(opt.value)}
-                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                                                maxPrice === opt.value
-                                                    ? "bg-[#b88d2b] text-white"
-                                                    : "bg-[#f3f4f6] text-[#6b6b6b] hover:bg-gray-100"
-                                            }`}
-                                        >
-                                            {opt.label}
-                                        </button>
-                                    ))}
+                                <div className="space-y-2 mt-2">
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={maxPriceValue}
+                                        step={50}
+                                        value={maxPrice >= maxPriceValue ? maxPriceValue : maxPrice}
+                                        onChange={(e) => setMaxPrice(Number(e.target.value))}
+                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#b88d2b]
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-5
+                                            [&::-webkit-slider-thumb]:h-5
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-[#b88d2b]
+                                            [&::-webkit-slider-thumb]:border-2
+                                            [&::-webkit-slider-thumb]:border-white
+                                            [&::-webkit-slider-thumb]:shadow-md
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:transition-transform
+                                            hover:[&::-webkit-slider-thumb]:scale-110
+                                            active:[&::-webkit-slider-thumb]:scale-95
+                                            [&::-moz-range-thumb]:w-5
+                                            [&::-moz-range-thumb]:h-5
+                                            [&::-moz-range-thumb]:rounded-full
+                                            [&::-moz-range-thumb]:bg-[#b88d2b]
+                                            [&::-moz-range-thumb]:border-2
+                                            [&::-moz-range-thumb]:border-white
+                                            [&::-moz-range-thumb]:shadow-md
+                                            [&::-moz-range-thumb]:cursor-pointer"
+                                    />
+                                    <div className="flex justify-between text-xs text-[#9ca3af]">
+                                        <span>0</span>
+                                        <span>{maxPriceValue} ر.س</span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -431,6 +456,19 @@ export default function HomePage() {
             </div>
 
             <div className="max-w-7xl mx-auto px-4 py-8">
+                {/* CTA Section - Moved before cities */}
+                <section className="bg-[#1a1a1a] rounded-2xl py-10 mb-10">
+                    <div className="max-w-3xl mx-auto px-4 text-center">
+                        <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">لديك عقار؟</h2>
+                        <p className="text-white/70 mb-6">سجّل عقارك في منصة روقان وابدأ باستقبال الحجوزات</p>
+                        <Link href="/subscription">
+                            <Button size="lg" className="bg-[#b88d2b] hover:bg-[#9a7623] text-white font-bold rounded-full px-10">
+                                اشترك الآن
+                            </Button>
+                        </Link>
+                    </div>
+                </section>
+
                 {/* Cities Section */}
                 {cities.length > 0 && (
                     <section className="mb-10">
@@ -443,7 +481,7 @@ export default function HomePage() {
                                     className="group relative overflow-hidden rounded-2xl aspect-[4/3] bg-gray-100"
                                 >
                                     <img
-                                        src={getPropertyImage(
+                                        src={CITY_IMAGES[city.name] || getPropertyImage(
                                             allProperties.find(p => p.city === city.name)?.propertyNumber || "0",
                                             idx % 3
                                         )}
@@ -453,7 +491,7 @@ export default function HomePage() {
                                             (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${city.name}/400/300`;
                                         }}
                                     />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                                     <div className="absolute bottom-0 left-0 right-0 p-3">
                                         <h3 className="text-white font-bold text-base">{city.name}</h3>
                                         <p className="text-white/80 text-xs">{city.count} عقار</p>
@@ -564,19 +602,6 @@ export default function HomePage() {
                     </div>
                 )}
             </div>
-
-            {/* CTA Section */}
-            <section className="bg-[#1a1a1a] py-12 mt-8">
-                <div className="max-w-3xl mx-auto px-4 text-center">
-                    <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">لديك عقار؟</h2>
-                    <p className="text-white/70 mb-6">سجّل عقارك في منصة روقان وابدأ باستقبال الحجوزات</p>
-                    <Link href="/subscription">
-                        <Button size="lg" className="bg-[#b88d2b] hover:bg-[#9a7623] text-white font-bold rounded-full px-10">
-                            اشترك الآن
-                        </Button>
-                    </Link>
-                </div>
-            </section>
         </div>
     );
 }
