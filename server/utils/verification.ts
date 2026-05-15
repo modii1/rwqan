@@ -4,7 +4,7 @@
 import { dbProxy } from "../config/dbConfig";
 
 // Sensitive fields that require re-verification
-const SENSITIVE_FIELDS = ['name', 'location', 'city', 'type', 'facilities', 'imagesLink', 'images'];
+const SENSITIVE_FIELDS = ['location', 'city', 'type', 'imagesLink', 'images'];
 
 export interface PropertyDataCheckResult {
   isComplete: boolean;

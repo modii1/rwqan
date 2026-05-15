@@ -515,7 +515,7 @@ export default function HomePage() {
                 {featuredProperties.length > 0 && !hasActiveFilters && (
                     <section className="mb-10">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-bold text-[#1a1a1a]">العقارات بعض</h2>
+                            <h2 className="text-xl font-bold text-[#1a1a1a]">بعض العقارات</h2>
                             <Link href="/properties" className="text-sm text-[#b88d2b] font-medium hover:underline">
                                 عرض الكل
                             </Link>
