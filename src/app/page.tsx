@@ -457,10 +457,10 @@ export default function HomePage() {
 
             <div className="max-w-7xl mx-auto px-4 py-8">
                 {/* CTA Section - Moved before cities */}
-                <section className="bg-[#1a1a1a] rounded-2xl py-10 mb-10">
+                <section className="bg-white border border-gray-200 rounded-2xl py-10 mb-10">
                     <div className="max-w-3xl mx-auto px-4 text-center">
-                        <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">لديك عقار؟</h2>
-                        <p className="text-white/70 mb-6">سجّل عقارك في منصة روقان وابدأ باستقبال الحجوزات</p>
+                        <h2 className="text-2xl md:text-3xl font-bold text-[#1a1a1a] mb-3">لديك عقار؟</h2>
+                        <p className="text-gray-600 mb-6">سجّل عقارك في منصة روقان وابدأ باستقبال الحجوزات</p>
                         <Link href="/subscription">
                             <Button size="lg" className="bg-[#b88d2b] hover:bg-[#9a7623] text-white font-bold rounded-full px-10">
                                 اشترك الآن
