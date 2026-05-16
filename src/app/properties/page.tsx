@@ -53,7 +53,7 @@ export default function AllPropertiesPage() {
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
     const [maxPrice, setMaxPrice] = useState<number>(99999);
-    const [showFilters, setShowFilters] = useState(false);
+    const [showFilters, setShowFilters] = useState(true);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(24);
@@ -256,7 +256,7 @@ export default function AllPropertiesPage() {
             </section>
 
             {/* Filters Bar */}
-            <div ref={filtersRef} className="sticky top-[70px] z-40 bg-white border-b border-gray-100 shadow-sm">
+            <div ref={filtersRef} className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 py-3">
                     <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
                         <button

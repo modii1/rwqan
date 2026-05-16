@@ -74,7 +74,7 @@ export default function HomePage() {
     const [maxPrice, setMaxPrice] = useState<number>(99999);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
-    const [showFilters, setShowFilters] = useState(false);
+    const [showFilters, setShowFilters] = useState(true);
     const [visibleCount, setVisibleCount] = useState(24);
     const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -326,7 +326,7 @@ export default function HomePage() {
             </section>
 
             {/* Filters Bar */}
-            <div className="sticky top-[70px] z-40 bg-white border-b border-gray-100 shadow-sm">
+            <div className="bg-white border-b border-gray-100 shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 py-3">
                     <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
                         <button
