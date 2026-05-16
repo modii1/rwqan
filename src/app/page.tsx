@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, MapPin, SlidersHorizontal, ChevronUp, Waves, Star } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, ChevronUp, Waves, Star, Dumbbell, Snowflake, Flame } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
