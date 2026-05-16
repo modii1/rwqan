@@ -520,7 +520,7 @@ export default function HomePage() {
         {showScrollTop && (
             <button
                 onClick={() => setShowFilters(true)}
-                className="fixed bottom-6 left-6 z-50 px-4 py-3 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center gap-2 font-bold text-sm"
+                className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center gap-2 font-bold text-sm"
             >
                 <SlidersHorizontal className="w-4 h-4" />
                 تصفية
