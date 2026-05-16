@@ -29,6 +29,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
+import { FilterModal } from "@/components/filter-modal";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -304,85 +305,6 @@ export default function AllPropertiesPage() {
                             </button>
                         )}
                     </div>
-
-                    {/* Expanded Filters */}
-                    {showFilters && (
-                        <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                            <div>
-                                <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">الاتجاه</label>
-                                <Select value={selectedDirection} onValueChange={setSelectedDirection}>
-                                    <SelectTrigger className="h-9 rounded-lg text-sm">
-                                        <SelectValue placeholder="الاتجاه" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">الكل</SelectItem>
-                                        {DIRECTIONS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="col-span-2 md:col-span-4 lg:col-span-6">
-                                <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">
-                                    السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `حتى ${maxPrice} ر.س`}
-                                </label>
-                                <div className="space-y-2 mt-2">
-                                    <input
-                                        type="range"
-                                        min={0}
-                                        max={maxPriceValue}
-                                        step={1}
-                                        value={maxPrice}
-                                        onChange={(e) => setMaxPrice(Number(e.target.value))}
-                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#b88d2b]
-                                            [&::-webkit-slider-thumb]:appearance-none
-                                            [&::-webkit-slider-thumb]:w-5
-                                            [&::-webkit-slider-thumb]:h-5
-                                            [&::-webkit-slider-thumb]:rounded-full
-                                            [&::-webkit-slider-thumb]:bg-[#b88d2b]
-                                            [&::-webkit-slider-thumb]:border-2
-                                            [&::-webkit-slider-thumb]:border-white
-                                            [&::-webkit-slider-thumb]:shadow-md
-                                            [&::-webkit-slider-thumb]:cursor-pointer
-                                            [&::-webkit-slider-thumb]:transition-transform
-                                            hover:[&::-webkit-slider-thumb]:scale-110
-                                            active:[&::-webkit-slider-thumb]:scale-95
-                                            [&::-moz-range-thumb]:w-5
-                                            [&::-moz-range-thumb]:h-5
-                                            [&::-moz-range-thumb]:rounded-full
-                                            [&::-moz-range-thumb]:bg-[#b88d2b]
-                                            [&::-moz-range-thumb]:border-2
-                                            [&::-moz-range-thumb]:border-white
-                                            [&::-moz-range-thumb]:shadow-md
-                                            [&::-moz-range-thumb]:cursor-pointer"
-                                    />
-                                    <div className="flex justify-between text-xs text-[#9ca3af]">
-                                        <span>0</span>
-                                        <span>{maxPriceValue} ر.س</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="col-span-2 md:col-span-4 lg:col-span-4">
-                                <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">المرافق</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {FACILITIES.map(f => (
-                                        <Badge
-                                            key={f}
-                                            variant={selectedFacilities.includes(f) ? "default" : "outline"}
-                                            onClick={() => toggleFacility(f)}
-                                            className={`cursor-pointer text-xs px-3 py-1 rounded-full font-medium transition-colors ${
-                                                selectedFacilities.includes(f)
-                                                    ? "bg-[#b88d2b] text-white hover:bg-[#9a7623] border-transparent"
-                                                    : "border-gray-200 text-[#6b6b6b] hover:bg-gray-50"
-                                            }`}
-                                        >
-                                            {f}
-                                        </Badge>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -480,7 +402,7 @@ export default function AllPropertiesPage() {
         {showScrollTop && (
             <button
                 onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
+                className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
             >
                 <ChevronUp className="w-6 h-6" />
             </button>
@@ -488,13 +410,32 @@ export default function AllPropertiesPage() {
 
         {showScrollTop && (
             <button
-                onClick={() => setShowFilters(!showFilters)}
-                className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center gap-2 font-bold text-sm"
+                onClick={() => setShowFilters(true)}
+                className="fixed bottom-6 left-6 z-50 px-4 py-3 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center gap-2 font-bold text-sm"
             >
                 <SlidersHorizontal className="w-4 h-4" />
                 تصفية
             </button>
         )}
+
+        <FilterModal
+            showFilters={showFilters}
+            setShowFilters={setShowFilters}
+            selectedDirection={selectedDirection}
+            setSelectedDirection={setSelectedDirection}
+            selectedType={selectedType}
+            setSelectedType={setSelectedType}
+            maxPrice={maxPrice}
+            maxPriceValue={maxPriceValue}
+            setMaxPrice={setMaxPrice}
+            selectedFacilities={selectedFacilities}
+            toggleFacility={toggleFacility}
+            clearFilters={clearFilters}
+            hasActiveFilters={hasActiveFilters}
+            DIRECTIONS={DIRECTIONS}
+            TYPES={TYPES}
+            FACILITIES={FACILITIES}
+        />
         </>
     );
 }
