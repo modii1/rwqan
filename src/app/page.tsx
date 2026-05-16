@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, MapPin, SlidersHorizontal, ChevronUp } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, ChevronUp, Waves, Star } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
@@ -271,6 +271,7 @@ export default function HomePage() {
     }, [filteredProperties.length]);
 
     return (
+        <>
         <div className="min-h-screen bg-[#fafafa]">
             {/* Hero Section */}
             <section className="relative bg-white border-b border-gray-100">
@@ -616,6 +617,17 @@ export default function HomePage() {
                 <ChevronUp className="w-6 h-6" />
             </button>
         )}
+
+        {showScrollTop && (
+            <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center gap-2 font-bold text-sm"
+            >
+                <SlidersHorizontal className="w-4 h-4" />
+                تصفية
+            </button>
+        )}
+        </>
     );
 }
 
