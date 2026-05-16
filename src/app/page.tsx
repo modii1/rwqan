@@ -14,20 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-    Search,
-    X,
-    MapPin,
-    Star,
-    ChevronLeft,
-    ChevronRight,
-    Sparkles,
-    Snowflake,
-    Flame,
-    Waves,
-    Wifi,
-    Dumbbell
-} from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
@@ -89,6 +76,13 @@ export default function HomePage() {
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [showFilters, setShowFilters] = useState(false);
     const [visibleCount, setVisibleCount] = useState(24);
+    const [showScrollTop, setShowScrollTop] = useState(false);
+
+    useEffect(() => {
+        const onScroll = () => setShowScrollTop(window.scrollY > 400);
+        window.addEventListener("scroll", onScroll);
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
 
     const { data: allProperties = [], isLoading } = useQuery<Property[]>({
         queryKey: ["/api/properties"],
@@ -613,6 +607,15 @@ export default function HomePage() {
                 )}
             </div>
         </div>
+
+        {showScrollTop && (
+            <button
+                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
+            >
+                <ChevronUp className="w-6 h-6" />
+            </button>
+        )}
     );
 }
 

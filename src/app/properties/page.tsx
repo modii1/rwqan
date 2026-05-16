@@ -23,6 +23,7 @@ import {
     ChevronRight,
     Sparkles,
     Home,
+    ChevronUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -56,6 +57,13 @@ export default function AllPropertiesPage() {
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(24);
+    const [showScrollTop, setShowScrollTop] = useState(false);
+
+    useEffect(() => {
+        const onScroll = () => setShowScrollTop(window.scrollY > 400);
+        window.addEventListener("scroll", onScroll);
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
 
     // Fetch ALL properties for computing max price (not filtered)
     const { data: allProperties = [] } = useQuery<Property[]>({
@@ -466,6 +474,15 @@ export default function AllPropertiesPage() {
                 )}
             </div>
         </div>
+
+        {showScrollTop && (
+            <button
+                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
+            >
+                <ChevronUp className="w-6 h-6" />
+            </button>
+        )}
     );
 }
 
