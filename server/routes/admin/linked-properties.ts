@@ -74,11 +74,19 @@ router.get("/api/admin/linked-properties", async (req, res) => {
       }
     }
 
+    // Deduplicate by propertyNumber — keep first occurrence
+    const seen = new Set<string>();
+    const deduplicated = linkedProps.filter(p => {
+      if (seen.has(p.propertyNumber)) return false;
+      seen.add(p.propertyNumber);
+      return true;
+    });
+
     res.json({
       success: true,
-      data: linkedProps,
-      count: linkedProps.length,
-      mainPropertyCount: new Set(linkedProps.filter(p => p.isMainProperty).map(p => p.propertyNumber)).size,
+      data: deduplicated,
+      count: deduplicated.length,
+      mainPropertyCount: new Set(deduplicated.filter(p => p.isMainProperty).map(p => p.propertyNumber)).size,
     });
 
   } catch (err) {
