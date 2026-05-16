@@ -51,11 +51,16 @@ export default function AllPropertiesPage() {
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
-    const [maxPrice, setMaxPrice] = useState<number>(1000);
+    const [maxPrice, setMaxPrice] = useState<number>(99999);
     const [showFilters, setShowFilters] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(24);
+
+    // Fetch ALL properties for computing max price (not filtered)
+    const { data: allProperties = [] } = useQuery<Property[]>({
+        queryKey: ["/api/properties"],
+    });
 
     const buildQueryString = () => {
         const params = new URLSearchParams();
@@ -64,7 +69,7 @@ export default function AllPropertiesPage() {
         if (selectedDirection) params.set("direction", selectedDirection);
         if (selectedType) params.set("type", selectedType);
         if (selectedFacilities.length > 0) params.set("facilities", selectedFacilities.join(","));
-        if (maxPrice < 2000) params.set("maxPrice", String(maxPrice));
+        if (maxPrice < 99999) params.set("maxPrice", String(maxPrice));
         return params.toString();
     };
 
@@ -79,24 +84,23 @@ export default function AllPropertiesPage() {
     });
 
     const maxPriceValue = useMemo(() => {
-        const prices = properties.flatMap(p => [
+        const prices = allProperties.flatMap(p => [
             parseFloat(p.prices?.weekday || "0"),
             parseFloat(p.prices?.weekend || "0"),
         ]).filter(p => p > 0);
-        const max = prices.length > 0 ? Math.ceil(Math.max(...prices)) : 1000;
-        return Math.max(max, 200);
-    }, [properties]);
+        return prices.length > 0 ? Math.ceil(Math.max(...prices)) : 500;
+    }, [allProperties]);
 
-    const initRef = useRef(false);
+    const initializedRef = useRef(false);
     useEffect(() => {
-        if (initRef.current) {
-            if (maxPrice > maxPriceValue) setMaxPrice(maxPriceValue);
+        if (initializedRef.current) {
+            setMaxPrice(maxPriceValue);
         }
     }, [maxPriceValue]);
 
     useEffect(() => {
-        if (initRef.current) return;
-        initRef.current = true;
+        if (initializedRef.current) return;
+        initializedRef.current = true;
         setMaxPrice(maxPriceValue);
 
         const saved = sessionStorage.getItem("propsPageFilters");
@@ -107,7 +111,7 @@ export default function AllPropertiesPage() {
             setSelectedDirection(f.selectedDirection || "");
             setSelectedType(f.selectedType || "");
             setSelectedFacilities(f.selectedFacilities || []);
-            if (f.maxPrice) setMaxPrice(f.maxPrice);
+            if (f.maxPrice && f.maxPrice < 99999) setMaxPrice(f.maxPrice);
         }
     }, []);
 
@@ -316,8 +320,8 @@ export default function AllPropertiesPage() {
                                         type="range"
                                         min={0}
                                         max={maxPriceValue}
-                                        step={50}
-                                        value={maxPrice >= maxPriceValue ? maxPriceValue : maxPrice}
+                                        step={1}
+                                        value={maxPrice}
                                         onChange={(e) => setMaxPrice(Number(e.target.value))}
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#b88d2b]
                                             [&::-webkit-slider-thumb]:appearance-none
