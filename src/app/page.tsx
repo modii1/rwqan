@@ -515,8 +515,8 @@ export default function HomePage() {
                     </div>
                 )}
 
-                {/* Featured Properties */}
-                {featuredProperties.length > 0 && !hasActiveFilters && (
+                {/* Featured Properties - Commented out */}
+                {/* {featuredProperties.length > 0 && !hasActiveFilters && (
                     <section className="mb-10">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-xl font-bold text-[#1a1a1a]">أحدث العقارات</h2>
@@ -539,65 +539,71 @@ export default function HomePage() {
                             ))}
                         </div>
                     </section>
-                )}
+                )} */}
 
-                {/* All Properties (when filtered) */}
-                {(hasActiveFilters || visibleProperties.length > 0) && (
-                    <section>
+                {/* Premium Properties */}
+                {filteredProperties.filter(p => p.subscriptionType === "مميز").length > 0 && (
+                    <section className="mb-10">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-bold text-[#1a1a1a]">
-                                {hasActiveFilters ? "نتائج البحث" : "جميع العقارات"}
-                            </h2>
+                            <h2 className="text-xl font-bold text-[#1a1a1a]">العقارات المميزة</h2>
                         </div>
-
-                        {isLoading ? (
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                                {[...Array(6)].map((_, i) => (
-                                    <div key={i} className="h-72 bg-gray-100 rounded-2xl animate-pulse" />
-                                ))}
-                            </div>
-                        ) : filteredProperties.length === 0 ? (
-                            <div className="text-center py-20">
-                                <p className="text-[#6b6b6b] text-lg">لا توجد عقارات مطابقة</p>
-                                <button
-                                    onClick={clearFilters}
-                                    className="mt-4 text-[#b88d2b] font-medium hover:underline"
-                                >
-                                    مسح الفلاتر
-                                </button>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                                    {visibleProperties.map(p => (
-                                        <PropertyCard
-                                            key={p.propertyNumber}
-                                            property={p}
-                                            isPremium={p.subscriptionType === "مميز"}
-                                            onNext={() => nextImage(p.propertyNumber)}
-                                            onPrev={() => prevImage(p.propertyNumber)}
-                                            imgIdx={getImgIdx(p.propertyNumber)}
-                                            isTransitioning={isImageTransitioning.has(p.propertyNumber)}
-                                            onClick={() => goToProperty(p.propertyNumber)}
-                                        />
-                                    ))}
-                                </div>
-
-                                {visibleCount < filteredProperties.length && (
-                                    <div className="text-center mt-8">
-                                        <Button
-                                            variant="outline"
-                                            onClick={() => setVisibleCount(prev => Math.min(prev + 12, filteredProperties.length))}
-                                            className="rounded-full px-8 border-[#b88d2b] text-[#b88d2b] hover:bg-[#b88d2b] hover:text-white"
-                                        >
-                                            تحميل المزيد
-                                        </Button>
-                                    </div>
-                                )}
-                            </>
-                        )}
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                            {filteredProperties.filter(p => p.subscriptionType === "مميز").map(p => (
+                                <PropertyCard
+                                    key={p.propertyNumber}
+                                    property={p}
+                                    isPremium={true}
+                                    onNext={() => nextImage(p.propertyNumber)}
+                                    onPrev={() => prevImage(p.propertyNumber)}
+                                    imgIdx={getImgIdx(p.propertyNumber)}
+                                    isTransitioning={isImageTransitioning.has(p.propertyNumber)}
+                                    onClick={() => goToProperty(p.propertyNumber)}
+                                />
+                            ))}
+                        </div>
                     </section>
                 )}
+
+                {/* Normal Properties */}
+                {filteredProperties.filter(p => p.subscriptionType !== "مميز").length > 0 && (
+                    <section className="mb-10">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-bold text-[#1a1a1a]">جميع العقارات</h2>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                            {filteredProperties.filter(p => p.subscriptionType !== "مميز").map(p => (
+                                <PropertyCard
+                                    key={p.propertyNumber}
+                                    property={p}
+                                    isPremium={false}
+                                    onNext={() => nextImage(p.propertyNumber)}
+                                    onPrev={() => prevImage(p.propertyNumber)}
+                                    imgIdx={getImgIdx(p.propertyNumber)}
+                                    isTransitioning={isImageTransitioning.has(p.propertyNumber)}
+                                    onClick={() => goToProperty(p.propertyNumber)}
+                                />
+                            ))}
+                        </div>
+                    </section>
+                )}
+
+                {isLoading ? (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} className="h-72 bg-gray-100 rounded-2xl animate-pulse" />
+                        ))}
+                    </div>
+                ) : filteredProperties.length === 0 ? (
+                    <div className="text-center py-20">
+                        <p className="text-[#6b6b6b] text-lg">لا توجد عقارات مطابقة</p>
+                        <button
+                            onClick={clearFilters}
+                            className="mt-4 text-[#b88d2b] font-medium hover:underline"
+                        >
+                            مسح الفلاتر
+                        </button>
+                    </div>
+                ) : null}
 
                 {/* Empty state - no filters, no properties yet */}
                 {!hasActiveFilters && filteredProperties.length === 0 && !isLoading && (
