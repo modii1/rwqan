@@ -491,8 +491,8 @@ export default function HomePage() {
                                             (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${city.name}/400/300`;
                                         }}
                                     />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                                    <div className="absolute bottom-0 left-0 right-0 p-3">
+                                    <div className="absolute inset-0 bg-black/30" />
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
                                         <h3 className="text-white font-bold text-base">{city.name}</h3>
                                         <p className="text-white/80 text-xs">{city.count} عقار</p>
                                     </div>
