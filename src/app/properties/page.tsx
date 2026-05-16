@@ -307,22 +307,45 @@ export default function AllPropertiesPage() {
                                 </Select>
                             </div>
 
-                            <div>
-                                <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">السعر</label>
-                                <Select value={String(maxPrice)} onValueChange={(v) => setMaxPrice(Number(v))}>
-                                    <SelectTrigger className="h-9 rounded-lg text-sm">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value={String(maxPriceValue)}>الكل</SelectItem>
-                                        <SelectItem value="200">حتى 200</SelectItem>
-                                        <SelectItem value="300">حتى 300</SelectItem>
-                                        <SelectItem value="400">حتى 400</SelectItem>
-                                        <SelectItem value="500">حتى 500</SelectItem>
-                                        <SelectItem value="750">حتى 750</SelectItem>
-                                        <SelectItem value="1000">حتى 1000</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                            <div className="col-span-2 md:col-span-4 lg:col-span-6">
+                                <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">
+                                    السعر الأقصى: {maxPrice >= maxPriceValue ? "الكل" : `حتى ${maxPrice} ر.س`}
+                                </label>
+                                <div className="space-y-2 mt-2">
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={maxPriceValue}
+                                        step={50}
+                                        value={maxPrice >= maxPriceValue ? maxPriceValue : maxPrice}
+                                        onChange={(e) => setMaxPrice(Number(e.target.value))}
+                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#b88d2b]
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-5
+                                            [&::-webkit-slider-thumb]:h-5
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-[#b88d2b]
+                                            [&::-webkit-slider-thumb]:border-2
+                                            [&::-webkit-slider-thumb]:border-white
+                                            [&::-webkit-slider-thumb]:shadow-md
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:transition-transform
+                                            hover:[&::-webkit-slider-thumb]:scale-110
+                                            active:[&::-webkit-slider-thumb]:scale-95
+                                            [&::-moz-range-thumb]:w-5
+                                            [&::-moz-range-thumb]:h-5
+                                            [&::-moz-range-thumb]:rounded-full
+                                            [&::-moz-range-thumb]:bg-[#b88d2b]
+                                            [&::-moz-range-thumb]:border-2
+                                            [&::-moz-range-thumb]:border-white
+                                            [&::-moz-range-thumb]:shadow-md
+                                            [&::-moz-range-thumb]:cursor-pointer"
+                                    />
+                                    <div className="flex justify-between text-xs text-[#9ca3af]">
+                                        <span>0</span>
+                                        <span>{maxPriceValue} ر.س</span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="col-span-2 md:col-span-4 lg:col-span-4">
