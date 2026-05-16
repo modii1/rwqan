@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, MapPin, SlidersHorizontal, ChevronUp, Waves, Star, Dumbbell, Snowflake, Flame, Sparkles, Wifi } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, ChevronUp, ChevronRight, ChevronLeft, Waves, Star, Dumbbell, Snowflake, Flame, Sparkles, Wifi, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
@@ -536,41 +536,18 @@ export default function HomePage() {
                     </section>
                 )} */}
 
-                {/* Premium Properties */}
-                {filteredProperties.filter(p => p.subscriptionType === "مميز").length > 0 && (
-                    <section className="mb-10">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-xl font-bold text-[#1a1a1a]">العقارات المميزة</h2>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                            {filteredProperties.filter(p => p.subscriptionType === "مميز").map(p => (
-                                <PropertyCard
-                                    key={p.propertyNumber}
-                                    property={p}
-                                    isPremium={true}
-                                    onNext={() => nextImage(p.propertyNumber)}
-                                    onPrev={() => prevImage(p.propertyNumber)}
-                                    imgIdx={getImgIdx(p.propertyNumber)}
-                                    isTransitioning={isImageTransitioning.has(p.propertyNumber)}
-                                    onClick={() => goToProperty(p.propertyNumber)}
-                                />
-                            ))}
-                        </div>
-                    </section>
-                )}
-
-                {/* Normal Properties */}
-                {filteredProperties.filter(p => p.subscriptionType !== "مميز").length > 0 && (
+                {/* All Properties - Mixed Premium and Normal */}
+                {filteredProperties.length > 0 && (
                     <section className="mb-10">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-xl font-bold text-[#1a1a1a]">جميع العقارات</h2>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                            {filteredProperties.filter(p => p.subscriptionType !== "مميز").map(p => (
+                            {filteredProperties.map(p => (
                                 <PropertyCard
                                     key={p.propertyNumber}
                                     property={p}
-                                    isPremium={false}
+                                    isPremium={p.subscriptionType === "مميز"}
                                     onNext={() => nextImage(p.propertyNumber)}
                                     onPrev={() => prevImage(p.propertyNumber)}
                                     imgIdx={getImgIdx(p.propertyNumber)}
