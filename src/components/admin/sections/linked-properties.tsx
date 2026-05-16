@@ -167,8 +167,6 @@ export default function LinkedPropertiesSection() {
   });
 
   const filteredData = (data?.data || []).filter((p) => {
-    // Skip properties that are linked to themselves (self-linking)
-    if (p.propertyNumber && p.linkedProperty && p.propertyNumber === p.linkedProperty) return false;
     if (!filter) return true;
     const normalizedFilter = filter.toLowerCase();
     return (

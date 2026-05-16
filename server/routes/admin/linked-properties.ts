@@ -35,6 +35,9 @@ router.get("/api/admin/linked-properties", async (req, res) => {
       const mainPropertyNumber = multiSub.propertyNumber1;
 
       for (const propNumber of allProps) {
+        // Skip the main property — only show linked/additional properties
+        if (propNumber === mainPropertyNumber) continue;
+
         const prop = allProperties.find(p => p.propertyNumber === propNumber);
         const sub = allSubscriptions.find(s => s.propertyNumber === propNumber);
         const mainProp = allProperties.find(p => p.propertyNumber === mainPropertyNumber);

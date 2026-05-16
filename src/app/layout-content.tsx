@@ -9,13 +9,13 @@ import QueryProvider from "@/lib/query-provider";
 
 export default function LayoutContent({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
-    const isAdmin = pathname.startsWith("/admin");
+    const isAdmin = pathname?.startsWith("/admin") ?? false;
 
     return (
         <QueryProvider>
             <TooltipProvider>
                 <div className="min-h-screen flex flex-col bg-background">
-                    {!isAdmin && <Header />}
+                    <Header />
                     <main className="flex-1">
                         {children}
                     </main>
