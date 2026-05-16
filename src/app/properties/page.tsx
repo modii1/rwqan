@@ -55,7 +55,7 @@ export default function AllPropertiesPage() {
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
     const [maxPrice, setMaxPrice] = useState<number>(99999);
-    const [showFilters, setShowFilters] = useState(true);
+    const [showFilters, setShowFilters] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(24);

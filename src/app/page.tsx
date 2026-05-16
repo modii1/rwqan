@@ -75,7 +75,7 @@ export default function HomePage() {
     const [maxPrice, setMaxPrice] = useState<number>(99999);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
-    const [showFilters, setShowFilters] = useState(true);
+    const [showFilters, setShowFilters] = useState(false);
     const [visibleCount, setVisibleCount] = useState(24);
     const [showScrollTop, setShowScrollTop] = useState(false);
 
