@@ -45,6 +45,14 @@ router.get("/api/properties", async (_req, res) => {
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });
+
+    // Sort: premium properties first
+    filtered.sort((a, b) => {
+      const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
+      const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
+      return bIsPremium - aIsPremium;
+    });
+
     res.json(filtered);
   } catch (err) {
     console.error("Properties fetch error:", err);
@@ -299,6 +307,13 @@ router.get("/api/search", async (req, res) => {
         return searchable.includes(query);
       });
     }
+
+    // Sort: premium properties first
+    items.sort((a, b) => {
+      const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
+      const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
+      return bIsPremium - aIsPremium;
+    });
 
     res.json(items);
   } catch (err) {
