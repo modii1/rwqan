@@ -320,12 +320,10 @@ export default function HomePage() {
                         alt="عقار فاخر"
                         className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                     />
-                    {/* Gradient overlay - dark on the left */}
-                    <div className="absolute inset-0 bg-gradient-to-l from-transparent via-[#1a1a2e]/70 to-[#1a1a2e]/95" />
-                    {/* Decorative accent line */}
-                    <div className="absolute left-[52%] md:left-[42%] top-6 bottom-6 w-[2px] bg-gradient-to-b from-transparent via-[#b88d2b]/60 to-transparent" />
-                    {/* Text content - positioned on the left (dark) side */}
-                    <div className="relative h-full flex flex-col justify-center items-end px-6 md:px-10 w-[58%] md:w-[48%] mr-auto text-right">
+                    {/* Gradient overlay - centered dark */}
+                    <div className="absolute inset-0 bg-[#1a1a2e]/70" />
+                    {/* Text content - centered */}
+                    <div className="relative h-full flex flex-col justify-center items-center px-6 md:px-10 w-full text-center">
                         <span className="inline-block bg-[#b88d2b]/20 text-[#e8c66a] text-[10px] md:text-xs font-semibold px-3 py-1 rounded-full mb-2 backdrop-blur-sm border border-[#b88d2b]/30">
                             لملّاك العقارات
                         </span>
