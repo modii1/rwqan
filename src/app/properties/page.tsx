@@ -12,7 +12,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
     Search,
@@ -21,10 +20,9 @@ import {
     Star,
     ChevronLeft,
     ChevronRight,
-    Sparkles,
-    Home,
     ChevronUp,
     SlidersHorizontal,
+    Home,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -45,7 +43,6 @@ function getPropertyImage(propertyNumber: string, index: number = 0) {
 export default function AllPropertiesPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const filtersRef = useRef<HTMLDivElement>(null);
 
     const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
     const [selectedCity, setSelectedCity] = useState(searchParams.get("city") || "");
@@ -67,7 +64,6 @@ export default function AllPropertiesPage() {
         return () => window.removeEventListener("scroll", onScroll);
     }, []);
 
-    // Fetch ALL properties for computing max price (not filtered)
     const { data: allProperties = [] } = useQuery<Property[]>({
         queryKey: ["/api/properties"],
     });
@@ -125,8 +121,6 @@ export default function AllPropertiesPage() {
         }
     }, []);
 
-    const filteredCount = properties.length;
-
     const toggleFacility = (f: string) => {
         setSelectedFacilities(prev =>
             prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]
@@ -143,7 +137,7 @@ export default function AllPropertiesPage() {
         sessionStorage.removeItem("propsPageFilters");
     };
 
-    const hasActiveFilters = searchQuery || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue;
+    const hasActiveFilters = !!(searchQuery || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
 
     useEffect(() => {
         const filters = { searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice };
@@ -205,100 +199,52 @@ export default function AllPropertiesPage() {
     return (
         <>
         <div className="min-h-screen bg-[#fafafa]">
-            {/* Header */}
-            <section className="relative bg-white border-b border-gray-100">
-                <div className="max-w-7xl mx-auto px-4 pt-12 pb-8">
-                    <div className="text-center mb-8">
-                        <h1 className="text-3xl md:text-4xl font-bold text-[#1a1a1a] mb-2">
-                            جميع العقارات
-                        </h1>
-                        <p className="text-[#6b6b6b] text-base md:text-lg">
-                            اكتشف أفضل الشاليهات والاستراحات في منطقة القصيم
-                        </p>
-                    </div>
-
+            {/* Search & Filter Header */}
+            <section className="bg-white border-b border-gray-100 sticky top-[70px] z-40">
+                <div className="max-w-7xl mx-auto px-4 py-4">
                     {/* Search Bar */}
-                    <div className="max-w-3xl mx-auto">
-                        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-3 md:p-4">
-                            <div className="flex flex-col md:flex-row gap-2 md:gap-3">
-                                <div className="relative flex-1">
-                                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9ca3af]" />
-                                    <Input
-                                        placeholder="ابحث عن عقار..."
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        className="pr-10 h-11 rounded-xl border-gray-200 bg-[#f9fafb] text-sm"
-                                    />
-                                </div>
-
-                                <div className="flex flex-row gap-2 md:flex-row md:gap-3">
-                                    <Select value={selectedCity} onValueChange={setSelectedCity}>
-                                        <SelectTrigger className="h-11 w-full md:w-36 rounded-xl border-gray-200 bg-[#f9fafb] text-sm">
-                                            <SelectValue placeholder="المدينة" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">الكل</SelectItem>
-                                            {CITIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-
-                                    <Select value={selectedType} onValueChange={setSelectedType}>
-                                        <SelectTrigger className="h-11 w-full md:w-32 rounded-xl border-gray-200 bg-[#f9fafb] text-sm">
-                                            <SelectValue placeholder="النوع" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">الكل</SelectItem>
-                                            {TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
+                    <div className="flex gap-2 mb-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9ca3af]" />
+                            <Input
+                                placeholder="ابحث عن عقار..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pr-10 h-11 rounded-xl border-gray-200 bg-[#f9fafb] text-sm"
+                            />
                         </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* Filters Bar */}
-            <div ref={filtersRef} className="bg-white border-b border-gray-100 shadow-sm">
-                <div className="max-w-7xl mx-auto px-4 py-3">
-                    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
                         <button
-                            onClick={() => setShowFilters(!showFilters)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                showFilters || hasActiveFilters
+                            onClick={() => setShowFilters(true)}
+                            className={`flex items-center gap-2 px-4 h-11 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
+                                hasActiveFilters
                                     ? "bg-[#b88d2b] text-white"
-                                    : "bg-[#f3f4f6] text-[#6b6b6b] hover:bg-gray-100"
+                                    : "bg-[#f9fafb] border border-gray-200 text-[#6b6b6b] hover:bg-gray-100"
                             }`}
                         >
-                            <Sparkles className="w-4 h-4" />
-                            الفلاتر
-                            {hasActiveFilters && (
-                                <span className="bg-white text-[#b88d2b] text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                                    {selectedFacilities.length + (selectedDirection ? 1 : 0) + (selectedType ? 1 : 0) + (searchQuery ? 1 : 0)}
-                                </span>
-                            )}
+                            <SlidersHorizontal className="w-4 h-4" />
+                            تصفية
                         </button>
+                    </div>
 
-                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                            {CITIES.map(city => (
-                                <button
-                                    key={city}
-                                    onClick={() => setSelectedCity(selectedCity === city ? "" : city)}
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                                        selectedCity === city
-                                            ? "bg-[#b88d2b] text-white"
-                                            : "bg-[#f3f4f6] text-[#6b6b6b] hover:bg-gray-100"
-                                    }`}
-                                >
-                                    {city}
-                                </button>
-                            ))}
-                        </div>
-
+                    {/* City pills */}
+                    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+                        {CITIES.map(city => (
+                            <button
+                                key={city}
+                                onClick={() => setSelectedCity(selectedCity === city ? "" : city)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                    selectedCity === city
+                                        ? "bg-[#b88d2b] text-white"
+                                        : "bg-[#f3f4f6] text-[#6b6b6b] hover:bg-gray-200"
+                                }`}
+                            >
+                                {city}
+                            </button>
+                        ))}
                         {hasActiveFilters && (
                             <button
                                 onClick={clearFilters}
-                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-500 hover:text-red-600 whitespace-nowrap transition-colors"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-600 whitespace-nowrap"
                             >
                                 <X className="w-3 h-3" />
                                 مسح
@@ -306,52 +252,46 @@ export default function AllPropertiesPage() {
                         )}
                     </div>
                 </div>
-            </div>
+            </section>
 
-            {/* Properties Grid */}
-            <div className="max-w-7xl mx-auto px-4 py-8">
-                {/* Active filters summary */}
+            {/* Results */}
+            <div className="max-w-7xl mx-auto px-4 py-6">
+                {/* Active filter tags */}
                 {hasActiveFilters && (
-                    <div className="mb-6 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm text-[#6b6b6b]">نتائج:</span>
-                        <span className="text-sm font-bold text-[#1a1a1a]">{filteredCount}</span>
+                    <div className="mb-4 flex items-center gap-2 flex-wrap">
+                        <span className="text-sm text-[#6b6b6b]">النتائج:</span>
+                        <span className="text-sm font-bold text-[#1a1a1a]">{properties.length}</span>
                         {selectedCity && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {selectedCity}
-                                <button onClick={() => setSelectedCity("")} className="hover:text-[#9a7623]"><X className="w-2.5 h-2.5" /></button>
+                                <button onClick={() => setSelectedCity("")}><X className="w-2.5 h-2.5" /></button>
                             </span>
                         )}
                         {selectedDirection && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {selectedDirection}
-                                <button onClick={() => setSelectedDirection("")} className="hover:text-[#9a7623]"><X className="w-2.5 h-2.5" /></button>
+                                <button onClick={() => setSelectedDirection("")}><X className="w-2.5 h-2.5" /></button>
                             </span>
                         )}
                         {selectedType && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {selectedType}
-                                <button onClick={() => setSelectedType("")} className="hover:text-[#9a7623]"><X className="w-2.5 h-2.5" /></button>
+                                <button onClick={() => setSelectedType("")}><X className="w-2.5 h-2.5" /></button>
                             </span>
                         )}
                         {selectedFacilities.map(f => (
                             <span key={f} className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {f}
-                                <button onClick={() => toggleFacility(f)} className="hover:text-[#9a7623]"><X className="w-2.5 h-2.5" /></button>
+                                <button onClick={() => toggleFacility(f)}><X className="w-2.5 h-2.5" /></button>
                             </span>
                         ))}
-                        {maxPrice < maxPriceValue && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
-                                حتى {maxPrice}
-                                <button onClick={() => setMaxPrice(maxPriceValue)} className="hover:text-[#9a7623]"><X className="w-2.5 h-2.5" /></button>
-                            </span>
-                        )}
                     </div>
                 )}
 
                 {isLoading ? (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                         {[...Array(6)].map((_, i) => (
-                            <div key={i} className="h-80 bg-gray-100 rounded-2xl animate-pulse" />
+                            <div key={i} className="h-72 bg-gray-100 rounded-2xl animate-pulse" />
                         ))}
                     </div>
                 ) : properties.length === 0 ? (
@@ -369,7 +309,7 @@ export default function AllPropertiesPage() {
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                             {visibleProperties.map(p => (
                                 <PropertyCard
                                     key={p.propertyNumber}
@@ -385,7 +325,7 @@ export default function AllPropertiesPage() {
                         </div>
 
                         {visibleCount < properties.length && (
-                            <div className="text-center mt-10">
+                            <div className="text-center mt-8">
                                 <button
                                     onClick={() => setVisibleCount(prev => Math.min(prev + 12, properties.length))}
                                     className="px-8 py-3 border-2 border-[#b88d2b] text-[#b88d2b] font-bold rounded-full hover:bg-[#b88d2b] hover:text-white transition-colors"
@@ -399,15 +339,17 @@ export default function AllPropertiesPage() {
             </div>
         </div>
 
+        {/* Scroll to top */}
         {showScrollTop && (
             <button
                 onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
+                className="fixed bottom-6 left-6 z-50 w-11 h-11 rounded-full bg-[#b88d2b] text-white shadow-lg hover:bg-[#9a7623] transition-all duration-300 flex items-center justify-center"
             >
-                <ChevronUp className="w-6 h-6" />
+                <ChevronUp className="w-5 h-5" />
             </button>
         )}
 
+        {/* Sticky filter button */}
         {showScrollTop && (
             <button
                 onClick={() => setShowFilters(true)}
@@ -453,20 +395,17 @@ interface PropertyCardProps {
 function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, onPrev, onClick }: PropertyCardProps) {
     const imageUrl = getPropertyImage(property.propertyNumber, imgIdx);
     const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
-    const topFacilities = (Array.isArray(property.facilities) ? property.facilities : []).slice(0, 2);
 
     return (
         <Card
-            className={`group overflow-hidden rounded-2xl cursor-pointer transition-shadow hover:shadow-lg ${
-                isPremium ? "ring-2 ring-[#b88d2b]" : ""
-            }`}
+            className="group overflow-hidden rounded-2xl cursor-pointer transition-shadow hover:shadow-lg border-0 shadow-sm"
             onClick={onClick}
         >
             <div className="relative">
                 <img
                     src={imageUrl}
                     alt={property.name || property.propertyNumber}
-                    className={`w-full h-44 md:h-56 object-cover transition-opacity duration-300 ${
+                    className={`w-full h-40 md:h-48 object-cover transition-opacity duration-300 ${
                         isTransitioning ? "opacity-0" : "opacity-100"
                     }`}
                     onError={(e) => {
@@ -474,61 +413,56 @@ function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, on
                     }}
                 />
 
+                {/* Badge */}
                 {isPremium && (
-                    <div className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2 py-1 rounded-full shadow flex items-center gap-1">
-                        <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                        <span className="text-[#b38b00] font-bold text-xs">مميز</span>
+                    <div className="absolute top-2 right-2 bg-[#b88d2b] px-2.5 py-1 rounded-lg shadow">
+                        <span className="text-white font-bold text-xs">مميز</span>
                     </div>
                 )}
 
+                {!isPremium && property.createdAt && (Date.now() - new Date(property.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000 && (
+                    <div className="absolute top-2 right-2 bg-green-600 px-2.5 py-1 rounded-lg shadow">
+                        <span className="text-white font-bold text-xs">جديد</span>
+                    </div>
+                )}
+
+                {/* Image navigation */}
                 <div
                     className="absolute inset-0 flex items-center justify-between px-1 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <button
                         onClick={(e) => { e.stopPropagation(); onPrev(); }}
-                        className="w-8 h-8 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white transition-colors"
+                        className="w-7 h-7 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white transition-colors"
                     >
-                        <ChevronRight className="w-4 h-4 text-[#434040]" />
+                        <ChevronRight className="w-4 h-4 text-gray-700" />
                     </button>
                     <button
                         onClick={(e) => { e.stopPropagation(); onNext(); }}
-                        className="w-8 h-8 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white transition-colors"
+                        className="w-7 h-7 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white transition-colors"
                     >
-                        <ChevronLeft className="w-4 h-4 text-[#434040]" />
+                        <ChevronLeft className="w-4 h-4 text-gray-700" />
                     </button>
                 </div>
             </div>
 
-            <div className="p-3 md:p-4">
-                <div className="flex items-center gap-1 text-[#b88d2b] mb-1">
+            <div className="p-3">
+                {/* Property name */}
+                <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">
+                    {property.name || property.type || "عقار"}
+                </h3>
+
+                {/* Location */}
+                <div className="flex items-center gap-1 text-[#6b6b6b] mb-2">
                     <MapPin className="w-3 h-3 flex-shrink-0" />
-                    <span className="text-xs font-medium truncate">
+                    <span className="text-xs truncate">
                         {property.location || property.city}
                     </span>
                 </div>
 
-                {isPremium && property.name && (
-                    <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">{property.name}</h3>
-                )}
-
-                {topFacilities.length > 0 && (
-                    <div className="flex items-center gap-2 text-[#9ca3af] mb-3 overflow-hidden">
-                        {topFacilities.map((f, i) => (
-                            <span key={i} className="text-xs whitespace-nowrap">{f}</span>
-                        ))}
-                    </div>
-                )}
-
+                {/* Price */}
                 <div className="flex items-center justify-between">
                     <PriceDisplay amount={mainPrice} size="md" />
-                    <Button
-                        size="sm"
-                        className="bg-[#b88d2b] hover:bg-[#9a7623] text-white text-xs h-8 px-3 rounded-lg font-bold"
-                        onClick={(e) => { e.stopPropagation(); onClick(); }}
-                    >
-                        التفاصيل
-                    </Button>
                 </div>
             </div>
         </Card>

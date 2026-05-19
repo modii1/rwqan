@@ -371,7 +371,7 @@ export function startScheduler() {
   console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
 }
 
-// خفض الاشتراكات المنتهية من مميز إلى عادي
+// خفض الاشتراكات المنتهية من مميز/موثوق إلى عادي
 async function downgradeExpiredSubscriptions(): Promise<number> {
   try {
     const subscriptions = await firebaseService.getSubscriptions();
@@ -380,15 +380,24 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
     let downgraded = 0;
 
     for (const sub of subscriptions) {
-      if (!sub.endDate || sub.subscriptionType !== "مميز") continue;
+      const isPremiumType = sub.subscriptionType === "مميز" || sub.subscriptionType === "موثوق";
+      if (!isPremiumType) continue;
+
+      // Case 1: Subscription was manually cancelled
+      const isCancelled = sub.status === "منتهي" || (sub as any).cancelledAt;
       
-      const endDate = new Date(sub.endDate);
-      endDate.setHours(0, 0, 0, 0);
-      
-      if (endDate < today) {
+      // Case 2: End date has passed
+      let isDateExpired = false;
+      if (sub.endDate) {
+        const endDate = new Date(sub.endDate);
+        endDate.setHours(0, 0, 0, 0);
+        isDateExpired = endDate < today;
+      }
+
+      if (isCancelled || isDateExpired) {
         await firebaseService.updateSubscription(sub.id, { subscriptionType: "عادي" });
         await firebaseService.updateProperty(sub.propertyNumber, { subscriptionType: "عادي" });
-        console.log(`⬇️ [Scheduler] تم تخفيض اشتراك ${sub.propertyNumber} من مميز إلى عادي`);
+        console.log(`⬇️ [Scheduler] تم تخفيض اشتراك ${sub.propertyNumber} من ${sub.subscriptionType} إلى عادي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
         downgraded++;
       }
     }

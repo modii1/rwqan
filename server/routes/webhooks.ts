@@ -3,6 +3,7 @@ import { propertyService, paymentService, subscriptionService, addOnService } fr
 import { firebaseService } from "../firebaseService";
 import { paymobService } from "../integrations/paymob";
 import { sendWhatsAppNotification, notifyNewPayment } from "../integrations/whatsapp";
+import { checkPropertyDataComplete } from "../utils/verification";
 
 const router = Router();
 
@@ -567,6 +568,31 @@ const router = Router();
               status: "نشط",
               paymentId: payment.id,
             });
+          }
+
+          // ✅ التحقق الذكي التلقائي عند التجديد/الترقية
+          const propertyDataCheck = await checkPropertyDataComplete(property);
+          if (propertyDataCheck.isComplete) {
+            await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+            console.log(`✅ [Smart Verify] العقار ${payment.propertyNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
+          } else {
+            await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+            console.log(`⏳ [Smart Verify] العقار ${payment.propertyNumber} - بيانات ناقصة: ${propertyDataCheck.missingFields.join(', ')}`);
+          }
+
+          // التحقق الذكي للعقارات الإضافية
+          for (const propNumber of additionalProps) {
+            const additionalProperty = await propertyService.getByNumber(propNumber);
+            if (additionalProperty) {
+              const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
+              if (additionalDataCheck.isComplete) {
+                await firebaseService.updateVerificationStatus(propNumber, "approved");
+                console.log(`✅ [Smart Verify] العقار الإضافي ${propNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
+              } else {
+                await firebaseService.updateVerificationStatus(propNumber, "pending");
+                console.log(`⏳ [Smart Verify] العقار الإضافي ${propNumber} - بيانات ناقصة: ${additionalDataCheck.missingFields.join(', ')}`);
+              }
+            }
           }
         }
       } else if (isNewRegistration) {

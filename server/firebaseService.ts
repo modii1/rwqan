@@ -214,7 +214,15 @@ export class FirebaseService {
             propertyCount: subscriptionData.propertyCount || 1,
         };
 
-        await this.db.collection("subscriptions").doc(id).set(subscription);
+        // Clear cancellation fields when reactivating
+        const docRef = this.db.collection("subscriptions").doc(id);
+        const existingDoc = await docRef.get();
+        if (existingDoc.exists && (existingDoc.data()?.cancelledAt || existingDoc.data()?.cancelReason)) {
+            // Use set with merge to overwrite and delete old cancellation fields
+            await docRef.set({ ...subscription, cancelledAt: null, cancelReason: null });
+        } else {
+            await docRef.set(subscription);
+        }
 
         // Sync with property - use the subscriptionType from the passed data
         const propertyUpdates: any = {
@@ -273,6 +281,9 @@ export class FirebaseService {
             status: data.status,
             subscriptionType: data.subscriptionType,
             packageId: data.packageId,
+            // Clear cancellation fields on reactivation
+            cancelledAt: null,
+            cancelReason: null,
         };
         
         // Add linked property info if provided

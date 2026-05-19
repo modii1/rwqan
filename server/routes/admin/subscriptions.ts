@@ -85,7 +85,12 @@ router.get("/api/admin/subscriptions", async (req, res) => {
       const subWithType = sub as any;
 
       // إذا تم إلغاء الاشتراك يدوياً (موقوف أو ملغى) → منتهي مباشرة
-      if (sub.status === "منتهي" || (subWithType as any).cancelledAt) {
+      // لكن إذا تم إعادة تفعيله بعد الإلغاء (startDate > cancelledAt) فلا يُعتبر منتهي
+      const wasCancelled = !!(subWithType as any).cancelledAt;
+      const wasReactivated = wasCancelled && sub.startDate && 
+        new Date(sub.startDate) > new Date((subWithType as any).cancelledAt);
+      
+      if (sub.status === "منتهي" || (wasCancelled && !wasReactivated)) {
         status = "منتهي";
         remainingDays = -1;
       }

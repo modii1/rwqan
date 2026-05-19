@@ -14,6 +14,7 @@ import {
 } from "../utils/dateUtils";
 import { paymobService } from "../integrations/paymob";
 import { notifyOwnerSubscriptionActivated } from "../integrations/whatsapp";
+import { checkPropertyDataComplete } from "../utils/verification";
 
 export class PaymentService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -148,12 +149,19 @@ export class PaymentService {
               payment.receiptUrl ?? ""
             );
 
-            // Approve the linked property
+            // Approve the linked property based on smart verification
             await firebaseService.updateProperty(propNumber, {
               pendingApprovalFrom: undefined,
               subscriptionType: isPremium ? "مميز" : "عادي"
             });
-            await firebaseService.updateVerificationStatus(propNumber, "approved");
+            const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
+            if (additionalDataCheck.isComplete) {
+              await firebaseService.updateVerificationStatus(propNumber, "approved");
+              console.log(`[approveBankTransfer] ✅ Smart verify: ${propNumber} - data complete`);
+            } else {
+              await firebaseService.updateVerificationStatus(propNumber, "pending");
+              console.log(`[approveBankTransfer] ⏳ Smart verify: ${propNumber} - missing: ${additionalDataCheck.missingFields.join(', ')}`);
+            }
           }
         }
 
@@ -173,8 +181,20 @@ export class PaymentService {
       }
     }
 
-    // Verification - approve main property (linked properties already approved above)
-    await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+    // Smart Verification - check data completeness before approving
+    const mainProperty = property || await firebaseService.getPropertyByNumber(payment.propertyNumber);
+    if (mainProperty) {
+      const mainDataCheck = await checkPropertyDataComplete(mainProperty);
+      if (mainDataCheck.isComplete) {
+        await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+        console.log(`[approveBankTransfer] ✅ Smart verify: ${payment.propertyNumber} - data complete`);
+      } else {
+        await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+        console.log(`[approveBankTransfer] ⏳ Smart verify: ${payment.propertyNumber} - missing: ${mainDataCheck.missingFields.join(', ')}`);
+      }
+    } else {
+      await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+    }
     
     // Log verification for main property
     await firebaseService.addVerificationLog({
