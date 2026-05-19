@@ -626,10 +626,12 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitio
             </div>
 
             <div className="p-3">
-                {/* Property name */}
-                <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">
-                    {property.name || property.type || "عقار"}
-                </h3>
+                {/* Property name - only for premium */}
+                {isPremium && (
+                    <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">
+                        {property.name || property.type || "عقار"}
+                    </h3>
+                )}
 
                 {/* Location */}
                 <div className="flex items-center gap-1 text-[#6b6b6b] mb-2">
