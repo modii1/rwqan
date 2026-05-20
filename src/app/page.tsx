@@ -643,7 +643,7 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitio
                 <div className="flex items-center justify-between">
                     <PriceDisplay amount={mainPrice} size="md" />
                     {isPremium && (
-                        <span className="bg-[#b88d2b] text-white text-[10px] font-bold px-2 py-0.5 rounded-md">مميز</span>
+                        <span className="-ml-3 bg-[#f5f0e4] text-[#b88d2b] text-xs font-bold pl-3 pr-4 py-1.5 rounded-tr-full">مميز</span>
                     )}
                 </div>
             </div>
