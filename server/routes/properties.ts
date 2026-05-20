@@ -282,9 +282,15 @@ router.get("/api/search", async (req, res) => {
         : [String(facilities)];
       items = items.filter(p => {
         const propFacilities: string[] = Array.isArray(p.facilities) ? p.facilities : [];
-        return facilityList.every((f: string) => 
-          propFacilities.some((pf: string) => pf.includes(f) || f.includes(pf))
-        );
+        return facilityList.every((f: string) => {
+          // مبيت: تطابق العقارات التي لها سعر مبيت أو "مبيت" في المرافق
+          if (f === "مبيت") {
+            const hasInFacilities = propFacilities.some((pf: string) => pf.includes("مبيت") || "مبيت".includes(pf));
+            const hasOvernightPrice = !!(p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "");
+            return hasInFacilities || hasOvernightPrice;
+          }
+          return propFacilities.some((pf: string) => pf.includes(f) || f.includes(pf));
+        });
       });
     }
 
@@ -301,10 +307,23 @@ router.get("/api/search", async (req, res) => {
     if (search && typeof search === "string" && search.trim()) {
       const normalizedSearch = normalizeArabicText(search);
       items = items.filter(p => {
-        const normalizedQuery = normalizeArabicText([
-          p.propertyNumber, p.name, p.city, p.direction, p.type, p.location,
-          ...(Array.isArray(p.facilities) ? p.facilities : [])
-        ].join(" "));
+        const parts: (string | null | undefined)[] = [
+          p.propertyNumber,
+          p.name,
+          p.city,
+          p.direction,
+          p.type,
+          p.lastChanges,
+          // المرافق
+          ...(Array.isArray(p.facilities) ? p.facilities : []),
+          // إضافة "مبيت" كلمة مفتاحية إذا كان سعر المبيت محددًا
+          (p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "") ? "مبيت" : null,
+          // أي حقول نصية إضافية قد تكون موجودة في Firestore
+          (p as any).description,
+          (p as any).notes,
+          (p as any).seoDescription,
+        ];
+        const normalizedQuery = normalizeArabicText(parts.filter(Boolean).join(" "));
         return normalizedQuery.includes(normalizedSearch);
       });
     }

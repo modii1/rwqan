@@ -112,12 +112,18 @@ export default function HomePage() {
         let results = allProperties;
 
         if (searchQuery.trim()) {
-            const q = normalizeArabicText(searchQuery);
+        const q = normalizeArabicText(searchQuery);
             results = results.filter(p => {
-                const searchable = normalizeArabicText([
-                    p.propertyNumber, p.name, p.city, p.type, p.location,
+                const parts: (string | null | undefined)[] = [
+                    p.propertyNumber, p.name, p.city, p.direction, p.type,
+                    p.lastChanges,
                     ...(Array.isArray(p.facilities) ? p.facilities : []),
-                ].join(" "));
+                    // إضافة "مبيت" كلمة مفتاحية إذا كان سعر المبيت محددًا
+                    (p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "") ? "مبيت" : null,
+                    (p as any).description,
+                    (p as any).seoDescription,
+                ];
+                const searchable = normalizeArabicText(parts.filter(Boolean).join(" "));
                 return searchable.includes(q);
             });
         }
@@ -134,9 +140,14 @@ export default function HomePage() {
             }
             if (selectedFacilities.length > 0) {
                 const pf = Array.isArray(p.facilities) ? p.facilities : [];
-                const hasAll = selectedFacilities.every(f =>
-                    pf.some(pf2 => pf2.includes(f) || f.includes(pf2))
-                );
+                const hasAll = selectedFacilities.every(f => {
+                    if (f === "مبيت") {
+                        const inFacilities = pf.some(pf2 => pf2.includes("مبيت") || "مبيت".includes(pf2));
+                        const hasOvernightPrice = !!(p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "");
+                        return inFacilities || hasOvernightPrice;
+                    }
+                    return pf.some(pf2 => pf2.includes(f) || f.includes(pf2));
+                });
                 if (!hasAll) return false;
             }
             if (maxPrice < maxPriceValue) {

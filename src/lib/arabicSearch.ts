@@ -27,6 +27,10 @@ export function normalizeArabicText(text: string | null | undefined): string {
     .replace(/[\u0300-\u036f]/g, "")
     // إزالة المد (التطويل)
     .replace(/\u0640/g, "")
+    // توحيد الحروف الفارسية/غير الأصيلة إلى عربية (مثال: ڤ → ف)
+    .replace(/ڤ/g, "ف")
+    .replace(/ک/g, "ك")
+    .replace(/ی/g, "ي")
     // توحيد جميع أشكال الألف إلى ألف بسيطة
     .replace(/[إأٱآ]/g, "ا")
     // توحيد الياء المقصورة إلى ياء
