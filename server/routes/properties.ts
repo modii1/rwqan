@@ -6,6 +6,7 @@ import { propertyService, subscriptionService, contentService, notificationServi
 import { firebaseService } from "../firebaseService";
 import { googleDriveService } from "../integrations/googleDrive";
 import type { InsertProperty } from "../../shared/schema";
+import { normalizeArabicText } from "../../src/lib/arabicSearch";
 
 const router = Router();
 
@@ -298,13 +299,13 @@ router.get("/api/search", async (req, res) => {
 
     // Apply text search
     if (search && typeof search === "string" && search.trim()) {
-      const query = search.toLowerCase().trim();
+      const normalizedSearch = normalizeArabicText(search);
       items = items.filter(p => {
-        const searchable = [
-          p.propertyNumber, p.name, p.city, p.direction, p.type,
+        const normalizedQuery = normalizeArabicText([
+          p.propertyNumber, p.name, p.city, p.direction, p.type, p.location,
           ...(Array.isArray(p.facilities) ? p.facilities : [])
-        ].join(" ").toLowerCase();
-        return searchable.includes(query);
+        ].join(" "));
+        return normalizedQuery.includes(normalizedSearch);
       });
     }
 

@@ -157,10 +157,13 @@ export default function AllPropertiesPage() {
     useEffect(() => {
         const savedScroll = sessionStorage.getItem("propsScrollY");
         if (savedScroll && properties.length > 0) {
-            requestAnimationFrame(() => {
-                window.scrollTo(0, parseInt(savedScroll, 10));
-                sessionStorage.removeItem("propsScrollY");
-            });
+            const scrollY = parseInt(savedScroll, 10);
+            sessionStorage.removeItem("propsScrollY");
+            // Multiple attempts to ensure scroll happens after Next.js resets to top
+            const restore = () => window.scrollTo(0, scrollY);
+            requestAnimationFrame(restore);
+            setTimeout(restore, 50);
+            setTimeout(restore, 150);
         }
     }, [properties.length]);
 
@@ -449,15 +452,9 @@ function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, on
                     }}
                 />
 
-                {/* Badge */}
-                {isPremium && (
-                    <div className="absolute top-2 right-2 bg-[#b88d2b] px-2.5 py-1 rounded-lg shadow">
-                        <span className="text-white font-bold text-xs">مميز</span>
-                    </div>
-                )}
-
+                {/* New badge */}
                 {!isPremium && property.createdAt && (Date.now() - new Date(property.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000 && (
-                    <div className="absolute top-2 right-2 bg-green-600 px-2.5 py-1 rounded-lg shadow">
+                    <div className="absolute top-2 right-2 bg-green-600/90 px-2.5 py-1 rounded-lg shadow backdrop-blur-sm">
                         <span className="text-white font-bold text-xs">جديد</span>
                     </div>
                 )}
@@ -501,6 +498,9 @@ function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, on
                 {/* Price */}
                 <div className="flex items-center justify-between">
                     <PriceDisplay amount={mainPrice} size="md" />
+                    {isPremium && (
+                        <span className="bg-[#b88d2b] text-white text-[10px] font-bold px-2 py-0.5 rounded-md">مميز</span>
+                    )}
                 </div>
             </div>
         </Card>

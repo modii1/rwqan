@@ -365,7 +365,13 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => router.push("/")}
+                            onClick={() => {
+                                if (window.history.length > 1) {
+                                    router.back();
+                                } else {
+                                    router.push("/");
+                                }
+                            }}
                         >
                             <ArrowRight className="w-5 h-5" />
                         </Button>
@@ -519,11 +525,20 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
             <header className="header-glass border-b border-border/50 shadow-soft sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
                     {/* زر الرجوع */}
-                    <Link href="/">
-                        <Button variant="ghost" size="icon" className="rounded-xl hover:bg-primary/10 transition-colors">
-                            <ArrowRight className="w-5 h-5" />
-                        </Button>
-                    </Link>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl hover:bg-primary/10 transition-colors"
+                        onClick={() => {
+                            if (window.history.length > 1) {
+                                router.back();
+                            } else {
+                                router.push("/");
+                            }
+                        }}
+                    >
+                        <ArrowRight className="w-5 h-5" />
+                    </Button>
 
                     <div className="flex-1">
                         <h1 className="text-lg font-bold text-primary truncate">

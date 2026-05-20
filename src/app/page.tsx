@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
+import { normalizeArabicText } from "@/lib/arabicSearch";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -111,12 +112,12 @@ export default function HomePage() {
         let results = allProperties;
 
         if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase().trim();
+            const q = normalizeArabicText(searchQuery);
             results = results.filter(p => {
-                const searchable = [
-                    p.propertyNumber, p.name, p.city, p.type,
+                const searchable = normalizeArabicText([
+                    p.propertyNumber, p.name, p.city, p.type, p.location,
                     ...(Array.isArray(p.facilities) ? p.facilities : []),
-                ].join(" ").toLowerCase();
+                ].join(" "));
                 return searchable.includes(q);
             });
         }
@@ -214,10 +215,13 @@ export default function HomePage() {
     useEffect(() => {
         const savedScroll = sessionStorage.getItem("homeScrollY");
         if (savedScroll && allProperties.length > 0) {
-            requestAnimationFrame(() => {
-                window.scrollTo(0, parseInt(savedScroll, 10));
-                sessionStorage.removeItem("homeScrollY");
-            });
+            const scrollY = parseInt(savedScroll, 10);
+            sessionStorage.removeItem("homeScrollY");
+            // Multiple attempts to ensure scroll happens after Next.js resets to top
+            const restore = () => window.scrollTo(0, scrollY);
+            requestAnimationFrame(restore);
+            setTimeout(restore, 50);
+            setTimeout(restore, 150);
         }
     }, [allProperties.length]);
 
@@ -592,15 +596,9 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitio
                     }}
                 />
 
-                {/* Badge */}
-                {isPremium && (
-                    <div className="absolute top-2 right-2 bg-[#b88d2b] px-2.5 py-1 rounded-lg shadow">
-                        <span className="text-white font-bold text-xs">مميز</span>
-                    </div>
-                )}
-
+                {/* New badge */}
                 {!isPremium && property.createdAt && (Date.now() - new Date(property.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000 && (
-                    <div className="absolute top-2 right-2 bg-green-600 px-2.5 py-1 rounded-lg shadow">
+                    <div className="absolute top-2 right-2 bg-green-600/90 px-2.5 py-1 rounded-lg shadow backdrop-blur-sm">
                         <span className="text-white font-bold text-xs">جديد</span>
                     </div>
                 )}
@@ -644,6 +642,9 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitio
                 {/* Price */}
                 <div className="flex items-center justify-between">
                     <PriceDisplay amount={mainPrice} size="md" />
+                    {isPremium && (
+                        <span className="bg-[#b88d2b] text-white text-[10px] font-bold px-2 py-0.5 rounded-md">مميز</span>
+                    )}
                 </div>
             </div>
         </Card>
