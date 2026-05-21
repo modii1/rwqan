@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
 import { startSmartScheduler } from "./smartScheduler";
+import { startScheduler } from "./scheduler";
 import next from "next";
 import cookieParser from "cookie-parser";
 
@@ -108,7 +109,10 @@ const handle = nextApp.getRequestHandler();
     server.listen({ port, host: "0.0.0.0" }, () => {
       console.log(`🚀 Server running on port ${port}`);
 
-      // Smart non-spam scheduler (twice weekly with staggered batches)
+      // Daily scheduler (noon: 3/3 cycle notifications, remaining days, payment expiry)
+      startScheduler();
+
+      // Smart non-spam scheduler (twice weekly with staggered batches - safety net)
       startSmartScheduler();
     });
   } catch (e) {

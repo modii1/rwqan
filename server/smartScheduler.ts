@@ -303,8 +303,8 @@ async function tick() {
     _nextTarget = nextTarget;
     const diffMs = nextTarget.getTime() - now.getTime();
 
-    // If we are within 2 minutes of the target dispatch time → run
-    if (diffMs <= 2 * 60 * 1000 && diffMs > -60_000) {
+    // If we are within 30 minutes of the target dispatch time → run
+    if (diffMs <= 30 * 60 * 1000 && diffMs > -30 * 60_000) {
       console.log(`🚀 [SmartScheduler] Triggering dispatch for ${nextTarget.toLocaleString()}`);
       await dispatchExpiredSubscriptionReminders();
     }
@@ -343,7 +343,45 @@ function scheduleNextTick() {
 
 export function startSmartScheduler() {
   console.log("🧠 [SmartScheduler] Initializing non-spam expired subscription scheduler...");
+
+  // Check if we missed a dispatch today (e.g. server restarted after scheduled time)
+  checkMissedDispatch().catch((err) =>
+    console.error("❌ [SmartScheduler] Missed dispatch check failed:", err)
+  );
+
   tick(); // Fire one tick immediately
+}
+
+/**
+ * If today is a send day and the target time has passed but no notifications were sent,
+ * run the dispatch now as a catch-up.
+ */
+async function checkMissedDispatch() {
+  const config = await getSmartScheduleConfig();
+  if (!config.enabled) return;
+
+  const now = getRiyadhNow();
+  const today = getDayNameEn(now);
+
+  if (!config.sendDays.includes(today)) return;
+
+  const timeStr = config.sendTimes[today];
+  if (!timeStr) return;
+
+  const { hours, minutes } = parseHHMM(timeStr);
+  const targetToday = new Date(now);
+  targetToday.setHours(hours, minutes, 0, 0);
+
+  // Only catch up if target time already passed today (within last 12 hours)
+  const msSinceTarget = now.getTime() - targetToday.getTime();
+  if (msSinceTarget < 0 || msSinceTarget > 12 * 60 * 60 * 1000) return;
+
+  // Check if anything was already sent today
+  const alreadySent = await getTodaysSentNotifications();
+  if (alreadySent.size > 0) return;
+
+  console.log("🔄 [SmartScheduler] Missed dispatch detected for today, running catch-up...");
+  await dispatchExpiredSubscriptionReminders();
 }
 
 // ─── Legacy Remainder (kept for imports that still rely on old functions) ─────

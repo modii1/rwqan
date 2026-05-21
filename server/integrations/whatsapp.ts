@@ -100,55 +100,73 @@ async function sendAdminWhatsAppNotification(options: {
   let status = "pending";
   let responseText = "";
 
-  try {
-    console.log("📲 WhatsApp API call - URL:", url);
-    console.log("📲 WhatsApp API call - Phone ID:", WHATSAPP_PHONE_NUMBER_ID ? "present" : "MISSING");
-    console.log("📲 WhatsApp API call - Token:", WHATSAPP_ACCESS_TOKEN ? `present (${WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...)` : "MISSING");
-    console.log("📲 WhatsApp API call - Admin:", ADMIN_WHATSAPP);
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-    
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: ADMIN_WHATSAPP,
-        type: "text",
-        text: {
-          preview_url: false,
-          body,
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt === 0) {
+        console.log("📲 WhatsApp API call - URL:", url);
+        console.log("📲 WhatsApp API call - Phone ID:", WHATSAPP_PHONE_NUMBER_ID ? "present" : "MISSING");
+        console.log("📲 WhatsApp API call - Token:", WHATSAPP_ACCESS_TOKEN ? `present (${WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...)` : "MISSING");
+        console.log("📲 WhatsApp API call - Admin:", ADMIN_WHATSAPP);
+      } else {
+        console.log(`📲 WhatsApp API retry attempt ${attempt + 1}/${maxRetries + 1}...`);
+      }
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
         },
-      }),
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
-    
-    console.log("📲 WhatsApp API response status:", resp.status, resp.statusText);
-    
-    const data = await resp.json().catch(() => ({}));
-    status = resp.ok ? "success" : "error";
-    responseText = JSON.stringify(data).slice(0, 1000);
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: ADMIN_WHATSAPP,
+          type: "text",
+          text: {
+            preview_url: false,
+            body,
+          },
+        }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      console.log("📲 WhatsApp API response status:", resp.status, resp.statusText);
+      
+      const data = await resp.json().catch(() => ({}));
+      status = resp.ok ? "success" : "error";
+      responseText = JSON.stringify(data).slice(0, 1000);
 
-    console.log("📲 WhatsApp API response:", status, responseText);
-  } catch (err: any) {
-    status = "error";
-    const errorMessage = err?.message || String(err);
-    const isTimeout = err?.cause?.code === 'ETIMEDOUT' || errorMessage.includes('ETIMEDOUT');
-    
-    responseText = isTimeout ? `TIMEOUT: ${errorMessage}` : errorMessage;
-    
-    console.error("❌ WhatsApp send error:", err);
-    console.error("❌ WhatsApp error cause:", err?.cause);
-    console.error("❌ Is timeout error:", isTimeout);
-    
-    if (isTimeout) {
-      console.error("🔴 WhatsApp API is unreachable! Check server network/firewall settings.");
+      console.log("📲 WhatsApp API response:", status, responseText);
+      
+      if (resp.ok) break; // Success, no need to retry
+      
+      // Non-timeout error (e.g. 400 bad request) - don't retry
+      if (resp.status >= 400 && resp.status < 500) break;
+      
+      // Server error - retry
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+      }
+    } catch (err: any) {
+      status = "error";
+      const errorMessage = err?.message || String(err);
+      const isTimeout = err?.cause?.code === 'ETIMEDOUT' || errorMessage.includes('ETIMEDOUT') || errorMessage.includes('aborted');
+      
+      responseText = isTimeout ? `TIMEOUT: ${errorMessage}` : errorMessage;
+      
+      console.error(`❌ WhatsApp send error (attempt ${attempt + 1}):`, err);
+      
+      if (isTimeout && attempt < maxRetries) {
+        console.log(`🔄 Retrying after timeout (attempt ${attempt + 2})...`);
+        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+      } else if (isTimeout) {
+        console.error("🔴 WhatsApp API is unreachable after all retries! Check server network/firewall settings.");
+      }
     }
   }
 
@@ -542,8 +560,9 @@ const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN || "";
 
 /**
  * دالة أساسية لإرسال رسالة WhatsApp للمالك عبر Enjazatik
+ * مع إعادة المحاولة في حال الفشل
  */
-export async function sendOwnerWhatsApp(phone: string, message: string): Promise<{ success: boolean; error?: string }> {
+export async function sendOwnerWhatsApp(phone: string, message: string, retries = 2): Promise<{ success: boolean; error?: string }> {
   if (!ENJAZATIK_URL || !ENJAZATIK_TOKEN) {
     console.error("❌ Missing Enjazatik credentials");
     return { success: false, error: "إعدادات الإرسال غير مكتملة" };
@@ -557,30 +576,40 @@ export async function sendOwnerWhatsApp(phone: string, message: string): Promise
     cleanPhone = "966" + cleanPhone;
   }
 
-  try {
-    const response = await fetch(ENJAZATIK_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ENJAZATIK_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        number: cleanPhone,
-        message: message
-      })
-    });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(ENJAZATIK_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${ENJAZATIK_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          number: cleanPhone,
+          message: message
+        })
+      });
 
-    if (!response.ok) {
-      console.error("❌ Enjazatik send failed:", response.status);
-      return { success: false, error: "فشل في إرسال الرسالة" };
+      if (response.ok) {
+        console.log(`✅ Owner notification sent to ${cleanPhone.substring(0, 6)}**** (attempt ${attempt + 1})`);
+        return { success: true };
+      }
+
+      console.error(`❌ Enjazatik send failed (attempt ${attempt + 1}/${retries + 1}):`, response.status);
+      if (attempt < retries) {
+        const backoff = 5000 * (attempt + 1); // 5s, 10s
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    } catch (error) {
+      console.error(`❌ Enjazatik error (attempt ${attempt + 1}/${retries + 1}):`, error);
+      if (attempt < retries) {
+        const backoff = 5000 * (attempt + 1);
+        await new Promise(r => setTimeout(r, backoff));
+      }
     }
-
-    console.log(`✅ Owner notification sent to ${cleanPhone.substring(0, 6)}****`);
-    return { success: true };
-  } catch (error) {
-    console.error("❌ Enjazatik error:", error);
-    return { success: false, error: "خطأ في الاتصال" };
   }
+
+  return { success: false, error: "فشل في إرسال الرسالة بعد عدة محاولات" };
 }
 
 /**
