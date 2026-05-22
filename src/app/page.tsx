@@ -96,8 +96,10 @@ export default function HomePage() {
         initializedRef.current = true;
         setMaxPrice(maxPriceValue);
 
+        // Only restore filters if navigating back from a property detail page
+        const hasScrollPosition = sessionStorage.getItem("homeScrollY");
         const saved = sessionStorage.getItem("homeFilters");
-        if (saved) {
+        if (saved && hasScrollPosition) {
             const f = JSON.parse(saved);
             setSearchQuery(f.searchQuery || "");
             setSelectedCity(f.selectedCity || "");
@@ -106,6 +108,7 @@ export default function HomePage() {
             setSelectedFacilities(f.selectedFacilities || []);
             if (f.maxPrice) setMaxPrice(f.maxPrice);
         }
+        sessionStorage.removeItem("homeFilters");
     }, []);
 
     const filteredProperties = useMemo(() => {

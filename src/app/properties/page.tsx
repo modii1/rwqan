@@ -109,8 +109,10 @@ export default function AllPropertiesPage() {
         initializedRef.current = true;
         setMaxPrice(maxPriceValue);
 
+        // Only restore filters if navigating back from a property detail page
+        const hasScrollPosition = sessionStorage.getItem("propsScrollY");
         const saved = sessionStorage.getItem("propsPageFilters");
-        if (saved) {
+        if (saved && hasScrollPosition) {
             const f = JSON.parse(saved);
             // Only restore from sessionStorage if there are NO URL params
             // (URL params take priority - e.g. coming from home page city click)
@@ -128,6 +130,7 @@ export default function AllPropertiesPage() {
             // Always restore visibleCount (min 24 to prevent empty page)
             if (f.visibleCount && f.visibleCount >= 24) setVisibleCount(f.visibleCount);
         }
+        sessionStorage.removeItem("propsPageFilters");
     }, []);
 
     const toggleFacility = (f: string) => {
