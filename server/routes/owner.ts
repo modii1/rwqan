@@ -4,7 +4,7 @@ import { propertyService, subscriptionService, paymentService, addOnService, dis
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
 import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
-import { checkPropertyDataComplete, detectSensitiveChanges, smartVerification } from "../utils/verification";
+import { checkPropertyDataComplete } from "../utils/verification";
 import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
 import { storage } from "../storage";
@@ -147,30 +147,6 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     const changesSummary = changes.length > 0 ? changes.slice(0, 3).join(' | ') : 'تحديث عام';
     updates.lastChanges = changesSummary;
 
-
-    // 🔍 فحص التعديل الحساس
-    const sensitiveChanges = detectSensitiveChanges(currentProperty, updates);
-    const previousStatus = currentProperty.verificationStatus;
-    let needsManualVerification = false;
-
-    // عند تحديث العقار، يتم فحصه ذكياً
-    if (sensitiveChanges.length > 0 && previousStatus === 'approved') {
-      const updatedProperty = { ...currentProperty, ...updates };
-
-      const verificationResult = await smartVerification({
-        property: updatedProperty,
-        isSensitiveUpdate: true,
-        previousVerificationStatus: previousStatus
-      });
-
-      if (verificationResult.canAutoActivate) {
-        updates.verificationStatus = 'approved';
-      } else {
-        updates.verificationStatus = 'pending';
-        needsManualVerification = true;
-      }
-    }
-
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
 
     // إرسال إشعار واتساب
@@ -182,10 +158,7 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
-    res.json({
-      ...updated,
-      needsManualVerification
-    });
+    res.json(updated);
   } catch (err: any) {
     console.error("Update property error:", err?.message);
     res.status(500).json({ error: err?.message || "فشل في تحديث البيانات" });
