@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, MapPin, Compass, Home, Phone } from "lucide-react";
+import { ArrowRight, MapPin, Compass, Home, Phone, Moon } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
@@ -234,6 +234,21 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
         staleTime: 1000 * 60 * 10, // 10 دقائق
         refetchOnWindowFocus: false,
     });
+
+    // جلب بيانات المناسبة النشطة (عروض العيد)
+    const { data: activeOccasion } = useQuery<{
+        occasion: { id: string; name: string; slug: string; type: string; days: { key: string; label: string }[]; theme: string };
+        properties: { id: string; occasionId: string; propertyNumber: string; availability: Record<string, boolean>; prices: Record<string, string> }[];
+    } | null>({
+        queryKey: ["/api/occasions/active"],
+        staleTime: 1000 * 60 * 5,
+        refetchOnWindowFocus: false,
+    });
+
+    // Get this property's occasion data
+    const propertyOccasionData = activeOccasion?.properties.find(
+        p => p.propertyNumber === propertyId
+    );
 
     // NOTE: Schema and Metadata handling removed from here as it should be handled by the Server Page or Layout
 
@@ -815,6 +830,51 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
                                 )}
                             </div>
                         </Card>
+
+                        {/* عروض المناسبات - توفر الأيام */}
+                        {activeOccasion && propertyOccasionData && (
+                            <Card className="p-6 border-[#2d6b45]/30 bg-gradient-to-br from-[#f0fdf4] to-[#fefce8]">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Moon className="w-5 h-5 text-[#d4af37]" />
+                                    <h3 className="text-lg font-bold text-[#1a472a]">
+                                        {activeOccasion.occasion.name}
+                                    </h3>
+                                </div>
+                                <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                                    {activeOccasion.occasion.days?.map(day => (
+                                        <div key={day.key} className="text-center">
+                                            <div
+                                                className={`w-10 h-10 mx-auto rounded-full flex items-center justify-center mb-1 ${
+                                                    propertyOccasionData.availability[day.key]
+                                                        ? "bg-green-500 shadow-sm shadow-green-200"
+                                                        : "bg-gray-200 border border-gray-300"
+                                                }`}
+                                            >
+                                                {propertyOccasionData.availability[day.key] && (
+                                                    <span className="text-white text-xs">✓</span>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-[#6b6b6b] leading-tight">{day.label}</p>
+                                            {propertyOccasionData.prices[day.key] && propertyOccasionData.availability[day.key] && (
+                                                <div className="mt-0.5">
+                                                    <PriceDisplay amount={propertyOccasionData.prices[day.key]} size="sm" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-3 mt-3 text-[10px] text-[#6b6b6b]">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                                        <span>متوفر</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-gray-200 border border-gray-300" />
+                                        <span>غير متوفر</span>
+                                    </div>
+                                </div>
+                            </Card>
+                        )}
 
                         {/* التواصل */}
                         <Card className="p-6">

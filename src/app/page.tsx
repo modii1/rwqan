@@ -13,7 +13,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Search, MapPin, SlidersHorizontal, ChevronUp, ChevronRight, ChevronLeft, Star, X } from "lucide-react";
+import { Search, MapPin, SlidersHorizontal, ChevronUp, ChevronRight, ChevronLeft, Star, X, Moon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
@@ -75,6 +75,17 @@ export default function HomePage() {
     const { data: allProperties = [], isLoading } = useQuery<Property[]>({
         queryKey: ["/api/properties"],
     });
+
+    // Fetch active occasion (Eid offers)
+    const { data: activeOccasion } = useQuery<{
+        occasion: { id: string; name: string; slug: string; type: string; days: { key: string; label: string }[]; theme: string; isActive: boolean };
+        properties: { id: string; occasionId: string; propertyNumber: string; availability: Record<string, boolean>; prices: Record<string, string> }[];
+    } | null>({
+        queryKey: ["/api/occasions/active"],
+    });
+
+    const [selectedDay, setSelectedDay] = useState<string>("");
+    const occasionScrollRef = useRef<HTMLDivElement>(null);
 
     const maxPriceValue = useMemo(() => {
         const prices = allProperties.flatMap(p => [
@@ -450,8 +461,172 @@ export default function HomePage() {
                 </section>
             )}
 
-            {/* Featured Properties - Horizontal Scroll */}
-            {featuredProperties.length > 0 && (
+            {/* � عروض المناسبات - Active Occasion Section */}
+            {activeOccasion && activeOccasion.properties.length > 0 && (() => {
+                const theme = activeOccasion.occasion.theme || 'default';
+                const themeStyles = {
+                    eid: { bg: 'from-[#1a472a] via-[#0d3320] to-[#1a472a]', border: 'border-[#2d6b45]', accent: '#d4af37', accentBg: 'bg-[#d4af37]', accentText: 'text-[#d4af37]', pillActive: 'bg-[#d4af37] text-[#1a472a]', pillInactive: 'bg-[#2d6b45]/50 text-[#8fbc8f] hover:bg-[#2d6b45]', subtitle: 'text-[#8fbc8f]', icon: '☪', badge: 'bg-[#1a472a]/90 text-[#d4af37]' },
+                    national: { bg: 'from-[#1b4332] via-[#0a2f1f] to-[#1b4332]', border: 'border-[#2d6b45]', accent: '#10b981', accentBg: 'bg-[#10b981]', accentText: 'text-[#10b981]', pillActive: 'bg-[#10b981] text-white', pillInactive: 'bg-[#2d6b45]/50 text-[#8fbc8f] hover:bg-[#2d6b45]', subtitle: 'text-[#8fbc8f]', icon: '🇸🇦', badge: 'bg-[#1b4332]/90 text-[#10b981]' },
+                    ramadan: { bg: 'from-[#1a1a3e] via-[#0d0d2b] to-[#1a1a3e]', border: 'border-[#3b3b6b]', accent: '#f5c542', accentBg: 'bg-[#f5c542]', accentText: 'text-[#f5c542]', pillActive: 'bg-[#f5c542] text-[#1a1a3e]', pillInactive: 'bg-[#3b3b6b]/50 text-[#a0a0d0] hover:bg-[#3b3b6b]', subtitle: 'text-[#a0a0d0]', icon: '🌙', badge: 'bg-[#1a1a3e]/90 text-[#f5c542]' },
+                    default: { bg: 'from-[#1e293b] via-[#0f172a] to-[#1e293b]', border: 'border-[#334155]', accent: '#f59e0b', accentBg: 'bg-[#f59e0b]', accentText: 'text-[#f59e0b]', pillActive: 'bg-[#f59e0b] text-[#1e293b]', pillInactive: 'bg-[#334155]/50 text-[#94a3b8] hover:bg-[#334155]', subtitle: 'text-[#94a3b8]', icon: '✨', badge: 'bg-[#1e293b]/90 text-[#f59e0b]' },
+                };
+                const t = themeStyles[theme] || themeStyles.default;
+
+                const filteredProperties = activeOccasion.properties.filter(op => {
+                    if (!selectedDay) return true;
+                    return op.availability[selectedDay] === true;
+                });
+
+                return (
+                <section className="max-w-7xl mx-auto px-4 mb-8">
+                    {/* Occasion Header */}
+                    <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-l ${t.bg} p-6 mb-4 ${t.border} border`}>
+                        <div className="absolute top-2 right-6 opacity-30 text-4xl">{t.icon}</div>
+                        <div className="absolute bottom-2 left-6 opacity-20 text-3xl">✦</div>
+
+                        <div className="relative flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-12 h-12 rounded-full flex items-center justify-center`} style={{ background: `${t.accent}20`, border: `1px solid ${t.accent}60` }}>
+                                    <Moon className="w-6 h-6" style={{ color: t.accent }} />
+                                </div>
+                                <div>
+                                    <h2 className={`text-xl md:text-2xl font-bold ${t.accentText}`}>
+                                        {activeOccasion.occasion.name}
+                                    </h2>
+                                    <p className={`${t.subtitle} text-xs md:text-sm`}>
+                                        {activeOccasion.occasion.description || 'شاليهات متوفرة'}
+                                    </p>
+                                </div>
+                            </div>
+                            <Link href={`/properties?occasion=${activeOccasion.occasion.slug}`} className={`flex items-center gap-1 text-sm ${t.accentText} font-medium hover:underline`}>
+                                عرض الكل
+                                <ChevronLeft className="w-4 h-4" />
+                            </Link>
+                        </div>
+
+                        {/* Day Filter Pills */}
+                        <div className="flex gap-2 mt-4 overflow-x-auto pb-1">
+                            <button
+                                onClick={() => setSelectedDay("")}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                                    selectedDay === "" ? t.pillActive : t.pillInactive
+                                }`}
+                            >
+                                كل الأيام
+                            </button>
+                            {activeOccasion.occasion.days?.map(day => (
+                                <button
+                                    key={day.key}
+                                    onClick={() => setSelectedDay(day.key)}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                                        selectedDay === day.key ? t.pillActive : t.pillInactive
+                                    }`}
+                                >
+                                    {day.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Occasion Properties - Horizontal Scroll */}
+                    <div className="relative">
+                        <div
+                            ref={occasionScrollRef}
+                            className="flex gap-4 overflow-x-hidden pb-2"
+                        >
+                            {filteredProperties.map((op, idx) => {
+                                const property = allProperties.find(p => p.propertyNumber === op.propertyNumber);
+                                if (!property) return null;
+
+                                return (
+                                    <div
+                                        key={`${op.propertyNumber}-${idx}`}
+                                        onClick={() => goToProperty(op.propertyNumber)}
+                                        className="flex-shrink-0 w-[260px] md:w-[300px] cursor-pointer bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all overflow-hidden"
+                                    >
+                                        {/* Image */}
+                                        <div className="relative h-40 overflow-hidden">
+                                            <img
+                                                src={getPropertyImage(op.propertyNumber, 0)}
+                                                alt={property.name}
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&h=300&fit=crop";
+                                                }}
+                                            />
+                                            <div className="absolute top-2 right-2">
+                                                <span className={`${t.badge} text-[10px] px-2 py-1 rounded-full font-medium flex items-center gap-1`}>
+                                                    <Moon className="w-3 h-3" />
+                                                    {activeOccasion.occasion.name}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        {/* Content */}
+                                        <div className="p-3">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h3 className="font-bold text-sm text-[#1a1a1a] truncate">{property.name}</h3>
+                                                <span className="text-xs text-[#6b6b6b]">{property.city}</span>
+                                            </div>
+                                            {/* Availability Dots */}
+                                            <div className="flex items-center gap-1.5 mb-2">
+                                                {activeOccasion.occasion.days?.map(day => (
+                                                    <div key={day.key} className="flex flex-col items-center gap-0.5">
+                                                        <div
+                                                            className={`w-4 h-4 rounded-full ${
+                                                                op.availability[day.key]
+                                                                    ? "bg-green-500"
+                                                                    : "bg-gray-200 border border-gray-300"
+                                                            }`}
+                                                        />
+                                                        <span className="text-[8px] text-[#9ca3af] leading-none">
+                                                            {(activeOccasion.occasion.days?.indexOf(day) ?? 0) + 1}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* Price */}
+                                            {op.prices && Object.values(op.prices).some(p => p) && (
+                                                <div className="flex items-center gap-1">
+                                                    <PriceDisplay amount={Object.values(op.prices).find(p => p) || ""} size="sm" />
+                                                    <span className="text-[10px] text-gray-500">/ الليلة</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <button
+                            onClick={() => scrollContainer(occasionScrollRef, "left")}
+                            className="absolute left-2 top-1/3 -translate-y-1/2 w-9 h-9 bg-white rounded-full shadow-md flex items-center justify-center hover:bg-gray-50 transition-colors z-10"
+                        >
+                            <ChevronLeft className="w-5 h-5 text-gray-600" />
+                        </button>
+                        <button
+                            onClick={() => scrollContainer(occasionScrollRef, "right")}
+                            className="absolute right-2 top-1/3 -translate-y-1/2 w-9 h-9 bg-white rounded-full shadow-md flex items-center justify-center hover:bg-gray-50 transition-colors z-10"
+                        >
+                            <ChevronLeft className="w-5 h-5 text-gray-600 rotate-180" />
+                        </button>
+                    </div>
+
+                    {/* Legend */}
+                    <div className="flex items-center justify-center gap-4 mt-3 text-xs text-[#6b6b6b]">
+                        <div className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full bg-green-500" />
+                            <span>متوفر</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full bg-gray-200 border border-gray-300" />
+                            <span>غير متوفر</span>
+                        </div>
+                    </div>
+                </section>
+                );
+            })()}
+
+            {/* Featured Properties - Horizontal Scroll (fallback when no active occasion) */}
+            {featuredProperties.length > 0 && !(activeOccasion && activeOccasion.properties.length > 0) && (
                 <section className="max-w-7xl mx-auto px-4 mb-8">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-xl font-bold text-[#1a1a1a]">العروض المميزة</h2>

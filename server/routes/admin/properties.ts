@@ -315,6 +315,25 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       }
     }
 
+    // Use payment date as subscription start date (completedAt or createdAt)
+    let paymentStartDate: string | undefined;
+    let paymentEndDate: string | undefined;
+    if (validPayment) {
+      if (validPayment.pendingStartDate && validPayment.pendingEndDate) {
+        paymentStartDate = validPayment.pendingStartDate;
+        paymentEndDate = validPayment.pendingEndDate;
+      } else {
+        const baseDate = validPayment.completedAt || validPayment.createdAt;
+        if (baseDate) {
+          paymentStartDate = baseDate;
+          const end = new Date(baseDate);
+          end.setDate(end.getDate() + 30);
+          paymentEndDate = end.toISOString();
+        }
+      }
+      console.log(`[APPROVE] Using payment date for subscription: startDate=${paymentStartDate}, endDate=${paymentEndDate}`);
+    }
+
     if (currentSubscription && currentSubscription.status === "غير نشط") {
       console.log(`[APPROVE] Found placeholder subscription, activating for: ${propertyNumber}`);
       // Update the placeholder subscription to active with correct package
@@ -322,6 +341,8 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
         status: "نشط",
         subscriptionType,
         packageId,
+        startDate: paymentStartDate,
+        endDate: paymentEndDate,
         linkedProperty: linkedProperty || "",
         propertyCount,
         linkedProperties,
@@ -333,6 +354,8 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
         status: "نشط",
         subscriptionType,
         packageId,
+        startDate: paymentStartDate,
+        endDate: paymentEndDate,
         linkedProperty: linkedProperty || "",
         propertyCount,
         linkedProperties,

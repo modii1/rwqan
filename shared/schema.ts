@@ -732,3 +732,49 @@ export const propertySeoSchema = z.object({
 export type PropertySeo = z.infer<typeof propertySeoSchema>;
 export const insertPropertySeoSchema = propertySeoSchema.omit({ updatedAt: true });
 export type InsertPropertySeo = z.infer<typeof insertPropertySeoSchema>;
+
+// =========================
+// Occasion Schema (المناسبات - عروض العيد وغيرها)
+// =========================
+export const occasionSchema = z.object({
+  id: z.string(),
+  name: z.string(), // اسم المناسبة مثل "عيد الأضحى 1447"
+  slug: z.string(), // معرف فريد مثل "eid-adha-1447"
+  type: z.enum(['eid', 'national_day', 'ramadan', 'custom']), // نوع المناسبة
+  startDate: z.string(), // تاريخ بداية المناسبة ISO
+  endDate: z.string(), // تاريخ نهاية المناسبة ISO
+  days: z.array(z.object({
+    key: z.string(), // مفتاح اليوم مثل "day1", "day2"
+    label: z.string(), // عنوان اليوم مثل "أول العيد", "ثاني العيد"
+    date: z.string().optional(), // التاريخ الفعلي لليوم (اختياري)
+  })),
+  isActive: z.boolean().default(false), // هل المناسبة نشطة (تظهر في الموقع)
+  theme: z.enum(['eid', 'national', 'ramadan', 'default']).default('default'), // ثيم التصميم
+  description: z.string().optional(), // وصف المناسبة
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type Occasion = z.infer<typeof occasionSchema>;
+export const insertOccasionSchema = occasionSchema.omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertOccasion = z.infer<typeof insertOccasionSchema>;
+
+// =========================
+// Occasion Property Schema (عقارات المناسبات)
+// =========================
+export const occasionPropertySchema = z.object({
+  id: z.string(),
+  occasionId: z.string(), // معرف المناسبة
+  propertyNumber: z.string(), // رقم العقار
+  availability: z.record(z.boolean()), // { "day1": true, "day2": false, ... }
+  prices: z.record(z.string()), // { "day1": "500", "day2": "600", ... }
+  addedBy: z.enum(['admin', 'owner']).default('admin'), // من أضاف العقار
+  approvedByAdmin: z.boolean().default(true), // موافقة الأدمن
+  notes: z.string().optional(), // ملاحظات
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export type OccasionProperty = z.infer<typeof occasionPropertySchema>;
+export const insertOccasionPropertySchema = occasionPropertySchema.omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertOccasionProperty = z.infer<typeof insertOccasionPropertySchema>;

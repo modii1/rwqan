@@ -2,7 +2,7 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
-import { propertyService, subscriptionService, discountService, notificationService, contentService } from "../services";
+import { propertyService, subscriptionService, discountService, notificationService, contentService, occasionService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
@@ -341,6 +341,38 @@ router.get("/api/packages", async (req, res) => {
   } catch (err: any) {
     console.error("Get packages error:", err?.message);
     res.status(500).json({ error: "Failed to load packages" });
+  }
+});
+
+// ======================
+// 🎉 المناسبات النشطة (عروض العيد)
+// ======================
+router.get("/api/occasions/active", async (_req, res) => {
+  try {
+    const result = await occasionService.getActiveOccasionWithProperties();
+    if (!result) {
+      return res.json(null);
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error("Get active occasion error:", err?.message);
+    res.status(500).json({ error: "Failed to load occasion" });
+  }
+});
+
+// جلب مناسبة بالـ slug
+router.get("/api/occasions/:slug", async (req, res) => {
+  try {
+    const occasion = await occasionService.getOccasionBySlug(req.params.slug);
+    if (!occasion || !occasion.isActive) {
+      return res.status(404).json({ error: "المناسبة غير موجودة" });
+    }
+    const properties = await occasionService.getOccasionProperties(occasion.id);
+    const approved = properties.filter(p => p.approvedByAdmin);
+    res.json({ occasion, properties: approved });
+  } catch (err: any) {
+    console.error("Get occasion by slug error:", err?.message);
+    res.status(500).json({ error: "Failed to load occasion" });
   }
 });
 

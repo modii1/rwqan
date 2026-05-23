@@ -23,6 +23,7 @@ import {
     ChevronUp,
     SlidersHorizontal,
     Home,
+    Moon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -57,6 +58,8 @@ export default function AllPropertiesPage() {
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [visibleCount, setVisibleCount] = useState(24);
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const [occasionFilter, setOccasionFilter] = useState(searchParams.get("occasion") || "");
+    const [selectedDay, setSelectedDay] = useState(searchParams.get("day") || "");
 
     useEffect(() => {
         const onScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -66,6 +69,14 @@ export default function AllPropertiesPage() {
 
     const { data: allProperties = [] } = useQuery<Property[]>({
         queryKey: ["/api/properties"],
+    });
+
+    // Fetch active occasion for filtering
+    const { data: activeOccasion } = useQuery<{
+        occasion: { id: string; name: string; slug: string; type: string; days: { key: string; label: string }[]; theme: string };
+        properties: { id: string; occasionId: string; propertyNumber: string; availability: Record<string, boolean>; prices: Record<string, string> }[];
+    } | null>({
+        queryKey: ["/api/occasions/active"],
     });
 
     const buildQueryString = () => {
@@ -146,6 +157,8 @@ export default function AllPropertiesPage() {
         setSelectedType("");
         setSelectedFacilities([]);
         setMaxPrice(maxPriceValue);
+        setOccasionFilter("");
+        setSelectedDay("");
         sessionStorage.removeItem("propsPageFilters");
     };
 
@@ -224,12 +237,27 @@ export default function AllPropertiesPage() {
     const getImgIdx = (pn: string) => currentImageIndex.get(pn) || 0;
 
     const sortedProperties = useMemo(() => {
-        return [...properties].sort((a, b) => {
+        let result = [...properties];
+
+        // Filter by occasion if active
+        if (occasionFilter && activeOccasion) {
+            const occasionPropertyNumbers = new Set(
+                activeOccasion.properties
+                    .filter(op => {
+                        if (!selectedDay) return true;
+                        return op.availability[selectedDay] === true;
+                    })
+                    .map(op => op.propertyNumber)
+            );
+            result = result.filter(p => occasionPropertyNumbers.has(p.propertyNumber));
+        }
+
+        return result.sort((a, b) => {
             const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
             const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
             return bIsPremium - aIsPremium;
         });
-    }, [properties]);
+    }, [properties, occasionFilter, activeOccasion, selectedDay]);
 
     const visibleProperties = sortedProperties.slice(0, visibleCount);
 
@@ -288,6 +316,49 @@ export default function AllPropertiesPage() {
                             </button>
                         )}
                     </div>
+
+                    {/* Occasion Day Filter */}
+                    {activeOccasion && activeOccasion.properties.length > 0 && (
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide mt-2 pt-2 border-t border-gray-100">
+                            <div className="flex items-center gap-1 pl-2">
+                                <Moon className="w-3.5 h-3.5 text-[#b88d2b]" />
+                                <span className="text-xs font-medium text-[#1a1a1a] whitespace-nowrap">{activeOccasion.occasion.name}:</span>
+                            </div>
+                            <button
+                                onClick={() => { setOccasionFilter(""); setSelectedDay(""); }}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                    !occasionFilter
+                                        ? "bg-[#1a472a] text-[#d4af37]"
+                                        : "bg-[#f0fdf4] text-[#2d6b45] hover:bg-[#dcfce7]"
+                                }`}
+                            >
+                                الكل
+                            </button>
+                            <button
+                                onClick={() => setOccasionFilter(occasionFilter ? "" : activeOccasion.occasion.slug)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                    occasionFilter
+                                        ? "bg-[#1a472a] text-[#d4af37]"
+                                        : "bg-[#f0fdf4] text-[#2d6b45] hover:bg-[#dcfce7]"
+                                }`}
+                            >
+                                عروض المناسبة فقط
+                            </button>
+                            {occasionFilter && activeOccasion.occasion.days?.map(day => (
+                                <button
+                                    key={day.key}
+                                    onClick={() => setSelectedDay(selectedDay === day.key ? "" : day.key)}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                        selectedDay === day.key
+                                            ? "bg-[#d4af37] text-[#1a472a]"
+                                            : "bg-[#fefce8] text-[#92400e] hover:bg-[#fef3c7]"
+                                    }`}
+                                >
+                                    {day.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </section>
 
@@ -347,7 +418,9 @@ export default function AllPropertiesPage() {
                 ) : (
                     <>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                            {visibleProperties.map(p => (
+                            {visibleProperties.map(p => {
+                                const occasionProp = activeOccasion?.properties.find(op => op.propertyNumber === p.propertyNumber);
+                                return (
                                 <PropertyCard
                                     key={p.propertyNumber}
                                     property={p}
@@ -360,8 +433,10 @@ export default function AllPropertiesPage() {
                                         sessionStorage.setItem("propsScrollY", String(window.scrollY));
                                         router.push(`/property/${p.propertyNumber}`);
                                     }}
+                                    occasionData={occasionProp ? { name: activeOccasion!.occasion.name, price: Object.values(occasionProp.prices).find(p => p) || "" } : undefined}
                                 />
-                            ))}
+                                );
+                            })}
                         </div>
 
                         {visibleCount < properties.length && (
@@ -432,9 +507,10 @@ interface PropertyCardProps {
     onNext: () => void;
     onPrev: () => void;
     onClick: () => void;
+    occasionData?: { name: string; price: string };
 }
 
-function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, onPrev, onClick }: PropertyCardProps) {
+function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, onPrev, onClick, occasionData }: PropertyCardProps) {
     const imageUrl = getPropertyImage(property.propertyNumber, imgIdx);
     const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
 
@@ -505,6 +581,15 @@ function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, on
                         <span className="-ml-3 bg-[#f5f0e4] text-[#b88d2b] text-xs font-bold pl-3 pr-4 py-1.5 rounded-tr-full">مميز</span>
                     )}
                 </div>
+
+                {/* Occasion Price */}
+                {occasionData && occasionData.price && (
+                    <div className="mt-2 flex items-center gap-1 bg-[#f0fdf4] border border-green-200 rounded-lg px-2 py-1">
+                        <Moon className="w-3 h-3 text-green-600" />
+                        <span className="text-[10px] text-green-700 font-medium">{occasionData.name}:</span>
+                        <PriceDisplay amount={occasionData.price} size="sm" />
+                    </div>
+                )}
             </div>
         </Card>
     );

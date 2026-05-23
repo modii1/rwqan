@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireOwner } from "./middleware";
-import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService } from "../services";
+import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
 import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
@@ -2024,6 +2024,70 @@ router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, 
   } catch (err: any) {
     console.error("Get subscription error:", err);
     res.status(500).json({ error: err?.message || "فشل في جلب بيانات الاشتراك" });
+  }
+});
+
+// ======================================================
+// 🎉 GET /api/owner/occasions - Get owner's property occasions
+// ======================================================
+router.get("/api/owner/occasions", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "Property not found in session" });
+    }
+
+    // Get active occasions
+    const activeOccasions = await occasionService.getActiveOccasions();
+    
+    // Get property's occasion data
+    const propertyOccasions = await occasionService.getPropertyOccasions(propertyNumber);
+    
+    // Combine data
+    const result = activeOccasions.map(occasion => {
+      const propData = propertyOccasions.find(po => po.occasionId === occasion.id);
+      return {
+        occasion,
+        propertyData: propData || null,
+        isEnrolled: !!propData,
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error("Get owner occasions error:", err);
+    res.status(500).json({ error: "فشل في جلب المناسبات" });
+  }
+});
+
+// ======================================================
+// 🎉 PUT /api/owner/occasions/:occasionId - Update availability & prices
+// ======================================================
+router.put("/api/owner/occasions/:occasionId", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "Property not found in session" });
+    }
+
+    const { occasionId } = req.params;
+    const { availability, prices } = req.body;
+
+    // Verify the property is enrolled in this occasion
+    const existing = await occasionService.getOccasionProperty(occasionId, propertyNumber);
+    if (!existing) {
+      return res.status(404).json({ error: "العقار غير مسجل في هذه المناسبة" });
+    }
+
+    const updates: any = {};
+    if (availability !== undefined) updates.availability = availability;
+    if (prices !== undefined) updates.prices = prices;
+
+    const result = await occasionService.updateOccasionProperty(existing.id, updates);
+    res.json(result);
+  } catch (err: any) {
+    console.error("Update owner occasion error:", err);
+    res.status(500).json({ error: "فشل في تحديث بيانات المناسبة" });
   }
 });
 

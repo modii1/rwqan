@@ -35,6 +35,7 @@ import adminImagesRoutes from "./admin/images";
 import adminPackagesRoutes from "./admin/packages";
 import adminTestingRoutes from "./admin/testing";
 import adminLinkedPropertiesRoutes from "./admin/linked-properties";
+import adminOccasionsRoutes from "./admin/occasions";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for cookies
@@ -100,6 +101,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(adminImagesRoutes);
   app.use(adminPackagesRoutes);
   app.use(adminTestingRoutes);
+  app.use(adminOccasionsRoutes);
 
   return createServer(app);
 }

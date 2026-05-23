@@ -16,6 +16,7 @@ export { analyticsService } from "./AnalyticsService";
 export { addOnService } from "./AddOnService";
 export { financeService } from "./FinanceService";
 export { contentService } from "./ContentService";
+export { occasionService } from "./OccasionService";
 
 // Type re-exports for convenience
 export type { DiscountApplicationResult } from "./DiscountService";

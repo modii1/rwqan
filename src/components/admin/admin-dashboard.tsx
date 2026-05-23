@@ -63,6 +63,7 @@ import BankAccountsSection from "./sections/bank-accounts";
 import FeatureFlagsSection from "./sections/feature-flags";
 import AdminBlogSection from "./sections/blog";
 import AdminLinkedPropertiesSection from "./sections/linked-properties";
+import AdminOccasionsSection from "./sections/occasions";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -87,7 +88,8 @@ export type AdminSection =
   | "fee-configs"
   | "bank-accounts"
   | "feature-flags"
-  | "blog";
+  | "blog"
+  | "occasions";
 
 
 export default function AdminDashboard({ initialSection }: { initialSection?: AdminSection } = {}) {
@@ -324,6 +326,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         />
 
         <SidebarButton
+          icon={<Calendar className="w-4 h-4 text-amber-600" />}
+          label="المناسبات"
+          active={activeSection === "occasions"}
+          onClick={() => setActiveSection("occasions")}
+        />
+
+        <SidebarButton
           icon={<FileText className="w-4 h-4 text-teal-600" />}
           label="المدونة"
           active={activeSection === "blog"}
@@ -376,6 +385,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "bank-accounts" && <BankAccountsSection />}
         {activeSection === "feature-flags" && <FeatureFlagsSection />}
         {activeSection === "blog" && <AdminBlogSection />}
+        {activeSection === "occasions" && <AdminOccasionsSection />}
       </main>
     </div>
   );

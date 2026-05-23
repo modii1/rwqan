@@ -26,6 +26,7 @@ const validSections: AdminSection[] = [
   "bank-accounts",
   "feature-flags",
   "blog",
+  "occasions",
 ];
 
 export default async function AdminSectionPage({

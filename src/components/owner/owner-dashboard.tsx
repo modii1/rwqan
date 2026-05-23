@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
+import OwnerOccasionsSection from "./owner-occasions-section";
 import { Property, AddOnPackage, PropertyAddOn } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1580,6 +1581,9 @@ export default function OwnerDashboard() {
             </div>
           )}
         </Card>
+
+        {/* ===== عروض المناسبات (العيد) ===== */}
+        <OwnerOccasionsSection />
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
