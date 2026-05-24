@@ -102,11 +102,76 @@ export class PaymentService {
         // For multi-property packages OR new subscriptions → always start from today
         // This prevents double-counting remaining days on main property
 
-        const additionalProps = (payment as any).additionalProperties || [];
+        const additionalProps: string[] = (payment as any).additionalProperties || [];
         const secondProp = (payment as any).secondPropertyNumber;
         if (secondProp && !additionalProps.includes(secondProp)) {
           additionalProps.push(secondProp);
         }
+
+        // If no additional properties were specified in the payment,
+        // look up existing linked properties from the current subscription
+        // and the multi-property subscriptions collection.
+        // This ensures that when extending/upgrading, ALL linked properties
+        // get the same subscription dates (whether main or added property initiated it).
+        if (additionalProps.length === 0) {
+          // Check current subscription's linkedProperties array
+          if (currentSub?.linkedProperties && currentSub.linkedProperties.length > 0) {
+            for (const lp of currentSub.linkedProperties) {
+              if (lp !== payment.propertyNumber && !additionalProps.includes(lp)) {
+                additionalProps.push(lp);
+              }
+            }
+          }
+
+          // Check if this property is a linked (secondary) property pointing to a main
+          if (currentSub?.linkedProperty) {
+            const mainPropNumber = currentSub.linkedProperty;
+            if (!additionalProps.includes(mainPropNumber)) {
+              additionalProps.push(mainPropNumber);
+            }
+            // Also get other linked properties from the main property's subscription
+            const mainSub = await firebaseService.getSubscriptionByPropertyNumber(mainPropNumber);
+            if (mainSub?.linkedProperties) {
+              for (const lp of mainSub.linkedProperties) {
+                if (lp !== payment.propertyNumber && !additionalProps.includes(lp)) {
+                  additionalProps.push(lp);
+                }
+              }
+            }
+          }
+
+          // Also check multi_property_subscriptions collection
+          if (additionalProps.length === 0) {
+            const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+            const activeGroup = multiSubs.find(
+              ms => ms.status === "نشط" && (
+                ms.propertyNumber1 === payment.propertyNumber ||
+                ms.propertyNumber2 === payment.propertyNumber ||
+                (ms.additionalProperties && ms.additionalProperties.includes(payment.propertyNumber))
+              )
+            );
+            if (activeGroup) {
+              if (activeGroup.propertyNumber1 !== payment.propertyNumber && !additionalProps.includes(activeGroup.propertyNumber1)) {
+                additionalProps.push(activeGroup.propertyNumber1);
+              }
+              if (activeGroup.propertyNumber2 && activeGroup.propertyNumber2 !== payment.propertyNumber && !additionalProps.includes(activeGroup.propertyNumber2)) {
+                additionalProps.push(activeGroup.propertyNumber2);
+              }
+              if (activeGroup.additionalProperties) {
+                for (const ap of activeGroup.additionalProperties) {
+                  if (ap !== payment.propertyNumber && !additionalProps.includes(ap)) {
+                    additionalProps.push(ap);
+                  }
+                }
+              }
+            }
+          }
+
+          if (additionalProps.length > 0) {
+            console.log(`[approveBankTransfer] 🔗 Found ${additionalProps.length} linked properties to sync: ${additionalProps.join(', ')}`);
+          }
+        }
+
         const totalProperties = 1 + additionalProps.length;
         
         const pricePerProperty = (payment.finalAmount || pkg.price) / totalProperties;
@@ -165,18 +230,37 @@ export class PaymentService {
           }
         }
 
-        // Create multi-property subscription record
+        // Create or update multi-property subscription record
         if (additionalProps.length > 0) {
-          await firebaseService.createMultiPropertySubscription({
-            packageId: pkg.id,
-            propertyNumber1: payment.propertyNumber,
-            propertyNumber2: additionalProps[0],
-            additionalProperties: additionalProps,
-            startDate: subscriptionData.startDate,
-            endDate: subscriptionData.endDate,
-            status: "نشط",
-            paymentId: payment.id,
-          });
+          // Check if there's an existing multi-property subscription to update
+          const existingMultiSubs = await firebaseService.getMultiPropertySubscriptions();
+          const existingGroup = existingMultiSubs.find(
+            ms => ms.propertyNumber1 === payment.propertyNumber ||
+              ms.propertyNumber2 === payment.propertyNumber ||
+              (ms.additionalProperties && ms.additionalProperties.includes(payment.propertyNumber))
+          );
+          
+          if (existingGroup) {
+            // Update existing group with new dates
+            await firebaseService.updateMultiPropertySubscription(existingGroup.id, {
+              startDate: subscriptionData.startDate,
+              endDate: subscriptionData.endDate,
+              status: "نشط",
+              paymentId: payment.id,
+            });
+            console.log(`[approveBankTransfer] 🔄 Updated existing multi-property group: ${existingGroup.id}`);
+          } else {
+            await firebaseService.createMultiPropertySubscription({
+              packageId: pkg.id,
+              propertyNumber1: payment.propertyNumber,
+              propertyNumber2: additionalProps[0],
+              additionalProperties: additionalProps,
+              startDate: subscriptionData.startDate,
+              endDate: subscriptionData.endDate,
+              status: "نشط",
+              paymentId: payment.id,
+            });
+          }
         }
       }
     }

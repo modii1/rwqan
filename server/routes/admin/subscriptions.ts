@@ -205,12 +205,88 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
     // تحديث حالة التحقق
     await propertyService.approve(propertyNumber);
 
-    console.log(`✅ [Manual Activation] تم تفعيل الاشتراك يدوياً للعقار: ${propertyNumber}`);
+    // تفعيل العقارات المرتبطة بنفس التواريخ
+    const linkedPropsToSync: string[] = [];
+    
+    // Check if linkedProperty was explicitly provided
+    if (linkedProperty) {
+      linkedPropsToSync.push(linkedProperty);
+    }
+    
+    // Also look up existing linked properties from current subscription and multi-property groups
+    const currentSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    if (currentSub?.linkedProperties && currentSub.linkedProperties.length > 0) {
+      for (const lp of currentSub.linkedProperties) {
+        if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
+          linkedPropsToSync.push(lp);
+        }
+      }
+    }
+    if (currentSub?.linkedProperty && !linkedPropsToSync.includes(currentSub.linkedProperty)) {
+      linkedPropsToSync.push(currentSub.linkedProperty);
+      // Get other linked properties from the main property
+      const mainSub = await firebaseService.getSubscriptionByPropertyNumber(currentSub.linkedProperty);
+      if (mainSub?.linkedProperties) {
+        for (const lp of mainSub.linkedProperties) {
+          if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
+            linkedPropsToSync.push(lp);
+          }
+        }
+      }
+    }
+
+    // Check multi_property_subscriptions collection
+    if (linkedPropsToSync.length === 0) {
+      const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+      const activeGroup = multiSubs.find(
+        ms => ms.status === "نشط" && (
+          ms.propertyNumber1 === propertyNumber ||
+          ms.propertyNumber2 === propertyNumber ||
+          (ms.additionalProperties && ms.additionalProperties.includes(propertyNumber))
+        )
+      );
+      if (activeGroup) {
+        if (activeGroup.propertyNumber1 !== propertyNumber && !linkedPropsToSync.includes(activeGroup.propertyNumber1)) {
+          linkedPropsToSync.push(activeGroup.propertyNumber1);
+        }
+        if (activeGroup.propertyNumber2 && activeGroup.propertyNumber2 !== propertyNumber && !linkedPropsToSync.includes(activeGroup.propertyNumber2)) {
+          linkedPropsToSync.push(activeGroup.propertyNumber2);
+        }
+        if (activeGroup.additionalProperties) {
+          for (const ap of activeGroup.additionalProperties) {
+            if (ap !== propertyNumber && !linkedPropsToSync.includes(ap)) {
+              linkedPropsToSync.push(ap);
+            }
+          }
+        }
+      }
+    }
+
+    // Apply same subscription to all linked properties
+    for (const linkedPropNum of linkedPropsToSync) {
+      const linkedProp = await propertyService.getByNumber(linkedPropNum);
+      if (linkedProp) {
+        await firebaseService.addSubscriptionToSheet(
+          linkedPropNum,
+          {
+            ...subscriptionData,
+            linkedProperty: propertyNumber,
+          },
+          linkedProp,
+          ""
+        );
+        await propertyService.approve(linkedPropNum);
+        console.log(`✅ [Manual Activation] تم تفعيل العقار المرتبط: ${linkedPropNum}`);
+      }
+    }
+
+    console.log(`✅ [Manual Activation] تم تفعيل الاشتراك يدوياً للعقار: ${propertyNumber}${linkedPropsToSync.length > 0 ? ` + ${linkedPropsToSync.length} عقارات مرتبطة` : ''}`);
 
     res.json({
       success: true,
-      message: `تم تفعيل الاشتراك للعقار ${propertyNumber} بنجاح`,
-      subscription: subscriptionData
+      message: `تم تفعيل الاشتراك للعقار ${propertyNumber} بنجاح${linkedPropsToSync.length > 0 ? ` و ${linkedPropsToSync.length} عقارات مرتبطة` : ''}`,
+      subscription: subscriptionData,
+      linkedPropertiesActivated: linkedPropsToSync,
     });
   } catch (error) {
     console.error("Error manual activating subscription:", error);

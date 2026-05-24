@@ -433,7 +433,14 @@ export default function AllPropertiesPage() {
                                         sessionStorage.setItem("propsScrollY", String(window.scrollY));
                                         router.push(`/property/${p.propertyNumber}`);
                                     }}
-                                    occasionData={occasionProp ? { name: activeOccasion!.occasion.name, price: Object.values(occasionProp.prices).find(p => p) || "" } : undefined}
+                                    occasionData={occasionProp ? {
+                                        name: selectedDay
+                                            ? (activeOccasion!.occasion.days?.find(d => d.key === selectedDay)?.label || activeOccasion!.occasion.name)
+                                            : activeOccasion!.occasion.name,
+                                        price: selectedDay
+                                            ? (occasionProp.prices[selectedDay] || "")
+                                            : (Object.values(occasionProp.prices).find(p => p) || "")
+                                    } : undefined}
                                 />
                                 );
                             })}

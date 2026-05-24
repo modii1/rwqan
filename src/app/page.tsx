@@ -587,8 +587,12 @@ export default function HomePage() {
                                             {/* Price */}
                                             {op.prices && Object.values(op.prices).some(p => p) && (
                                                 <div className="flex items-center gap-1">
-                                                    <PriceDisplay amount={Object.values(op.prices).find(p => p) || ""} size="sm" />
-                                                    <span className="text-[10px] text-gray-500">/ الليلة</span>
+                                                    <PriceDisplay amount={selectedDay ? (op.prices[selectedDay] || Object.values(op.prices).find(p => p) || "") : (Object.values(op.prices).find(p => p) || "")} size="sm" />
+                                                    <span className="text-[10px] text-gray-500">
+                                                        {selectedDay
+                                                            ? `/ ${activeOccasion.occasion.days?.find(d => d.key === selectedDay)?.label || "الليلة"}`
+                                                            : "/ الليلة"}
+                                                    </span>
                                                 </div>
                                             )}
                                         </div>

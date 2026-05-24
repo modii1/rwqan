@@ -807,40 +807,88 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
           );
 
           // Handle second property for multi-property packages
+          // Also sync linked properties from existing subscription/group
+          const linkedPropsToSync: string[] = [];
           if (secondPropertyNumber) {
-            const secondProperty = await firebaseService.getPropertyByNumber(secondPropertyNumber);
-            if (secondProperty) {
-              const pricePerProperty = finalAmount / 2;
-              const secondSubscriptionData = {
+            linkedPropsToSync.push(secondPropertyNumber);
+          }
+          
+          // If no explicit second property, look up existing linked properties
+          if (linkedPropsToSync.length === 0 && currentSubscription) {
+            if (currentSubscription.linkedProperties && currentSubscription.linkedProperties.length > 0) {
+              for (const lp of currentSubscription.linkedProperties) {
+                if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
+                  linkedPropsToSync.push(lp);
+                }
+              }
+            }
+            if ((currentSubscription as any).linkedProperty) {
+              const mainPropNum = (currentSubscription as any).linkedProperty;
+              if (!linkedPropsToSync.includes(mainPropNum)) {
+                linkedPropsToSync.push(mainPropNum);
+              }
+              const mainSub = await subscriptionService.getByProperty(mainPropNum);
+              if (mainSub?.linkedProperties) {
+                for (const lp of mainSub.linkedProperties) {
+                  if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
+                    linkedPropsToSync.push(lp);
+                  }
+                }
+              }
+            }
+          }
+
+          // Sync subscription to all linked properties
+          for (const linkedPropNum of linkedPropsToSync) {
+            const linkedProp = await firebaseService.getPropertyByNumber(linkedPropNum);
+            if (linkedProp) {
+              const linkedSubData = {
                 ...subscriptionData,
-                price: pricePerProperty,
+                price: finalAmount / (1 + linkedPropsToSync.length),
                 linkedProperty: propertyNumber,
               };
               await firebaseService.addSubscriptionToSheet(
-                secondPropertyNumber,
-                secondSubscriptionData,
-                secondProperty,
+                linkedPropNum,
+                linkedSubData,
+                linkedProp,
                 receiptUrl
               );
-
-              await firebaseService.createMultiPropertySubscription({
-                packageId: pkg.id,
-                propertyNumber1: propertyNumber,
-                propertyNumber2: secondPropertyNumber,
-                startDate: formatDateRiyadh(startDate),
-                endDate: formatDateRiyadh(endDate),
-                status: "نشط",
-                paymentId: payment.id,
+              await firebaseService.updateProperty(linkedPropNum, {
+                subscriptionType: isPremiumPackage ? "مميز" : "عادي"
               });
 
-              // Auto-verify second property
-              const secondPropertyComplete = await checkPropertyDataComplete(secondProperty);
-              if (secondPropertyComplete.isComplete) {
-                await firebaseService.updateVerificationStatus(secondPropertyNumber, "approved");
+              const linkedPropComplete = await checkPropertyDataComplete(linkedProp);
+              if (linkedPropComplete.isComplete) {
+                await firebaseService.updateVerificationStatus(linkedPropNum, "approved");
               } else {
-                await firebaseService.updateVerificationStatus(secondPropertyNumber, "pending");
+                await firebaseService.updateVerificationStatus(linkedPropNum, "pending");
               }
             }
+          }
+
+          if (linkedPropsToSync.length > 0 && !secondPropertyNumber) {
+            // Create/update multi-property subscription record
+            await firebaseService.createMultiPropertySubscription({
+              packageId: pkg.id,
+              propertyNumber1: propertyNumber,
+              propertyNumber2: linkedPropsToSync[0],
+              additionalProperties: linkedPropsToSync,
+              startDate: formatDateRiyadh(startDate),
+              endDate: formatDateRiyadh(endDate),
+              status: "نشط",
+              paymentId: payment.id,
+            });
+          } else if (secondPropertyNumber) {
+            // Original secondPropertyNumber flow - create multi-property record
+            await firebaseService.createMultiPropertySubscription({
+              packageId: pkg.id,
+              propertyNumber1: propertyNumber,
+              propertyNumber2: secondPropertyNumber,
+              startDate: formatDateRiyadh(startDate),
+              endDate: formatDateRiyadh(endDate),
+              status: "نشط",
+              paymentId: payment.id,
+            });
           }
 
           // Auto-verify first property
