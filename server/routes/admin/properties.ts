@@ -237,135 +237,38 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       action: "approved",
     });
 
-    // Check for paid/completed payments for this property
-    console.log(`[APPROVE] Checking for payments for property: ${propertyNumber}`);
+    // الموافقة لا تؤثر على الاشتراك - الاشتراك يبدأ من يوم الدفع
+    // الموافقة تؤثر فقط على ظهور العقار في صفحات العقارات
+    console.log(`[APPROVE] Property approved. Subscription already active from payment day for: ${propertyNumber}`);
+
+    // Auto-approve pending payment if exists
     let subscriptionType = "عادي";
-    let packageId = "pkg-free";
-    let validPayment: any = null;
-    let linkedProperty: string | undefined;
-    let propertyCount: number | undefined;
-    let linkedProperties: string[] | undefined;
-
     try {
-      console.log(`[APPROVE] Calling paymentService.getByProperty(${propertyNumber})...`);
       const payments = await paymentService.getByProperty(propertyNumber);
-      console.log(`[APPROVE] getByProperty returned ${payments.length} payments`);
-      
-      // Log all payments found
-      payments.forEach((p, idx) => {
-        console.log(`[APPROVE] Payment[${idx}]: id=${p.id}, propertyNumber="${p.propertyNumber}", status="${p.status}", packageId="${p.packageId}", amount=${p.finalAmount}`);
-      });
-      
-      // First look for completed payments
-      validPayment = payments.find(p => 
-        p.status === "مكتمل" || 
-        (p.status as string) === "Approved" || 
-        p.status === "completed"
+      const pendingPayment = payments.find(p => 
+        p.status === "قيد التحقق" || 
+        p.status === "قيد المراجعة" || 
+        p.status === "معلق" ||
+        p.status === "pending" ||
+        p.status === "نجح - قيد التحقق"
       );
-
-      // If no completed payment, look for pending payments
-      if (!validPayment) {
-        validPayment = payments.find(p => 
-          p.status === "قيد التحقق" || 
-          p.status === "قيد المراجعة" || 
-          p.status === "معلق" ||
-          p.status === "pending"
-        );
-        
-        if (validPayment) {
-          console.log(`[APPROVE] Found pending payment: ${validPayment.id}, auto-approving it...`);
-          // Auto-update payment status to مكتمل
-          await paymentService.setStatus(validPayment.id, "مكتمل");
-          console.log(`[APPROVE] ✅ Payment ${validPayment.id} auto-approved`);
-        }
-      }
       
-      if (validPayment && validPayment.packageId) {
-        packageId = validPayment.packageId;
-        console.log(`[APPROVE] ✅ Using payment: ${validPayment.id}, packageId: ${packageId}, amount: ${validPayment.finalAmount}`);
-        
-        // Get package to determine if premium
-        const pkg = await storage.getPackageById(packageId);
-        if (pkg) {
-          if (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0) {
-            subscriptionType = "مميز";
-            console.log(`[APPROVE] Package is premium: ${pkg.name}, type: ${pkg.type}, price: ${pkg.price}`);
-          }
-        }
-      } else {
-        console.log(`[APPROVE] No valid payment found, using default pkg-free`);
+      if (pendingPayment) {
+        console.log(`[APPROVE] Found pending payment: ${pendingPayment.id}, auto-approving it...`);
+        await paymentService.setStatus(pendingPayment.id, "مكتمل");
+        console.log(`[APPROVE] ✅ Payment ${pendingPayment.id} auto-approved`);
+      }
+
+      // Determine subscription type from existing subscription or payment
+      const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+      if (currentSubscription && currentSubscription.subscriptionType) {
+        subscriptionType = currentSubscription.subscriptionType;
       }
     } catch (payErr) {
       console.error(`[APPROVE] Error checking payments:`, payErr);
     }
 
-    // Check if there's a placeholder subscription and activate it
-    console.log(`[APPROVE] Checking for existing subscription for: ${propertyNumber}`);
-    const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
-    console.log(`[APPROVE] Current subscription:`, currentSubscription);
-
-    // Get linked property info from payment
-    if (validPayment) {
-      linkedProperty = (validPayment as any).secondPropertyNumber || (validPayment as any).linkedProperty;
-      linkedProperties = (validPayment as any).linkedProperties || (validPayment as any).additionalProperties;
-      if (linkedProperties && Array.isArray(linkedProperties)) {
-        propertyCount = linkedProperties.length + 1;
-      } else if (linkedProperty) {
-        propertyCount = 2;
-      }
-    }
-
-    // Use payment date as subscription start date (completedAt or createdAt)
-    let paymentStartDate: string | undefined;
-    let paymentEndDate: string | undefined;
-    if (validPayment) {
-      if (validPayment.pendingStartDate && validPayment.pendingEndDate) {
-        paymentStartDate = validPayment.pendingStartDate;
-        paymentEndDate = validPayment.pendingEndDate;
-      } else {
-        const baseDate = validPayment.completedAt || validPayment.createdAt;
-        if (baseDate) {
-          paymentStartDate = baseDate;
-          const end = new Date(baseDate);
-          end.setDate(end.getDate() + 30);
-          paymentEndDate = end.toISOString();
-        }
-      }
-      console.log(`[APPROVE] Using payment date for subscription: startDate=${paymentStartDate}, endDate=${paymentEndDate}`);
-    }
-
-    if (currentSubscription && currentSubscription.status === "غير نشط") {
-      console.log(`[APPROVE] Found placeholder subscription, activating for: ${propertyNumber}`);
-      // Update the placeholder subscription to active with correct package
-      await firebaseService.activateSubscription(propertyNumber, {
-        status: "نشط",
-        subscriptionType,
-        packageId,
-        startDate: paymentStartDate,
-        endDate: paymentEndDate,
-        linkedProperty: linkedProperty || "",
-        propertyCount,
-        linkedProperties,
-      });
-      console.log(`[APPROVE] ✅ Subscription activated for property: ${propertyNumber}, package: ${packageId}, type: ${subscriptionType}, linkedProperty: ${linkedProperty}`);
-    } else if (!currentSubscription) {
-      console.log(`[APPROVE] No subscription found for: ${propertyNumber}, creating new one`);
-      await firebaseService.activateSubscription(propertyNumber, {
-        status: "نشط",
-        subscriptionType,
-        packageId,
-        startDate: paymentStartDate,
-        endDate: paymentEndDate,
-        linkedProperty: linkedProperty || "",
-        propertyCount,
-        linkedProperties,
-      });
-      console.log(`[APPROVE] ✅ New subscription created and activated for: ${propertyNumber}, package: ${packageId}, type: ${subscriptionType}, linkedProperty: ${linkedProperty}`);
-    } else {
-      console.log(`[APPROVE] Subscription already active or not a placeholder: ${propertyNumber}, status: ${currentSubscription?.status}`);
-    }
-
-    // Also update the property's subscriptionType to match the package
+    // Update the property's subscriptionType to match what's in the subscription
     await firebaseService.updateProperty(propertyNumber, { 
       subscriptionType: subscriptionType as "عادي" | "مميز" | "موثوق" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
     });
@@ -414,10 +317,9 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
       admin: "Admin",
     });
 
-    // Cancel/deactivate the subscription when property is rejected
-    console.log(`[REJECT] Cancelling subscription for: ${propertyNumber}`);
-    await firebaseService.cancelSubscription(propertyNumber, reason || "رفض العقار من الإدارة");
-    console.log(`[REJECT] Subscription cancelled for: ${propertyNumber}`);
+    // الرفض لا يؤثر على الاشتراك - الاشتراك يبقى ساري من يوم الدفع
+    // الرفض يؤثر فقط على ظهور العقار في صفحات العقارات
+    console.log(`[REJECT] Property rejected but subscription remains active for: ${propertyNumber}`);
 
     // إرسال إشعار واتساب عند رفض العقار
     const property = await propertyService.getByNumber(propertyNumber);

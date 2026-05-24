@@ -496,10 +496,9 @@ const router = Router();
       console.log(`💰 Payment Updated: ${payment.id} - Status: ${newPaymentStatus}`);
 
       // ===============================
-      // 4) تفعيل الاشتراك (فقط للترقية والتمديد - التسجيل الجديد يحتاج مراجعة)
+      // 4) تفعيل الاشتراك (لجميع الحالات - الاشتراك يبدأ من يوم الدفع بغض النظر عن موافقة الإدارة)
       // ===============================
       if (
-        !isNewRegistration &&
         payment.pendingStartDate &&
         payment.pendingEndDate
       ) {
@@ -595,8 +594,45 @@ const router = Router();
             }
           }
         }
-      } else if (isNewRegistration) {
-        console.log("📋 New registration - awaiting admin verification:", payment.propertyNumber);
+      } else if (isNewRegistration && !payment.pendingStartDate) {
+        // تسجيل جديد بدون تواريخ مسبقة - تفعيل الاشتراك من اليوم
+        console.log("📋 New registration - activating subscription from today:", payment.propertyNumber);
+        const property = await propertyService.getByNumber(payment.propertyNumber);
+        if (property) {
+          const today = new Date();
+          const endDate = new Date(today);
+          endDate.setDate(endDate.getDate() + 30);
+
+          const pkg = await subscriptionService.getPackageById(payment.packageId);
+          const isPremiumPayment = (pkg && (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0)) || payment.finalAmount > 0;
+
+          const subscriptionData = {
+            packageId: payment.packageId,
+            price: payment.finalAmount,
+            subscriptionType: isPremiumPayment ? "مميز" : "عادي",
+            packageType: isPremiumPayment ? "مميز" : "عادي",
+            startDate: today.toISOString(),
+            endDate: endDate.toISOString(),
+            paymentId: payment.id,
+          };
+
+          await firebaseService.addSubscriptionToSheet(
+            payment.propertyNumber,
+            subscriptionData,
+            property
+          );
+          console.log(`🎉 New registration subscription activated: ${payment.propertyNumber}`);
+
+          // Smart check for visibility only
+          const propertyDataCheck = await checkPropertyDataComplete(property);
+          if (propertyDataCheck.isComplete) {
+            await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+            console.log(`✅ [Smart Verify] العقار ${payment.propertyNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
+          } else {
+            await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+            console.log(`⏳ [Smart Verify] العقار ${payment.propertyNumber} - بيانات ناقصة: ${propertyDataCheck.missingFields.join(', ')}`);
+          }
+        }
       }
 
       // إرسال إشعار WhatsApp عند نجاح الدفع
