@@ -43,7 +43,9 @@ const FACILITIES = [
 
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
-function getPropertyImage(propertyNumber: string, index: number = 0) {
+function getPropertyImage(propertyNumber: string, index: number = 0, imagesMap?: Map<string, string[]>) {
+    const cached = imagesMap?.get(propertyNumber);
+    if (cached && cached.length > index) return cached[index];
     return `${R2_BASE}/${propertyNumber}/${index + 1}.jpg`;
 }
 
@@ -65,6 +67,8 @@ export default function HomePage() {
     const [isImageTransitioning, setIsImageTransitioning] = useState<Set<string>>(new Set());
     const [showFilters, setShowFilters] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const [propertyImages, setPropertyImages] = useState<Map<string, string[]>>(new Map());
+    const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         const onScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -255,7 +259,8 @@ export default function HomePage() {
         setTimeout(() => {
             setCurrentImageIndex(prev => {
                 const newMap = new Map(prev);
-                newMap.set(pn, ((newMap.get(pn) || 0) + 1) % 3);
+                const count = propertyImages.get(pn)?.length || 3;
+                newMap.set(pn, ((newMap.get(pn) || 0) + 1) % count);
                 return newMap;
             });
             setTimeout(() => {
@@ -274,7 +279,8 @@ export default function HomePage() {
             setCurrentImageIndex(prev => {
                 const newMap = new Map(prev);
                 const cur = newMap.get(pn) || 0;
-                newMap.set(pn, cur === 0 ? 2 : cur - 1);
+                const count = propertyImages.get(pn)?.length || 3;
+                newMap.set(pn, cur === 0 ? count - 1 : cur - 1);
                 return newMap;
             });
             setTimeout(() => {
@@ -288,6 +294,48 @@ export default function HomePage() {
     };
 
     const getImgIdx = (pn: string) => currentImageIndex.get(pn) || 0;
+
+    const fetchPropertyImages = async (propertyNumber: string) => {
+        if (propertyImages.has(propertyNumber) || loadingImages.has(propertyNumber)) return;
+        setLoadingImages(prev => new Set(prev).add(propertyNumber));
+        try {
+            const response = await fetch(`/api/public/property-images/${propertyNumber}`);
+            const data = await response.json();
+            setPropertyImages(prev => {
+                const newMap = new Map(prev);
+                newMap.set(propertyNumber, data.images || []);
+                return newMap;
+            });
+        } catch {
+            setPropertyImages(prev => {
+                const newMap = new Map(prev);
+                newMap.set(propertyNumber, [
+                    `${R2_BASE}/${propertyNumber}/1.jpg`,
+                    `${R2_BASE}/${propertyNumber}/2.jpg`,
+                    `${R2_BASE}/${propertyNumber}/3.jpg`,
+                ]);
+                return newMap;
+            });
+        } finally {
+            setLoadingImages(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(propertyNumber);
+                return newSet;
+            });
+        }
+    };
+
+    useEffect(() => {
+        if (isLoading || allProperties.length === 0) return;
+        const occasionPropNumbers = activeOccasion
+            ? activeOccasion.properties.map(op => op.propertyNumber)
+            : [];
+        const allNeeded = new Set([
+            ...latestProperties.map(p => p.propertyNumber),
+            ...occasionPropNumbers,
+        ]);
+        allNeeded.forEach(pn => fetchPropertyImages(pn));
+    }, [latestProperties.length, activeOccasion, isLoading]);
 
     const hasActiveFilters = !!(searchQuery || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
 
@@ -550,11 +598,11 @@ export default function HomePage() {
                                         >
                                             <div className="relative h-40 overflow-hidden">
                                                 <img
-                                                    src={getPropertyImage(op.propertyNumber, 0)}
+                                                    src={getPropertyImage(op.propertyNumber, 0, propertyImages)}
                                                     alt={property.name}
                                                     className="w-full h-full object-cover"
                                                     onError={(e) => {
-                                                        (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&h=300&fit=crop";
+                                                        (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo,sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
                                                     }}
                                                 />
                                                 <div className="absolute top-2 right-2">
@@ -675,6 +723,7 @@ export default function HomePage() {
                                         imgIdx={getImgIdx(p.propertyNumber)}
                                         isTransitioning={isImageTransitioning.has(p.propertyNumber)}
                                         onClick={() => goToProperty(p.propertyNumber)}
+                                        propertyImages={propertyImages}
                                     />
                                 </div>
                             ))}
@@ -723,6 +772,7 @@ export default function HomePage() {
                                 imgIdx={getImgIdx(p.propertyNumber)}
                                 isTransitioning={isImageTransitioning.has(p.propertyNumber)}
                                 onClick={() => goToProperty(p.propertyNumber)}
+                                propertyImages={propertyImages}
                             />
                         ))}
                     </div>
@@ -787,10 +837,11 @@ interface PropertyCardProps {
     imgIdx: number;
     isTransitioning: boolean;
     onClick: () => void;
+    propertyImages: Map<string, string[]>;
 }
 
-function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitioning, onClick }: PropertyCardProps) {
-    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx);
+function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, isTransitioning, onClick, propertyImages }: PropertyCardProps) {
+    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx, propertyImages);
     const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
 
     return (

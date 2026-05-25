@@ -37,7 +37,9 @@ const FACILITIES = ["مسبح", "بدون مسبح", "مبيت", "ألعاب م�
 
 const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
 
-function getPropertyImage(propertyNumber: string, index: number = 0) {
+function getPropertyImage(propertyNumber: string, index: number = 0, imagesMap?: Map<string, string[]>) {
+    const cached = imagesMap?.get(propertyNumber);
+    if (cached && cached.length > index) return cached[index];
     return `${R2_BASE}/${propertyNumber}/${index + 1}.jpg`;
 }
 
@@ -60,6 +62,8 @@ export default function AllPropertiesPage() {
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [occasionFilter, setOccasionFilter] = useState(searchParams.get("occasion") || "");
     const [selectedDay, setSelectedDay] = useState(searchParams.get("day") || "");
+    const [propertyImages, setPropertyImages] = useState<Map<string, string[]>>(new Map());
+    const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         const onScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -202,7 +206,8 @@ export default function AllPropertiesPage() {
         setTimeout(() => {
             setCurrentImageIndex(prev => {
                 const m = new Map(prev);
-                m.set(pn, ((m.get(pn) || 0) + 1) % 3);
+                const count = propertyImages.get(pn)?.length || 3;
+                m.set(pn, ((m.get(pn) || 0) + 1) % count);
                 return m;
             });
             setTimeout(() => {
@@ -221,7 +226,8 @@ export default function AllPropertiesPage() {
             setCurrentImageIndex(prev => {
                 const m = new Map(prev);
                 const cur = m.get(pn) || 0;
-                m.set(pn, cur === 0 ? 2 : cur - 1);
+                const count = propertyImages.get(pn)?.length || 3;
+                m.set(pn, cur === 0 ? count - 1 : cur - 1);
                 return m;
             });
             setTimeout(() => {
@@ -235,6 +241,36 @@ export default function AllPropertiesPage() {
     };
 
     const getImgIdx = (pn: string) => currentImageIndex.get(pn) || 0;
+
+    const fetchPropertyImages = async (propertyNumber: string) => {
+        if (propertyImages.has(propertyNumber) || loadingImages.has(propertyNumber)) return;
+        setLoadingImages(prev => new Set(prev).add(propertyNumber));
+        try {
+            const response = await fetch(`/api/public/property-images/${propertyNumber}`);
+            const data = await response.json();
+            setPropertyImages(prev => {
+                const newMap = new Map(prev);
+                newMap.set(propertyNumber, data.images || []);
+                return newMap;
+            });
+        } catch {
+            setPropertyImages(prev => {
+                const newMap = new Map(prev);
+                newMap.set(propertyNumber, [
+                    `${R2_BASE}/${propertyNumber}/1.jpg`,
+                    `${R2_BASE}/${propertyNumber}/2.jpg`,
+                    `${R2_BASE}/${propertyNumber}/3.jpg`,
+                ]);
+                return newMap;
+            });
+        } finally {
+            setLoadingImages(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(propertyNumber);
+                return newSet;
+            });
+        }
+    };
 
     const sortedProperties = useMemo(() => {
         let result = [...properties];
@@ -260,6 +296,11 @@ export default function AllPropertiesPage() {
     }, [properties, occasionFilter, activeOccasion, selectedDay]);
 
     const visibleProperties = sortedProperties.slice(0, visibleCount);
+
+    useEffect(() => {
+        if (isLoading || properties.length === 0) return;
+        visibleProperties.forEach(p => fetchPropertyImages(p.propertyNumber));
+    }, [visibleProperties.length, isLoading]);
 
     return (
         <>
@@ -441,6 +482,7 @@ export default function AllPropertiesPage() {
                                             ? (occasionProp.prices[selectedDay] || "")
                                             : (Object.values(occasionProp.prices).find(p => p) || "")
                                     } : undefined}
+                                    propertyImages={propertyImages}
                                 />
                                 );
                             })}
@@ -515,10 +557,11 @@ interface PropertyCardProps {
     onPrev: () => void;
     onClick: () => void;
     occasionData?: { name: string; price: string };
+    propertyImages: Map<string, string[]>;
 }
 
-function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, onPrev, onClick, occasionData }: PropertyCardProps) {
-    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx);
+function PropertyCard({ property, isPremium, imgIdx, isTransitioning, onNext, onPrev, onClick, occasionData, propertyImages }: PropertyCardProps) {
+    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx, propertyImages);
     const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
 
     return (
