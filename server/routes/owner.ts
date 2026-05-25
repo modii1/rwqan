@@ -1747,14 +1747,49 @@ router.get("/api/owner/additional-property-requests", requireOwner, async (req, 
       p.pendingApprovalFrom === propertyNumber
     );
 
-    // Get properties that are already linked/approved (has linkedProperty pointing to this property)
+    // Collect all linked property numbers from multiple sources
+    const approvedPropertyNumbersSet = new Set<string>();
+
+    // Source 1: Subscriptions where linkedProperty points to this property
     const subscriptions = await firebaseService.getSubscriptions();
-    
     const linkedSubscriptions = subscriptions.filter((s: any) => 
       s.linkedProperty === propertyNumber && s.status === 'نشط'
     );
-    
-    const approvedPropertyNumbers = linkedSubscriptions.map((s: any) => s.propertyNumber);
+    for (const s of linkedSubscriptions) {
+      approvedPropertyNumbersSet.add(s.propertyNumber);
+    }
+
+    // Source 2: Current subscription's linkedProperties array
+    const currentSubscription = subscriptions.find((s: any) => s.propertyNumber === propertyNumber);
+    if (currentSubscription?.linkedProperties && Array.isArray(currentSubscription.linkedProperties)) {
+      for (const lp of currentSubscription.linkedProperties) {
+        if (lp !== propertyNumber) {
+          approvedPropertyNumbersSet.add(lp);
+        }
+      }
+    }
+
+    // Source 3: multi_property_subscriptions collection
+    const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+    for (const multiSub of multiSubs) {
+      if (multiSub.status !== 'نشط') continue;
+      const allProps = new Set<string>();
+      allProps.add(multiSub.propertyNumber1);
+      if (multiSub.propertyNumber2) allProps.add(multiSub.propertyNumber2);
+      if (multiSub.additionalProperties) {
+        for (const ap of multiSub.additionalProperties) allProps.add(ap);
+      }
+      // If this property is in the group, add all OTHER properties as linked
+      if (allProps.has(propertyNumber)) {
+        for (const pn of allProps) {
+          if (pn !== propertyNumber) {
+            approvedPropertyNumbersSet.add(pn);
+          }
+        }
+      }
+    }
+
+    const approvedPropertyNumbers = Array.from(approvedPropertyNumbersSet);
     
     // Filter pendingRequests to exclude properties that already have subscriptions (are already linked/approved)
     const filteredPendingRequests = pendingRequests.filter((p: any) => 

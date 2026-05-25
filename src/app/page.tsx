@@ -25,15 +25,15 @@ const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 
 const CITY_IMAGES: Record<string, string> = {
-    "بريدة": "https://images.unsplash.com/photo-1580418827495-f2df08f05e3c?w=600&h=450&fit=crop",
-    "عنيزة": "https://images.unsplash.com/photo-1548013146-72479768bada?w=600&h=450&fit=crop",
-    "الرس": "https://images.unsplash.com/photo-1597659840241-37e2b9c2f55f?w=600&h=450&fit=crop",
-    "البكيرية": "https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=600&h=450&fit=crop",
-    "المذنب": "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=600&h=450&fit=crop",
-    "البدائع": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=450&fit=crop",
-    "الاسياح": "https://images.unsplash.com/photo-1473773508845-188df29842c1?w=600&h=450&fit=crop",
-    "رياض الخبراء": "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=450&fit=crop",
-    "عيون الجواء": "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=600&h=450&fit=crop"
+    "بريدة": "/images/cities/بريدة.jpeg",
+    "عنيزة": "/images/cities/عنيزة.jpeg",
+    "الرس": "/images/cities/الرس.jpeg",
+    "البكيرية": "/images/cities/البكيرية.jpeg",
+    "المذنب": "/images/cities/المذنب.jpeg",
+    "البدائع": "/images/cities/البدائع.jpeg",
+    "الاسياح": "/images/cities/الاسياح.jpeg",
+    "رياض الخبراء": "/images/cities/رياض_الخبراء.jpeg",
+    "عيون الجواء": "/images/cities/عيون_الجواء.jpeg"
 };
 
 const FACILITIES = [
@@ -433,7 +433,7 @@ export default function HomePage() {
                                             alt={city.name}
                                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                             onError={(e) => {
-                                                (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${city.name}/300/400`;
+                                                (e.target as HTMLImageElement).src = "/images/cities/بريدة.jpeg";
                                             }}
                                         />
                                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />

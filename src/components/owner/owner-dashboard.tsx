@@ -2019,7 +2019,7 @@ export default function OwnerDashboard() {
 
           {/* ===== العقارات المربوطة ===== */}
           {/* Use approvedRequests from additional-property-requests API for full info */}
-          {additionalPropertyRequests?.approvedRequests && additionalPropertyRequests.approvedRequests.length > 0 && !currentSubscription?.linkedProperty && (
+          {additionalPropertyRequests?.approvedRequests && additionalPropertyRequests.approvedRequests.length > 0 && (
             <Card className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <Home className="w-5 h-5 text-blue-600" />
@@ -2051,7 +2051,7 @@ export default function OwnerDashboard() {
           )}
 
           {/* Show message when no linked properties */}
-          {(!additionalPropertyRequests?.approvedRequests || additionalPropertyRequests.approvedRequests.length === 0) && !currentSubscription?.linkedProperty && (
+          {(!additionalPropertyRequests?.approvedRequests || additionalPropertyRequests.approvedRequests.length === 0) && (
             <Card className="p-6">
               <div className="flex items-center gap-3">
                 <Home className="w-5 h-5 text-muted-foreground" />
