@@ -78,7 +78,7 @@ export default function HomePage() {
 
     // Fetch active occasion (Eid offers)
     const { data: activeOccasion } = useQuery<{
-        occasion: { id: string; name: string; slug: string; type: string; days: { key: string; label: string }[]; theme: string; isActive: boolean };
+        occasion: { id: string; name: string; slug: string; type: string; days: { key: string; label: string }[]; theme: string; isActive: boolean; description?: string };
         properties: { id: string; occasionId: string; propertyNumber: string; availability: Record<string, boolean>; prices: Record<string, string> }[];
     } | null>({
         queryKey: ["/api/occasions/active"],
@@ -470,7 +470,7 @@ export default function HomePage() {
                     ramadan: { bg: 'from-[#1a1a3e] via-[#0d0d2b] to-[#1a1a3e]', border: 'border-[#3b3b6b]', accent: '#f5c542', accentBg: 'bg-[#f5c542]', accentText: 'text-[#f5c542]', pillActive: 'bg-[#f5c542] text-[#1a1a3e]', pillInactive: 'bg-[#3b3b6b]/50 text-[#a0a0d0] hover:bg-[#3b3b6b]', subtitle: 'text-[#a0a0d0]', icon: '🌙', badge: 'bg-[#1a1a3e]/90 text-[#f5c542]' },
                     default: { bg: 'from-[#1e293b] via-[#0f172a] to-[#1e293b]', border: 'border-[#334155]', accent: '#f59e0b', accentBg: 'bg-[#f59e0b]', accentText: 'text-[#f59e0b]', pillActive: 'bg-[#f59e0b] text-[#1e293b]', pillInactive: 'bg-[#334155]/50 text-[#94a3b8] hover:bg-[#334155]', subtitle: 'text-[#94a3b8]', icon: '✨', badge: 'bg-[#1e293b]/90 text-[#f59e0b]' },
                 };
-                const t = themeStyles[theme] || themeStyles.default;
+                const t = themeStyles[theme as keyof typeof themeStyles] || themeStyles.default;
 
                 const occasionProperties = activeOccasion.properties.filter(op => {
                     if (!selectedDay) return true;

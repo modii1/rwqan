@@ -528,7 +528,7 @@ function CreateOccasionForm({
           </div>
           <div>
             <label className="text-sm font-medium">النوع</label>
-            <Select value={type} onValueChange={setType}>
+            <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="eid">عيد</SelectItem>
@@ -540,7 +540,7 @@ function CreateOccasionForm({
           </div>
           <div>
             <label className="text-sm font-medium">الثيم</label>
-            <Select value={theme} onValueChange={setTheme}>
+            <Select value={theme} onValueChange={(v) => setTheme(v as typeof theme)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="eid">عيد (ذهبي/أخضر)</SelectItem>
