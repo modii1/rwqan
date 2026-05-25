@@ -49,6 +49,7 @@ dev_error.log
 
 # backup and local
 .backup-history/
+backups/
 _client_backup/
 .local/
 .config/
