@@ -7,7 +7,6 @@ interface PageProps {
     }>;
 }
 
-// جلب بيانات العقار من API الخادم المحلي (أسرع وأكثر موثوقية)
 async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
     try {
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
@@ -36,12 +35,11 @@ async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
     }
 }
 
-// دالة لجلب البيانات من Google Apps Script (للخادم فقط من أجل Metadata) - fallback
 async function getPropertyFromScript(id: string): Promise<PropertyDetails | null> {
     try {
         const res = await fetch(
             "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData",
-            { next: { revalidate: 3600 } } // Cache for 1 hour
+            { next: { revalidate: 3600 } }
         );
 
         if (!res.ok) return null;
@@ -56,7 +54,6 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
         let facilities: string[] = [];
         const rawFacilities = item["المرافق"] || "";
         if (typeof rawFacilities === "string") {
-            // نفس منطق التحليل الموجود في العميل
             const trimmed = rawFacilities.trim();
             if (trimmed.startsWith("[")) {
                 try {
@@ -102,9 +99,23 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
     }
 }
 
+async function getPropertyImages(id: string): Promise<string[]> {
+    try {
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
+            `http://localhost:${process.env.PORT || 5000}`;
+        const res = await fetch(`${baseUrl}/api/public/property-images/${id}`, {
+            next: { revalidate: 300 },
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.images || [];
+    } catch {
+        return [];
+    }
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { id } = await params;
-    // Try our own API first (fast, reliable), then fall back to Google Apps Script
     const property = await getPropertyFromApi(id) ?? await getPropertyFromScript(id);
 
     if (!property) {
@@ -144,5 +155,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function PropertyPage({ params }: PageProps) {
     const { id } = await params;
-    return <PropertyDetailsClient propertyId={id} />;
+
+    const [property, images] = await Promise.all([
+        getPropertyFromApi(id),
+        getPropertyImages(id),
+    ]);
+
+    return <PropertyDetailsClient propertyId={id} initialProperty={property} initialImages={images.length > 0 ? images : undefined} />;
 }

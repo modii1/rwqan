@@ -89,9 +89,11 @@ function detectDeviceType() {
 
 interface PropertyDetailsClientProps {
     propertyId: string;
+    initialProperty?: PropertyDetails | null;
+    initialImages?: string[];
 }
 
-export default function PropertyDetailsClient({ propertyId }: PropertyDetailsClientProps) {
+export default function PropertyDetailsClient({ propertyId, initialProperty, initialImages }: PropertyDetailsClientProps) {
     const router = useRouter();
     const { toast } = useToast();
     const [isSending, setIsSending] = useState(false);
@@ -216,6 +218,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
         staleTime: 1000 * 60 * 5, // 5 دقائق
         retry: 1,
         refetchOnWindowFocus: false,
+        initialData: initialProperty ?? undefined,
     });
 
     // جلب بيانات SEO المخصصة للعقار
@@ -303,6 +306,7 @@ export default function PropertyDetailsClient({ propertyId }: PropertyDetailsCli
         },
         staleTime: 1000 * 60 * 10, // 10 دقائق
         enabled: !!propertyId,
+        initialData: initialImages ?? undefined,
     });
 
     // دمج الصور من R2 + imageUrls من بيانات العقار (بدون تكرار)
