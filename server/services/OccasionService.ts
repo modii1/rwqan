@@ -21,10 +21,13 @@ class OccasionService {
   }
 
   async getActiveOccasions(): Promise<Occasion[]> {
+    const now = toRiyadhISO(getNowInRiyadh());
     const snapshot = await this.db.collection("occasions")
       .where("isActive", "==", true)
       .get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Occasion));
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as Occasion))
+      .filter(o => o.endDate >= now);
   }
 
   async getOccasionById(id: string): Promise<Occasion | null> {

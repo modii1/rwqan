@@ -6,6 +6,7 @@ import { propertyService, subscriptionService, discountService, notificationServ
 import { firebaseService } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
+import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
 
 const router = Router();
 
@@ -364,7 +365,8 @@ router.get("/api/occasions/active", async (_req, res) => {
 router.get("/api/occasions/:slug", async (req, res) => {
   try {
     const occasion = await occasionService.getOccasionBySlug(req.params.slug);
-    if (!occasion || !occasion.isActive) {
+    const now = toRiyadhISO(getNowInRiyadh());
+    if (!occasion || !occasion.isActive || !occasion.endDate || occasion.endDate < now) {
       return res.status(404).json({ error: "المناسبة غير موجودة" });
     }
     const properties = await occasionService.getOccasionProperties(occasion.id);
