@@ -23,7 +23,9 @@ export default async function HomePage() {
         ? await serverFetchImages(neededImageIds)
         : {};
 
-    return <HomeClient initialProperties={allProperties} initialOccasion={occasion} initialImages={initialImages} />;
+    return (
+        <HomeClient initialProperties={allProperties} initialOccasion={occasion} initialImages={initialImages} />
+    );
 }
     const neededImageIds = [...new Set([...premiumPropNumbers, ...occasionPropNumbers])];
     const initialImages = neededImageIds.length > 0
