@@ -15,8 +15,7 @@ import {
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
 
-// رقم افتراضي إضافي يتلقى نسخة من إشعارات المالك
-const BACKUP_OWNER_PHONE = "966550805632";
+
 
 /**
  * التحقق من أن اليوم يقع ضمن أيام الإرسال
@@ -132,16 +131,6 @@ async function updateRemainingDaysInSheet() {
                     propertyName: property.name || "",
                   });
                   console.log(`📱 [Scheduler] تم إرسال إشعار للمالك - انتهاء اشتراك: ${sub.propertyNumber}`);
-                  
-                  // إرسال نسخة للرقم الافتراضي الإضافي
-                  const backupMessage = `🔔 نسخة إشعار مالك - انتهاء اشتراك
-
-العقار: ${property.name || sub.propertyNumber}
-رقم العقار: ${sub.propertyNumber}
-رقم المالك: ${property.whatsappNumber}
-يوم ${daysSinceExpiry} منذ الانتهاء`;
-                  await sendOwnerWhatsApp(BACKUP_OWNER_PHONE, backupMessage);
-                  console.log(`📱 [Scheduler] تم إرسال نسخة للرقم الافتراضي: ${sub.propertyNumber}`);
                 } catch (ownerErr) {
                   console.error(`❌ [Scheduler] فشل إرسال إشعار المالك لـ ${sub.propertyNumber}:`, ownerErr);
                 }
@@ -172,16 +161,6 @@ async function updateRemainingDaysInSheet() {
                 daysLeft: 3,
               });
               console.log(`📱 [Scheduler] تم إرسال تنبيه للمالك - 3 أيام متبقية: ${sub.propertyNumber}`);
-              
-              // إرسال نسخة للرقم الافتراضي الإضافي
-              const backupMessage = `⏰ نسخة إشعار مالك - تنبيه قبل الانتهاء
-
-العقار: ${property.name || sub.propertyNumber}
-رقم العقار: ${sub.propertyNumber}
-رقم المالك: ${property.whatsappNumber}
-الأيام المتبقية: 3 أيام`;
-              await sendOwnerWhatsApp(BACKUP_OWNER_PHONE, backupMessage);
-              console.log(`📱 [Scheduler] تم إرسال نسخة تنبيه للرقم الافتراضي: ${sub.propertyNumber}`);
             } catch (err) {
               console.error(`❌ [Scheduler] فشل إرسال تنبيه المالك لـ ${sub.propertyNumber}:`, err);
             }

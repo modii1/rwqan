@@ -17,7 +17,6 @@ import {
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
 
-const BACKUP_OWNER_PHONE = "966550805632";
 
 // ─── Configuration (mirrors Firebase settings shape) ─────────────────────────
 interface SmartScheduleConfig {
@@ -142,22 +141,13 @@ async function sendStaggeredNotifications(
           ownerPhone: entry.ownerPhone,
         });
 
-        if (entry.ownerPhone) {
-          await notifyOwnerSubscriptionExpired({
-            ownerPhone: entry.ownerPhone,
-            propertyNumber: entry.propertyNumber,
-            propertyName: entry.propertyName,
-          });
-
-          // Backup copy
-          const backupMessage = `🔔 نسخة إشعار مالك - انتهاء اشتراك
-
-العقار: ${entry.propertyName || entry.propertyNumber}
-رقم العقار: ${entry.propertyNumber}
-رقم المالك: ${entry.ownerPhone}
-يوم ${entry.daysSinceExpiry} منذ الانتهاء`;
-          await sendOwnerWhatsApp(BACKUP_OWNER_PHONE, backupMessage);
-        }
+          if (entry.ownerPhone) {
+            await notifyOwnerSubscriptionExpired({
+              ownerPhone: entry.ownerPhone,
+              propertyNumber: entry.propertyNumber,
+              propertyName: entry.propertyName,
+            });
+          }
 
         sentToday++;
         sentAlready.add(entry.propertyNumber);

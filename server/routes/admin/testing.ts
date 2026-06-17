@@ -132,7 +132,7 @@ router.post("/api/admin/test-enjazatik", async (req, res) => {
   try {
     const { phone, message } = req.body;
 
-    const targetPhone = phone || "966550805632";
+    const targetPhone = phone;
     const testMessage = message || "🔔 اختبار من نظام روقـان\n\nهذه رسالة تجريبية للتأكد من عمل نظام الإشعارات.";
 
     const { sendOwnerWhatsApp } = await import("../../integrations/whatsapp");
