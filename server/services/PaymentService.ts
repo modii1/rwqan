@@ -9,6 +9,7 @@ import type { Payment, InsertPayment } from "../../shared/schema";
 import {
   calculateSubscriptionEndDate,
   calculateExtensionEndDate,
+  capAtMaxDays,
   getStartOfDayRiyadh,
   formatDateRiyadh,
 } from "../utils/dateUtils";
@@ -93,7 +94,7 @@ export class PaymentService {
         const pendingEnd = (payment as any).pendingEndDate;
         if (pendingStart && pendingEnd) {
           startDate = new Date(pendingStart);
-          endDate = new Date(pendingEnd);
+          endDate = capAtMaxDays(new Date(pendingEnd));
         } else if ((payment as any).action === 'extend' && currentSub && new Date(currentSub.endDate) > today) {
           // Extend only: append after current subscription ends
           startDate = new Date(currentSub.endDate);

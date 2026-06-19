@@ -148,6 +148,19 @@ export function addDays(date: Date, days: number): Date {
   return result;
 }
 
+const MAX_SUBSCRIPTION_DAYS = 40;
+
+/**
+ * تحديد الحد الأقصى للاشتراك: لا يزيد عن MAX_SUBSCRIPTION_DAYS يوماً من اليوم
+ */
+export function capAtMaxDays(endDate: Date, maxDays: number = MAX_SUBSCRIPTION_DAYS): Date {
+  const today = getStartOfDayRiyadh();
+  const maxEnd = new Date(today);
+  maxEnd.setDate(maxEnd.getDate() + maxDays);
+  maxEnd.setHours(23, 59, 59, 999);
+  return endDate > maxEnd ? maxEnd : endDate;
+}
+
 /**
  * حساب تاريخ انتهاء الاشتراك بشكل موحد
  * القاعدة: الاشتراك يبدأ من بداية اليوم وينتهي في نهاية اليوم الأخير (23:59:59)
@@ -155,7 +168,7 @@ export function addDays(date: Date, days: number): Date {
  * 
  * @param startDate تاريخ البداية (إذا لم يحدد، يبدأ من اليوم)
  * @param durationDays عدد الأيام (مثلاً 30)
- * @returns تاريخ الانتهاء في نهاية اليوم الأخير
+ * @returns تاريخ الانتهاء في نهاية اليوم الأخير (محدد بـ MAX_SUBSCRIPTION_DAYS من اليوم)
  */
 export function calculateSubscriptionEndDate(startDate: Date | null, durationDays: number): Date {
   // بداية اليوم بتوقيت الرياض
@@ -171,13 +184,14 @@ export function calculateSubscriptionEndDate(startDate: Date | null, durationDay
   // نهاية اليوم الأخير
   endDate.setHours(23, 59, 59, 999);
   
-  return endDate;
+  return capAtMaxDays(endDate);
 }
 
 /**
  * حساب تاريخ انتهاء الاشتراك للتمديد
  * القاعدة: إذا كان الاشتراك الحالي نشط، يضاف من تاريخ انتهائه
  * وإلا يبدأ من اليوم
+ * ملاحظة: النتيجة محددة بـ MAX_SUBSCRIPTION_DAYS من اليوم
  */
 export function calculateExtensionEndDate(currentEndDate: Date | null, durationDays: number): Date {
   const today = getStartOfDayRiyadh();
@@ -189,7 +203,7 @@ export function calculateExtensionEndDate(currentEndDate: Date | null, durationD
       const newEnd = new Date(currentEnd);
       newEnd.setDate(newEnd.getDate() + durationDays);
       newEnd.setHours(23, 59, 59, 999);
-      return newEnd;
+      return capAtMaxDays(newEnd);
     }
   }
   

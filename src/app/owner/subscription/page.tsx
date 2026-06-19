@@ -507,6 +507,7 @@ export default function OwnerSubscriptionPage() {
     ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
     : 0;
   
+  const displayDays = Math.min(Math.max(0, remainingDays), 40);
   const isExpired = remainingDays < 0;
   const isNearExpiry = remainingDays >= 0 && remainingDays <= 7;
   const canExtend = subscription?.endDate
@@ -951,7 +952,7 @@ export default function OwnerSubscriptionPage() {
             <div className="col-span-2 md:col-span-1 text-center p-4 rounded-xl bg-muted/40">
               <p className="text-muted-foreground text-xs mb-1">الأيام المتبقية</p>
               <p className={`text-5xl font-black ${isExpired ? "text-red-500" : isNearExpiry ? "text-amber-500" : "text-[#434040]"}`}>
-                {isExpired ? "0" : remainingDays}
+                {isExpired ? "0" : displayDays}
               </p>
               <p className="text-muted-foreground text-sm mt-1">{isExpired ? "منتهي" : "يوم"}</p>
             </div>
