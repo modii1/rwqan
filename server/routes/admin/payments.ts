@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-// قبول التحويل البنكي (للإدارة)
+// قبول التحويل البنكي — تجاوز يدوي للتحقق التلقائي
 router.post("/api/admin/payment/approve", requireAdmin, async (req, res) => {
   try {
     const { paymentId } = req.body;

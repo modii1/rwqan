@@ -230,6 +230,8 @@ export const paymentSchema = z.object({
   // حقول التحقق من التحويل البنكي
   paymentReference: z.string().optional(), // رمز الدفع الفريد (RWQN-XXXXXX)
   selectedBankAccountId: z.string().optional(), // معرف الحساب البنكي المختار
+  // ملاحظات
+  notes: z.string().optional(),
 });
 
 export type Payment = z.infer<typeof paymentSchema>;

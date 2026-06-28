@@ -113,19 +113,6 @@ export interface SmartVerificationContext {
   secondProperty?: any;
 }
 
-async function isFirstPropertyForOwner(whatsappNumber: string): Promise<boolean> {
-  try {
-    const allProperties = await dbProxy.getProperties();
-    const ownerProperties = allProperties.filter((p: any) =>
-      p.whatsappNumber === whatsappNumber &&
-      (p.verificationStatus === 'approved' || p.verificationStatus === 'verified')
-    );
-    return ownerProperties.length === 0;
-  } catch {
-    return true;
-  }
-}
-
 export function detectSensitiveChanges(oldProperty: any, newData: any): string[] {
   const changes: string[] = [];
   for (const field of SENSITIVE_FIELDS) {
@@ -147,8 +134,6 @@ export async function smartVerification(context: SmartVerificationContext): Prom
   const dataCheck = await checkPropertyDataComplete(property);
   const subscriptionType = property.subscriptionType || 'عادي';
   const isPremium = subscriptionType === 'مميز' || subscriptionType === 'موثوق';
-  const isFirst = context.isFirstProperty ??
-    (property.whatsappNumber ? await isFirstPropertyForOwner(property.whatsappNumber) : false);
 
   let aiConfidence = dataCheck.completionScore;
   if (ocrResult) {
@@ -161,13 +146,8 @@ export async function smartVerification(context: SmartVerificationContext): Prom
 
   if (!dataCheck.isComplete) {
     verificationStatus = 'incomplete';
+    paymentStatus = 'مرفوض';
     notes.push(`حقول ناقصة: ${dataCheck.missingFields.join('، ')}`);
-    adminRequired = false;
-    canAutoActivate = false;
-  } else if (isFirst) {
-    verificationStatus = 'pending';
-    notes.push('أول عقار للمستخدم - يتطلب موافقة الأدمن');
-    adminRequired = true;
     canAutoActivate = false;
   } else if (paymentRecord?.paymentMethod === 'bank_transfer' && ocrResult) {
     if (ocrResult.confidence >= 90 && ocrResult.matched) {
@@ -177,10 +157,10 @@ export async function smartVerification(context: SmartVerificationContext): Prom
       notes.push(`تم التحقق تلقائياً - نسبة الثقة: ${ocrResult.confidence}%`);
       canAutoActivate = true;
     } else {
-      verificationStatus = 'pending';
-      paymentStatus = 'قيد التحقق';
-      notes.push(`نسبة الثقة منخفضة: ${ocrResult.confidence}% - يتطلب مراجعة الأدمن`);
-      adminRequired = true;
+      verificationStatus = 'rejected';
+      paymentStatus = 'مرفوض';
+      notes.push(`نسبة الثقة منخفضة: ${ocrResult.confidence}% - تم الرفض`);
+      canAutoActivate = false;
     }
   } else if (paymentRecord?.status === 'completed' || paymentRecord?.status === 'مكتمل') {
     if (dataCheck.isComplete) {
@@ -196,9 +176,9 @@ export async function smartVerification(context: SmartVerificationContext): Prom
       notes.push('تعديل حساس - تم قبوله تلقائياً لأن البيانات مكتملة');
       canAutoActivate = true;
     } else {
-      verificationStatus = 'pending';
-      notes.push('تعديل حساس - يتطلب مراجعة الأدمن');
-      adminRequired = true;
+      verificationStatus = 'rejected';
+      notes.push('تعديل حساس - البيانات غير مكتملة - تم الرفض');
+      canAutoActivate = false;
     }
   } else if (secondProperty) {
     const secondDataCheck = await checkPropertyDataComplete(secondProperty);
@@ -207,18 +187,19 @@ export async function smartVerification(context: SmartVerificationContext): Prom
       notes.push('باقة العقارين - كلا العقارين مكتملين - تفعيل تلقائي');
       canAutoActivate = true;
     } else {
-      verificationStatus = 'pending';
+      verificationStatus = 'incomplete';
       if (!dataCheck.isComplete) notes.push(`العقار الأول: ${dataCheck.missingFields.join('، ')}`);
       if (!secondDataCheck.isComplete) notes.push(`العقار الثاني: ${secondDataCheck.missingFields.join('، ')}`);
-      adminRequired = false;
+      canAutoActivate = false;
     }
   } else if (dataCheck.isComplete && dataCheck.completionScore === 100) {
     verificationStatus = 'verified';
     notes.push('البيانات مكتملة 100% - جاهز للتفعيل');
     canAutoActivate = true;
   } else {
-    verificationStatus = 'pending';
-    notes.push('في انتظار المراجعة');
+    verificationStatus = 'rejected';
+    notes.push('البيانات غير مكتملة - تم الرفض');
+    canAutoActivate = false;
   }
 
   if (dataCheck.warnings.length > 0) {

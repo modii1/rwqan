@@ -5,7 +5,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, CheckCircle2, XCircle, Search, Filter, X } from "lucide-react";
+import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, Search, Filter, X, CheckCircle2, XCircle } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -44,6 +44,7 @@ type Payment = {
   totalFees?: number;
   netAmount?: number;
   action?: string;
+  notes?: string;
 };
 
 type AddOnPackage = {
@@ -151,14 +152,14 @@ export default function PaymentsSection() {
   const [showFilters, setShowFilters] = useState(false);
   const { toast } = useToast();
   
-  // Mutation للموافقة على التحويل البنكي
+  // Mutation للموافقة على التحويل البنكي (تجاوز يدوي)
   const approvePaymentMutation = useMutation({
     mutationFn: async (paymentId: string) => {
       const response = await apiRequest("POST", "/api/admin/payment/approve", { paymentId });
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
       toast({
         title: "✅ تم قبول التحويل",
         description: "تم تفعيل الاشتراك بنجاح",
@@ -173,14 +174,14 @@ export default function PaymentsSection() {
     },
   });
 
-  // Mutation لرفض التحويل البنكي
+  // Mutation لرفض التحويل البنكي (تجاوز يدوي)
   const rejectPaymentMutation = useMutation({
     mutationFn: async (paymentId: string) => {
       const response = await apiRequest("POST", "/api/admin/payment/reject", { paymentId });
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
       toast({
         title: "✅ تم رفض التحويل",
         description: "تم رفض الدفع بنجاح",
@@ -194,6 +195,7 @@ export default function PaymentsSection() {
       });
     },
   });
+  
   
   const { data, isLoading } = useQuery<Payment[]>({
     queryKey: ["admin-payments"],
@@ -617,7 +619,31 @@ const totals = completedPayments.reduce((acc, p) => {
                         <Td colSpan={10}>
                           <div className="py-4 px-3">
                             <div className={`text-sm font-bold mb-3 ${p.status === "مرفوض" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
-                              {p.status === "مرفوض" ? "تحويل بنكي مرفوض" : "تحويل بنكي معلق - يحتاج مراجعة"}
+                              {p.status === "مرفوض" ? "تحويل بنكي مرفوض" : "تحويل بنكي — قيد التحقق التلقائي"}
+                            </div>
+                            
+                            {/* حالة التحقق التلقائي */}
+                            <div className="mb-4">
+                              {p.status === "نجح - قيد التحقق" && (
+                                <span className="inline-flex items-center gap-1.5 text-sm text-yellow-700 bg-yellow-50 px-3 py-1.5 rounded-md border border-yellow-200">
+                                  🔄 التحقق التلقائي قيد التشغيل — يتم فحص بيانات العقار
+                                </span>
+                              )}
+                              {p.status === "مكتمل" && (
+                                <span className="inline-flex items-center gap-1.5 text-sm text-green-700 bg-green-50 px-3 py-1.5 rounded-md border border-green-200">
+                                  ✅ التحقق التلقائي: تمت الموافقة — البيانات كاملة
+                                </span>
+                              )}
+                              {p.status === "مرفوض" && (
+                                <span className="inline-flex items-center gap-1.5 text-sm text-red-700 bg-red-50 px-3 py-1.5 rounded-md border border-red-200">
+                                  ❌ التحقق التلقائي: تم الرفض — بيانات العقار غير مكتملة{p.notes ? ` (${p.notes})` : ''}
+                                </span>
+                              )}
+                              {p.status === "قيد المراجعة" && (
+                                <span className="inline-flex items-center gap-1.5 text-sm text-blue-700 bg-blue-50 px-3 py-1.5 rounded-md border border-blue-200">
+                                  ⏳ في انتظار تأكيد الدفع
+                                </span>
+                              )}
                             </div>
                             
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-xs">
@@ -656,42 +682,44 @@ const totals = completedPayments.reduce((acc, p) => {
                               </div>
                             )}
 
-                            <div className="flex gap-3 mt-4">
-                              {/* Accept button: show for pending and rejected (can re-accept a rejected) */}
+                            {/* أزرار تجاوز الأدمن */}
+                            <div className="flex gap-3 mt-4 items-center">
+                              <span className="text-[10px] text-muted-foreground ml-2">تجاوز يدوي:</span>
+                              {/* Accept button: show for pending and rejected */}
                               {p.status !== "مكتمل" && (
-                              <Button
-                                size="sm"
-                                variant="default"
-                                className="bg-green-600 hover:bg-green-700 text-white"
-                                onClick={() => approvePaymentMutation.mutate(p.id)}
-                                disabled={approvePaymentMutation.isPending}
-                                data-testid={`button-approve-payment-${p.id}`}
-                              >
-                                {approvePaymentMutation.isPending ? (
-                                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-4 h-4 ml-2" />
-                                )}
-                                {p.action === "addon" ? "قبول وتفعيل الإضافة" : "قبول التحويل وتفعيل الاشتراك"}
-                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                  onClick={() => approvePaymentMutation.mutate(p.id)}
+                                  disabled={approvePaymentMutation.isPending}
+                                  data-testid={`button-approve-payment-${p.id}`}
+                                >
+                                  {approvePaymentMutation.isPending ? (
+                                    <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-4 h-4 ml-2" />
+                                  )}
+                                  {p.action === "addon" ? "قبول وتفعيل الإضافة" : "قبول التحويل وتفعيل الاشتراك"}
+                                </Button>
                               )}
-                              {/* Reject button: only show for pending statuses, NOT for already rejected */}
+                              {/* Reject button: only for non-rejected, non-completed */}
                               {p.status !== "مرفوض" && p.status !== "مكتمل" && (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => rejectPaymentMutation.mutate(p.id)}
-                                disabled={rejectPaymentMutation.isPending}
-                                data-testid={`button-reject-payment-${p.id}`}
-                              >
-                                {rejectPaymentMutation.isPending ? (
-                                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                                ) : (
-                                  <XCircle className="w-4 h-4 ml-2" />
-                                )}
-                                رفض التحويل
-                              </Button>
-                            )}
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => rejectPaymentMutation.mutate(p.id)}
+                                  disabled={rejectPaymentMutation.isPending}
+                                  data-testid={`button-reject-payment-${p.id}`}
+                                >
+                                  {rejectPaymentMutation.isPending ? (
+                                    <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                                  ) : (
+                                    <XCircle className="w-4 h-4 ml-2" />
+                                  )}
+                                  رفض التحويل
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </Td>

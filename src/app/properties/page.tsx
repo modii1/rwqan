@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
 import PropertiesClient from "@/components/properties-client";
@@ -38,11 +39,13 @@ export default async function AllPropertiesPage({ searchParams }: Props) {
         : {};
 
     return (
-        <PropertiesClient
-            initialAllProperties={allProperties ?? undefined}
-            initialSearchResults={hasParams ? (searchResults ?? undefined) : (allProperties ?? undefined)}
-            initialOccasion={occasion}
-            initialImages={initialImages}
-        />
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-[#6b6b6b] text-lg">جاري التحميل...</p></div>}>
+            <PropertiesClient
+                initialAllProperties={allProperties ?? undefined}
+                initialSearchResults={hasParams ? (searchResults ?? undefined) : undefined}
+                initialOccasion={occasion}
+                initialImages={initialImages}
+            />
+        </Suspense>
     );
 }

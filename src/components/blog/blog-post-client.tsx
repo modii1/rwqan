@@ -160,7 +160,7 @@ export function BlogPostClient({ slug }: { slug: string }) {
                 )}
 
                 <div
-                    className="prose prose-lg dark:prose-invert max-w-none blog-content"
+                    className="max-w-none blog-content"
                     dangerouslySetInnerHTML={{ __html: post.content }}
                 />
             </article>

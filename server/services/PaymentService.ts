@@ -186,6 +186,8 @@ export class PaymentService {
           startDate: formatDateRiyadh(startDate),
           endDate: formatDateRiyadh(endDate),
           paymentId: payment.id,
+          linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
+          propertyCount: totalProperties,
         };
 
         await firebaseService.addSubscriptionToSheet(
@@ -201,34 +203,47 @@ export class PaymentService {
         });
 
         // Activate linked/additional properties with the SAME subscription dates
-        for (const propNumber of additionalProps) {
-          const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
-          if (additionalProperty) {
-            // Create a real subscription for the linked property (same dates as main)
-            await firebaseService.addSubscriptionToSheet(
-              propNumber,
-              {
-                ...subscriptionData,
-                linkedProperty: payment.propertyNumber,
-              },
-              additionalProperty,
-              payment.receiptUrl ?? ""
-            );
+        const activatedLinkedPropertyNumbers: string[] = [];
+        try {
+          for (const propNumber of additionalProps) {
+            const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
+            if (additionalProperty) {
+              // Create a real subscription for the linked property (same dates as main)
+              await firebaseService.addSubscriptionToSheet(
+                propNumber,
+                {
+                  ...subscriptionData,
+                  linkedProperty: payment.propertyNumber,
+                  linkedProperties: undefined,
+                  propertyCount: undefined,
+                },
+                additionalProperty,
+                payment.receiptUrl ?? ""
+              );
 
-            // Approve the linked property based on smart verification
-            await firebaseService.updateProperty(propNumber, {
-              pendingApprovalFrom: undefined,
-              subscriptionType: isPremium ? "مميز" : "عادي"
-            });
-            const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
-            if (additionalDataCheck.isComplete) {
-              await firebaseService.updateVerificationStatus(propNumber, "approved");
-              console.log(`[approveBankTransfer] ✅ Smart verify: ${propNumber} - data complete`);
-            } else {
-              await firebaseService.updateVerificationStatus(propNumber, "pending");
-              console.log(`[approveBankTransfer] ⏳ Smart verify: ${propNumber} - missing: ${additionalDataCheck.missingFields.join(', ')}`);
+              // Approve the linked property based on smart verification
+              await firebaseService.updateProperty(propNumber, {
+                pendingApprovalFrom: undefined,
+                subscriptionType: isPremium ? "مميز" : "عادي"
+              });
+              const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
+              if (additionalDataCheck.isComplete) {
+                await firebaseService.updateVerificationStatus(propNumber, "approved");
+                console.log(`[approveBankTransfer] ✅ Smart verify: ${propNumber} - data complete`);
+              } else {
+                await firebaseService.updateVerificationStatus(propNumber, "pending");
+                console.log(`[approveBankTransfer] ⏳ Smart verify: ${propNumber} - missing: ${additionalDataCheck.missingFields.join(', ')}`);
+              }
+              activatedLinkedPropertyNumbers.push(propNumber);
             }
           }
+        } catch (linkErr) {
+          // Rollback: if any linked property activation fails, cancel what was already activated
+          console.error(`[approveBankTransfer] ❌ Failed to activate linked properties, rolling back:`, linkErr);
+          for (const pn of activatedLinkedPropertyNumbers) {
+            await firebaseService.cancelSubscription(pn, "فشل تفعيل العقارات المرتبطة — تراجع");
+          }
+          throw new Error("فشل في تفعيل العقارات المرتبطة");
         }
 
         // Create or update multi-property subscription record
@@ -273,22 +288,50 @@ export class PaymentService {
       if (mainDataCheck.isComplete) {
         await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
         console.log(`[approveBankTransfer] ✅ Smart verify: ${payment.propertyNumber} - data complete`);
+        
+        await firebaseService.addVerificationLog({
+          date: new Date().toISOString(),
+          propertyNumber: payment.propertyNumber,
+          action: "قبول التحقق",
+          reason: "تم التأكد من صحة الإيصال واكتمال بيانات العقار",
+          admin: "النظام",
+        });
       } else {
-        await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
-        console.log(`[approveBankTransfer] ⏳ Smart verify: ${payment.propertyNumber} - missing: ${mainDataCheck.missingFields.join(', ')}`);
+        await firebaseService.updateVerificationStatus(payment.propertyNumber, "rejected");
+        // Reject the payment since property data is incomplete
+        await firebaseService.updatePaymentStatus(paymentId, "مرفوض");
+        await firebaseService.cancelSubscription(payment.propertyNumber, "بيانات العقار غير مكتملة");
+        console.log(`[approveBankTransfer] ❌ Rejected: ${payment.propertyNumber} - missing: ${mainDataCheck.missingFields.join(', ')}`);
+        
+        // Rollback linked property subscriptions that were already created
+        const additionalProps = (payment as any).additionalProperties || [];
+        const secondProp = (payment as any).secondPropertyNumber;
+        if (secondProp && !additionalProps.includes(secondProp)) additionalProps.push(secondProp);
+        for (const pn of additionalProps) {
+          await firebaseService.cancelSubscription(pn, "تم رفض الدفع — تراجع عن العقارات المرتبطة");
+        }
+
+        await firebaseService.addVerificationLog({
+          date: new Date().toISOString(),
+          propertyNumber: payment.propertyNumber,
+          action: "رفض التحقق",
+          reason: `بيانات العقار غير مكتملة: ${mainDataCheck.missingFields.join('، ')}`,
+          admin: "النظام",
+        });
+        
+        throw new Error(`بيانات العقار غير مكتملة: ${mainDataCheck.missingFields.join('، ')}`);
       }
     } else {
       await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+      
+      await firebaseService.addVerificationLog({
+        date: new Date().toISOString(),
+        propertyNumber: payment.propertyNumber,
+        action: "قبول التحقق",
+        reason: "تم التأكد من صحة الإيصال وتفعيل الاشتراك",
+        admin: "النظام",
+      });
     }
-    
-    // Log verification for main property
-    await firebaseService.addVerificationLog({
-      date: new Date().toISOString(),
-      propertyNumber: payment.propertyNumber,
-      action: "قبول التحقق",
-      reason: "تم التأكد من صحة الإيصال وتفعيل الاشتراك",
-      admin: "النظام",
-    });
 
     // WhatsApp notification
     if (property && property.whatsappNumber && payment.packageId) {
@@ -334,12 +377,21 @@ export class PaymentService {
 
     const payment = await firebaseService.getPaymentById(paymentId);
     if (payment?.propertyNumber) {
-      // Set to pending - admin should manually review and decide to reject or approve
-      await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+      // Cancel linked property subscriptions first (before main, to avoid duplicate cascading)
+      const additionalProps: string[] = (payment as any).additionalProperties || [];
+      const secondProp = (payment as any).secondPropertyNumber;
+      if (secondProp && !additionalProps.includes(secondProp)) {
+        additionalProps.push(secondProp);
+      }
+      for (const pn of additionalProps) {
+        await firebaseService.cancelSubscription(pn, "تم رفض الدفع — تراجع عن العقارات المرتبطة");
+      }
+
+      await firebaseService.updateVerificationStatus(payment.propertyNumber, "rejected");
       await firebaseService.addVerificationLog({
         date: new Date().toISOString(),
         propertyNumber: payment.propertyNumber,
-        action: "رفض الدفع - قيد المراجعة",
+        action: "رفض الدفع",
         reason: "إيصال دفع غير صحيح",
         admin: "النظام",
       });
@@ -383,21 +435,56 @@ export class PaymentService {
     if (payment.pendingStartDate && payment.pendingEndDate) {
       const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
 
+      // Gather linked/additional properties from the payment record
+      const additionalProps: string[] = (payment as any).additionalProperties || [];
+      const secondProp = (payment as any).secondPropertyNumber;
+      if (secondProp && !additionalProps.includes(secondProp)) {
+        additionalProps.push(secondProp);
+      }
+
+      const subscriptionData = {
+        propertyNumber: payment.propertyNumber,
+        packageId: payment.packageId,
+        startDate: payment.pendingStartDate,
+        endDate: payment.pendingEndDate,
+        status: "نشط",
+        paymentId,
+        price: payment.amount ?? "",
+        packageType: payment.pendingSubscriptionType ?? "مميز",
+        linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
+        propertyCount: 1 + additionalProps.length,
+      };
+
       await firebaseService.addSubscriptionToSheet(
         payment.propertyNumber,
-        {
-          propertyNumber: payment.propertyNumber,
-          packageId: payment.packageId,
-          startDate: payment.pendingStartDate,
-          endDate: payment.pendingEndDate,
-          status: "نشط",
-          paymentId,
-          price: payment.amount ?? "",
-          packageType: payment.pendingSubscriptionType ?? "مميز",
-        },
+        subscriptionData,
         property,
         undefined
       );
+
+      // Activate linked/additional properties with the same dates
+      for (const propNumber of additionalProps) {
+        const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
+        if (additionalProperty) {
+          await firebaseService.addSubscriptionToSheet(
+            propNumber,
+            {
+              ...subscriptionData,
+              propertyNumber: propNumber,
+              linkedProperty: payment.propertyNumber,
+              linkedProperties: undefined,
+              propertyCount: undefined,
+            },
+            additionalProperty,
+            undefined
+          );
+          await firebaseService.updateProperty(propNumber, {
+            subscriptionType: (payment.pendingSubscriptionType ?? "مميز") as "مميز",
+            pendingApprovalFrom: undefined,
+          });
+          console.log(`[confirmManually] ✅ Linked property activated: ${propNumber}`);
+        }
+      }
 
       if (property?.whatsappNumber) {
         try {

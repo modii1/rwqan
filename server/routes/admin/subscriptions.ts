@@ -294,15 +294,106 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
   }
 });
 
-// تحديث العقار المرتبط في الاشتراك
+// ربط عقار بعقار آخر مع التحقق من البيانات وإنشاء رابط ثنائي الاتجاه
 router.post("/api/admin/subscription/link", async (req, res) => {
   try {
     const { propertyNumber, linkedProperty } = req.body;
     if (!propertyNumber || !linkedProperty) {
       return res.status(400).json({ error: "propertyNumber و linkedProperty مطلوبين" });
     }
+
+    // Validate both properties exist
+    const prop = await firebaseService.getPropertyByNumber(propertyNumber);
+    const mainProp = await firebaseService.getPropertyByNumber(linkedProperty);
+    if (!prop) {
+      return res.status(404).json({ error: "العقار الأول غير موجود" });
+    }
+    if (!mainProp) {
+      return res.status(404).json({ error: "العقار الثاني غير موجود" });
+    }
+
+    // Get or create subscription for the linked property
+    const linkedSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    const mainSub = await firebaseService.getSubscriptionByPropertyNumber(linkedProperty);
+
+    if (!mainSub) {
+      return res.status(400).json({ error: "العقار الرئيسي ليس لديه اشتراك نشط" });
+    }
+
+    // Set linkedProperty on the child subscription
     await firebaseService.updateSubscriptionLinkedProperty(propertyNumber, linkedProperty);
-    res.json({ success: true, message: `تم ربط العقار ${propertyNumber} بالعقار ${linkedProperty}` });
+
+    // Add to main's linkedProperties array
+    if (mainSub) {
+      const currentLinked = mainSub.linkedProperties || [];
+      if (!currentLinked.includes(propertyNumber)) {
+        const updatedLinked = [...currentLinked, propertyNumber];
+        await firebaseService.updateSubscription(mainSub.id, {
+          linkedProperties: updatedLinked,
+          propertyCount: updatedLinked.length + 1,
+        });
+      }
+    }
+
+    // Create or update multi-property subscription record
+    const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+    const existingGroup = multiSubs.find(
+      m => m.propertyNumber1 === linkedProperty && m.status === 'نشط'
+    );
+
+    if (existingGroup) {
+      const addProps = [...(existingGroup.additionalProperties || []), propertyNumber];
+      const uniqueAdd = new Set([existingGroup.propertyNumber1, ...addProps].filter(Boolean));
+      await firebaseService.updateMultiPropertySubscription(existingGroup.id, {
+        additionalProperties: addProps,
+        linkedProperties: Array.from(uniqueAdd),
+        propertyCount: uniqueAdd.size,
+      });
+    } else {
+      await firebaseService.createMultiPropertySubscription({
+        packageId: mainSub.packageId || "",
+        propertyNumber1: linkedProperty,
+        propertyNumber2: propertyNumber,
+        additionalProperties: [propertyNumber],
+        linkedProperties: [linkedProperty, propertyNumber],
+        propertyCount: 2,
+        startDate: mainSub.startDate || new Date().toISOString().split("T")[0],
+        endDate: mainSub.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        status: "نشط",
+        paymentId: mainSub.paymentId,
+      });
+    }
+
+    // Update property's subscriptionType to match main
+    await firebaseService.updateProperty(propertyNumber, {
+      subscriptionType: mainProp.subscriptionType || "مميز",
+      pendingApprovalFrom: undefined,
+    });
+
+    // If the linked property has no subscription yet, create one with same dates as main
+    if (!linkedSub) {
+      const today = new Date();
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 30);
+
+      await firebaseService.addSubscriptionToSheet(
+        propertyNumber,
+        {
+          packageId: mainSub.packageId,
+          price: 0,
+          subscriptionType: mainSub.subscriptionType || "مميز",
+          packageType: mainSub.packageType || "مميز",
+          startDate: mainSub.startDate || today.toISOString(),
+          endDate: mainSub.endDate || endDate.toISOString(),
+          linkedProperty: linkedProperty,
+          status: "نشط",
+          paymentId: mainSub.paymentId,
+        },
+        prop
+      );
+    }
+
+    res.json({ success: true, message: `تم ربط العقار ${propertyNumber} بالعقار ${linkedProperty} بنجاح (رابط ثنائي الاتجاه)` });
   } catch (error) {
     console.error("Error linking properties:", error);
     res.status(500).json({ error: "فشل في ربط العقارات" });

@@ -8,11 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock, Star } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock, Star, Unlink, Eye, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
+import AdminLinkedPropertiesSection from "./linked-properties";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'رياض الخبراء'] as const;
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
@@ -187,6 +188,8 @@ export default function PropertiesSection() {
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
   const [linkedPropertyView, setLinkedPropertyView] = useState<{ propertyNumber: string; subscription: any } | null>(null);
   const [showAdditionalRequests, setShowAdditionalRequests] = useState(false);
+  const [viewMode, setViewMode] = useState<'all' | 'linked'>('all');
+  const [linkedPropertiesList, setLinkedPropertiesList] = useState<{ propertyNumber: string; data: any[]; loading?: boolean } | null>(null);
 
   // Query for additional property requests
   const { data: additionalRequests, isLoading: additionalRequestsLoading, refetch: refetchAdditionalRequests } = useQuery<any[]>({
@@ -466,6 +469,36 @@ export default function PropertiesSection() {
 
   return (
     <section className="space-y-3" dir="rtl">
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border pb-1">
+        <button
+          onClick={() => setViewMode('all')}
+          className={`px-4 py-2 text-sm font-medium rounded-t-lg transition ${
+            viewMode === 'all'
+              ? 'bg-primary/10 text-primary border-b-2 border-primary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
+        >
+          <Home className="w-4 h-4 inline ml-1" />
+          كل العقارات
+        </button>
+        <button
+          onClick={() => setViewMode('linked')}
+          className={`px-4 py-2 text-sm font-medium rounded-t-lg transition ${
+            viewMode === 'linked'
+              ? 'bg-primary/10 text-primary border-b-2 border-primary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
+        >
+          <Link className="w-4 h-4 inline ml-1" />
+          العقارات المضافة
+        </button>
+      </div>
+
+      {viewMode === 'linked' ? (
+        <AdminLinkedPropertiesSection />
+      ) : (
+        <>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">إدارة العقارات</h2>
@@ -572,7 +605,7 @@ export default function PropertiesSection() {
                 <Th>المدينة</Th>
                 <Th>النوع</Th>
                 <Th>نوع الاشتراك</Th>
-                <Th>العقارات المضافة</Th>
+                  <Th>العقارات المضافة (عدد)</Th>
                 <Th>تحكم</Th>
               </tr>
             </thead>
@@ -614,8 +647,25 @@ export default function PropertiesSection() {
                     </div>
                   </Td>
                   <Td>
-                    {p.linkedProperty ? (
-                      <Badge variant="secondary" className="bg-amber-100 text-amber-800 text-xs">
+                    {(p as any).linkedPropertyCount > 0 ? (
+                      <button
+                        onClick={async () => {
+                          setLinkedPropertiesList({ propertyNumber: p.propertyNumber, data: [], loading: true });
+                          try {
+                            const res = await fetch(`/api/admin/properties/${p.propertyNumber}/linked-properties`);
+                            const result = await res.json();
+                            setLinkedPropertiesList({ propertyNumber: p.propertyNumber, data: result.data || [], loading: false });
+                          } catch (err) {
+                            setLinkedPropertiesList({ propertyNumber: p.propertyNumber, data: [], loading: false });
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200 transition text-xs font-medium"
+                      >
+                        <Link className="w-3 h-3" />
+                        {(p as any).linkedPropertyCount}
+                      </button>
+                    ) : p.linkedProperty ? (
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">
                         <Link className="w-3 h-3" />
                         مضاف
                       </Badge>
@@ -1134,6 +1184,100 @@ export default function PropertiesSection() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Linked Properties List Dialog */}
+      <Dialog open={!!linkedPropertiesList} onOpenChange={() => setLinkedPropertiesList(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link className="w-5 h-5 text-primary" />
+              العقارات المضافة للعقار رقم: {linkedPropertiesList?.propertyNumber}
+            </DialogTitle>
+            <DialogDescription>
+              إدارة العقارات المضافة المرتبطة بهذا العقار
+            </DialogDescription>
+          </DialogHeader>
+          {linkedPropertiesList && (
+            <div className="space-y-3">
+              {linkedPropertiesList.loading ? (
+                <div className="flex items-center justify-center gap-2 text-muted-foreground py-8">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  جاري التحميل...
+                </div>
+              ) : linkedPropertiesList.data.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8">
+                  <Link className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
+                  <p className="text-lg font-medium mb-1">لا توجد عقارات مضافة</p>
+                  <p className="text-sm">هذا العقار ليس لديه عقارات إضافية مرتبطة به</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 text-right">
+                    <tr>
+                      <Th>رقم العقار</Th>
+                      <Th>الاسم</Th>
+                      <Th>المدينة</Th>
+                      <Th>النوع</Th>
+                      <Th>حالة الاشتراك</Th>
+                      <Th>تحكم</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkedPropertiesList.data.map((lp: any) => (
+                      <tr key={lp.propertyNumber} className="border-t hover:bg-muted/30">
+                        <Td><span className="font-mono text-primary">#{lp.propertyNumber}</span></Td>
+                        <Td>
+                          <div className="font-medium">{lp.name}</div>
+                          <div className="text-xs text-muted-foreground">{lp.whatsappNumber}</div>
+                        </Td>
+                        <Td>{lp.city}</Td>
+                        <Td>{lp.type}</Td>
+                        <Td>
+                          <Badge className={lp.subscriptionStatus === 'نشط' ? 'bg-green-100 text-green-800 dark:bg-green-900/30' : 'bg-red-100 text-red-800 dark:bg-red-900/30'}>
+                            {lp.subscriptionStatus === 'نشط' ? 'نشط' : lp.subscriptionStatus === 'منتهي' ? 'منتهي' : lp.subscriptionStatus || 'غير نشط'}
+                          </Badge>
+                        </Td>
+                        <Td>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="icon" variant="ghost"
+                              onClick={() => {
+                                setLinkedPropertyView({
+                                  propertyNumber: lp.propertyNumber,
+                                  subscription: {
+                                    found: true,
+                                    propertyNumber: lp.propertyNumber,
+                                    subscription: {
+                                      subscriptionType: lp.subscriptionType,
+                                      status: lp.subscriptionStatus,
+                                      startDate: lp.startDate,
+                                      endDate: lp.endDate,
+                                      packageId: lp.packageId,
+                                    },
+                                    property: {
+                                      name: lp.name,
+                                      city: lp.city,
+                                    }
+                                  }
+                                });
+                              }}
+                              title="عرض التفاصيل"
+                            >
+                              <Eye className="w-4 h-4 text-blue-500" />
+                            </Button>
+                          </div>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+    )}
     </section>
   );
 }

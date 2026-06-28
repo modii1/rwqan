@@ -79,6 +79,7 @@ export default async function BlogPostPage({ params }: PageProps) {
                 .blog-content img {
                     max-width: 100%;
                     height: auto;
+                    aspect-ratio: unset;
                     border-radius: 0.5rem;
                     margin: 1.5rem 0;
                 }

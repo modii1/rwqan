@@ -72,7 +72,7 @@ export default function OwnerImagesPage() {
             });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || "فشل رفع الصور");
+                throw new Error(err.error || "تعذر رفع الصور. تأكد من أن حجم الصورة لا يتجاوز 2 ميجابايت");
             }
             return res.json();
         },
@@ -85,7 +85,7 @@ export default function OwnerImagesPage() {
             window.location.reload();
         },
         onError: (err: Error) => {
-            toast({ title: "فشل رفع الصور", description: err.message, variant: "destructive" });
+            toast({ title: "لم يتم رفع الصور", description: err.message || "حدث خطأ أثناء رفع الصور. يرجى التحقق من حجم الصورة (أقصى حد 2 ميجابايت) والمحاولة مرة أخرى", variant: "destructive" });
         },
     });
 
@@ -98,7 +98,7 @@ export default function OwnerImagesPage() {
                 body: JSON.stringify({ imageUrl }),
                 credentials: "include",
             });
-            if (!res.ok) throw new Error("فشل حذف الصورة");
+            if (!res.ok) throw new Error("تعذر حذف الصورة. يرجى المحاولة مرة أخرى");
             return res.json();
         },
         onSuccess: () => {
@@ -108,7 +108,7 @@ export default function OwnerImagesPage() {
             window.location.reload();
         },
         onError: (err: Error) => {
-            toast({ title: "فشل حذف الصورة", description: err.message, variant: "destructive" });
+            toast({ title: "لم يتم حذف الصورة", description: err.message || "حدث خطأ أثناء حذف الصورة. يرجى المحاولة مرة أخرى", variant: "destructive" });
         },
     });
 
@@ -119,6 +119,15 @@ export default function OwnerImagesPage() {
             toast({
                 title: "تجاوز الحد الأقصى",
                 description: `الحد الأقصى 15 صورة. لديك ${currentCount} صورة، يمكنك إضافة ${15 - currentCount} صورة فقط`,
+                variant: "destructive",
+            });
+            return;
+        }
+        const oversized = files.filter((f) => f.size > 2 * 1024 * 1024);
+        if (oversized.length > 0) {
+            toast({
+                title: "حجم الصورة كبير جداً",
+                description: `${oversized.length} صورة تتجاوز الحد الأقصى 2 ميجابايت. يرجى تصغير حجم الصور ثم المحاولة مرة أخرى`,
                 variant: "destructive",
             });
             return;
@@ -204,8 +213,8 @@ export default function OwnerImagesPage() {
                     <div className="space-y-4">
                         <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
                             <Upload className="w-12 h-12 mx-auto mb-4 text-[#b88d2b]" />
-                            <p className="text-lg font-semibold mb-2">اختر الصور للرفع</p>
-                            <p className="text-sm text-muted-foreground mb-4">الحد الأقصى 15 صورة (PNG, JPG, JPEG)</p>
+                            <p className="text-lg font-semibold mb-2">اختر صور العقار للرفع</p>
+                            <p className="text-sm text-muted-foreground mb-4">الحد الأقصى 15 صورة - بحجم لا يتجاوز 2 ميجابايت للصورة (PNG, JPG, JPEG)</p>
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -259,8 +268,10 @@ export default function OwnerImagesPage() {
                 <Card className="p-6 bg-[#fffdf0] border-[#e0c97b]">
                     <h3 className="font-bold mb-2 text-[#4a3b2a]">ملاحظات هامة:</h3>
                     <ul className="list-disc list-inside space-y-1 text-sm text-[#5b4a1f]">
-                        <li>يمكنك رفع حتى 15 صور للعقار</li>
-                        <li>الصور المدعومة: JPG, PNG, JPEG</li>
+                        <li>يمكنك رفع حتى 15 صورة للعقار</li>
+                        <li>الصيغ المدعومة: JPG - PNG - JPEG</li>
+                        <li><strong>الحد الأقصى لحجم الصورة:</strong> 2 ميجابايت لكل صورة</li>
+                        <li><strong>الحجم المناسب:</strong> يفضل أن تكون الصورة بدقة 1200×800 بكسل أو أكثر وبحجم لا يتجاوز 2 ميجابايت</li>
                         <li>سيتم عرض الصور في صفحة العقار تلقائياً</li>
                     </ul>
                 </Card>

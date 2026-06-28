@@ -29,12 +29,43 @@ router.get("/api/admin/properties", async (_req, res) => {
     
     // Fetch subscription status for each property
     const subscriptions = await firebaseService.getSubscriptions();
+    const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+    
+    // Build a map of propertyNumber -> linkedPropertyCount
+    const linkedCountMap: Record<string, number> = {};
+    // Source 1: Count via linkedProperty (additional property's subscription points to main)
+    for (const sub of subscriptions) {
+      if (sub.linkedProperty && sub.status === 'نشط') {
+        linkedCountMap[sub.linkedProperty] = (linkedCountMap[sub.linkedProperty] || 0) + 1;
+      }
+    }
+    // Source 2: Override with linkedProperties array if larger (main property lists its children)
+    for (const sub of subscriptions) {
+      if (sub.linkedProperties && Array.isArray(sub.linkedProperties) && sub.linkedProperties.length > 0) {
+        const existing = linkedCountMap[sub.propertyNumber] || 0;
+        if (sub.linkedProperties.length > existing) {
+          linkedCountMap[sub.propertyNumber] = sub.linkedProperties.length;
+        }
+      }
+    }
+    // Source 3: Override with multi_property_subscriptions count if larger
+    for (const ms of multiSubs) {
+      if (ms.status !== 'نشط') continue;
+      const propSet = new Set<string>([ms.propertyNumber1]);
+      if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
+      if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
+      const count = propSet.size - 1; // exclude main property
+      if (count > (linkedCountMap[ms.propertyNumber1] || 0)) {
+        linkedCountMap[ms.propertyNumber1] = count;
+      }
+    }
     
     const itemsWithSubscriptionStatus = items.map(property => {
       const sub = subscriptions.find(s => s.propertyNumber === property.propertyNumber);
       return {
         ...property,
-        subscriptionStatus: sub?.status || null
+        subscriptionStatus: sub?.status || null,
+        linkedPropertyCount: linkedCountMap[property.propertyNumber] || 0
       };
     });
     
@@ -42,6 +73,76 @@ router.get("/api/admin/properties", async (_req, res) => {
   } catch (err) {
     console.error("Admin get properties error:", err);
     res.status(500).json({ error: "فشل في جلب العقارات" });
+  }
+});
+
+// Admin: Get linked properties for a specific property
+router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req, res) => {
+  try {
+    const { propertyNumber } = req.params;
+    const allProperties = await firebaseService.getProperties();
+    const subscriptions = await firebaseService.getSubscriptions();
+    const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+    
+    const linkedPropertyNumbers = new Set<string>();
+    
+    // Source 1: Subscriptions where linkedProperty points to this property
+    for (const sub of subscriptions) {
+      if (sub.linkedProperty === propertyNumber && sub.status === 'نشط') {
+        linkedPropertyNumbers.add(sub.propertyNumber);
+      }
+    }
+    
+    // Source 2: Current property's subscription linkedProperties array
+    const currentSub = subscriptions.find(s => s.propertyNumber === propertyNumber);
+    if (currentSub?.linkedProperties) {
+      for (const lp of currentSub.linkedProperties) {
+        if (lp !== propertyNumber) linkedPropertyNumbers.add(lp);
+      }
+    }
+    
+    // Source 3: multi_property_subscriptions
+    for (const ms of multiSubs) {
+      if (ms.status !== 'نشط') continue;
+      const propSet = new Set<string>([ms.propertyNumber1]);
+      if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
+      if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
+      if (propSet.has(propertyNumber)) {
+        for (const pn of propSet) {
+          if (pn !== propertyNumber) linkedPropertyNumbers.add(pn);
+        }
+      }
+    }
+    
+    const linkedProperties = Array.from(linkedPropertyNumbers).map(pn => {
+      const prop = allProperties.find((p: any) => p.propertyNumber === pn);
+      const sub = subscriptions.find(s => s.propertyNumber === pn);
+      return {
+        propertyNumber: pn,
+        name: prop?.name || pn,
+        city: prop?.city || '',
+        direction: prop?.direction || '',
+        type: prop?.type || '',
+        whatsappNumber: prop?.whatsappNumber || '',
+        location: prop?.location || '',
+        facilities: prop?.facilities || [],
+        prices: prop?.prices || null,
+        subscriptionType: sub?.subscriptionType || prop?.subscriptionType || 'عادي',
+        subscriptionStatus: sub?.status || null,
+        startDate: sub?.startDate || null,
+        endDate: sub?.endDate || null,
+        packageId: sub?.packageId || null,
+        verificationStatus: prop?.verificationStatus || null,
+        createdAt: prop?.createdAt || null,
+        updatedAt: prop?.updatedAt || null,
+        mainPropertyNumber: propertyNumber
+      };
+    });
+    
+    res.json({ success: true, data: linkedProperties, count: linkedProperties.length });
+  } catch (err) {
+    console.error("[GET_LINKED_PROPERTIES_FOR] Error:", err);
+    res.status(500).json({ success: false, message: "فشل في جلب العقارات المضافة" });
   }
 });
 

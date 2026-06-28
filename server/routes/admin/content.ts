@@ -49,6 +49,22 @@ router.get("/api/admin/blog", async (_req, res) => {
   }
 });
 
+// معاينة مقال (للأدمن - بدون التحقق من حالة النشر)
+// Must be defined BEFORE /api/admin/blog/:id to avoid route conflict
+router.get("/api/admin/blog/preview/:slug", async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const post = await contentService.getPostBySlug(slug);
+    if (!post) {
+      return res.status(404).json({ error: "المقال غير موجود" });
+    }
+    res.json(post);
+  } catch (err) {
+    console.error("Error previewing blog post:", err);
+    res.status(500).json({ error: "فشل في جلب المقال" });
+  }
+});
+
 // جلب مقال محدد للأدمن
 router.get("/api/admin/blog/:id", async (req, res) => {
   try {
@@ -67,6 +83,13 @@ router.get("/api/admin/blog/:id", async (req, res) => {
 // إنشاء مقال جديد
 router.post("/api/admin/blog", async (req, res) => {
   try {
+    const { title, slug } = req.body;
+    if (!title?.trim()) {
+      return res.status(400).json({ error: "عنوان المقال مطلوب" });
+    }
+    if (!slug?.trim()) {
+      return res.status(400).json({ error: "الرابط الدائم (slug) مطلوب" });
+    }
     const id = await contentService.createPost(req.body);
     res.json({ success: true, id, message: "تم إنشاء المقال بنجاح" });
   } catch (err) {
@@ -79,6 +102,13 @@ router.post("/api/admin/blog", async (req, res) => {
 router.put("/api/admin/blog/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const { title, slug } = req.body;
+    if (!title?.trim()) {
+      return res.status(400).json({ error: "عنوان المقال مطلوب" });
+    }
+    if (!slug?.trim()) {
+      return res.status(400).json({ error: "الرابط الدائم (slug) مطلوب" });
+    }
     const success = await contentService.updatePost(id, req.body);
     if (!success) {
       return res.status(404).json({ error: "المقال غير موجود" });
@@ -87,6 +117,30 @@ router.put("/api/admin/blog/:id", async (req, res) => {
   } catch (err) {
     console.error("Error updating blog post:", err);
     res.status(500).json({ error: "فشل في تحديث المقال" });
+  }
+});
+
+// تبديل حالة النشر (publish/unpublish)
+router.patch("/api/admin/blog/:id/toggle-status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const post = await contentService.getPostById(id);
+    if (!post) {
+      return res.status(404).json({ error: "المقال غير موجود" });
+    }
+    const newStatus = post.status === "منشور" ? "مسودة" : "منشور";
+    const updates: any = { status: newStatus };
+    if (newStatus === "منشور" && !post.publishedAt) {
+      updates.publishedAt = new Date().toISOString();
+    }
+    const success = await contentService.updatePost(id, updates);
+    if (!success) {
+      return res.status(404).json({ error: "المقال غير موجود" });
+    }
+    res.json({ success: true, status: newStatus, message: newStatus === "منشور" ? "تم نشر المقال" : "تم إلغاء نشر المقال" });
+  } catch (err) {
+    console.error("Error toggling blog post status:", err);
+    res.status(500).json({ error: "فشل في تغيير حالة المقال" });
   }
 });
 

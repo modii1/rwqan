@@ -28,7 +28,7 @@ function formatDate(dateStr: string): string {
 }
 
 export function BlogList() {
-    const { data: posts, isLoading } = useQuery<BlogPost[]>({
+    const { data: posts, isLoading, isError, error } = useQuery<BlogPost[]>({
         queryKey: ["/api/blog"],
     });
 
@@ -82,7 +82,15 @@ export function BlogList() {
             </section>
 
             <main className="max-w-7xl mx-auto px-4 py-12">
-                {!posts || posts.length === 0 ? (
+                {isError ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <div className="w-24 h-24 rounded-full bg-destructive/10 flex items-center justify-center mb-6">
+                            <BookOpen className="w-12 h-12 text-destructive" />
+                        </div>
+                        <h3 className="text-xl font-bold text-foreground mb-2">حدث خطأ في تحميل المقالات</h3>
+                        <p className="text-muted-foreground">يرجى المحاولة لاحقاً</p>
+                    </div>
+                ) : !posts || posts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center">
                         <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center mb-6">
                             <BookOpen className="w-12 h-12 text-muted-foreground" />

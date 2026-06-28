@@ -33,6 +33,8 @@ import {
   Image as ImageIcon,
   Save,
   X,
+  Globe,
+  EyeOff,
 } from "lucide-react";
 
 interface BlogPost {
@@ -125,6 +127,20 @@ export default function AdminBlogSection() {
     },
   });
 
+  const toggleStatusMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("PATCH", `/api/admin/blog/${id}/toggle-status`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/blog"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/blog"] });
+      toast({ title: "تم تغيير حالة المقال" });
+    },
+    onError: () => {
+      toast({ title: "فشل في تغيير حالة المقال", variant: "destructive" });
+    },
+  });
+
   const openNewForm = () => {
     setEditingPost(null);
     setFormData({
@@ -171,6 +187,11 @@ export default function AdminBlogSection() {
     }
 
     const slug = formData.slug || generateSlug(formData.title);
+    if (!slug.trim()) {
+      toast({ title: "تعذر إنشاء رابط دائم للمقال. يرجى التأكد من كتابة عنوان مناسب", variant: "destructive" });
+      return;
+    }
+
     const data = {
       ...formData,
       slug,
@@ -281,16 +302,31 @@ export default function AdminBlogSection() {
                 </div>
 
                 <div className="flex items-center gap-1">
-                  {post.status === "منشور" && (
+                  {post.slug && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => window.open(`/blog/${post.slug}`, "_blank")}
                       data-testid={`button-view-${post.id}`}
+                      title="عرض المقال"
                     >
                       <ExternalLink className="w-4 h-4" />
                     </Button>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => toggleStatusMutation.mutate(post.id)}
+                    disabled={toggleStatusMutation.isPending}
+                    data-testid={`button-toggle-${post.id}`}
+                    title={post.status === "منشور" ? "إلغاء النشر" : "نشر المقال"}
+                  >
+                    {post.status === "منشور" ? (
+                      <EyeOff className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <Globe className="w-4 h-4 text-primary" />
+                    )}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -381,6 +417,16 @@ export default function AdminBlogSection() {
                   rows={8}
                   data-testid="input-content"
                 />
+                {formData.content && (
+                  <div className="mt-4 p-4 border rounded-lg bg-background">
+                    <Label className="mb-2 block text-xs text-muted-foreground">معاينة المحتوى</Label>
+                    <div
+                      className="blog-content-preview max-w-none"
+                      dir="rtl"
+                      dangerouslySetInnerHTML={{ __html: formData.content }}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="col-span-2">

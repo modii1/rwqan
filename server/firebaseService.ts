@@ -247,6 +247,8 @@ export class FirebaseService {
             console.log(`⚠️ Subscription not found for property ${propertyNumber}`);
             return;
         }
+        const subData = doc.data() as any;
+
         await ref.update({
             status: "منتهي",
             endDate: new Date().toISOString(),
@@ -254,6 +256,76 @@ export class FirebaseService {
             cancelReason: reason ?? "admin",
         });
         console.log(`✅ Subscription cancelled for property ${propertyNumber} (reason: ${reason ?? "admin"})`);
+
+        // Cascading cleanup: remove this property from linkedProperties of related subscriptions
+        // and clear linkedProperty on children if this was a main property
+        if (subData.linkedProperty) {
+            // This property was linked TO another (main) property
+            const mainSubId = `SUB-${subData.linkedProperty}`;
+            const mainRef = this.db.collection("subscriptions").doc(mainSubId);
+            const mainDoc = await mainRef.get();
+            if (mainDoc.exists) {
+                const mainData = mainDoc.data() as any;
+                if (mainData.linkedProperties && Array.isArray(mainData.linkedProperties)) {
+                    const updatedLinkedProps = mainData.linkedProperties.filter((lp: string) => lp !== propertyNumber);
+                    await mainRef.update({
+                        linkedProperties: updatedLinkedProps,
+                        propertyCount: updatedLinkedProps.length + 1,
+                    });
+                }
+                // Also clear from multi_property_subscriptions
+                const multiQuery = await this.db.collection("multi_property_subscriptions")
+                    .where("status", "==", "نشط")
+                    .get();
+                for (const multiDoc of multiQuery.docs) {
+                    const msData = multiDoc.data();
+                    const allProps = new Set<string>([msData.propertyNumber1]);
+                    if (msData.propertyNumber2) allProps.add(msData.propertyNumber2);
+                    if (msData.additionalProperties) msData.additionalProperties.forEach((ap: string) => allProps.add(ap));
+                    if (allProps.has(propertyNumber)) {
+                        if (propertyNumber === msData.propertyNumber1) {
+                            // Main property being cancelled — delete whole group
+                            await multiDoc.ref.delete();
+                        } else {
+                            // Remove from group
+                            let newProp2 = msData.propertyNumber2;
+                            let newAdd = [...(msData.additionalProperties || [])];
+                            if (propertyNumber === msData.propertyNumber2) {
+                                newProp2 = undefined;
+                                newAdd = newAdd.filter((p: string) => p !== propertyNumber);
+                            } else {
+                                newAdd = newAdd.filter((p: string) => p !== propertyNumber);
+                            }
+                            const remainingSet = new Set<string>([msData.propertyNumber1]);
+                            if (newProp2) remainingSet.add(newProp2);
+                            newAdd.forEach((ap: string) => remainingSet.add(ap));
+                            const remaining = Array.from(remainingSet);
+                            const updateData: any = {
+                                additionalProperties: newAdd,
+                                linkedProperties: remaining,
+                                propertyCount: remaining.length,
+                            };
+                            if (typeof newProp2 === 'undefined' && msData.propertyNumber2) {
+                                updateData.propertyNumber2 = null;
+                            }
+                            await multiDoc.ref.update(updateData);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (subData.linkedProperties && Array.isArray(subData.linkedProperties) && subData.linkedProperties.length > 0) {
+            // This was a main property with children — cancel all linked children too
+            for (const childProp of subData.linkedProperties) {
+                if (childProp !== propertyNumber) {
+                    await this.cancelSubscription(childProp, `تم إلغاء اشتراك العقار الرئيسي ${propertyNumber}: ${reason ?? ""}`);
+                }
+            }
+        }
+
+        // Clear linkedProperty on property document
+        await this.updateProperty(propertyNumber, { linkedProperty: "" });
     }
 
     async activateSubscription(
@@ -611,7 +683,10 @@ export class FirebaseService {
 
     async createBlogPost(post: any): Promise<string> {
         const id = `BLOG-${Date.now()}`;
-        const newPost = { id, ...post, createdAt: new Date().toISOString() };
+        const newPost: any = { id, ...post, createdAt: new Date().toISOString() };
+        if (newPost.status === "منشور" && !newPost.publishedAt) {
+            newPost.publishedAt = new Date().toISOString();
+        }
         await this.db.collection("blog_posts").doc(id).set(newPost);
         return id;
     }
@@ -620,7 +695,11 @@ export class FirebaseService {
         const ref = this.db.collection("blog_posts").doc(id);
         const doc = await ref.get();
         if (!doc.exists) return false;
-        await ref.update({ ...updates, updatedAt: new Date().toISOString() });
+        const data: any = { ...updates, updatedAt: new Date().toISOString() };
+        if (data.status === "منشور" && !doc.data()?.publishedAt) {
+            data.publishedAt = new Date().toISOString();
+        }
+        await ref.update(data);
         return true;
     }
 

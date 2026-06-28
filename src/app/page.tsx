@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
 import HomeClient from "@/components/home-client";
@@ -24,6 +25,8 @@ export default async function HomePage() {
         : {};
 
     return (
-        <HomeClient initialProperties={allProperties} initialOccasion={occasion} initialImages={initialImages} />
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-[#6b6b6b] text-lg">جاري التحميل...</p></div>}>
+            <HomeClient initialProperties={allProperties} initialOccasion={occasion} initialImages={initialImages} />
+        </Suspense>
     );
 }

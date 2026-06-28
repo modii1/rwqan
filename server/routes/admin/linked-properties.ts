@@ -159,6 +159,20 @@ router.post("/api/admin/linked-properties/groups", async (req, res) => {
       return res.status(404).json({ success: false, message: "أحد العقارين غير موجود" });
     }
 
+    // Payment validation: check if the main property's payment covers this many properties
+    const mainSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber1);
+    if (mainSub && mainSub.paymentId) {
+      const payment = await firebaseService.getPaymentById(mainSub.paymentId);
+      if (payment) {
+        const totalProps = 1 + (additionalProperties?.length || 0) + 1; // main + additional + propertyNumber2
+        const expectedProps = 1 + ((payment as any).additionalProperties?.length || 0) + ((payment as any).secondPropertyNumber ? 1 : 0);
+        if (totalProps > expectedProps && !packageId) {
+          console.log(`[CREATE_GROUP] ⚠️ Warning: Group would have ${totalProps} properties but payment covers ${expectedProps}`);
+          // Don't block, but log warning — admin has override authority
+        }
+      }
+    }
+
     const allLinkedProps = [propertyNumber1, propertyNumber2, ...(additionalProperties || [])];
 
     const multiSub = await firebaseService.createMultiPropertySubscription({
@@ -235,6 +249,22 @@ router.post("/api/admin/linked-properties/groups/:id/add", async (req, res) => {
     const current = multiSubs.find(m => m.id === id);
     if (!current) {
       return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
+    }
+
+    // Payment validation: check if adding exceeds what the payment covered
+    if (current.paymentId) {
+      const addPayment = await firebaseService.getPaymentById(current.paymentId);
+      if (addPayment) {
+        const existingUnique = new Set<string>([current.propertyNumber1]);
+        if (current.propertyNumber2) existingUnique.add(current.propertyNumber2);
+        if (current.additionalProperties) current.additionalProperties.forEach((ap: string) => existingUnique.add(ap));
+        const newTotal = existingUnique.size + 1; // adding propertyNumber
+        const paymentProps = 1 + ((addPayment as any).additionalProperties?.length || 0) + ((addPayment as any).secondPropertyNumber ? 1 : 0);
+        if (newTotal > paymentProps) {
+          console.log(`[ADD_TO_GROUP] ⚠️ Warning: Group would have ${newTotal} properties but payment covers ${paymentProps}`);
+          // Admin override allowed — log warning
+        }
+      }
     }
 
     const newAdditional = [...(current.additionalProperties || []), propertyNumber];
