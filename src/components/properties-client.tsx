@@ -31,7 +31,6 @@ import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import type { ActiveOccasion } from "@/lib/server-fetch";
 
-const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 const FACILITIES = ["مسبح", "بدون مسبح", "مبيت", "ألعاب مائية", "ملعب", "مناسبات", "شتاء", "صيف", "مكيف", "واي فاي"];
@@ -171,7 +170,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         sessionStorage.removeItem("propsPageFilters");
     };
 
-    const hasActiveFilters = !!(searchQuery || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
+    const hasActiveFilters = !!(searchQuery || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
 
     useEffect(() => {
         const filters = { searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount };
@@ -314,19 +313,19 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                         </button>
                     </div>
 
-                    {/* City pills */}
+                    {/* Direction pills */}
                     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                        {CITIES.map(city => (
+                        {DIRECTIONS.map(dir => (
                             <button
-                                key={city}
-                                onClick={() => setSelectedCity(selectedCity === city ? "" : city)}
+                                key={dir}
+                                onClick={() => setSelectedDirection(selectedDirection === dir ? "" : dir)}
                                 className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                                    selectedCity === city
+                                    selectedDirection === dir
                                         ? "bg-[#b88d2b] text-white"
                                         : "bg-[#f3f4f6] text-[#6b6b6b] hover:bg-gray-200"
                                 }`}
                             >
-                                {city}
+                                {dir}
                             </button>
                         ))}
                         {hasActiveFilters && (
@@ -391,12 +390,6 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                     <div className="mb-4 flex items-center gap-2 flex-wrap">
                         <span className="text-sm text-[#6b6b6b]">النتائج:</span>
                         <span className="text-sm font-bold text-[#1a1a1a]">{properties.length}</span>
-                        {selectedCity && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
-                                {selectedCity}
-                                <button onClick={() => setSelectedCity("")}><X className="w-2.5 h-2.5" /></button>
-                            </span>
-                        )}
                         {selectedDirection && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {selectedDirection}
