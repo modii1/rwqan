@@ -41,7 +41,20 @@ router.get("/api/admin/linked-properties", async (req, res) => {
         const prop = allProperties.find(p => p.propertyNumber === propNumber);
         const sub = allSubscriptions.find(s => s.propertyNumber === propNumber);
         const mainProp = allProperties.find(p => p.propertyNumber === mainPropertyNumber);
+        const mainSub = allSubscriptions.find(s => s.propertyNumber === mainPropertyNumber);
         const parentNumber = propNumber === mainPropertyNumber ? null : mainPropertyNumber;
+
+        // Detect mismatch between the linked property's state and the main's state
+        const childSubType = sub?.subscriptionType || prop?.subscriptionType || "عادي";
+        const mainSubType = mainSub?.subscriptionType || mainProp?.subscriptionType || "عادي";
+        const childEndDate = sub?.endDate || undefined;
+        const mainEndDate = mainSub?.endDate || multiSub.endDate || undefined;
+        const childVerified = prop?.verificationStatus === "approved";
+        const mainVerified = mainProp?.verificationStatus === "approved";
+        const isMismatched =
+          childSubType !== mainSubType ||
+          (childEndDate && mainEndDate && childEndDate !== mainEndDate) ||
+          (mainVerified && !childVerified);
 
         linkedProps.push({
           propertyNumber: propNumber,
@@ -50,15 +63,19 @@ router.get("/api/admin/linked-properties", async (req, res) => {
           direction: prop?.direction || "",
           type: prop?.type || "",
           whatsappNumber: prop?.whatsappNumber || "",
-          subscriptionType: sub?.subscriptionType || prop?.subscriptionType || "عادي",
+          subscriptionType: childSubType,
           linkedProperty: parentNumber,
           linkedPropertyName: parentNumber ? (mainProp?.name || parentNumber) : null,
           mainPropertyName: mainProp?.name || mainPropertyNumber,
           mainPropertyCity: mainProp?.city || "",
           mainPropertyWhatsapp: mainProp?.whatsappNumber || "",
+          mainPropertyNumber,
+          mainSubscriptionType: mainSubType,
+          mainEndDate,
           verificationStatus: prop?.verificationStatus,
+          isMismatched,
           subscriptionStatus: sub?.status || "غير مرتبط",
-          endDate: sub?.endDate || multiSub.endDate || undefined,
+          endDate: childEndDate || mainEndDate || undefined,
           startDate: sub?.startDate || multiSub.startDate || undefined,
           packageId: sub?.packageId || multiSub.packageId || undefined,
           facilities: prop?.facilities || [],

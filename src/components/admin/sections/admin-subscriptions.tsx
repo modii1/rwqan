@@ -10,7 +10,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   Search, Calendar, Clock, CheckCircle2, XCircle, AlertTriangle,
   RefreshCw, Filter, ChevronDown, ChevronUp, MessageSquare, Send,
-  Bell, BellOff, Info
+  Bell, BellOff, Info, Link2
 } from "lucide-react";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,6 +60,11 @@ interface AdminSubscription {
   endDate: string;
   remainingDays: number | null;
   status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني";
+  linkedProperty?: string | null;
+  linkedProperties?: string[];
+  propertyCount?: number;
+  isLinkedChild?: boolean;
+  linkedGroupName?: string | null;
 }
 
 export default function AdminSubscriptionsSection() {
@@ -470,6 +475,18 @@ export default function AdminSubscriptionsSection() {
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-bold text-[#434040]">{sub.name}</span>
                     <span className="text-sm text-muted-foreground">({sub.propertyNumber})</span>
+                    {sub.isLinkedChild && (
+                      <Badge variant="outline" className="text-xs gap-1 border-blue-300 text-blue-700">
+                        <Link2 className="w-3 h-3" />
+                        مرتبط بـ {sub.linkedGroupName || sub.linkedProperty}
+                      </Badge>
+                    )}
+                    {!sub.isLinkedChild && sub.linkedProperties && sub.linkedProperties.length > 0 && (
+                      <Badge variant="outline" className="text-xs gap-1 border-emerald-300 text-emerald-700">
+                        <Link2 className="w-3 h-3" />
+                        رئيسي ({sub.propertyCount || sub.linkedProperties.length + 1} عقارات)
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 text-sm text-muted-foreground">
                     {sub.status !== "نشط مجاني" && (

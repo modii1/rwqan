@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users } from "lucide-react";
+import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LinkIcon } from "lucide-react";
 
@@ -24,6 +24,10 @@ interface LinkedProperty {
   mainPropertyName: string;
   mainPropertyCity: string;
   mainPropertyWhatsapp: string;
+  mainPropertyNumber?: string;
+  mainSubscriptionType?: string;
+  mainEndDate?: string;
+  isMismatched?: boolean;
   verificationStatus: string;
   subscriptionStatus: string;
   endDate: string | undefined;
@@ -166,6 +170,54 @@ export default function LinkedPropertiesSection() {
     },
   });
 
+  // Sync (reconcile) a single linked group — forces the linked property to match the main
+  const syncMutation = useMutation({
+    mutationFn: async (mainPropertyNumber: string) => {
+      const res = await fetch("/api/admin/subscriptions/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyNumber: mainPropertyNumber }),
+      });
+      if (!res.ok) throw new Error("فشل في مزامنة العقار المرتبط");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "تمت المزامنة ✓",
+        description: data?.fixed > 0
+          ? `تم إصلاح ${data.fixed} عقار مرتبط`
+          : "العقار المرتبط متطابق بالفعل",
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-linked-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-subscriptions"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Sync ALL linked groups at once
+  const syncAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/subscriptions/reconcile-all", { method: "POST" });
+      if (!res.ok) throw new Error("فشل في مزامنة جميع العقارات");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "تمت المزامنة الشاملة ✓",
+        description: `تم إصلاح ${data?.propertiesFixed || 0} عقار من ${data?.groupsReconciled || 0} مجموعة`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-linked-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-subscriptions"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    },
+  });
+
   const filteredData = (data?.data || []).filter((p) => {
     if (!filter) return true;
     const normalizedFilter = filter.toLowerCase();
@@ -210,6 +262,16 @@ export default function LinkedPropertiesSection() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            onClick={() => syncAllMutation.mutate()}
+            disabled={syncAllMutation.isPending}
+            variant="outline"
+            className="gap-2"
+            title="مزامنة جميع العقارات المرتبطة لتتطابق مع العقار الرئيسي"
+          >
+            {syncAllMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            مزامنة الكل
+          </Button>
           <Button onClick={() => setShowCreateGroup(true)} className="gap-2">
             <Plus className="w-4 h-4" />
             إنشاء مجموعة
@@ -265,6 +327,15 @@ export default function LinkedPropertiesSection() {
         </Card>
       </div>
 
+      {/* Info banner */}
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 text-sm">
+        <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+        <div className="text-blue-800 dark:text-blue-300">
+          العقار المضاف يرث حالة العقار الرئيسي: نفس نوع الاشتراك، نفس تاريخ الانتهاء، ونفس حالة التحقق.
+          عند تفعيل دفعة العقار الرئيسي يتم تفعيل العقار المضاف تلقائياً. الصفوف الحمراء تشير إلى عدم تطابق — استخدم زر المزامنة للإصلاح.
+        </div>
+      </div>
+
       {/* Table */}
       <Card className="overflow-x-auto">
         {isLoading ? (
@@ -281,7 +352,9 @@ export default function LinkedPropertiesSection() {
                 <Th>المدينة</Th>
                 <Th>النوع</Th>
                 <Th>العقار الرئيسي</Th>
+                <Th>نوع الاشتراك</Th>
                 <Th>حالة الاشتراك</Th>
+                <Th>التحقق</Th>
                 <Th>تاريخ الانتهاء</Th>
                 <Th>تحكم</Th>
               </tr>
@@ -289,7 +362,7 @@ export default function LinkedPropertiesSection() {
             <tbody>
               {filteredData.length > 0 ? (
                 filteredData.map((p) => (
-                  <tr key={p.propertyNumber} className="border-t hover:bg-muted/30 transition-colors">
+                  <tr key={p.propertyNumber} className={`border-t hover:bg-muted/30 transition-colors ${p.isMismatched ? "bg-red-50/50 dark:bg-red-950/20" : ""}`}>
                     <Td>
                       <div className="font-mono font-bold text-primary">#{p.propertyNumber}</div>
                     </Td>
@@ -305,7 +378,29 @@ export default function LinkedPropertiesSection() {
                         <span className="text-xs text-muted-foreground">#{p.linkedProperty}</span>
                       </div>
                     </Td>
+                    <Td>
+                      <div className="flex flex-col">
+                        <Badge variant="secondary" className="w-fit">{p.subscriptionType || "عادي"}</Badge>
+                        {p.mainSubscriptionType && p.subscriptionType !== p.mainSubscriptionType && (
+                          <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            الرئيسي: {p.mainSubscriptionType}
+                          </span>
+                        )}
+                      </div>
+                    </Td>
                     <Td>{getStatusBadge(p.subscriptionStatus)}</Td>
+                    <Td>
+                      {p.verificationStatus === "approved" ? (
+                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">موثّق</Badge>
+                      ) : p.verificationStatus === "pending" ? (
+                        <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">معلق</Badge>
+                      ) : p.verificationStatus === "rejected" ? (
+                        <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">مرفوض</Badge>
+                      ) : (
+                        <Badge variant="secondary">{p.verificationStatus || "-"}</Badge>
+                      )}
+                    </Td>
                     <Td>
                       {p.endDate ? (
                         <div className="flex items-center gap-1">
@@ -318,6 +413,17 @@ export default function LinkedPropertiesSection() {
                     </Td>
                     <Td>
                       <div className="flex items-center gap-1">
+                        {p.isMismatched && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => p.mainPropertyNumber && syncMutation.mutate(p.mainPropertyNumber)}
+                            disabled={syncMutation.isPending}
+                            title="مزامنة مع العقار الرئيسي (إصلاح عدم التطابق)"
+                          >
+                            <RefreshCw className="w-4 h-4 text-red-500" />
+                          </Button>
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -356,7 +462,7 @@ export default function LinkedPropertiesSection() {
                 ))
               ) : (
                 <tr>
-                  <Td colSpan={8}>
+                  <Td colSpan={10}>
                     <div className="p-8 text-center text-muted-foreground">
                       <Home className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
                       <p className="text-lg font-medium mb-1">لا توجد عقارات مضافة</p>
@@ -405,11 +511,40 @@ export default function LinkedPropertiesSection() {
                 <h3 className="font-bold text-primary mb-3">الاشتراك</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <DetailItem label="نوع الاشتراك" value={selectedProperty.subscriptionType} />
+                  <DetailItem label="نوع اشتراك الرئيسي" value={selectedProperty.mainSubscriptionType || "-"} />
                   <DetailItem label="حالة الاشتراك" value={selectedProperty.subscriptionStatus} />
+                  <DetailItem label="حالة التحقق" value={
+                    selectedProperty.verificationStatus === "approved" ? "موثّق" :
+                    selectedProperty.verificationStatus === "pending" ? "معلق" :
+                    selectedProperty.verificationStatus === "rejected" ? "مرفوض" :
+                    selectedProperty.verificationStatus || "-"
+                  } />
                   <DetailItem label="تاريخ البدء" value={formatDate(selectedProperty.startDate)} />
                   <DetailItem label="تاريخ الانتهاء" value={formatDate(selectedProperty.endDate)} />
+                  <DetailItem label="تاريخ انتهاء الرئيسي" value={formatDate(selectedProperty.mainEndDate)} />
                   <DetailItem label="الباقة" value={selectedProperty.packageId} />
                 </div>
+                {selectedProperty.isMismatched && (
+                  <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+                    <div className="text-sm text-red-700 dark:text-red-300">
+                      يوجد عدم تطابق مع العقار الرئيسي. اضغط زر المزامنة بالأسفل للإصلاح.
+                    </div>
+                  </div>
+                )}
+                {selectedProperty.isMismatched && selectedProperty.mainPropertyNumber && (
+                  <Button
+                    onClick={() => {
+                      syncMutation.mutate(selectedProperty.mainPropertyNumber!);
+                      setSelectedProperty(null);
+                    }}
+                    disabled={syncMutation.isPending}
+                    className="w-full mt-3 gap-2"
+                  >
+                    {syncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    مزامنة مع العقار الرئيسي
+                  </Button>
+                )}
               </div>
               {selectedProperty.prices && (
                 <div className="border-t pt-4">

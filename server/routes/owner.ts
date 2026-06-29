@@ -1503,6 +1503,27 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     } as any);
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
+    // للتمديد/الترقية بالبطاقة: احفظ التواريخ المعلقة (محدودة بـ40 يوماً) حتى يتمكن
+    // الـ webhook من تفعيل الاشتراك بالتواريخ الصحيحة. بدون هذا لا يجد الـ webhook
+    // pendingEndDate فلا يُفعّل تمديد/ترقية البطاقة أبداً.
+    if (action === 'extend' || action === 'upgrade') {
+      const cardToday = getStartOfDayRiyadh();
+      const currentSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+      let cardStart = cardToday;
+      let cardEnd = calculateSubscriptionEndDate(null, pkg.duration);
+      if (action === 'extend' && currentSub && new Date(currentSub.endDate) > cardToday) {
+        cardStart = new Date(currentSub.endDate);
+        cardEnd = calculateExtensionEndDate(cardStart, pkg.duration);
+      }
+      await paymentService.update(payment.id, {
+        action,
+        pendingStartDate: formatDateRiyadh(cardStart),
+        pendingEndDate: formatDateRiyadh(cardEnd),
+        pendingPrice: finalAmount,
+        pendingSubscriptionType: (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0) ? "مميز" : "عادي",
+      });
+    }
+
     const paymentReference = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     await paymentService.update(payment.id, { paymentReference });
 
@@ -1854,14 +1875,12 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
     // Update property fields
     await firebaseService.updateProperty(additionalPropertyNumber, {
       subscriptionType: ownerProperty.subscriptionType || "مميز",
-      pendingApprovalFrom: ""
+      pendingApprovalFrom: "" as any
     });
 
-    // Auto-verify if data is complete
-    const dataCheck = await checkPropertyDataComplete(additionalProperty);
-    if (dataCheck.isComplete) {
-      await firebaseService.updateVerificationStatus(additionalPropertyNumber, "approved");
-    }
+    // العقار المضاف يرث حالة التحقق من العقار الرئيسي — يُوافق عليه تلقائياً
+    // (بدلاً من تركه معلقاً/مرفوضاً مما يُظهر العقار الرئيسي نشطاً والمضاف غير نشط)
+    await firebaseService.updateVerificationStatus(additionalPropertyNumber, "approved");
 
     res.json({
       ok: true,
@@ -2173,27 +2192,24 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
 
     console.log(`✅ [Owner Confirm] Subscription activated for: ${propertyNumber}`);
 
-    // Auto-renew linked properties with same dates
+    // Auto-renew linked properties with same dates — sync BOTH subscription doc AND property doc
+    // so the linked property always reflects the same state as the main (fixes "active parent, inactive linked").
     const currentLinkedProperties = currentSubscription?.linkedProperties || [];
     if (currentLinkedProperties.length > 0) {
       console.log(`🔗 [Owner Confirm] Auto-renewing ${currentLinkedProperties.length} linked properties`);
-      
+
+      const linkedSyncData = {
+        subscriptionType: isPremium ? "مميز" : "عادي",
+        startDate: newStartDate.toISOString(),
+        endDate: newEndDate.toISOString(),
+        status: 'نشط' as string,
+        paymentId: paymentId,
+        packageId: packageId,
+      };
+
       for (const linkedPropNum of currentLinkedProperties) {
-        const linkedProperty = await firebaseService.getPropertyByNumber(linkedPropNum);
-        const linkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(linkedPropNum);
-        
-        if (linkedSubscription) {
-          await firebaseService.updateSubscription(linkedSubscription.id, {
-            startDate: newStartDate.toISOString(),
-            endDate: newEndDate.toISOString(),
-            packageId: packageId,
-            subscriptionType: isPremium ? "مميز" : "عادي",
-            packageType: isPremium ? "مميز" : "عادي",
-            status: 'نشط',
-            paymentId: paymentId,
-          });
-          console.log(`✅ [Owner Confirm] Updated linked property ${linkedPropNum} subscription to match main property dates (paymentId: ${paymentId})`);
-        }
+        await firebaseService.syncLinkedProperty(linkedPropNum, propertyNumber, linkedSyncData);
+        console.log(`✅ [Owner Confirm] Synced linked property ${linkedPropNum} (sub + property doc + verification=approved)`);
       }
     }
 
@@ -2213,14 +2229,18 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
         propertyCount: maxProperties + 1
       });
       
-      // Clear linkedProperty on unlinked subscriptions (keep subscriptions as-is)
+      // Mark unlinked properties clearly: detach from group but keep subscription until expiry
       for (const propNum of toUnlink) {
         const unlinkedSub = await firebaseService.getSubscriptionByPropertyNumber(propNum);
         if (unlinkedSub) {
+          const detachedEndDate = unlinkedSub.endDate || newEndDate.toISOString();
           await firebaseService.updateSubscription(unlinkedSub.id, {
-            linkedProperty: ""
+            linkedProperty: "",
+            status: new Date(detachedEndDate) > new Date() ? "نشط" : "منتهي",
           });
-          console.log(`✅ [Owner Confirm] Unlinked property ${propNum} - subscription kept active until expiry`);
+          // Reflect detachment on the property doc too so the admin dashboard shows it consistently
+          await firebaseService.updateProperty(propNum, { linkedProperty: "" });
+          console.log(`✅ [Owner Confirm] Detached property ${propNum} — subscription kept until ${detachedEndDate}`);
         }
       }
     }

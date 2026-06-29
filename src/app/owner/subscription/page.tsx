@@ -507,7 +507,7 @@ export default function OwnerSubscriptionPage() {
     ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
     : 0;
   
-  const displayDays = Math.min(Math.max(0, remainingDays), 40);
+  const displayDays = Math.max(0, remainingDays);
   const isExpired = remainingDays < 0;
   const isNearExpiry = remainingDays >= 0 && remainingDays <= 7;
   const canExtend = subscription?.endDate

@@ -120,6 +120,22 @@ const router = Router();
                   await firebaseService.updateVerificationStatus(propertyNumber, "approved");
                 }
                 console.log("✅ Payment auto-verified and completed:", payment.id);
+
+                // Sync linked/additional properties so they inherit the main's verified state.
+                // The GET path doesn't activate subscriptions (POST does that), but it MUST keep
+                // linked property verification in sync — otherwise the parent shows approved while
+                // children stay pending/rejected.
+                const additionalProps: string[] = (payment as any).additionalProperties || [];
+                const secondProp = (payment as any).secondPropertyNumber;
+                if (secondProp && !additionalProps.includes(secondProp)) {
+                  additionalProps.push(secondProp);
+                }
+                for (const linkedNum of additionalProps) {
+                  if (linkedNum && linkedNum !== propertyNumber) {
+                    await firebaseService.updateVerificationStatus(linkedNum, "approved");
+                    console.log(`✅ [Webhook GET] Linked property ${linkedNum} verified (inherits main's approval)`);
+                  }
+                }
               } else {
                 await paymentService.update(payment.id, {
                   status: "مرفوض" as any,
@@ -642,15 +658,10 @@ const router = Router();
               );
               console.log(`🎉 Additional property subscription activated: ${propNumber} (price: ${pricePerProperty})`);
 
-              // التحقق الذكي للعقار الإضافي
-              const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
-              if (additionalDataCheck.isComplete) {
-                await firebaseService.updateVerificationStatus(propNumber, "approved");
-                console.log(`✅ [Smart Verify] العقار الإضافي ${propNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
-              } else {
-                await firebaseService.updateVerificationStatus(propNumber, "rejected");
-                console.log(`❌ [Smart Verify] العقار الإضافي ${propNumber} - بيانات ناقصة: ${additionalDataCheck.missingFields.join(', ')} - تم الرفض`);
-              }
+              // Linked properties inherit the main's verified state — force approved (do NOT reject
+              // on incomplete data, which previously left linked properties inactive while main was active).
+              await firebaseService.updateVerificationStatus(propNumber, "approved");
+              console.log(`✅ [Webhook] العقار الإضافي ${propNumber} - تمت الموافقة تلقائياً (مرتبط بالعقار الرئيسي)`);
             }
           }
 
@@ -725,13 +736,9 @@ const router = Router();
               );
               console.log(`🎉 Additional property subscription created: ${propNumber}`);
 
-              // التحقق الذكي للعقار الإضافي
-              const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
-              if (additionalDataCheck.isComplete) {
-                await firebaseService.updateVerificationStatus(propNumber, "approved");
-              } else {
-                await firebaseService.updateVerificationStatus(propNumber, "rejected");
-              }
+              // Linked properties inherit the main's verified state — force approved
+              await firebaseService.updateVerificationStatus(propNumber, "approved");
+              console.log(`✅ [Webhook] العقار الإضافي ${propNumber} - تمت الموافقة تلقائياً (مرتبط بالعقار الرئيسي)`);
             }
           }
 

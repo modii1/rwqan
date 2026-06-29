@@ -134,6 +134,14 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         endDate: sub.endDate,
         remainingDays,
         status,
+        // Linked-group awareness for the admin dashboard
+        linkedProperty: subWithType.linkedProperty || null,
+        linkedProperties: subWithType.linkedProperties || [],
+        propertyCount: subWithType.propertyCount || 1,
+        isLinkedChild: !!subWithType.linkedProperty,
+        linkedGroupName: subWithType.linkedProperty
+          ? (properties.find(p => p.propertyNumber === subWithType.linkedProperty)?.name || subWithType.linkedProperty)
+          : null,
       };
     });
 
@@ -397,6 +405,70 @@ router.post("/api/admin/subscription/link", async (req, res) => {
   } catch (error) {
     console.error("Error linking properties:", error);
     res.status(500).json({ error: "فشل في ربط العقارات" });
+  }
+});
+
+// ======================
+// 🔧 مزامنة / إصلاح العقارات المرتبطة (Reconcile)
+// ======================
+
+// Reconcile a single linked group (force all linked properties to match the main)
+router.post("/api/admin/subscriptions/reconcile", async (req, res) => {
+  try {
+    const { propertyNumber } = req.body;
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
+    }
+    const result = await firebaseService.reconcileLinkedGroup(propertyNumber, true);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Error reconciling linked group:", error);
+    res.status(500).json({ error: "فشل في مزامنة العقارات المرتبطة" });
+  }
+});
+
+// Audit all linked groups (read-only report of inconsistencies)
+router.get("/api/admin/subscriptions/reconcile-audit", async (req, res) => {
+  try {
+    const subscriptions = await firebaseService.getSubscriptions();
+    // Only main properties (those with a linkedProperties array)
+    const mains = subscriptions.filter(s => s.linkedProperties && s.linkedProperties.length > 0);
+
+    const reports = [];
+    let totalInconsistencies = 0;
+    for (const main of mains) {
+      const report = await firebaseService.reconcileLinkedGroup(main.propertyNumber, false);
+      if (report.inconsistencies.length > 0) {
+        reports.push(report);
+        totalInconsistencies += report.inconsistencies.length;
+      }
+    }
+    res.json({ success: true, groupsAudited: mains.length, groupsWithIssues: reports.length, totalInconsistencies, reports });
+  } catch (error) {
+    console.error("Error auditing linked groups:", error);
+    res.status(500).json({ error: "فشل في تدقيق العقارات المرتبطة" });
+  }
+});
+
+// Reconcile ALL linked groups at once (apply fixes)
+router.post("/api/admin/subscriptions/reconcile-all", async (req, res) => {
+  try {
+    const subscriptions = await firebaseService.getSubscriptions();
+    const mains = subscriptions.filter(s => s.linkedProperties && s.linkedProperties.length > 0);
+
+    let totalFixed = 0;
+    const results = [];
+    for (const main of mains) {
+      const result = await firebaseService.reconcileLinkedGroup(main.propertyNumber, true);
+      if (result.fixed > 0) {
+        results.push({ propertyNumber: main.propertyNumber, fixed: result.fixed });
+        totalFixed += result.fixed;
+      }
+    }
+    res.json({ success: true, groupsReconciled: mains.length, propertiesFixed: totalFixed, results });
+  } catch (error) {
+    console.error("Error reconciling all linked groups:", error);
+    res.status(500).json({ error: "فشل في مزامنة جميع العقارات المرتبطة" });
   }
 });
 

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, MapPin, Compass, Home, Phone, Moon } from "lucide-react";
+import { ArrowRight, MapPin, Compass, Home, Phone, Moon, Sparkles } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
@@ -355,18 +355,21 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     if (isError) {
         return (
-            <div className="min-h-screen bg-background flex items-center justify-center">
-                <Card className="p-8 text-center space-y-4">
-                    <h2 className="text-xl font-bold mb-2">تعذر تحميل البيانات</h2>
-                    <p className="text-sm text-muted-foreground">
+            <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 flex items-center justify-center px-4">
+                <Card className="p-10 text-center space-y-5 max-w-md border-border/60 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.18)] rounded-3xl animate-in fade-in zoom-in-95 duration-500">
+                    <div className="w-16 h-16 mx-auto rounded-2xl bg-destructive/10 flex items-center justify-center">
+                        <Home className="w-8 h-8 text-destructive/70" />
+                    </div>
+                    <h2 className="text-2xl font-bold tracking-tight">تعذر تحميل البيانات</h2>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
                         حدث خطأ أثناء الاتصال بالخادم. تأكد من الاتصال بالإنترنت ثم حاول مرة
                         أخرى.
                     </p>
-                    <div className="flex justify-center gap-3">
-                        <Button onClick={() => window.location.reload()}>
+                    <div className="flex justify-center gap-3 pt-2">
+                        <Button onClick={() => window.location.reload()} className="rounded-xl shadow-sm">
                             إعادة المحاولة
                         </Button>
-                        <Button variant="outline" onClick={() => router.push("/")}>
+                        <Button variant="outline" onClick={() => router.push("/")} className="rounded-xl">
                             العودة للرئيسية
                         </Button>
                     </div>
@@ -378,12 +381,13 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     // حالة التحميل مع Skeleton
     if (isLoading || !property) {
         return (
-            <div className="min-h-screen bg-background">
-                <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
-                    <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+            <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
+                <header className="bg-card/80 backdrop-blur-xl border-b border-border/60 shadow-sm sticky top-0 z-10">
+                    <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center gap-3">
                         <Button
                             variant="ghost"
                             size="icon"
+                            className="rounded-xl"
                             onClick={() => {
                                 if (window.history.length > 1) {
                                     router.back();
@@ -395,40 +399,34 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                             <ArrowRight className="w-5 h-5" />
                         </Button>
                         <div className="flex-1">
-                            <div className="h-5 w-32 bg-muted animate-pulse rounded" />
-                            <div className="h-3 w-20 bg-muted animate-pulse rounded mt-1" />
+                            <div className="h-5 w-36 bg-muted shimmer rounded-lg" />
+                            <div className="h-3 w-24 bg-muted shimmer rounded-lg mt-1.5" />
                         </div>
                     </div>
                 </header>
                 <div className="max-w-7xl mx-auto px-4 py-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 space-y-4">
-                            <Card className="overflow-hidden">
-                                <div className="aspect-video bg-muted animate-pulse flex items-center justify-center">
-                                    <Home className="w-16 h-16 text-muted-foreground/30" />
+                        <div className="lg:col-span-2 space-y-5">
+                            <Card className="overflow-hidden rounded-3xl border-border/60">
+                                <div className="aspect-video bg-muted shimmer flex items-center justify-center">
+                                    <Home className="w-16 h-16 text-muted-foreground/20" />
                                 </div>
                             </Card>
-                            <Card className="p-6">
-                                <div className="h-6 w-32 bg-muted animate-pulse rounded mb-4" />
-                                <div className="flex flex-wrap gap-6">
+                            <Card className="p-7 rounded-3xl border-border/60">
+                                <div className="h-6 w-36 bg-muted shimmer rounded-lg mb-5" />
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                     {[1, 2, 3, 4].map((i) => (
-                                        <div
-                                            key={i}
-                                            className="h-12 w-24 bg-muted animate-pulse rounded"
-                                        />
+                                        <div key={i} className="h-20 bg-muted shimmer rounded-2xl" />
                                     ))}
                                 </div>
                             </Card>
                         </div>
-                        <div className="space-y-4">
-                            <Card className="p-6">
-                                <div className="h-6 w-20 bg-muted animate-pulse rounded mb-4" />
-                                <div className="space-y-3">
+                        <div className="space-y-5">
+                            <Card className="p-7 rounded-3xl border-border/60">
+                                <div className="h-6 w-24 bg-muted shimmer rounded-lg mb-5" />
+                                <div className="space-y-3.5">
                                     {[1, 2, 3].map((i) => (
-                                        <div
-                                            key={i}
-                                            className="h-8 bg-muted animate-pulse rounded"
-                                        />
+                                        <div key={i} className="h-9 bg-muted shimmer rounded-xl" />
                                     ))}
                                 </div>
                             </Card>
@@ -535,19 +533,36 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
         }
     };
 
+    // ===== سمة العرض: مميّز مقابل عادي =====
+    const premium = isVerified(property);
+
     return (
-        <div className="min-h-screen bg-background">
+        <div
+            className={`min-h-screen transition-colors ${premium
+                ? "bg-gradient-to-b from-[#fdfbf4] via-background to-[#faf6ea] dark:from-[#13110a] dark:via-background dark:to-[#100e08]"
+                : "bg-gradient-to-b from-background to-muted/20"
+                }`}
+        >
             {/* ⭐ مؤشر السحب */}
             <EdgeSwipeIndicator />
 
             {/* ===== Header ===== */}
-            <header className="header-glass border-b border-border/50 shadow-soft sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+            <header
+                className={`backdrop-blur-xl border-b shadow-soft sticky top-0 z-20 ${premium
+                    ? "bg-card/70 border-amber-200/40 dark:border-amber-700/20"
+                    : "bg-card/70 border-border/50"
+                    }`}
+            >
+                {/* خيط ذهبي رفيع للمميّز فقط */}
+                {premium && (
+                    <div className="h-0.5 w-full bg-gradient-to-l from-transparent via-[#d4af37] to-transparent opacity-70 shimmer-gold" />
+                )}
+                <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center gap-3">
                     {/* زر الرجوع */}
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="rounded-xl hover:bg-primary/10 transition-colors"
+                        className="rounded-xl hover:bg-primary/10 hover:-translate-x-0.5 transition-all duration-200"
                         onClick={() => {
                             if (window.history.length > 1) {
                                 router.back();
@@ -559,18 +574,19 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                         <ArrowRight className="w-5 h-5" />
                     </Button>
 
-                    <div className="flex-1">
-                        <h1 className="text-lg font-bold text-primary truncate">
+                    <div className="flex-1 min-w-0">
+                        <h1 className="text-lg font-bold text-primary truncate tracking-tight">
                             {displayName || `عقار رقم ${property.propertyNumber}`}
                         </h1>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground font-medium">
                             عقار رقم {property.propertyNumber}
                         </p>
                     </div>
 
                     {/* شارة موثوق */}
-                    {isVerified(property) && (
-                        <Badge className="bg-primary/10 text-primary border-primary/30 text-xs glass-sm px-3 py-1">
+                    {premium && (
+                        <Badge className="bg-gradient-to-l from-[#d4af37] to-[#b8932f] text-white border-0 text-xs px-3 py-1.5 gap-1 shadow-[0_2px_12px_-2px_rgba(212,175,55,0.6)] rounded-full animate-in fade-in slide-in-from-top-1 duration-500">
+                            <Sparkles className="w-3 h-3" />
                             مميز
                         </Badge>
                     )}
@@ -578,18 +594,20 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             </header>
 
             {/* ===== Content ===== */}
-            <div className="max-w-7xl mx-auto px-4 py-6">
+            <div className="max-w-7xl mx-auto px-4 py-6 md:py-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* ===== الصور ===== */}
-                    <div className="lg:col-span-2 space-y-4">
+                    <div className="lg:col-span-2 space-y-5">
                         <Card
-                            className={`overflow-hidden shadow-soft hover:shadow-card-hover transition-shadow duration-300 ${isVerified(property) ? "ring-2 ring-primary/20" : ""
+                            className={`overflow-hidden rounded-3xl transition-all duration-500 animate-in fade-in slide-in-from-bottom-2 ${premium
+                                ? "border-amber-200/50 dark:border-amber-700/25 ring-1 ring-[#d4af37]/25 shadow-[0_12px_48px_-18px_rgba(184,147,47,0.4)] hover:shadow-[0_16px_56px_-18px_rgba(184,147,47,0.5)]"
+                                : "border-border/60 shadow-[0_8px_40px_-16px_rgba(0,0,0,0.2)] hover:shadow-[0_12px_48px_-16px_rgba(0,0,0,0.28)]"
                                 }`}
                         >
                             {images.length > 0 ? (
                                 <>
                                     <div
-                                        className="relative aspect-video bg-muted select-none img-zoom"
+                                        className="relative aspect-video bg-muted select-none img-zoom group"
                                         onTouchStart={handleTouchStart}
                                         onTouchEnd={handleTouchEnd}
                                     >
@@ -604,14 +622,15 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
                                         {/* Skeleton أثناء تحميل الصورة */}
                                         {!imageLoaded && (
-                                            <div className="absolute inset-0 bg-muted animate-pulse flex items-center justify-center">
-                                                <Home className="w-16 h-16 text-muted-foreground/30" />
+                                            <div className="absolute inset-0 bg-muted shimmer flex items-center justify-center">
+                                                <Home className="w-16 h-16 text-muted-foreground/20" />
                                             </div>
                                         )}
                                         <img
+                                            key={selectedImage}
                                             src={images[selectedImage]}
                                             alt={`صورة ${selectedImage + 1}`}
-                                            className={`w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+                                            className={`w-full h-full object-cover transition-all duration-500 ease-out ${imageLoaded ? "opacity-100 scale-100" : "opacity-0 scale-105"}`}
                                             loading="eager"
                                             decoding="async"
                                             data-testid="img-main"
@@ -619,17 +638,28 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                             onLoad={() => setImageLoaded(true)}
                                         />
 
+                                        {/* تدرّج خفيف أسفل الصورة لإبراز العدّاد */}
+                                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/35 to-transparent opacity-90" />
+
+                                        {/* عدّاد الصور */}
+                                        {images.length > 1 && (
+                                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/45 backdrop-blur-md text-white text-xs font-medium tabular-nums tracking-wide">
+                                                {selectedImage + 1} / {images.length}
+                                            </div>
+                                        )}
+
                                         {images.length > 1 && (
                                             <>
                                                 {/* الزر على اليمين — الآن يروح للصورة "التالية" — والشكل سهم احترافي */}
                                                 <button
                                                     type="button"
+                                                    aria-label="الصورة التالية"
                                                     onClick={() =>
                                                         setSelectedImage(
                                                             (prev) => (prev + 1) % images.length,
                                                         )
                                                     }
-                                                    className="absolute inset-y-0 right-2 my-auto h-10 w-10 rounded-full glass-md flex items-center justify-center text-foreground text-sm hover:bg-background/90 transition-all duration-200 hover:scale-105 shadow-lg"
+                                                    className="absolute inset-y-0 right-3 my-auto h-11 w-11 rounded-full bg-white/85 backdrop-blur-md flex items-center justify-center text-foreground shadow-[0_4px_16px_-4px_rgba(0,0,0,0.3)] hover:bg-white transition-all duration-200 hover:scale-110 active:scale-95 md:opacity-0 md:group-hover:opacity-100"
                                                 >
                                                     {/* شكل جديد للسهم ← للداخل (Next) */}
                                                     <svg
@@ -638,7 +668,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                                         fill="none"
                                                         viewBox="0 0 24 24"
                                                         stroke="currentColor"
-                                                        strokeWidth={2}
+                                                        strokeWidth={2.2}
                                                     >
                                                         <path
                                                             strokeLinecap="round"
@@ -651,13 +681,14 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                                 {/* الزر على اليسار — الآن يروح للصورة "السابقة" — والشكل سهم احترافي */}
                                                 <button
                                                     type="button"
+                                                    aria-label="الصورة السابقة"
                                                     onClick={() =>
                                                         setSelectedImage(
                                                             (prev) =>
                                                                 (prev - 1 + images.length) % images.length,
                                                         )
                                                     }
-                                                    className="absolute inset-y-0 left-2 my-auto h-10 w-10 rounded-full glass-md flex items-center justify-center text-foreground text-sm hover:bg-background/90 transition-all duration-200 hover:scale-105 shadow-lg"
+                                                    className="absolute inset-y-0 left-3 my-auto h-11 w-11 rounded-full bg-white/85 backdrop-blur-md flex items-center justify-center text-foreground shadow-[0_4px_16px_-4px_rgba(0,0,0,0.3)] hover:bg-white transition-all duration-200 hover:scale-110 active:scale-95 md:opacity-0 md:group-hover:opacity-100"
                                                 >
                                                     {/* شكل جديد للسهم → للخارج (Prev) */}
                                                     <svg
@@ -666,7 +697,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                                         fill="none"
                                                         viewBox="0 0 24 24"
                                                         stroke="currentColor"
-                                                        strokeWidth={2}
+                                                        strokeWidth={2.2}
                                                     >
                                                         <path
                                                             strokeLinecap="round"
@@ -680,14 +711,16 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     </div>
 
                                     {images.length > 1 && (
-                                                    <div className="p-4 bg-muted/20 flex gap-2 overflow-x-auto custom-scrollbar">
+                                        <div className="p-4 bg-muted/30 flex gap-2.5 overflow-x-auto custom-scrollbar">
                                             {images.map((img, idx) => (
                                                 <button
                                                     key={idx}
                                                     onClick={() => setSelectedImage(idx)}
-                                                    className={`flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden transition-all duration-300 ${selectedImage === idx
-                                                            ? "ring-2 ring-primary shadow-golden scale-105"
-                                                            : "opacity-60 hover:opacity-100 hover:scale-105"
+                                                    className={`flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden transition-all duration-300 ${selectedImage === idx
+                                                        ? premium
+                                                            ? "ring-2 ring-[#d4af37] ring-offset-2 ring-offset-background shadow-golden scale-105"
+                                                            : "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105"
+                                                        : "opacity-55 hover:opacity-100 hover:scale-105 ring-1 ring-border/40"
                                                         }`}
                                                     data-testid={`button-thumbnail-${idx}`}
                                                     type="button"
@@ -706,72 +739,74 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     )}
                                 </>
                             ) : (
-                                <div className="aspect-video bg-muted flex items-center justify-center">
+                                <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
                                     <div className="text-center">
-                                        <Home className="w-16 h-16 mx-auto mb-2 text-muted-foreground" />
-                                        <p className="text-muted-foreground">لا توجد صور</p>
+                                        <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-background/60 flex items-center justify-center">
+                                            <Home className="w-8 h-8 text-muted-foreground" />
+                                        </div>
+                                        <p className="text-muted-foreground font-medium">لا توجد صور</p>
                                     </div>
                                 </div>
                             )}
                         </Card>
 
                         {/* ===== التفاصيل ===== */}
-                        <Card className="p-6">
-                            <h2 className="text-xl font-bold text-primary mb-4">
-                                تفاصيل العقار
-                            </h2>
+                        <Card
+                            className={`p-7 rounded-3xl shadow-[0_4px_24px_-12px_rgba(0,0,0,0.12)] animate-in fade-in slide-in-from-bottom-2 duration-500 ${premium
+                                ? "border-amber-200/50 dark:border-amber-700/25 bg-gradient-to-br from-[#fffdf7] to-card dark:from-amber-950/5 dark:to-card"
+                                : "border-border/60"
+                                }`}
+                            style={{ animationDelay: "80ms" }}
+                        >
+                            <div className="flex items-center gap-2.5 mb-6">
+                                <span className={`h-5 w-1 rounded-full ${premium ? "bg-[#d4af37]" : "bg-primary"}`} />
+                                <h2 className="text-xl font-bold text-primary tracking-tight">
+                                    تفاصيل العقار
+                                </h2>
+                            </div>
 
-                            <div className="flex flex-wrap items-center gap-6 mb-6">
-                                <div className="flex items-center gap-2">
-                                    <MapPin className="w-5 h-5 text-primary" />
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">المدينة</p>
-                                        <p className="font-semibold">
-                                            {property.city || "غير محدد"}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <Compass className="w-5 h-5 text-primary" />
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">الاتجاه</p>
-                                        <p className="font-semibold">
-                                            {property.direction || "غير محدد"}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <Home className="w-5 h-5 text-primary" />
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">النوع</p>
-                                        <p className="font-semibold">
-                                            {property.type || "غير محدد"}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <MapPin className="w-5 h-5 text-primary" />
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">الموقع</p>
-                                        <p className="font-semibold">
-                                            {property.location || "غير محدد"}
-                                        </p>
-                                    </div>
-                                </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-7">
+                                {[
+                                    { icon: MapPin, label: "المدينة", value: property.city },
+                                    { icon: Compass, label: "الاتجاه", value: property.direction },
+                                    { icon: Home, label: "النوع", value: property.type },
+                                    { icon: MapPin, label: "الموقع", value: property.location },
+                                ].map((item, i) => {
+                                    const Icon = item.icon;
+                                    return (
+                                        <div
+                                            key={i}
+                                            className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 ${premium
+                                                ? "bg-amber-50/40 border-amber-200/40 hover:bg-amber-50/70 hover:shadow-sm dark:bg-amber-950/10 dark:border-amber-800/20"
+                                                : "bg-muted/40 border-border/40 hover:bg-muted/60 hover:shadow-sm"
+                                                }`}
+                                        >
+                                            <div className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${premium ? "bg-[#d4af37]/15" : "bg-primary/10"}`}>
+                                                <Icon className={`w-5 h-5 ${premium ? "text-[#b8932f]" : "text-primary"}`} />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[11px] text-muted-foreground font-medium">{item.label}</p>
+                                                <p className="font-semibold truncate">
+                                                    {item.value || "غير محدد"}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
 
                             {property.facilities?.length > 0 && (
-                                <div>
-                                    <h3 className="font-bold mb-3">المرافق</h3>
+                                <div className="pt-5 border-t border-border/50">
+                                    <h3 className="font-bold mb-3.5 text-foreground/90">المرافق</h3>
                                     <div className="flex flex-wrap gap-2">
                                         {property.facilities.map((facility, idx) => (
                                             <Badge
                                                 key={idx}
                                                 variant="outline"
-                                                className="text-sm"
+                                                className={`text-sm font-medium px-3 py-1.5 rounded-full transition-all duration-200 hover:scale-105 ${premium
+                                                    ? "bg-amber-50/50 border-amber-200/60 text-amber-900 hover:bg-amber-100/60 dark:bg-amber-950/15 dark:text-amber-300 dark:border-amber-800/30"
+                                                    : "bg-muted/40 border-border/60 hover:bg-primary/5 hover:border-primary/30"
+                                                    }`}
                                                 data-testid={`badge-facility-${idx}`}
                                             >
                                                 {facility}
@@ -784,10 +819,13 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
                         {/* وصف العقار - للمميزة فقط */}
                         {property.subscriptionType?.includes("مميز") && seoData?.seoDescription && (
-                            <Card className="p-6 bg-gradient-to-l from-amber-50/30 to-transparent dark:from-amber-900/10 border-amber-200/50 dark:border-amber-700/30">
-                                <div className="flex items-center gap-2 mb-3">
+                            <Card className="p-7 rounded-3xl bg-gradient-to-l from-amber-50/60 to-transparent dark:from-amber-900/10 border-amber-200/60 dark:border-amber-700/30 shadow-[0_4px_24px_-12px_rgba(212,175,55,0.25)] animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                <div className="flex items-center gap-2.5 mb-4">
+                                    <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                                        <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                                    </div>
                                     <h3 className="text-lg font-bold text-primary">وصف العقار</h3>
-                                    <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-600">
+                                    <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-600 rounded-full">
                                         ميزة مميزة
                                     </Badge>
                                 </div>
@@ -797,28 +835,37 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     </div>
 
                     {/* ===== الأسعار + التواصل ===== */}
-                    <div className="space-y-4">
+                    <div className="space-y-5 lg:sticky lg:top-24 lg:self-start">
                         {/* الأسعار */}
-                        <Card className="p-6">
-                            <h3 className="text-lg font-bold text-primary mb-4">الأسعار</h3>
-                            <div className="space-y-3">
+                        <Card
+                            className={`p-7 rounded-3xl shadow-[0_4px_24px_-12px_rgba(0,0,0,0.12)] animate-in fade-in slide-in-from-bottom-2 duration-500 ${premium
+                                ? "border-amber-200/50 dark:border-amber-700/25 bg-gradient-to-br from-[#fffdf7] to-card dark:from-amber-950/5 dark:to-card"
+                                : "border-border/60"
+                                }`}
+                            style={{ animationDelay: "120ms" }}
+                        >
+                            <div className="flex items-center gap-2.5 mb-5">
+                                <span className={`h-5 w-1 rounded-full ${premium ? "bg-[#d4af37]" : "bg-primary"}`} />
+                                <h3 className="text-lg font-bold text-primary tracking-tight">الأسعار</h3>
+                            </div>
+                            <div className="space-y-2.5">
                                 {property.prices?.weekday && (
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground">وسط الأسبوع</span>
+                                    <div className={`flex justify-between items-center py-2.5 px-3.5 rounded-2xl transition-all duration-200 hover:translate-x-0.5 ${premium ? "bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/10" : "bg-muted/30 hover:bg-muted/50"}`}>
+                                        <span className="text-muted-foreground font-medium">وسط الأسبوع</span>
                                         <PriceDisplay amount={property.prices.weekday} size="md" />
                                     </div>
                                 )}
 
                                 {property.prices?.weekend && (
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground">نهاية الأسبوع</span>
+                                    <div className={`flex justify-between items-center py-2.5 px-3.5 rounded-2xl transition-all duration-200 hover:translate-x-0.5 ${premium ? "bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/10" : "bg-muted/30 hover:bg-muted/50"}`}>
+                                        <span className="text-muted-foreground font-medium">نهاية الأسبوع</span>
                                         <PriceDisplay amount={property.prices.weekend} size="md" />
                                     </div>
                                 )}
 
                                 {property.prices?.overnight && (
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground">مبيت</span>
+                                    <div className={`flex justify-between items-center py-2.5 px-3.5 rounded-2xl transition-all duration-200 hover:translate-x-0.5 ${premium ? "bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/10" : "bg-muted/30 hover:bg-muted/50"}`}>
+                                        <span className="text-muted-foreground font-medium">مبيت</span>
                                         <PriceDisplay
                                             amount={property.prices.overnight}
                                             size="md"
@@ -827,8 +874,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                 )}
 
                                 {property.prices?.holidays && (
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-muted-foreground">إجازات</span>
+                                    <div className={`flex justify-between items-center py-2.5 px-3.5 rounded-2xl transition-all duration-200 hover:translate-x-0.5 ${premium ? "bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-950/10" : "bg-muted/30 hover:bg-muted/50"}`}>
+                                        <span className="text-muted-foreground font-medium">إجازات</span>
                                         <PriceDisplay amount={property.prices.holidays} size="md" />
                                     </div>
                                 )}
@@ -837,9 +884,11 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
                         {/* عروض المناسبات - توفر الأيام */}
                         {activeOccasion && propertyOccasionData && (
-                            <Card className="p-6 border-[#2d6b45]/30 bg-gradient-to-br from-[#f0fdf4] to-[#fefce8]">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <Moon className="w-5 h-5 text-[#d4af37]" />
+                            <Card className="p-7 rounded-3xl border-[#2d6b45]/25 bg-gradient-to-br from-[#f0fdf4] to-[#fefce8] shadow-[0_4px_24px_-12px_rgba(45,107,69,0.2)] animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                <div className="flex items-center gap-2.5 mb-5">
+                                    <div className="w-9 h-9 rounded-xl bg-[#d4af37]/15 flex items-center justify-center">
+                                        <Moon className="w-5 h-5 text-[#d4af37]" />
+                                    </div>
                                     <h3 className="text-lg font-bold text-[#1a472a]">
                                         {activeOccasion.occasion.name}
                                     </h3>
@@ -848,47 +897,56 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     {activeOccasion.occasion.days?.map(day => (
                                         <div key={day.key} className="text-center">
                                             <div
-                                                className={`w-10 h-10 mx-auto rounded-full flex items-center justify-center mb-1 ${
+                                                className={`w-11 h-11 mx-auto rounded-2xl flex items-center justify-center mb-1.5 transition-transform hover:scale-110 ${
                                                     propertyOccasionData.availability[day.key]
-                                                        ? "bg-green-500 shadow-sm shadow-green-200"
-                                                        : "bg-gray-200 border border-gray-300"
+                                                        ? "bg-gradient-to-br from-green-500 to-green-600 shadow-md shadow-green-200"
+                                                        : "bg-gray-100 border border-gray-200"
                                                 }`}
                                             >
                                                 {propertyOccasionData.availability[day.key] && (
-                                                    <span className="text-white text-xs">✓</span>
+                                                    <span className="text-white text-sm font-bold">✓</span>
                                                 )}
                                             </div>
-                                            <p className="text-[10px] text-[#6b6b6b] leading-tight">{day.label}</p>
+                                            <p className="text-[10px] text-[#6b6b6b] leading-tight font-medium">{day.label}</p>
                                             {propertyOccasionData.prices[day.key] && propertyOccasionData.availability[day.key] && (
-                                                <div className="mt-0.5">
+                                                <div className="mt-1">
                                                     <PriceDisplay amount={propertyOccasionData.prices[day.key]} size="sm" />
                                                 </div>
                                             )}
                                         </div>
                                     ))}
                                 </div>
-                                <div className="flex items-center gap-3 mt-3 text-[10px] text-[#6b6b6b]">
-                                    <div className="flex items-center gap-1">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                                        <span>متوفر</span>
+                                <div className="flex items-center gap-4 mt-5 pt-4 border-t border-[#2d6b45]/15 text-[10px] text-[#6b6b6b]">
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-green-500 to-green-600" />
+                                        <span className="font-medium">متوفر</span>
                                     </div>
-                                    <div className="flex items-center gap-1">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-gray-200 border border-gray-300" />
-                                        <span>غير متوفر</span>
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-2.5 h-2.5 rounded-full bg-gray-100 border border-gray-200" />
+                                        <span className="font-medium">غير متوفر</span>
                                     </div>
                                 </div>
                             </Card>
                         )}
 
                         {/* التواصل */}
-                        <Card className="p-6">
-                            <h3 className="text-lg font-bold text-primary mb-4">التواصل</h3>
+                        <Card
+                            className={`p-7 rounded-3xl shadow-[0_4px_24px_-12px_rgba(0,0,0,0.12)] animate-in fade-in slide-in-from-bottom-2 duration-500 ${premium
+                                ? "border-amber-200/50 dark:border-amber-700/25 bg-gradient-to-br from-[#fffdf7] to-card dark:from-amber-950/5 dark:to-card"
+                                : "border-border/60"
+                                }`}
+                            style={{ animationDelay: "160ms" }}
+                        >
+                            <div className="flex items-center gap-2.5 mb-5">
+                                <span className={`h-5 w-1 rounded-full ${premium ? "bg-[#d4af37]" : "bg-primary"}`} />
+                                <h3 className="text-lg font-bold text-primary tracking-tight">التواصل</h3>
+                            </div>
                             <Button
                                 onClick={handleWhatsApp}
                                 disabled={isSending}
                                 className={`
-    w-full text-white 
-    ${isSending ? "bg-gray-400 cursor-not-allowed" : "bg-[#25D366] hover:bg-[#128C7E]"}
+    group/wa w-full text-white rounded-2xl h-12 text-base font-semibold shadow-[0_4px_20px_-6px_rgba(37,211,102,0.5)] transition-all duration-200 hover:shadow-[0_6px_24px_-6px_rgba(37,211,102,0.6)] hover:-translate-y-0.5 active:translate-y-0
+    ${isSending ? "bg-gray-400 cursor-not-allowed shadow-none hover:translate-y-0" : "bg-[#25D366] hover:bg-[#1eb858]"}
     ${shake ? "animate-shake" : ""}
   `}
                                 size="lg"
@@ -915,7 +973,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     </span>
                                 ) : (
                                     <>
-                                        <Phone className="w-5 h-5 ml-2" />
+                                        <Phone className="w-5 h-5 ml-2 transition-transform duration-200 group-hover/wa:rotate-12" />
                                         تواصل عبر واتساب
                                     </>
                                 )}

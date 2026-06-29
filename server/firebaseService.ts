@@ -36,7 +36,7 @@ import type {
     OcrResult,
     InsertOcrResult,
 } from "../shared/schema";
-import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate } from "./utils/dateUtils";
+import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate, capAtMaxDays } from "./utils/dateUtils";
 
 export class FirebaseService {
     private get db() {
@@ -192,7 +192,10 @@ export class FirebaseService {
 
     async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
         const id = `SUB-${propertyNumber}`;
-        const endDate = new Date(subscriptionData.endDate);
+        // فرض الحد الأقصى (40 يوماً من اليوم) كحاجز أخير — يمنع تسريب مدة 60 يوماً
+        // مهما كان المسار المستدعي. هذا هو نقطة التطبيق الوحيدة الموثوقة.
+        const cappedEndDate = capAtMaxDays(new Date(subscriptionData.endDate));
+        const endDate = cappedEndDate;
         const now = new Date();
 
         let status = "نشط";
@@ -206,7 +209,7 @@ export class FirebaseService {
             packageId: subscriptionData.packageId || "pkg-free",
             subscriptionType: subscriptionData.subscriptionType || "عادي",
             startDate: subscriptionData.startDate,
-            endDate: subscriptionData.endDate,
+            endDate: cappedEndDate.toISOString(),
             status: status as any,
             paymentId: subscriptionData.paymentId,
             linkedProperty: subscriptionData.linkedProperty || undefined,
@@ -326,6 +329,164 @@ export class FirebaseService {
 
         // Clear linkedProperty on property document
         await this.updateProperty(propertyNumber, { linkedProperty: "" });
+    }
+
+    /**
+     * Sync a single linked (child) property so its subscription doc AND property doc
+     * always match the main property's state. This is the single source of truth for
+     * keeping parent + child consistent — use it on every activation/renewal path.
+     *
+     * - Updates the child subscription doc (dates, type, status, paymentId)
+     * - Mirrors subscriptionType + subscriptionDate onto the child property doc
+     * - Forces verificationStatus = "approved" (linked props inherit the main's verified state)
+     */
+    async syncLinkedProperty(
+        linkedPropNum: string,
+        mainPropertyNumber: string,
+        data: {
+            subscriptionType: string;
+            startDate: string;
+            endDate: string;
+            status?: string;
+            paymentId?: string;
+            packageId?: string;
+        }
+    ): Promise<void> {
+        const childSubId = `SUB-${linkedPropNum}`;
+        const childSubRef = this.db.collection("subscriptions").doc(childSubId);
+        const childSubDoc = await childSubRef.get();
+
+        const subUpdates: any = {
+            startDate: data.startDate,
+            endDate: capAtMaxDays(new Date(data.endDate)).toISOString(),
+            subscriptionType: data.subscriptionType,
+            packageType: data.subscriptionType,
+            status: data.status || "نشط",
+            linkedProperty: mainPropertyNumber,
+            linkedProperties: null,
+            propertyCount: 1,
+            cancelledAt: null,
+            cancelReason: null,
+            updatedAt: new Date().toISOString(),
+        };
+        if (data.paymentId) subUpdates.paymentId = data.paymentId;
+        if (data.packageId) subUpdates.packageId = data.packageId;
+
+        if (childSubDoc.exists) {
+            await childSubRef.update(subUpdates);
+        } else {
+            await childSubRef.set({
+                id: childSubId,
+                propertyNumber: linkedPropNum,
+                ...subUpdates,
+                createdAt: new Date().toISOString(),
+            });
+        }
+
+        // Mirror onto the property document — this is the part that was missing and caused
+        // the "main active but linked inactive" bug.
+        await this.updateProperty(linkedPropNum, {
+            subscriptionType: data.subscriptionType as any,
+            verificationStatus: "approved",
+            linkedProperty: mainPropertyNumber,
+            pendingApprovalFrom: null as any,
+            subscriptionDate: data.startDate.split("T")[0],
+            lastUpdate: new Date().toISOString().split("T")[0],
+        });
+    }
+
+    /**
+     * Reconcile an entire linked group: force every linked property's subscription doc
+     * AND property doc to match the main property's subscription (type, dates, status).
+     * Returns a report of what was fixed. Safe to call repeatedly (idempotent).
+     *
+     * Pass `apply: false` for a read-only audit report.
+     */
+    async reconcileLinkedGroup(
+        mainPropertyNumber: string,
+        apply: boolean = true
+    ): Promise<{
+        mainPropertyNumber: string;
+        linkedProperties: string[];
+        inconsistencies: Array<{
+            propertyNumber: string;
+            field: string;
+            expected: any;
+            actual: any;
+        }>;
+        fixed: number;
+    }> {
+        const mainSub = await this.getSubscriptionByPropertyNumber(mainPropertyNumber);
+        const inconsistencies: Array<{ propertyNumber: string; field: string; expected: any; actual: any }> = [];
+        const linkedProps = mainSub?.linkedProperties || [];
+
+        if (!mainSub) {
+            return { mainPropertyNumber, linkedProperties: linkedProps, inconsistencies, fixed: 0 };
+        }
+
+        const expectedType = mainSub.subscriptionType || "عادي";
+        const expectedStart = mainSub.startDate;
+        const expectedEnd = mainSub.endDate;
+        const expectedStatus = mainSub.status || "نشط";
+
+        let fixed = 0;
+
+        for (const childNum of linkedProps) {
+            if (childNum === mainPropertyNumber) continue;
+            const childSub = await this.getSubscriptionByPropertyNumber(childNum);
+            const childProp = await this.getPropertyByNumber(childNum);
+
+            const childInconsistencies: Array<{ propertyNumber: string; field: string; expected: any; actual: any }> = [];
+
+            if (!childSub) {
+                childInconsistencies.push({ propertyNumber: childNum, field: "subscription", expected: "exists", actual: "missing" });
+            } else {
+                if ((childSub.subscriptionType || "عادي") !== expectedType) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "subscriptionType", expected: expectedType, actual: childSub.subscriptionType });
+                }
+                if (childSub.endDate !== expectedEnd) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "endDate", expected: expectedEnd, actual: childSub.endDate });
+                }
+                if (childSub.startDate !== expectedStart) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "startDate", expected: expectedStart, actual: childSub.startDate });
+                }
+                if ((childSub.status || "") !== expectedStatus) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "status", expected: expectedStatus, actual: childSub.status });
+                }
+                if (childSub.linkedProperty !== mainPropertyNumber) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "linkedProperty", expected: mainPropertyNumber, actual: childSub.linkedProperty });
+                }
+            }
+
+            if (childProp) {
+                if ((childProp.subscriptionType || "عادي") !== expectedType) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "property.subscriptionType", expected: expectedType, actual: childProp.subscriptionType });
+                }
+                if (childProp.verificationStatus !== "approved") {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "property.verificationStatus", expected: "approved", actual: childProp.verificationStatus });
+                }
+                if (childProp.linkedProperty !== mainPropertyNumber) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "property.linkedProperty", expected: mainPropertyNumber, actual: childProp.linkedProperty });
+                }
+            }
+
+            if (childInconsistencies.length > 0) {
+                inconsistencies.push(...childInconsistencies);
+                if (apply) {
+                    await this.syncLinkedProperty(childNum, mainPropertyNumber, {
+                        subscriptionType: expectedType,
+                        startDate: expectedStart,
+                        endDate: expectedEnd,
+                        status: expectedStatus,
+                        paymentId: mainSub.paymentId,
+                        packageId: mainSub.packageId,
+                    });
+                    fixed++;
+                }
+            }
+        }
+
+        return { mainPropertyNumber, linkedProperties: linkedProps, inconsistencies, fixed };
     }
 
     async activateSubscription(

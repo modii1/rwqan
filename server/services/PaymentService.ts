@@ -221,19 +221,15 @@ export class PaymentService {
                 payment.receiptUrl ?? ""
               );
 
-              // Approve the linked property based on smart verification
+              // Approve the linked property — linked props inherit the main's verified state
+              // (force approved, do NOT smart-verify, which previously left linked props pending
+              // while the main was active — the "active parent, inactive linked" bug).
               await firebaseService.updateProperty(propNumber, {
                 pendingApprovalFrom: undefined,
                 subscriptionType: isPremium ? "مميز" : "عادي"
               });
-              const additionalDataCheck = await checkPropertyDataComplete(additionalProperty);
-              if (additionalDataCheck.isComplete) {
-                await firebaseService.updateVerificationStatus(propNumber, "approved");
-                console.log(`[approveBankTransfer] ✅ Smart verify: ${propNumber} - data complete`);
-              } else {
-                await firebaseService.updateVerificationStatus(propNumber, "pending");
-                console.log(`[approveBankTransfer] ⏳ Smart verify: ${propNumber} - missing: ${additionalDataCheck.missingFields.join(', ')}`);
-              }
+              await firebaseService.updateVerificationStatus(propNumber, "approved");
+              console.log(`[approveBankTransfer] ✅ Linked property ${propNumber} approved (inherits main's verification)`);
               activatedLinkedPropertyNumbers.push(propNumber);
             }
           }
@@ -462,27 +458,21 @@ export class PaymentService {
         undefined
       );
 
-      // Activate linked/additional properties with the same dates
+      // Activate linked/additional properties with the same dates — sync BOTH docs
+      // and force verification=approved so linked props never lag behind the main.
+      const linkedSyncType = (payment.pendingSubscriptionType ?? "مميز") as string;
       for (const propNumber of additionalProps) {
         const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
         if (additionalProperty) {
-          await firebaseService.addSubscriptionToSheet(
-            propNumber,
-            {
-              ...subscriptionData,
-              propertyNumber: propNumber,
-              linkedProperty: payment.propertyNumber,
-              linkedProperties: undefined,
-              propertyCount: undefined,
-            },
-            additionalProperty,
-            undefined
-          );
-          await firebaseService.updateProperty(propNumber, {
-            subscriptionType: (payment.pendingSubscriptionType ?? "مميز") as "مميز",
-            pendingApprovalFrom: undefined,
+          await firebaseService.syncLinkedProperty(propNumber, payment.propertyNumber, {
+            subscriptionType: linkedSyncType,
+            startDate: payment.pendingStartDate,
+            endDate: payment.pendingEndDate,
+            status: "نشط",
+            paymentId,
+            packageId: payment.packageId,
           });
-          console.log(`[confirmManually] ✅ Linked property activated: ${propNumber}`);
+          console.log(`[confirmManually] ✅ Linked property synced (sub + property + approved): ${propNumber}`);
         }
       }
 

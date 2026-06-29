@@ -64,7 +64,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     const [maxPrice, setMaxPrice] = useState<number>(99999);
     const [showFilters, setShowFilters] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
-    const [visibleCount, setVisibleCount] = useState(24);
+    const [visibleCount, setVisibleCount] = useState(30);
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [occasionFilter, setOccasionFilter] = useState(searchParams.get("occasion") || "");
     const [selectedDay, setSelectedDay] = useState(searchParams.get("day") || "");
@@ -147,7 +147,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                 setSelectedFacilities(f.selectedFacilities || []);
                 if (f.maxPrice && f.maxPrice < 99999) setMaxPrice(f.maxPrice);
             }
-            if (f.visibleCount && f.visibleCount >= 24) setVisibleCount(f.visibleCount);
+            if (f.visibleCount && f.visibleCount >= 30) setVisibleCount(f.visibleCount);
         }
         sessionStorage.removeItem("propsPageFilters");
     }, []);
@@ -412,9 +412,9 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                 )}
 
                 {isLoading ? (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                        {[...Array(6)].map((_, i) => (
-                            <div key={i} className="h-72 bg-gray-100 rounded-2xl animate-pulse" />
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
+                        {[...Array(10)].map((_, i) => (
+                            <div key={i} className="h-64 bg-gray-100 rounded-2xl animate-pulse" />
                         ))}
                     </div>
                 ) : properties.length === 0 ? (
@@ -432,7 +432,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
                             {visibleProperties.map(p => {
                                 const occasionProp = activeOccasion?.properties.find(op => op.propertyNumber === p.propertyNumber);
                                 return (
@@ -536,14 +536,15 @@ function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, oc
 
     return (
         <Card
-            className="group overflow-hidden rounded-2xl cursor-pointer transition-shadow hover:shadow-lg border-0 shadow-sm"
+            className="group overflow-hidden rounded-xl cursor-pointer transition-shadow hover:shadow-lg border-0 shadow-sm bg-white"
             onClick={onClick}
         >
             <div className="relative">
                 <img
                     src={imageUrl}
                     alt={property.name || property.propertyNumber}
-                    className="w-full h-40 md:h-48 object-cover"
+                    className="w-full h-36 sm:h-40 md:h-44 object-cover"
+                    loading="lazy"
                     onError={(e) => {
                         (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo,sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
                     }}
@@ -574,16 +575,14 @@ function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, oc
                 </div>
             </div>
 
-            <div className="p-3">
-                {isPremium && (
-                    <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">
-                        {property.name || property.type || "عقار"}
-                    </h3>
-                )}
+            <div className="p-2.5 sm:p-3">
+                <h3 className="font-bold text-[#1a1a1a] text-xs sm:text-sm mb-1 line-clamp-1">
+                    {property.name || property.type || "عقار"}
+                </h3>
 
                 <div className="flex items-center gap-1 text-[#6b6b6b] mb-2">
                     <MapPin className="w-3 h-3 flex-shrink-0" />
-                    <span className="text-xs truncate">
+                    <span className="text-[11px] truncate">
                         {property.location || property.city}
                     </span>
                 </div>

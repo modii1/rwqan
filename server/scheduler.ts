@@ -351,20 +351,25 @@ export function startScheduler() {
 }
 
 // خفض الاشتراكات المنتهية من مميز/موثوق إلى عادي
+// Group-aware: when a main property's subscription expires/cancels, all linked properties
+// follow the same state (same endDate, same downgrade) so parent + children never drift.
 async function downgradeExpiredSubscriptions(): Promise<number> {
   try {
     const subscriptions = await firebaseService.getSubscriptions();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     let downgraded = 0;
+    const processed = new Set<string>();
 
     for (const sub of subscriptions) {
+      if (processed.has(sub.propertyNumber)) continue;
+
       const isPremiumType = sub.subscriptionType === "مميز" || sub.subscriptionType === "موثوق";
       if (!isPremiumType) continue;
 
       // Case 1: Subscription was manually cancelled
       const isCancelled = sub.status === "منتهي" || (sub as any).cancelledAt;
-      
+
       // Case 2: End date has passed
       let isDateExpired = false;
       if (sub.endDate) {
@@ -374,13 +379,34 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
       }
 
       if (isCancelled || isDateExpired) {
+        // Downgrade the main property
         await firebaseService.updateSubscription(sub.id, { subscriptionType: "عادي" });
         await firebaseService.updateProperty(sub.propertyNumber, { subscriptionType: "عادي" });
         console.log(`⬇️ [Scheduler] تم تخفيض اشتراك ${sub.propertyNumber} من ${sub.subscriptionType} إلى عادي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
         downgraded++;
+        processed.add(sub.propertyNumber);
+
+        // Cascade to ALL linked properties — they share the main's endDate and must
+        // downgrade together so the group stays consistent.
+        const linkedProps: string[] = sub.linkedProperties || [];
+        for (const childNum of linkedProps) {
+          if (childNum === sub.propertyNumber || processed.has(childNum)) continue;
+          const childSub = await firebaseService.getSubscriptionByPropertyNumber(childNum);
+          if (childSub && (childSub.subscriptionType === "مميز" || childSub.subscriptionType === "موثوق")) {
+            await firebaseService.updateSubscription(childSub.id, {
+              subscriptionType: "عادي",
+              status: isCancelled ? "منتهي" : childSub.status,
+              endDate: sub.endDate,
+            });
+            await firebaseService.updateProperty(childNum, { subscriptionType: "عادي" });
+            console.log(`⬇️ [Scheduler] تم تخفيض العقار المرتبط ${childNum} تبعاً للعقار الرئيسي ${sub.propertyNumber}`);
+            downgraded++;
+          }
+          processed.add(childNum);
+        }
       }
     }
-    
+
     if (downgraded > 0) {
       console.log(`⬇️ [Scheduler] تم تخفيض ${downgraded} اشتراك منتهي`);
     }
