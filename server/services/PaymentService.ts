@@ -16,6 +16,7 @@ import {
 import { paymobService } from "../integrations/paymob";
 import { notifyOwnerSubscriptionActivated } from "../integrations/whatsapp";
 import { checkPropertyDataComplete } from "../utils/verification";
+import { countR2Images } from "../utils/r2";
 
 export class PaymentService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -280,7 +281,8 @@ export class PaymentService {
     // Smart Verification - check data completeness before approving
     const mainProperty = property || await firebaseService.getPropertyByNumber(payment.propertyNumber);
     if (mainProperty) {
-      const mainDataCheck = await checkPropertyDataComplete(mainProperty);
+      const mainR2ImageCount = await countR2Images(payment.propertyNumber);
+      const mainDataCheck = await checkPropertyDataComplete(mainProperty, mainR2ImageCount);
       if (mainDataCheck.isComplete) {
         await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
         console.log(`[approveBankTransfer] ✅ Smart verify: ${payment.propertyNumber} - data complete`);

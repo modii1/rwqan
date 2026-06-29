@@ -11,6 +11,7 @@ import {
   smartVerification,
 } from "../utils/verification";
 import { toRiyadhISO, getNowInRiyadh } from "../utils/dateUtils";
+import { countR2Images } from "../utils/r2";
 
 export class PropertyService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ export class PropertyService {
     const current = await firebaseService.getPropertyByNumber(propertyNumber);
     const merged = { ...(current ?? {}), ...(updates as any) } as Property;
 
-    const completionResult = await checkPropertyDataComplete(merged);
+    const completionResult = await checkPropertyDataComplete(merged, await countR2Images(propertyNumber));
     const hasSensitive = detectSensitiveChanges(current ?? {}, updates).length > 0;
 
     if (!completionResult.isComplete) return "incomplete";
@@ -113,7 +114,7 @@ export class PropertyService {
    * Check if all required fields for a property are filled (eligibility for approval).
    */
   async isDataComplete(property: Property): Promise<boolean> {
-    const result = await checkPropertyDataComplete(property);
+    const result = await checkPropertyDataComplete(property, await countR2Images(property.propertyNumber));
     return result.isComplete;
   }
 }

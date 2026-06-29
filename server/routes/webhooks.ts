@@ -4,6 +4,7 @@ import { firebaseService } from "../firebaseService";
 import { paymobService } from "../integrations/paymob";
 import { sendWhatsAppNotification, notifyNewPayment } from "../integrations/whatsapp";
 import { checkPropertyDataComplete } from "../utils/verification";
+import { countR2Images } from "../utils/r2";
 
 const router = Router();
 
@@ -107,7 +108,9 @@ const router = Router();
               let missingFields: string[] = [];
               if (property) {
                 const { checkPropertyDataComplete } = await import("../utils/verification");
-                const dataCheck = await checkPropertyDataComplete(property);
+                const { countR2Images } = await import("../utils/r2");
+                const r2ImgCount = await countR2Images(propertyNumber);
+                const dataCheck = await checkPropertyDataComplete(property, r2ImgCount);
                 missingFields = dataCheck.missingFields;
                 autoVerified = dataCheck.isComplete;
               }
@@ -563,7 +566,8 @@ const router = Router();
       let verificationMissingFields: string[] = [];
 
       if (property) {
-        const propertyDataCheck = await checkPropertyDataComplete(property);
+        const r2ImgCount = await countR2Images(payment.propertyNumber);
+        const propertyDataCheck = await checkPropertyDataComplete(property, r2ImgCount);
         verificationMissingFields = propertyDataCheck.missingFields;
         verificationPassed = propertyDataCheck.isComplete;
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireOwner } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import { firebaseService } from "../firebaseService";
-import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
+import { r2, R2_BUCKET, R2_PUBLIC_URL, countR2Images } from "../utils/r2";
 import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
 import multer from "multer";
 import { checkPropertyDataComplete } from "../utils/verification";
@@ -776,7 +776,8 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
         await paymentService.setStatus(payment.id, "نجح - قيد التحقق");
 
         // 2) التحقق التلقائي من بيانات العقار
-        const propertyComplete = await checkPropertyDataComplete(property);
+        const r2ImgCount = await countR2Images(propertyNumber);
+        const propertyComplete = await checkPropertyDataComplete(property, r2ImgCount);
 
         if (propertyComplete.isComplete) {
           // 3) البيانات مكتملة → تفعيل الاشتراك
@@ -860,7 +861,8 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
                 subscriptionType: isPremiumPackage ? "مميز" : "عادي"
               });
 
-              const linkedPropComplete = await checkPropertyDataComplete(linkedProp);
+              const linkedR2ImgCount = await countR2Images(linkedPropNum);
+              const linkedPropComplete = await checkPropertyDataComplete(linkedProp, linkedR2ImgCount);
               if (linkedPropComplete.isComplete) {
                 await firebaseService.updateVerificationStatus(linkedPropNum, "approved");
               } else {

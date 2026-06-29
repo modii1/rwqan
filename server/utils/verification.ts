@@ -13,7 +13,7 @@ export interface PropertyDataCheckResult {
   completionScore: number;
 }
 
-export async function checkPropertyDataComplete(property: any): Promise<PropertyDataCheckResult> {
+export async function checkPropertyDataComplete(property: any, r2ImageCount?: number): Promise<PropertyDataCheckResult> {
   const missingFields: string[] = [];
   const warnings: string[] = [];
   let score = 0;
@@ -53,8 +53,13 @@ export async function checkPropertyDataComplete(property: any): Promise<Property
   }
 
   // 3. الصور (30 نقطة) - على الأقل 3 صور
+  // Prefer live R2 count over stale property doc fields
   let imageCount = 0;
-  if (property.imagesLink) {
+  if (typeof r2ImageCount === 'number') {
+    imageCount = r2ImageCount;
+  } else if (property.imageUrls && Array.isArray(property.imageUrls) && property.imageUrls.length > 0) {
+    imageCount = property.imageUrls.length;
+  } else if (property.imagesLink) {
     if (property.images && Array.isArray(property.images)) {
       imageCount = property.images.length;
     } else if (property.localImages && Array.isArray(property.localImages)) {

@@ -45,3 +45,23 @@ export const r2 = process.env.R2_REGION && process.env.R2_ENDPOINT && process.en
     },
   })
   : null;
+
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
+
+export async function countR2Images(propertyNumber: string): Promise<number> {
+  if (!r2 || !R2_BUCKET) return 0;
+  try {
+    const list = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: R2_BUCKET,
+        Prefix: `${propertyNumber}/`,
+        MaxKeys: 200,
+      })
+    );
+    return (list.Contents || []).filter(
+      (obj) => obj.Key && /\.(jpg|jpeg|png|webp|gif)$/i.test(obj.Key)
+    ).length;
+  } catch {
+    return 0;
+  }
+}
