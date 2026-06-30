@@ -1,10 +1,11 @@
 /**
  * Migration: Remove مvoxوق (trusted) tier
  * Converts all subscriptionType: "موثوق" → "مميز" in Firebase
- * 
+ *
  * Run: npx tsx scripts/migrate-remove-mawthouq.ts
  */
 
+import "dotenv/config";
 import { firebaseService } from '../server/firebaseService';
 
 async function main() {
