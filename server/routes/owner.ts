@@ -794,7 +794,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
             endDate = calculateExtensionEndDate(startDate, pkg.duration);
           }
 
-          const isPremiumPackage = pkg.type === "موثوق" || pkg.type === "مميز" || finalAmount > 0;
+          const isPremiumPackage = pkg.type === "مميز" || finalAmount > 0;
 
           const subscriptionData = {
             packageId: pkg.id,
@@ -1273,7 +1273,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         endDate = calculateExtensionEndDate(startDate, pkg.duration);
       }
 
-      const isPremiumApproval = pkg.type === "موثوق" || pkg.type === "مميز" || pendingPayment.finalAmount > 0;
+      const isPremiumApproval = pkg.type === "مميز" || pendingPayment.finalAmount > 0;
 
       const subscriptionData = {
         packageId: pkg.id,
@@ -1522,7 +1522,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
         pendingStartDate: formatDateRiyadh(cardStart),
         pendingEndDate: formatDateRiyadh(cardEnd),
         pendingPrice: finalAmount,
-        pendingSubscriptionType: (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0) ? "مميز" : "عادي",
+        pendingSubscriptionType: (pkg.type === "مميز" || pkg.price > 0) ? "مميز" : "عادي",
       });
     }
 
@@ -1814,7 +1814,7 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
     }
 
     // Auto-activate: create subscription for the additional property
-    const isPremium = ownerSubscription.subscriptionType === "مميز" || ownerSubscription.subscriptionType === "موثوق";
+    const isPremium = ownerSubscription.subscriptionType === "مميز";
     
     const linkedSubData = {
       packageId: ownerSubscription.packageId,
@@ -2169,7 +2169,7 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       console.log(`📅 [Owner Confirm] New subscription starting today + ${newPackage.duration} days`);
     }
 
-    const isPremium = newPackage.type === "موثوق" || newPackage.type === "مميز" || newPackage.price > 0;
+    const isPremium = newPackage.type === "مميز" || newPackage.price > 0;
 
     const subscriptionData = {
       propertyNumber,

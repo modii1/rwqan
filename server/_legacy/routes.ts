@@ -265,7 +265,7 @@ async function smartVerification(context: SmartVerificationContext): Promise<Sma
 
   // 2. تحديد نوع الاشتراك
   const subscriptionType = property.subscriptionType || 'عادي';
-  const isPremium = subscriptionType === 'مميز' || subscriptionType === 'موثوق';
+  const isPremium = subscriptionType === 'مميز';
 
   // 3. التحقق من كونه أول عقار للمستخدم
   const isFirst = context.isFirstProperty ??
@@ -3626,7 +3626,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               endDate = calculateExtensionEndDate(startDate, pkg.duration);
             }
 
-            const isPremiumPackage = pkg.type === "موثوق" || pkg.type === "مميز" || finalAmount > 0;
+            const isPremiumPackage = pkg.type === "مميز" || finalAmount > 0;
 
             const subscriptionData = {
               packageId: pkg.id,
@@ -4252,7 +4252,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const pricePerProperty = isMultiProperty ? pendingPayment.finalAmount / 2 : pendingPayment.finalAmount;
 
         // تحديد نوع الاشتراك (مميز إذا مدفوع)
-        const isPremiumPkg = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
+        const isPremiumPkg = pkg.type === "مميز" || pricePerProperty > 0;
 
         const subscriptionData = {
           packageId: pkg.id,
@@ -4419,7 +4419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const pricePerProperty = isMultiProperty ? payment.finalAmount / 2 : payment.finalAmount;
 
           // تحديد نوع الاشتراك (مميز إذا مدفوع)
-          const isPremiumApproval = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
+          const isPremiumApproval = pkg.type === "مميز" || pricePerProperty > 0;
 
           const subscriptionData = {
             packageId: pkg.id,
@@ -5599,7 +5599,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "الباقة غير موجودة" });
       }
 
-      const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0;
+      const isPremium = pkg.type === "مميز" || pkg.price > 0;
 
       const subscriptionData = {
         packageId: pkg.id,
@@ -6474,7 +6474,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : (payment.pendingPrice || payment.finalAmount);
 
           // تحديد نوع الاشتراك (مميز إذا مدفوع)
-          const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "موثوق" || payment.pendingSubscriptionType === "مميز";
+          const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "مميز";
 
           const subscriptionData = {
             packageId: payment.packageId,

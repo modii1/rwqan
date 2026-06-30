@@ -622,7 +622,7 @@ const router = Router();
           const totalProperties = 1 + additionalProps.length;
           
           const pricePerProperty = (payment.pendingPrice || payment.finalAmount) / totalProperties;
-          const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "موثوق" || payment.pendingSubscriptionType === "مميز";
+          const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "مميز";
 
           const subscriptionData = {
             packageId: payment.packageId,
@@ -692,7 +692,7 @@ const router = Router();
           endDate.setDate(endDate.getDate() + 30);
 
           const pkg = await subscriptionService.getPackageById(payment.packageId);
-          const isPremiumPayment = (pkg && (pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0)) || payment.finalAmount > 0;
+          const isPremiumPayment = (pkg && (pkg.type === "مميز" || pkg.price > 0)) || payment.finalAmount > 0;
 
           const subscriptionData = {
             packageId: payment.packageId,

@@ -211,7 +211,7 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       console.log(`[ADMIN UPDATE] subscriptionType changed to: ${updates.subscriptionType}`);
       try {
         const subscription = await subscriptionService.getByProperty(propertyNumber);
-        const isPremium = updates.subscriptionType === "مميز" || updates.subscriptionType === "موثوق";
+        const isPremium = updates.subscriptionType === "مميز";
         
         if (subscription) {
           const newStatus = isPremium ? "ساري" : "منتهي";
@@ -371,7 +371,7 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
 
     // Update the property's subscriptionType to match what's in the subscription
     await firebaseService.updateProperty(propertyNumber, { 
-      subscriptionType: subscriptionType as "عادي" | "مميز" | "موثوق" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
+      subscriptionType: subscriptionType as "عادي" | "مميز" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
     });
     console.log(`[APPROVE] Property subscriptionType updated to: ${subscriptionType}`);
 

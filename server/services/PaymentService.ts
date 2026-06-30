@@ -177,7 +177,7 @@ export class PaymentService {
         const totalProperties = 1 + additionalProps.length;
         
         const pricePerProperty = (payment.finalAmount || pkg.price) / totalProperties;
-        const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
+        const isPremium = pkg.type === "مميز" || pricePerProperty > 0;
 
         const subscriptionData = {
           packageId: pkg.id,

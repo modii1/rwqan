@@ -2846,13 +2846,13 @@ function PaymentRow({
                 </div>
                 <Badge
                   variant={
-                    payment.pendingSubscriptionType === "موثوق"
+                    payment.pendingSubscriptionType === "مميز"
                       ? "default"
                       : "outline"
                   }
                   className="text-xs"
                 >
-                  {payment.pendingSubscriptionType === "موثوق" && (
+                  {payment.pendingSubscriptionType === "مميز" && (
                     <Crown className="w-3 h-3 ml-1" />
                   )}
                   {payment.pendingSubscriptionType}
@@ -2955,13 +2955,13 @@ function PaymentRow({
                 </div>
                 <Badge
                   variant={
-                    payment.pendingSubscriptionType === "موثوق"
+                    payment.pendingSubscriptionType === "مميز"
                       ? "default"
                       : "outline"
                   }
                   className="text-xs"
                 >
-                  {payment.pendingSubscriptionType === "موثوق" && (
+                  {payment.pendingSubscriptionType === "مميز" && (
                     <Crown className="w-3 h-3 ml-1" />
                   )}
                   {payment.pendingSubscriptionType}

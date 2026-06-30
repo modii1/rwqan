@@ -190,7 +190,7 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
 
-    const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pkg.price > 0;
+    const isPremium = pkg.type === "مميز" || pkg.price > 0;
 
     const subscriptionData = {
       packageId: pkg.id,

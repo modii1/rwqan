@@ -23,7 +23,7 @@ export const propertySchema = z.object({
     special: z.string().optional(), // سعر خاص
     holidays: z.string(), // إجازات
   }),
-  subscriptionType: z.enum(['عادي', 'مميز', 'موثوق', 'premium', 'trusted', 'normal', 'free', 'مجاني']), // نوع الاشتراك
+  subscriptionType: z.enum(['عادي', 'مميز', 'premium', 'trusted', 'normal', 'free', 'مجاني']), // نوع الاشتراك
   lastUpdate: z.string().optional(), // آخر تحديث
   subscriptionDate: z.string().optional(), // تاريخ الاشتراك
   pin: z.string().optional(), // رقم سري للدخول (للنظام القديم)
@@ -54,7 +54,7 @@ export const subscriptionSchema = z.object({
   endDate: z.string(),
   status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'غير نشط', 'active', 'expired', 'cancelled', 'rejected', 'premium']),
   paymentId: z.string().optional(),
-  subscriptionType: z.string().optional(), // نوع الاشتراك (مميز، موثوق، عادي)
+  subscriptionType: z.string().optional(), // نوع الاشتراك (مميز، عادي)
   packageType: z.string().optional(), // نوع الباقة
   linkedProperty: z.string().optional(), // رقم العقار المرتبط (لباقات العقارين)
   linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة
@@ -82,7 +82,7 @@ export const packageSchema = z.object({
   duration: z.number(), // بالأيام
   price: z.number(), // السعر الإجمالي للباقة
   pricePerProperty: z.number().optional(), // السعر لكل عقار (مثلاً 25 ريال)
-  type: z.enum(['عادي', 'مميز', 'موثوق', 'premium', 'trusted', 'normal', 'free', 'مجاني']),
+  type: z.enum(['عادي', 'مميز', 'premium', 'trusted', 'normal', 'free', 'مجاني']),
   features: z.array(z.string()).default([]),
   description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),

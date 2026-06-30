@@ -814,8 +814,8 @@ function AlertsDashboard() {
                           {/* السطر الثاني */}
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {item.type && (
-                              <Badge variant="secondary" className={`text-[9px] py-0 ${item.type === 'مميز' || item.type === 'trusted' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : ''}`}>
-                                {item.type === 'trusted' ? 'مميز' : item.type === 'normal' ? 'عادي' : item.type}
+                              <Badge variant="secondary" className={`text-[9px] py-0 ${item.type === 'مميز' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : ''}`}>
+                                {item.type === 'normal' ? 'عادي' : item.type}
                               </Badge>
                             )}
                             {item.packageId && (

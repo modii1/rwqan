@@ -138,7 +138,7 @@ export async function smartVerification(context: SmartVerificationContext): Prom
 
   const dataCheck = await checkPropertyDataComplete(property);
   const subscriptionType = property.subscriptionType || 'عادي';
-  const isPremium = subscriptionType === 'مميز' || subscriptionType === 'موثوق';
+  const isPremium = subscriptionType === 'مميز';
 
   let aiConfidence = dataCheck.completionScore;
   if (ocrResult) {

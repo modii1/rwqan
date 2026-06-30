@@ -77,7 +77,7 @@ export class SubscriptionService {
 
     const isMulti = pkg.propertyCount && pkg.propertyCount > 1;
     const pricePerProperty = isMulti ? finalAmount / (pkg.propertyCount ?? 1) : finalAmount;
-    const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
+    const isPremium = pkg.type === "مميز" || pricePerProperty > 0;
 
     const subscriptionData = {
       packageId: pkg.id,
@@ -131,7 +131,7 @@ export class SubscriptionService {
     const property2 = await firebaseService.getPropertyByNumber(propertyNumber2);
     if (property2) {
       const pricePerProperty = finalAmount / 2;
-      const isPremium = pkg.type === "موثوق" || pkg.type === "مميز" || pricePerProperty > 0;
+      const isPremium = pkg.type === "مميز" || pricePerProperty > 0;
 
       await firebaseService.addSubscriptionToSheet(
         propertyNumber2,

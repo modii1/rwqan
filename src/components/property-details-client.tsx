@@ -583,7 +583,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                         </p>
                     </div>
 
-                    {/* شارة موثوق */}
+                    {/* شارة مميز */}
                     {premium && (
                         <Badge className="bg-gradient-to-l from-[#d4af37] to-[#b8932f] text-white border-0 text-xs px-3 py-1.5 gap-1 shadow-[0_2px_12px_-2px_rgba(212,175,55,0.6)] rounded-full animate-in fade-in slide-in-from-top-1 duration-500">
                             <Sparkles className="w-3 h-3" />

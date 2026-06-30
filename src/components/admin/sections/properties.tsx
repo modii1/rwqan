@@ -621,7 +621,7 @@ export default function PropertiesSection() {
                       {(() => {
                         const displayType = (p.subscriptionStatus === 'expired' || p.subscriptionStatus === 'منتهي') ? 'عادي' : p.subscriptionType;
                         return (
-                          <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${(displayType === "موثوق" || displayType === "مميز") ? "bg-primary/20 text-primary" : "bg-muted"}`}>
+                          <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${displayType === "مميز" ? "bg-primary/20 text-primary" : "bg-muted"}`}>
                             {displayType}
                           </span>
                         );
@@ -695,7 +695,7 @@ export default function PropertiesSection() {
                         <Image className="w-4 h-4 text-blue-500" />
                       </Button>
 
-                      {(p.subscriptionType === "موثوق" || p.subscriptionType === "مميز") && (
+                      {p.subscriptionType === "مميز" && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -916,7 +916,7 @@ export default function PropertiesSection() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="عادي">عادي</SelectItem>
-                        <SelectItem value="مميز">مميز (موثوق)</SelectItem>
+                        <SelectItem value="مميز">مميز</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1107,13 +1107,11 @@ export default function PropertiesSection() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">نوع الاشتراك:</span>
                 <span className={`font-medium px-2 py-0.5 rounded text-xs ${
-                  linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' || 
-                  linkedPropertyView.subscription.subscription.subscriptionType === 'موثوق'
+                  linkedPropertyView.subscription.subscription.subscriptionType === 'مميز'
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-muted'
                 }`}>
-                  {linkedPropertyView.subscription.subscription.subscriptionType === 'موثوق' ? 'موثوق' : 
-                   linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' ? 'مميز' : 
+                  {linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' ? 'مميز' : 
                    linkedPropertyView.subscription.subscription.subscriptionType || 'عادي'}
                 </span>
               </div>

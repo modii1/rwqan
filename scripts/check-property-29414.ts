@@ -57,7 +57,7 @@ async function main() {
     const now = new Date();
     const endDate = subscription.endDate ? new Date(subscription.endDate) : null;
     const isExpired = !endDate || endDate < now || subscription.status === "منتهي";
-    const isPremium = property.subscriptionType === "مميز" || property.subscriptionType === "موثوق";
+    const isPremium = property.subscriptionType === "مميز";
 
     if (isExpired && isPremium) {
       console.log("\n⚠️  CONFLICT DETECTED: Property is marked as 'مميز' but subscription is expired!");
@@ -71,7 +71,7 @@ async function main() {
     }
   } else {
     console.log("\n❌ No subscription found for this property");
-    if (property.subscriptionType === "مميز" || property.subscriptionType === "موثوق") {
+    if (property.subscriptionType === "مميز") {
       console.log("⚠️  CONFLICT: Property is marked as premium but has no subscription!");
       console.log("   Fixing: Setting subscriptionType to 'عادي'...");
       await firebaseService.updateProperty(propertyNumber, { subscriptionType: "عادي" });

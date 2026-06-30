@@ -853,7 +853,6 @@ class GoogleSheetsService {
     // منطق تحديد نوع الاشتراك - الباقات المجانية تبقى "عادي" دائماً
     const isPremium = !isFreePackage && (
       subscription.packageType === "مميز" ||
-      subscription.packageType === "موثوق" ||
       subscription.subscriptionType === "مميز" ||
       subscription.packageId?.includes("premium") ||
       subscription.packageId === "pkg-trusted" ||

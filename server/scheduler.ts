@@ -350,7 +350,7 @@ export function startScheduler() {
   console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
 }
 
-// خفض الاشتراكات المنتهية من مميز/موثوق إلى عادي
+// خفض الاشتراكات المنتهية من مميز إلى عادي
 // Group-aware: when a main property's subscription expires/cancels, all linked properties
 // follow the same state (same endDate, same downgrade) so parent + children never drift.
 async function downgradeExpiredSubscriptions(): Promise<number> {
@@ -364,7 +364,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
     for (const sub of subscriptions) {
       if (processed.has(sub.propertyNumber)) continue;
 
-      const isPremiumType = sub.subscriptionType === "مميز" || sub.subscriptionType === "موثوق";
+      const isPremiumType = sub.subscriptionType === "مميز";
       if (!isPremiumType) continue;
 
       // Case 1: Subscription was manually cancelled
@@ -392,7 +392,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
         for (const childNum of linkedProps) {
           if (childNum === sub.propertyNumber || processed.has(childNum)) continue;
           const childSub = await firebaseService.getSubscriptionByPropertyNumber(childNum);
-          if (childSub && (childSub.subscriptionType === "مميز" || childSub.subscriptionType === "موثوق")) {
+          if (childSub && childSub.subscriptionType === "مميز") {
             await firebaseService.updateSubscription(childSub.id, {
               subscriptionType: "عادي",
               status: isCancelled ? "منتهي" : childSub.status,
