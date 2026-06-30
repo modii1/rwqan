@@ -55,7 +55,7 @@ export async function checkPropertyDataComplete(property: any, r2ImageCount?: nu
   // 3. الصور (30 نقطة) - على الأقل 3 صور
   // Prefer live R2 count over stale property doc fields
   let imageCount = 0;
-  if (typeof r2ImageCount === 'number') {
+  if (typeof r2ImageCount === 'number' && Number.isFinite(r2ImageCount) && r2ImageCount >= 0) {
     imageCount = r2ImageCount;
   } else if (property.imageUrls && Array.isArray(property.imageUrls) && property.imageUrls.length > 0) {
     imageCount = property.imageUrls.length;
