@@ -164,6 +164,35 @@ export default function OwnerSubscriptionPage() {
     enabled: !!property?.propertyNumber,
   });
 
+  // Owner self-service smart verification
+  const [isRunningVerification, setIsRunningVerification] = useState(false);
+  const runVerification = async () => {
+    setIsRunningVerification(true);
+    try {
+      const res = await fetch("/api/owner/property/run-verification", { method: "POST" });
+      const data = await res.json();
+      if (data.verified) {
+        toast({
+          title: data.subscriptionActivated ? "تم التحقق وتفعيل الاشتراك" : "تم التحقق من البيانات",
+          description: data.message,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/payment/check-pending"] });
+      } else {
+        toast({
+          title: "البيانات غير مكتملة",
+          description: data.missingFields?.join("، ") || data.message,
+          variant: "destructive",
+        });
+      }
+    } catch (err: any) {
+      toast({ title: "خطأ", description: err.message || "فشل في التحقق", variant: "destructive" });
+    } finally {
+      setIsRunningVerification(false);
+    }
+  };
+
   const selectedPackage = packages.find((p: any) => p.id === selectedPackageId);
 
   // Validate discount
@@ -1088,6 +1117,36 @@ export default function OwnerSubscriptionPage() {
                 <p className="text-sm">يرجى إعادة التحويل ورفع إيصال صحيح</p>
               </div>
             </div>
+          </Card>
+        )}
+
+        {/* Owner Self-Service Verification (new property with successful payment awaiting admin) */}
+        {property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
+          <Card className="p-4 border-blue-300 bg-blue-50">
+            <div className="flex items-center gap-2 text-blue-700 mb-3">
+              <CheckCircle2 className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">تم استلام الدفع بنجاح</p>
+                <p className="text-sm">يمكنك الآن التحقق من بيانات العقار للتفعيل التلقائي</p>
+              </div>
+            </div>
+            <Button
+              onClick={runVerification}
+              disabled={isRunningVerification}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isRunningVerification ? (
+                <>
+                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                  جاري التحقق...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 ml-2" />
+                  تحقق من بيانات العقار وفعّل الاشتراك
+                </>
+              )}
+            </Button>
           </Card>
         )}
 

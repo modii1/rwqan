@@ -7,7 +7,7 @@ import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber
 import multer from "multer";
 import { checkPropertyDataComplete } from "../utils/verification";
 import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
-import { calculateSubscriptionEndDate, calculateExtensionEndDate, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
+import { calculateSubscriptionEndDate, calculateExtensionEndDate, calculateRemainingDays, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
 import { storage } from "../storage";
 import {
   notifyPropertyUpdate,
@@ -1391,6 +1391,121 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 });
 
 
+// ======================================================
+// 🔍 POST /api/owner/property/run-verification - Owner self-service smart verification
+// ======================================================
+router.post("/api/owner/property/run-verification", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber;
+    if (!propertyNumber) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const property = await propertyService.getByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+
+    const r2ImgCount = await countR2Images(propertyNumber);
+    const verificationResult = await checkPropertyDataComplete(property, r2ImgCount);
+
+    console.log(`🔍 [Owner Self-Verify] العقار ${propertyNumber} - النتيجة: ${verificationResult.isComplete ? 'مكتمل' : 'ناقص'} (${verificationResult.completionScore}%)`);
+
+    if (!verificationResult.isComplete) {
+      return res.json({
+        success: false,
+        verified: false,
+        completionScore: verificationResult.completionScore,
+        missingFields: verificationResult.missingFields,
+        warnings: verificationResult.warnings,
+        message: `بيانات العقار غير مكتملة - يرجى إكمال الحقول التالية`,
+      });
+    }
+
+    await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+    console.log(`✅ [Owner Self-Verify] العقار ${propertyNumber} - تم التحقق بنجاح`);
+
+    // فحص: هل يوجد دفعة معلقة مكتملة لكن غير مفعّلة (عقار جديد دفع لكن انتظار يدوياً)
+    const payments = await paymentService.getByProperty(propertyNumber);
+    const pendingActivationPayment = payments.find(
+      (p) => p.status === ("نجح - قيد التحقق" as any) && !p.pendingStartDate
+    );
+
+    let subscriptionActivated = false;
+
+    if (pendingActivationPayment) {
+      const pkg = await storage.getPackageById(pendingActivationPayment.packageId);
+      if (pkg) {
+        const today = getStartOfDayRiyadh();
+        const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+
+        let startDate = today;
+        let endDate = calculateSubscriptionEndDate(null, pkg.duration);
+
+        if (currentSubscription && new Date(currentSubscription.endDate) > today) {
+          startDate = new Date(currentSubscription.endDate);
+          endDate = calculateExtensionEndDate(startDate, pkg.duration);
+        }
+
+        const isPremiumPayment = pkg.type === "مميز" || pendingActivationPayment.finalAmount > 0;
+
+        const subscriptionData = {
+          packageId: pkg.id,
+          price: pendingActivationPayment.finalAmount,
+          subscriptionType: isPremiumPayment ? "مميز" : "عادي",
+          packageType: isPremiumPayment ? "مميز" : "عادي",
+          startDate: formatDateRiyadh(startDate),
+          endDate: formatDateRiyadh(endDate),
+          paymentId: pendingActivationPayment.id,
+        };
+
+        await firebaseService.addSubscriptionToSheet(
+          propertyNumber,
+          subscriptionData,
+          property
+        );
+
+        await paymentService.update(pendingActivationPayment.id, {
+          status: "مكتمل" as any,
+        });
+
+        subscriptionActivated = true;
+        console.log(`🎉 [Owner Self-Verify] تم تفعيل الاشتراك للعقار ${propertyNumber}`);
+
+        if (property.whatsappNumber) {
+          try {
+            await notifyOwnerSubscriptionActivated({
+              ownerPhone: property.whatsappNumber,
+              propertyNumber: propertyNumber,
+              propertyName: property.name || "",
+              endDate: subscriptionData.endDate,
+            });
+          } catch (err) {
+            console.error(`❌ Failed to send owner notification:`, err);
+          }
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      verified: true,
+      completionScore: verificationResult.completionScore,
+      subscriptionActivated,
+      message: subscriptionActivated
+        ? "تم التحقق من بيانات العقار وتفعيل الاشتراك بنجاح"
+        : "تم التحقق من بيانات العقار بنجاح - العقار معتمد",
+    });
+  } catch (err: any) {
+    console.error("Owner self-verification error:", err);
+    res.status(500).json({
+      success: false,
+      error: `خطأ في التحقق: ${err.message || 'خطأ غير معروف'}`,
+    });
+  }
+});
+
+
 router.post("/api/owner/payment/initiate", async (req, res) => {
   try {
     const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
@@ -1485,6 +1600,19 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
         } else {
           discountAmount = discount.value;
           finalAmount -= discount.value;
+        }
+      }
+    }
+
+    // فحص قاعدة 10 أيام للتمديد/الترقية على السيرفر (يمنع التجاوز من الواجهة)
+    if (action === 'extend' || action === 'upgrade') {
+      const currentSubForCheck = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+      if (currentSubForCheck?.endDate) {
+        const remaining = calculateRemainingDays(new Date(currentSubForCheck.endDate));
+        if (remaining > 10) {
+          return res.status(400).json({
+            error: `يمكن التمديد فقط عندما تبقى 10 أيام أو أقل من الاشتراك الحالي (${Math.floor(remaining)} يوم متبقية)`
+          });
         }
       }
     }

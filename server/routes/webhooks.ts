@@ -116,27 +116,34 @@ const router = Router();
               }
 
               if (autoVerified) {
+                // فحص: هل هذا عقار جديد (لا يملك اشتراك سابق)؟
+                const existingSubGet = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+                const hasPriorSubGet = !!(existingSubGet?.endDate);
+
                 await paymentService.update(payment.id, {
-                  status: "مكتمل" as any,
+                  status: hasPriorSubGet ? ("مكتمل" as any) : ("نجح - قيد التحقق" as any),
                 });
                 if (property) {
-                  await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+                  // العقار القديم: approved تلقائياً | العقار الجديد: pending (ينتظر يدوياً)
+                  await firebaseService.updateVerificationStatus(propertyNumber, hasPriorSubGet ? "approved" : "pending");
                 }
-                console.log("✅ Payment auto-verified and completed:", payment.id);
+                console.log(`✅ Payment auto-verified: ${payment.id} (property ${propertyNumber}, hasPrior: ${hasPriorSubGet})`);
 
                 // Sync linked/additional properties so they inherit the main's verified state.
                 // The GET path doesn't activate subscriptions (POST does that), but it MUST keep
                 // linked property verification in sync — otherwise the parent shows approved while
                 // children stay pending/rejected.
-                const additionalProps: string[] = (payment as any).additionalProperties || [];
-                const secondProp = (payment as any).secondPropertyNumber;
-                if (secondProp && !additionalProps.includes(secondProp)) {
-                  additionalProps.push(secondProp);
-                }
-                for (const linkedNum of additionalProps) {
-                  if (linkedNum && linkedNum !== propertyNumber) {
-                    await firebaseService.updateVerificationStatus(linkedNum, "approved");
-                    console.log(`✅ [Webhook GET] Linked property ${linkedNum} verified (inherits main's approval)`);
+                if (hasPriorSubGet) {
+                  const additionalProps: string[] = (payment as any).additionalProperties || [];
+                  const secondProp = (payment as any).secondPropertyNumber;
+                  if (secondProp && !additionalProps.includes(secondProp)) {
+                    additionalProps.push(secondProp);
+                  }
+                  for (const linkedNum of additionalProps) {
+                    if (linkedNum && linkedNum !== propertyNumber) {
+                      await firebaseService.updateVerificationStatus(linkedNum, "approved");
+                      console.log(`✅ [Webhook GET] Linked property ${linkedNum} verified (inherits main's approval)`);
+                    }
                   }
                 }
               } else {
@@ -607,7 +614,20 @@ const router = Router();
       }
 
       // ===============================
-      // 5) تفعيل الاشتراك (فقط بعد نجاح التحقق)
+      // 4.5) فحص: هل هذا عقار جديد (لا يملك اشتراك سابق)؟
+      // ===============================
+      const existingSub = await firebaseService.getSubscriptionByPropertyNumber(payment.propertyNumber);
+      const hasPriorSubscription = !!(existingSub?.endDate);
+
+      if (!hasPriorSubscription) {
+        // عقار جديد: الدفع ناجح والتحقق نجح لكن لا يُفعّل تلقائياً
+        // ينتظر موافقة يدوية من الأدمن أو إعادة تحقق من المالك
+        console.log(`⏳ [Webhook] العقار الجديد ${payment.propertyNumber} - دفع ناجح لكن يحتاج مراجعة يدوية (لا يوجد اشتراك سابق)`);
+        return res.json({ ok: true, status: "pending_admin", paymentId: payment.id });
+      }
+
+      // ===============================
+      // 5) تفعيل الاشتراك (فقط بعد نجاح التحقق + عقار قديم)
       // ===============================
       if (
         payment.pendingStartDate &&

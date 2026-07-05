@@ -148,6 +148,22 @@ export function addDays(date: Date, days: number): Date {
   return result;
 }
 
+/**
+ * حساب الأيام المتبقية في الاشتراك
+ * يُرجع عدد الأيام من اليوم حتى تاريخ الانتهاء
+ * 0 = اليوم الأخير (الاشتراك ينتهي نهاية هذا اليوم)
+ * سالب = منتهي
+ */
+export function calculateRemainingDays(endDate: Date | string | null): number {
+  if (!endDate) return -1;
+  const end = typeof endDate === 'string' ? new Date(endDate) : endDate;
+  if (isNaN(end.getTime())) return -1;
+  const today = getStartOfDayRiyadh();
+  const endMidnight = getStartOfDayRiyadh(end);
+  const diffTime = endMidnight.getTime() - today.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
 const MAX_SUBSCRIPTION_DAYS = 40;
 
 /**
