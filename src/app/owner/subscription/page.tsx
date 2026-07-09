@@ -707,6 +707,14 @@ export default function OwnerSubscriptionPage() {
   const hasSubscriptionDateConflict =
     hasValidSubscriptionDates && subscriptionEndDate!.getTime() < subscriptionStartDate!.getTime();
   const displayedRemainingDays = hasSubscriptionDateConflict ? 0 : displayDays;
+  const daysMetricValue = hasSubscriptionDateConflict ? "—" : displayedRemainingDays;
+  const daysMetricLabel = hasSubscriptionDateConflict
+    ? "غير قابل للحساب"
+    : isExpired
+      ? "منتهي"
+      : displayedRemainingDays === 0
+        ? "اليوم الأخير"
+        : "يوم";
   const displayStatusLabel = subStatusDisplay.label;
   const statusBadgeClass = `${subStatusDisplay.bgColor} ${subStatusDisplay.textColor}`;
   const progressPercent =
@@ -750,7 +758,7 @@ export default function OwnerSubscriptionPage() {
       return {
         tone: "red",
         title: "تنبيه في تواريخ الاشتراك",
-        description: "حالة الاشتراك تعرض حسب المنطق الحالي، لكن تاريخ البداية بعد تاريخ الانتهاء ويحتاج تصحيحاً يدوياً من الإدارة.",
+        description: "حالة الاشتراك وحالة العقار كما هي في النظام، لكن الأيام المتبقية لا يمكن حسابها لأن تاريخ البداية بعد تاريخ الانتهاء.",
         bannerClass: "border-red-200 bg-red-50 text-red-900",
         iconClass: "bg-red-600 text-white",
       };
@@ -1273,6 +1281,16 @@ export default function OwnerSubscriptionPage() {
                   <p className="mt-1 max-w-2xl text-sm leading-6 opacity-85">
                     {subscriptionVisualState.description}
                   </p>
+                  {hasSubscriptionDateConflict && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-3 h-9 rounded-lg border-red-200 bg-white/70 text-red-800 hover:bg-white"
+                      onClick={() => window.open("https://wa.me/966533220646", "_blank")}
+                    >
+                      تواصل مع الإدارة
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs md:min-w-56">
@@ -1291,7 +1309,7 @@ export default function OwnerSubscriptionPage() {
             <section className="p-5 md:p-8 space-y-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#a77d22]">حالة الاشتراك</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#a77d22]">الباقة الحالية</p>
                   <div className="space-y-1">
                     <h2 className="text-3xl md:text-4xl font-bold leading-tight text-[#2f2d2b]">
                       {getPackageName(subscription?.packageId)}
@@ -1317,10 +1335,10 @@ export default function OwnerSubscriptionPage() {
                   <p className="text-xs font-semibold text-[#776f63]">الأيام المتبقية</p>
                   <div className="mt-3 flex items-end gap-2">
                     <span className={`text-5xl font-black leading-none ${hasSubscriptionDateConflict || isExpired ? "text-red-600" : isNearExpiry ? "text-[#b7791f]" : "text-[#2f2d2b]"}`}>
-                      {displayedRemainingDays}
+                      {daysMetricValue}
                     </span>
                     <span className="pb-1 text-sm font-semibold text-[#776f63]">
-                      {isExpired ? "منتهي" : displayedRemainingDays === 0 ? "اليوم الأخير" : "يوم"}
+                      {daysMetricLabel}
                     </span>
                   </div>
                 </div>
@@ -1392,32 +1410,19 @@ export default function OwnerSubscriptionPage() {
                 </div>
               </div>
 
-              {hasSubscriptionDateConflict ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-                    <div className="space-y-2">
-                      <p className="font-bold">تواريخ الاشتراك غير متسقة</p>
-                      <p>
-                        تاريخ البداية بعد تاريخ الانتهاء، لذلك لا يمكن اعتبار الاشتراك منتهياً بشكل طبيعي.
-                        يرجى التواصل مع الإدارة لتعديل تاريخ الاشتراك يدوياً قبل التجديد.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : !canExtend && !isExpired ? (
+              {!hasSubscriptionDateConflict && !canExtend && !isExpired ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
                   <div className="flex items-center gap-2">
                     <Info className="h-4 w-4 flex-shrink-0" />
                     <span>يمكن التمديد عند بقاء 10 أيام أو أقل. الترقية متاحة الآن وتبدأ من تاريخ اليوم.</span>
                   </div>
                 </div>
-              ) : isNearExpiry ? (
+              ) : !hasSubscriptionDateConflict && isNearExpiry ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                   <AlertTriangle className="ml-1 inline h-4 w-4" />
                   اشتراكك ينتهي قريباً. يمكنك التمديد لإضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.
                 </div>
-              ) : isExpired ? (
+              ) : !hasSubscriptionDateConflict && isExpired ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                   <AlertTriangle className="ml-1 inline h-4 w-4" />
                   اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة.
@@ -1482,11 +1487,11 @@ export default function OwnerSubscriptionPage() {
                     <div className="flex items-start gap-3">
                       <Home className="mt-0.5 h-4 w-4 text-[#a77d22]" />
                       <div>
-                        <p className="text-sm font-bold text-[#2f2d2b]">العقارات المرتبطة</p>
+                        <p className="text-sm font-bold text-[#2f2d2b]">الاشتراك المشترك</p>
                         <p className="text-xs leading-6 text-[#776f63]">
                           {visibleLinkedCount > 0
-                            ? `${visibleLinkedCount} عقار مرتبط يرث نفس تواريخ الاشتراك من العقار الأساسي.`
-                            : "لا توجد عقارات مرتبطة حالياً."}
+                            ? `${visibleLinkedCount} عقار ضمن نفس الاشتراك وتواريخه.`
+                            : "لا توجد عقارات ضمن اشتراك مشترك حالياً."}
                         </p>
                       </div>
                     </div>
