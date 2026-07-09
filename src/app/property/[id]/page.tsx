@@ -1,5 +1,7 @@
 import { Metadata } from "next";
 import PropertyDetailsClient, { PropertyDetails } from "@/components/property-details-client";
+import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "@shared/subscriptionType";
+import { buildServerUrl } from "@/lib/server-fetch";
 
 interface PageProps {
     params: Promise<{
@@ -9,9 +11,7 @@ interface PageProps {
 
 async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
     try {
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
-            `http://localhost:${process.env.PORT || 5000}`;
-        const res = await fetch(`${baseUrl}/api/properties/${id}`, {
+        const res = await fetch(buildServerUrl(`/api/properties/${id}`), {
             next: { revalidate: 300 },
         });
         if (!res.ok) return null;
@@ -26,7 +26,14 @@ async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
             type: data.type || "",
             facilities: Array.isArray(data.facilities) ? data.facilities : [],
             prices: data.prices || { weekday: "", weekend: "", overnight: "", holidays: "" },
-            subscriptionType: data.isSubscriptionExpired ? "عادي" : (data.subscriptionType || "مميز"),
+            subscriptionType: getEffectiveSubscriptionType({
+                subscriptionType: data.subscriptionType,
+                status: data.subscriptionStatus,
+                isExpired: data.isSubscriptionExpired,
+            }),
+            subscriptionStatus: data.subscriptionStatus,
+            subscriptionEndDate: data.subscriptionEndDate,
+            isSubscriptionExpired: data.isSubscriptionExpired,
             phone: data.whatsappNumber || "",
             imageCount: 0,
         } as PropertyDetails;
@@ -89,7 +96,7 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
                 overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
                 holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
             },
-            subscriptionType: name ? "مميز" : "عادي",
+            subscriptionType: getEffectiveSubscriptionType({ subscriptionType: name ? "مميز" : "عادي" }),
             phone: item["رقم الجوال"] ? String(item["رقم الجوال"]) : "",
             imageCount: 0,
         };
@@ -101,9 +108,7 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
 
 async function getPropertyImages(id: string): Promise<string[]> {
     try {
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ||
-            `http://localhost:${process.env.PORT || 5000}`;
-        const res = await fetch(`${baseUrl}/api/public/property-images/${id}`, {
+        const res = await fetch(buildServerUrl(`/api/public/property-images/${id}`), {
             next: { revalidate: 300 },
         });
         if (!res.ok) return [];
@@ -125,7 +130,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         };
     }
 
-    const isPremium = property.subscriptionType?.includes("مميز");
+    const isPremium = isActivePremiumSubscription({
+        subscriptionType: property.subscriptionType,
+        status: property.subscriptionStatus,
+        isExpired: property.isSubscriptionExpired,
+    });
     const title = isPremium
         ? `${property.name || "عقار"} - ${property.city || ""} | روقان`
         : `عقار رقم ${property.propertyNumber} - ${property.city || ""} | روقان`;

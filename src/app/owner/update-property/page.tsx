@@ -20,6 +20,7 @@ import { Save, ArrowRight, Star, X, Search, Lock } from "lucide-react";
 import { FACILITIES } from "@shared/schema";
 import Link from "next/link";
 import { validateTextInput, validateNumericInput, validateWhatsAppInput } from "@/lib/validation";
+import { isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -235,7 +236,7 @@ export default function UpdatePropertyPage() {
         });
     };
 
-    const isPremium = property?.subscriptionType === "مميز";
+    const isPremium = isPremiumSubscriptionType(property?.subscriptionType);
 
     if (isLoading) {
         return (

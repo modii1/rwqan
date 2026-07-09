@@ -20,6 +20,7 @@ import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import type { ActiveOccasion } from "@/lib/server-fetch";
+import { isActivePremiumSubscription } from "@shared/subscriptionType";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -69,7 +70,11 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
-    const [maxPrice, setMaxPrice] = useState<number>(99999);
+    const maxPriceParam = searchParams.get("maxPrice");
+    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam))
+        ? Number(maxPriceParam)
+        : 99999;
+    const [maxPrice, setMaxPrice] = useState<number>(initialMaxPrice);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [showFilters, setShowFilters] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
@@ -106,15 +111,17 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
 
     const initializedRef = useRef(false);
     useEffect(() => {
-        if (initializedRef.current) {
+        if (initializedRef.current && !maxPriceParam) {
             setMaxPrice(maxPriceValue);
         }
-    }, [maxPriceValue]);
+    }, [maxPriceValue, maxPriceParam]);
 
     useEffect(() => {
         if (initializedRef.current) return;
         initializedRef.current = true;
-        setMaxPrice(maxPriceValue);
+        if (!maxPriceParam) {
+            setMaxPrice(maxPriceValue);
+        }
 
         const hasScrollPosition = sessionStorage.getItem("homeScrollY");
         const saved = sessionStorage.getItem("homeFilters");
@@ -177,14 +184,26 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
             }
             return true;
         }).sort((a, b) => {
-            const aPremium = a.subscriptionType === "مميز" ? 1 : 0;
-            const bPremium = b.subscriptionType === "مميز" ? 1 : 0;
+            const aPremium = isActivePremiumSubscription({
+                subscriptionType: a.subscriptionType,
+                status: (a as any).subscriptionStatus,
+                isExpired: (a as any).isSubscriptionExpired,
+            }) ? 1 : 0;
+            const bPremium = isActivePremiumSubscription({
+                subscriptionType: b.subscriptionType,
+                status: (b as any).subscriptionStatus,
+                isExpired: (b as any).isSubscriptionExpired,
+            }) ? 1 : 0;
             return bPremium - aPremium;
         });
     }, [allProperties, searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, maxPriceValue]);
 
     const premiumAll = useMemo(() =>
-        filteredProperties.filter(p => p.subscriptionType === "مميز"),
+        filteredProperties.filter(p => Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
+            subscriptionType: p.subscriptionType,
+            status: (p as any).subscriptionStatus,
+            isExpired: (p as any).isSubscriptionExpired,
+        })),
     [filteredProperties]);
 
     const [shuffledPremium, setShuffledPremium] = useState<Property[]>(() => premiumAll);
@@ -732,7 +751,11 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                             <PropertyCard
                                 key={p.propertyNumber}
                                 property={p}
-                                isPremium={p.subscriptionType === "مميز"}
+                                isPremium={Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
+                                    subscriptionType: p.subscriptionType,
+                                    status: (p as any).subscriptionStatus,
+                                    isExpired: (p as any).isSubscriptionExpired,
+                                })}
                                 onNext={() => nextImage(p.propertyNumber)}
                                 onPrev={() => prevImage(p.propertyNumber)}
                                 imgIdx={getImgIdx(p.propertyNumber)}

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LinkIcon } from "lucide-react";
+import { getSubscriptionTypeLabel } from "@shared/subscriptionType";
 
 interface LinkedProperty {
   propertyNumber: string;
@@ -379,15 +380,21 @@ export default function LinkedPropertiesSection() {
                       </div>
                     </Td>
                     <Td>
-                      <div className="flex flex-col">
-                        <Badge variant="secondary" className="w-fit">{p.subscriptionType || "عادي"}</Badge>
-                        {p.mainSubscriptionType && p.subscriptionType !== p.mainSubscriptionType && (
-                          <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            الرئيسي: {p.mainSubscriptionType}
-                          </span>
-                        )}
-                      </div>
+                      {(() => {
+                        const linkedType = getSubscriptionTypeLabel(p.subscriptionType);
+                        const mainType = p.mainSubscriptionType ? getSubscriptionTypeLabel(p.mainSubscriptionType) : "";
+                        return (
+                          <div className="flex flex-col">
+                            <Badge variant="secondary" className="w-fit">{linkedType}</Badge>
+                            {mainType && linkedType !== mainType && (
+                              <span className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                الرئيسي: {mainType}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </Td>
                     <Td>{getStatusBadge(p.subscriptionStatus)}</Td>
                     <Td>
@@ -510,8 +517,8 @@ export default function LinkedPropertiesSection() {
               <div className="border-t pt-4">
                 <h3 className="font-bold text-primary mb-3">الاشتراك</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <DetailItem label="نوع الاشتراك" value={selectedProperty.subscriptionType} />
-                  <DetailItem label="نوع اشتراك الرئيسي" value={selectedProperty.mainSubscriptionType || "-"} />
+                  <DetailItem label="نوع الاشتراك" value={getSubscriptionTypeLabel(selectedProperty.subscriptionType)} />
+                  <DetailItem label="نوع اشتراك الرئيسي" value={selectedProperty.mainSubscriptionType ? getSubscriptionTypeLabel(selectedProperty.mainSubscriptionType) : "-"} />
                   <DetailItem label="حالة الاشتراك" value={selectedProperty.subscriptionStatus} />
                   <DetailItem label="حالة التحقق" value={
                     selectedProperty.verificationStatus === "approved" ? "موثّق" :

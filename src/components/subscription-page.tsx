@@ -10,12 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw, CreditCard } from "lucide-react";
+import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw, CreditCard, AlertTriangle } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { formatDiscount, getCurrencyLabel } from "@/lib/currency";
 import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 // ─── Visual Captcha helpers ───
 const CAPTCHA_CHARS = '23456789';
@@ -108,6 +109,18 @@ export default function SubscriptionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [bankTransferResult, setBankTransferResult] = useState<{
+    autoActivated?: boolean;
+    verificationFailed?: boolean;
+    paymentRejected?: boolean;
+    missingFields?: string[];
+    pendingManualReview?: boolean;
+    pendingAdminApproval?: boolean;
+    message?: string;
+    nextAction?: string;
+    nextUrl?: string;
+    actionLabel?: string;
+  } | null>(null);
 
   const [discountCode, setDiscountCode] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -261,7 +274,7 @@ export default function SubscriptionPage() {
         ...formData,
         facilities,
         prices,
-        subscriptionType: selectedPackage?.type || 'عادي',
+        subscriptionType: getSubscriptionTypeLabel(selectedPackage?.type),
       };
 
       console.log('Registering property...');
@@ -336,9 +349,24 @@ export default function SubscriptionPage() {
             body: formDataUpload,
           });
           const bankData = await bankResponse.json();
+          if (!bankResponse.ok) {
+            throw new Error(bankData.error || "فشل إرسال التحويل البنكي");
+          }
           if (bankData.aiScan) {
             setAiScanResult(bankData.aiScan);
           }
+          setBankTransferResult({
+            autoActivated: bankData.autoActivated,
+            verificationFailed: bankData.verificationFailed,
+            paymentRejected: bankData.paymentRejected,
+            missingFields: bankData.missingFields,
+            pendingManualReview: bankData.pendingManualReview,
+            pendingAdminApproval: bankData.pendingAdminApproval,
+            message: bankData.message,
+            nextAction: bankData.nextAction,
+            nextUrl: bankData.nextUrl,
+            actionLabel: bankData.actionLabel,
+          });
           setRegistrationSuccess(true);
         }
       }
@@ -363,23 +391,53 @@ export default function SubscriptionPage() {
 
   // عرض صفحة النجاح "قيد المراجعة"
   if (registrationSuccess) {
+    const isAutoActivated = bankTransferResult?.autoActivated;
+    const isVerificationFailed = bankTransferResult?.verificationFailed;
+    const isPaymentRejected = bankTransferResult?.paymentRejected;
+    const isPendingManualReview = bankTransferResult?.pendingManualReview;
+    const isPendingAdminApproval = bankTransferResult?.pendingAdminApproval;
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
         <Card className="max-w-lg w-full p-8 text-center space-y-6">
           {/* أيقونة النجاح */}
           <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
-              <Clock className="w-10 h-10 text-[#c9951d]" />
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
+              isVerificationFailed || isPaymentRejected
+                ? "bg-red-100"
+                : isAutoActivated
+                  ? "bg-emerald-100"
+                  : "bg-amber-100"
+            }`}>
+              {isVerificationFailed || isPaymentRejected ? (
+                <AlertTriangle className="w-10 h-10 text-red-500" />
+              ) : isAutoActivated ? (
+                <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+              ) : (
+                <Clock className="w-10 h-10 text-[#c9951d]" />
+              )}
             </div>
           </div>
 
           {/* العنوان */}
           <div>
             <h1 className="text-2xl font-bold text-[#434040] mb-2">
-              تم استلام طلبك بنجاح!
+              {isVerificationFailed || isPaymentRejected
+                ? "تعذر تفعيل الاشتراك"
+                : isAutoActivated
+                  ? "تم تفعيل اشتراكك بنجاح!"
+                  : "تم استلام طلبك بنجاح!"}
             </h1>
             <p className="text-muted-foreground">
-              عقارك قيد المراجعة من فريقنا
+              {isVerificationFailed || isPaymentRejected
+                ? (bankTransferResult?.message || "يرجى مراجعة سبب الرفض بالأسفل.")
+                : isAutoActivated
+                  ? "تم التحقق من الدفع وبيانات العقار تلقائياً"
+                  : isPendingManualReview
+                    ? "الإيصال يحتاج مراجعة يدوية من الإدارة"
+                    : isPendingAdminApproval
+                      ? (bankTransferResult?.message || "تم التحقق من الدفع والبيانات، وبقي اعتماد الإدارة")
+                      : "عقارك قيد المراجعة من فريقنا"}
             </p>
           </div>
 
@@ -408,13 +466,51 @@ export default function SubscriptionPage() {
           </div>
 
           {/* رسالة المراجعة */}
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className={`border rounded-lg p-4 ${
+            isVerificationFailed || isPaymentRejected
+              ? "bg-red-50 border-red-200"
+              : isAutoActivated
+                ? "bg-emerald-50 border-emerald-200"
+                : "bg-amber-50 border-amber-200"
+          }`}>
             <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              {isVerificationFailed || isPaymentRejected ? (
+                <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+              ) : (
+                <CheckCircle2 className={`w-5 h-5 mt-0.5 flex-shrink-0 ${isAutoActivated ? "text-emerald-600" : "text-amber-600"}`} />
+              )}
               <div className="text-right">
-                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
-                <p className="text-sm text-amber-700">
-                  {isFreePackage
+                <p className={`font-semibold mb-1 ${
+                  isVerificationFailed || isPaymentRejected
+                    ? "text-red-800"
+                    : isAutoActivated
+                      ? "text-emerald-800"
+                      : "text-amber-800"
+                }`}>
+                  {isVerificationFailed || isPaymentRejected
+                    ? "مطلوب إجراء من المالك"
+                    : isAutoActivated
+                      ? "الاشتراك نشط الآن"
+                      : "قيد المراجعة"}
+                </p>
+                <p className={`text-sm ${
+                  isVerificationFailed || isPaymentRejected
+                    ? "text-red-700"
+                    : isAutoActivated
+                      ? "text-emerald-700"
+                      : "text-amber-700"
+                }`}>
+                  {isVerificationFailed
+                    ? `يرجى استكمال بيانات العقار: ${bankTransferResult?.missingFields?.join("، ") || "بيانات ناقصة"}`
+                    : isPaymentRejected
+                      ? (bankTransferResult?.nextAction || "يرجى رفع إيصال تحويل صحيح وإعادة المحاولة.")
+                      : isAutoActivated
+                        ? "يمكنك تسجيل الدخول الآن ومتابعة بيانات اشتراكك من لوحة التحكم."
+                        : isPendingManualReview
+                          ? (bankTransferResult?.nextAction || "تعذر التحقق من الإيصال تلقائياً. سيتم مراجعته من قبل الإدارة خلال 24 ساعة.")
+                          : isPendingAdminApproval
+                            ? "لا يلزمك إجراء إضافي الآن. سيتم تفعيل الاشتراك بعد اعتماد الإدارة للعقار الجديد."
+                          : isFreePackage
                     ? "سيتم مراجعة عقارك من قبل الإدارة خلال 24 ساعة. ستتمكن من تسجيل الدخول فور قبول العقار."
                     : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."
                   }
@@ -487,11 +583,21 @@ export default function SubscriptionPage() {
           {/* الأزرار */}
           <div className="flex flex-col gap-3">
             <Button
-              onClick={() => router.push('/owner/login')}
+              onClick={() => router.push(
+                (isPaymentRejected || isPendingManualReview || isPendingAdminApproval) && bankTransferResult?.nextUrl
+                  ? bankTransferResult.nextUrl
+                  : '/owner/login'
+              )}
               className="w-full bg-[#434040] hover:bg-[#333]"
               data-testid="button-go-login"
             >
-              الذهاب لتسجيل الدخول
+              {isPaymentRejected
+                ? (bankTransferResult?.actionLabel || "إعادة المحاولة")
+                : isPendingManualReview || isPendingAdminApproval
+                  ? (bankTransferResult?.actionLabel || "متابعة الحالة")
+                  : isVerificationFailed
+                    ? "تسجيل الدخول لتعديل البيانات"
+                    : "الذهاب لتسجيل الدخول"}
             </Button>
             <Button
               variant="outline"
@@ -584,7 +690,7 @@ export default function SubscriptionPage() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
-                  {pkg.type === 'مميز' && (
+                  {isPremiumSubscriptionType(pkg.type) && (
                     <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
                   )}
                   
@@ -938,7 +1044,7 @@ export default function SubscriptionPage() {
               {/* Free Package Message */}
               {isFreePackage && (
                 <div className="p-4 bg-muted/30 rounded-lg">
-                  <p className="text-sm font-semibold">هذه باقة مجانية - سيتم تفعيل العقار مباشرة</p>
+                  <p className="text-sm font-semibold">هذه باقة مجانية - سيتم إرسال العقار لاعتماد الإدارة بعد اكتمال البيانات</p>
                 </div>
               )}
 
@@ -1027,7 +1133,7 @@ export default function SubscriptionPage() {
                     </ul>
                   </div>
                 )}
-                {packageToView.type === 'مميز' && (
+                {isPremiumSubscriptionType(packageToView.type) && (
                   <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] w-fit">
                     مميز
                   </Badge>

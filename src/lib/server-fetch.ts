@@ -1,4 +1,17 @@
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+function getServerBaseUrl(): string {
+    const configured = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+    if (configured && configured !== "/" && /^https?:\/\//i.test(configured)) {
+        return configured.replace(/\/+$/, "");
+    }
+
+    return `http://127.0.0.1:${process.env.PORT || 5000}`;
+}
+
+export function buildServerUrl(url: string): string {
+    if (/^https?:\/\//i.test(url)) return url;
+    const path = url.startsWith("/") ? url : `/${url}`;
+    return `${getServerBaseUrl()}${path}`;
+}
 
 export interface ActiveOccasion {
     occasion: {
@@ -22,7 +35,7 @@ export interface ActiveOccasion {
 
 export async function serverFetch<T>(url: string, revalidate = 60): Promise<T | null> {
     try {
-        const res = await fetch(`${BASE_URL}${url}`, { next: { revalidate } });
+        const res = await fetch(buildServerUrl(url), { next: { revalidate } });
         if (!res.ok) return null;
         return res.json();
     } catch {

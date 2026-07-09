@@ -210,12 +210,10 @@ export function calculateSubscriptionEndDate(startDate: Date | null, durationDay
  * ملاحظة: النتيجة محددة بـ MAX_SUBSCRIPTION_DAYS من اليوم
  */
 export function calculateExtensionEndDate(currentEndDate: Date | null, durationDays: number): Date {
-  const today = getStartOfDayRiyadh();
-  
   if (currentEndDate) {
     const currentEnd = new Date(currentEndDate);
     // إذا كان الاشتراك الحالي لم ينتهي بعد، نضيف من تاريخ انتهائه
-    if (currentEnd > today) {
+    if (calculateRemainingDays(currentEnd) >= 0) {
       const newEnd = new Date(currentEnd);
       newEnd.setDate(newEnd.getDate() + durationDays);
       newEnd.setHours(23, 59, 59, 999);

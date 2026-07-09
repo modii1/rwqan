@@ -37,6 +37,7 @@ import type {
     InsertOcrResult,
 } from "../shared/schema";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate, capAtMaxDays } from "./utils/dateUtils";
+import { isPremiumSubscriptionType } from "../shared/subscriptionType";
 
 export class FirebaseService {
     private get db() {
@@ -177,7 +178,8 @@ export class FirebaseService {
         await this.db.collection("subscriptions").doc(id).set(newSubscription);
 
         // Update property status
-        const isPremium = subscription.packageId?.includes("premium") ||
+        const isPremium = isPremiumSubscriptionType(subscription.subscriptionType || subscription.packageType) ||
+            subscription.packageId?.includes("premium") ||
             subscription.packageId === "pkg-trusted" ||
             subscription.status === "نشط";
 
@@ -418,7 +420,10 @@ export class FirebaseService {
     }> {
         const mainSub = await this.getSubscriptionByPropertyNumber(mainPropertyNumber);
         const inconsistencies: Array<{ propertyNumber: string; field: string; expected: any; actual: any }> = [];
-        const linkedProps = mainSub?.linkedProperties || [];
+        const rawLinkedProps = Array.isArray(mainSub?.linkedProperties) ? mainSub.linkedProperties : [];
+        const linkedProps = Array.from(
+            new Set(rawLinkedProps.map((lp: string) => String(lp).trim()).filter((lp: string) => lp && lp !== mainPropertyNumber))
+        );
 
         if (!mainSub) {
             return { mainPropertyNumber, linkedProperties: linkedProps, inconsistencies, fixed: 0 };
@@ -431,8 +436,20 @@ export class FirebaseService {
 
         let fixed = 0;
 
+        if (rawLinkedProps.length !== linkedProps.length) {
+            inconsistencies.push({
+                propertyNumber: mainPropertyNumber,
+                field: "linkedProperties",
+                expected: linkedProps,
+                actual: rawLinkedProps,
+            });
+            if (apply) {
+                await this.updateSubscription(mainSub.id, { linkedProperties: linkedProps });
+                fixed++;
+            }
+        }
+
         for (const childNum of linkedProps) {
-            if (childNum === mainPropertyNumber) continue;
             const childSub = await this.getSubscriptionByPropertyNumber(childNum);
             const childProp = await this.getPropertyByNumber(childNum);
 

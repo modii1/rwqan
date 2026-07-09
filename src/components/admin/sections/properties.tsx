@@ -14,6 +14,7 @@ import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'رياض الخبراء'] as const;
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
@@ -619,11 +620,20 @@ export default function PropertiesSection() {
                   <Td>
                     <div className="flex flex-col gap-1">
                       {(() => {
-                        const displayType = (p.subscriptionStatus === 'expired' || p.subscriptionStatus === 'منتهي') ? 'عادي' : p.subscriptionType;
+                        const displayType = getSubscriptionTypeLabel(p.subscriptionType);
+                        const statusLabel = p.subscriptionStatus ? normalizeSubscriptionStatus(p.subscriptionStatus) : "";
+                        const isPremium = isPremiumSubscriptionType(displayType);
                         return (
-                          <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${displayType === "مميز" ? "bg-primary/20 text-primary" : "bg-muted"}`}>
-                            {displayType}
-                          </span>
+                          <>
+                            <span className={`px-2 py-0.5 rounded text-xs inline-flex items-center gap-1 ${isPremium ? "bg-primary/20 text-primary" : "bg-muted"}`}>
+                              {displayType}
+                            </span>
+                            {statusLabel && (
+                              <span className="text-[11px] text-muted-foreground">
+                                حالة الاشتراك: {statusLabel}
+                              </span>
+                            )}
+                          </>
                         );
                       })()}
                       {p.linkedProperty && (
@@ -695,7 +705,7 @@ export default function PropertiesSection() {
                         <Image className="w-4 h-4 text-blue-500" />
                       </Button>
 
-                      {p.subscriptionType === "مميز" && (
+                      {isPremiumSubscriptionType(getSubscriptionTypeLabel(p.subscriptionType)) && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -708,7 +718,7 @@ export default function PropertiesSection() {
                         </Button>
                       )}
 
-                      {p.subscriptionType === "عادي" && (
+                      {!isPremiumSubscriptionType(getSubscriptionTypeLabel(p.subscriptionType)) && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -1107,12 +1117,11 @@ export default function PropertiesSection() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">نوع الاشتراك:</span>
                 <span className={`font-medium px-2 py-0.5 rounded text-xs ${
-                  linkedPropertyView.subscription.subscription.subscriptionType === 'مميز'
+                  isPremiumSubscriptionType(linkedPropertyView.subscription.subscription.subscriptionType)
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-muted'
                 }`}>
-                  {linkedPropertyView.subscription.subscription.subscriptionType === 'مميز' ? 'مميز' : 
-                   linkedPropertyView.subscription.subscription.subscriptionType || 'عادي'}
+                  {getSubscriptionTypeLabel(linkedPropertyView.subscription.subscription.subscriptionType)}
                 </span>
               </div>
               <div className="flex justify-between items-center">

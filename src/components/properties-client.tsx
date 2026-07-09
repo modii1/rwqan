@@ -30,6 +30,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import type { ActiveOccasion } from "@/lib/server-fetch";
+import { isActivePremiumSubscription } from "@shared/subscriptionType";
 
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
@@ -61,7 +62,11 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
         searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
     );
-    const [maxPrice, setMaxPrice] = useState<number>(99999);
+    const maxPriceParam = searchParams.get("maxPrice");
+    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam))
+        ? Number(maxPriceParam)
+        : 99999;
+    const [maxPrice, setMaxPrice] = useState<number>(initialMaxPrice);
     const [showFilters, setShowFilters] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [visibleCount, setVisibleCount] = useState(30);
@@ -122,22 +127,25 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
 
     const initializedRef = useRef(false);
     useEffect(() => {
-        if (initializedRef.current) {
+        if (initializedRef.current && !maxPriceParam) {
             setMaxPrice(maxPriceValue);
         }
-    }, [maxPriceValue]);
+    }, [maxPriceValue, maxPriceParam]);
 
     useEffect(() => {
         if (initializedRef.current) return;
         initializedRef.current = true;
-        setMaxPrice(maxPriceValue);
+        if (!maxPriceParam) {
+            setMaxPrice(maxPriceValue);
+        }
 
         const hasScrollPosition = sessionStorage.getItem("propsScrollY");
         const saved = sessionStorage.getItem("propsPageFilters");
         if (saved && hasScrollPosition) {
             const f = JSON.parse(saved);
-            const hasUrlParams = searchParams.get("search") || searchParams.get("city") || 
-                searchParams.get("direction") || searchParams.get("type") || searchParams.get("facilities");
+            const hasUrlParams = searchParams.get("search") || searchParams.get("city") ||
+                searchParams.get("direction") || searchParams.get("type") || searchParams.get("facilities") ||
+                searchParams.get("maxPrice") || searchParams.get("occasion") || searchParams.get("day");
             
             if (!hasUrlParams) {
                 setSearchQuery(f.searchQuery || "");
@@ -146,6 +154,8 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                 setSelectedType(f.selectedType || "");
                 setSelectedFacilities(f.selectedFacilities || []);
                 if (f.maxPrice && f.maxPrice < 99999) setMaxPrice(f.maxPrice);
+                setOccasionFilter(f.occasionFilter || "");
+                setSelectedDay(f.selectedDay || "");
             }
             if (f.visibleCount && f.visibleCount >= 30) setVisibleCount(f.visibleCount);
         }
@@ -170,12 +180,21 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         sessionStorage.removeItem("propsPageFilters");
     };
 
-    const hasActiveFilters = !!(searchQuery || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
+    const hasActiveFilters = !!(
+        searchQuery ||
+        selectedCity ||
+        selectedDirection ||
+        selectedType ||
+        selectedFacilities.length > 0 ||
+        maxPrice < maxPriceValue ||
+        occasionFilter ||
+        selectedDay
+    );
 
     useEffect(() => {
-        const filters = { searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount };
+        const filters = { searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount, occasionFilter, selectedDay };
         sessionStorage.setItem("propsPageFilters", JSON.stringify(filters));
-    }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount]);
+    }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount, occasionFilter, selectedDay]);
 
     useEffect(() => {
         const savedScroll = sessionStorage.getItem("propsScrollY");
@@ -270,8 +289,16 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         }
 
         return result.sort((a, b) => {
-            const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
-            const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
+            const aIsPremium = isActivePremiumSubscription({
+                subscriptionType: a.subscriptionType,
+                status: (a as any).subscriptionStatus,
+                isExpired: (a as any).isSubscriptionExpired,
+            }) ? 1 : 0;
+            const bIsPremium = isActivePremiumSubscription({
+                subscriptionType: b.subscriptionType,
+                status: (b as any).subscriptionStatus,
+                isExpired: (b as any).isSubscriptionExpired,
+            }) ? 1 : 0;
             return bIsPremium - aIsPremium;
         });
     }, [properties, occasionFilter, activeOccasion, selectedDay]);
@@ -389,7 +416,13 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                 {hasActiveFilters && (
                     <div className="mb-4 flex items-center gap-2 flex-wrap">
                         <span className="text-sm text-[#6b6b6b]">النتائج:</span>
-                        <span className="text-sm font-bold text-[#1a1a1a]">{properties.length}</span>
+                        <span className="text-sm font-bold text-[#1a1a1a]">{sortedProperties.length}</span>
+                        {selectedCity && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
+                                {selectedCity}
+                                <button onClick={() => setSelectedCity("")}><X className="w-2.5 h-2.5" /></button>
+                            </span>
+                        )}
                         {selectedDirection && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#b88d2b]/10 text-[#b88d2b] text-xs rounded-full">
                                 {selectedDirection}
@@ -417,7 +450,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                             <div key={i} className="h-64 bg-gray-100 rounded-2xl animate-pulse" />
                         ))}
                     </div>
-                ) : properties.length === 0 ? (
+                ) : sortedProperties.length === 0 ? (
                     <div className="text-center py-20">
                         <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
                             <Home className="w-8 h-8 text-[#9ca3af]" />
@@ -439,7 +472,11 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                                 <PropertyCard
                                     key={p.propertyNumber}
                                     property={p}
-                                    isPremium={p.subscriptionType === "مميز"}
+                                    isPremium={Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
+                                        subscriptionType: p.subscriptionType,
+                                        status: (p as any).subscriptionStatus,
+                                        isExpired: (p as any).isSubscriptionExpired,
+                                    })}
                                     imgIdx={getImgIdx(p.propertyNumber)}
                                     onNext={() => nextImage(p.propertyNumber)}
                                     onPrev={() => prevImage(p.propertyNumber)}
@@ -461,13 +498,13 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                             })}
                         </div>
 
-                        {visibleCount < properties.length && (
+                        {visibleCount < sortedProperties.length && (
                             <div className="text-center mt-8">
                                 <button
-                                    onClick={() => setVisibleCount(prev => Math.min(prev + 12, properties.length))}
+                                    onClick={() => setVisibleCount(prev => Math.min(prev + 12, sortedProperties.length))}
                                     className="px-8 py-3 border-2 border-[#b88d2b] text-[#b88d2b] font-bold rounded-full hover:bg-[#b88d2b] hover:text-white transition-colors"
                                 >
-                                    تحميل المزيد ({properties.length - visibleCount} متبقي)
+                                    تحميل المزيد ({sortedProperties.length - visibleCount} متبقي)
                                 </button>
                             </div>
                         )}

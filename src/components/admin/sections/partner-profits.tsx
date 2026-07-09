@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator, Trash2, MinusCircle, Banknote, ChevronDown } from "lucide-react";
 import type { PartnerProfit, Payment, Expense } from "@shared/schema";
 import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 // رسوم Paymob
 const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
@@ -961,8 +962,8 @@ export default function PartnerProfitsSection() {
                                 <td className="p-2 font-mono">{sub.propertyNumber}</td>
                                 <td className="p-2">{sub.name || "غير معروف"}</td>
                                 <td className="p-2">
-                                  <Badge variant={sub.subscriptionType === "مميز" ? "default" : "secondary"}>
-                                    {sub.subscriptionType || "عادي"}
+                                  <Badge variant={isPremiumSubscriptionType(sub.subscriptionType) ? "default" : "secondary"}>
+                                    {getSubscriptionTypeLabel(sub.subscriptionType)}
                                   </Badge>
                                 </td>
                                 <td className="p-2 text-left font-semibold text-emerald-600" dir="ltr">

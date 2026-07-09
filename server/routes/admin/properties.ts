@@ -4,10 +4,21 @@ import { propertyService, analyticsService, subscriptionService, paymentService 
 import { firebaseService } from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
 import { SHEET_MAP, normalizePhoneNumber } from "../../utils/helpers";
-import { notifyPropertyVerification } from "../../integrations/whatsapp";
+import { notifyOwnerSubscriptionActivated, notifyPropertyVerification } from "../../integrations/whatsapp";
 import { storage } from "../../storage";
+import {
+  activateVerifiedPaymentSubscription,
+  calculateActionDates,
+} from "../../utils/paymentScenarioFlow";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "../../../shared/subscriptionType";
 
 const router = Router();
+
+const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set(["نشط", "ساري", "نشط مجاني", "active"]);
+
+function isLinkedSubscriptionActive(status?: string | null): boolean {
+  return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
+}
 
 // 🔧 endpoint مؤقت لتحديث بيانات العقار (للاختبار)
 router.put("/api/admin/property/:propertyNumber", async (req, res) => {
@@ -35,7 +46,7 @@ router.get("/api/admin/properties", async (_req, res) => {
     const linkedCountMap: Record<string, number> = {};
     // Source 1: Count via linkedProperty (additional property's subscription points to main)
     for (const sub of subscriptions) {
-      if (sub.linkedProperty && sub.status === 'نشط') {
+      if (sub.linkedProperty && isLinkedSubscriptionActive(sub.status)) {
         linkedCountMap[sub.linkedProperty] = (linkedCountMap[sub.linkedProperty] || 0) + 1;
       }
     }
@@ -50,7 +61,7 @@ router.get("/api/admin/properties", async (_req, res) => {
     }
     // Source 3: Override with multi_property_subscriptions count if larger
     for (const ms of multiSubs) {
-      if (ms.status !== 'نشط') continue;
+      if (!isLinkedSubscriptionActive(ms.status)) continue;
       const propSet = new Set<string>([ms.propertyNumber1]);
       if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
       if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
@@ -88,7 +99,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     
     // Source 1: Subscriptions where linkedProperty points to this property
     for (const sub of subscriptions) {
-      if (sub.linkedProperty === propertyNumber && sub.status === 'نشط') {
+      if (sub.linkedProperty === propertyNumber && isLinkedSubscriptionActive(sub.status)) {
         linkedPropertyNumbers.add(sub.propertyNumber);
       }
     }
@@ -103,7 +114,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     
     // Source 3: multi_property_subscriptions
     for (const ms of multiSubs) {
-      if (ms.status !== 'نشط') continue;
+      if (!isLinkedSubscriptionActive(ms.status)) continue;
       const propSet = new Set<string>([ms.propertyNumber1]);
       if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
       if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
@@ -201,6 +212,10 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       }
     }
 
+    if (updates.subscriptionType) {
+      updates.subscriptionType = getSubscriptionTypeLabel(updates.subscriptionType);
+    }
+
     // skipVerification=true because admin edits are intentional and should not
     // revert the property back to 'pending' (the old code had the same behaviour).
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
@@ -211,25 +226,26 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
       console.log(`[ADMIN UPDATE] subscriptionType changed to: ${updates.subscriptionType}`);
       try {
         const subscription = await subscriptionService.getByProperty(propertyNumber);
-        const isPremium = updates.subscriptionType === "مميز";
+        const normalizedSubscriptionType = getSubscriptionTypeLabel(updates.subscriptionType);
+        const isPremium = isPremiumSubscriptionType(normalizedSubscriptionType);
         
         if (subscription) {
           const newStatus = isPremium ? "ساري" : "منتهي";
           const packageId = isPremium ? "pkg-premium-admin" : "pkg-free";
           
           await firebaseService.activateSubscription(propertyNumber, {
-            subscriptionType: updates.subscriptionType,
+            subscriptionType: normalizedSubscriptionType,
             status: newStatus,
             packageId: packageId,
           });
-          console.log(`[ADMIN UPDATE] Subscription updated for ${propertyNumber}: type=${updates.subscriptionType}, status=${newStatus}`);
+          console.log(`[ADMIN UPDATE] Subscription updated for ${propertyNumber}: type=${normalizedSubscriptionType}, status=${newStatus}`);
         } else {
           console.log(`[ADMIN UPDATE] No subscription found for ${propertyNumber}, creating one`);
           const newStatus = isPremium ? "ساري" : "منتهي";
           const packageId = isPremium ? "pkg-premium-admin" : "pkg-free";
           
           await firebaseService.activateSubscription(propertyNumber, {
-            subscriptionType: updates.subscriptionType,
+            subscriptionType: normalizedSubscriptionType,
             status: newStatus,
             packageId: packageId,
           });
@@ -338,26 +354,50 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       action: "approved",
     });
 
-    // الموافقة لا تؤثر على الاشتراك - الاشتراك يبدأ من يوم الدفع
-    // الموافقة تؤثر فقط على ظهور العقار في صفحات العقارات
-    console.log(`[APPROVE] Property approved. Subscription already active from payment day for: ${propertyNumber}`);
-
-    // Auto-approve pending payment if exists
+    // اعتماد العقار الجديد المدفوع يفعّل الاشتراك من بيانات الدفع المعلقة.
     let subscriptionType = "عادي";
     try {
       const payments = await paymentService.getByProperty(propertyNumber);
-      const pendingPayment = payments.find(p => 
-        p.status === "قيد التحقق" || 
-        p.status === "قيد المراجعة" || 
-        p.status === "معلق" ||
-        p.status === "pending" ||
-        p.status === "نجح - قيد التحقق"
-      );
+      const pendingPayment = payments
+        .filter(p => p.status === "نجح - قيد التحقق")
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
       
       if (pendingPayment) {
-        console.log(`[APPROVE] Found pending payment: ${pendingPayment.id}, auto-approving it...`);
-        await paymentService.setStatus(pendingPayment.id, "مكتمل");
-        console.log(`[APPROVE] ✅ Payment ${pendingPayment.id} auto-approved`);
+        const pkg = await subscriptionService.getPackageById(pendingPayment.packageId);
+        if (!pkg) {
+          console.warn(`[APPROVE] Pending payment ${pendingPayment.id} has missing package: ${pendingPayment.packageId}`);
+        } else {
+          const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+          const calculatedDates = calculateActionDates(pendingPayment.action, currentSubscription, pkg.duration);
+          const activation = await activateVerifiedPaymentSubscription({
+            payment: pendingPayment,
+            property: updated,
+            pkg,
+            receiptUrl: pendingPayment.receiptUrl || "",
+            startDate: pendingPayment.pendingStartDate || calculatedDates.startDate,
+            endDate: pendingPayment.pendingEndDate || calculatedDates.endDate,
+            finalAmount: pendingPayment.pendingPrice || pendingPayment.finalAmount,
+          });
+
+          await paymentService.update(pendingPayment.id, {
+            status: "مكتمل" as any,
+            completedAt: new Date().toISOString(),
+            notes: "تم تفعيل الاشتراك بعد اعتماد العقار من الإدارة",
+          });
+
+          subscriptionType = activation.subscriptionType;
+          console.log(`[APPROVE] ✅ Activated pending payment ${pendingPayment.id}. Linked: ${activation.linkedProperties.join(", ") || "none"}`);
+
+          const property = await propertyService.getByNumber(propertyNumber);
+          if (property?.whatsappNumber) {
+            notifyOwnerSubscriptionActivated({
+              ownerPhone: property.whatsappNumber,
+              propertyNumber,
+              propertyName: property.name || "",
+              endDate: activation.endDate,
+            }).catch(err => console.error("Owner activation notify error:", err));
+          }
+        }
       }
 
       // Determine subscription type from existing subscription or payment
@@ -631,7 +671,7 @@ router.get("/api/admin/additional-property-requests", async (req, res) => {
 
     // Get all linked properties (properties that have linkedProperty set)
     const linkedProperties = subscriptions.filter((s: any) => 
-      s.linkedProperty && s.status === 'نشط'
+      s.linkedProperty && isLinkedSubscriptionActive(s.status)
     );
 
     const linkedRequests = await Promise.all(

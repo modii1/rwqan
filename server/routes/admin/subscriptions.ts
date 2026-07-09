@@ -2,11 +2,40 @@ import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { subscriptionService, propertyService } from "../../services";
 import { firebaseService } from "../../firebaseService";
+import {
+  getSubscriptionTypeLabel,
+  isPremiumSubscriptionType,
+} from "../../../shared/subscriptionType";
 
 const router = Router();
 
 // All admin subscription routes require admin authentication
 router.use("/api/admin", requireAdmin);
+
+type AdminSubscriptionStatus =
+  | "ساري"
+  | "منتهي"
+  | "قريب الانتهاء"
+  | "نشط مجاني";
+
+type StoredSubscriptionStatus = "ساري" | "منتهي" | "نشط مجاني";
+
+function parseStoredSubscriptionStatus(status: unknown): StoredSubscriptionStatus | null {
+  const value = String(status || "").trim();
+  if (value === "قريب الانتهاء") return "ساري";
+  if (value === "ساري" || value === "منتهي" || value === "نشط مجاني") return value;
+  return null;
+}
+
+function isValidDateInput(value: unknown): boolean {
+  if (value === undefined || value === null || value === "") return true;
+  const date = new Date(String(value));
+  return !Number.isNaN(date.getTime());
+}
+
+function subscriptionDocId(subscription: any): string {
+  return subscription?.id || `SUB-${subscription.propertyNumber}`;
+}
 
 // ======================
 // 🏠🏠 اشتراكات العقارين
@@ -79,12 +108,12 @@ router.get("/api/admin/subscriptions", async (req, res) => {
 
       // حساب الأيام المتبقية - الاشتراك يبقى فعال طوال يوم الانتهاء
       let remainingDays: number | null = null;
-      let status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني" = "ساري";
+      let status: AdminSubscriptionStatus = "ساري";
 
       // قراءة البيانات من الاشتراك مباشرة
       const subWithType = sub as any;
 
-      // إذا تم إلغاء الاشتراك يدوياً (موقوف أو ملغى) → منتهي مباشرة
+      // إذا تم إلغاء الاشتراك يدوياً → منتهي مباشرة
       // لكن إذا تم إعادة تفعيله بعد الإلغاء (startDate > cancelledAt) فلا يُعتبر منتهي
       const wasCancelled = !!(subWithType as any).cancelledAt;
       const wasReactivated = wasCancelled && sub.startDate && 
@@ -95,7 +124,7 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         remainingDays = -1;
       }
       // إذا لم يكن هناك تاريخ انتهاء = نشط مجاني (free)
-      else if (!sub.endDate || sub.endDate.trim() === "") {
+      else if (sub.status === "نشط مجاني" || !sub.endDate || sub.endDate.trim() === "") {
         status = "نشط مجاني";
         remainingDays = null;
       } else {
@@ -152,6 +181,182 @@ router.get("/api/admin/subscriptions", async (req, res) => {
   }
 });
 
+// تعديل الاشتراك يدوياً من لوحة الأدمن
+router.put("/api/admin/subscriptions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { subscriptionType, status, startDate, endDate, price } = req.body || {};
+
+    if (!id) {
+      return res.status(400).json({
+        error: "معرّف الاشتراك أو رقم العقار مطلوب.",
+        nextAction: "افتح الاشتراك من لوحة الأدمن ثم حاول مرة أخرى.",
+        nextUrl: "/admin",
+        actionLabel: "العودة للوحة الأدمن",
+      });
+    }
+
+    if (!isValidDateInput(startDate) || !isValidDateInput(endDate)) {
+      return res.status(400).json({
+        error: "صيغة التاريخ غير صحيحة.",
+        nextAction: "استخدم صيغة تاريخ صحيحة من حقول بداية ونهاية الاشتراك.",
+        nextUrl: "/admin",
+        actionLabel: "تعديل التواريخ",
+      });
+    }
+
+    const allSubscriptions = await firebaseService.getSubscriptions();
+    const currentSubscription = allSubscriptions.find((sub: any) =>
+      sub.id === id || sub.propertyNumber === id || `SUB-${sub.propertyNumber}` === id
+    ) as any;
+
+    if (!currentSubscription) {
+      return res.status(404).json({
+        error: "لم يتم العثور على الاشتراك المطلوب.",
+        nextAction: "تأكد من رقم العقار أو حدّث قائمة الاشتراكات ثم حاول مرة أخرى.",
+        nextUrl: "/admin",
+        actionLabel: "تحديث الاشتراكات",
+      });
+    }
+
+    const normalizedType = getSubscriptionTypeLabel(subscriptionType || currentSubscription.subscriptionType || currentSubscription.packageType);
+    const storedStatus = status !== undefined
+      ? parseStoredSubscriptionStatus(status)
+      : parseStoredSubscriptionStatus(currentSubscription.status) || "ساري";
+
+    if (!storedStatus) {
+      return res.status(400).json({
+        error: "حالة الاشتراك غير صحيحة.",
+        nextAction: "اختر حالة اشتراك صحيحة: ساري، منتهي، أو نشط مجاني.",
+        nextUrl: "/admin",
+        actionLabel: "تعديل الحالة",
+      });
+    }
+
+    const parsedPrice = price === undefined || price === null || price === "" ? undefined : Number(price);
+    if (parsedPrice !== undefined && !Number.isFinite(parsedPrice)) {
+      return res.status(400).json({
+        error: "السعر المدخل غير صحيح.",
+        nextAction: "أدخل السعر كرقم فقط أو اتركه فارغاً.",
+        nextUrl: "/admin",
+        actionLabel: "تعديل السعر",
+      });
+    }
+
+    const baseUpdates: any = {
+      subscriptionType: normalizedType,
+      packageType: normalizedType,
+      status: storedStatus,
+    };
+    if (startDate !== undefined) baseUpdates.startDate = String(startDate || "");
+    if (endDate !== undefined) baseUpdates.endDate = String(endDate || "");
+    if (parsedPrice !== undefined) baseUpdates.price = parsedPrice;
+
+    if (storedStatus === "ساري" || storedStatus === "نشط مجاني") {
+      baseUpdates.cancelledAt = null;
+      baseUpdates.cancelReason = null;
+    }
+
+    const mainPropertyNumber = currentSubscription.linkedProperty || currentSubscription.propertyNumber;
+    const mainSubscription = allSubscriptions.find((sub: any) => sub.propertyNumber === mainPropertyNumber) || currentSubscription;
+    const targetPropertyNumbers = new Set<string>([mainPropertyNumber, currentSubscription.propertyNumber]);
+
+    if (Array.isArray(mainSubscription.linkedProperties)) {
+      for (const linked of mainSubscription.linkedProperties) {
+        if (linked) targetPropertyNumbers.add(String(linked));
+      }
+    }
+    if (Array.isArray(currentSubscription.linkedProperties)) {
+      for (const linked of currentSubscription.linkedProperties) {
+        if (linked) targetPropertyNumbers.add(String(linked));
+      }
+    }
+
+    const updatedSubscriptions: string[] = [];
+    const skippedSubscriptions: string[] = [];
+    const groupSize = targetPropertyNumbers.size;
+
+    for (const propertyNumber of targetPropertyNumbers) {
+      const targetSub = allSubscriptions.find((sub: any) => sub.propertyNumber === propertyNumber) as any;
+      const targetProperty = await propertyService.getByNumber(propertyNumber);
+      const updateForTarget: any = { ...baseUpdates };
+
+      if (propertyNumber === mainPropertyNumber) {
+        const linkedProperties = Array.from(targetPropertyNumbers).filter((pn) => pn !== mainPropertyNumber);
+        if (linkedProperties.length > 0) {
+          updateForTarget.linkedProperties = linkedProperties;
+          updateForTarget.propertyCount = groupSize;
+        }
+      } else {
+        updateForTarget.linkedProperty = mainPropertyNumber;
+        updateForTarget.linkedProperties = null;
+        updateForTarget.propertyCount = 1;
+      }
+
+      if (targetSub) {
+        await firebaseService.updateSubscription(subscriptionDocId(targetSub), updateForTarget);
+      } else if (targetProperty && updateForTarget.startDate !== "") {
+        await firebaseService.createSubscription({
+          propertyNumber,
+          packageId: currentSubscription.packageId || "manual",
+          paymentId: currentSubscription.paymentId || "",
+          linkedProperty: propertyNumber === mainPropertyNumber ? undefined : mainPropertyNumber,
+          linkedProperties: propertyNumber === mainPropertyNumber
+            ? Array.from(targetPropertyNumbers).filter((pn) => pn !== mainPropertyNumber)
+            : undefined,
+          propertyCount: propertyNumber === mainPropertyNumber ? groupSize : 1,
+          startDate: updateForTarget.startDate || currentSubscription.startDate || new Date().toISOString(),
+          endDate: updateForTarget.endDate || currentSubscription.endDate || "",
+          status: storedStatus as any,
+          subscriptionType: normalizedType,
+          packageType: normalizedType,
+        } as any);
+      } else {
+        skippedSubscriptions.push(propertyNumber);
+        continue;
+      }
+
+      if (targetProperty) {
+        const propertyUpdates: any = {
+          subscriptionType: normalizedType,
+        };
+        const effectiveStartDate = updateForTarget.startDate ?? targetSub?.startDate ?? currentSubscription.startDate;
+        if (effectiveStartDate) {
+          propertyUpdates.subscriptionDate = String(effectiveStartDate).split("T")[0];
+        }
+        if (propertyNumber !== mainPropertyNumber) {
+          propertyUpdates.linkedProperty = mainPropertyNumber;
+          propertyUpdates.pendingApprovalFrom = undefined;
+        }
+        await firebaseService.updateProperty(propertyNumber, propertyUpdates);
+      }
+
+      updatedSubscriptions.push(propertyNumber);
+    }
+
+    res.json({
+      success: true,
+      message: updatedSubscriptions.length > 1
+        ? `تم تحديث الاشتراك المشترك لـ ${updatedSubscriptions.length} عقارات بنجاح`
+        : "تم تحديث الاشتراك بنجاح",
+      updatedProperties: updatedSubscriptions,
+      skippedProperties: skippedSubscriptions,
+      subscription: {
+        ...currentSubscription,
+        ...baseUpdates,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating subscription manually:", error);
+    res.status(500).json({
+      error: "فشل تحديث الاشتراك يدوياً.",
+      nextAction: "راجع القيم المدخلة ثم حاول مرة أخرى. إذا استمرت المشكلة، حدّث الصفحة وتأكد من وجود الاشتراك.",
+      nextUrl: "/admin",
+      actionLabel: "العودة للاشتراكات",
+    });
+  }
+});
+
 // إلغاء الاشتراك
 router.post("/api/admin/subscription/cancel", async (req, res) => {
   try {
@@ -190,7 +395,7 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
 
-    const isPremium = pkg.type === "مميز" || pkg.price > 0;
+    const isPremium = isPremiumSubscriptionType(pkg.type) || pkg.price > 0;
 
     const subscriptionData = {
       packageId: pkg.id,

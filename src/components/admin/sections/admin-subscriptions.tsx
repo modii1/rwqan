@@ -10,7 +10,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   Search, Calendar, Clock, CheckCircle2, XCircle, AlertTriangle,
   RefreshCw, Filter, ChevronDown, ChevronUp, MessageSquare, Send,
-  Bell, BellOff, Info, Link2
+  Bell, BellOff, Info, Link2, Pencil
 } from "lucide-react";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,6 +34,7 @@ import {
   getSubscriptionStatus,
   getStatusInfo,
 } from "@/lib/subscription-utils";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 // Override formatDate to always show English numbers
 function formatDate(dateStr: any): string {
@@ -67,13 +68,42 @@ interface AdminSubscription {
   linkedGroupName?: string | null;
 }
 
+const subscriptionStatusOptions = [
+  "ساري",
+  "منتهي",
+  "نشط مجاني",
+] as const;
+
+function toDateInputValue(dateStr: any): string {
+  if (!dateStr) return "";
+  const raw = String(dateStr);
+  const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) return isoMatch[0];
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function toEditableSubscriptionStatus(status: AdminSubscription["status"]): string {
+  return status === "قريب الانتهاء" ? "ساري" : status || "ساري";
+}
+
 export default function AdminSubscriptionsSection() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedSubscription, setSelectedSubscription] = useState<AdminSubscription | null>(null);
+  const [editForm, setEditForm] = useState({
+    subscriptionType: "عادي",
+    status: "ساري",
+    startDate: "",
+    endDate: "",
+    price: "",
+  });
   const [cancelReason, setCancelReason] = useState("");
   const [notifyDialogOpen, setNotifyDialogOpen] = useState(false);
   const [notifyType, setNotifyType] = useState<"expired" | "expiring_soon" | "custom">("expired");
@@ -84,6 +114,18 @@ export default function AdminSubscriptionsSection() {
   const { data: subscriptions = [], isLoading, refetch } = useQuery<AdminSubscription[]>({
     queryKey: ["/api/admin/subscriptions"],
   });
+
+  const openEditDialog = (sub: AdminSubscription) => {
+    setSelectedSubscription(sub);
+    setEditForm({
+      subscriptionType: getSubscriptionTypeLabel(sub.subscriptionType),
+      status: toEditableSubscriptionStatus(sub.status),
+      startDate: toDateInputValue(sub.startDate),
+      endDate: toDateInputValue(sub.endDate),
+      price: sub.price ? String(sub.price) : "",
+    });
+    setEditDialogOpen(true);
+  };
 
   const cancelMutation = useMutation({
     mutationFn: async ({ propertyNumber, reason }: { propertyNumber: string; reason: string }) => {
@@ -129,6 +171,41 @@ export default function AdminSubscriptionsSection() {
       toast({
         title: "خطأ",
         description: error.message || "فشل في تحديث الأيام المتبقية",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: async ({ subscriptionId, updates }: { subscriptionId: string; updates: typeof editForm }) => {
+      const response = await fetch(`/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(updates),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "فشل حفظ تعديل الاشتراك");
+      }
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-subscriptions"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/properties"] });
+      toast({
+        title: "تم حفظ التعديل",
+        description: data?.message || "تم تحديث بيانات الاشتراك بنجاح",
+      });
+      setEditDialogOpen(false);
+      setSelectedSubscription(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "تعذر حفظ التعديل",
+        description: error.message || "راجع بيانات الاشتراك ثم حاول مرة أخرى",
         variant: "destructive",
       });
     },
@@ -496,10 +573,11 @@ export default function AdminSubscriptionsSection() {
                       </span>
                     )}
                     {(() => {
-                      const isPremium = sub.status !== "منتهي" && sub.status !== "نشط مجاني";
+                      const displayType = getSubscriptionTypeLabel(sub.subscriptionType);
+                      const isPremium = isPremiumSubscriptionType(displayType);
                       return (
                         <Badge className={isPremium ? "bg-[#b88d2b] text-white" : "bg-gray-400 text-white"}>
-                          {isPremium ? "مميز" : sub.subscriptionType}
+                          {displayType}
                         </Badge>
                       );
                     })()}
@@ -511,21 +589,52 @@ export default function AdminSubscriptionsSection() {
 
                 {/* Days Remaining */}
                 <div className="text-center px-4">
-                  <p className={`text-2xl font-bold ${
-                    (sub.remainingDays ?? -1) < 0 ? 'text-red-600' :
-                    (sub.remainingDays ?? 0) <= 7 ? 'text-orange-600' : 'text-green-600'
-                  }`} data-testid={`text-remaining-days-${sub.propertyNumber}`}>
-                    {(sub.remainingDays ?? -1) < 0 ? "منتهي" : sub.remainingDays}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {(sub.remainingDays ?? -1) < 0 ? "" : 
-                     sub.remainingDays === 0 ? "اليوم الأخير" : "يوم متبقي"}
-                  </p>
+                  {(() => {
+                    const days = typeof sub.remainingDays === "number" ? sub.remainingDays : null;
+                    const hasDays = days !== null;
+                    const isExpired = hasDays && days < 0;
+                    const isSoon = hasDays && days <= 7;
+                    const value = sub.status === "نشط مجاني"
+                      ? "مجاني"
+                      : !hasDays
+                        ? "-"
+                        : isExpired
+                          ? "منتهي"
+                          : days;
+
+                    return (
+                      <>
+                        <p className={`text-2xl font-bold ${
+                          sub.status === "نشط مجاني" ? 'text-blue-600' :
+                          !hasDays ? 'text-gray-500' :
+                          isExpired ? 'text-red-600' :
+                          isSoon ? 'text-orange-600' : 'text-green-600'
+                        }`} data-testid={`text-remaining-days-${sub.propertyNumber}`}>
+                          {value}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {sub.status === "نشط مجاني" ? "بدون تاريخ انتهاء" :
+                           !hasDays || isExpired ? "" :
+                           days === 0 ? "اليوم الأخير" : "يوم متبقي"}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Status & Actions */}
                 <div className="flex items-center gap-3">
                   {getStatusBadge(sub.status, sub.remainingDays)}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[#b88d2b] border-[#b88d2b]/30"
+                    onClick={() => openEditDialog(sub)}
+                    data-testid={`button-edit-subscription-${sub.propertyNumber}`}
+                    title="تعديل الاشتراك"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -557,6 +666,129 @@ export default function AdminSubscriptionsSection() {
           ))
         )}
       </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#b88d2b]">
+              <Pencil className="w-5 h-5" />
+              تعديل الاشتراك
+            </DialogTitle>
+            <DialogDescription className="text-right pt-2">
+              تعديل بيانات اشتراك العقار "{selectedSubscription?.name}" ({selectedSubscription?.propertyNumber})
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            {(selectedSubscription?.isLinkedChild || (selectedSubscription?.linkedProperties?.length || 0) > 0) && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                هذا اشتراك مشترك. سيتم تطبيق نفس النوع والحالة والتواريخ على العقار الأساسي وكل العقارات المرتبطة.
+              </div>
+            )}
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              نوع الاشتراك يحدد عادي أو مميز فقط. حالة الاشتراك الحالية هي ساري أو منتهي أو نشط مجاني، أما قريب الانتهاء فيظهر تلقائياً حسب تاريخ النهاية ولا يغيّر حالة اعتماد العقار.
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2">نوع الاشتراك</label>
+                <Select
+                  value={editForm.subscriptionType}
+                  onValueChange={(value) => setEditForm((prev) => ({ ...prev, subscriptionType: value }))}
+                >
+                  <SelectTrigger data-testid="select-edit-subscription-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="عادي">عادي</SelectItem>
+                    <SelectItem value="مميز">مميز</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">حالة الاشتراك</label>
+                <Select
+                  value={editForm.status}
+                  onValueChange={(value) => setEditForm((prev) => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger data-testid="select-edit-subscription-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {subscriptionStatusOptions.map((option) => (
+                      <SelectItem key={option} value={option}>{option}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">تاريخ البداية</label>
+                <Input
+                  type="date"
+                  value={editForm.startDate}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                  data-testid="input-edit-subscription-start-date"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2">تاريخ النهاية</label>
+                <Input
+                  type="date"
+                  value={editForm.endDate}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, endDate: e.target.value }))}
+                  data-testid="input-edit-subscription-end-date"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">يمكن تركه فارغاً للاشتراك المجاني فقط.</p>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-semibold mb-2">السعر</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="السعر بالريال"
+                  value={editForm.price}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, price: e.target.value }))}
+                  data-testid="input-edit-subscription-price"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditDialogOpen(false);
+                setSelectedSubscription(null);
+              }}
+            >
+              إلغاء
+            </Button>
+            <Button
+              className="bg-[#b88d2b] hover:bg-[#9f7923]"
+              onClick={() => {
+                if (selectedSubscription) {
+                  editMutation.mutate({
+                    subscriptionId: selectedSubscription.id || selectedSubscription.propertyNumber,
+                    updates: editForm,
+                  });
+                }
+              }}
+              disabled={editMutation.isPending}
+              data-testid="button-confirm-edit-subscription"
+            >
+              {editMutation.isPending ? "جاري الحفظ..." : "حفظ التعديل"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Cancel Dialog */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>

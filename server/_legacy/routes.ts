@@ -4069,13 +4069,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`   Payment ${i + 1}: status=${p.status}, method=${p.paymentMethod}, amount=${p.finalAmount}`);
       });
 
-      // ترتيب الدفعات حسب الأولوية: مكتمل > نجح - قيد التحقق > قيد التحقق (تحويل) > قيد المراجعة (بطاقة)
+      // ترتيب الدفعات حسب الأولوية: مكتمل > نجح - قيد التحقق > قيد المراجعة (تحويل/بطاقة)
       const completedPayment = payments.find(p => p.status === "مكتمل");
       const cardSuccessPayment = payments.find(p => p.status === "نجح - قيد التحقق");
-      const bankTransferPayment = payments.find(p => p.status === "قيد التحقق" && p.paymentMethod === "تحويل بنكي");
+      const bankTransferPayment = payments.find(p => p.status === "قيد المراجعة" && p.paymentMethod === "تحويل بنكي");
       const cardPendingPayment = payments.find(p => p.status === "قيد المراجعة" && (p.paymentMethod === "بطاقة" || p.paymentMethod === "Apple Pay"));
 
       // السيناريو 0: دفعة مكتملة موجودة - التحقق فقط (الاشتراك مُفعّل مسبقاً)
+      // (يشمل العقار القديم والجديد بعد تفعيلSmart Verify)
       if (completedPayment) {
         await dbProxy.updateVerificationStatus(propertyNumber, "approved");
         console.log(`✅ [Verify] Payment already completed for ${propertyNumber} - verification only`);

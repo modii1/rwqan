@@ -57,6 +57,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 export default function OwnerDashboard() {
   const router = useRouter();
@@ -843,7 +844,7 @@ export default function OwnerDashboard() {
   // استخدام الأيام المتبقية من شيت الاشتراكات مباشرة (العمود H)
   // إذا لم تكن موجودة، نحسبها محلياً كـ fallback
   const calculateRemainingDaysLocal = () => {
-    if (!property.subscriptionType || property.subscriptionType === "عادي") {
+    if (!isPremiumSubscriptionType(property.subscriptionType)) {
       return null;
     }
 
@@ -889,7 +890,7 @@ export default function OwnerDashboard() {
   const isNearExpiry =
     remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
 
-  const isVip = property.subscriptionType === "مميز" && (remainingDays === null || remainingDays >= 0);
+  const isVip = isPremiumSubscriptionType(property.subscriptionType) && (remainingDays === null || remainingDays >= 0);
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
   const subscriptionButtonLabel = isVip ? "إدارة الاشتراك" : "ترقية الاشتراك";
@@ -1240,7 +1241,7 @@ export default function OwnerDashboard() {
                   variant={isVip ? "default" : "secondary"}
                   className="text-xs md:text-sm px-3 md:px-4 py-1"
                 >
-                  {remainingDays !== null && remainingDays < 0 ? "عادي" : property.subscriptionType}
+                  {remainingDays !== null && remainingDays < 0 ? "عادي" : getSubscriptionTypeLabel(property.subscriptionType)}
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">

@@ -2,9 +2,15 @@ import { Router } from "express";
 import { propertyService, paymentService, subscriptionService, addOnService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { paymobService } from "../integrations/paymob";
-import { sendWhatsAppNotification, notifyNewPayment } from "../integrations/whatsapp";
+import { sendWhatsAppNotification, notifyNewPayment, notifyOwnerSubscriptionActivated, sendOwnerWhatsApp } from "../integrations/whatsapp";
 import { checkPropertyDataComplete } from "../utils/verification";
 import { countR2Images } from "../utils/r2";
+import {
+  activateVerifiedPaymentSubscription,
+  calculateActionDates,
+  hasPriorSubscription,
+  queueVerifiedNewPropertyForAdminApproval,
+} from "../utils/paymentScenarioFlow";
 
 const router = Router();
 
@@ -118,43 +124,69 @@ const router = Router();
               if (autoVerified) {
                 // فحص: هل هذا عقار جديد (لا يملك اشتراك سابق)؟
                 const existingSubGet = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
-                const hasPriorSubGet = !!(existingSubGet?.endDate);
-
-                await paymentService.update(payment.id, {
-                  status: hasPriorSubGet ? ("مكتمل" as any) : ("نجح - قيد التحقق" as any),
-                });
-                if (property) {
-                  // العقار القديم: approved تلقائياً | العقار الجديد: pending (ينتظر يدوياً)
-                  await firebaseService.updateVerificationStatus(propertyNumber, hasPriorSubGet ? "approved" : "pending");
-                }
-                console.log(`✅ Payment auto-verified: ${payment.id} (property ${propertyNumber}, hasPrior: ${hasPriorSubGet})`);
-
-                // Sync linked/additional properties so they inherit the main's verified state.
-                // The GET path doesn't activate subscriptions (POST does that), but it MUST keep
-                // linked property verification in sync — otherwise the parent shows approved while
-                // children stay pending/rejected.
-                if (hasPriorSubGet) {
-                  const additionalProps: string[] = (payment as any).additionalProperties || [];
-                  const secondProp = (payment as any).secondPropertyNumber;
-                  if (secondProp && !additionalProps.includes(secondProp)) {
-                    additionalProps.push(secondProp);
-                  }
-                  for (const linkedNum of additionalProps) {
-                    if (linkedNum && linkedNum !== propertyNumber) {
-                      await firebaseService.updateVerificationStatus(linkedNum, "approved");
-                      console.log(`✅ [Webhook GET] Linked property ${linkedNum} verified (inherits main's approval)`);
+                const pkg = await subscriptionService.getPackageById(payment.packageId);
+                if (property && pkg) {
+                  const calculatedDates = calculateActionDates(payment.action, existingSubGet, pkg.duration);
+                  if (!hasPriorSubscription(existingSubGet)) {
+                    const queued = await queueVerifiedNewPropertyForAdminApproval({
+                      payment,
+                      property,
+                      pkg,
+                      startDate: payment.pendingStartDate || calculatedDates.startDate,
+                      endDate: payment.pendingEndDate || calculatedDates.endDate,
+                      finalAmount: payment.pendingPrice || payment.finalAmount,
+                    });
+                    if (property.whatsappNumber) {
+                      await sendOwnerWhatsApp(
+                        property.whatsappNumber,
+                        `تم التحقق من الدفع وبيانات العقار ${property.name || propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن.`,
+                      ).catch(err => console.error("Owner pending approval notification failed:", err));
+                    }
+                    console.log(`🆕 Payment verified for new property ${propertyNumber}; queued for admin approval until ${queued.endDate}`);
+                  } else {
+                    const activation = await activateVerifiedPaymentSubscription({
+                      payment,
+                      property,
+                      pkg,
+                      startDate: payment.pendingStartDate || calculatedDates.startDate,
+                      endDate: payment.pendingEndDate || calculatedDates.endDate,
+                      finalAmount: payment.pendingPrice || payment.finalAmount,
+                    });
+                    await paymentService.update(payment.id, {
+                      status: "مكتمل" as any,
+                      completedAt: new Date().toISOString(),
+                    });
+                    if (property.whatsappNumber) {
+                      await notifyOwnerSubscriptionActivated({
+                        ownerPhone: property.whatsappNumber,
+                        propertyNumber,
+                        propertyName: property.name || "",
+                        endDate: activation.endDate,
+                      }).catch(err => console.error("Owner activation notification failed:", err));
                     }
                   }
+                } else {
+                  await paymentService.update(payment.id, {
+                    status: "مرفوض" as any,
+                    notes: "تعذر تفعيل الاشتراك: الباقة غير موجودة",
+                  });
                 }
+                console.log(`✅ Payment auto-verified: ${payment.id} (property ${propertyNumber}, hasPrior: ${hasPriorSubscription(existingSubGet)})`);
               } else {
                 await paymentService.update(payment.id, {
-                  status: "مرفوض" as any,
+                  status: "نجح - قيد التحقق" as any,
                   notes: `بيانات العقار غير مكتملة: ${missingFields.join('، ')}`
                 });
                 if (property) {
-                  await firebaseService.updateVerificationStatus(propertyNumber, "rejected");
+                  await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+                  if (property.whatsappNumber) {
+                    await sendOwnerWhatsApp(
+                      property.whatsappNumber,
+                      `تم استلام الدفع، لكن بيانات العقار ${property.name || propertyNumber} غير مكتملة.\n\nالحقول المطلوبة: ${missingFields.join("، ")}\n\nالخطوة التالية: عدّل بيانات العقار وارفع الصور المطلوبة ثم شغّل التحقق من صفحة الاشتراك.`,
+                    ).catch(err => console.error("Owner incomplete data notification failed:", err));
+                  }
                 }
-                console.log("❌ Payment auto-rejected (incomplete data):", payment.id, missingFields);
+                console.log("⏳ Payment kept pending verification (incomplete data):", payment.id, missingFields);
               }
             } else if (payment && payment.status === "مرفوض") {
               console.log("⚠️ Payment was already rejected by POST webhook:", payment.id);
@@ -173,6 +205,14 @@ const router = Router();
 
             const paymentStatus = payment?.status || "غير معروف";
             const isRejected = paymentStatus === "مرفوض";
+            const isAwaitingAdminApproval = paymentStatus === "نجح - قيد التحقق";
+            const paymentStateLabel = isRejected
+              ? "مرفوض - راجع سبب الرفض"
+              : isAddonPayment
+                ? "نجح - قيد مراجعة الإدارة"
+                : isAwaitingAdminApproval
+                  ? "نجح - بانتظار اعتماد الإدارة أو استكمال البيانات"
+                  : "نجح - تم التحقق التلقائي";
             
             await sendWhatsAppNotification(
               `💳 *${isRejected ? 'تم رفض الدفع' : 'تم استلام دفعة إلكترونية'}*\n\n` +
@@ -181,7 +221,7 @@ const router = Router();
               `💰 المبلغ: ${payment?.finalAmount || 'غير محدد'} ر.س\n` +
               `🔢 رقم العملية: ${transactionId}\n` +
               `📋 نوع العملية: ${actionLabel}\n` +
-              `📋 الحالة: ${isRejected ? `مرفوض - بيانات العقار غير مكتملة` : (isAddonPayment ? 'نجح - قيد مراجعة الإدارة' : 'نجح - تم التحقق التلقائي')}`
+              `📋 الحالة: ${paymentStateLabel}`
             );
             console.log("✅ WhatsApp notification sent for electronic payment:", transactionId);
           } catch (notifyErr) {
@@ -193,7 +233,7 @@ const router = Router();
         let redirectUrl: string;
         let currentPaymentStatus = '';
 
-        // التحقق من حالة الدفع (قد يكون مرفوضاً بسبب فشل التحقق التلقائي)
+        // التحقق من حالة الدفع (قد يكون مرفوضاً بسبب سبب نهائي مثل باقة غير موجودة)
         if (propertyNumber) {
           const payments = await paymentService.getAll();
           const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
@@ -215,7 +255,7 @@ const router = Router();
         }
 
         if (currentPaymentStatus === "مرفوض") {
-          // تم رفض الدفع بسبب فشل التحقق التلقائي
+          // تم رفض الدفع بسبب سبب نهائي
           redirectUrl = `/subscription?payment=rejected&property=${propertyNumber}&reason=verification_failed`;
         } else if (isAddonPaymentRedirect) {
           // إضافة: توجيه للوحة التحكم مع تحديد نجاح الدفع
@@ -579,25 +619,39 @@ const router = Router();
         verificationPassed = propertyDataCheck.isComplete;
 
         if (verificationPassed) {
-          await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
-          console.log(`✅ [Auto Verify] العقار ${payment.propertyNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
+          const verificationSub = await firebaseService.getSubscriptionByPropertyNumber(payment.propertyNumber);
+          if (hasPriorSubscription(verificationSub)) {
+            await firebaseService.updateVerificationStatus(payment.propertyNumber, "approved");
+            console.log(`✅ [Auto Verify] العقار القديم ${payment.propertyNumber} - البيانات مكتملة - تمت الموافقة تلقائياً`);
+          } else {
+            await firebaseService.updateProperty(payment.propertyNumber, {
+              verificationStatus: "pending",
+              smartVerificationPassed: true,
+              smartVerificationPassedAt: new Date().toISOString(),
+              pendingPaidSubscription: true,
+            } as any);
+            console.log(`✅ [Auto Verify] العقار الجديد ${payment.propertyNumber} - البيانات مكتملة وينتظر اعتماد الإدارة`);
+          }
         } else {
-          await firebaseService.updateVerificationStatus(payment.propertyNumber, "rejected");
-          console.log(`❌ [Auto Verify] العقار ${payment.propertyNumber} - بيانات ناقصة: ${verificationMissingFields.join(', ')} - تم الرفض`);
+          await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+          console.log(`⏳ [Auto Verify] العقار ${payment.propertyNumber} - بيانات ناقصة: ${verificationMissingFields.join(', ')} - بانتظار الاستكمال`);
         }
       }
 
       if (!verificationPassed) {
-        // رفض الدفع - لا يتم التفعيل لأن بيانات العقار غير مكتملة
+        // الدفع ناجح لكن لا يتم التفعيل لأن بيانات العقار غير مكتملة
         await paymentService.update(payment.id, {
-          status: "مرفوض" as any,
+          status: "نجح - قيد التحقق" as any,
           completedAt: new Date().toISOString(),
           transactionId,
-          notes: `تم الرفض التلقائي: بيانات العقار غير مكتملة (${verificationMissingFields.join('، ')})`,
+          notes: `بيانات العقار غير مكتملة (${verificationMissingFields.join('، ')})`,
         });
-        console.log(`❌ Payment Rejected (auto-verify): ${payment.id} - property ${payment.propertyNumber} has incomplete data`);
+        if (property) {
+          await firebaseService.updateVerificationStatus(payment.propertyNumber, "pending");
+        }
+        console.log(`⏳ Payment awaiting verification: ${payment.id} - property ${payment.propertyNumber} has incomplete data`);
 
-        // إرسال إشعار برفض الدفع
+        // إرسال إشعار بأن الدفع ناجح لكن ينتظر استكمال بيانات العقار
         try {
           await notifyNewPayment({
             propertyNumber: payment.propertyNumber,
@@ -610,174 +664,92 @@ const router = Router();
           console.error("❌ WhatsApp notification failed:", err);
         }
 
-        return res.json({ ok: true, status: "rejected", reason: `بيانات العقار غير مكتملة: ${verificationMissingFields.join('، ')}` });
+        if (property?.whatsappNumber) {
+          try {
+            await sendOwnerWhatsApp(
+              property.whatsappNumber,
+              `تم استلام الدفع، لكن بيانات العقار ${property.name || payment.propertyNumber} غير مكتملة.\n\nالحقول المطلوبة: ${verificationMissingFields.join("، ")}\n\nالخطوة التالية: عدّل بيانات العقار وارفع الصور المطلوبة ثم شغّل التحقق من صفحة الاشتراك.`,
+            );
+          } catch (err) {
+            console.error("❌ Owner rejection notification failed:", err);
+          }
+        }
+
+        return res.json({ ok: true, status: "pending_verification", reason: `بيانات العقار غير مكتملة: ${verificationMissingFields.join('، ')}` });
       }
 
       // ===============================
       // 4.5) فحص: هل هذا عقار جديد (لا يملك اشتراك سابق)؟
       // ===============================
       const existingSub = await firebaseService.getSubscriptionByPropertyNumber(payment.propertyNumber);
-      const hasPriorSubscription = !!(existingSub?.endDate);
+      const isOldProperty = hasPriorSubscription(existingSub);
 
-      if (!hasPriorSubscription) {
-        // عقار جديد: الدفع ناجح والتحقق نجح لكن لا يُفعّل تلقائياً
-        // ينتظر موافقة يدوية من الأدمن أو إعادة تحقق من المالك
-        console.log(`⏳ [Webhook] العقار الجديد ${payment.propertyNumber} - دفع ناجح لكن يحتاج مراجعة يدوية (لا يوجد اشتراك سابق)`);
-        return res.json({ ok: true, status: "pending_admin", paymentId: payment.id });
+      if (!isOldProperty) {
+        console.log(`🆕 [Webhook] العقار الجديد ${payment.propertyNumber} - تحقق ناجح + دفع مكتمل → انتظار اعتماد الإدارة`);
       }
 
       // ===============================
-      // 5) تفعيل الاشتراك (فقط بعد نجاح التحقق + عقار قديم)
+      // 5) تفعيل الاشتراك (بعد نجاح التحقق — العقار القديم والجديد)
       // ===============================
-      if (
-        payment.pendingStartDate &&
-        payment.pendingEndDate
-      ) {
-        if (property) {
-          const additionalProps = (payment as any).additionalProperties || [];
-          const secondProp = (payment as any).secondPropertyNumber;
-          if (secondProp && !additionalProps.includes(secondProp)) {
-            additionalProps.push(secondProp);
-          }
-          const totalProperties = 1 + additionalProps.length;
-          
-          const pricePerProperty = (payment.pendingPrice || payment.finalAmount) / totalProperties;
-          const isPremiumPayment = pricePerProperty > 0 || payment.pendingSubscriptionType === "مميز";
-
-          const subscriptionData = {
-            packageId: payment.packageId,
-            price: pricePerProperty,
-            subscriptionType: isPremiumPayment ? "مميز" : "عادي",
-            packageType: isPremiumPayment ? "مميز" : "عادي",
-            startDate: payment.pendingStartDate,
-            endDate: payment.pendingEndDate,
-            paymentId: payment.id,
-            linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
-            linkedProperty: additionalProps.length > 0 ? additionalProps[0] : undefined,
-            propertyCount: totalProperties,
-          };
-
-          console.log(`📦 [Webhook] Payment: ${payment.id}, isPremium: ${isPremiumPayment}, subscriptionType: ${subscriptionData.subscriptionType}`);
-
-          await firebaseService.addSubscriptionToSheet(
-            payment.propertyNumber,
-            subscriptionData,
-            property
-          );
-
-          console.log(`🎉 Subscription Activated: ${payment.propertyNumber} (price: ${pricePerProperty}, type: ${subscriptionData.subscriptionType})`);
-
-          // === إضافة اشتراك للعقارات الإضافية ===
-          for (const propNumber of additionalProps) {
-            const additionalProperty = await propertyService.getByNumber(propNumber);
-            if (additionalProperty) {
-              const additionalSubscriptionData = {
-                ...subscriptionData,
-                linkedProperty: payment.propertyNumber,
-              };
-              await firebaseService.addSubscriptionToSheet(
-                propNumber,
-                additionalSubscriptionData,
-                additionalProperty
-              );
-              console.log(`🎉 Additional property subscription activated: ${propNumber} (price: ${pricePerProperty})`);
-
-              // Linked properties inherit the main's verified state — force approved (do NOT reject
-              // on incomplete data, which previously left linked properties inactive while main was active).
-              await firebaseService.updateVerificationStatus(propNumber, "approved");
-              console.log(`✅ [Webhook] العقار الإضافي ${propNumber} - تمت الموافقة تلقائياً (مرتبط بالعقار الرئيسي)`);
-            }
-          }
-
-          // Create multi-property subscription record
-          if (additionalProps.length > 0) {
-            await firebaseService.createMultiPropertySubscription({
-              packageId: payment.packageId,
-              propertyNumber1: payment.propertyNumber,
-              propertyNumber2: additionalProps[0],
-              additionalProperties: additionalProps,
-              startDate: subscriptionData.startDate,
-              endDate: subscriptionData.endDate,
-              status: "نشط",
-              paymentId: payment.id,
-            });
-          }
+      if (property) {
+        const pkg = await subscriptionService.getPackageById(payment.packageId);
+        if (!pkg) {
+          await paymentService.update(payment.id, {
+            status: "مرفوض" as any,
+            notes: "تم رفض الدفع: الباقة غير موجودة",
+          });
+          return res.json({ ok: true, status: "rejected", reason: "الباقة غير موجودة" });
         }
-      } else if ((payment.action === 'new' || !payment.action) && !payment.pendingStartDate) {
-        // تسجيل جديد بدون تواريخ مسبقة - تفعيل الاشتراك من اليوم
-        console.log("📋 New registration - activating subscription from today:", payment.propertyNumber);
-        if (property) {
-          const today = new Date();
-          const endDate = new Date(today);
-          endDate.setDate(endDate.getDate() + 30);
 
-          const pkg = await subscriptionService.getPackageById(payment.packageId);
-          const isPremiumPayment = (pkg && (pkg.type === "مميز" || pkg.price > 0)) || payment.finalAmount > 0;
+        const calculatedDates = calculateActionDates(payment.action, existingSub, pkg.duration);
+        if (!isOldProperty) {
+          const queued = await queueVerifiedNewPropertyForAdminApproval({
+            payment,
+            property,
+            pkg,
+            startDate: payment.pendingStartDate || calculatedDates.startDate,
+            endDate: payment.pendingEndDate || calculatedDates.endDate,
+            finalAmount: payment.pendingPrice || payment.finalAmount,
+          });
+          console.log(`🆕 [Webhook] Payment queued for admin approval for new property ${payment.propertyNumber}. Linked: ${queued.linkedProperties.join(", ") || "none"}`);
 
-          const subscriptionData = {
-            packageId: payment.packageId,
-            price: payment.finalAmount,
-            subscriptionType: isPremiumPayment ? "مميز" : "عادي",
-            packageType: isPremiumPayment ? "مميز" : "عادي",
-            startDate: today.toISOString(),
-            endDate: endDate.toISOString(),
-            paymentId: payment.id,
-          };
-
-          const additionalProps = (payment as any).additionalProperties || [];
-          const secondProp = (payment as any).secondPropertyNumber;
-          if (secondProp && !additionalProps.includes(secondProp)) {
-            additionalProps.push(secondProp);
-          }
-          const totalProperties = 1 + additionalProps.length;
-
-          const subscriptionDataFull = {
-            ...subscriptionData,
-            linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
-            linkedProperty: additionalProps.length > 0 ? additionalProps[0] : undefined,
-            propertyCount: totalProperties,
-          };
-
-          await firebaseService.addSubscriptionToSheet(
-            payment.propertyNumber,
-            subscriptionDataFull,
-            property
-          );
-          console.log(`🎉 New registration subscription activated: ${payment.propertyNumber} (with ${additionalProps.length} linked)`);
-
-          // إنشاء اشتراكات للعقارات الإضافية
-          for (const propNumber of additionalProps) {
-            const additionalProperty = await propertyService.getByNumber(propNumber);
-            if (additionalProperty) {
-              const additionalSubData = {
-                ...subscriptionData,
-                linkedProperty: payment.propertyNumber,
-              };
-              await firebaseService.addSubscriptionToSheet(
-                propNumber,
-                additionalSubData,
-                additionalProperty
+          if (property.whatsappNumber) {
+            try {
+              await sendOwnerWhatsApp(
+                property.whatsappNumber,
+                `تم التحقق من الدفع وبيانات العقار ${property.name || payment.propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن.`,
               );
-              console.log(`🎉 Additional property subscription created: ${propNumber}`);
-
-              // Linked properties inherit the main's verified state — force approved
-              await firebaseService.updateVerificationStatus(propNumber, "approved");
-              console.log(`✅ [Webhook] العقار الإضافي ${propNumber} - تمت الموافقة تلقائياً (مرتبط بالعقار الرئيسي)`);
+            } catch (err) {
+              console.error("❌ Owner pending approval notification failed:", err);
             }
           }
+        } else {
+          const activation = await activateVerifiedPaymentSubscription({
+            payment,
+            property,
+            pkg,
+            startDate: payment.pendingStartDate || calculatedDates.startDate,
+            endDate: payment.pendingEndDate || calculatedDates.endDate,
+            finalAmount: payment.pendingPrice || payment.finalAmount,
+          });
 
-          // إنشاء سجل multi-property subscription
-          if (additionalProps.length > 0) {
-            await firebaseService.createMultiPropertySubscription({
-              packageId: payment.packageId,
-              propertyNumber1: payment.propertyNumber,
-              propertyNumber2: additionalProps[0],
-              additionalProperties: additionalProps,
-              startDate: subscriptionData.startDate,
-              endDate: subscriptionData.endDate,
-              status: "نشط",
-              paymentId: payment.id,
-            });
+          await paymentService.update(payment.id, {
+            status: "مكتمل" as any,
+            completedAt: new Date().toISOString(),
+          });
+          console.log(`🎉 [Webhook] Subscription activated for ${payment.propertyNumber}. Linked: ${activation.linkedProperties.join(", ") || "none"}`);
+
+          if (property.whatsappNumber) {
+            try {
+              await notifyOwnerSubscriptionActivated({
+                ownerPhone: property.whatsappNumber,
+                propertyNumber: payment.propertyNumber,
+                propertyName: property.name || "",
+                endDate: activation.endDate,
+              });
+            } catch (err) {
+              console.error("❌ Owner activation notification failed:", err);
+            }
           }
         }
       }

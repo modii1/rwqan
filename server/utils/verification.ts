@@ -2,6 +2,7 @@
  * Smart verification system for property data completeness
  */
 import { dbProxy } from "../config/dbConfig";
+import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
 
 // Sensitive fields that require re-verification
 const SENSITIVE_FIELDS = ['location', 'city', 'type', 'imagesLink', 'images'];
@@ -138,7 +139,7 @@ export async function smartVerification(context: SmartVerificationContext): Prom
 
   const dataCheck = await checkPropertyDataComplete(property);
   const subscriptionType = property.subscriptionType || 'عادي';
-  const isPremium = subscriptionType === 'مميز';
+  const isPremium = isPremiumSubscriptionType(subscriptionType);
 
   let aiConfidence = dataCheck.completionScore;
   if (ocrResult) {

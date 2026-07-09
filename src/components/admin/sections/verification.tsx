@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, RefreshCw, Search } from "lucide-react";
 import type { Property } from "@shared/schema";
+import { isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 type Level = "ok" | "warning" | "danger";
 
@@ -83,7 +84,7 @@ function getVerificationStatus(
   const fiftyDaysAgo = new Date();
   fiftyDaysAgo.setDate(fiftyDaysAgo.getDate() - 50);
 
-  if (p.subscriptionDate && p.subscriptionType === "عادي") {
+  if (p.subscriptionDate && !isPremiumSubscriptionType(p.subscriptionType)) {
     const subDate = new Date(p.subscriptionDate);
     if (subDate < fiftyDaysAgo) {
       issues.push("اشتراك عادي قديم (أكثر من 50 يوم)");

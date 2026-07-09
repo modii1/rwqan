@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
 import HomeClient from "@/components/home-client";
+import { isActivePremiumSubscription } from "@shared/subscriptionType";
 
 export default async function HomePage() {
     const [properties, occasion] = await Promise.all([
@@ -12,7 +13,11 @@ export default async function HomePage() {
     const allProperties = properties ?? [];
 
     const premiumPropNumbers = allProperties
-        .filter(p => p.subscriptionType === "مميز")
+        .filter(p => Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
+            subscriptionType: p.subscriptionType,
+            status: (p as any).subscriptionStatus,
+            isExpired: (p as any).isSubscriptionExpired,
+        }))
         .map(p => p.propertyNumber);
 
     const occasionPropNumbers = occasion

@@ -26,6 +26,7 @@ import {
   formatDate as formatSubDate,
   canExtendSubscription,
 } from "@/lib/subscription-utils";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
 export default function OwnerSubscriptionPage() {
   const router = useRouter();
@@ -40,6 +41,18 @@ export default function OwnerSubscriptionPage() {
   const [discountCode, setDiscountCode] = useState("");
   const [validatedDiscount, setValidatedDiscount] = useState<any>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [bankTransferResult, setBankTransferResult] = useState<{
+    autoActivated?: boolean;
+    verificationFailed?: boolean;
+    paymentRejected?: boolean;
+    missingFields?: string[];
+    pendingManualReview?: boolean;
+    pendingAdminApproval?: boolean;
+    message?: string;
+    nextAction?: string;
+    nextUrl?: string;
+    actionLabel?: string;
+  } | null>(null);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [aiScanResult, setAiScanResult] = useState<any>(null);
   
@@ -333,6 +346,8 @@ export default function OwnerSubscriptionPage() {
   // Bank transfer payment
   const bankTransferMutation = useMutation({
     mutationFn: async (data: { packageId: string; action: string; receipt: File; discountCode?: string }) => {
+      setBankTransferResult(null);
+      setPaymentSuccess(false);
       const formData = new FormData();
       formData.append("propertyNumber", property?.propertyNumber || "");
       formData.append("packageId", data.packageId);
@@ -359,6 +374,18 @@ export default function OwnerSubscriptionPage() {
       if (data.aiScan) {
         setAiScanResult(data.aiScan);
       }
+      setBankTransferResult({
+        autoActivated: data.autoActivated,
+        verificationFailed: data.verificationFailed,
+        paymentRejected: data.paymentRejected,
+        missingFields: data.missingFields,
+        pendingManualReview: data.pendingManualReview,
+        pendingAdminApproval: data.pendingAdminApproval,
+        message: data.message,
+        nextAction: data.nextAction,
+        nextUrl: data.nextUrl,
+        actionLabel: data.actionLabel,
+      });
       setPaymentSuccess(true);
     },
     onError: (err: Error) => {
@@ -776,116 +803,7 @@ export default function OwnerSubscriptionPage() {
   }
 
   // Success Screen
-  if (paymentSuccess) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
-        <Card className="max-w-lg w-full p-8 text-center space-y-6">
-          <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
-              <Clock className="w-10 h-10 text-[#c9951d]" />
-            </div>
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-[#434040] mb-2">تم استلام طلبك بنجاح!</h1>
-            <p className="text-muted-foreground">
-              {action === "upgrade" ? "طلب الترقية" : "طلب التمديد"} قيد المراجعة
-            </p>
-          </div>
-          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground flex items-center gap-2">
-                <Home className="w-4 h-4" />رقم العقار
-              </span>
-              <span className="font-bold text-lg">{property?.propertyNumber}</span>
-            </div>
-            {selectedPackage && (
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">الباقة</span>
-                <Badge className="bg-[#c9951d] text-white">{selectedPackage.name}</Badge>
-              </div>
-            )}
-          </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div className="text-right">
-                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
-                <p className="text-sm text-amber-700">
-                  تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* AI Scan Results */}
-          {aiScanResult && (
-            <div className={`p-4 rounded-lg border ${
-              aiScanResult.recommendation === 'تفعيل_تلقائي' 
-                ? 'bg-emerald-50 border-emerald-300' 
-                : aiScanResult.recommendation === 'رفض'
-                ? 'bg-red-50 border-red-300'
-                : 'bg-amber-50 border-amber-300'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
-                <Badge variant="outline" className={
-                  aiScanResult.recommendation === 'تفعيل_تلقائي' 
-                    ? 'border-emerald-500 text-emerald-600' 
-                    : aiScanResult.recommendation === 'رفض'
-                    ? 'border-red-500 text-red-600'
-                    : 'border-amber-500 text-amber-600'
-                }>
-                  {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
-                  {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
-                  {aiScanResult.recommendation === 'رفض' && 'غير مطابق'}
-                </Badge>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">نسبة الأصالة</span>
-                    <span className="font-bold">{aiScanResult.authenticityScore}%</span>
-                  </div>
-                  <Progress value={aiScanResult.authenticityScore} className="h-2" />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">نسبة التطابق</span>
-                    <span className="font-bold">{aiScanResult.matchScore}%</span>
-                  </div>
-                  <Progress value={aiScanResult.matchScore} className="h-2" />
-                </div>
-              </div>
-
-              {aiScanResult.summary && (
-                <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
-                  {aiScanResult.summary}
-                </p>
-              )}
-
-              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
-                مستوى الثقة: {aiScanResult.confidence}%
-              </div>
-            </div>
-          )}
-
-          <div className="text-sm text-muted-foreground">
-            <p className="flex items-center justify-center gap-2">
-              <Phone className="w-4 h-4" />للاستفسار: 0533220646
-            </p>
-          </div>
-          <div className="flex flex-col gap-3">
-            <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
-              العودة للوحة التحكم
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // Incomplete Data Dialog
+  // Helper: translate missing field keys to Arabic labels
   const getMissingFieldLabel = (field: string) => {
     const labels: Record<string, string> = {
       name: "اسم العقار",
@@ -901,6 +819,260 @@ export default function OwnerSubscriptionPage() {
     };
     return labels[field] || field;
   };
+
+  if (paymentSuccess) {
+    const isAutoActivated = bankTransferResult?.autoActivated;
+    const isVerificationFailed = bankTransferResult?.verificationFailed;
+    const isPaymentRejected = bankTransferResult?.paymentRejected;
+    const isPendingManualReview = bankTransferResult?.pendingManualReview;
+    const isPendingAdminApproval = bankTransferResult?.pendingAdminApproval;
+    const missingFields = bankTransferResult?.missingFields;
+
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
+        <Card className="max-w-lg w-full p-8 text-center space-y-6">
+          {isVerificationFailed ? (
+            <>
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertTriangle className="w-10 h-10 text-red-500" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-red-700 mb-2">فشل التحقق من بيانات العقار</h1>
+                <p className="text-muted-foreground">
+                  بيانات العقار غير مكتملة — يرجى إكمال الحقول التالية
+                </p>
+              </div>
+              {missingFields && missingFields.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-right">
+                  <p className="font-semibold text-red-800 mb-2">الحقول الناقصة:</p>
+                  <div className="space-y-1">
+                    {missingFields.map((field, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-sm text-red-700">
+                        <X className="w-3 h-3 flex-shrink-0" />
+                        <span>{getMissingFieldLabel(field)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col gap-3">
+                <Button onClick={() => router.push("/owner/update-property")} className="w-full bg-red-600 hover:bg-red-700">
+                  تعديل بيانات العقار
+                </Button>
+                <Button onClick={() => router.push("/owner/dashboard")} variant="outline" className="w-full">
+                  العودة للوحة التحكم
+                </Button>
+              </div>
+            </>
+          ) : isPaymentRejected ? (
+            <>
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertTriangle className="w-10 h-10 text-red-500" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-red-700 mb-2">تم رفض الدفع</h1>
+                <p className="text-muted-foreground">
+                  {bankTransferResult?.message || "لم نتمكن من قبول إيصال التحويل."}
+                </p>
+              </div>
+              {bankTransferResult?.nextAction && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-right text-sm text-red-700">
+                  {bankTransferResult.nextAction}
+                </div>
+              )}
+              <div className="flex flex-col gap-3">
+                <Button
+                  onClick={() => router.push(bankTransferResult?.nextUrl || "/owner/subscription")}
+                  className="w-full bg-red-600 hover:bg-red-700"
+                >
+                  {bankTransferResult?.actionLabel || "إعادة المحاولة"}
+                </Button>
+                <Button onClick={() => router.push("/owner/dashboard")} variant="outline" className="w-full">
+                  العودة للوحة التحكم
+                </Button>
+              </div>
+            </>
+          ) : isAutoActivated ? (
+            <>
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-emerald-700 mb-2">تم تفعيل اشتراكك بنجاح!</h1>
+                <p className="text-muted-foreground">
+                  تم التحقق من دفعك وبيانات عقارك وتفعيل اشتراكك تلقائياً
+                </p>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <p className="font-semibold">الاشتراك نشط الآن</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                  العودة للوحة التحكم
+                </Button>
+              </div>
+            </>
+          ) : isPendingManualReview ? (
+            <>
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-orange-100 flex items-center justify-center">
+                  <Clock className="w-10 h-10 text-orange-500" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-orange-700 mb-2">الإيصال يحتاج مراجعة يدوية</h1>
+                <p className="text-muted-foreground">
+                  {bankTransferResult?.message || "تعذر التحقق من الإيصال تلقائياً. سيتم مراجعته من قبل الإدارة خلال 24 ساعة."}
+                </p>
+              </div>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-orange-700">
+                  <Clock className="w-5 h-5" />
+                  <p className="font-semibold">بانتظار المراجعة</p>
+                </div>
+                {bankTransferResult?.nextAction && (
+                  <p className="mt-2 text-sm text-orange-700 text-right">
+                    {bankTransferResult.nextAction}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-col gap-3">
+                {bankTransferResult?.nextUrl && (
+                  <Button
+                    onClick={() => router.push(bankTransferResult.nextUrl || "/owner/subscription")}
+                    className="w-full bg-orange-600 hover:bg-orange-700"
+                  >
+                    {bankTransferResult.actionLabel || "متابعة"}
+                  </Button>
+                )}
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                  العودة للوحة التحكم
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+                  <Clock className="w-10 h-10 text-[#c9951d]" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-[#434040] mb-2">تم استلام طلبك بنجاح!</h1>
+                <p className="text-muted-foreground">
+                  {isPendingAdminApproval
+                    ? (bankTransferResult?.message || "تم التحقق من الدفع والبيانات، وبقي اعتماد الإدارة")
+                    : `${action === "upgrade" ? "طلب الترقية" : "طلب التمديد"} قيد المراجعة`}
+                </p>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground flex items-center gap-2">
+                    <Home className="w-4 h-4" />رقم العقار
+                  </span>
+                  <span className="font-bold text-lg">{property?.propertyNumber}</span>
+                </div>
+                {selectedPackage && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">الباقة</span>
+                    <Badge className="bg-[#c9951d] text-white">{selectedPackage.name}</Badge>
+                  </div>
+                )}
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-right">
+                    <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
+                    <p className="text-sm text-amber-700">
+                      {isPendingAdminApproval
+                        ? "لا يلزمك إجراء إضافي الآن. سيتم تفعيل الاشتراك بعد اعتماد الإدارة للعقار الجديد."
+                        : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Scan Results */}
+              {aiScanResult && (
+                <div className={`p-4 rounded-lg border ${
+                  aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                    ? 'bg-emerald-50 border-emerald-300' 
+                    : aiScanResult.recommendation === 'رفض'
+                    ? 'bg-red-50 border-red-300'
+                    : 'bg-amber-50 border-amber-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
+                    <Badge variant="outline" className={
+                      aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                        ? 'border-emerald-500 text-emerald-600' 
+                        : aiScanResult.recommendation === 'رفض'
+                        ? 'border-red-500 text-red-600'
+                        : 'border-amber-500 text-amber-600'
+                    }>
+                      {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
+                      {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
+                      {aiScanResult.recommendation === 'رفض' && 'غير مطابق'}
+                    </Badge>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">نسبة الأصالة</span>
+                        <span className="font-bold">{aiScanResult.authenticityScore}%</span>
+                      </div>
+                      <Progress value={aiScanResult.authenticityScore} className="h-2" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">نسبة التطابق</span>
+                        <span className="font-bold">{aiScanResult.matchScore}%</span>
+                      </div>
+                      <Progress value={aiScanResult.matchScore} className="h-2" />
+                    </div>
+                  </div>
+
+                  {aiScanResult.summary && (
+                    <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                      {aiScanResult.summary}
+                    </p>
+                  )}
+
+                  <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+                    مستوى الثقة: {aiScanResult.confidence}%
+                  </div>
+                </div>
+              )}
+
+              <div className="text-sm text-muted-foreground">
+                <p className="flex items-center justify-center gap-2">
+                  <Phone className="w-4 h-4" />للاستفسار: 0533220646
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                  العودة للوحة التحكم
+                </Button>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  // Incomplete Data Dialog
 
   return (
     <div className="min-h-screen bg-background">
@@ -1110,13 +1282,22 @@ export default function OwnerSubscriptionPage() {
         {/* Rejected Payment Notice */}
         {pendingPayment && !pendingPayment.hasPending && pendingPayment.payment?.status === "مرفوض" && (
           <Card className="p-4 border-red-300 bg-red-50">
-            <div className="flex items-center gap-2 text-red-700">
+            <div className="flex items-center gap-2 text-red-700 mb-3">
               <AlertTriangle className="w-5 h-5" />
               <div>
                 <p className="font-semibold">تم رفض الدفعة السابقة</p>
-                <p className="text-sm">يرجى إعادة التحويل ورفع إيصال صحيح</p>
+                <p className="text-sm">
+                  {pendingPayment.payment?.notes || "يرجى إعادة التحويل ورفع إيصال صحيح"}
+                </p>
               </div>
             </div>
+            <Button
+              onClick={() => router.push("/owner/update-property")}
+              variant="outline"
+              className="w-full border-red-300 text-red-700 hover:bg-red-100"
+            >
+              تعديل بيانات العقار
+            </Button>
           </Card>
         )}
 
@@ -1127,7 +1308,7 @@ export default function OwnerSubscriptionPage() {
               <CheckCircle2 className="w-5 h-5" />
               <div>
                 <p className="font-semibold">تم استلام الدفع بنجاح</p>
-                <p className="text-sm">يمكنك الآن التحقق من بيانات العقار للتفعيل التلقائي</p>
+                <p className="text-sm">يمكنك التحقق من اكتمال بيانات العقار، وسيتم التفعيل بعد اعتماد الإدارة إذا كان العقار جديداً</p>
               </div>
             </div>
             <Button
@@ -1143,7 +1324,7 @@ export default function OwnerSubscriptionPage() {
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 ml-2" />
-                  تحقق من بيانات العقار وفعّل الاشتراك
+                  تحقق من بيانات العقار
                 </>
               )}
             </Button>
@@ -1359,7 +1540,7 @@ export default function OwnerSubscriptionPage() {
                     )}
 
                     {/* المميزات */}
-                    {pkg.type === "مميز" && (
+                    {isPremiumSubscriptionType(pkg.type) && (
                       <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-2">مميز</Badge>
                     )}
                     {pkg.features && pkg.features.length > 0 && (
@@ -1472,7 +1653,7 @@ export default function OwnerSubscriptionPage() {
                                linkedPropertySubscription.subscription.status || '-'}
                             </Badge>
                             <span className="text-muted-foreground">
-                              {linkedPropertySubscription.subscription.subscriptionType}
+                              {getSubscriptionTypeLabel(linkedPropertySubscription.subscription.subscriptionType)}
                             </span>
                           </div>
                         )}

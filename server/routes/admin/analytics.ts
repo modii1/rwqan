@@ -3,6 +3,7 @@ import { requireAdmin } from "../middleware";
 import { analyticsService, propertyService, subscriptionService, paymentService, addOnService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { updateRemainingDaysInSheet } from "../../scheduler";
+import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
 
 const router = Router();
 
@@ -613,10 +614,10 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
       s.status === 'expired' || s.status === 'منتهي'
     ).length;
     const trustedProperties = properties.filter(p =>
-      p.subscriptionType === 'trusted' || p.subscriptionType === 'مميز'
+      isPremiumSubscriptionType(p.subscriptionType)
     ).length;
     const normalProperties = properties.filter(p =>
-      p.subscriptionType === 'normal' || p.subscriptionType === 'عادي' || p.subscriptionType === 'مجاني'
+      !isPremiumSubscriptionType(p.subscriptionType)
     ).length;
 
     // مدفوعات اليوم المكتملة فقط للإحصائيات (تتصفر نهاية اليوم)

@@ -257,11 +257,16 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
  * القاعدة: فقط إذا الأيام المتبقية ≤ 10
  */
 export function canExtendSubscription(endDate: any, status?: SubscriptionStatus): boolean {
-  const effectiveStatus = status || getSubscriptionStatus(endDate);
-  if (effectiveStatus === 'cancelled' || effectiveStatus === 'pending') return false;
+  const rawStatus = String(status || "").trim().toLowerCase();
+  if (['منتهي', 'expired', 'موقوف', 'cancelled', 'قيد المراجعة', 'معلق', 'pending'].includes(rawStatus)) {
+    return false;
+  }
+
+  const effectiveStatus = status ? getSubscriptionStatus(endDate, status) : getSubscriptionStatus(endDate);
+  if (effectiveStatus !== 'active' && effectiveStatus !== 'expiring') return false;
   
   const remainingDays = calculateRemainingDays(endDate);
-  return remainingDays <= 10;
+  return remainingDays >= 0 && remainingDays <= 10;
 }
 
 /**

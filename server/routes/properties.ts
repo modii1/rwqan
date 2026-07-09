@@ -7,8 +7,29 @@ import { firebaseService } from "../firebaseService";
 import { googleDriveService } from "../integrations/googleDrive";
 import type { InsertProperty } from "../../shared/schema";
 import { normalizeArabicText } from "../../src/lib/arabicSearch";
+import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 
 const router = Router();
+
+function getPublicSubscriptionFields(property: any, subscription: any, isSubscriptionExpired: boolean) {
+  const subscriptionType = getEffectiveSubscriptionType({
+    subscriptionType: subscription?.subscriptionType || property.subscriptionType,
+    packageType: subscription?.packageType,
+    price: subscription?.price,
+  });
+
+  return {
+    subscriptionStatus: subscription?.status || null,
+    subscriptionEndDate: subscription?.endDate || null,
+    isSubscriptionExpired,
+    subscriptionType,
+    isPremiumActive: isActivePremiumSubscription({
+      subscriptionType,
+      status: subscription?.status,
+      isExpired: isSubscriptionExpired,
+    }),
+  };
+}
 
 // GET all properties (public - only approved)
 router.get("/api/properties", async (_req, res) => {
@@ -34,10 +55,7 @@ router.get("/api/properties", async (_req, res) => {
         
         return {
           ...p,
-          subscriptionStatus: subscription?.status || null,
-          subscriptionEndDate: subscription?.endDate || null,
-          isSubscriptionExpired,
-          subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+          ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
         };
       })
     );
@@ -49,8 +67,8 @@ router.get("/api/properties", async (_req, res) => {
 
     // Sort: premium properties first
     filtered.sort((a, b) => {
-      const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
-      const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
+      const aIsPremium = (a as any).isPremiumActive ? 1 : 0;
+      const bIsPremium = (b as any).isPremiumActive ? 1 : 0;
       return bIsPremium - aIsPremium;
     });
 
@@ -89,10 +107,7 @@ router.get("/api/properties/:id", async (req, res) => {
 
     const response = {
       ...p,
-      subscriptionStatus: subscription?.status || null,
-      subscriptionEndDate: subscription?.endDate || null,
-      isSubscriptionExpired,
-      subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+      ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
     };
 
     return res.json(response);
@@ -253,10 +268,7 @@ router.get("/api/search", async (req, res) => {
       }
       return {
         ...p,
-        subscriptionStatus: subscription?.status || null,
-        subscriptionEndDate: subscription?.endDate || null,
-        isSubscriptionExpired,
-        subscriptionType: isSubscriptionExpired ? "عادي" : (p.subscriptionType || "عادي"),
+        ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
       };
     }));
 
@@ -277,9 +289,10 @@ router.get("/api/search", async (req, res) => {
 
     // Filter by facilities
     if (facilities) {
-      const facilityList: string[] = Array.isArray(facilities) 
-        ? (facilities as string[]).map(String)
-        : [String(facilities)];
+      const facilityList: string[] = (Array.isArray(facilities) ? facilities : [facilities])
+        .flatMap((value) => String(value).split(","))
+        .map((value) => value.trim())
+        .filter(Boolean);
       items = items.filter(p => {
         const propFacilities: string[] = Array.isArray(p.facilities) ? p.facilities : [];
         return facilityList.every((f: string) => {
@@ -330,8 +343,8 @@ router.get("/api/search", async (req, res) => {
 
     // Sort: premium properties first
     items.sort((a, b) => {
-      const aIsPremium = a.subscriptionType === "مميز" ? 1 : 0;
-      const bIsPremium = b.subscriptionType === "مميز" ? 1 : 0;
+      const aIsPremium = (a as any).isPremiumActive ? 1 : 0;
+      const bIsPremium = (b as any).isPremiumActive ? 1 : 0;
       return bIsPremium - aIsPremium;
     });
 
