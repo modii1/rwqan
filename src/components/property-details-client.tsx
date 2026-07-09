@@ -78,6 +78,14 @@ function getExternalHref(value?: string) {
     return "";
 }
 
+function getSafeImageSrc(value?: string) {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed === "/" || trimmed === "#") return "";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith("/assets/")) return trimmed;
+    return "";
+}
+
 function detectDeviceType() {
     const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
 
@@ -324,8 +332,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     // دمج الصور من R2 + imageUrls من بيانات العقار (بدون تكرار)
     const images = (() => {
-        const r2Urls = r2ImagesData || [];
-        const propertyUrls = property?.imageUrls || [];
+        const r2Urls = (r2ImagesData || []).map(getSafeImageSrc).filter(Boolean);
+        const propertyUrls = (property?.imageUrls || []).map(getSafeImageSrc).filter(Boolean);
         const merged = [...r2Urls];
         for (const url of propertyUrls) {
             if (url && !merged.includes(url)) {
