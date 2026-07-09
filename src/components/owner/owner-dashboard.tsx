@@ -1031,6 +1031,15 @@ export default function OwnerDashboard() {
   const stats = calculateAnalytics();
   const heroImage = property.imageUrls?.[0];
   const activeAddOnsCount = propertyAddOns.filter((addon) => addon.status === "active").length;
+  const hasPendingReceiptPayment = !!paymentsData?.some((payment: any) =>
+    payment.status === "معلق" || payment.status === "pending",
+  );
+  const hasPaymentUnderReview = !!paymentsData?.some((payment: any) =>
+    payment.status === "قيد التحقق" || payment.status === "نجح - قيد التحقق",
+  );
+  const hasRejectedPayment = !!paymentsData?.some((payment: any) =>
+    payment.status === "مرفوض",
+  );
   const pendingPaymentsCount = paymentsData?.filter((payment: any) =>
     payment.status === "قيد المراجعة" ||
     payment.status === "معلق" ||
@@ -1064,11 +1073,18 @@ export default function OwnerDashboard() {
       : property.verificationStatus === "rejected"
         ? "border-[#f1c8c8] bg-[#fff5f5] text-red-700"
         : "border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]";
+  const subscriptionSinceLabel = property.subscriptionDate
+    ? (() => {
+      const d = new Date(property.subscriptionDate);
+      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
+    })()
+    : "غير محدد";
+  const subscriptionProgressValue = remainingDays < 0 ? 100 : (progressPercent ?? 0);
 
   return (
     <div className="min-h-screen bg-[#faf8f1] pb-20 text-[#2f2a1f]">
       {/* ===== تنبيه أعلى الصفحة عند قرب انتهاء الاشتراك ===== */}
-      {shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
+      {false && shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
         <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center justify-between gap-2 text-xs md:text-sm">
             <div className="flex items-center gap-2">
@@ -1091,7 +1107,7 @@ export default function OwnerDashboard() {
       )}
 
       {/* ===== تنبيه دفعة قيد المراجعة (بانتظار رفع الإيصال) ===== */}
-      {shouldShowNotification(NOTIFICATION_KEYS.paymentPendingReceipt, !!(paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending"))) && (
+      {false && shouldShowNotification(NOTIFICATION_KEYS.paymentPendingReceipt, !!(paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending"))) && (
         <div className="bg-[#fff9ec] border-b border-[#ead7a8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1135,7 +1151,7 @@ export default function OwnerDashboard() {
       )}
 
       {/* ===== تنبيه دفعة قيد التحقق (بعد رفع الإيصال) ===== */}
-      {shouldShowNotification(NOTIFICATION_KEYS.paymentUnderReview, !!(paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق"))) && (
+      {false && shouldShowNotification(NOTIFICATION_KEYS.paymentUnderReview, !!(paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق"))) && (
         <div className="bg-[#f4f8fc] border-b border-[#c9d9eb]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1179,7 +1195,7 @@ export default function OwnerDashboard() {
       )}
 
       {/* ===== تنبيه دفعة مرفوضة ===== */}
-      {shouldShowNotification(NOTIFICATION_KEYS.paymentRejected, !!(paymentsData?.some((p: any) => p.status === "مرفوض"))) && (
+      {false && shouldShowNotification(NOTIFICATION_KEYS.paymentRejected, !!(paymentsData?.some((p: any) => p.status === "مرفوض"))) && (
         <div className="bg-[#fff5f5] border-b border-[#f1c8c8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1261,7 +1277,177 @@ export default function OwnerDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-6 md:py-8 space-y-6 md:space-y-8">
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,.65fr)]">
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <Card className={`${ownerPanelClass} overflow-hidden`}>
+            <div className="border-b border-[#eee4cf] bg-[#fffdf8] p-5 md:p-6">
+              <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#8b7140]">حالة الاشتراك</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={isVip ? "default" : "secondary"}
+                      className="rounded-lg px-3 py-1 text-sm"
+                    >
+                      {subscriptionStateLabel}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]">
+                      منذ {subscriptionSinceLabel}
+                    </Badge>
+                    {currentSubscription?.linkedProperty && (
+                      <Badge variant="outline" className="rounded-lg border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]">
+                        مرتبط: {currentSubscription.linkedProperty}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                <Button
+                  className="h-11 rounded-lg bg-[#2f2a1f] px-5 text-sm font-bold text-white"
+                  onClick={() => router.push("/owner/subscription")}
+                  data-testid="button-subscription-manage"
+                >
+                  <CreditCard className="w-4 h-4 ml-2" />
+                  {subscriptionButtonLabel}
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-5 md:p-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-[#8b7140]">التقدم</p>
+                  <p className={`mt-1 text-3xl font-bold ${remainingDays === 0 ? "text-orange-600" : remainingDays !== null && remainingDays < 0 ? "text-red-600" : "text-[#2f2a1f]"}`}>
+                    {remainingDaysLabel}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm md:min-w-[260px]">
+                  <div className="rounded-lg border border-[#eee4cf] bg-[#fffdf8] px-3 py-2">
+                    <p className="text-xs text-[#8b7140]">العقار</p>
+                    <p className="font-bold text-[#2f2a1f]">#{property.propertyNumber}</p>
+                  </div>
+                  <div className="rounded-lg border border-[#eee4cf] bg-[#fffdf8] px-3 py-2">
+                    <p className="text-xs text-[#8b7140]">التحقق</p>
+                    <p className="font-bold text-[#2f2a1f]">{verificationStateLabel}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5">
+                <ProgressBar value={subscriptionProgressValue} />
+              </div>
+            </div>
+          </Card>
+
+          <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+            <div className="mb-5">
+              <p className="text-sm font-semibold text-[#8b7140]">العقار</p>
+              <h2 className="mt-1 truncate text-2xl font-bold text-[#2f2a1f]">
+                {property.name || `عقار رقم ${property.propertyNumber}`}
+              </h2>
+              <p className="mt-2 text-sm text-[#6f6249]">
+                {property.city || "المدينة غير محددة"}
+                {property.location ? ` - ${property.location}` : ""}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Button
+                variant="outline"
+                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+                onClick={() => router.push("/owner/update-property")}
+              >
+                <Edit3 className="w-4 h-4 ml-2" />
+                تحديث بيانات العقار
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+                onClick={() => router.push("/owner/images")}
+              >
+                <ImageIcon className="w-4 h-4 ml-2" />
+                إدارة الصور ({imageCount}/15)
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+                onClick={() => router.push(`/property/${property.propertyNumber}`)}
+              >
+                <Eye className="w-4 h-4 ml-2" />
+                مشاهدة صفحة العقار
+              </Button>
+            </div>
+          </Card>
+        </section>
+
+        <section className="space-y-3">
+          {hasPaymentUnderReview && (
+            <WorkflowNotice
+              tone="blue"
+              icon={<Loader2 className="h-5 w-5 animate-spin" />}
+              label="قيد التحقق الآن"
+              title="المراجعة تعمل على إيصال التحويل"
+              description="تم استلام الإيصال، وسيتم تحديث حالة الدفع والاشتراك بعد انتهاء التحقق."
+              actionLabel="عرض سجل المدفوعات"
+              onAction={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+          )}
+          {hasPendingReceiptPayment && (
+            <WorkflowNotice
+              tone="amber"
+              icon={<Clock className="h-5 w-5" />}
+              label="بانتظارك"
+              title="يوجد دفع بانتظار رفع إيصال التحويل"
+              description="ارفع إيصال التحويل الصحيح حتى يبدأ التحقق وتظهر حالة المراجعة بوضوح."
+              actionLabel="رفع الإيصال"
+              onAction={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+          )}
+          {hasRejectedPayment && (
+            <WorkflowNotice
+              tone="red"
+              icon={<AlertTriangle className="h-5 w-5" />}
+              label="مطلوب إجراء"
+              title="تم رفض إيصال تحويل سابق"
+              description="راجع السبب في سجل المدفوعات ثم ارفع إيصالاً صحيحاً أو أعد محاولة الدفع."
+              actionLabel="معالجة الدفع"
+              onAction={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+          )}
+          {property.verificationStatus !== "approved" && (
+            <WorkflowNotice
+              tone={property.verificationStatus === "rejected" ? "red" : "blue"}
+              icon={<Activity className="h-5 w-5" />}
+              label={verificationStateLabel}
+              title="تحقق بيانات العقار غير مكتمل"
+              description="شغل التحقق الذكي أو عدل البيانات الناقصة حتى يصبح العقار جاهزاً للاعتماد."
+              actionLabel="تشغيل التحقق"
+              onAction={startSmartVerification}
+            />
+          )}
+          {!hasPaymentUnderReview && !hasPendingReceiptPayment && !hasRejectedPayment && property.verificationStatus === "approved" && (
+            <WorkflowNotice
+              tone="green"
+              icon={<CheckCircle2 className="h-5 w-5" />}
+              label="لا توجد إجراءات معلقة"
+              title="كل شيء واضح حالياً"
+              description="الاشتراك وبيانات العقار لا تحتاج إجراءً فورياً من المالك."
+              actionLabel="إدارة الاشتراك"
+              onAction={() => router.push("/owner/subscription")}
+            />
+          )}
+        </section>
+
+        <section className="hidden">
           <div className="overflow-hidden rounded-lg border border-[#2f2a1f] bg-[#2f2a1f] text-white">
             <div className="grid min-h-[360px] lg:grid-cols-[minmax(0,1fr)_320px]">
               <div className="flex flex-col justify-between gap-8 p-5 md:p-7">
@@ -1381,7 +1567,7 @@ export default function OwnerDashboard() {
           </div>
         </section>
 
-        <section className="grid gap-3 md:grid-cols-4">
+        <section className="hidden">
           <DashboardQuickAction
             icon={<Zap className="h-5 w-5" />}
             title="الإضافات النشطة"
@@ -1415,7 +1601,7 @@ export default function OwnerDashboard() {
         </section>
 
         {/* ===== كرت حالة الاشتراك + Progress Bar ===== */}
-        <Card className={`${ownerSoftPanelClass} p-4 md:p-6`}>
+        <Card className={`hidden ${ownerSoftPanelClass} p-4 md:p-6`}>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6">
             <div className="space-y-2 flex-1">
               <h2 className="font-bold text-base md:text-lg text-[#2f2a1f]">
@@ -2634,6 +2820,77 @@ function DashboardQuickAction({
         <p className="mt-1 text-2xl font-bold text-[#2f2a1f]">{value}</p>
       </div>
     </button>
+  );
+}
+
+function WorkflowNotice({
+  tone,
+  icon,
+  label,
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  tone: "amber" | "blue" | "red" | "green";
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  const toneClass = {
+    amber: {
+      wrap: "border-[#ead7a8] bg-[#fff9ec]",
+      icon: "border-[#ead7a8] bg-white text-[#9a7623]",
+      badge: "border-[#e2c27a] bg-[#fff3d4] text-[#7a5413]",
+      button: "border-[#d8c9a8] text-[#6f5520]",
+    },
+    blue: {
+      wrap: "border-[#c9d9eb] bg-[#f4f8fc]",
+      icon: "border-[#c9d9eb] bg-white text-[#315f92]",
+      badge: "border-[#b7cbe2] bg-[#eaf2fb] text-[#315f92]",
+      button: "border-[#c9d9eb] text-[#315f92]",
+    },
+    red: {
+      wrap: "border-[#f1c8c8] bg-[#fff5f5]",
+      icon: "border-[#f1c8c8] bg-white text-red-700",
+      badge: "border-[#efb6b6] bg-[#ffecec] text-red-700",
+      button: "border-[#f1c8c8] text-red-700",
+    },
+    green: {
+      wrap: "border-[#cfe5d6] bg-[#f8fff9]",
+      icon: "border-[#cfe5d6] bg-white text-[#128c47]",
+      badge: "border-[#b8dec3] bg-[#effaf2] text-[#128c47]",
+      button: "border-[#cfe5d6] text-[#128c47]",
+    },
+  }[tone];
+
+  return (
+    <div className={`rounded-lg border p-4 md:p-5 ${toneClass.wrap}`}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-start gap-3">
+          <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border ${toneClass.icon}`}>
+            {icon}
+          </div>
+          <div>
+            <Badge variant="outline" className={`mb-2 rounded-lg ${toneClass.badge}`}>
+              {label}
+            </Badge>
+            <h3 className="font-bold text-[#2f2a1f]">{title}</h3>
+            <p className="mt-1 text-sm leading-6 text-[#6f6249]">{description}</p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          className={`h-10 flex-shrink-0 rounded-lg bg-white px-4 font-bold ${toneClass.button}`}
+          onClick={onAction}
+        >
+          {actionLabel}
+        </Button>
+      </div>
+    </div>
   );
 }
 
