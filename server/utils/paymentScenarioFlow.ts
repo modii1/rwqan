@@ -188,8 +188,6 @@ async function syncMultiPropertyRecord(params: {
   paymentId: string;
 }) {
   const { mainPropertyNumber, linkedProperties, packageId, startDate, endDate, paymentId } = params;
-  if (linkedProperties.length === 0) return;
-
   const groupMembers = new Set([mainPropertyNumber, ...linkedProperties]);
   const multiSubscriptions = await firebaseService.getMultiPropertySubscriptions();
   const existingGroup = multiSubscriptions.find((multiSub) => {
@@ -201,6 +199,13 @@ async function syncMultiPropertyRecord(params: {
     }
     return Array.from(groupMembers).some((propNumber) => members.has(propNumber));
   });
+
+  if (linkedProperties.length === 0) {
+    if (existingGroup) {
+      await firebaseService.deleteMultiPropertySubscription(existingGroup.id);
+    }
+    return;
+  }
 
   if (existingGroup) {
     await firebaseService.updateMultiPropertySubscription(existingGroup.id, {
