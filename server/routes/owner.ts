@@ -33,9 +33,33 @@ import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "../../share
 const router = Router();
 
 const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set(["نشط", "ساري", "نشط مجاني", "active"]);
+const OWNER_PAYMENT_ATTENTION_STATUSES = new Set(["قيد المراجعة", "معلق", "قيد التحقق", "نجح - قيد التحقق", "pending"]);
 
 function isLinkedSubscriptionActive(status?: string | null): boolean {
   return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
+}
+
+function getPaymentTime(value: any): number {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1_000_000);
+  if (typeof value._seconds === "number") return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
+  return 0;
+}
+
+function sortPaymentsNewestFirst<T extends { createdAt?: any; completedAt?: any; id?: string }>(payments: T[]): T[] {
+  return [...payments].sort((a, b) => {
+    const byTime =
+      getPaymentTime(b.createdAt || b.completedAt) -
+      getPaymentTime(a.createdAt || a.completedAt);
+    if (byTime !== 0) return byTime;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
 }
 
 // ======================================================
@@ -567,37 +591,30 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const payments = await paymentService.getByProperty(propertyNumber);
+    const payments = sortPaymentsNewestFirst(await paymentService.getByProperty(propertyNumber));
+    const latestPayment = payments[0];
 
-    // Look for any pending payment that needs owner/admin follow-up.
-    const pendingPayment = payments.find(p =>
-      p.status === "قيد المراجعة" ||
-      p.status === "معلق" ||
-      p.status === "نجح - قيد التحقق"
-    );
-
-    if (!pendingPayment) {
-      const rejectedPayment = payments
-        .filter(p => p.status === "مرفوض")
-        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-      if (rejectedPayment) {
+    if (!latestPayment || !OWNER_PAYMENT_ATTENTION_STATUSES.has(latestPayment.status)) {
+      if (latestPayment?.status === "مرفوض") {
         return res.json({
           hasPending: false,
-          payment: rejectedPayment,
-          errorMessage: rejectedPayment.notes || "تم رفض الدفع. يرجى مراجعة السبب وإعادة المحاولة.",
-          nextAction: rejectedPayment.notes?.includes("بيانات العقار")
+          payment: latestPayment,
+          errorMessage: latestPayment.notes || "تم رفض الدفع. يرجى مراجعة السبب وإعادة المحاولة.",
+          nextAction: latestPayment.notes?.includes("بيانات العقار")
             ? "أكمل بيانات العقار ثم أعد محاولة الدفع."
             : "ارفع إيصال تحويل صحيح وواضح.",
-          nextUrl: rejectedPayment.notes?.includes("بيانات العقار")
+          nextUrl: latestPayment.notes?.includes("بيانات العقار")
             ? "/owner/update-property"
             : "/owner/subscription",
-          actionLabel: rejectedPayment.notes?.includes("بيانات العقار")
+          actionLabel: latestPayment.notes?.includes("بيانات العقار")
             ? "تعديل بيانات العقار"
             : "رفع إيصال جديد",
         });
       }
       return res.json({ hasPending: false });
     }
+
+    const pendingPayment = latestPayment;
 
     // Auto-check for issues
     const issues: string[] = [];

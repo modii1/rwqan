@@ -45,6 +45,23 @@ export class FirebaseService {
         return db;
     }
 
+    private getDateMillis(value: any): number {
+        if (!value) return 0;
+        if (typeof value === "number") return value;
+        if (typeof value === "string") {
+            const parsed = new Date(value).getTime();
+            return Number.isNaN(parsed) ? 0 : parsed;
+        }
+        if (typeof value.toMillis === "function") return value.toMillis();
+        if (typeof value.seconds === "number") {
+            return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1_000_000);
+        }
+        if (typeof value._seconds === "number") {
+            return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
+        }
+        return 0;
+    }
+
     // ================== العقارات (Properties) ==================
 
     /**
@@ -733,9 +750,13 @@ export class FirebaseService {
             return data;
         });
         console.log(`[DEBUG getPaymentsByProperty] Total payments found for "${propertyNumber}": ${payments.length}`);
-        return payments.sort((a, b) =>
-            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
+        return payments.sort((a, b) => {
+            const byTime =
+                this.getDateMillis(b.createdAt || b.completedAt) -
+                this.getDateMillis(a.createdAt || a.completedAt);
+            if (byTime !== 0) return byTime;
+            return String(b.id || "").localeCompare(String(a.id || ""));
+        });
     }
 
     // ================== الطلبات (Requests) ==================

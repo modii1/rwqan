@@ -28,6 +28,29 @@ import {
 } from "@/lib/subscription-utils";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
+function getPaymentTime(value: any): number {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1_000_000);
+  if (typeof value._seconds === "number") return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
+  return 0;
+}
+
+function sortPaymentsNewestFirst<T extends { createdAt?: any; completedAt?: any; id?: string }>(payments: T[]): T[] {
+  return [...payments].sort((a, b) => {
+    const byTime =
+      getPaymentTime(b.createdAt || b.completedAt) -
+      getPaymentTime(a.createdAt || a.completedAt);
+    if (byTime !== 0) return byTime;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
+}
+
 export default function OwnerSubscriptionPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -174,6 +197,11 @@ export default function OwnerSubscriptionPage() {
   // Check pending payment - only after property is loaded
   const { data: pendingPayment } = useQuery<any>({
     queryKey: ["/api/owner/payment/check-pending"],
+    enabled: !!property?.propertyNumber,
+  });
+
+  const { data: paymentsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/owner/payments"],
     enabled: !!property?.propertyNumber,
   });
 
@@ -565,7 +593,7 @@ export default function OwnerSubscriptionPage() {
   
   const displayDays = Math.max(0, remainingDays);
   const isExpired = remainingDays < 0;
-  const isNearExpiry = remainingDays >= 0 && remainingDays <= 7;
+  const isNearExpiry = remainingDays >= 0 && remainingDays <= 10;
   const canExtend = subscription?.endDate
     ? canExtendSubscription(subscription.endDate, subscription?.status)
     : true; // expired = can extend
@@ -642,6 +670,12 @@ export default function OwnerSubscriptionPage() {
 
   // Current package price from subscription
   const currentPackageObj = packages.find((p: any) => p.id === subscription?.packageId);
+  const latestOwnerPayment = sortPaymentsNewestFirst(paymentsData || [])[0];
+  const shouldShowRejectedPaymentNotice =
+    pendingPayment &&
+    !pendingPayment.hasPending &&
+    pendingPayment.payment?.status === "مرفوض" &&
+    latestOwnerPayment?.status === "مرفوض";
 
   // Get subscription status with custom Arabic labels for display
   const getSubscriptionDisplayStatus = () => {
@@ -663,6 +697,99 @@ export default function OwnerSubscriptionPage() {
     return { label: 'غير نشط', bgColor: 'bg-gray-400', textColor: 'text-white' };
   };
   const subStatusDisplay = getSubscriptionDisplayStatus();
+  const subscriptionStartDate = subscription?.startDate ? new Date(subscription.startDate) : null;
+  const subscriptionEndDate = subscription?.endDate ? new Date(subscription.endDate) : null;
+  const hasValidSubscriptionDates =
+    !!subscriptionStartDate &&
+    !!subscriptionEndDate &&
+    !Number.isNaN(subscriptionStartDate.getTime()) &&
+    !Number.isNaN(subscriptionEndDate.getTime());
+  const hasSubscriptionDateConflict =
+    hasValidSubscriptionDates && subscriptionEndDate!.getTime() < subscriptionStartDate!.getTime();
+  const displayedRemainingDays = hasSubscriptionDateConflict ? 0 : displayDays;
+  const displayStatusLabel = subStatusDisplay.label;
+  const statusBadgeClass = `${subStatusDisplay.bgColor} ${subStatusDisplay.textColor}`;
+  const progressPercent =
+    !hasValidSubscriptionDates || hasSubscriptionDateConflict || isExpired || subscriptionDuration <= 0
+      ? 0
+      : Math.max(5, Math.min(100, (remainingDays / Math.max(1, subscriptionDuration)) * 100));
+  const propertyStatusDisplay = (() => {
+    switch (property?.verificationStatus) {
+      case "approved":
+        return { label: "العقار معتمد", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+      case "pending":
+        return { label: "العقار قيد الاعتماد", className: "border-amber-200 bg-amber-50 text-amber-700" };
+      case "rejected":
+        return { label: "العقار مرفوض", className: "border-red-200 bg-red-50 text-red-700" };
+      default:
+        return { label: "حالة العقار غير محددة", className: "border-stone-200 bg-stone-50 text-stone-700" };
+    }
+  })();
+  const approvedLinkedCount = additionalPropertyRequests?.approvedRequests?.length || 0;
+  const visibleLinkedCount = approvedLinkedCount || (currentSubscription?.linkedProperty ? 1 : 0);
+  const subscriptionVisualState = (() => {
+    if (property?.verificationStatus === "rejected") {
+      return {
+        tone: "red",
+        title: "العقار غير ظاهر حالياً",
+        description: "تم رفض اعتماد بيانات العقار. راجع السبب وعدل البيانات قبل متابعة الاشتراك.",
+        bannerClass: "border-red-200 bg-red-50 text-red-900",
+        iconClass: "bg-red-600 text-white",
+      };
+    }
+    if (property?.verificationStatus === "pending") {
+      return {
+        tone: "amber",
+        title: "العقار بانتظار الاعتماد",
+        description: "الاشتراك لا يعني ظهور العقار قبل اكتمال اعتماد بيانات العقار من الإدارة.",
+        bannerClass: "border-amber-200 bg-amber-50 text-amber-900",
+        iconClass: "bg-amber-500 text-white",
+      };
+    }
+    if (hasSubscriptionDateConflict) {
+      return {
+        tone: "red",
+        title: "تنبيه في تواريخ الاشتراك",
+        description: "حالة الاشتراك تعرض حسب المنطق الحالي، لكن تاريخ البداية بعد تاريخ الانتهاء ويحتاج تصحيحاً يدوياً من الإدارة.",
+        bannerClass: "border-red-200 bg-red-50 text-red-900",
+        iconClass: "bg-red-600 text-white",
+      };
+    }
+    if (isExpired) {
+      return {
+        tone: "red",
+        title: "ظهور العقار متوقف",
+        description: "الاشتراك منتهي. قم بالتجديد لإعادة ظهور العقار في المنصة.",
+        bannerClass: "border-red-200 bg-red-50 text-red-900",
+        iconClass: "bg-red-600 text-white",
+      };
+    }
+    if (isNearExpiry) {
+      return {
+        tone: "amber",
+        title: "الاشتراك ينتهي قريباً",
+        description: "يمكنك التجديد الآن لأن المتبقي 10 أيام أو أقل. التجديد يضيف المدة بعد تاريخ الانتهاء الحالي.",
+        bannerClass: "border-amber-200 bg-amber-50 text-amber-900",
+        iconClass: "bg-amber-500 text-white",
+      };
+    }
+    if (subStatus === "active") {
+      return {
+        tone: "green",
+        title: "العقار ظاهر في المنصة",
+        description: "الاشتراك نشط وبيانات العقار معتمدة حالياً.",
+        bannerClass: "border-emerald-200 bg-emerald-50 text-emerald-900",
+        iconClass: "bg-emerald-600 text-white",
+      };
+    }
+    return {
+      tone: "neutral",
+      title: "حالة الاشتراك غير نشطة",
+      description: "اختر باقة مناسبة أو أكمل الإجراء المطلوب لتفعيل ظهور العقار.",
+      bannerClass: "border-stone-200 bg-stone-50 text-stone-900",
+      iconClass: "bg-stone-600 text-white",
+    };
+  })();
 
   // Filter packages - show upgradable ones
   const availablePackages = packages.filter((pkg: any) => {
@@ -1075,7 +1202,7 @@ export default function OwnerSubscriptionPage() {
   // Incomplete Data Dialog
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#f8f4eb]">
       {/* Incomplete Data Dialog */}
       <Dialog open={showIncompleteDataDialog} onOpenChange={setShowIncompleteDataDialog}>
         <DialogContent className="max-w-md" dir="rtl">
@@ -1115,22 +1242,263 @@ export default function OwnerSubscriptionPage() {
       </Dialog>
 
       {/* Header */}
-      <header className="bg-card border-b border-border shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/owner/dashboard")}>
+      <header className="sticky top-0 z-10 border-b border-[#ded3bc] bg-[#fffdf8]/95 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/owner/dashboard")} className="rounded-lg">
             <ChevronRight className="w-5 h-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-[#434040]">إدارة الاشتراك</h1>
-            <p className="text-sm text-muted-foreground">ترقية أو تمديد اشتراكك</p>
+            <h1 className="text-2xl font-bold text-[#2f2d2b]">إدارة الاشتراك</h1>
+            <p className="text-sm text-[#776f63]">إدارة الباقة والمدفوعات وحالة الظهور</p>
           </div>
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 py-6 md:py-8 flex flex-col gap-6 [&>*]:order-3">
+        <Card className="overflow-hidden rounded-lg border border-[#ded3bc] bg-[#fffdf8]" style={{ order: 1 }}>
+          <div className={`border-b p-5 md:p-6 ${subscriptionVisualState.bannerClass}`}>
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-4">
+                <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg ${subscriptionVisualState.iconClass}`}>
+                  {subscriptionVisualState.tone === "green" ? (
+                    <CheckCircle2 className="h-5 w-5" />
+                  ) : subscriptionVisualState.tone === "amber" ? (
+                    <Clock className="h-5 w-5" />
+                  ) : (
+                    <AlertTriangle className="h-5 w-5" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-lg font-bold">{subscriptionVisualState.title}</p>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 opacity-85">
+                    {subscriptionVisualState.description}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs md:min-w-56">
+                <div className="rounded-lg border border-current/15 bg-white/55 p-3">
+                  <p className="font-semibold opacity-70">حالة الاشتراك</p>
+                  <p className="mt-1 font-bold">{displayStatusLabel}</p>
+                </div>
+                <div className="rounded-lg border border-current/15 bg-white/55 p-3">
+                  <p className="font-semibold opacity-70">حالة العقار</p>
+                  <p className="mt-1 font-bold">{propertyStatusDisplay.label.replace("العقار ", "")}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="p-5 md:p-8 space-y-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#a77d22]">حالة الاشتراك</p>
+                  <div className="space-y-1">
+                    <h2 className="text-3xl md:text-4xl font-bold leading-tight text-[#2f2d2b]">
+                      {getPackageName(subscription?.packageId)}
+                    </h2>
+                    <p className="text-sm text-[#776f63]">
+                      عقار رقم {property?.propertyNumber || "غير محدد"}
+                      {property?.name ? ` - ${property.name}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge className={`${statusBadgeClass} rounded-md px-3 py-1 text-xs font-bold`}>
+                    {displayStatusLabel}
+                  </Badge>
+                  <Badge variant="outline" className={`${propertyStatusDisplay.className} rounded-md px-3 py-1 text-xs font-bold`}>
+                    {propertyStatusDisplay.label}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
+                  <p className="text-xs font-semibold text-[#776f63]">الأيام المتبقية</p>
+                  <div className="mt-3 flex items-end gap-2">
+                    <span className={`text-5xl font-black leading-none ${hasSubscriptionDateConflict || isExpired ? "text-red-600" : isNearExpiry ? "text-[#b7791f]" : "text-[#2f2d2b]"}`}>
+                      {displayedRemainingDays}
+                    </span>
+                    <span className="pb-1 text-sm font-semibold text-[#776f63]">
+                      {isExpired ? "منتهي" : displayedRemainingDays === 0 ? "اليوم الأخير" : "يوم"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
+                  <div className="flex items-center gap-2 text-[#776f63]">
+                    <Banknote className="h-4 w-4" />
+                    <p className="text-xs font-semibold">رسوم الاشتراك</p>
+                  </div>
+                  <div className="mt-3">
+                    <PriceDisplay amount={currentPackageObj?.price || 0} size="lg" />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
+                  <div className="flex items-center gap-2 text-[#776f63]">
+                    <Timer className="h-4 w-4" />
+                    <p className="text-xs font-semibold">مدة الاشتراك</p>
+                  </div>
+                  <p className="mt-4 text-2xl font-bold text-[#2f2d2b]">
+                    {currentPackageObj?.duration || subscriptionDuration || 30} يوم
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-[#e5dcc7] bg-white p-5 space-y-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-[#2f2d2b]">التقدم الزمني للاشتراك</p>
+                    <p className="text-xs text-[#776f63]">
+                      {hasSubscriptionDateConflict
+                        ? "لا يمكن حساب التقدم بسبب تعارض تاريخ البداية والانتهاء"
+                        : isExpired
+                          ? "انتهت مدة الاشتراك"
+                          : isNearExpiry
+                            ? "اشتراكك قريب من الانتهاء"
+                            : `متبقي ${displayedRemainingDays} يوم`}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-[#a77d22]">
+                    {hasSubscriptionDateConflict ? "غير متسق" : `${Math.round(progressPercent)}%`}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-[#eee6d5]">
+                  <div
+                    className={`h-2 rounded-full ${hasSubscriptionDateConflict || isExpired ? "bg-red-600" : isNearExpiry ? "bg-[#c9951d]" : "bg-[#2f2d2b]"}`}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg bg-[#f8f4eb] p-4">
+                    <div className="flex items-center gap-2 text-[#776f63]">
+                      <Calendar className="h-4 w-4" />
+                      <p className="text-xs font-semibold">تاريخ البداية</p>
+                    </div>
+                    <p className="mt-2 text-sm font-bold text-[#2f2d2b]">
+                      {subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-[#f8f4eb] p-4">
+                    <div className="flex items-center gap-2 text-[#776f63]">
+                      <Calendar className="h-4 w-4" />
+                      <p className="text-xs font-semibold">تاريخ الانتهاء</p>
+                    </div>
+                    <p className="mt-2 text-sm font-bold text-[#2f2d2b]">
+                      {subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {hasSubscriptionDateConflict ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                    <div className="space-y-2">
+                      <p className="font-bold">تواريخ الاشتراك غير متسقة</p>
+                      <p>
+                        تاريخ البداية بعد تاريخ الانتهاء، لذلك لا يمكن اعتبار الاشتراك منتهياً بشكل طبيعي.
+                        يرجى التواصل مع الإدارة لتعديل تاريخ الاشتراك يدوياً قبل التجديد.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : !canExtend && !isExpired ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 flex-shrink-0" />
+                    <span>يمكن التمديد عند بقاء 10 أيام أو أقل. الترقية متاحة الآن وتبدأ من تاريخ اليوم.</span>
+                  </div>
+                </div>
+              ) : isNearExpiry ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  <AlertTriangle className="ml-1 inline h-4 w-4" />
+                  اشتراكك ينتهي قريباً. يمكنك التمديد لإضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.
+                </div>
+              ) : isExpired ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  <AlertTriangle className="ml-1 inline h-4 w-4" />
+                  اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة.
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-3 border-t border-[#e5dcc7] pt-5 sm:flex-row">
+                <Button
+                  className="h-11 flex-1 rounded-lg bg-[#2f2d2b] text-white hover:bg-[#2f2d2b] gap-2"
+                  onClick={() => {
+                    setAction("upgrade");
+                    setShowUpgradeDialog(true);
+                  }}
+                >
+                  <Zap className="h-4 w-4" />
+                  تغيير الباقة
+                </Button>
+                {canExtend && (
+                  <Button
+                    variant="outline"
+                    className="h-11 flex-1 rounded-lg border-[#c9951d] bg-[#fffdf8] text-[#7b5a13] hover:bg-[#fffdf8] sm:flex-none"
+                    onClick={() => {
+                      setAction("extend");
+                      setSelectedPackageId(subscription?.packageId || null);
+                      setCurrentStep(2);
+                      setShowUpgradeDialog(false);
+                    }}
+                  >
+                    <RefreshCcw className="ml-2 h-4 w-4" />
+                    تمديد الاشتراك
+                  </Button>
+                )}
+              </div>
+            </section>
+
+            <aside className="border-t border-[#ded3bc] bg-[#f4efe3] p-5 md:p-6 lg:border-r lg:border-t-0">
+              <div className="space-y-5">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#a77d22]">قواعد واضحة</p>
+                  <h3 className="mt-2 text-xl font-bold text-[#2f2d2b]">الترقية والتجديد</h3>
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
+                    <div className="flex items-start gap-3">
+                      <RefreshCcw className="mt-0.5 h-4 w-4 text-[#a77d22]" />
+                      <div>
+                        <p className="text-sm font-bold text-[#2f2d2b]">التجديد</p>
+                        <p className="text-xs leading-6 text-[#776f63]">متاح عند بقاء 10 أيام أو أقل، وتتم إضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
+                    <div className="flex items-start gap-3">
+                      <Zap className="mt-0.5 h-4 w-4 text-[#a77d22]" />
+                      <div>
+                        <p className="text-sm font-bold text-[#2f2d2b]">الترقية</p>
+                        <p className="text-xs leading-6 text-[#776f63]">تبدأ من اليوم وتعيد عداد الاشتراك حسب الباقة الجديدة.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
+                    <div className="flex items-start gap-3">
+                      <Home className="mt-0.5 h-4 w-4 text-[#a77d22]" />
+                      <div>
+                        <p className="text-sm font-bold text-[#2f2d2b]">العقارات المرتبطة</p>
+                        <p className="text-xs leading-6 text-[#776f63]">
+                          {visibleLinkedCount > 0
+                            ? `${visibleLinkedCount} عقار مرتبط يرث نفس تواريخ الاشتراك من العقار الأساسي.`
+                            : "لا توجد عقارات مرتبطة حالياً."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </Card>
 
         {/* ===== بطاقة الباقة الحالية ===== */}
-        <Card className={`p-6 border-2 ${cardColors.border} ${cardColors.bg}`}>
+        <Card className={`hidden p-6 border-2 ${cardColors.border} ${cardColors.bg}`}>
           <div className="flex items-center justify-between mb-5">
             <h2 className={`text-xl font-bold flex items-center gap-2 ${cardColors.text}`}>
               <Crown className="w-5 h-5 text-[#c9951d]" />
@@ -1280,7 +1648,7 @@ export default function OwnerSubscriptionPage() {
         )}
 
         {/* Rejected Payment Notice */}
-        {pendingPayment && !pendingPayment.hasPending && pendingPayment.payment?.status === "مرفوض" && (
+        {shouldShowRejectedPaymentNotice && (
           <Card className="p-4 border-red-300 bg-red-50">
             <div className="flex items-center gap-2 text-red-700 mb-3">
               <AlertTriangle className="w-5 h-5" />
@@ -1451,7 +1819,7 @@ export default function OwnerSubscriptionPage() {
 
         {/* ===== نافذة اختيار الباقة للترقية ===== */}
         {showUpgradeDialog && currentStep === 1 && (
-          <Card className="p-6">
+          <Card className="p-6" style={{ order: 2 }}>
           <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-[#434040]">اختر الباقة الجديدة</h2>
               <Button variant="ghost" size="icon" onClick={() => setShowUpgradeDialog(false)}>
@@ -1608,7 +1976,7 @@ export default function OwnerSubscriptionPage() {
 
         {/* Step 2: Payment Method */}
         {currentStep === 2 && selectedPackageId && (
-          <Card className="p-8">
+          <Card className="p-8" style={{ order: 2 }}>
             <h2 className="text-xl font-bold text-[#434040] mb-6">
               {action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"} — طريقة الدفع
             </h2>

@@ -63,6 +63,29 @@ const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
 const ownerSoftPanelClass = "rounded-lg border border-[#e5dcc7] bg-[#fffdf8]";
 const ownerTileClass = "rounded-lg border border-[#eee4cf] bg-[#fbf7ee]";
 
+function getPaymentTime(value: any): number {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1_000_000);
+  if (typeof value._seconds === "number") return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
+  return 0;
+}
+
+function sortPaymentsNewestFirst<T extends { createdAt?: any; completedAt?: any; id?: string }>(payments: T[]): T[] {
+  return [...payments].sort((a, b) => {
+    const byTime =
+      getPaymentTime(b.createdAt || b.completedAt) -
+      getPaymentTime(a.createdAt || a.completedAt);
+    if (byTime !== 0) return byTime;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
+}
+
 export default function OwnerDashboard() {
   const router = useRouter();
   const { toast } = useToast();
@@ -1031,15 +1054,13 @@ export default function OwnerDashboard() {
   const stats = calculateAnalytics();
   const heroImage = property.imageUrls?.[0];
   const activeAddOnsCount = propertyAddOns.filter((addon) => addon.status === "active").length;
-  const hasPendingReceiptPayment = !!paymentsData?.some((payment: any) =>
-    payment.status === "معلق" || payment.status === "pending",
-  );
-  const hasPaymentUnderReview = !!paymentsData?.some((payment: any) =>
-    payment.status === "قيد التحقق" || payment.status === "نجح - قيد التحقق",
-  );
-  const hasRejectedPayment = !!paymentsData?.some((payment: any) =>
-    payment.status === "مرفوض",
-  );
+  const latestPayment = sortPaymentsNewestFirst(paymentsData || [])[0];
+  const hasPendingReceiptPayment = latestPayment?.status === "معلق" || latestPayment?.status === "pending";
+  const hasPaymentUnderReview =
+    latestPayment?.status === "قيد المراجعة" ||
+    latestPayment?.status === "قيد التحقق" ||
+    latestPayment?.status === "نجح - قيد التحقق";
+  const hasRejectedPayment = latestPayment?.status === "مرفوض";
   const pendingPaymentsCount = paymentsData?.filter((payment: any) =>
     payment.status === "قيد المراجعة" ||
     payment.status === "معلق" ||
