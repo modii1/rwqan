@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Upload, Trash2, ExternalLink, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
+
 export default function OwnerImagesPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -150,71 +152,75 @@ export default function OwnerImagesPage() {
 
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-background p-6 flex items-center justify-center">
+            <div className="min-h-screen bg-[#faf8f1] p-6 flex items-center justify-center">
                 <div className="text-center">
-                    <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-                    <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
+                    <div className="inline-block w-8 h-8 border-4 border-[#b88d2b] border-t-transparent rounded-lg animate-spin" />
+                    <p className="mt-4 text-[#6f6249]">جاري التحميل...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-background p-4 md:p-6">
-            <div className="max-w-4xl mx-auto space-y-6">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-[#4a3b2a] mb-2">إدارة الصور</h1>
-                    <p className="text-muted-foreground">رفع وإدارة صور العقار</p>
+        <div className="min-h-screen bg-[#faf8f1] p-4 md:p-6">
+            <div className="max-w-5xl mx-auto space-y-6">
+                <div className="rounded-lg border border-[#e2d6bd] bg-[#fffdf8] p-5 md:p-6">
+                    <p className="text-sm font-semibold text-[#8b7140]">صور العقار</p>
+                    <h1 className="mt-1 text-3xl md:text-4xl font-bold text-[#2f2a1f]">إدارة الصور</h1>
+                    <p className="mt-2 text-[#6f6249]">رفع وتنظيم الصور المعروضة في صفحة العقار</p>
                 </div>
 
                 {/* Current Images */}
-                <Card className="p-6">
-                    <h2 className="text-xl font-bold mb-4">
+                <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+                    <h2 className="text-xl font-bold mb-4 text-[#2f2a1f]">
                         الصور الحالية ({allImages.length}/15)
                     </h2>
                     {allImages.length > 0 ? (
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                             {allImages.map((url: string, idx: number) => (
-                                <div key={idx} className="relative group">
+                                <div key={idx} className="overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#fffdf8]">
                                     <img
                                         src={url}
                                         alt={`صورة ${idx + 1}`}
-                                        className="w-full h-48 object-cover rounded-lg"
+                                        className="w-full h-48 object-cover"
                                     />
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                                    <div className="flex items-center justify-between gap-2 border-t border-[#eee4cf] p-2">
+                                        <span className="text-xs font-semibold text-[#8b7140]">صورة {idx + 1}</span>
                                         <a
                                             href={url}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-white bg-blue-500 hover:bg-blue-600 rounded-full p-2"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#d8c9a8] bg-white text-[#6f5520]"
+                                            aria-label="فتح الصورة"
                                         >
-                                            <ExternalLink className="w-5 h-5" />
+                                            <ExternalLink className="w-4 h-4" />
                                         </a>
                                         <button
                                             onClick={() => handleDelete(url)}
                                             disabled={deleteMutation.isPending}
-                                            className="text-white bg-red-500 hover:bg-red-600 rounded-full p-2 disabled:opacity-50"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#f1c8c8] bg-white text-red-600 disabled:opacity-50"
                                             type="button"
+                                            aria-label="حذف الصورة"
                                         >
-                                            <Trash2 className="w-5 h-5" />
+                                            <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
                                 </div>
                             ))}
                         </div>
                     ) : (
-                        <div className="text-center py-8 text-muted-foreground">لا توجد صور مرفوعة حالياً</div>
+                        <div className="text-center py-8 text-[#6f6249]">لا توجد صور مرفوعة حالياً</div>
                     )}
                 </Card>
 
                 {/* Upload */}
-                <Card className="p-6">
-                    <h2 className="text-xl font-bold mb-4">رفع صور جديدة</h2>
+                <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+                    <h2 className="text-xl font-bold mb-4 text-[#2f2a1f]">رفع صور جديدة</h2>
                     <div className="space-y-4">
-                        <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+                        <div className="border border-dashed border-[#d8c9a8] rounded-lg bg-[#fffdf8] p-8 text-center">
                             <Upload className="w-12 h-12 mx-auto mb-4 text-[#b88d2b]" />
-                            <p className="text-lg font-semibold mb-2">اختر صور العقار للرفع</p>
-                            <p className="text-sm text-muted-foreground mb-4">الحد الأقصى 15 صورة - بحجم لا يتجاوز 2 ميجابايت للصورة (PNG, JPG, JPEG)</p>
+                            <p className="text-lg font-semibold mb-2 text-[#2f2a1f]">اختر صور العقار للرفع</p>
+                            <p className="text-sm text-[#6f6249] mb-4">الحد الأقصى 15 صورة - بحجم لا يتجاوز 2 ميجابايت للصورة (PNG, JPG, JPEG)</p>
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -227,7 +233,7 @@ export default function OwnerImagesPage() {
                             <Button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                className="bg-[#b88d2b] hover:bg-[#a07d25]"
+                                className="bg-[#2f2a1f] text-white"
                                 disabled={uploadMutation.isPending}
                             >
                                 اختر الصور
@@ -236,26 +242,26 @@ export default function OwnerImagesPage() {
 
                         {selectedFiles.length > 0 && (
                             <div className="space-y-4">
-                                <h3 className="font-semibold">الصور المختارة ({selectedFiles.length})</h3>
+                                <h3 className="font-semibold text-[#2f2a1f]">الصور المختارة ({selectedFiles.length})</h3>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                     {previews.map((src, idx) => (
-                                        <div key={idx} className="relative">
-                                            <img src={src} alt={`معاينة ${idx + 1}`} className="w-full h-48 object-cover rounded-lg" />
+                                        <div key={idx} className="overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#fffdf8]">
+                                            <img src={src} alt={`معاينة ${idx + 1}`} className="w-full h-48 object-cover" />
                                             <button
                                                 onClick={() => removePreview(idx)}
-                                                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                                                className="m-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#f1c8c8] bg-white text-red-600"
                                                 type="button"
                                             >
                                                 <X className="w-4 h-4" />
                                             </button>
-                                            <p className="text-xs text-muted-foreground mt-1 truncate">{selectedFiles[idx]?.name}</p>
+                                            <p className="px-2 pb-2 text-xs text-[#6f6249] truncate">{selectedFiles[idx]?.name}</p>
                                         </div>
                                     ))}
                                 </div>
                                 <Button
                                     onClick={() => uploadMutation.mutate(selectedFiles)}
                                     disabled={uploadMutation.isPending}
-                                    className="w-full bg-[#b88d2b] hover:bg-[#a07d25]"
+                                    className="w-full bg-[#2f2a1f] text-white"
                                 >
                                     {uploadMutation.isPending ? "جاري الرفع..." : `رفع ${selectedFiles.length} صورة`}
                                 </Button>
@@ -265,7 +271,7 @@ export default function OwnerImagesPage() {
                 </Card>
 
                 {/* Notes */}
-                <Card className="p-6 bg-[#fffdf0] border-[#e0c97b]">
+                <Card className="rounded-lg border border-[#e0c97b] bg-[#fffdf0] p-5 md:p-6">
                     <h3 className="font-bold mb-2 text-[#4a3b2a]">ملاحظات هامة:</h3>
                     <ul className="list-disc list-inside space-y-1 text-sm text-[#5b4a1f]">
                         <li>يمكنك رفع حتى 15 صورة للعقار</li>

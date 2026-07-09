@@ -59,6 +59,10 @@ import {
 } from "@/components/ui/dialog";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 
+const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
+const ownerSoftPanelClass = "rounded-lg border border-[#e5dcc7] bg-[#fffdf8]";
+const ownerTileClass = "rounded-lg border border-[#eee4cf] bg-[#fbf7ee]";
+
 export default function OwnerDashboard() {
   const router = useRouter();
   const { toast } = useToast();
@@ -1025,9 +1029,44 @@ export default function OwnerDashboard() {
   };
 
   const stats = calculateAnalytics();
+  const heroImage = property.imageUrls?.[0];
+  const activeAddOnsCount = propertyAddOns.filter((addon) => addon.status === "active").length;
+  const pendingPaymentsCount = paymentsData?.filter((payment: any) =>
+    payment.status === "قيد المراجعة" ||
+    payment.status === "معلق" ||
+    payment.status === "نجح - قيد التحقق" ||
+    payment.status === "pending",
+  ).length || 0;
+  const completedPaymentsCount = paymentsData?.filter((payment: any) => payment.status === "مكتمل").length || 0;
+  const linkedPropertiesCount = additionalPropertyRequests?.approvedRequests?.length || 0;
+  const imageCount = property.imageUrls?.length || 0;
+  const subscriptionStateLabel =
+    remainingDays !== null && remainingDays < 0
+      ? "منتهي"
+      : getSubscriptionTypeLabel(property.subscriptionType);
+  const remainingDaysLabel =
+    remainingDays === null
+      ? "غير محدد"
+      : remainingDays < 0
+        ? "منتهي"
+        : remainingDays === 0
+          ? "اليوم الأخير"
+          : `${remainingDays} يوم`;
+  const verificationStateLabel =
+    property.verificationStatus === "approved"
+      ? "معتمد"
+      : property.verificationStatus === "rejected"
+        ? "مرفوض"
+        : "بانتظار التحقق";
+  const verificationTone =
+    property.verificationStatus === "approved"
+      ? "border-[#b8dec3] bg-[#f6fff8] text-[#128c47]"
+      : property.verificationStatus === "rejected"
+        ? "border-[#f1c8c8] bg-[#fff5f5] text-red-700"
+        : "border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]";
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-screen bg-[#faf8f1] pb-20 text-[#2f2a1f]">
       {/* ===== تنبيه أعلى الصفحة عند قرب انتهاء الاشتراك ===== */}
       {shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
         <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
@@ -1042,7 +1081,7 @@ export default function OwnerDashboard() {
             </div>
             <button
               onClick={() => hideNotification(NOTIFICATION_KEYS.subscriptionExpiry)}
-              className="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1"
+              className="text-red-500 p-1"
               title="إخفاء بشكل دائم"
             >
               <XCircle className="w-4 h-4" />
@@ -1053,11 +1092,11 @@ export default function OwnerDashboard() {
 
       {/* ===== تنبيه دفعة قيد المراجعة (بانتظار رفع الإيصال) ===== */}
       {shouldShowNotification(NOTIFICATION_KEYS.paymentPendingReceipt, !!(paymentsData?.some((p: any) => p.status === "معلق" || p.status === "pending"))) && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/50 dark:to-orange-950/30 border-b border-amber-300 dark:border-amber-800">
+        <div className="bg-[#fff9ec] border-b border-[#ead7a8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center flex-shrink-0">
-                <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              <div className="w-10 h-10 rounded-lg border border-[#ead7a8] bg-white flex items-center justify-center flex-shrink-0">
+                <Clock className="w-5 h-5 text-[#9a7623]" />
               </div>
               <div>
                 <p className="font-bold text-amber-800 dark:text-amber-300 text-sm md:text-base">
@@ -1072,7 +1111,7 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-amber-500 text-amber-700 hover:bg-amber-100 flex-shrink-0"
+                className="border-[#d8c9a8] text-[#6f5520] bg-white flex-shrink-0"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
@@ -1085,7 +1124,7 @@ export default function OwnerDashboard() {
               </Button>
               <button
                 onClick={() => hideNotification(NOTIFICATION_KEYS.paymentPendingReceipt)}
-                className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 p-1"
+                className="text-[#9a7623] p-1"
                 title="إخفاء بشكل دائم"
               >
                 <XCircle className="w-5 h-5" />
@@ -1097,11 +1136,11 @@ export default function OwnerDashboard() {
 
       {/* ===== تنبيه دفعة قيد التحقق (بعد رفع الإيصال) ===== */}
       {shouldShowNotification(NOTIFICATION_KEYS.paymentUnderReview, !!(paymentsData?.some((p: any) => p.status === "قيد التحقق" || p.status === "نجح - قيد التحقق"))) && (
-        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/50 dark:to-cyan-950/30 border-b border-blue-300 dark:border-blue-800">
+        <div className="bg-[#f4f8fc] border-b border-[#c9d9eb]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center flex-shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <div className="w-10 h-10 rounded-lg border border-[#c9d9eb] bg-white flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-[#315f92]" />
               </div>
               <div>
                 <p className="font-bold text-blue-800 dark:text-blue-300 text-sm md:text-base">
@@ -1116,7 +1155,7 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-blue-500 text-blue-700 hover:bg-blue-100 flex-shrink-0"
+                className="border-[#c9d9eb] text-[#315f92] bg-white flex-shrink-0"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
@@ -1129,7 +1168,7 @@ export default function OwnerDashboard() {
               </Button>
               <button
                 onClick={() => hideNotification(NOTIFICATION_KEYS.paymentUnderReview)}
-                className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 p-1"
+                className="text-[#315f92] p-1"
                 title="إخفاء بشكل دائم"
               >
                 <XCircle className="w-5 h-5" />
@@ -1141,11 +1180,11 @@ export default function OwnerDashboard() {
 
       {/* ===== تنبيه دفعة مرفوضة ===== */}
       {shouldShowNotification(NOTIFICATION_KEYS.paymentRejected, !!(paymentsData?.some((p: any) => p.status === "مرفوض"))) && (
-        <div className="bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/50 dark:to-rose-950/30 border-b border-red-300 dark:border-red-800">
+        <div className="bg-[#fff5f5] border-b border-[#f1c8c8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              <div className="w-10 h-10 rounded-lg border border-[#f1c8c8] bg-white flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
               </div>
               <div>
                 <p className="font-bold text-red-800 dark:text-red-300 text-sm md:text-base">
@@ -1160,7 +1199,7 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-red-500 text-red-700 hover:bg-red-100 flex-shrink-0"
+                className="border-[#f1c8c8] text-red-700 bg-white flex-shrink-0"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
@@ -1173,7 +1212,7 @@ export default function OwnerDashboard() {
               </Button>
               <button
                 onClick={() => hideNotification(NOTIFICATION_KEYS.paymentRejected)}
-                className="text-red-500 hover:text-red-700 dark:hover:text-red-300 p-1"
+                className="text-red-500 p-1"
                 title="إخفاء بشكل دائم"
               >
                 <XCircle className="w-5 h-5" />
@@ -1184,22 +1223,15 @@ export default function OwnerDashboard() {
       )}
 
       {/* ===== الهيدر / رأس الصفحة ===== */}
-      <header
-        className={
-          "border-b border-border shadow-sm sticky top-0 z-10 " +
-          (isVip
-            ? "bg-gradient-to-l from-yellow-50 via-amber-50 to-white dark:from-amber-950 dark:via-amber-900 dark:to-background"
-            : "bg-card")
-        }
-      >
+      <header className="sticky top-0 z-10 border-b border-[#e5dcc7] bg-[#fffdf8]/95 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 md:py-4">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <div
               className={
-                "w-10 md:w-12 h-10 md:h-12 rounded-full flex items-center justify-center flex-shrink-0 " +
+                "w-10 md:w-12 h-10 md:h-12 rounded-lg border flex items-center justify-center flex-shrink-0 " +
                 (isVip
-                  ? "bg-amber-100 border border-amber-300 dark:bg-amber-900 dark:border-amber-700"
-                  : "bg-primary/10")
+                  ? "bg-[#f4e8bd] border-[#d9c37b] text-[#6f5520]"
+                  : "bg-white border-[#e2d6bd] text-[#6f5520]")
               }
             >
               {isVip ? (
@@ -1210,17 +1242,17 @@ export default function OwnerDashboard() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg md:text-xl font-bold text-primary truncate">
+                <h1 className="text-lg md:text-xl font-bold text-[#2f2a1f] truncate">
                   لوحة التحكم
                 </h1>
                 {isVip && (
-                  <Badge className="text-white flex items-center gap-1 px-2 md:px-3 py-0.5 md:py-1 text-xs md:text-sm flex-shrink-0 bg-[#2e2f31]">
+                  <Badge className="flex items-center gap-1 rounded-lg border border-[#d9c37b] bg-[#f4e8bd] px-2 py-0.5 text-xs text-[#5f4817] md:px-3 md:py-1 md:text-sm flex-shrink-0">
                     <Crown className="w-3 h-3" />
                     <span className="hidden md:inline">مميز</span>
                   </Badge>
                 )}
               </div>
-              <p className="text-xs md:text-sm text-muted-foreground truncate">
+              <p className="text-xs md:text-sm text-[#8b7140] truncate">
                 عقار #{property.propertyNumber}
               </p>
             </div>
@@ -1229,11 +1261,164 @@ export default function OwnerDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-3 md:px-4 py-6 md:py-8 space-y-6 md:space-y-8">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,.65fr)]">
+          <div className="overflow-hidden rounded-lg border border-[#2f2a1f] bg-[#2f2a1f] text-white">
+            <div className="grid min-h-[360px] lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="flex flex-col justify-between gap-8 p-5 md:p-7">
+                <div className="space-y-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-white">
+                      مركز التحكم
+                    </Badge>
+                    <Badge className="rounded-lg border border-[#d7bd76]/40 bg-[#d7bd76]/15 px-3 py-1 text-[#f7df9c]">
+                      {subscriptionStateLabel}
+                    </Badge>
+                    {property.verificationStatus === "approved" && (
+                      <Badge className="rounded-lg border border-[#78d998]/30 bg-[#128c47]/20 px-3 py-1 text-[#9ff0b6]">
+                        معتمد
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-[#d7bd76]">
+                      عقار رقم {property.propertyNumber}
+                    </p>
+                    <h2 className="mt-2 max-w-3xl text-3xl font-bold leading-tight md:text-5xl">
+                      {property.name || "لوحة إدارة العقار"}
+                    </h2>
+                    <p className="mt-4 max-w-2xl text-sm leading-7 text-[#d9d0bf] md:text-base">
+                      {property.city || "المدينة غير محددة"}
+                      {property.location ? ` - ${property.location}` : ""}
+                      {property.direction ? ` - ${property.direction}` : ""}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <DashboardHeroMetric label="الأيام المتبقية" value={remainingDaysLabel} />
+                    <DashboardHeroMetric label="طلبات الشهر" value={String(stats.monthlyRequests)} />
+                    <DashboardHeroMetric label="الصور" value={`${imageCount}/15`} />
+                    <DashboardHeroMetric label="العقارات المرتبطة" value={String(linkedPropertiesCount)} />
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => router.push("/owner/update-property")}
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white text-[#2f2a1f] px-4 text-sm font-bold"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                      تحديث البيانات
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push("/owner/images")}
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/10 px-4 text-sm font-bold text-white"
+                    >
+                      <ImageIcon className="h-4 w-4" />
+                      إدارة الصور
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/property/${property.propertyNumber}`)}
+                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/10 px-4 text-sm font-bold text-white"
+                    >
+                      <Eye className="h-4 w-4" />
+                      مشاهدة الصفحة
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-white/10 bg-white/[0.06] p-3 lg:border-r lg:border-t-0">
+                {heroImage ? (
+                  <img
+                    src={heroImage}
+                    alt={property.name || "صورة العقار"}
+                    className="h-72 w-full rounded-lg object-cover lg:h-full"
+                  />
+                ) : (
+                  <div className="flex h-72 w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] lg:h-full">
+                    <ImageIcon className="h-12 w-12 text-white/35" />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+            <DashboardStatusTile
+              icon={<CreditCard className="h-5 w-5" />}
+              title="الاشتراك"
+              value={subscriptionStateLabel}
+              note={`المتبقي: ${remainingDaysLabel}`}
+              actionLabel={subscriptionButtonLabel}
+              onAction={() => router.push("/owner/subscription")}
+            />
+            <DashboardStatusTile
+              icon={<Activity className="h-5 w-5" />}
+              title="التحقق"
+              value={verificationStateLabel}
+              note={property.verificationStatus === "approved" ? "بيانات العقار جاهزة للعرض" : "راجع بيانات العقار أو شغل التحقق"}
+              toneClass={verificationTone}
+              actionLabel={property.verificationStatus === "approved" ? "إعادة التحقق" : "تشغيل التحقق"}
+              onAction={startSmartVerification}
+            />
+            <DashboardStatusTile
+              icon={<Receipt className="h-5 w-5" />}
+              title="المدفوعات"
+              value={`${pendingPaymentsCount} معلقة`}
+              note={`${completedPaymentsCount} عملية مكتملة`}
+              actionLabel="عرض السجل"
+              onAction={() => {
+                setPaymentFilter("all");
+                setPaymentsExpanded(true);
+                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            />
+          </div>
+        </section>
+
+        <section className="grid gap-3 md:grid-cols-4">
+          <DashboardQuickAction
+            icon={<Zap className="h-5 w-5" />}
+            title="الإضافات النشطة"
+            value={String(activeAddOnsCount)}
+            action="إدارة"
+            onClick={() => router.push("/owner/subscription")}
+          />
+          <DashboardQuickAction
+            icon={<MessageCircle className="h-5 w-5" />}
+            title="طلبات واتساب"
+            value={String(stats.monthlyRequests)}
+            action="تفاصيل"
+            onClick={() => setShowRequestsStats(true)}
+          />
+          <DashboardQuickAction
+            icon={<ImageIcon className="h-5 w-5" />}
+            title="صور العقار"
+            value={`${imageCount}/15`}
+            action="تعديل"
+            onClick={() => router.push("/owner/images")}
+          />
+          <DashboardQuickAction
+            icon={<Home className="h-5 w-5" />}
+            title="العقارات المرتبطة"
+            value={String(linkedPropertiesCount)}
+            action="عرض"
+            onClick={() => {
+              document.getElementById("linked-properties-section")?.scrollIntoView({ behavior: "smooth" });
+            }}
+          />
+        </section>
+
         {/* ===== كرت حالة الاشتراك + Progress Bar ===== */}
-        <Card className="p-4 md:p-6 !border-primary/15 bg-primary/5">
+        <Card className={`${ownerSoftPanelClass} p-4 md:p-6`}>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6">
             <div className="space-y-2 flex-1">
-              <h2 className="font-bold text-base md:text-lg text-primary">
+              <h2 className="font-bold text-base md:text-lg text-[#2f2a1f]">
                 حالة الاشتراك
               </h2>
               <div className="flex items-center gap-2 md:gap-3 flex-wrap">
@@ -1256,7 +1441,7 @@ export default function OwnerDashboard() {
                   <div className="mt-2">
                     <Badge
                       variant="outline"
-                      className="text-xs px-2 py-0.5 border-blue-400 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                      className="text-xs px-2 py-0.5 border-[#c9d9eb] text-[#315f92] bg-[#f4f8fc]"
                     >
                       <Home className="w-3 h-3 ml-1" />
                       مرتبط: {currentSubscription.linkedProperty}
@@ -1295,7 +1480,7 @@ export default function OwnerDashboard() {
             </div>
 
             <Button
-              className="w-full md:w-auto h-10 md:h-12 text-sm md:text-base font-bold gap-2 bg-primary text-white hover:bg-primary/90 flex-shrink-0"
+              className="w-full md:w-auto h-10 md:h-12 text-sm md:text-base font-bold gap-2 bg-[#2f2a1f] text-white flex-shrink-0"
               onClick={() => router.push("/owner/subscription")}
               data-testid="button-subscription-manage"
             >
@@ -1309,18 +1494,18 @@ export default function OwnerDashboard() {
         </Card>
 
         {/* ===== قسم الإضافات (عرض دائماً) ===== */}
-        <Card className="p-4 md:p-6 border-2 border-violet-200 dark:border-violet-800 bg-gradient-to-r from-violet-50/50 to-purple-50/50 dark:from-violet-950/30 dark:to-purple-950/30">
+        <Card className={`${ownerPanelClass} p-4 md:p-6`}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-violet-600" />
-              <h2 className="font-bold text-base md:text-lg text-violet-600">
+              <Zap className="w-5 h-5 text-[#9a7623]" />
+              <h2 className="font-bold text-base md:text-lg text-[#2f2a1f]">
                 إضافاتك
               </h2>
             </div>
             <Button
               variant="outline"
               size="sm"
-              className="text-violet-600 border-violet-300 hover:bg-violet-100"
+              className="text-[#6f5520] border-[#d8c9a8] bg-white"
               onClick={() => router.push("/owner/subscription")}
               data-testid="button-go-to-addons"
             >
@@ -1588,12 +1773,12 @@ export default function OwnerDashboard() {
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
-          <Card className={`p-4 md:p-6 border-2 ${property.verificationStatus === "approved" ? "border-green-300 bg-gradient-to-r from-green-50/50 to-emerald-50/50 dark:from-green-900/20 dark:to-emerald-900/20" : "border-[#17a2b8] bg-gradient-to-r from-cyan-50/50 to-blue-50/50 dark:from-cyan-900/20 dark:to-blue-900/20"}`}>
+          <Card className={`p-4 md:p-6 ${property.verificationStatus === "approved" ? "rounded-lg border border-[#cfe5d6] bg-[#f8fff9]" : "rounded-lg border border-[#d8e4ea] bg-[#f7fbfd]"}`}>
             <div className="space-y-4">
               {/* العنوان والزر */}
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${property.verificationStatus === "approved" ? "text-green-600" : "text-[#17a2b8]"}`}>
+                    <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${property.verificationStatus === "approved" ? "text-[#128c47]" : "text-[#315f92]"}`}>
                     {property.verificationStatus === "approved" ? (
                       <>
                         <CheckCircle2 className="w-6 h-6" />
@@ -1622,7 +1807,7 @@ export default function OwnerDashboard() {
                 {!isVerifying && (
                   <Button
                     onClick={startSmartVerification}
-                    className={`${property.verificationStatus === "approved" ? "bg-green-600 hover:bg-green-700" : "bg-[#17a2b8] hover:bg-[#138496]"} text-white flex-shrink-0`}
+                    className={`${property.verificationStatus === "approved" ? "bg-[#128c47]" : "bg-[#315f92]"} text-white flex-shrink-0`}
                     data-testid="button-start-verification"
                   >
                     <Activity className="w-4 h-4 ml-2" />
@@ -1636,7 +1821,7 @@ export default function OwnerDashboard() {
                     <div className="space-y-3">
                       {/* النسبة المئوية */}
                       <div className="text-center">
-                        <div className="text-4xl font-bold text-[#17a2b8] mb-1">
+                        <div className="text-4xl font-bold text-[#315f92] mb-1">
                           {verificationProgress}%
                         </div>
                         <p className="text-sm text-muted-foreground">
@@ -1645,9 +1830,9 @@ export default function OwnerDashboard() {
                       </div>
 
                       {/* شريط التقدم */}
-                      <div className="w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden border-2 border-[#17a2b8]">
+                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-[#d8e4ea]">
                         <div
-                          className="h-full bg-gradient-to-r from-[#17a2b8] to-[#138496] transition-all duration-500 ease-out"
+                          className="h-full bg-[#315f92] transition-all duration-500 ease-out"
                           style={{ width: `${verificationProgress}%` }}
                         />
                       </div>
@@ -1770,7 +1955,7 @@ export default function OwnerDashboard() {
                             <Button
                               variant="default"
                               size="sm"
-                              className="mt-3 bg-red-600 hover:bg-red-700 text-white gap-2"
+                              className="mt-3 bg-red-600 text-white gap-2"
                               onClick={() =>
                                 router.push("/owner/update-property")
                               }
@@ -1790,9 +1975,9 @@ export default function OwnerDashboard() {
         {/* ===== سجل المدفوعات ===== */}
         <Card
           id="payments-section"
-          className={`p-4 md:p-6 transition-all duration-500 ${
+          className={`${ownerPanelClass} p-4 md:p-6 ${
             highlightPayments
-              ? "ring-4 ring-primary/50 ring-offset-2 shadow-lg scale-[1.01]"
+              ? "ring-2 ring-[#b88d2b]/40 ring-offset-2"
               : ""
           }`}
         >
@@ -1801,17 +1986,17 @@ export default function OwnerDashboard() {
             <button
               type="button"
               onClick={() => setPaymentsExpanded(!paymentsExpanded)}
-              className="flex items-center gap-2 hover:opacity-80 transition"
+              className="flex items-center gap-2"
               data-testid="button-toggle-payments"
             >
-              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg border border-[#e2d6bd] bg-[#fffaf0] flex items-center justify-center">
                 {paymentsExpanded ? (
                   <Minus className="w-4 h-4 text-primary" />
                 ) : (
                   <Plus className="w-4 h-4 text-primary" />
                 )}
               </div>
-              <h2 className="text-lg font-bold text-primary flex items-center gap-2">
+              <h2 className="text-lg font-bold text-[#2f2a1f] flex items-center gap-2">
                 <Receipt className="w-5 h-5" />
                 سجل المدفوعات
               </h2>
@@ -1962,8 +2147,8 @@ export default function OwnerDashboard() {
         {/* ===== معلومات العقار + أداء العقار ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* معلومات العقار */}
-          <Card className="p-6">
-            <h2 className="text-lg font-bold text-primary mb-4">
+          <Card className={`${ownerPanelClass} p-6`}>
+            <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
               معلومات العقار
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -2021,23 +2206,23 @@ export default function OwnerDashboard() {
           {/* ===== العقارات المربوطة ===== */}
           {/* Use approvedRequests from additional-property-requests API for full info */}
           {additionalPropertyRequests?.approvedRequests && additionalPropertyRequests.approvedRequests.length > 0 && (
-            <Card className="p-6">
+            <Card id="linked-properties-section" className={`${ownerPanelClass} p-6`}>
               <div className="flex items-center gap-2 mb-4">
-                <Home className="w-5 h-5 text-blue-600" />
-                <h2 className="text-lg font-bold text-primary">
+                <Home className="w-5 h-5 text-[#315f92]" />
+                <h2 className="text-lg font-bold text-[#2f2a1f]">
                   العقارات المربوطة
                 </h2>
-                <Badge variant="outline" className="bg-blue-100 text-blue-700">
+                <Badge variant="outline" className="border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]">
                   {additionalPropertyRequests.approvedRequests.length} عقار
                 </Badge>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {additionalPropertyRequests.approvedRequests.map((req: any) => (
-                  <div key={req.propertyNumber} className="bg-muted/30 rounded-lg p-4">
+                  <div key={req.propertyNumber} className={ownerTileClass + " p-4"}>
                     <div className="flex items-center justify-between mb-2">
-                      <div className="font-bold text-lg text-blue-600">{req.propertyNumber}</div>
-                      <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300">
+                      <div className="font-bold text-lg text-[#315f92]">{req.propertyNumber}</div>
+                      <Badge variant="outline" className="bg-[#f8fff9] text-[#128c47] border-[#cfe5d6]">
                         نشط
                       </Badge>
                     </div>
@@ -2053,11 +2238,11 @@ export default function OwnerDashboard() {
 
           {/* Show message when no linked properties */}
           {(!additionalPropertyRequests?.approvedRequests || additionalPropertyRequests.approvedRequests.length === 0) && (
-            <Card className="p-6">
+            <Card id="linked-properties-section" className={`${ownerPanelClass} p-6`}>
               <div className="flex items-center gap-3">
                 <Home className="w-5 h-5 text-muted-foreground" />
                 <div>
-                  <h3 className="font-medium text-primary">العقارات المربوطة</h3>
+                  <h3 className="font-medium text-[#2f2a1f]">العقارات المربوطة</h3>
                   <p className="text-sm text-muted-foreground">
                     يمكنك ربط عقار آخر باشتراكك للوصول إلى باقة العقارين
                   </p>
@@ -2067,9 +2252,9 @@ export default function OwnerDashboard() {
           )}
 
           {/* ===== أداء العقار ===== */}
-          <Card className="p-6">
+          <Card className={`${ownerPanelClass} p-6`}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-primary">أداء العقار</h2>
+              <h2 className="text-lg font-bold text-[#2f2a1f]">أداء العقار</h2>
               <Badge variant="outline" className="flex items-center gap-1">
                 <Activity className="w-3 h-3" />
                 تحليلات ذكية
@@ -2113,9 +2298,9 @@ export default function OwnerDashboard() {
         </div>
 
         {/* ===== تحليلات وملخص ===== */}
-        <Card className="p-6">
+        <Card className={`${ownerPanelClass} p-6`}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-primary">تحليلات وملخص</h2>
+            <h2 className="text-lg font-bold text-[#2f2a1f]">تحليلات وملخص</h2>
             <Badge variant="outline" className="text-xs">
               بيانات حقيقية
             </Badge>
@@ -2149,8 +2334,8 @@ export default function OwnerDashboard() {
         </Card>
 
         {/* ===== أزرار التحكم (أيقونات كبيرة) ===== */}
-        <Card className="p-6">
-          <h2 className="text-lg font-bold text-primary mb-4">
+        <Card className={`${ownerPanelClass} p-6`}>
+          <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
             إدارة العقار والإعدادات
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -2178,8 +2363,8 @@ export default function OwnerDashboard() {
 
         {/* ===== صور العقار ===== */}
         {property.imageUrls && property.imageUrls.length > 0 && (
-          <Card className="p-6 mt-2">
-            <h2 className="text-lg font-bold text-primary mb-4">
+          <Card className={`${ownerPanelClass} p-6 mt-2`}>
+            <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
               صور العقار ({property.imageUrls.length})
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -2368,6 +2553,90 @@ function getPackageNameArabic(packageId: string): string {
 
 /* ================== مكوّنات مساعدة ================== */
 
+function DashboardHeroMetric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-3">
+      <p className="text-[11px] font-semibold text-[#d7bd76]">{label}</p>
+      <p className="mt-1 truncate text-lg font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+function DashboardStatusTile({
+  icon,
+  title,
+  value,
+  note,
+  actionLabel,
+  onAction,
+  toneClass = "border-[#e2d6bd] bg-white text-[#2f2a1f]",
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  note: string;
+  actionLabel: string;
+  onAction: () => void;
+  toneClass?: string;
+}) {
+  return (
+    <div className={`rounded-lg border p-5 ${toneClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-current/15 bg-white/60">
+          {icon}
+        </div>
+        <button
+          type="button"
+          onClick={onAction}
+          className="rounded-lg border border-current/20 bg-white/60 px-3 py-1.5 text-xs font-bold"
+        >
+          {actionLabel}
+        </button>
+      </div>
+      <div className="mt-5">
+        <p className="text-xs font-semibold opacity-70">{title}</p>
+        <p className="mt-1 text-2xl font-bold">{value}</p>
+        <p className="mt-2 text-sm leading-6 opacity-75">{note}</p>
+      </div>
+    </div>
+  );
+}
+
+function DashboardQuickAction({
+  icon,
+  title,
+  value,
+  action,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border border-[#e2d6bd] bg-white p-4 text-right"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0] text-[#9a7623]">
+          {icon}
+        </div>
+        <span className="rounded-lg border border-[#eadfca] bg-[#fffdf8] px-2.5 py-1 text-[11px] font-bold text-[#6f5520]">
+          {action}
+        </span>
+      </div>
+      <div className="mt-4">
+        <p className="text-xs font-semibold text-[#8b7140]">{title}</p>
+        <p className="mt-1 text-2xl font-bold text-[#2f2a1f]">{value}</p>
+      </div>
+    </button>
+  );
+}
+
 function Loader({ text }: { text: string }) {
   return (
     <div className="min-h-screen flex items-center justify-center text-center">
@@ -2405,18 +2674,18 @@ function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
 
 function Info({ title, value }: { title: string; value: React.ReactNode }) {
   return (
-    <div className="p-3 rounded-lg bg-[#e6e4e026]">
-      <p className="text-xs text-muted-foreground">{title}</p>
-      <div className="font-semibold text-base truncate">{value || "---"}</div>
+    <div className={ownerTileClass + " p-3"}>
+      <p className="text-xs text-[#8b7140]">{title}</p>
+      <div className="font-semibold text-base truncate text-[#2f2a1f]">{value || "---"}</div>
     </div>
   );
 }
 
 function ProgressBar({ value }: { value: number }) {
   return (
-    <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+    <div className="w-full h-2 rounded-full bg-[#eee4cf] overflow-hidden">
       <div
-        className="h-full rounded-full bg-primary transition-all"
+        className="h-full rounded-full bg-[#b88d2b] transition-all"
         style={{ width: `${value}%` }}
       />
     </div>
@@ -2433,13 +2702,13 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="p-3 rounded-lg bg-muted/15 flex items-center gap-3">
-      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+    <div className={ownerTileClass + " p-3 flex items-center gap-3"}>
+      <div className="w-9 h-9 rounded-lg border border-[#e2d6bd] bg-white flex items-center justify-center text-[#9a7623]">
         {icon}
       </div>
       <div className="flex-1">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="font-semibold text-sm">{value}</p>
+        <p className="text-xs text-[#8b7140]">{label}</p>
+        <p className="font-semibold text-sm text-[#2f2a1f]">{value}</p>
       </div>
     </div>
   );
@@ -2455,10 +2724,10 @@ function AnalyticsBox({
   note?: string;
 }) {
   return (
-    <div className="p-4 rounded-xl bg-muted/15 border border-border/40">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-xl font-bold text-primary mb-1">{value}</p>
-      {note && <p className="text-[11px] text-muted-foreground">{note}</p>}
+    <div className={ownerTileClass + " p-4"}>
+      <p className="text-xs text-[#8b7140] mb-1">{label}</p>
+      <p className="text-xl font-bold text-[#2f2a1f] mb-1">{value}</p>
+      {note && <p className="text-[11px] text-[#6f6249]">{note}</p>}
     </div>
   );
 }
@@ -2651,7 +2920,7 @@ function PaymentRow({
 
   return (
     <div
-      className="rounded-lg bg-muted/10 border border-border/40 hover:bg-muted/20 transition overflow-hidden"
+      className="rounded-lg bg-white border border-[#e2d6bd] overflow-hidden"
       data-testid={`payment-row-${payment.id}`}
     >
       {/* الصف الرئيسي */}
@@ -2672,8 +2941,8 @@ function PaymentRow({
 
         {/* معلومات الباقة */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <CreditCard className="w-5 h-5 text-primary" />
+          <div className="w-10 h-10 rounded-lg border border-[#eadfca] bg-[#fffaf0] flex items-center justify-center flex-shrink-0">
+            <CreditCard className="w-5 h-5 text-[#9a7623]" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -2756,7 +3025,7 @@ function PaymentRow({
           <Button
             size="sm"
             variant="default"
-            className="bg-amber-600 hover:bg-amber-700 text-white gap-1 flex-shrink-0"
+            className="bg-[#9a7623] text-white gap-1 flex-shrink-0"
             onClick={() => onRetryPayment(payment)}
             disabled={isRetrying}
             data-testid={`button-upload-receipt-${payment.id}`}
@@ -2777,7 +3046,7 @@ function PaymentRow({
             <Button
               size="sm"
               variant="outline"
-              className="gap-1 flex-shrink-0 border-green-500 text-green-600 hover:bg-green-50"
+              className="gap-1 flex-shrink-0 border-[#cfe5d6] text-[#128c47] bg-white"
               onClick={() => onVerifyPayment(payment)}
               disabled={isVerifying}
               data-testid={`button-verify-payment-${payment.id}`}
@@ -3021,16 +3290,16 @@ function BigActionButton({
     <button
       type="button"
       onClick={onClick}
-      className="group rounded-xl border border-border bg-card hover:bg-primary/5 transition p-4 flex flex-col gap-2 text-right h-full"
+      className="rounded-lg border border-[#e2d6bd] bg-white p-4 flex flex-col gap-2 text-right h-full"
     >
       <div className="flex items-center justify-between">
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition">
+        <div className="w-10 h-10 rounded-lg border border-[#eadfca] bg-[#fffaf0] flex items-center justify-center text-[#9a7623]">
           {icon}
         </div>
       </div>
       <div>
-        <div className="font-bold text-sm mb-1">{title}</div>
-        <div className="text-[11px] text-muted-foreground leading-relaxed">
+        <div className="font-bold text-sm mb-1 text-[#2f2a1f]">{title}</div>
+        <div className="text-[11px] text-[#6f6249] leading-relaxed">
           {desc}
         </div>
       </div>
@@ -3093,7 +3362,7 @@ function RequestsStatsModal({
           </h2>
           <button
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground"
             data-testid="button-close-modal"
           >
             ✕
@@ -3156,7 +3425,7 @@ function RequestsStatsModal({
                     {filteredRequests.map((req: any, idx: number) => (
                       <tr
                         key={idx}
-                        className="border-b border-border/50 hover:bg-primary/5"
+                        className="border-b border-border/50"
                       >
                         <td className="p-3">
                           <span className="font-medium text-primary">
@@ -3172,7 +3441,7 @@ function RequestsStatsModal({
                         <td className="p-3">
                           <button
                             onClick={() => onDeleteRequest?.(req.id || req.requestCode)}
-                            className="text-red-500 hover:text-red-700 text-sm"
+                            className="text-red-500 text-sm"
                             title="حذف"
                           >
                             🗑️

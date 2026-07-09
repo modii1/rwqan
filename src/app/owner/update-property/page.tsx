@@ -25,6 +25,7 @@ import { isPremiumSubscriptionType } from "@shared/subscriptionType";
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
+const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
 
 /** Parse facilities from any stored format to string[] */
 function parseFacilities(raw: unknown): string[] {
@@ -240,35 +241,38 @@ export default function UpdatePropertyPage() {
 
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-background p-6 flex items-center justify-center">
+            <div className="min-h-screen bg-[#faf8f1] p-6 flex items-center justify-center">
                 <div className="text-center">
-                    <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-                    <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
+                    <div className="inline-block w-8 h-8 border-4 border-[#b88d2b] border-t-transparent rounded-lg animate-spin" />
+                    <p className="mt-4 text-[#6f6249]">جاري التحميل...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-background p-4 md:p-6">
-            <div className="max-w-2xl mx-auto space-y-6">
+        <div className="min-h-screen bg-[#faf8f1] p-4 md:p-6">
+            <div className="max-w-4xl mx-auto space-y-6">
                 {/* Header */}
-                <div className="flex items-center gap-3">
-                    <Button variant="ghost" size="icon" onClick={() => router.push("/owner/dashboard")}>
+                <div className="rounded-lg border border-[#e2d6bd] bg-[#fffdf8] p-5 md:p-6">
+                    <div className="mb-5">
+                        <Button variant="outline" size="icon" className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]" onClick={() => router.push("/owner/dashboard")}>
                         <ArrowRight className="w-5 h-5" />
                     </Button>
+                    </div>
                     <div>
-                        <h1 className="text-2xl md:text-3xl font-bold text-[#4a3b2a]">تحديث بيانات العقار</h1>
-                        <p className="text-muted-foreground">
+                        <p className="text-sm font-semibold text-[#8b7140]">
                             {property?.propertyNumber ? `عقار رقم ${property.propertyNumber}` : "الاسم – المدينة – الأسعار – الوصف"}
                         </p>
+                        <h1 className="mt-1 text-3xl md:text-4xl font-bold text-[#2f2a1f]">تحديث بيانات العقار</h1>
+                        <p className="mt-2 text-[#6f6249]">عدّل بيانات العرض والأسعار والمرافق بدون تغيير مسار العمل.</p>
                     </div>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     {/* ====== 1. Basic Info ====== */}
-                    <Card className="p-6">
-                        <h2 className="text-lg font-bold text-primary mb-4">المعلومات الأساسية</h2>
+                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">المعلومات الأساسية</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-semibold mb-2">اسم العقار</label>
@@ -279,7 +283,7 @@ export default function UpdatePropertyPage() {
                                     maxLength={30}
                                     data-testid="input-name"
                                 />
-                                <span className="text-xs text-muted-foreground">{form.name?.length || 0}/30 حرف</span>
+                                <span className="text-xs text-[#6f6249]">{form.name?.length || 0}/30 حرف</span>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold mb-2">رقم واتساب</label>
@@ -352,8 +356,8 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 2. Prices ====== */}
-                    <Card className="p-6">
-                        <h2 className="text-lg font-bold text-primary mb-4">الأسعار</h2>
+                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">الأسعار</h2>
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
@@ -395,8 +399,8 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 3. Facilities ====== */}
-                    <Card className="p-6">
-                        <h2 className="text-lg font-bold text-primary mb-4">
+                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
+                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
                             المرافق المتوفرة ({selectedFacilities.length} مختار)
                         </h2>
 
@@ -406,13 +410,13 @@ export default function UpdatePropertyPage() {
                                 {selectedFacilities.map(fac => (
                                     <span
                                         key={fac}
-                                        className="inline-flex items-center gap-1 px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium"
+                                        className="inline-flex items-center gap-1 rounded-lg border border-[#eadfca] bg-[#fffaf0] px-3 py-1 text-xs font-medium text-[#6f5520]"
                                     >
                                         {fac}
                                         <button
                                             type="button"
                                             onClick={() => toggleFacility(fac)}
-                                            className="hover:text-destructive"
+                                            className="text-red-600"
                                         >
                                             <X className="w-3 h-3" />
                                         </button>
@@ -434,7 +438,7 @@ export default function UpdatePropertyPage() {
                         </div>
 
                         {/* Checkbox grid */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto p-3 bg-muted/30 rounded-lg">
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto rounded-lg border border-[#eee4cf] bg-[#fffdf8] p-3">
                             {filteredFacilities.map(facility => (
                                 <div key={facility} className="flex items-center gap-2">
                                     <Checkbox
@@ -451,10 +455,10 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 4. SEO Description ====== */}
-                    <Card className="p-6 border-amber-200 bg-gradient-to-br from-amber-50/50 to-background">
+                    <Card className="rounded-lg border border-[#e0c97b] bg-[#fffdf0] p-5 md:p-6">
                         <div className="flex items-center gap-2 mb-4">
                             <Star className="w-5 h-5 text-amber-500" />
-                            <h2 className="text-lg font-bold text-amber-700">وصف العقار (SEO)</h2>
+                            <h2 className="text-lg font-bold text-[#6f5520]">وصف العقار (SEO)</h2>
                         </div>
 
                         {isPremium ? (
@@ -469,7 +473,7 @@ export default function UpdatePropertyPage() {
                                 <Button
                                     type="button"
                                     variant="outline"
-                                    className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                                    className="border-[#d8c9a8] text-[#6f5520] bg-white"
                                     onClick={() => seoMutation.mutate(seoDescription)}
                                     disabled={seoMutation.isPending}
                                 >
@@ -478,12 +482,12 @@ export default function UpdatePropertyPage() {
                             </>
                         ) : (
                             <div className="text-center py-4">
-                                <p className="text-amber-700 mb-3 text-sm">
+                                <p className="text-[#6f5520] mb-3 text-sm">
                                     ميزة وصف SEO متاحة فقط للمشتركين في{" "}
                                     <span className="font-bold">الباقة المميزة</span>
                                 </p>
                                 <Link href="/subscription">
-                                    <Button variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                                    <Button variant="outline" className="border-[#d8c9a8] text-[#6f5520] bg-white">
                                         <Star className="w-4 h-4 ml-2" />
                                         ترقية الاشتراك
                                     </Button>
@@ -495,7 +499,7 @@ export default function UpdatePropertyPage() {
                     {/* Save property button */}
                     <Button
                         type="submit"
-                        className="w-full bg-[#b88d2b] hover:bg-[#a07d25] text-white font-bold py-6"
+                        className="w-full bg-[#2f2a1f] text-white font-bold py-6"
                         disabled={mutation.isPending}
                     >
                         <Save className="w-5 h-5 ml-2" />
@@ -504,10 +508,10 @@ export default function UpdatePropertyPage() {
                 </form>
 
                 {/* ====== 5. Password Change (outside form) ====== */}
-                <Card className="p-6">
+                <Card className={`${ownerPanelClass} p-5 md:p-6`}>
                     <div className="flex items-center gap-2 mb-4">
-                        <Lock className="w-5 h-5 text-primary" />
-                        <h2 className="text-lg font-bold text-primary">تغيير الرقم السري</h2>
+                        <Lock className="w-5 h-5 text-[#9a7623]" />
+                        <h2 className="text-lg font-bold text-[#2f2a1f]">تغيير الرقم السري</h2>
                     </div>
                     <div className="space-y-4">
                         <div>
