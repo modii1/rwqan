@@ -8,26 +8,47 @@ import { googleDriveService } from "../integrations/googleDrive";
 import type { InsertProperty } from "../../shared/schema";
 import { normalizeArabicText } from "../../src/lib/arabicSearch";
 import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
+import { calculateRemainingDays } from "../utils/dateUtils";
 
 const router = Router();
 
-function getPublicSubscriptionFields(property: any, subscription: any, isSubscriptionExpired: boolean) {
-  const subscriptionType = getEffectiveSubscriptionType({
-    subscriptionType: subscription?.subscriptionType || property.subscriptionType,
-    packageType: subscription?.packageType,
-    price: subscription?.price,
+function toPublicProperty(property: any) {
+  const {
+    pin: _pin,
+    whatsappNumber: _whatsappNumber,
+    ...publicProperty
+  } = property;
+  return publicProperty;
+}
+
+function isExpiredSubscription(subscription: any): boolean {
+  if (!subscription || subscription.status === "منتهي" || subscription.status === "expired") {
+    return true;
+  }
+  return !subscription.endDate || calculateRemainingDays(subscription.endDate) < 0;
+}
+
+function getPublicSubscriptionFields(subscription: any, isSubscriptionExpired: boolean) {
+  const storedSubscriptionType = subscription
+    ? getEffectiveSubscriptionType({
+        subscriptionType: subscription.subscriptionType,
+        packageType: subscription.packageType,
+        price: subscription.price,
+      })
+    : "عادي";
+  const isPremiumActive = isActivePremiumSubscription({
+    subscriptionType: storedSubscriptionType,
+    status: subscription?.status,
+    isExpired: isSubscriptionExpired,
   });
 
   return {
     subscriptionStatus: subscription?.status || null,
     subscriptionEndDate: subscription?.endDate || null,
     isSubscriptionExpired,
-    subscriptionType,
-    isPremiumActive: isActivePremiumSubscription({
-      subscriptionType,
-      status: subscription?.status,
-      isExpired: isSubscriptionExpired,
-    }),
+    // A property is public-facing premium only while its premium subscription is valid.
+    subscriptionType: isPremiumActive ? storedSubscriptionType : "عادي",
+    isPremiumActive,
   };
 }
 
@@ -35,27 +56,14 @@ function getPublicSubscriptionFields(property: any, subscription: any, isSubscri
 router.get("/api/properties", async (_req, res) => {
   try {
     const items = await propertyService.getAll();
-    const now = new Date();
-    
     const withSubscriptionStatus = await Promise.all(
       items.map(async (p) => {
         const subscription = await subscriptionService.getByProperty(p.propertyNumber);
-        
-        let isSubscriptionExpired = false;
-        if (!subscription) {
-          isSubscriptionExpired = true;
-        } else if (subscription.status === "منتهي") {
-          isSubscriptionExpired = true;
-        } else if (subscription.endDate) {
-          const endDate = new Date(subscription.endDate);
-          isSubscriptionExpired = endDate < now;
-        } else {
-          isSubscriptionExpired = true;
-        }
+        const isSubscriptionExpired = isExpiredSubscription(subscription);
         
         return {
-          ...p,
-          ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
+          ...toPublicProperty(p),
+          ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
         };
       })
     );
@@ -92,22 +100,11 @@ router.get("/api/properties/:id", async (req, res) => {
     // Check subscription status
     const subscription = await subscriptionService.getByProperty(req.params.id);
     
-    const now = new Date();
-    let isSubscriptionExpired = false;
-    if (!subscription) {
-      isSubscriptionExpired = true;
-    } else if (subscription.status === "منتهي") {
-      isSubscriptionExpired = true;
-    } else if (subscription.endDate) {
-      const endDate = new Date(subscription.endDate);
-      isSubscriptionExpired = endDate < now;
-    } else {
-      isSubscriptionExpired = true;
-    }
+    const isSubscriptionExpired = isExpiredSubscription(subscription);
 
     const response = {
-      ...p,
-      ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
+      ...toPublicProperty(p),
+      ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
     };
 
     return res.json(response);
@@ -245,8 +242,6 @@ router.get("/api/search", async (req, res) => {
   try {
     const { search, city, direction, type, facilities, maxPrice } = req.query;
     let items = await propertyService.getAll();
-    const now = new Date();
-    
     items = items.filter((p) => {
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
@@ -255,20 +250,10 @@ router.get("/api/search", async (req, res) => {
     // Apply subscription status
     items = await Promise.all(items.map(async (p) => {
       const subscription = await subscriptionService.getByProperty(p.propertyNumber);
-      let isSubscriptionExpired = false;
-      if (!subscription) {
-        isSubscriptionExpired = true;
-      } else if (subscription.status === "منتهي") {
-        isSubscriptionExpired = true;
-      } else if (subscription.endDate) {
-        const endDate = new Date(subscription.endDate);
-        isSubscriptionExpired = endDate < now;
-      } else {
-        isSubscriptionExpired = true;
-      }
+      const isSubscriptionExpired = isExpiredSubscription(subscription);
       return {
-        ...p,
-        ...getPublicSubscriptionFields(p, subscription, isSubscriptionExpired),
+        ...toPublicProperty(p),
+        ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
       };
     }));
 

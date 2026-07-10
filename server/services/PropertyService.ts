@@ -10,8 +10,9 @@ import {
   detectSensitiveChanges,
   smartVerification,
 } from "../utils/verification";
-import { toRiyadhISO, getNowInRiyadh } from "../utils/dateUtils";
+import { calculateRemainingDays, toRiyadhISO, getNowInRiyadh } from "../utils/dateUtils";
 import { countR2Images } from "../utils/r2";
+import { isActivePremiumSubscription, isPremiumSubscriptionType } from "../../shared/subscriptionType";
 
 export class PropertyService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -27,7 +28,8 @@ export class PropertyService {
   // ─── Create ─────────────────────────────────────────────────────────────────
 
   async create(data: InsertProperty): Promise<Property> {
-    return firebaseService.createProperty(data);
+    // Premium is granted by an activated subscription, never by property creation alone.
+    return firebaseService.createProperty({ ...data, subscriptionType: "عادي" });
   }
 
   // ─── Update ─────────────────────────────────────────────────────────────────
@@ -43,6 +45,21 @@ export class PropertyService {
   ): Promise<Property> {
     const current = await firebaseService.getPropertyByNumber(propertyNumber);
     if (!current) throw new Error(`Property not found: ${propertyNumber}`);
+
+    if (isPremiumSubscriptionType(updates.subscriptionType)) {
+      const subscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+      const isExpired = !subscription || calculateRemainingDays(subscription.endDate) < 0;
+      const hasValidPremiumSubscription = isActivePremiumSubscription({
+        subscriptionType: subscription?.subscriptionType,
+        packageType: subscription?.packageType,
+        status: subscription?.status,
+        isExpired,
+      });
+
+      if (!hasValidPremiumSubscription) {
+        throw new Error("لا يمكن جعل العقار مميزاً دون اشتراك مميز ساري");
+      }
+    }
 
     const merged: Property = { ...(current as any), ...(updates as any) };
 

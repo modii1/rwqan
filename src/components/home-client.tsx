@@ -20,7 +20,7 @@ import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import type { ActiveOccasion } from "@/lib/server-fetch";
-import { isActivePremiumSubscription } from "@shared/subscriptionType";
+import { isPublicPropertyPremium } from "@/lib/public-subscription";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -184,26 +184,14 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
             }
             return true;
         }).sort((a, b) => {
-            const aPremium = isActivePremiumSubscription({
-                subscriptionType: a.subscriptionType,
-                status: (a as any).subscriptionStatus,
-                isExpired: (a as any).isSubscriptionExpired,
-            }) ? 1 : 0;
-            const bPremium = isActivePremiumSubscription({
-                subscriptionType: b.subscriptionType,
-                status: (b as any).subscriptionStatus,
-                isExpired: (b as any).isSubscriptionExpired,
-            }) ? 1 : 0;
+            const aPremium = isPublicPropertyPremium(a) ? 1 : 0;
+            const bPremium = isPublicPropertyPremium(b) ? 1 : 0;
             return bPremium - aPremium;
         });
     }, [allProperties, searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, maxPriceValue]);
 
     const premiumAll = useMemo(() =>
-        filteredProperties.filter(p => Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
-            subscriptionType: p.subscriptionType,
-            status: (p as any).subscriptionStatus,
-            isExpired: (p as any).isSubscriptionExpired,
-        })),
+        filteredProperties.filter((property) => isPublicPropertyPremium(property)),
     [filteredProperties]);
 
     const [shuffledPremium, setShuffledPremium] = useState<Property[]>(() => premiumAll);
@@ -751,11 +739,7 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                             <PropertyCard
                                 key={p.propertyNumber}
                                 property={p}
-                                isPremium={Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
-                                    subscriptionType: p.subscriptionType,
-                                    status: (p as any).subscriptionStatus,
-                                    isExpired: (p as any).isSubscriptionExpired,
-                                })}
+                                isPremium={isPublicPropertyPremium(p)}
                                 onNext={() => nextImage(p.propertyNumber)}
                                 onPrev={() => prevImage(p.propertyNumber)}
                                 imgIdx={getImgIdx(p.propertyNumber)}

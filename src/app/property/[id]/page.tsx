@@ -1,6 +1,7 @@
 import { Metadata } from "next";
 import PropertyDetailsClient, { PropertyDetails } from "@/components/property-details-client";
-import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "@shared/subscriptionType";
+import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
+import { isPublicPropertyPremium } from "@/lib/public-subscription";
 import { buildServerUrl } from "@/lib/server-fetch";
 
 interface PageProps {
@@ -34,7 +35,6 @@ async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
             subscriptionStatus: data.subscriptionStatus,
             subscriptionEndDate: data.subscriptionEndDate,
             isSubscriptionExpired: data.isSubscriptionExpired,
-            phone: data.whatsappNumber || "",
             imageCount: 0,
         } as PropertyDetails;
     } catch {
@@ -97,7 +97,6 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
                 holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
             },
             subscriptionType: getEffectiveSubscriptionType({ subscriptionType: name ? "مميز" : "عادي" }),
-            phone: item["رقم الجوال"] ? String(item["رقم الجوال"]) : "",
             imageCount: 0,
         };
     } catch (err) {
@@ -130,16 +129,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         };
     }
 
-    const isPremium = isActivePremiumSubscription({
-        subscriptionType: property.subscriptionType,
-        status: property.subscriptionStatus,
-        isExpired: property.isSubscriptionExpired,
-    });
+    const isPremium = isPublicPropertyPremium(property);
     const title = isPremium
         ? `${property.name || "عقار"} - ${property.city || ""} | روقان`
         : `عقار رقم ${property.propertyNumber} - ${property.city || ""} | روقان`;
     const description = isPremium && property.name
-        ? `${property.name} في ${property.city}${property.direction ? ` - ${property.direction}` : ""}. ${property.type || ""} للإيجار مع ${property.facilities?.length || 0} مرافق. احجز الآن في روقان.`
+        ? `${property.name} في ${property.city}${property.direction ? ` - ${property.direction}` : ""}. ${property.type || "عقار"} للإيجار. احجز الآن في روقان.`
         : `عقار رقم ${property.propertyNumber} للإيجار في ${property.city || "القصيم"} | روقان`;
 
     const ogImage = `https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev/${property.propertyNumber}/1.jpg`;

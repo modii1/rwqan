@@ -36,8 +36,12 @@ import type {
     OcrResult,
     InsertOcrResult,
 } from "../shared/schema";
-import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate, capAtMaxDays } from "./utils/dateUtils";
-import { isPremiumSubscriptionType } from "../shared/subscriptionType";
+import { calculateRemainingDays, getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate, capAtMaxDays } from "./utils/dateUtils";
+import {
+    isActivePremiumSubscription,
+    isPremiumSubscriptionType,
+    isSubscriptionStatusActive,
+} from "../shared/subscriptionType";
 
 export class FirebaseService {
     private get db() {
@@ -156,7 +160,10 @@ export class FirebaseService {
 
     async getSubscriptions(): Promise<Subscription[]> {
         const snapshot = await this.db.collection("subscriptions").get();
-        return snapshot.docs.map((doc) => doc.data() as Subscription);
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return { ...data, id: data.id || doc.id } as Subscription;
+        });
     }
 
     async getSubscriptionByPropertyNumber(propertyNumber: string): Promise<Subscription | null> {
@@ -174,7 +181,10 @@ export class FirebaseService {
         }
 
         // Sort in JS to avoid composite index requirement
-        const docs = snapshot.docs.map(doc => doc.data() as Subscription);
+        const docs = snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return { ...data, id: data.id || doc.id } as Subscription;
+        });
         docs.sort((a, b) => {
             const dateA = a.endDate ? new Date(a.endDate).getTime() : 0;
             const dateB = b.endDate ? new Date(b.endDate).getTime() : 0;
@@ -195,10 +205,14 @@ export class FirebaseService {
         await this.db.collection("subscriptions").doc(id).set(newSubscription);
 
         // Update property status
-        const isPremium = isPremiumSubscriptionType(subscription.subscriptionType || subscription.packageType) ||
-            subscription.packageId?.includes("premium") ||
-            subscription.packageId === "pkg-trusted" ||
-            subscription.status === "نشط";
+        const planType = subscription.subscriptionType || subscription.packageType ||
+            (subscription.packageId?.includes("premium") || subscription.packageId === "pkg-trusted"
+                ? "مميز"
+                : "عادي");
+        const hasValidEndDate = calculateRemainingDays(subscription.endDate) >= 0;
+        const isPremium = hasValidEndDate &&
+            isPremiumSubscriptionType(planType) &&
+            isSubscriptionStatusActive(subscription.status);
 
         await this.updateProperty(subscription.propertyNumber, {
             subscriptionType: isPremium ? "مميز" : "عادي",
@@ -248,7 +262,10 @@ export class FirebaseService {
 
         // Sync with property - use the subscriptionType from the passed data
         const propertyUpdates: any = {
-            subscriptionType: subscriptionData.subscriptionType || "عادي",
+            subscriptionType:
+                status !== "منتهي" && isPremiumSubscriptionType(subscriptionData.subscriptionType)
+                    ? "مميز"
+                    : "عادي",
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
         };
@@ -346,8 +363,11 @@ export class FirebaseService {
             }
         }
 
-        // Clear linkedProperty on property document
-        await this.updateProperty(propertyNumber, { linkedProperty: "" });
+        // A cancelled subscription can never leave the property classified as premium.
+        await this.updateProperty(propertyNumber, {
+            linkedProperty: "",
+            subscriptionType: "عادي",
+        });
     }
 
     /**
@@ -374,13 +394,20 @@ export class FirebaseService {
         const childSubId = `SUB-${linkedPropNum}`;
         const childSubRef = this.db.collection("subscriptions").doc(childSubId);
         const childSubDoc = await childSubRef.get();
+        const cappedEndDate = capAtMaxDays(new Date(data.endDate));
+        const effectiveStatus = data.status || "نشط";
+        const propertySubscriptionType = isActivePremiumSubscription({
+            subscriptionType: data.subscriptionType,
+            status: effectiveStatus,
+            isExpired: calculateRemainingDays(cappedEndDate) < 0,
+        }) ? "مميز" : "عادي";
 
         const subUpdates: any = {
             startDate: data.startDate,
-            endDate: capAtMaxDays(new Date(data.endDate)).toISOString(),
+            endDate: cappedEndDate.toISOString(),
             subscriptionType: data.subscriptionType,
             packageType: data.subscriptionType,
-            status: data.status || "نشط",
+            status: effectiveStatus,
             linkedProperty: mainPropertyNumber,
             linkedProperties: null,
             propertyCount: 1,
@@ -405,7 +432,7 @@ export class FirebaseService {
         // Mirror onto the property document — this is the part that was missing and caused
         // the "main active but linked inactive" bug.
         await this.updateProperty(linkedPropNum, {
-            subscriptionType: data.subscriptionType as any,
+            subscriptionType: propertySubscriptionType,
             verificationStatus: "approved",
             linkedProperty: mainPropertyNumber,
             pendingApprovalFrom: null as any,
@@ -450,6 +477,11 @@ export class FirebaseService {
         const expectedStart = mainSub.startDate;
         const expectedEnd = mainSub.endDate;
         const expectedStatus = mainSub.status || "نشط";
+        const expectedPropertyType = isActivePremiumSubscription({
+            subscriptionType: expectedType,
+            status: expectedStatus,
+            isExpired: calculateRemainingDays(expectedEnd) < 0,
+        }) ? "مميز" : "عادي";
 
         let fixed = 0;
 
@@ -493,8 +525,8 @@ export class FirebaseService {
             }
 
             if (childProp) {
-                if ((childProp.subscriptionType || "عادي") !== expectedType) {
-                    childInconsistencies.push({ propertyNumber: childNum, field: "property.subscriptionType", expected: expectedType, actual: childProp.subscriptionType });
+                if ((childProp.subscriptionType || "عادي") !== expectedPropertyType) {
+                    childInconsistencies.push({ propertyNumber: childNum, field: "property.subscriptionType", expected: expectedPropertyType, actual: childProp.subscriptionType });
                 }
                 if (childProp.verificationStatus !== "approved") {
                     childInconsistencies.push({ propertyNumber: childNum, field: "property.verificationStatus", expected: "approved", actual: childProp.verificationStatus });
@@ -1636,6 +1668,54 @@ export class FirebaseService {
             ...updates,
             updatedAt: new Date().toISOString()
         });
+    }
+
+    async updateSubscriptionLifecycleGroup(
+        updates: Array<{
+            subscriptionId: string;
+            propertyNumber: string;
+            subscriptionUpdates: Partial<Subscription>;
+            propertySubscriptionType: "مميز" | "عادي";
+        }>,
+    ): Promise<void> {
+        if (updates.length === 0) return;
+        if (updates.length > 250) {
+            throw new Error("Subscription lifecycle group exceeds the Firestore batch limit");
+        }
+
+        const propertyRefs = updates.map(({ propertyNumber }) =>
+            this.db.collection("properties").doc(propertyNumber)
+        );
+        const propertyDocs = await this.db.getAll(...propertyRefs);
+        const existingProperties = new Set(
+            propertyDocs.filter((doc) => doc.exists).map((doc) => doc.id),
+        );
+        const batch = this.db.batch();
+        const updatedAt = new Date().toISOString();
+        const lastUpdate = updatedAt.split("T")[0];
+
+        for (const update of updates) {
+            const subscriptionRef = this.db
+                .collection("subscriptions")
+                .doc(update.subscriptionId);
+            batch.update(subscriptionRef, {
+                ...update.subscriptionUpdates,
+                updatedAt,
+            });
+
+            if (existingProperties.has(update.propertyNumber)) {
+                const propertyRef = this.db
+                    .collection("properties")
+                    .doc(update.propertyNumber);
+                batch.update(propertyRef, {
+                    subscriptionType: update.propertySubscriptionType,
+                    lastUpdate,
+                    updatedAt,
+                });
+            }
+        }
+
+        await batch.commit();
     }
 
     // Async wrappers (no-arg) for FinanceService compatibility

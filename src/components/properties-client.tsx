@@ -30,7 +30,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import type { ActiveOccasion } from "@/lib/server-fetch";
-import { isActivePremiumSubscription } from "@shared/subscriptionType";
+import { isPublicPropertyPremium } from "@/lib/public-subscription";
 
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
@@ -289,16 +289,8 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         }
 
         return result.sort((a, b) => {
-            const aIsPremium = isActivePremiumSubscription({
-                subscriptionType: a.subscriptionType,
-                status: (a as any).subscriptionStatus,
-                isExpired: (a as any).isSubscriptionExpired,
-            }) ? 1 : 0;
-            const bIsPremium = isActivePremiumSubscription({
-                subscriptionType: b.subscriptionType,
-                status: (b as any).subscriptionStatus,
-                isExpired: (b as any).isSubscriptionExpired,
-            }) ? 1 : 0;
+            const aIsPremium = isPublicPropertyPremium(a) ? 1 : 0;
+            const bIsPremium = isPublicPropertyPremium(b) ? 1 : 0;
             return bIsPremium - aIsPremium;
         });
     }, [properties, occasionFilter, activeOccasion, selectedDay]);
@@ -472,11 +464,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                                 <PropertyCard
                                     key={p.propertyNumber}
                                     property={p}
-                                    isPremium={Boolean((p as any).isPremiumActive) || isActivePremiumSubscription({
-                                        subscriptionType: p.subscriptionType,
-                                        status: (p as any).subscriptionStatus,
-                                        isExpired: (p as any).isSubscriptionExpired,
-                                    })}
+                                    isPremium={isPublicPropertyPremium(p)}
                                     imgIdx={getImgIdx(p.propertyNumber)}
                                     onNext={() => nextImage(p.propertyNumber)}
                                     onPrev={() => prevImage(p.propertyNumber)}

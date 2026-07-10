@@ -26,6 +26,12 @@ const paymentIdSchema = z
   .trim()
   .min(1, "معرف الدفعة لا يمكن أن يكون فارغاً");
 
+export const subscriptionIdentifierSchema = z
+  .string({ required_error: "معرف الاشتراك مطلوب" })
+  .trim()
+  .min(1, "معرف الاشتراك لا يمكن أن يكون فارغاً")
+  .max(200, "معرف الاشتراك غير صالح");
+
 const positiveAmount = z
   .number({ required_error: "المبلغ مطلوب", invalid_type_error: "المبلغ يجب أن يكون رقماً" })
   .nonnegative("المبلغ يجب أن يكون صفراً أو أكبر");

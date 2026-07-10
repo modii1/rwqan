@@ -10,6 +10,7 @@ import QueryProvider from "@/lib/query-provider";
 export default function LayoutContent({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isAdmin = pathname?.startsWith("/admin") ?? false;
+    const isPropertyDetails = /^\/property\/[^/]+\/?$/.test(pathname || "");
 
     return (
         <QueryProvider>
@@ -19,7 +20,7 @@ export default function LayoutContent({ children }: { children: React.ReactNode 
                     <main className="flex-1">
                         {children}
                     </main>
-                    {!isAdmin && <Footer />}
+                    {!isAdmin && !isPropertyDetails && <Footer />}
                     <Toaster />
                 </div>
             </TooltipProvider>

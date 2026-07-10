@@ -7,6 +7,7 @@ export type NormalizedSubscriptionStatus =
   | "قيد المراجعة"
   | "معلق"
   | "موقوف"
+  | "موقوف مؤقتاً"
   | "مرفوض"
   | "غير نشط";
 
@@ -19,6 +20,7 @@ const FREE_STATUS_VALUES = new Set(["نشط مجاني", "free_active"]);
 const PENDING_REVIEW_STATUS_VALUES = new Set(["قيد المراجعة", "pending_review"]);
 const PENDING_STATUS_VALUES = new Set(["معلق", "pending"]);
 const CANCELLED_STATUS_VALUES = new Set(["موقوف", "cancelled"]);
+const SUSPENDED_STATUS_VALUES = new Set(["موقوف مؤقتاً", "suspended"]);
 const REJECTED_STATUS_VALUES = new Set(["مرفوض", "rejected"]);
 
 export function normalizeSubscriptionType(value?: string | null): NormalizedSubscriptionType {
@@ -50,6 +52,7 @@ export function normalizeSubscriptionStatus(
   if (PENDING_REVIEW_STATUS_VALUES.has(normalized)) return "قيد المراجعة";
   if (PENDING_STATUS_VALUES.has(normalized)) return "معلق";
   if (CANCELLED_STATUS_VALUES.has(normalized)) return "موقوف";
+  if (SUSPENDED_STATUS_VALUES.has(normalized)) return "موقوف مؤقتاً";
   if (REJECTED_STATUS_VALUES.has(normalized)) return "مرفوض";
   return "غير نشط";
 }

@@ -136,6 +136,7 @@ export type SubscriptionStatus =
   | 'active'      // مفعل
   | 'expiring'    // ينتهي قريباً
   | 'expired'     // منتهي
+  | 'suspended'   // موقوف مؤقتاً مع حفظ المدة
   | 'cancelled'   // موقوف
   | 'pending'     // قيد المراجعة
   | 'inactive'    // غير نشط
@@ -161,6 +162,7 @@ export function getSubscriptionStatus(
   }
   
   // إذا كانت الحالة موقوف أو قيد المراجعة، نرجعها مباشرة
+  if (storedStatus === 'موقوف مؤقتاً' || storedStatus === 'suspended') return 'suspended';
   if (storedStatus === 'موقوف' || storedStatus === 'cancelled') return 'cancelled';
   if (storedStatus === 'قيد المراجعة' || storedStatus === 'معلق' || storedStatus === 'pending') return 'pending';
   
@@ -215,6 +217,14 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
       borderColor: 'border-red-500',
       icon: '✗',
     },
+    suspended: {
+      status: 'suspended',
+      label: 'موقوف مؤقتاً',
+      color: 'text-slate-700',
+      bgColor: 'bg-slate-600',
+      borderColor: 'border-slate-500',
+      icon: 'Ⅱ',
+    },
     cancelled: {
       status: 'cancelled',
       label: 'موقوف',
@@ -258,7 +268,7 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
  */
 export function canExtendSubscription(endDate: any, status?: SubscriptionStatus): boolean {
   const rawStatus = String(status || "").trim().toLowerCase();
-  if (['منتهي', 'expired', 'موقوف', 'cancelled', 'قيد المراجعة', 'معلق', 'pending'].includes(rawStatus)) {
+  if (['منتهي', 'expired', 'موقوف مؤقتاً', 'suspended', 'موقوف', 'cancelled', 'قيد المراجعة', 'معلق', 'pending'].includes(rawStatus)) {
     return false;
   }
 
@@ -274,7 +284,7 @@ export function canExtendSubscription(endDate: any, status?: SubscriptionStatus)
  * القاعدة: فقط إذا الاشتراك نشط (غير موقوف أو قيد المراجعة)
  */
 export function canUpgradeSubscription(status: SubscriptionStatus): boolean {
-  return status !== 'cancelled' && status !== 'pending';
+  return status !== 'suspended' && status !== 'cancelled' && status !== 'pending';
 }
 
 /**

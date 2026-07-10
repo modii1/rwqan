@@ -52,7 +52,7 @@ export const subscriptionSchema = z.object({
   packageId: z.string(),
   startDate: z.string(),
   endDate: z.string(),
-  status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'غير نشط', 'active', 'expired', 'cancelled', 'rejected', 'premium']),
+  status: z.enum(['نشط', 'منتهي', 'معلق', 'موقوف', 'موقوف مؤقتاً', 'ينتهي قريباً', 'نشط مجاني', 'ساري', 'غير نشط', 'active', 'expired', 'cancelled', 'rejected', 'premium']),
   paymentId: z.string().optional(),
   subscriptionType: z.string().optional(), // نوع الاشتراك (مميز، عادي)
   packageType: z.string().optional(), // نوع الباقة
@@ -65,8 +65,10 @@ export const subscriptionSchema = z.object({
     requestedAt: z.string(),
   })).optional(), // العقارات الإضافية في انتظار موافقة الأدمن
   createdAt: z.string().optional(),
-  cancelledAt: z.string().optional(),
-  cancelReason: z.string().optional(),
+  cancelledAt: z.string().nullable().optional(),
+  cancelReason: z.string().nullable().optional(),
+  suspendedAt: z.string().nullable().optional(),
+  remainingDurationMs: z.number().nonnegative().nullable().optional(),
 });
 
 export type Subscription = z.infer<typeof subscriptionSchema>;

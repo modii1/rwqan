@@ -2,6 +2,8 @@ import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { firebaseService } from "../../firebaseService";
 import { propertyService } from "../../services";
+import { isSubscriptionStatusActive } from "../../../shared/subscriptionType";
+import { calculateRemainingDays } from "../../utils/dateUtils";
 
 const router = Router();
 
@@ -178,6 +180,16 @@ router.post("/api/admin/linked-properties/groups", async (req, res) => {
 
     // Payment validation: check if the main property's payment covers this many properties
     const mainSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber1);
+    if (
+      !mainSub ||
+      !isSubscriptionStatusActive(mainSub.status) ||
+      calculateRemainingDays(mainSub.endDate) < 0
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "لا يمكن إنشاء مجموعة دون اشتراك رئيسي ساري.",
+      });
+    }
     if (mainSub && mainSub.paymentId) {
       const payment = await firebaseService.getPaymentById(mainSub.paymentId);
       if (payment) {
@@ -193,19 +205,32 @@ router.post("/api/admin/linked-properties/groups", async (req, res) => {
     const allLinkedProps = [propertyNumber1, propertyNumber2, ...(additionalProperties || [])];
 
     const multiSub = await firebaseService.createMultiPropertySubscription({
-      packageId: packageId || "",
+      packageId: packageId || mainSub.packageId || "",
       propertyNumber1,
       propertyNumber2,
       additionalProperties: additionalProperties || [],
       linkedProperties: allLinkedProps,
       propertyCount: allLinkedProps.length,
-      startDate: startDate || new Date().toISOString().split("T")[0],
-      endDate: endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-      status: status || "نشط",
+      startDate: mainSub.startDate,
+      endDate: mainSub.endDate,
+      status: "نشط",
+      paymentId: mainSub.paymentId,
     });
 
-    for (const pn of allLinkedProps) {
-      await firebaseService.updateProperty(pn, { subscriptionType: "مميز" });
+    const childProperties = allLinkedProps.filter((pn) => pn !== propertyNumber1);
+    await firebaseService.updateSubscription(mainSub.id, {
+      linkedProperties: childProperties,
+      propertyCount: allLinkedProps.length,
+    });
+    for (const pn of childProperties) {
+      await firebaseService.syncLinkedProperty(pn, propertyNumber1, {
+        packageId: mainSub.packageId,
+        subscriptionType: mainSub.subscriptionType || mainSub.packageType || "عادي",
+        startDate: mainSub.startDate,
+        endDate: mainSub.endDate,
+        status: mainSub.status,
+        paymentId: mainSub.paymentId,
+      });
     }
 
     res.json({ success: true, message: "تم إنشاء مجموعة العقارات بنجاح", data: multiSub });
@@ -225,6 +250,18 @@ router.put("/api/admin/linked-properties/groups/:id", async (req, res) => {
     const current = multiSubs.find(m => m.id === id);
     if (!current) {
       return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
+    }
+
+    const mainSub = await firebaseService.getSubscriptionByPropertyNumber(current.propertyNumber1);
+    if (
+      !mainSub ||
+      !isSubscriptionStatusActive(mainSub.status) ||
+      calculateRemainingDays(mainSub.endDate) < 0
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "لا يمكن إضافة عقار لأن الاشتراك الرئيسي غير ساري.",
+      });
     }
 
     const updatedLinkedProps = [
@@ -268,6 +305,18 @@ router.post("/api/admin/linked-properties/groups/:id/add", async (req, res) => {
       return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
     }
 
+    const mainSub = await firebaseService.getSubscriptionByPropertyNumber(current.propertyNumber1);
+    if (
+      !mainSub ||
+      !isSubscriptionStatusActive(mainSub.status) ||
+      calculateRemainingDays(mainSub.endDate) < 0
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "لا يمكن إضافة عقار لأن الاشتراك الرئيسي غير ساري.",
+      });
+    }
+
     // Payment validation: check if adding exceeds what the payment covered
     if (current.paymentId) {
       const addPayment = await firebaseService.getPaymentById(current.paymentId);
@@ -299,7 +348,18 @@ router.post("/api/admin/linked-properties/groups/:id/add", async (req, res) => {
       propertyCount: allLinked.length,
     });
 
-    await firebaseService.updateProperty(propertyNumber, { subscriptionType: "مميز" });
+    await firebaseService.updateSubscription(mainSub.id, {
+      linkedProperties: allLinked.filter((pn) => pn !== current.propertyNumber1),
+      propertyCount: allLinked.length,
+    });
+    await firebaseService.syncLinkedProperty(propertyNumber, current.propertyNumber1, {
+      packageId: mainSub.packageId,
+      subscriptionType: mainSub.subscriptionType || mainSub.packageType || "عادي",
+      startDate: mainSub.startDate,
+      endDate: mainSub.endDate,
+      status: mainSub.status,
+      paymentId: mainSub.paymentId,
+    });
 
     res.json({ success: true, message: `تم إضافة العقار ${propertyNumber} للمجموعة` });
   } catch (err) {

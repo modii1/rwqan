@@ -16,17 +16,23 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Save, ArrowRight, Star, X, Search, Lock } from "lucide-react";
+import { BadgeDollarSign, Building2, ListChecks, Save, Star, X, Search, Lock } from "lucide-react";
 import { FACILITIES } from "@shared/schema";
 import Link from "next/link";
 import { validateTextInput, validateNumericInput, validateWhatsAppInput } from "@/lib/validation";
 import { isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+    OwnerLoadingState,
+    OwnerMobileNavigation,
+    OwnerPageHeader,
+    OwnerPageMain,
+    OwnerSectionHeading,
+    ownerPanelClass,
+} from "@/components/owner/owner-page";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
-const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
-
 /** Parse facilities from any stored format to string[] */
 function parseFacilities(raw: unknown): string[] {
     if (!raw) return [];
@@ -240,40 +246,28 @@ export default function UpdatePropertyPage() {
     const isPremium = isPremiumSubscriptionType(property?.subscriptionType);
 
     if (isLoading) {
-        return (
-            <div className="min-h-screen bg-[#faf8f1] p-6 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="inline-block w-8 h-8 border-4 border-[#b88d2b] border-t-transparent rounded-lg animate-spin" />
-                    <p className="mt-4 text-[#6f6249]">جاري التحميل...</p>
-                </div>
-            </div>
-        );
+        return <OwnerLoadingState text="جاري تحميل بيانات العقار..." />;
     }
 
     return (
-        <div className="min-h-screen bg-[#faf8f1] p-4 md:p-6">
-            <div className="max-w-4xl mx-auto space-y-6">
-                {/* Header */}
-                <div className="rounded-lg border border-[#e2d6bd] bg-[#fffdf8] p-5 md:p-6">
-                    <div className="mb-5">
-                        <Button variant="outline" size="icon" className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]" onClick={() => router.push("/owner/dashboard")}>
-                        <ArrowRight className="w-5 h-5" />
-                    </Button>
-                    </div>
-                    <div>
-                        <p className="text-sm font-semibold text-[#8b7140]">
-                            {property?.propertyNumber ? `عقار رقم ${property.propertyNumber}` : "الاسم – المدينة – الأسعار – الوصف"}
-                        </p>
-                        <h1 className="mt-1 text-3xl md:text-4xl font-bold text-[#2f2a1f]">تحديث بيانات العقار</h1>
-                        <p className="mt-2 text-[#6f6249]">عدّل بيانات العرض والأسعار والمرافق بدون تغيير مسار العمل.</p>
-                    </div>
-                </div>
+        <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
+            <OwnerPageHeader
+                title="بيانات العقار"
+                description={property?.propertyNumber ? `عقار رقم ${property.propertyNumber}` : "بيانات العرض والأسعار والمرافق"}
+                backHref="/owner/dashboard"
+            />
+
+            <OwnerPageMain maxWidth="4xl" className="space-y-4 sm:space-y-6">
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     {/* ====== 1. Basic Info ====== */}
-                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
-                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">المعلومات الأساسية</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
+                        <OwnerSectionHeading
+                            title="المعلومات الأساسية"
+                            description="البيانات التي تعرّف العقار في نتائج البحث"
+                            icon={<Building2 className="h-4 w-4" />}
+                        />
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div>
                                 <label className="block text-sm font-semibold mb-2">اسم العقار</label>
                                 <Input
@@ -356,9 +350,13 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 2. Prices ====== */}
-                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
-                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">الأسعار</h2>
-                        <div className="grid grid-cols-2 gap-4">
+                    <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
+                        <OwnerSectionHeading
+                            title="الأسعار"
+                            description="السعر بالريال السعودي لكل فترة"
+                            icon={<BadgeDollarSign className="h-4 w-4" />}
+                        />
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4">
                             <div>
                                 <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
                                 <Input
@@ -399,10 +397,12 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 3. Facilities ====== */}
-                    <Card className={`${ownerPanelClass} p-5 md:p-6`}>
-                        <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
-                            المرافق المتوفرة ({selectedFacilities.length} مختار)
-                        </h2>
+                    <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
+                        <OwnerSectionHeading
+                            title="أبرز المرافق"
+                            description={`${selectedFacilities.length} مرفق محدد`}
+                            icon={<ListChecks className="h-4 w-4" />}
+                        />
 
                         {/* Selected facilities chips */}
                         {selectedFacilities.length > 0 && (
@@ -438,9 +438,9 @@ export default function UpdatePropertyPage() {
                         </div>
 
                         {/* Checkbox grid */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-56 overflow-y-auto rounded-lg border border-[#eee4cf] bg-[#fffdf8] p-3">
+                        <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto rounded-lg border border-[#eee4cf] bg-[#fffdf8] p-2 min-[390px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                             {filteredFacilities.map(facility => (
-                                <div key={facility} className="flex items-center gap-2">
+                                <div key={facility} className="flex min-h-10 items-center gap-2 rounded-md px-2 hover:bg-[#f6f0e3]">
                                     <Checkbox
                                         checked={selectedFacilities.includes(facility)}
                                         onCheckedChange={() => toggleFacility(facility)}
@@ -455,11 +455,12 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 4. SEO Description ====== */}
-                    <Card className="rounded-lg border border-[#e0c97b] bg-[#fffdf0] p-5 md:p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Star className="w-5 h-5 text-amber-500" />
-                            <h2 className="text-lg font-bold text-[#6f5520]">وصف العقار (SEO)</h2>
-                        </div>
+                    <Card className="rounded-lg border border-[#e0c97b] bg-[#fffdf0] p-4 sm:p-6">
+                        <OwnerSectionHeading
+                            title="وصف العقار"
+                            description="وصف مختصر يساعد في إظهار العقار في نتائج البحث"
+                            icon={<Star className="h-4 w-4" />}
+                        />
 
                         {isPremium ? (
                             <>
@@ -486,7 +487,7 @@ export default function UpdatePropertyPage() {
                                     ميزة وصف SEO متاحة فقط للمشتركين في{" "}
                                     <span className="font-bold">الباقة المميزة</span>
                                 </p>
-                                <Link href="/subscription">
+                                <Link href="/owner/subscription">
                                     <Button variant="outline" className="border-[#d8c9a8] text-[#6f5520] bg-white">
                                         <Star className="w-4 h-4 ml-2" />
                                         ترقية الاشتراك
@@ -499,7 +500,7 @@ export default function UpdatePropertyPage() {
                     {/* Save property button */}
                     <Button
                         type="submit"
-                        className="w-full bg-[#2f2a1f] text-white font-bold py-6"
+                        className="h-12 w-full bg-[#2f2a1f] font-bold text-white"
                         disabled={mutation.isPending}
                     >
                         <Save className="w-5 h-5 ml-2" />
@@ -508,12 +509,13 @@ export default function UpdatePropertyPage() {
                 </form>
 
                 {/* ====== 5. Password Change (outside form) ====== */}
-                <Card className={`${ownerPanelClass} p-5 md:p-6`}>
-                    <div className="flex items-center gap-2 mb-4">
-                        <Lock className="w-5 h-5 text-[#9a7623]" />
-                        <h2 className="text-lg font-bold text-[#2f2a1f]">تغيير الرقم السري</h2>
-                    </div>
-                    <div className="space-y-4">
+                <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
+                    <OwnerSectionHeading
+                        title="الرقم السري"
+                        description="استخدم رقماً سرياً مختلفاً عن رقم العقار"
+                        icon={<Lock className="h-4 w-4" />}
+                    />
+                    <div className="grid gap-4 md:grid-cols-3">
                         <div>
                             <label className="block text-sm font-semibold mb-2">الرقم السري الحالي</label>
                             <Input
@@ -553,7 +555,7 @@ export default function UpdatePropertyPage() {
                                 !passwordForm.newPassword ||
                                 !passwordForm.confirmPassword
                             }
-                            className="w-full"
+                            className="h-11 w-full md:col-span-3"
                             variant="outline"
                         >
                             <Lock className="w-4 h-4 ml-2" />
@@ -561,7 +563,8 @@ export default function UpdatePropertyPage() {
                         </Button>
                     </div>
                 </Card>
-            </div>
+            </OwnerPageMain>
+            <OwnerMobileNavigation />
         </div>
     );
 }

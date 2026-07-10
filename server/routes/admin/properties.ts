@@ -10,7 +10,13 @@ import {
   activateVerifiedPaymentSubscription,
   calculateActionDates,
 } from "../../utils/paymentScenarioFlow";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "../../../shared/subscriptionType";
+import {
+  getEffectiveSubscriptionType,
+  getSubscriptionTypeLabel,
+  isActivePremiumSubscription,
+  isPremiumSubscriptionType,
+} from "../../../shared/subscriptionType";
+import { calculateRemainingDays } from "../../utils/dateUtils";
 
 const router = Router();
 
@@ -73,9 +79,25 @@ router.get("/api/admin/properties", async (_req, res) => {
     
     const itemsWithSubscriptionStatus = items.map(property => {
       const sub = subscriptions.find(s => s.propertyNumber === property.propertyNumber);
+      const isExpired = !sub || calculateRemainingDays(sub.endDate) < 0;
+      const effectiveSubscriptionType = sub
+        ? getEffectiveSubscriptionType({
+            subscriptionType: sub.subscriptionType,
+            packageType: sub.packageType,
+            price: (sub as any).price,
+          })
+        : "عادي";
+      const isPremiumActive = isActivePremiumSubscription({
+        subscriptionType: effectiveSubscriptionType,
+        status: sub?.status,
+        isExpired,
+      });
       return {
         ...property,
+        subscriptionType: isPremiumActive ? "مميز" : "عادي",
         subscriptionStatus: sub?.status || null,
+        isSubscriptionExpired: isExpired,
+        isPremiumActive,
         linkedPropertyCount: linkedCountMap[property.propertyNumber] || 0
       };
     });
@@ -214,6 +236,23 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
 
     if (updates.subscriptionType) {
       updates.subscriptionType = getSubscriptionTypeLabel(updates.subscriptionType);
+
+      if (updates.subscriptionType === "مميز") {
+        const subscription = await subscriptionService.getByProperty(propertyNumber);
+        const isExpired = !subscription || calculateRemainingDays(subscription.endDate) < 0;
+        const hasValidPremiumSubscription = isActivePremiumSubscription({
+          subscriptionType: subscription?.subscriptionType,
+          packageType: subscription?.packageType,
+          status: subscription?.status,
+          isExpired,
+        });
+
+        if (!hasValidPremiumSubscription) {
+          return res.status(409).json({
+            error: "لا يمكن جعل العقار مميزاً دون اشتراك مميز ساري. فعّل الاشتراك أو جدده أولاً.",
+          });
+        }
+      }
     }
 
     // skipVerification=true because admin edits are intentional and should not
@@ -409,7 +448,17 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       console.error(`[APPROVE] Error checking payments:`, payErr);
     }
 
-    // Update the property's subscriptionType to match what's in the subscription
+    // Approval never grants premium by itself; only a valid premium subscription does.
+    const effectiveSubscription = await subscriptionService.getByProperty(propertyNumber);
+    const effectiveSubscriptionExpired = !effectiveSubscription || calculateRemainingDays(effectiveSubscription.endDate) < 0;
+    subscriptionType = isActivePremiumSubscription({
+      subscriptionType: effectiveSubscription?.subscriptionType,
+      packageType: effectiveSubscription?.packageType,
+      status: effectiveSubscription?.status,
+      isExpired: effectiveSubscriptionExpired,
+    }) ? "مميز" : "عادي";
+
+    // Update the property's subscriptionType to match the valid subscription state.
     await firebaseService.updateProperty(propertyNumber, { 
       subscriptionType: subscriptionType as "عادي" | "مميز" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
     });

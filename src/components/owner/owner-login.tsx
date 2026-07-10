@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Home, Lock } from "lucide-react";
-import { cleanPropertyNumber, validatePropertyNumber } from "@/lib/validation";
+import { ArrowLeft, Home, Loader2, Lock, LogIn } from "lucide-react";
+import { cleanPropertyNumber } from "@/lib/validation";
 
 export default function OwnerLogin() {
   const router = useRouter();
@@ -127,31 +127,25 @@ export default function OwnerLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md p-8 glass-premium border-primary/20 shadow-golden-lg hover:shadow-golden transition-shadow duration-300">
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center shadow-golden">
-              <Home className="w-8 h-8 text-primary" />
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold text-primary mb-2" data-testid="text-login-title">
-            روقـان
+    <main className="flex min-h-screen items-center justify-center bg-[#f5f6f3] px-3 py-6 sm:px-6">
+      <Card className="w-full max-w-md overflow-hidden rounded-lg border border-[#dfe2dc] bg-white shadow-xl shadow-black/[0.05]">
+        <div className="border-b border-[#eceee9] bg-[#fbfcfa] px-5 py-5 text-center sm:px-7">
+          <img src="/assets/logo-full.png" alt="روقان" className="mx-auto h-14 w-auto object-contain" />
+          <h1 className="mt-3 text-xl font-bold text-[#242822]" data-testid="text-login-title">
+            {mode === "owner" ? "دخول مالك العقار" : "دخول المسؤول"}
           </h1>
-          <p className="text-muted-foreground">تسجيل دخول آمن</p>
+          <p className="mt-1 text-sm text-[#687064]">أدخل بيانات حسابك للمتابعة</p>
         </div>
 
-        <Tabs value={mode} onValueChange={(v) => setMode(v as "owner" | "admin")} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6 bg-muted/50 p-1 rounded-xl">
-            <TabsTrigger value="owner" className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
+        <Tabs value={mode} onValueChange={(v) => setMode(v as "owner" | "admin")} className="w-full px-5 py-5 sm:px-7 sm:py-6">
+          <TabsList className="mb-6 grid h-11 w-full grid-cols-2 rounded-lg bg-[#eef0eb] p-1">
+            <TabsTrigger value="owner" className="h-9 gap-2 rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm">
               <Home className="w-4 h-4" />
-              <span className="hidden sm:inline">صاحب العقار</span>
-              <span className="sm:hidden">ملاك</span>
+              مالك العقار
             </TabsTrigger>
-            <TabsTrigger value="admin" className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200">
+            <TabsTrigger value="admin" className="h-9 gap-2 rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm">
               <Lock className="w-4 h-4" />
-              <span className="hidden sm:inline">المسؤول</span>
-              <span className="sm:hidden">أدمن</span>
+              المسؤول
             </TabsTrigger>
           </TabsList>
 
@@ -159,10 +153,11 @@ export default function OwnerLogin() {
           <TabsContent value="owner">
             <form onSubmit={handleOwnerLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2 text-foreground">رقم العقار (5 أرقام)</label>
+                <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">رقم العقار</label>
                 <Input
+                  id="owner-property-number"
                   type="text"
-                  placeholder="اخر 5 أرقام من جوالك"
+                  placeholder="5 أرقام"
                   value={propertyNumber}
                   onChange={(e) => setPropertyNumber(cleanPropertyNumber(e.target.value))}
                   disabled={isLoading}
@@ -170,7 +165,7 @@ export default function OwnerLogin() {
                   pattern="[0-9]*"
                   maxLength={5}
                   data-testid="input-property-number"
-                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
+                  className="h-11 rounded-lg border-[#dfe2dc] bg-white text-base"
                 />
                 {propertyNumber && propertyNumber.length !== 5 && (
                   <p className="text-xs text-red-500 mt-1">يجب أن يكون 5 أرقام</p>
@@ -178,30 +173,36 @@ export default function OwnerLogin() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2 text-foreground">الرقم السري</label>
+                <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">الرقم السري</label>
                 <Input
+                  id="owner-pin"
                   type="password"
                   placeholder="••••••"
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-pin"
-                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
+                  className="h-11 rounded-lg border-[#dfe2dc] bg-white text-base"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full rounded-xl h-12 text-base font-bold gradient-golden shadow-golden hover:shadow-golden-lg transition-all duration-300"
+                className="h-12 w-full rounded-lg bg-[#242822] text-base font-bold text-white hover:bg-[#242822]"
                 disabled={isLoading}
                 data-testid="button-login"
               >
                 {isLoading ? (
                   <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     جاري تسجيل الدخول...
                   </span>
-                ) : "تسجيل الدخول"}
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <LogIn className="h-4 w-4" />
+                    تسجيل الدخول
+                  </span>
+                )}
               </Button>
 
               <div className="text-center">
@@ -209,7 +210,7 @@ export default function OwnerLogin() {
                   type="button"
                   variant="link"
                   onClick={() => router.push("/forgot-password")}
-                  className="text-sm text-muted-foreground hover:text-primary transition-colors duration-200"
+                  className="h-auto text-sm text-[#687064] hover:text-[#242822]"
                   data-testid="link-forgot-password"
                 >
                   نسيت الرقم السري؟
@@ -217,15 +218,16 @@ export default function OwnerLogin() {
               </div>
             </form>
 
-            <div className="mt-6 text-center text-sm text-muted-foreground pt-4 border-t border-border/30">
-              <p>ليس لديك حساب؟</p>
+            <div className="mt-5 flex items-center justify-center gap-1 border-t border-[#eceee9] pt-5 text-sm text-[#687064]">
+              <span>ليس لديك حساب؟</span>
               <Button
-                variant="ghost"
+                variant="link"
                 onClick={() => router.push("/subscription")}
-                className="text-primary hover:text-primary/80 transition-colors duration-200"
+                className="h-auto gap-1 px-1 font-bold text-[#80621d]"
                 data-testid="link-register"
               >
                 سجل معنا الآن
+                <ArrowLeft className="h-3.5 w-3.5" />
               </Button>
             </div>
           </TabsContent>
@@ -234,48 +236,55 @@ export default function OwnerLogin() {
           <TabsContent value="admin">
             <form onSubmit={handleAdminLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2 text-foreground">كود المسؤول</label>
+                <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-code">كود المسؤول</label>
                 <Input
+                  id="admin-code"
                   type="text"
                   placeholder="أدخل كود المسؤول"
                   value={adminCode}
                   onChange={(e) => setAdminCode(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-admin-code"
-                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
+                  className="h-11 rounded-lg border-[#dfe2dc] bg-white text-base"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-2 text-foreground">كلمة المرور</label>
+                <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-password">كلمة المرور</label>
                 <Input
+                  id="admin-password"
                   type="password"
                   placeholder="••••••"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   disabled={isLoading}
                   data-testid="input-admin-password"
-                  className="rounded-xl border-border/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all duration-300"
+                  className="h-11 rounded-lg border-[#dfe2dc] bg-white text-base"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full rounded-xl h-12 text-base font-bold gradient-golden shadow-golden hover:shadow-golden-lg transition-all duration-300"
+                className="h-12 w-full rounded-lg bg-[#242822] text-base font-bold text-white hover:bg-[#242822]"
                 disabled={isLoading}
                 data-testid="button-admin-login"
               >
                 {isLoading ? (
                   <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     جاري تسجيل الدخول...
                   </span>
-                ) : "تسجيل الدخول"}
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <LogIn className="h-4 w-4" />
+                    تسجيل الدخول
+                  </span>
+                )}
               </Button>
             </form>
           </TabsContent>
         </Tabs>
       </Card>
-    </div>
+    </main>
   );
 }

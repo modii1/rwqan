@@ -1,11 +1,23 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
-import { subscriptionService, propertyService } from "../../services";
+import {
+  SubscriptionLifecycleError,
+  subscriptionService,
+  propertyService,
+} from "../../services";
 import { firebaseService } from "../../firebaseService";
+import { subscriptionIdentifierSchema } from "../../validation";
 import {
   getSubscriptionTypeLabel,
+  isActivePremiumSubscription,
   isPremiumSubscriptionType,
+  isSubscriptionStatusActive,
 } from "../../../shared/subscriptionType";
+import { calculateRemainingDays as calculateServerRemainingDays } from "../../utils/dateUtils";
+import {
+  SUSPENDED_SUBSCRIPTION_STATUS,
+  calculateFrozenRemainingDays,
+} from "../../services/subscriptionLifecycle";
 
 const router = Router();
 
@@ -16,7 +28,8 @@ type AdminSubscriptionStatus =
   | "ساري"
   | "منتهي"
   | "قريب الانتهاء"
-  | "نشط مجاني";
+  | "نشط مجاني"
+  | "موقوف مؤقتاً";
 
 type StoredSubscriptionStatus = "ساري" | "منتهي" | "نشط مجاني";
 
@@ -35,6 +48,17 @@ function isValidDateInput(value: unknown): boolean {
 
 function subscriptionDocId(subscription: any): string {
   return subscription?.id || `SUB-${subscription.propertyNumber}`;
+}
+
+function lifecycleErrorStatus(error: SubscriptionLifecycleError): number {
+  if (error.code === "NOT_FOUND") return 404;
+  if (
+    error.code === "INVALID_END_DATE" ||
+    error.code === "INVALID_SUSPENSION_STATE"
+  ) {
+    return 400;
+  }
+  return 409;
 }
 
 // ======================
@@ -119,7 +143,11 @@ router.get("/api/admin/subscriptions", async (req, res) => {
       const wasReactivated = wasCancelled && sub.startDate && 
         new Date(sub.startDate) > new Date((subWithType as any).cancelledAt);
       
-      if (sub.status === "منتهي" || (wasCancelled && !wasReactivated)) {
+      if (sub.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+        status = SUSPENDED_SUBSCRIPTION_STATUS;
+        remainingDays = calculateFrozenRemainingDays(Number(subWithType.remainingDurationMs));
+      }
+      else if (sub.status === "منتهي" || (wasCancelled && !wasReactivated)) {
         status = "منتهي";
         remainingDays = -1;
       }
@@ -128,15 +156,7 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         status = "نشط مجاني";
         remainingDays = null;
       } else {
-        const end = new Date(sub.endDate);
-        const now = new Date();
-
-        // تصفير الوقت للمقارنة بالأيام فقط
-        end.setHours(0, 0, 0, 0);
-        now.setHours(0, 0, 0, 0);
-
-        const diffTime = end.getTime() - now.getTime();
-        remainingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        remainingDays = calculateServerRemainingDays(sub.endDate);
 
         // الاشتراك منتهي فقط إذا كان تاريخ الانتهاء قبل اليوم (سالب)
         if (remainingDays < 0) {
@@ -163,6 +183,8 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         endDate: sub.endDate,
         remainingDays,
         status,
+        suspendedAt: subWithType.suspendedAt || null,
+        remainingDurationMs: subWithType.remainingDurationMs ?? null,
         // Linked-group awareness for the admin dashboard
         linkedProperty: subWithType.linkedProperty || null,
         linkedProperties: subWithType.linkedProperties || [],
@@ -178,6 +200,50 @@ router.get("/api/admin/subscriptions", async (req, res) => {
   } catch (error) {
     console.error("Error fetching subscriptions:", error);
     res.status(500).json({ error: "فشل في جلب الاشتراكات" });
+  }
+});
+
+router.post("/api/admin/subscriptions/:id/suspend", async (req, res) => {
+  const identifier = subscriptionIdentifierSchema.safeParse(req.params.id);
+  if (!identifier.success) {
+    return res.status(400).json({ error: identifier.error.issues[0]?.message });
+  }
+
+  try {
+    const result = await subscriptionService.suspend(identifier.data);
+    return res.json({
+      success: true,
+      message: "تم إيقاف الاشتراك مؤقتاً مع حفظ المدة المتبقية.",
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof SubscriptionLifecycleError) {
+      return res.status(lifecycleErrorStatus(error)).json({ error: error.message });
+    }
+    console.error("Error suspending subscription:", error);
+    return res.status(500).json({ error: "فشل إيقاف الاشتراك مؤقتاً." });
+  }
+});
+
+router.post("/api/admin/subscriptions/:id/resume", async (req, res) => {
+  const identifier = subscriptionIdentifierSchema.safeParse(req.params.id);
+  if (!identifier.success) {
+    return res.status(400).json({ error: identifier.error.issues[0]?.message });
+  }
+
+  try {
+    const result = await subscriptionService.resume(identifier.data);
+    return res.json({
+      success: true,
+      message: "تم استئناف الاشتراك من المدة المتبقية.",
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof SubscriptionLifecycleError) {
+      return res.status(lifecycleErrorStatus(error)).json({ error: error.message });
+    }
+    console.error("Error resuming subscription:", error);
+    return res.status(500).json({ error: "فشل استئناف الاشتراك." });
   }
 });
 
@@ -219,6 +285,13 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
       });
     }
 
+    if (currentSubscription.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+      return res.status(409).json({
+        error: "استأنف الاشتراك قبل تعديل بياناته حتى لا تضيع المدة المحفوظة.",
+        nextAction: "استخدم زر استئناف الاشتراك أولاً.",
+      });
+    }
+
     const normalizedType = getSubscriptionTypeLabel(subscriptionType || currentSubscription.subscriptionType || currentSubscription.packageType);
     const storedStatus = status !== undefined
       ? parseStoredSubscriptionStatus(status)
@@ -251,6 +324,21 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
     if (startDate !== undefined) baseUpdates.startDate = String(startDate || "");
     if (endDate !== undefined) baseUpdates.endDate = String(endDate || "");
     if (parsedPrice !== undefined) baseUpdates.price = parsedPrice;
+
+    const effectiveEndDate = String(baseUpdates.endDate ?? currentSubscription.endDate ?? "");
+    const isExpiredByDate = calculateServerRemainingDays(effectiveEndDate) < 0;
+    const isPremiumActive = isActivePremiumSubscription({
+      subscriptionType: normalizedType,
+      status: storedStatus,
+      isExpired: isExpiredByDate,
+    });
+
+    if (normalizedType === "مميز" && storedStatus === "ساري" && !isPremiumActive) {
+      return res.status(400).json({
+        error: "الاشتراك المميز الساري يحتاج إلى تاريخ نهاية صالح وغير منتهٍ.",
+        nextAction: "حدّث تاريخ النهاية أو اختر حالة منتهي.",
+      });
+    }
 
     if (storedStatus === "ساري" || storedStatus === "نشط مجاني") {
       baseUpdates.cancelledAt = null;
@@ -318,7 +406,7 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
 
       if (targetProperty) {
         const propertyUpdates: any = {
-          subscriptionType: normalizedType,
+          subscriptionType: isPremiumActive ? "مميز" : "عادي",
         };
         const effectiveStartDate = updateForTarget.startDate ?? targetSub?.startDate ?? currentSubscription.startDate;
         if (effectiveStartDate) {
@@ -529,12 +617,13 @@ router.post("/api/admin/subscription/link", async (req, res) => {
     const linkedSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
     const mainSub = await firebaseService.getSubscriptionByPropertyNumber(linkedProperty);
 
-    if (!mainSub) {
+    if (
+      !mainSub ||
+      !isSubscriptionStatusActive(mainSub.status) ||
+      calculateServerRemainingDays(mainSub.endDate) < 0
+    ) {
       return res.status(400).json({ error: "العقار الرئيسي ليس لديه اشتراك نشط" });
     }
-
-    // Set linkedProperty on the child subscription
-    await firebaseService.updateSubscriptionLinkedProperty(propertyNumber, linkedProperty);
 
     // Add to main's linkedProperties array
     if (mainSub) {
@@ -577,34 +666,15 @@ router.post("/api/admin/subscription/link", async (req, res) => {
       });
     }
 
-    // Update property's subscriptionType to match main
-    await firebaseService.updateProperty(propertyNumber, {
-      subscriptionType: mainProp.subscriptionType || "مميز",
-      pendingApprovalFrom: undefined,
+    // Child state is always derived from the valid main subscription.
+    await firebaseService.syncLinkedProperty(propertyNumber, linkedProperty, {
+      packageId: mainSub.packageId,
+      subscriptionType: mainSub.subscriptionType || mainSub.packageType || "عادي",
+      startDate: mainSub.startDate,
+      endDate: mainSub.endDate,
+      status: mainSub.status,
+      paymentId: mainSub.paymentId,
     });
-
-    // If the linked property has no subscription yet, create one with same dates as main
-    if (!linkedSub) {
-      const today = new Date();
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 30);
-
-      await firebaseService.addSubscriptionToSheet(
-        propertyNumber,
-        {
-          packageId: mainSub.packageId,
-          price: 0,
-          subscriptionType: mainSub.subscriptionType || "مميز",
-          packageType: mainSub.packageType || "مميز",
-          startDate: mainSub.startDate || today.toISOString(),
-          endDate: mainSub.endDate || endDate.toISOString(),
-          linkedProperty: linkedProperty,
-          status: "نشط",
-          paymentId: mainSub.paymentId,
-        },
-        prop
-      );
-    }
 
     res.json({ success: true, message: `تم ربط العقار ${propertyNumber} بالعقار ${linkedProperty} بنجاح (رابط ثنائي الاتجاه)` });
   } catch (error) {

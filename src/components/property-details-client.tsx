@@ -4,14 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, BadgeCheck, ChevronLeft, ChevronRight, Compass, Copy, Home, Images, MapPin, Moon, Phone, Share2, Sparkles, Tags } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, Home, Loader2, Lock, MapPin, Moon, Phone, Share2, Sparkles, Tags } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "@shared/subscriptionType";
+import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
+import { isPublicPropertyPremium } from "@/lib/public-subscription";
+import { useSessionQuery } from "@/hooks/use-session";
+import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
 
 const DEFAULT_WHATSAPP = "966533220646";
 
@@ -59,17 +62,12 @@ export interface PropertyDetails {
     subscriptionStatus?: string;
     subscriptionEndDate?: string;
     isSubscriptionExpired?: boolean;
-    phone?: string;
     imageCount: number;
     imageUrls?: string[];
 }
 
 function isVerified(property: PropertyDetails) {
-    return isActivePremiumSubscription({
-        subscriptionType: property.subscriptionType,
-        status: property.subscriptionStatus,
-        isExpired: property.isSubscriptionExpired,
-    });
+    return isPublicPropertyPremium(property);
 }
 
 function getExternalHref(value?: string) {
@@ -91,13 +89,6 @@ function getSafeImageSrc(value?: string) {
 function normalizeWhatsAppNumber(value?: string) {
     const digits = value?.replace(/\D/g, "") || "";
     return digits || DEFAULT_WHATSAPP;
-}
-
-function formatWhatsAppNumber(value: string) {
-    if (/^966\d{9}$/.test(value)) {
-        return `+966 ${value.slice(3, 5)} ${value.slice(5, 8)} ${value.slice(8)}`;
-    }
-    return value.startsWith("00") ? `+${value.slice(2)}` : `+${value}`;
 }
 
 function detectDeviceType() {
@@ -128,12 +119,25 @@ interface PropertyDetailsClientProps {
 export default function PropertyDetailsClient({ propertyId, initialProperty, initialImages }: PropertyDetailsClientProps) {
     const router = useRouter();
     const { toast } = useToast();
+    const { data: ownerSession, isLoading: isOwnerSessionLoading } = useSessionQuery();
+    const { data: adminSession, isLoading: isAdminSessionLoading } = useQuery<{ isAdmin: boolean }>({
+        queryKey: ["/api/admin/session"],
+    });
+    const [isHydrated, setIsHydrated] = useState(false);
+    const canContact = isHydrated && Boolean(ownerSession?.isLoggedIn || adminSession?.isAdmin);
+    const isContactSessionLoading = !isHydrated || isOwnerSessionLoading || isAdminSessionLoading;
     const [isSending, setIsSending] = useState(false);
     const [shake, setShake] = useState(false);
 
     const [selectedImage, setSelectedImage] = useState<number>(0);
     const [touchStartX, setTouchStartX] = useState<number | null>(null);
     const [imageLoaded, setImageLoaded] = useState(false);
+    const [failedImageUrls, setFailedImageUrls] = useState<string[]>([]);
+    const [showAllFacilities, setShowAllFacilities] = useState(false);
+
+    useEffect(() => {
+        setIsHydrated(true);
+    }, []);
 
     // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
     useEffect(() => {
@@ -178,7 +182,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                             subscriptionStatus: data.subscriptionStatus,
                             subscriptionEndDate: data.subscriptionEndDate,
                             isSubscriptionExpired: data.isSubscriptionExpired,
-                            phone: data.whatsappNumber || "",
                             imageCount: 0,
                             imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],
                         } as PropertyDetails;
@@ -246,7 +249,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
                 },
                 subscriptionType: getEffectiveSubscriptionType({ subscriptionType: name ? "مميز" : "عادي" }),
-                phone: item["رقم الجوال"] ? String(item["رقم الجوال"]) : "",
                 imageCount: 0,
             } as PropertyDetails;
         },
@@ -321,6 +323,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     useEffect(() => {
         if (!property) return;
         setSelectedImage(0);
+        setFailedImageUrls([]);
     }, [property?.propertyNumber]);
 
     // جلب الصور من R2 بشكل متوازي مع البيانات
@@ -345,7 +348,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     });
 
     // دمج الصور من R2 + imageUrls من بيانات العقار (بدون تكرار)
-    const images = (() => {
+    const images = useMemo(() => {
         const r2Urls = (r2ImagesData || []).map(getSafeImageSrc).filter(Boolean);
         const propertyUrls = (property?.imageUrls || []).map(getSafeImageSrc).filter(Boolean);
         const merged = [...r2Urls];
@@ -355,25 +358,57 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             }
         }
         return merged;
-    })();
+    }, [property?.imageUrls, r2ImagesData]);
+    const galleryImages = useMemo(
+        () => images.filter((url) => !failedImageUrls.includes(url)),
+        [failedImageUrls, images],
+    );
+    const currentImage = galleryImages[selectedImage] || "";
 
     // إعادة تعيين حالة تحميل الصورة عند تغيير الصورة
     useEffect(() => {
         setImageLoaded(false);
-    }, [selectedImage]);
+        if (!currentImage) return;
+
+        let cancelled = false;
+        const image = new Image();
+        image.onload = () => {
+            if (!cancelled) setImageLoaded(true);
+        };
+        image.onerror = () => {
+            if (!cancelled) {
+                setFailedImageUrls((current) => current.includes(currentImage) ? current : [...current, currentImage]);
+            }
+        };
+        image.src = currentImage;
+
+        if (image.complete && image.naturalWidth > 0) {
+            setImageLoaded(true);
+        }
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentImage]);
+
+    useEffect(() => {
+        if (selectedImage >= galleryImages.length) {
+            setSelectedImage(Math.max(0, galleryImages.length - 1));
+        }
+    }, [galleryImages.length, selectedImage]);
 
     // Preload للصورة التالية عند التنقل
     useEffect(() => {
-        if (!images || images.length === 0) return;
-        const nextIndex = (selectedImage + 1) % images.length;
-        const prevIndex = selectedImage === 0 ? images.length - 1 : selectedImage - 1;
+        if (galleryImages.length === 0) return;
+        const nextIndex = (selectedImage + 1) % galleryImages.length;
+        const prevIndex = selectedImage === 0 ? galleryImages.length - 1 : selectedImage - 1;
 
         // تحميل الصورة التالية والسابقة
         [nextIndex, prevIndex].forEach((idx) => {
             const img = new Image();
-            img.src = images[idx];
+            img.src = galleryImages[idx];
         });
-    }, [images, selectedImage]);
+    }, [galleryImages, selectedImage]);
 
     // ===== حالات التحميل / الخطأ / غير موجود =====
 
@@ -404,61 +439,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     // حالة التحميل مع Skeleton
     if (isLoading || !property) {
-        return (
-            <div className="min-h-screen bg-[#faf8f1]">
-                <header className="bg-card/80 backdrop-blur-xl border-b border-border/60 sticky top-0 z-10">
-                    <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center gap-3">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-lg"
-                            onClick={() => {
-                                if (window.history.length > 1) {
-                                    router.back();
-                                } else {
-                                    router.push("/");
-                                }
-                            }}
-                        >
-                            <ArrowRight className="w-5 h-5" />
-                        </Button>
-                        <div className="flex-1">
-                            <div className="h-5 w-36 bg-muted shimmer rounded-lg" />
-                            <div className="h-3 w-24 bg-muted shimmer rounded-lg mt-1.5" />
-                        </div>
-                    </div>
-                </header>
-                <div className="max-w-7xl mx-auto px-4 py-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 space-y-5">
-                            <Card className="overflow-hidden rounded-lg border-border/60">
-                                <div className="aspect-video bg-muted shimmer flex items-center justify-center">
-                                    <Home className="w-16 h-16 text-muted-foreground/20" />
-                                </div>
-                            </Card>
-                            <Card className="p-7 rounded-lg border-border/60">
-                                <div className="h-6 w-36 bg-muted shimmer rounded-lg mb-5" />
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                    {[1, 2, 3, 4].map((i) => (
-                                        <div key={i} className="h-20 bg-muted shimmer rounded-lg" />
-                                    ))}
-                                </div>
-                            </Card>
-                        </div>
-                        <div className="space-y-5">
-                            <Card className="p-7 rounded-lg border-border/60">
-                                <div className="h-6 w-24 bg-muted shimmer rounded-lg mb-5" />
-                                <div className="space-y-3.5">
-                                    {[1, 2, 3].map((i) => (
-                                        <div key={i} className="h-9 bg-muted shimmer rounded-xl" />
-                                    ))}
-                                </div>
-                            </Card>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
+        return <PropertyDetailsSkeleton />;
     }
 
     // ===== سحب باللمس للصور =====
@@ -473,11 +454,11 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
         if (diff > threshold) {
             setSelectedImage((prev) =>
-                images.length ? (prev - 1 + images.length) % images.length : prev,
+                galleryImages.length ? (prev - 1 + galleryImages.length) % galleryImages.length : prev,
             );
         } else if (diff < -threshold) {
             setSelectedImage((prev) =>
-                images.length ? (prev + 1) % images.length : prev,
+                galleryImages.length ? (prev + 1) % galleryImages.length : prev,
             );
         }
 
@@ -489,6 +470,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     // الواتساب: رقم العقار المميّز أو رقم افتراضي
     const handleWhatsApp = async () => {
+        if (isContactSessionLoading || !canContact) return;
+
         // ⭐ عند الضغط المتكرر — اهتزاز فقط
         if (isSending) {
             setShake(true);
@@ -508,6 +491,13 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             const result = await response.json();
 
             if (!response.ok) {
+                if (result.code === "AUTH_REQUIRED") {
+                    toast({
+                        title: "يلزم تسجيل الدخول",
+                        description: result.error || "سجّل الدخول للتواصل عبر واتساب",
+                        variant: "destructive",
+                    });
+                }
                 if (result.remainingTimeFormatted) {
                     toast({
                         title: "⏱️ انتظر",
@@ -521,6 +511,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
             const nameText = isVerified(property) ? ` - ${property.name}` : "";
             const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
+            const whatsappNumber = normalizeWhatsAppNumber(result.whatsappNumber);
 
             const isMobile =
                 /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -582,14 +573,12 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     };
 
     const premium = isVerified(property);
-    const whatsappNumber = normalizeWhatsAppNumber(property.phone);
-    const formattedWhatsAppNumber = formatWhatsAppNumber(whatsappNumber);
     const locationHref = getExternalHref(property.location);
-    const facts = [
+    const propertyTitle = displayName || "عقار للإيجار";
+    const quickFacts = [
         { icon: MapPin, label: "المدينة", value: property.city || "غير محدد" },
         { icon: Compass, label: "الاتجاه", value: property.direction || "غير محدد" },
         { icon: Home, label: "النوع", value: property.type || "غير محدد" },
-        { icon: Images, label: "الصور", value: images.length ? `${images.length} صورة` : "لا توجد صور" },
     ];
     const priceRows = [
         { label: "وسط الأسبوع", amount: property.prices?.weekday },
@@ -597,41 +586,48 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
         { label: "مبيت", amount: property.prices?.overnight },
         { label: "إجازات", amount: property.prices?.holidays },
     ].filter((row) => row.amount);
-    const leadPrice = priceRows[0];
-    const facilityCount = property.facilities?.length || 0;
-    const visibleFacilities = property.facilities?.slice(0, 8) || [];
-    const hiddenFacilitiesCount = Math.max(0, facilityCount - visibleFacilities.length);
-    const summaryItems = [
-        { label: "المرافق", value: facilityCount ? `${facilityCount} مرفق` : "غير محددة" },
-        { label: "الأسعار", value: priceRows.length ? `${priceRows.length} خيارات` : "غير محددة" },
-        { label: "نوع الاشتراك", value: premium ? "مميز" : "عادي" },
-    ];
+    const featuredFacilities = Array.from(
+        new Set((property.facilities || []).map((facility) => facility.trim()).filter(Boolean)),
+    );
+    const visibleFacilities = showAllFacilities
+        ? featuredFacilities
+        : featuredFacilities.slice(0, 8);
 
     return (
         <div className="min-h-screen bg-[#faf8f1]" dir="rtl">
             <EdgeSwipeIndicator />
 
-            <header className="sticky top-0 z-20 border-b border-[#e5dcc7] bg-[#fffdf8]/90 backdrop-blur-xl">
-                <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+            <header className="border-b border-[#e5dcc7] bg-[#fffdf8]">
+                <div className="mx-auto flex max-w-7xl items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-4">
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="rounded-lg"
+                        className="h-10 w-10 flex-shrink-0 rounded-lg"
                         onClick={() => {
                             if (window.history.length > 1) router.back();
                             else router.push("/");
                         }}
+                        aria-label="العودة"
                     >
                         <ArrowRight className="h-5 w-5" />
                     </Button>
                     <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-[#8b7140]">عقار رقم {property.propertyNumber}</p>
-                        <h1 className="truncate text-base font-bold text-[#2f2a1f] sm:text-lg">
-                            {displayName || `عقار رقم ${property.propertyNumber}`}
-                        </h1>
+                        <p className="text-[11px] font-semibold text-[#8b7140]">تفاصيل العقار</p>
+                        <h1 className="truncate text-sm font-bold text-[#2f2a1f] sm:text-base">عقار رقم {property.propertyNumber}</h1>
                     </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={handleShare}
+                        className="h-10 w-10 flex-shrink-0 rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+                        title="مشاركة العقار"
+                        aria-label="مشاركة العقار"
+                    >
+                        <Share2 className="h-4 w-4" />
+                    </Button>
                     {premium && (
-                        <Badge className="gap-1 rounded-lg border-0 bg-[#b88d2b] px-3 py-1.5 text-white">
+                        <Badge className="flex-shrink-0 gap-1 rounded-lg border-0 bg-[#b88d2b] px-2 py-1.5 text-xs text-white sm:px-3">
                             <BadgeCheck className="h-3.5 w-3.5" />
                             مميز
                         </Badge>
@@ -639,68 +635,38 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 </div>
             </header>
 
-            <main className="mx-auto max-w-7xl px-4 py-6 md:py-10">
-                <section className="mb-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end">
-                    <div className="space-y-5">
-                        <div className="flex flex-wrap items-center gap-2">
-                            {premium && (
-                                <Badge className="gap-1 rounded-lg border border-[#d9c37b] bg-[#f4e8bd] text-[#5f4817]">
-                                    <BadgeCheck className="h-3.5 w-3.5" />
-                                    مميز
-                                </Badge>
-                            )}
-                            <Badge variant="outline" className="rounded-lg border-[#ded4bf] bg-white text-[#5f543f]">
-                                {property.type || "عقار"}
-                            </Badge>
-                            <Badge variant="outline" className="rounded-lg border-[#ded4bf] bg-white text-[#5f543f]">
-                                {property.city || "غير محدد"}
-                            </Badge>
-                        </div>
-                        <div>
-                            <p className="text-sm font-semibold text-[#8b7140]">عقار رقم {property.propertyNumber}</p>
-                            <h2 className="mt-2 max-w-4xl text-3xl font-bold leading-tight text-[#26221a] md:text-5xl">
-                                {displayName || `عقار رقم ${property.propertyNumber}`}
-                            </h2>
-                            <p className="mt-4 flex flex-wrap items-center gap-2 text-base text-[#6f6249]">
-                                <MapPin className="h-4 w-4 text-[#9a7623]" />
-                                <span>{property.city || "غير محدد"}</span>
-                                {property.direction && <span>، {property.direction}</span>}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#e2d6bd]">
-                        {summaryItems.map((item) => (
-                            <div key={item.label} className="bg-[#fffdf8] px-4 py-4">
-                                <p className="text-[11px] font-semibold text-[#8b7140]">{item.label}</p>
-                                <p className="mt-1 truncate text-sm font-bold text-[#2f2a1f]">{item.value}</p>
-                            </div>
-                        ))}
-                    </div>
+            <main className="mx-auto w-full max-w-7xl px-3 pb-10 pt-4 sm:px-4 sm:pt-6 md:pb-14 md:pt-8">
+                <section className="mb-4 min-w-0 sm:mb-6">
+                    <h2 className="break-words text-2xl font-bold leading-tight text-[#26221a] sm:text-3xl md:text-4xl">
+                        {propertyTitle}
+                    </h2>
                 </section>
 
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-                    <section className="space-y-6">
-                        <section className="overflow-hidden rounded-lg border border-[#e2d6bd] bg-white">
+                <div dir="ltr" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6">
+                    <section dir="rtl" className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
+                        <section className="min-w-0 overflow-hidden rounded-lg border border-[#e2d6bd] bg-white">
                             <div
                                 className="relative aspect-[4/3] bg-[#efe7d8] sm:aspect-[16/10]"
                                 onTouchStart={handleTouchStart}
                                 onTouchEnd={handleTouchEnd}
                             >
-                                {images.length > 1 && (
-                                    <link rel="preload" as="image" href={images[(selectedImage + 1) % images.length]} />
+                                {galleryImages.length > 1 && (
+                                    <link rel="preload" as="image" href={galleryImages[(selectedImage + 1) % galleryImages.length]} />
                                 )}
 
-                                {images.length > 0 ? (
+                                {galleryImages.length > 0 ? (
                                     <>
                                         {!imageLoaded && (
-                                            <div className="absolute inset-0 flex items-center justify-center bg-[#efe7d8] shimmer">
-                                                <Home className="h-14 w-14 text-[#b8aa8d]" />
+                                            <div className="absolute inset-0 z-[1] flex items-center justify-center bg-[#efe7d8]">
+                                                <div className="absolute inset-0 shimmer" />
+                                                <div className="relative flex h-12 w-12 items-center justify-center rounded-lg border border-white/80 bg-white/75 text-[#9a7623] shadow-sm">
+                                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                                </div>
                                             </div>
                                         )}
                                         <img
-                                            key={selectedImage}
-                                            src={images[selectedImage]}
+                                            key={currentImage}
+                                            src={currentImage}
                                             alt={`صورة ${selectedImage + 1}`}
                                             className={`h-full w-full object-cover transition duration-500 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
                                             loading="eager"
@@ -708,28 +674,31 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                             data-testid="img-main"
                                             draggable={false}
                                             onLoad={() => setImageLoaded(true)}
+                                            onError={() => {
+                                                setFailedImageUrls((current) => current.includes(currentImage) ? current : [...current, currentImage]);
+                                            }}
                                         />
 
-                                        {images.length > 1 && (
+                                        {galleryImages.length > 1 && (
                                             <>
                                                 <button
                                                     type="button"
                                                     aria-label="الصورة التالية"
-                                                    onClick={() => setSelectedImage((prev) => (prev + 1) % images.length)}
-                                                    className="absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg border border-[#efe7d8] bg-white/90 text-[#2f2a1f]"
+                                                    onClick={() => setSelectedImage((prev) => (prev + 1) % galleryImages.length)}
+                                                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-[#efe7d8] bg-white/90 text-[#2f2a1f] sm:right-3 sm:h-11 sm:w-11"
                                                 >
                                                     <ChevronRight className="h-5 w-5" />
                                                 </button>
                                                 <button
                                                     type="button"
                                                     aria-label="الصورة السابقة"
-                                                    onClick={() => setSelectedImage((prev) => (prev - 1 + images.length) % images.length)}
-                                                    className="absolute left-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg border border-[#efe7d8] bg-white/90 text-[#2f2a1f]"
+                                                    onClick={() => setSelectedImage((prev) => (prev - 1 + galleryImages.length) % galleryImages.length)}
+                                                    className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-[#efe7d8] bg-white/90 text-[#2f2a1f] sm:left-3 sm:h-11 sm:w-11"
                                                 >
                                                     <ChevronLeft className="h-5 w-5" />
                                                 </button>
                                                 <div className="absolute bottom-3 left-3 rounded-lg border border-[#efe7d8] bg-white/90 px-3 py-1.5 text-xs font-semibold tabular-nums text-[#2f2a1f]">
-                                                    {selectedImage + 1} / {images.length}
+                                                    {selectedImage + 1} / {galleryImages.length}
                                                 </div>
                                             </>
                                         )}
@@ -746,13 +715,13 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                 )}
                             </div>
 
-                            {images.length > 1 && (
+                            {galleryImages.length > 1 && (
                                 <div className="flex gap-2 overflow-x-auto border-t border-[#eee4cf] bg-[#fffdf8] p-3 custom-scrollbar">
-                                    {images.map((img, idx) => (
+                                    {galleryImages.map((img, idx) => (
                                         <button
                                             key={img}
                                             onClick={() => setSelectedImage(idx)}
-                                            className={`h-16 w-20 flex-shrink-0 overflow-hidden rounded-lg sm:h-20 sm:w-24 ${
+                                            className={`h-14 w-[4.5rem] flex-shrink-0 overflow-hidden rounded-lg sm:h-20 sm:w-24 ${
                                                 selectedImage === idx
                                                     ? "ring-2 ring-[#9a7623] ring-offset-2 ring-offset-[#fffdf8]"
                                                     : "opacity-55"
@@ -760,217 +729,87 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                             data-testid={`button-thumbnail-${idx}`}
                                             type="button"
                                         >
-                                            <img src={img} alt={`صورة ${idx + 1}`} className="h-full w-full object-cover" loading="lazy" decoding="async" draggable={false} />
+                                            <img
+                                                ref={(node) => {
+                                                    if (node?.complete && node.naturalWidth === 0) {
+                                                        setFailedImageUrls((current) => current.includes(img) ? current : [...current, img]);
+                                                    }
+                                                }}
+                                                src={img}
+                                                alt={`صورة ${idx + 1}`}
+                                                className="h-full w-full object-cover"
+                                                loading="lazy"
+                                                decoding="async"
+                                                draggable={false}
+                                                onError={() => {
+                                                    setFailedImageUrls((current) => current.includes(img) ? current : [...current, img]);
+                                                }}
+                                            />
                                         </button>
                                     ))}
                                 </div>
                             )}
                         </section>
 
-                        <section className="grid overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#e2d6bd] sm:grid-cols-2 lg:grid-cols-4">
-                            {facts.map((item) => {
+                        <section className="grid min-w-0 grid-cols-3 overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#e2d6bd]">
+                            {quickFacts.map((item) => {
                                 const Icon = item.icon;
                                 return (
-                                    <div key={item.label} className="bg-white p-5">
-                                        <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0]">
+                                    <div key={item.label} className="min-w-0 bg-white p-3 sm:p-4">
+                                        <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0] sm:mb-3 sm:h-9 sm:w-9">
                                             <Icon className="h-4 w-4 text-[#9a7623]" />
                                         </div>
-                                        <p className="text-xs font-semibold text-[#8b7140]">{item.label}</p>
-                                        <p className="mt-1 truncate font-bold text-[#2f2a1f]">{item.value}</p>
+                                        <p className="truncate text-[11px] font-semibold text-[#8b7140] sm:text-xs">{item.label}</p>
+                                        <p className="mt-1 truncate text-sm font-bold text-[#2f2a1f] sm:text-base" title={item.value}>{item.value}</p>
                                     </div>
                                 );
                             })}
                         </section>
-
-                        <section className="rounded-lg border border-[#e2d6bd] bg-white p-5 md:p-7">
-                            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold text-[#b88d2b]">التفاصيل</p>
-                                    <h2 className="mt-1 text-2xl font-bold text-[#2f2a1f]">معلومات العقار</h2>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={handleShare}
-                                        className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
-                                        title="مشاركة العقار"
-                                        aria-label="مشاركة العقار"
-                                    >
-                                        <Share2 className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={async () => {
-                                            try {
-                                                await navigator.clipboard.writeText(property.propertyNumber);
-                                                toast({ title: "تم نسخ رقم العقار" });
-                                            } catch {
-                                                toast({
-                                                    title: "تعذر نسخ رقم العقار",
-                                                    description: "يمكنك نسخه يدوياً من أعلى الصفحة",
-                                                    variant: "destructive",
-                                                });
-                                            }
-                                        }}
-                                        className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
-                                        title="نسخ رقم العقار"
-                                        aria-label="نسخ رقم العقار"
-                                    >
-                                        <Copy className="h-4 w-4" />
-                                    </Button>
-                                    {locationHref && (
-                                        <Link
-                                            href={locationHref}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c9a8] bg-white px-3 text-sm font-semibold text-[#6f5520]"
-                                        >
-                                            <MapPin className="h-4 w-4" />
-                                            فتح الموقع
-                                        </Link>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="grid overflow-hidden rounded-lg border border-[#e9dfca] bg-[#e9dfca] sm:grid-cols-2 lg:grid-cols-4">
-                                {[
-                                    ["رقم العقار", property.propertyNumber],
-                                    ["المدينة", property.city || "غير محدد"],
-                                    ["الاتجاه", property.direction || "غير محدد"],
-                                    ["النوع", property.type || "غير محدد"],
-                                ].map(([label, value]) => (
-                                    <div key={label} className="bg-[#fffdf8] p-4">
-                                        <p className="text-xs text-[#8b7140]">{label}</p>
-                                        <p className="mt-1 font-bold text-[#2f2a1f]">{value}</p>
-                                    </div>
-                                ))}
-                                {property.location && (
-                                    <div className="bg-[#fffdf8] p-4 sm:col-span-2 lg:col-span-4">
-                                        <p className="text-xs text-[#8b7140]">الموقع</p>
-                                        {locationHref ? (
-                                            <Link
-                                                href={locationHref}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="mt-1 inline-flex max-w-full truncate font-bold text-[#6f5520] underline-offset-4"
-                                            >
-                                                {property.location}
-                                            </Link>
-                                        ) : (
-                                            <p className="mt-1 font-bold text-[#2f2a1f]">{property.location}</p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {visibleFacilities.length > 0 && (
-                                <div className="mt-6 border-t border-[#eee4cf] pt-6">
-                                    <div className="mb-3 flex items-center gap-2">
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0]">
-                                            <Tags className="h-4 w-4 text-[#6f5520]" />
-                                        </div>
-                                        <h3 className="font-bold text-[#2f2a1f]">أبرز المرافق</h3>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {visibleFacilities.map((facility, idx) => (
-                                            <span
-                                                key={`featured-${facility}-${idx}`}
-                                                className="rounded-lg border border-[#eadfca] bg-[#fffdf8] px-3 py-1.5 text-sm font-semibold text-[#5e4a20]"
-                                            >
-                                                {facility}
-                                            </span>
-                                        ))}
-                                        {hiddenFacilitiesCount > 0 && (
-                                            <span className="rounded-lg border border-[#d8c9a8] px-3 py-1.5 text-sm font-bold text-[#6f5520]">
-                                                +{hiddenFacilitiesCount}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {property.facilities?.length > 0 && (
-                                <div className="mt-6 border-t border-[#eee4cf] pt-6">
-                                    <h3 className="mb-3 font-bold text-[#2f2a1f]">المرافق</h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {property.facilities.map((facility, idx) => (
-                                            <Badge
-                                                key={`${facility}-${idx}`}
-                                                variant="outline"
-                                                className="rounded-lg border-[#d8c9a8] bg-[#fffaf0] px-3 py-1.5 text-sm font-semibold text-[#5e4a20]"
-                                                data-testid={`badge-facility-${idx}`}
-                                            >
-                                                {facility}
-                                            </Badge>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </section>
-
-                        {premium && seoData?.seoDescription && (
-                            <section className="rounded-lg border border-[#e0c98b] bg-[#fffaf0] p-5 md:p-7">
-                                <div className="mb-3 flex items-center gap-2">
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#dec684] bg-[#f6eac0]">
-                                        <Sparkles className="h-4 w-4 text-[#6f5520]" />
-                                    </div>
-                                    <h3 className="text-lg font-bold text-[#2f2a1f]">وصف العقار</h3>
-                                </div>
-                                <p className="leading-8 text-[#5f543f]">{seoData.seoDescription}</p>
-                            </section>
-                        )}
                     </section>
 
-                    <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-                        <section className="rounded-lg border border-[#e5dcc7] bg-[#fffdf8] p-5">
-                            <div className="mb-5 flex items-start justify-between gap-4">
+                    <aside dir="rtl" className="min-w-0 space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:sticky lg:top-24 lg:self-start">
+                        <section className={`rounded-lg border p-4 sm:p-5 ${canContact ? "border-[#d8d1bf] bg-[#fffdf8]" : "border-[#d7dbd5] bg-[#f4f5f3]"}`}>
+                            <div className="mb-4 flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <Badge className="mb-3 rounded-lg border border-[#d8c9a8] bg-white text-[#6f5520]">
-                                        واتساب مباشر
-                                    </Badge>
-                                    <h3 className="text-2xl font-bold text-[#2f2a1f]">احجز أو استفسر الآن</h3>
+                                    <p className="text-xs font-semibold text-[#8b7140]">التواصل والحجز</p>
+                                    <h3 className="mt-1 text-xl font-bold text-[#2f2a1f]">{canContact ? "تواصل مع المعلن" : "متاح بعد تسجيل الدخول"}</h3>
                                     <p className="mt-2 text-sm leading-6 text-[#6f6249]">
-                                        عقار رقم {property.propertyNumber}
-                                        {displayName ? ` - ${displayName}` : ""}
+                                        {canContact
+                                            ? "سيتم تسجيل طلبك قبل فتح واتساب"
+                                            : "خدمة التواصل مخصصة للمستخدمين المسجلين"}
                                     </p>
                                 </div>
-                                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]">
-                                    <Phone className="h-5 w-5" />
+                                <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border ${canContact ? "border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]" : "border-[#d7dbd5] bg-[#eef0ed] text-[#697068]"}`}>
+                                    {canContact ? <Phone className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
                                 </div>
                             </div>
 
                             <div className="space-y-3">
-                                <div className="rounded-lg border border-[#e7d7b3] bg-white px-4 py-3">
-                                    <p className="text-xs font-semibold text-[#8b7140]">رقم التواصل عبر واتساب</p>
-                                    <p dir="ltr" className="mt-1 text-right text-lg font-bold tabular-nums text-[#2f2a1f]">
-                                        {formattedWhatsAppNumber}
-                                    </p>
-                                </div>
-
-                                {leadPrice && (
-                                    <div className="flex items-center justify-between rounded-lg border border-[#eadfca] bg-[#fbf7ee] px-4 py-3">
-                                        <div>
-                                            <p className="text-xs font-semibold text-[#8b7140]">السعر ابتداءً من</p>
-                                            <span className="text-sm font-bold text-[#2f2a1f]">{leadPrice.label}</span>
-                                        </div>
-                                        <PriceDisplay amount={leadPrice.amount || ""} size="md" />
-                                    </div>
-                                )}
-
                                 <Button
+                                    type="button"
                                     onClick={handleWhatsApp}
-                                    disabled={isSending}
-                                    className={`h-12 w-full rounded-lg text-base font-semibold text-white ${
-                                        isSending ? "bg-[#6f7a67]" : "bg-[#128c47]"
+                                    disabled={isSending || isContactSessionLoading || !canContact}
+                                    className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold sm:text-base ${
+                                        !canContact || isContactSessionLoading
+                                            ? "border border-[#c8cdc7] bg-[#dfe3de] text-[#596159] disabled:cursor-not-allowed disabled:opacity-100"
+                                            : isSending
+                                                ? "bg-[#6f7a67] text-white"
+                                                : "bg-[#128c47] text-white"
                                     } ${shake ? "animate-shake" : ""}`}
                                     size="lg"
                                     data-testid="button-whatsapp"
                                 >
-                                    {isSending ? (
+                                    {isContactSessionLoading ? (
+                                        <span className="flex items-center justify-center gap-2">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            جاري التحقق من تسجيل الدخول...
+                                        </span>
+                                    ) : !canContact ? (
+                                        <span className="flex items-center gap-2">
+                                            <Lock className="h-4 w-4" />
+                                            سجّل الدخول للتواصل عبر واتساب
+                                        </span>
+                                    ) : isSending ? (
                                         <span className="flex items-center gap-2">
                                             <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -988,11 +827,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                             </div>
                         </section>
 
-                        <section className="rounded-lg border border-[#e2d6bd] bg-white p-5">
-                            <div className="mb-4 flex items-center justify-between">
-                                <h3 className="text-lg font-bold text-[#2f2a1f]">الأسعار</h3>
-                                {premium && <Badge className="rounded-lg bg-[#f1dfaa] text-[#6f5520]">مميز</Badge>}
-                            </div>
+                        <section className="rounded-lg border border-[#e2d6bd] bg-white p-4 sm:p-5">
+                            <h3 className="mb-4 text-lg font-bold text-[#2f2a1f]">أسعار الحجز</h3>
                             <div className="divide-y divide-[#eee4cf]">
                                 {priceRows.length > 0 ? (
                                     priceRows.map((row) => (
@@ -1037,6 +873,82 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                             </section>
                         )}
                     </aside>
+
+                    <section dir="rtl" className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-2">
+                        {(property.location || featuredFacilities.length > 0) && (
+                            <section className="rounded-lg border border-[#e2d6bd] bg-white p-4 sm:p-5 md:p-7">
+                                {property.location && (
+                                    <div>
+                                        <div className="mb-2 flex items-center gap-2">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0]">
+                                                <MapPin className="h-4 w-4 text-[#6f5520]" />
+                                            </div>
+                                            <h3 className="font-bold text-[#2f2a1f]">الموقع</h3>
+                                        </div>
+                                        {locationHref ? (
+                                            <Link
+                                                href={locationHref}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex max-w-full items-center gap-2 break-words text-sm font-semibold leading-6 text-[#6f5520] underline-offset-4 hover:underline"
+                                            >
+                                                <span>{property.location}</span>
+                                            </Link>
+                                        ) : (
+                                            <p className="break-words text-sm leading-7 text-[#5f543f]">{property.location}</p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {featuredFacilities.length > 0 && (
+                                    <div className={property.location ? "mt-5 border-t border-[#eee4cf] pt-5" : ""}>
+                                        <div className="mb-3 flex items-center gap-2">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#eadfca] bg-[#fffaf0]">
+                                                <Tags className="h-4 w-4 text-[#6f5520]" />
+                                            </div>
+                                            <h3 className="font-bold text-[#2f2a1f]">أبرز المرافق</h3>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {visibleFacilities.map((facility, idx) => (
+                                                <Badge
+                                                    key={`featured-${facility}-${idx}`}
+                                                    variant="outline"
+                                                    className="max-w-full whitespace-normal rounded-lg border-[#d8c9a8] bg-[#fffaf0] px-3 py-1.5 text-right text-sm font-semibold leading-5 text-[#5e4a20]"
+                                                    data-testid={`badge-facility-${idx}`}
+                                                >
+                                                    {facility}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                        {featuredFacilities.length > 8 && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => setShowAllFacilities((current) => !current)}
+                                                className="mt-3 gap-1.5 rounded-lg px-2 text-[#6f5520]"
+                                            >
+                                                {showAllFacilities ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                {showAllFacilities ? "عرض أقل" : "عرض المزيد"}
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
+                            </section>
+                        )}
+
+                        {premium && seoData?.seoDescription && (
+                            <section className="rounded-lg border border-[#e0c98b] bg-[#fffaf0] p-4 sm:p-5 md:p-7">
+                                <div className="mb-3 flex items-center gap-2">
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#dec684] bg-[#f6eac0]">
+                                        <Sparkles className="h-4 w-4 text-[#6f5520]" />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-[#2f2a1f]">وصف العقار</h3>
+                                </div>
+                                <p className="break-words text-sm leading-7 text-[#5f543f] sm:text-base sm:leading-8">{seoData.seoDescription}</p>
+                            </section>
+                        )}
+                    </section>
                 </div>
             </main>
         </div>

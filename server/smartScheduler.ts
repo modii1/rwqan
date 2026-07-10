@@ -214,6 +214,7 @@ export async function dispatchExpiredSubscriptionReminders() {
     const expiredEntries: ExpiredSubscriptionEntry[] = [];
 
     for (const sub of subscriptions) {
+      if (sub.status === "موقوف مؤقتاً") continue;
       if (!sub.endDate || !sub.propertyNumber) continue;
       const endDate = new Date(sub.endDate);
       endDate.setHours(0, 0, 0, 0);

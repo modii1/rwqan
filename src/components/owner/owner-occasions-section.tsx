@@ -3,12 +3,13 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Calendar, Loader2, Star } from "lucide-react";
 import type { Occasion, OccasionProperty } from "@shared/schema";
+import { OwnerSectionHeading, ownerPanelClass } from "./owner-page";
 
 interface OwnerOccasionData {
   occasion: Occasion;
@@ -69,120 +70,88 @@ export default function OwnerOccasionsSection() {
   }
 
   return (
-    <Card className="p-4 md:p-6 border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50/50 to-yellow-50/50 dark:from-amber-950/30 dark:to-yellow-950/30">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
-          <Star className="w-4 h-4 text-amber-600" />
-        </div>
-        <div>
-          <h2 className="font-bold text-base md:text-lg text-amber-700 dark:text-amber-400">
-            عروض المناسبات
-          </h2>
-          <p className="text-xs text-muted-foreground">حدّث أسعارك وتوفرك لأيام المناسبة</p>
-        </div>
-      </div>
+    <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
+      <OwnerSectionHeading
+        title="عروض المناسبات"
+        description="حدّث التوفر والسعر لكل يوم"
+        icon={<Star className="h-4 w-4" />}
+      />
 
       {occasionsData.map(({ occasion, propertyData, isEnrolled }) => {
         if (!isEnrolled || !propertyData) {
           return (
-            <div key={occasion.id} className="text-center py-4 text-sm text-muted-foreground">
-              <Calendar className="w-8 h-8 mx-auto mb-2 opacity-40" />
-              <p>عقارك غير مسجل في {occasion.name}</p>
-              <p className="text-xs">تواصل مع الإدارة للانضمام</p>
+            <div key={occasion.id} className="rounded-lg bg-[#fffdf8] px-4 py-6 text-center text-sm text-[#74684f]">
+              <Calendar className="mx-auto mb-2 h-7 w-7 opacity-50" />
+              <p className="font-semibold text-[#2f2a1f]">عقارك غير مسجل في {occasion.name}</p>
+              <p className="mt-1 text-xs">تواصل مع الإدارة للانضمام</p>
             </div>
           );
         }
 
         return (
-          <div key={occasion.id} className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-sm">{occasion.name}</h3>
-              <Badge variant="outline" className="text-amber-600 border-amber-300 text-xs">
+          <div key={occasion.id} className="space-y-3 border-t border-[#eee4cf] pt-4 first:border-t-0 first:pt-0">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="truncate text-sm font-bold text-[#2f2a1f]">{occasion.name}</h3>
+              <Badge variant="outline" className="flex-none rounded-md border-[#d8c9a8] bg-[#fffdf8] text-xs text-[#6f5520]">
                 {occasion.days?.length || 0} أيام
               </Badge>
             </div>
 
-            {/* Availability Grid */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    {occasion.days?.map(day => (
-                      <th key={day.key} className="text-center py-2 px-2 font-medium text-xs whitespace-nowrap">
-                        {day.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Availability Row */}
-                  <tr className="border-b">
-                    {occasion.days?.map(day => (
-                      <td key={day.key} className="text-center py-3 px-2">
-                        <button
-                          onClick={() => {
-                            const newAvailability = {
-                              ...propertyData.availability,
-                              [day.key]: !propertyData.availability[day.key],
-                            };
-                            updateMutation.mutate({
-                              occasionId: occasion.id,
-                              data: { availability: newAvailability },
-                            });
-                          }}
-                          className={`w-8 h-8 rounded-full border-2 transition-all mx-auto ${
-                            propertyData.availability[day.key]
-                              ? "bg-green-500 border-green-600 shadow-sm shadow-green-200"
-                              : "bg-gray-200 border-gray-300"
-                          }`}
-                          title={propertyData.availability[day.key] ? "متوفر - اضغط لإلغاء" : "غير متوفر - اضغط للتفعيل"}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                  {/* Price Row */}
-                  <tr>
-                    {occasion.days?.map(day => (
-                      <td key={day.key} className="text-center py-2 px-1">
-                        <Input
-                          type="text"
-                          placeholder="السعر"
-                          defaultValue={propertyData.prices[day.key] || ""}
-                          onBlur={(e) => {
-                            const val = e.target.value;
-                            if (val !== (propertyData.prices[day.key] || "")) {
-                              const newPrices = {
+            <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
+              {occasion.days?.map(day => {
+                const isAvailable = Boolean(propertyData.availability[day.key]);
+                return (
+                  <div key={day.key} className="rounded-lg border border-[#e8dfce] bg-[#fffdf8] p-3">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[#2f2a1f]">{day.label}</span>
+                      <Switch
+                        checked={isAvailable}
+                        onCheckedChange={(checked) => {
+                          updateMutation.mutate({
+                            occasionId: occasion.id,
+                            data: {
+                              availability: {
+                                ...propertyData.availability,
+                                [day.key]: checked,
+                              },
+                            },
+                          });
+                        }}
+                        aria-label={`${day.label}: ${isAvailable ? "متوفر" : "غير متوفر"}`}
+                      />
+                    </div>
+                    <label className="mb-1.5 block text-[11px] font-medium text-[#74684f]" htmlFor={`occasion-${occasion.id}-${day.key}`}>
+                      السعر
+                    </label>
+                    <Input
+                      id={`occasion-${occasion.id}-${day.key}`}
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      defaultValue={propertyData.prices[day.key] || ""}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value !== (propertyData.prices[day.key] || "")) {
+                          updateMutation.mutate({
+                            occasionId: occasion.id,
+                            data: {
+                              prices: {
                                 ...propertyData.prices,
-                                [day.key]: val,
-                              };
-                              updateMutation.mutate({
-                                occasionId: occasion.id,
-                                data: { prices: newPrices },
-                              });
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                          }}
-                          className="w-16 md:w-20 text-center text-xs h-8 mx-auto"
-                          dir="ltr"
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                <span>متوفر</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-gray-300" />
-                <span>غير متوفر</span>
-              </div>
+                                [day.key]: value,
+                              },
+                            },
+                          });
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      className="h-9 text-center text-xs"
+                      dir="ltr"
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         );

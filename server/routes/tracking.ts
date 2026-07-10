@@ -11,6 +11,16 @@ const ipPropertyCounter = new Map<string, Map<string, number>>();
 
 router.post("/api/requests/smart", async (req, res) => {
   try {
+    const isAuthenticated = Boolean(
+      req.session?.propertyNumber || req.session?.isAdmin,
+    );
+    if (!isAuthenticated) {
+      return res.status(401).json({
+        code: "AUTH_REQUIRED",
+        error: "سجّل الدخول للتواصل عبر واتساب",
+      });
+    }
+
     const { propertyNumber } = req.body;
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
@@ -129,6 +139,7 @@ router.post("/api/requests/smart", async (req, res) => {
       message: "تم تسجيل طلبك بنجاح ✅",
       requestCode,
       requestTime: riyadhTimeDisplay,
+      whatsappNumber: property?.whatsappNumber || "",
     });
   } catch (err: any) {
     console.error("Smart request error:", err);

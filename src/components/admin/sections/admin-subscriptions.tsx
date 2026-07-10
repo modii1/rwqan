@@ -10,7 +10,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   Search, Calendar, Clock, CheckCircle2, XCircle, AlertTriangle,
   RefreshCw, Filter, ChevronDown, ChevronUp, MessageSquare, Send,
-  Bell, BellOff, Info, Link2, Pencil
+  Bell, BellOff, Info, Link2, Pencil, PauseCircle, PlayCircle
 } from "lucide-react";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,7 +60,9 @@ interface AdminSubscription {
   startDate: string;
   endDate: string;
   remainingDays: number | null;
-  status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني";
+  status: "ساري" | "منتهي" | "قريب الانتهاء" | "نشط مجاني" | "موقوف مؤقتاً";
+  suspendedAt?: string | null;
+  remainingDurationMs?: number | null;
   linkedProperty?: string | null;
   linkedProperties?: string[];
   propertyCount?: number;
@@ -95,6 +97,8 @@ export default function AdminSubscriptionsSection() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [lifecycleDialogOpen, setLifecycleDialogOpen] = useState(false);
+  const [lifecycleAction, setLifecycleAction] = useState<"suspend" | "resume">("suspend");
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedSubscription, setSelectedSubscription] = useState<AdminSubscription | null>(null);
   const [editForm, setEditForm] = useState({
@@ -171,6 +175,36 @@ export default function AdminSubscriptionsSection() {
       toast({
         title: "خطأ",
         description: error.message || "فشل في تحديث الأيام المتبقية",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const lifecycleMutation = useMutation({
+    mutationFn: async ({ subscriptionId, action }: { subscriptionId: string; action: "suspend" | "resume" }) => {
+      const response = await apiRequest(
+        "POST",
+        `/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}/${action}`,
+        {},
+      );
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/properties"] });
+      toast({
+        title: lifecycleAction === "suspend" ? "تم إيقاف الاشتراك مؤقتاً" : "تم استئناف الاشتراك",
+        description: data?.message || (lifecycleAction === "suspend"
+          ? "تم حفظ المدة المتبقية حتى استئناف الاشتراك."
+          : "تم احتساب تاريخ نهاية جديد من المدة المتبقية."),
+      });
+      setLifecycleDialogOpen(false);
+      setSelectedSubscription(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: lifecycleAction === "suspend" ? "تعذر إيقاف الاشتراك" : "تعذر استئناف الاشتراك",
+        description: error.message || "حدث خطأ أثناء تحديث حالة الاشتراك.",
         variant: "destructive",
       });
     },
@@ -274,6 +308,7 @@ export default function AdminSubscriptionsSection() {
       if (statusFilter === "all") return matchesSearch;
       if (statusFilter === "active") return matchesSearch && sub.status === "ساري";
       if (statusFilter === "activeFree") return matchesSearch && sub.status === "نشط مجاني";
+      if (statusFilter === "suspended") return matchesSearch && sub.status === "موقوف مؤقتاً";
       if (statusFilter === "expiring") return matchesSearch && sub.status === "قريب الانتهاء";
       if (statusFilter === "expired") return matchesSearch && sub.status === "منتهي";
       return matchesSearch;
@@ -288,6 +323,7 @@ export default function AdminSubscriptionsSection() {
     total: subscriptions.length,
     activePaid: subscriptions.filter(s => s.status === "ساري").length,
     activeFree: subscriptions.filter(s => s.status === "نشط مجاني").length,
+    suspended: subscriptions.filter(s => s.status === "موقوف مؤقتاً").length,
     expiring: subscriptions.filter(s => s.status === "قريب الانتهاء").length,
     expired: subscriptions.filter(s => s.status === "منتهي").length,
   };
@@ -356,6 +392,14 @@ export default function AdminSubscriptionsSection() {
         </Badge>
       );
     }
+    if (status === "موقوف مؤقتاً") {
+      return (
+        <Badge className="bg-slate-600 text-white flex items-center gap-1">
+          <PauseCircle className="w-3 h-3" />
+          موقوف مؤقتاً
+        </Badge>
+      );
+    }
     // ساري (مدفوع)
     return (
       <Badge className="bg-green-500 text-white flex items-center gap-1">
@@ -380,8 +424,8 @@ export default function AdminSubscriptionsSection() {
     <div className="space-y-6" dir="rtl">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#434040]">إدارة الاشتراكات</h1>
+        <div className="px-1 sm:px-0">
+          <h1 className="text-2xl font-bold tracking-normal text-[#434040]">إدارة الاشتراكات</h1>
           <p className="text-muted-foreground">عرض وإدارة جميع اشتراكات العقارات</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -412,7 +456,7 @@ export default function AdminSubscriptionsSection() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <Card className="p-3 text-center">
           <p className="text-2xl font-bold text-[#434040]">{stats.total}</p>
           <p className="text-xs text-muted-foreground">إجمالي</p>
@@ -424,6 +468,10 @@ export default function AdminSubscriptionsSection() {
         <Card className="p-3 text-center border-blue-200 bg-blue-50/50">
           <p className="text-2xl font-bold text-blue-600">{stats.activeFree}</p>
           <p className="text-xs text-muted-foreground">نشط مجاني</p>
+        </Card>
+        <Card className="p-3 text-center border-slate-200 bg-slate-50/50">
+          <p className="text-2xl font-bold text-slate-600">{stats.suspended}</p>
+          <p className="text-xs text-muted-foreground">موقوف مؤقتاً</p>
         </Card>
         <Card className="p-3 text-center border-orange-200 bg-orange-50/50">
           <p className="text-2xl font-bold text-orange-600">{stats.expiring}</p>
@@ -521,6 +569,7 @@ export default function AdminSubscriptionsSection() {
               <SelectItem value="all">جميع الحالات</SelectItem>
               <SelectItem value="active">ساري</SelectItem>
               <SelectItem value="activeFree">نشط مجاني</SelectItem>
+              <SelectItem value="suspended">موقوف مؤقتاً</SelectItem>
               <SelectItem value="expiring">ينتهي قريباً</SelectItem>
               <SelectItem value="expired">منتهي</SelectItem>
             </SelectContent>
@@ -546,7 +595,7 @@ export default function AdminSubscriptionsSection() {
         ) : (
           filteredSubscriptions.map((sub) => (
             <Card key={sub.id} className="p-4 hover:shadow-md transition-shadow">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 {/* Property Info */}
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
@@ -565,7 +614,7 @@ export default function AdminSubscriptionsSection() {
                       </Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                     {sub.status !== "نشط مجاني" && (
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
@@ -592,7 +641,8 @@ export default function AdminSubscriptionsSection() {
                   {(() => {
                     const days = typeof sub.remainingDays === "number" ? sub.remainingDays : null;
                     const hasDays = days !== null;
-                    const isExpired = hasDays && days < 0;
+                    const isSuspended = sub.status === "موقوف مؤقتاً";
+                    const isExpired = !isSuspended && hasDays && days < 0;
                     const isSoon = hasDays && days <= 7;
                     const value = sub.status === "نشط مجاني"
                       ? "مجاني"
@@ -606,6 +656,7 @@ export default function AdminSubscriptionsSection() {
                       <>
                         <p className={`text-2xl font-bold ${
                           sub.status === "نشط مجاني" ? 'text-blue-600' :
+                          isSuspended ? 'text-slate-600' :
                           !hasDays ? 'text-gray-500' :
                           isExpired ? 'text-red-600' :
                           isSoon ? 'text-orange-600' : 'text-green-600'
@@ -614,6 +665,7 @@ export default function AdminSubscriptionsSection() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {sub.status === "نشط مجاني" ? "بدون تاريخ انتهاء" :
+                           isSuspended ? "يوم محفوظ" :
                            !hasDays || isExpired ? "" :
                            days === 0 ? "اليوم الأخير" : "يوم متبقي"}
                         </p>
@@ -623,15 +675,47 @@ export default function AdminSubscriptionsSection() {
                 </div>
 
                 {/* Status & Actions */}
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   {getStatusBadge(sub.status, sub.remainingDays)}
+                  {sub.status === "موقوف مؤقتاً" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-green-700 border-green-200"
+                      onClick={() => {
+                        setSelectedSubscription(sub);
+                        setLifecycleAction("resume");
+                        setLifecycleDialogOpen(true);
+                      }}
+                      data-testid={`button-resume-subscription-${sub.propertyNumber}`}
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                      استئناف
+                    </Button>
+                  ) : sub.status !== "منتهي" && sub.status !== "نشط مجاني" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-slate-700 border-slate-300"
+                      onClick={() => {
+                        setSelectedSubscription(sub);
+                        setLifecycleAction("suspend");
+                        setLifecycleDialogOpen(true);
+                      }}
+                      data-testid={`button-suspend-subscription-${sub.propertyNumber}`}
+                    >
+                      <PauseCircle className="w-4 h-4" />
+                      إيقاف مؤقت
+                    </Button>
+                  ) : null}
                   <Button
                     variant="outline"
                     size="sm"
                     className="text-[#b88d2b] border-[#b88d2b]/30"
                     onClick={() => openEditDialog(sub)}
+                    disabled={sub.status === "موقوف مؤقتاً"}
                     data-testid={`button-edit-subscription-${sub.propertyNumber}`}
-                    title="تعديل الاشتراك"
+                    title={sub.status === "موقوف مؤقتاً" ? "استأنف الاشتراك قبل تعديل بياناته" : "تعديل الاشتراك"}
                   >
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -785,6 +869,79 @@ export default function AdminSubscriptionsSection() {
               data-testid="button-confirm-edit-subscription"
             >
               {editMutation.isPending ? "جاري الحفظ..." : "حفظ التعديل"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suspend / resume dialog */}
+      <Dialog open={lifecycleDialogOpen} onOpenChange={setLifecycleDialogOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {lifecycleAction === "suspend" ? (
+                <PauseCircle className="w-5 h-5 text-slate-600" />
+              ) : (
+                <PlayCircle className="w-5 h-5 text-green-700" />
+              )}
+              {lifecycleAction === "suspend" ? "إيقاف الاشتراك مؤقتاً" : "استئناف الاشتراك"}
+            </DialogTitle>
+            <DialogDescription className="text-right pt-2 leading-6">
+              {lifecycleAction === "suspend" ? (
+                <>
+                  سيتم إيقاف اشتراك العقار "{selectedSubscription?.name}" وحفظ المدة المتبقية كما هي.
+                  لن تُحتسب أيام التوقف ضمن مدة الاشتراك.
+                </>
+              ) : (
+                <>
+                  سيتم استئناف اشتراك العقار "{selectedSubscription?.name}" واحتساب تاريخ نهاية جديد
+                  من المدة المحفوظة.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">المدة المتبقية</span>
+              <span className="font-semibold">
+                {typeof selectedSubscription?.remainingDays === "number"
+                  ? `${Math.max(0, selectedSubscription.remainingDays)} يوم`
+                  : "غير محددة"}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLifecycleDialogOpen(false);
+                setSelectedSubscription(null);
+              }}
+            >
+              رجوع
+            </Button>
+            <Button
+              className={lifecycleAction === "suspend"
+                ? "bg-slate-700 hover:bg-slate-800"
+                : "bg-green-700 hover:bg-green-800"}
+              onClick={() => {
+                if (selectedSubscription) {
+                  lifecycleMutation.mutate({
+                    subscriptionId: selectedSubscription.id || selectedSubscription.propertyNumber,
+                    action: lifecycleAction,
+                  });
+                }
+              }}
+              disabled={lifecycleMutation.isPending}
+              data-testid={`button-confirm-${lifecycleAction}-subscription`}
+            >
+              {lifecycleMutation.isPending
+                ? "جاري التحديث..."
+                : lifecycleAction === "suspend"
+                  ? "تأكيد الإيقاف"
+                  : "تأكيد الاستئناف"}
             </Button>
           </DialogFooter>
         </DialogContent>

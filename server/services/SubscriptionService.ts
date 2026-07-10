@@ -12,7 +12,23 @@ import {
   formatDateRiyadh,
   getStartOfDayRiyadh,
 } from "../utils/dateUtils";
-import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import {
+  isPremiumSubscriptionType,
+  isSubscriptionStatusActive,
+} from "../../shared/subscriptionType";
+import {
+  SUSPENDED_SUBSCRIPTION_STATUS,
+  SubscriptionLifecycleError,
+  calculateFrozenRemainingDays,
+  calculateRemainingDurationMs,
+  calculateResumedEndDate,
+} from "./subscriptionLifecycle";
+
+export interface SubscriptionLifecycleResult {
+  subscription: Subscription;
+  updatedProperties: string[];
+  remainingDays: number;
+}
 
 export class SubscriptionService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -168,6 +184,159 @@ export class SubscriptionService {
 
   async cancel(propertyNumber: string, reason?: string): Promise<void> {
     await firebaseService.cancelSubscription(propertyNumber, reason);
+  }
+
+  // ─── Suspend / Resume ──────────────────────────────────────────────────────
+
+  async suspend(
+    identifier: string,
+    suspendedAt: Date = new Date(),
+  ): Promise<SubscriptionLifecycleResult> {
+    const { source, subscriptions } = await this.getLifecycleGroup(identifier);
+
+    if (source.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+      throw new SubscriptionLifecycleError(
+        "ALREADY_SUSPENDED",
+        "الاشتراك موقوف مؤقتاً بالفعل.",
+      );
+    }
+    if (!isSubscriptionStatusActive(source.status) || source.cancelledAt) {
+      throw new SubscriptionLifecycleError(
+        "NOT_ACTIVE",
+        "يمكن إيقاف الاشتراكات السارية فقط مؤقتاً.",
+      );
+    }
+
+    const remainingDurationMs = calculateRemainingDurationMs(
+      source.endDate,
+      suspendedAt,
+    );
+    const suspendedAtIso = suspendedAt.toISOString();
+    const subscriptionUpdates: Partial<Subscription> = {
+      status: SUSPENDED_SUBSCRIPTION_STATUS,
+      endDate: source.endDate,
+      suspendedAt: suspendedAtIso,
+      remainingDurationMs,
+      cancelledAt: null,
+      cancelReason: null,
+    };
+
+    await firebaseService.updateSubscriptionLifecycleGroup(
+      subscriptions.map((subscription) => ({
+        subscriptionId: subscription.id,
+        propertyNumber: subscription.propertyNumber,
+        subscriptionUpdates,
+        propertySubscriptionType: "عادي",
+      })),
+    );
+
+    return {
+      subscription: { ...source, ...subscriptionUpdates },
+      updatedProperties: subscriptions.map(({ propertyNumber }) => propertyNumber),
+      remainingDays: calculateFrozenRemainingDays(remainingDurationMs),
+    };
+  }
+
+  async resume(
+    identifier: string,
+    resumedAt: Date = new Date(),
+  ): Promise<SubscriptionLifecycleResult> {
+    const { source, subscriptions } = await this.getLifecycleGroup(identifier);
+
+    if (source.status !== SUSPENDED_SUBSCRIPTION_STATUS) {
+      throw new SubscriptionLifecycleError(
+        "NOT_SUSPENDED",
+        "الاشتراك غير موقوف مؤقتاً.",
+      );
+    }
+
+    const suspendedAtTime = source.suspendedAt
+      ? new Date(source.suspendedAt).getTime()
+      : Number.NaN;
+    if (!Number.isFinite(suspendedAtTime)) {
+      throw new SubscriptionLifecycleError(
+        "INVALID_SUSPENSION_STATE",
+        "تاريخ الإيقاف المؤقت غير صالح.",
+      );
+    }
+
+    const remainingDurationMs = Number(source.remainingDurationMs);
+    const endDate = calculateResumedEndDate(remainingDurationMs, resumedAt);
+    const subscriptionUpdates: Partial<Subscription> = {
+      status: "ساري",
+      endDate,
+      suspendedAt: null,
+      remainingDurationMs: null,
+      cancelledAt: null,
+      cancelReason: null,
+    };
+
+    await firebaseService.updateSubscriptionLifecycleGroup(
+      subscriptions.map((subscription) => ({
+        subscriptionId: subscription.id,
+        propertyNumber: subscription.propertyNumber,
+        subscriptionUpdates,
+        propertySubscriptionType: isPremiumSubscriptionType(
+          subscription.subscriptionType || subscription.packageType,
+        )
+          ? "مميز"
+          : "عادي",
+      })),
+    );
+
+    return {
+      subscription: { ...source, ...subscriptionUpdates },
+      updatedProperties: subscriptions.map(({ propertyNumber }) => propertyNumber),
+      remainingDays: calculateFrozenRemainingDays(remainingDurationMs),
+    };
+  }
+
+  private async getLifecycleGroup(identifier: string): Promise<{
+    source: Subscription;
+    subscriptions: Subscription[];
+  }> {
+    const subscriptions = await firebaseService.getSubscriptions();
+    const current = subscriptions.find((subscription) =>
+      subscription.id === identifier ||
+      subscription.propertyNumber === identifier ||
+      `SUB-${subscription.propertyNumber}` === identifier
+    );
+
+    if (!current) {
+      throw new SubscriptionLifecycleError(
+        "NOT_FOUND",
+        "لم يتم العثور على الاشتراك المطلوب.",
+      );
+    }
+
+    const requestedMainProperty = current.linkedProperty || current.propertyNumber;
+    const main = subscriptions.find(
+      ({ propertyNumber }) => propertyNumber === requestedMainProperty,
+    );
+    const source = main || current;
+    const mainPropertyNumber = source.propertyNumber;
+    const propertyNumbers = new Set<string>([
+      mainPropertyNumber,
+      current.propertyNumber,
+    ]);
+
+    for (const propertyNumber of source.linkedProperties || []) {
+      if (propertyNumber) propertyNumbers.add(String(propertyNumber));
+    }
+    for (const propertyNumber of current.linkedProperties || []) {
+      if (propertyNumber) propertyNumbers.add(String(propertyNumber));
+    }
+    for (const subscription of subscriptions) {
+      if (subscription.linkedProperty === mainPropertyNumber) {
+        propertyNumbers.add(subscription.propertyNumber);
+      }
+    }
+
+    const groupSubscriptions = subscriptions.filter(({ propertyNumber }) =>
+      propertyNumbers.has(propertyNumber)
+    );
+
+    return { source, subscriptions: groupSubscriptions };
   }
 
   // ─── Remaining Days ──────────────────────────────────────────────────────────

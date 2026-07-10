@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   Crown, CreditCard, Check, ChevronRight, Clock, Home,
   Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
-  Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2,
+  Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2, PauseCircle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -27,6 +27,12 @@ import {
   canExtendSubscription,
 } from "@/lib/subscription-utils";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+  OwnerMobileNavigation,
+  OwnerPageHeader,
+  OwnerPageMain,
+} from "@/components/owner/owner-page";
+import { runOwnerManualVerification } from "@/lib/owner-verification";
 
 function getPaymentTime(value: any): number {
   if (!value) return 0;
@@ -207,16 +213,23 @@ export default function OwnerSubscriptionPage() {
 
   // Owner self-service smart verification
   const [isRunningVerification, setIsRunningVerification] = useState(false);
+  const hasCompletedSmartVerification =
+    property?.verificationStatus === "approved" ||
+    property?.verificationStatus === "verified" ||
+    property?.smartVerificationPassed === true;
   const runVerification = async () => {
+    if (isRunningVerification || hasCompletedSmartVerification) return;
+
     setIsRunningVerification(true);
     try {
-      const res = await fetch("/api/owner/property/run-verification", { method: "POST" });
-      const data = await res.json();
+      const data = await runOwnerManualVerification();
       if (data.verified) {
-        toast({
-          title: data.subscriptionActivated ? "تم التحقق وتفعيل الاشتراك" : "تم التحقق من البيانات",
-          description: data.message,
-        });
+        if (data.notificationRequired !== false) {
+          toast({
+            title: data.subscriptionActivated ? "تم التحقق وتفعيل الاشتراك" : "تم التحقق من البيانات",
+            description: data.message,
+          });
+        }
         queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
         queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
         queryClient.invalidateQueries({ queryKey: ["/api/owner/payment/check-pending"] });
@@ -587,16 +600,22 @@ export default function OwnerSubscriptionPage() {
   };
 
   // Calculate remaining days using shared subscription-utils
-  const remainingDays = subscription?.endDate
-    ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
-    : 0;
+  const isSuspended = subscription?.status === "موقوف مؤقتاً";
+  const frozenRemainingDuration = Number(subscription?.remainingDurationMs);
+  const remainingDays = isSuspended && Number.isFinite(frozenRemainingDuration)
+    ? Math.max(0, Math.ceil(frozenRemainingDuration / (24 * 60 * 60 * 1000)))
+    : subscription?.endDate
+      ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
+      : 0;
   
   const displayDays = Math.max(0, remainingDays);
-  const isExpired = remainingDays < 0;
-  const isNearExpiry = remainingDays >= 0 && remainingDays <= 10;
-  const canExtend = subscription?.endDate
-    ? canExtendSubscription(subscription.endDate, subscription?.status)
-    : true; // expired = can extend
+  const isExpired = !isSuspended && remainingDays < 0;
+  const isNearExpiry = !isSuspended && remainingDays >= 0 && remainingDays <= 10;
+  const canExtend = !isSuspended && (
+    subscription?.endDate
+      ? canExtendSubscription(subscription.endDate, subscription?.status)
+      : true
+  );
 
   // Subscription duration & status
   const subscriptionDuration = subscription?.startDate && subscription?.endDate
@@ -607,8 +626,12 @@ export default function OwnerSubscriptionPage() {
   // AND property verification status
   let subStatus: string;
   
+  // A suspended subscription keeps its own lifecycle state regardless of property review.
+  if (isSuspended) {
+    subStatus = 'suspended';
+  }
   // First check: if property is rejected → show rejected
-  if (property?.verificationStatus === 'rejected') {
+  else if (property?.verificationStatus === 'rejected') {
     console.log("[DEBUG] Property is rejected, showing rejected status");
     subStatus = 'rejected';
   }
@@ -640,6 +663,7 @@ export default function OwnerSubscriptionPage() {
       active: { border: 'border-green-500', bg: 'bg-green-50', text: 'text-green-700' },
       expiring: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
       expired: { border: 'border-red-400', bg: 'bg-red-50', text: 'text-red-700' },
+      suspended: { border: 'border-slate-400', bg: 'bg-slate-50', text: 'text-slate-700' },
       cancelled: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
       pending: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
       inactive: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
@@ -685,6 +709,9 @@ export default function OwnerSubscriptionPage() {
     if (subStatus === 'expired') {
       return { label: 'منتهي', bgColor: 'bg-red-500', textColor: 'text-white' };
     }
+    if (subStatus === 'suspended') {
+      return { label: 'موقوف مؤقتاً', bgColor: 'bg-slate-600', textColor: 'text-white' };
+    }
     if (subStatus === 'expiring') {
       return { label: 'ينتهي قريباً', bgColor: 'bg-amber-500', textColor: 'text-white' };
     }
@@ -710,6 +737,8 @@ export default function OwnerSubscriptionPage() {
   const daysMetricValue = hasSubscriptionDateConflict ? "—" : displayedRemainingDays;
   const daysMetricLabel = hasSubscriptionDateConflict
     ? "غير قابل للحساب"
+    : isSuspended
+      ? "يوم محفوظ"
     : isExpired
       ? "منتهي"
       : displayedRemainingDays === 0
@@ -761,6 +790,15 @@ export default function OwnerSubscriptionPage() {
         description: "حالة الاشتراك وحالة العقار كما هي في النظام، لكن الأيام المتبقية لا يمكن حسابها لأن تاريخ البداية بعد تاريخ الانتهاء.",
         bannerClass: "border-red-200 bg-red-50 text-red-900",
         iconClass: "bg-red-600 text-white",
+      };
+    }
+    if (isSuspended) {
+      return {
+        tone: "neutral",
+        title: "الاشتراك موقوف مؤقتاً",
+        description: `تم حفظ ${displayedRemainingDays} يوم. لن تُحتسب مدة التوقف، ويستطيع المسؤول استئناف الاشتراك من لوحة الإدارة.`,
+        bannerClass: "border-slate-200 bg-slate-50 text-slate-900",
+        iconClass: "bg-slate-600 text-white",
       };
     }
     if (isExpired) {
@@ -1210,7 +1248,7 @@ export default function OwnerSubscriptionPage() {
   // Incomplete Data Dialog
 
   return (
-    <div className="min-h-screen bg-[#f8f4eb]">
+    <div className="min-h-screen bg-[#f5f6f3]">
       {/* Incomplete Data Dialog */}
       <Dialog open={showIncompleteDataDialog} onOpenChange={setShowIncompleteDataDialog}>
         <DialogContent className="max-w-md" dir="rtl">
@@ -1249,26 +1287,27 @@ export default function OwnerSubscriptionPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-[#ded3bc] bg-[#fffdf8]/95 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/owner/dashboard")} className="rounded-lg">
-            <ChevronRight className="w-5 h-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold text-[#2f2d2b]">إدارة الاشتراك</h1>
-            <p className="text-sm text-[#776f63]">إدارة الباقة والمدفوعات وحالة الظهور</p>
-          </div>
-        </div>
-      </header>
+      <OwnerPageHeader
+        title="إدارة الاشتراك"
+        description="الباقة والمدفوعات وحالة الظهور"
+        backHref="/owner/dashboard"
+        accessory={isSuspended ? (
+          <Badge className="gap-1 rounded-md bg-slate-600 text-white">
+            <PauseCircle className="h-3 w-3" />
+            موقوف
+          </Badge>
+        ) : undefined}
+      />
 
-      <div className="max-w-7xl mx-auto px-4 py-6 md:py-8 flex flex-col gap-6 [&>*]:order-3">
+      <OwnerPageMain className="flex flex-col gap-5 sm:gap-6 [&>*]:order-3">
         <Card className="overflow-hidden rounded-lg border border-[#ded3bc] bg-[#fffdf8]" style={{ order: 1 }}>
           <div className={`border-b p-5 md:p-6 ${subscriptionVisualState.bannerClass}`}>
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-start gap-4">
                 <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg ${subscriptionVisualState.iconClass}`}>
-                  {subscriptionVisualState.tone === "green" ? (
+                  {isSuspended ? (
+                    <PauseCircle className="h-5 w-5" />
+                  ) : subscriptionVisualState.tone === "green" ? (
                     <CheckCircle2 className="h-5 w-5" />
                   ) : subscriptionVisualState.tone === "amber" ? (
                     <Clock className="h-5 w-5" />
@@ -1410,7 +1449,12 @@ export default function OwnerSubscriptionPage() {
                 </div>
               </div>
 
-              {!hasSubscriptionDateConflict && !canExtend && !isExpired ? (
+              {isSuspended ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                  <PauseCircle className="ml-1 inline h-4 w-4" />
+                  المدة المتبقية محفوظة بالكامل، ولن تتغير حتى يستأنف المسؤول الاشتراك.
+                </div>
+              ) : !hasSubscriptionDateConflict && !canExtend && !isExpired ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
                   <div className="flex items-center gap-2">
                     <Info className="h-4 w-4 flex-shrink-0" />
@@ -1429,6 +1473,7 @@ export default function OwnerSubscriptionPage() {
                 </div>
               ) : null}
 
+              {!isSuspended && (
               <div className="flex flex-col gap-3 border-t border-[#e5dcc7] pt-5 sm:flex-row">
                 <Button
                   className="h-11 flex-1 rounded-lg bg-[#2f2d2b] text-white hover:bg-[#2f2d2b] gap-2"
@@ -1456,6 +1501,7 @@ export default function OwnerSubscriptionPage() {
                   </Button>
                 )}
               </div>
+              )}
             </section>
 
             <aside className="border-t border-[#ded3bc] bg-[#f4efe3] p-5 md:p-6 lg:border-r lg:border-t-0">
@@ -1675,7 +1721,7 @@ export default function OwnerSubscriptionPage() {
         )}
 
         {/* Owner Self-Service Verification (new property with successful payment awaiting admin) */}
-        {property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
+        {!hasCompletedSmartVerification && property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
           <Card className="p-4 border-blue-300 bg-blue-50">
             <div className="flex items-center gap-2 text-blue-700 mb-3">
               <CheckCircle2 className="w-5 h-5" />
@@ -1685,6 +1731,7 @@ export default function OwnerSubscriptionPage() {
               </div>
             </div>
             <Button
+              type="button"
               onClick={runVerification}
               disabled={isRunningVerification}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white"
@@ -2508,7 +2555,8 @@ export default function OwnerSubscriptionPage() {
         )}
 
 
-      </div>
+      </OwnerPageMain>
+      <OwnerMobileNavigation />
     </div>
   );
 }

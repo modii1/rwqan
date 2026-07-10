@@ -86,6 +86,7 @@ async function updateRemainingDaysInSheet() {
     const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
     
     for (const sub of subscriptions) {
+      if (sub.status === "موقوف مؤقتاً") continue;
       if (!sub.endDate || !sub.propertyNumber) continue;
       
       try {
@@ -351,8 +352,8 @@ export function startScheduler() {
   console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
 }
 
-// تحديث حالة الاشتراكات المنتهية دون تغيير نوع الباقة.
-// نوع الاشتراك (مميز/عادي) معلومة مستقلة عن حالة الاشتراك (ساري/منتهي).
+// تحديث الاشتراكات المنتهية وإزالة الصفة المميزة من العقار.
+// يحتفظ سجل الاشتراك بنوع الباقة التاريخي، بينما لا يبقى العقار مميزاً إلا باشتراك ساري.
 // Group-aware: when a main property's subscription expires/cancels, all linked properties
 // follow the same state (same endDate, same status) so parent + children never drift.
 async function downgradeExpiredSubscriptions(): Promise<number> {
@@ -365,6 +366,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
 
     for (const sub of subscriptions) {
       if (processed.has(sub.propertyNumber)) continue;
+      if (sub.status === "موقوف مؤقتاً") continue;
 
       const isPremiumType = isPremiumSubscriptionType(sub.subscriptionType);
       if (!isPremiumType) continue;
@@ -382,6 +384,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
 
       if (isCancelled || isDateExpired) {
         await firebaseService.updateSubscription(sub.id, { status: "منتهي" });
+        await firebaseService.updateProperty(sub.propertyNumber, { subscriptionType: "عادي" });
         console.log(`⬇️ [Scheduler] تم تحديث حالة اشتراك ${sub.propertyNumber} إلى منتهي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
         downgraded++;
         processed.add(sub.propertyNumber);
@@ -397,6 +400,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
               status: "منتهي",
               endDate: sub.endDate,
             });
+            await firebaseService.updateProperty(childNum, { subscriptionType: "عادي" });
             console.log(`⬇️ [Scheduler] تم تحديث حالة العقار المرتبط ${childNum} إلى منتهي تبعاً للعقار الرئيسي ${sub.propertyNumber}`);
             downgraded++;
           }

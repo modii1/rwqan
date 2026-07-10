@@ -28,12 +28,18 @@ import {
   queueVerifiedNewPropertyForAdminApproval,
   validateSubscriptionAction,
 } from "../utils/paymentScenarioFlow";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import {
+  getEffectiveSubscriptionType,
+  getSubscriptionTypeLabel,
+  isActivePremiumSubscription,
+  isPremiumSubscriptionType,
+} from "../../shared/subscriptionType";
 
 const router = Router();
 
 const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set(["نشط", "ساري", "نشط مجاني", "active"]);
 const OWNER_PAYMENT_ATTENTION_STATUSES = new Set(["قيد المراجعة", "معلق", "قيد التحقق", "نجح - قيد التحقق", "pending"]);
+const manualVerificationInFlight = new Set<string>();
 
 function isLinkedSubscriptionActive(status?: string | null): boolean {
   return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
@@ -77,7 +83,29 @@ router.get("/api/owner/property", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "Property not found" });
     }
 
-    res.json(property);
+    const subscription = await subscriptionService.getByProperty(propertyNumber);
+    const isSubscriptionExpired = !subscription || calculateRemainingDays(subscription.endDate) < 0;
+    const effectiveSubscriptionType = subscription
+      ? getEffectiveSubscriptionType({
+          subscriptionType: subscription.subscriptionType,
+          packageType: subscription.packageType,
+          price: (subscription as any).price,
+        })
+      : "عادي";
+    const isPremiumActive = isActivePremiumSubscription({
+      subscriptionType: effectiveSubscriptionType,
+      status: subscription?.status,
+      isExpired: isSubscriptionExpired,
+    });
+
+    res.json({
+      ...property,
+      subscriptionType: isPremiumActive ? "مميز" : "عادي",
+      subscriptionStatus: subscription?.status || "غير نشط",
+      subscriptionEndDate: subscription?.endDate || null,
+      isSubscriptionExpired,
+      isPremiumActive,
+    });
   } catch (err: any) {
     console.error("Get property error:", err?.message);
     res.status(500).json({ error: "Failed to load property" });
@@ -478,8 +506,20 @@ router.put("/api/owner/seo", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
-    // التحقق من اسم العقار في الوصف للعقارات العادية
-    const isPremium = isPremiumSubscriptionType(property.subscriptionType);
+    const subscription = await subscriptionService.getByProperty(propertyNumber);
+    const isSubscriptionExpired = !subscription || calculateRemainingDays(subscription.endDate) < 0;
+    const effectiveSubscriptionType = subscription
+      ? getEffectiveSubscriptionType({
+          subscriptionType: subscription.subscriptionType,
+          packageType: subscription.packageType,
+          price: (subscription as any).price,
+        })
+      : "عادي";
+    const isPremium = isActivePremiumSubscription({
+      subscriptionType: effectiveSubscriptionType,
+      status: subscription?.status,
+      isExpired: isSubscriptionExpired,
+    });
 
     if (!isPremium && seoDescription && property.name) {
       const propertyNameNormalized = property.name.toLowerCase().trim();
@@ -1513,6 +1553,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 // 🔍 POST /api/owner/property/run-verification - Owner self-service smart verification
 // ======================================================
 router.post("/api/owner/property/run-verification", requireOwner, async (req, res) => {
+  let lockedPropertyNumber: string | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
     if (!propertyNumber) {
@@ -1523,6 +1564,35 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
     if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
+
+    const isAlreadyApproved =
+      property.verificationStatus === "approved" ||
+      property.verificationStatus === "verified";
+    if (isAlreadyApproved || (property as any).smartVerificationPassed === true) {
+      return res.json({
+        success: true,
+        verified: true,
+        alreadyVerified: true,
+        notificationRequired: false,
+        pendingAdminApproval: !isAlreadyApproved,
+        subscriptionActivated: false,
+        message: isAlreadyApproved
+          ? "بيانات العقار معتمدة ولا تحتاج إلى فحص جديد"
+          : "تم فحص بيانات العقار مسبقاً والطلب بانتظار اعتماد الإدارة",
+      });
+    }
+
+    if (manualVerificationInFlight.has(propertyNumber)) {
+      return res.status(409).json({
+        success: false,
+        verified: false,
+        notificationRequired: false,
+        code: "VERIFICATION_IN_PROGRESS",
+        message: "التحقق الذكي قيد التنفيذ بالفعل.",
+      });
+    }
+    manualVerificationInFlight.add(propertyNumber);
+    lockedPropertyNumber = propertyNumber;
 
     const r2ImgCount = await countR2Images(propertyNumber);
     const verificationResult = await checkPropertyDataComplete(property, r2ImgCount);
@@ -1619,6 +1689,7 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
     return res.json({
       success: true,
       verified: true,
+      notificationRequired: true,
       completionScore: verificationResult.completionScore,
       subscriptionActivated,
       pendingAdminApproval,
@@ -1636,6 +1707,10 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
       success: false,
       error: `خطأ في التحقق: ${err.message || 'خطأ غير معروف'}`,
     });
+  } finally {
+    if (lockedPropertyNumber) {
+      manualVerificationInFlight.delete(lockedPropertyNumber);
+    }
   }
 });
 
@@ -2029,7 +2104,11 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
 
     // Get the owner's active subscription to auto-activate
     const ownerSubscription = await subscriptionService.getByProperty(ownerPropertyNumber);
-    if (!ownerSubscription || !isLinkedSubscriptionActive(ownerSubscription.status)) {
+    if (
+      !ownerSubscription ||
+      !isLinkedSubscriptionActive(ownerSubscription.status) ||
+      calculateRemainingDays(ownerSubscription.endDate) < 0
+    ) {
       // No active subscription - fall back to pending approval
       await firebaseService.updateProperty(additionalPropertyNumber, {
         pendingApprovalFrom: ownerPropertyNumber
@@ -2138,7 +2217,7 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
 
     // Update property fields
     await firebaseService.updateProperty(additionalPropertyNumber, {
-      subscriptionType: ownerProperty.subscriptionType || "مميز",
+      subscriptionType: getSubscriptionTypeLabel(ownerSubscription.subscriptionType || ownerSubscription.packageType),
       pendingApprovalFrom: "" as any
     });
 

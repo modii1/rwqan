@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Pencil, Plus, Trash2, UserX, Image, BellOff, Bell, Link, Home, Check, X, Clock, Star, Unlink, Eye, Search } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, Image, BellOff, Bell, Link, Home, Check, X, Clock, Unlink, Eye, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
@@ -58,7 +58,6 @@ const FIELD_LABELS: Record<string, string> = {
   location: "الموقع / الحي",
   whatsappNumber: "رقم الواتساب",
   facilities: "المرافق",
-  subscriptionType: "نوع الاشتراك",
   subscriptionDate: "تاريخ الاشتراك",
   priceWeekday: "سعر وسط الأسبوع",
   priceWeekend: "سعر نهاية الأسبوع",
@@ -282,7 +281,6 @@ export default function PropertiesSection() {
         direction: payload.direction,
         type: payload.type,
         facilities: facilitiesArr,
-        subscriptionType: payload.subscriptionType,
         subscriptionDate: payload.subscriptionDate || "",
         pin: payload.pin || "",
         priceWeekday: prices.weekday,
@@ -332,46 +330,6 @@ export default function PropertiesSection() {
     },
     onError: (error: Error) => {
       toast({ title: "خطأ في الحذف", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const upgradeToPremiumMutation = useMutation({
-    mutationFn: async (propertyNumber: string) => {
-      const res = await fetch(`/api/admin/properties/${propertyNumber}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscriptionType: "مميز" }),
-      });
-      if (!res.ok) throw new Error("فشل في ترقية الاشتراك");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
-      toast({ title: "تم الترقية ✓", description: "تم تحويل الاشتراك إلى مميز" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "خطأ", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const stopSubscriptionMutation = useMutation({
-    mutationFn: async (propertyNumber: string) => {
-      const res = await fetch(`/api/admin/properties/${propertyNumber}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscriptionType: "عادي" }),
-      });
-      if (!res.ok) throw new Error("فشل في إيقاف الاشتراك");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/subscriptions"] });
-      toast({ title: "تم إيقاف الاشتراك ✓", description: "تم تحويل الاشتراك إلى عادي" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "خطأ", description: error.message, variant: "destructive" });
     },
   });
 
@@ -705,32 +663,6 @@ export default function PropertiesSection() {
                         <Image className="w-4 h-4 text-blue-500" />
                       </Button>
 
-                      {isPremiumSubscriptionType(getSubscriptionTypeLabel(p.subscriptionType)) && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => stopSubscriptionMutation.mutate(p.propertyNumber)}
-                          title="إيقاف الاشتراك (تحويل إلى عادي)"
-                          disabled={stopSubscriptionMutation.isPending}
-                          data-testid={`button-stop-sub-${p.propertyNumber}`}
-                        >
-                          <UserX className="w-4 h-4 text-orange-500" />
-                        </Button>
-                      )}
-
-                      {!isPremiumSubscriptionType(getSubscriptionTypeLabel(p.subscriptionType)) && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => upgradeToPremiumMutation.mutate(p.propertyNumber)}
-                          title="ترقية إلى مميز"
-                          disabled={upgradeToPremiumMutation.isPending}
-                          data-testid={`button-upgrade-${p.propertyNumber}`}
-                        >
-                          <Star className="w-4 h-4 text-yellow-500" />
-                        </Button>
-                      )}
-
                       <Button
                         size="icon"
                         variant="ghost"
@@ -911,24 +843,6 @@ export default function PropertiesSection() {
                       placeholder="اسم الحي أو الموقع"
                       data-testid="input-location"
                     />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                      {FIELD_LABELS.subscriptionType}
-                    </label>
-                    <Select
-                      value={editing.subscriptionType || "عادي"}
-                      onValueChange={(v) => setEditing({ ...editing, subscriptionType: v })}
-                    >
-                      <SelectTrigger data-testid="select-subscription">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="عادي">عادي</SelectItem>
-                        <SelectItem value="مميز">مميز</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
 
                 </div>

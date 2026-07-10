@@ -36,10 +36,13 @@ import {
   Zap,
   Star,
   Info as InfoIcon,
+  LogOut,
+  PauseCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
 import { formatLiveSaudiTime } from "@/lib/dateUtils";
+import { runOwnerManualVerification } from "@/lib/owner-verification";
 import {
   calculateRemainingDays,
   calculateSubscriptionDuration,
@@ -58,8 +61,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+  OwnerMobileNavigation,
+  OwnerPageHeader,
+  OwnerPageMain,
+  ownerPanelClass,
+} from "./owner-page";
 
-const ownerPanelClass = "rounded-lg border border-[#e2d6bd] bg-white";
 const ownerSoftPanelClass = "rounded-lg border border-[#e5dcc7] bg-[#fffdf8]";
 const ownerTileClass = "rounded-lg border border-[#eee4cf] bg-[#fbf7ee]";
 
@@ -338,6 +346,13 @@ export default function OwnerDashboard() {
 
   // دالة التحقق التدريجي الذكي من بيانات العقار
   const startSmartVerification = async () => {
+    if (
+      isVerifying ||
+      property?.verificationStatus === "approved" ||
+      property?.verificationStatus === "verified" ||
+      (property as any)?.smartVerificationPassed === true
+    ) return;
+
     if (!FEATURE_SMART_VERIFICATION) {
       toast({
         title: "⏸️ التحقق الذكي متوقف مؤقتًا",
@@ -352,8 +367,14 @@ export default function OwnerDashboard() {
 
     setIsVerifying(true);
     setVerificationProgress(0);
+    setVerificationResult(null);
 
-    const steps = [...verificationSteps];
+    const steps: typeof verificationSteps = verificationSteps.map((step) => ({
+      ...step,
+      status: "pending" as const,
+      message: undefined,
+    }));
+    setVerificationSteps(steps);
     let hasErrors = false;
     const propData = property as any;
 
@@ -527,144 +548,62 @@ export default function OwnerDashboard() {
         .map((s) => `${s.name}: ${s.message}`);
 
       if (!hasErrors) {
-        // استدعاء API لتفعيل الاشتراك - سيعطي approved
-        const response = await apiRequest(
-          "POST",
-          "/api/owner/property/activate",
-          {
-            propertyNumber: property.propertyNumber,
-            status: "approved",
-          },
-        );
-        const result = await response.json();
+        const result = await runOwnerManualVerification();
 
-        if (result.success) {
-          // التحقق من الحالات المختلفة
-          if (result.alreadyApproved) {
-            // العقار معتمد مسبقاً - لا حاجة لتغيير الحالة
-            steps[6].status = "success";
-            steps[6].message = "العقار معتمد مسبقاً ✅";
-            setVerificationProgress(100);
-            setVerificationSteps([...steps]);
-
-            setVerificationResult({
-              success: true,
-              summary: result.message || "عقارك معتمد مسبقاً",
-              errors: [],
-            });
-
-            toast({
-              title: "✅ العقار معتمد",
-              description: result.message || "عقارك معتمد مسبقاً ولا يحتاج إعادة مراجعة",
-            });
-
-            setTimeout(async () => {
-              await queryClient.invalidateQueries({
-                queryKey: ["/api/owner/property"],
-              });
-              setIsVerifying(false);
-            }, 2000);
-          } else if (result.alreadyPending) {
-            // العقار قيد المراجعة مسبقاً
-            steps[6].status = "success";
-            steps[6].message = "العقار قيد المراجعة مسبقاً ⏳";
-            setVerificationProgress(100);
-            setVerificationSteps([...steps]);
-
-            setVerificationResult({
-              success: true,
-              summary: result.message || "عقارك قيد المراجعة من فريقنا",
-              errors: [],
-            });
-
-            toast({
-              title: "⏳ قيد المراجعة",
-              description: result.message || "عقارك قيد المراجعة من فريقنا",
-            });
-
-            setTimeout(async () => {
-              await queryClient.invalidateQueries({
-                queryKey: ["/api/owner/property"],
-              });
-              setIsVerifying(false);
-            }, 2000);
-          } else if (result.pendingAdminApproval) {
-            // عقار جديد مجاني - بانتظار موافقة الإدارة
-            steps[6].status = "success";
-            steps[6].message = "عقارك قيد المراجعة ⏳";
-            setVerificationProgress(100);
-            setVerificationSteps([...steps]);
-
-            setVerificationResult({
-              success: true,
-              summary: result.message || "عقارك قيد المراجعة",
-              errors: [],
-            });
-
-            toast({
-              title: "⏳ عقارك قيد المراجعة",
-              description:
-                result.message || "سيتم تفعيل اشتراكك بعد موافقة الإدارة",
-            });
-
-            setTimeout(async () => {
-              await queryClient.invalidateQueries({
-                queryKey: ["/api/owner/property"],
-              });
-              setIsVerifying(false);
-            }, 2000);
-          } else {
-            // تم التفعيل بنجاح
-            steps[6].status = "success";
-            steps[6].message = "تم تفعيل الاشتراك بنجاح! ✅";
-            setVerificationProgress(100);
-            setVerificationSteps([...steps]);
-
-            setVerificationResult({
-              success: true,
-              summary: "تم التحقق من جميع البيانات وتفعيل الاشتراك بنجاح",
-              errors: [],
-            });
-
-            toast({
-              title: "✅ تم الاعتماد بنجاح",
-              description: "تم اعتماد عقارك بعد نجاح فحص البيانات",
-            });
-
-            setTimeout(async () => {
-              await queryClient.invalidateQueries({
-                queryKey: ["/api/owner/property"],
-              });
-              setIsVerifying(false);
-            }, 2000);
-          }
-        } else {
-          steps[6].status = "error";
-          steps[6].message = result.message || "فشل الاعتماد";
+        if (result.success && result.verified) {
+          steps[6].status = "success";
+          steps[6].message = result.subscriptionActivated
+            ? "تم تفعيل الاشتراك بنجاح"
+            : result.pendingAdminApproval
+              ? "اكتمل الفحص - بانتظار اعتماد الإدارة"
+              : "اكتمل الفحص بنجاح";
           setVerificationProgress(100);
           setVerificationSteps([...steps]);
+          setVerificationResult({
+            success: true,
+            summary: result.message || steps[6].message,
+            errors: [],
+          });
 
+          if (result.notificationRequired !== false) {
+            toast({
+              title: result.subscriptionActivated ? "تم التحقق وتفعيل الاشتراك" : "اكتمل الفحص",
+              description: result.message || steps[6].message,
+            });
+          }
+
+          setTimeout(async () => {
+            await queryClient.invalidateQueries({
+              queryKey: ["/api/owner/property"],
+            });
+            await queryClient.invalidateQueries({
+              queryKey: ["/api/owner/current-subscription"],
+            });
+            setIsVerifying(false);
+          }, 1200);
+        } else {
+          const serverErrors = Array.isArray(result.missingFields)
+            ? result.missingFields.map((field: string) => String(field))
+            : [result.message || "تعذر إكمال الفحص"];
+          steps[6].status = "error";
+          steps[6].message = result.message || "تعذر إكمال الفحص";
+          setVerificationProgress(100);
+          setVerificationSteps([...steps]);
           setVerificationResult({
             success: false,
-            summary: result.message || "فشل اعتماد العقار",
-            errors: [result.message || "فشل الاعتماد"],
+            summary: result.message || "بيانات العقار غير مكتملة",
+            errors: serverErrors,
           });
-
-          setTimeout(() => setIsVerifying(false), 2000);
+          toast({
+            title: "البيانات غير مكتملة",
+            description: serverErrors.join("، "),
+            variant: "destructive",
+          });
+          setTimeout(() => setIsVerifying(false), 1200);
         }
       } else {
-        // استدعاء API لتحديث الحالة إلى rejected
-        try {
-          await apiRequest("POST", "/api/owner/property/activate", {
-            propertyNumber: property.propertyNumber,
-            status: "rejected",
-          });
-        } catch (e) {
-          console.log("فشل تحديث الحالة إلى rejected");
-        }
-
         steps[6].status = "error";
-        steps[6].message = "تم رفض العقار - يوجد بيانات ناقصة";
+        steps[6].message = "توجد بيانات ناقصة";
         setVerificationProgress(100);
         setVerificationSteps([...steps]);
 
@@ -675,7 +614,7 @@ export default function OwnerDashboard() {
         });
 
         toast({
-          title: "❌ تم رفض العقار",
+          title: "البيانات غير مكتملة",
           description: "يرجى إصلاح الأخطاء في بيانات العقار وإعادة الفحص",
           variant: "destructive",
         });
@@ -871,6 +810,13 @@ export default function OwnerDashboard() {
   // استخدام الأيام المتبقية من شيت الاشتراكات مباشرة (العمود H)
   // إذا لم تكن موجودة، نحسبها محلياً كـ fallback
   const calculateRemainingDaysLocal = () => {
+    if (currentSubscription?.status === "موقوف مؤقتاً") {
+      const frozenDuration = Number(currentSubscription.remainingDurationMs);
+      return Number.isFinite(frozenDuration)
+        ? Math.max(0, Math.ceil(frozenDuration / (24 * 60 * 60 * 1000)))
+        : null;
+    }
+
     if (!isPremiumSubscriptionType(property.subscriptionType)) {
       return null;
     }
@@ -917,10 +863,15 @@ export default function OwnerDashboard() {
   const isNearExpiry =
     remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
 
-  const isVip = isPremiumSubscriptionType(property.subscriptionType) && (remainingDays === null || remainingDays >= 0);
+  const isSubscriptionSuspended = currentSubscription?.status === "موقوف مؤقتاً";
+  const isVip = !isSubscriptionSuspended && isPremiumSubscriptionType(property.subscriptionType) && (remainingDays === null || remainingDays >= 0);
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
-  const subscriptionButtonLabel = isVip ? "إدارة الاشتراك" : "ترقية الاشتراك";
+  const subscriptionButtonLabel = isSubscriptionSuspended
+    ? "عرض الاشتراك"
+    : isVip
+      ? "إدارة الاشتراك"
+      : "ترقية الاشتراك";
 
   const handleComingSoon = () => {
     toast({
@@ -1071,25 +1022,35 @@ export default function OwnerDashboard() {
   const linkedPropertiesCount = additionalPropertyRequests?.approvedRequests?.length || 0;
   const imageCount = property.imageUrls?.length || 0;
   const subscriptionStateLabel =
-    remainingDays !== null && remainingDays < 0
+    isSubscriptionSuspended
+      ? "موقوف مؤقتاً"
+      : remainingDays !== null && remainingDays < 0
       ? "منتهي"
       : getSubscriptionTypeLabel(property.subscriptionType);
   const remainingDaysLabel =
-    remainingDays === null
+    isSubscriptionSuspended && remainingDays !== null
+      ? `${remainingDays} يوم محفوظ`
+      : remainingDays === null
       ? "غير محدد"
       : remainingDays < 0
         ? "منتهي"
         : remainingDays === 0
           ? "اليوم الأخير"
           : `${remainingDays} يوم`;
+  const hasCompletedSmartVerification =
+    property.verificationStatus === "approved" ||
+    property.verificationStatus === "verified" ||
+    (property as any).smartVerificationPassed === true;
   const verificationStateLabel =
     property.verificationStatus === "approved"
       ? "معتمد"
+      : hasCompletedSmartVerification
+        ? "تم الفحص"
       : property.verificationStatus === "rejected"
         ? "مرفوض"
         : "بانتظار التحقق";
   const verificationTone =
-    property.verificationStatus === "approved"
+    hasCompletedSmartVerification
       ? "border-[#b8dec3] bg-[#f6fff8] text-[#128c47]"
       : property.verificationStatus === "rejected"
         ? "border-[#f1c8c8] bg-[#fff5f5] text-red-700"
@@ -1103,7 +1064,7 @@ export default function OwnerDashboard() {
   const subscriptionProgressValue = remainingDays < 0 ? 100 : (progressPercent ?? 0);
 
   return (
-    <div className="min-h-screen bg-[#faf8f1] pb-20 text-[#2f2a1f]">
+    <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
       {/* ===== تنبيه أعلى الصفحة عند قرب انتهاء الاشتراك ===== */}
       {false && shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
         <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
@@ -1259,45 +1220,35 @@ export default function OwnerDashboard() {
         </div>
       )}
 
-      {/* ===== الهيدر / رأس الصفحة ===== */}
-      <header className="sticky top-0 z-10 border-b border-[#e5dcc7] bg-[#fffdf8]/95 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 md:py-4">
-          <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <div
-              className={
-                "w-10 md:w-12 h-10 md:h-12 rounded-lg border flex items-center justify-center flex-shrink-0 " +
-                (isVip
-                  ? "bg-[#f4e8bd] border-[#d9c37b] text-[#6f5520]"
-                  : "bg-white border-[#e2d6bd] text-[#6f5520]")
-              }
-            >
-              {isVip ? (
-                <Crown className="w-5 md:w-6 h-5 md:h-6 text-amber-500" />
-              ) : (
-                <Home className="w-5 md:w-6 h-5 md:h-6 text-primary" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg md:text-xl font-bold text-[#2f2a1f] truncate">
-                  لوحة التحكم
-                </h1>
-                {isVip && (
-                  <Badge className="flex items-center gap-1 rounded-lg border border-[#d9c37b] bg-[#f4e8bd] px-2 py-0.5 text-xs text-[#5f4817] md:px-3 md:py-1 md:text-sm flex-shrink-0">
-                    <Crown className="w-3 h-3" />
-                    <span className="hidden md:inline">مميز</span>
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs md:text-sm text-[#8b7140] truncate">
-                عقار #{property.propertyNumber}
-              </p>
-            </div>
-          </div>
-        </div>
-      </header>
+      <OwnerPageHeader
+        title="لوحة التحكم"
+        description={`عقار #${property.propertyNumber}`}
+        accessory={isVip ? (
+          <Badge className="gap-1 rounded-md border border-[#d9c37b] bg-[#f4e8bd] text-[#5f4817]">
+            <Crown className="h-3 w-3" />
+            مميز
+          </Badge>
+        ) : isSubscriptionSuspended ? (
+          <Badge className="gap-1 rounded-md bg-slate-600 text-white">
+            <PauseCircle className="h-3 w-3" />
+            موقوف
+          </Badge>
+        ) : undefined}
+        actions={(
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            title="تسجيل الخروج"
+            aria-label="تسجيل الخروج"
+            className="h-10 w-10 text-[#6f6249]"
+          >
+            <LogOut className="h-4 w-4" />
+          </Button>
+        )}
+      />
 
-      <div className="max-w-7xl mx-auto px-3 md:px-4 py-6 md:py-8 space-y-6 md:space-y-8">
+      <OwnerPageMain className="space-y-5 sm:space-y-6 lg:space-y-8">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
           <Card className={`${ownerPanelClass} overflow-hidden`}>
             <div className="border-b border-[#eee4cf] bg-[#fffdf8] p-5 md:p-6">
@@ -1399,6 +1350,17 @@ export default function OwnerDashboard() {
         </section>
 
         <section className="space-y-3">
+          {isSubscriptionSuspended && (
+            <WorkflowNotice
+              tone="blue"
+              icon={<PauseCircle className="h-5 w-5" />}
+              label="موقوف مؤقتاً"
+              title="مدة الاشتراك محفوظة"
+              description={`لن تُحتسب أيام التوقف. المتبقي المحفوظ: ${remainingDaysLabel}. يمكن للمسؤول استئناف الاشتراك من لوحة الإدارة.`}
+              actionLabel="عرض الاشتراك"
+              onAction={() => router.push("/owner/subscription")}
+            />
+          )}
           {hasPaymentUnderReview && (
             <WorkflowNotice
               tone="blue"
@@ -1407,11 +1369,7 @@ export default function OwnerDashboard() {
               title="المراجعة تعمل على إيصال التحويل"
               description="تم استلام الإيصال، وسيتم تحديث حالة الدفع والاشتراك بعد انتهاء التحقق."
               actionLabel="عرض سجل المدفوعات"
-              onAction={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
+              onAction={() => router.push("/owner/subscription")}
             />
           )}
           {hasPendingReceiptPayment && (
@@ -1422,11 +1380,7 @@ export default function OwnerDashboard() {
               title="يوجد دفع بانتظار رفع إيصال التحويل"
               description="ارفع إيصال التحويل الصحيح حتى يبدأ التحقق وتظهر حالة المراجعة بوضوح."
               actionLabel="رفع الإيصال"
-              onAction={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
+              onAction={() => router.push("/owner/subscription")}
             />
           )}
           {hasRejectedPayment && (
@@ -1437,25 +1391,10 @@ export default function OwnerDashboard() {
               title="تم رفض إيصال تحويل سابق"
               description="راجع السبب في سجل المدفوعات ثم ارفع إيصالاً صحيحاً أو أعد محاولة الدفع."
               actionLabel="معالجة الدفع"
-              onAction={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
+              onAction={() => router.push("/owner/subscription")}
             />
           )}
-          {property.verificationStatus !== "approved" && (
-            <WorkflowNotice
-              tone={property.verificationStatus === "rejected" ? "red" : "blue"}
-              icon={<Activity className="h-5 w-5" />}
-              label={verificationStateLabel}
-              title="تحقق بيانات العقار غير مكتمل"
-              description="شغل التحقق الذكي أو عدل البيانات الناقصة حتى يصبح العقار جاهزاً للاعتماد."
-              actionLabel="تشغيل التحقق"
-              onAction={startSmartVerification}
-            />
-          )}
-          {!hasPaymentUnderReview && !hasPendingReceiptPayment && !hasRejectedPayment && property.verificationStatus === "approved" && (
+          {!isSubscriptionSuspended && !hasPaymentUnderReview && !hasPendingReceiptPayment && !hasRejectedPayment && property.verificationStatus === "approved" && (
             <WorkflowNotice
               tone="green"
               icon={<CheckCircle2 className="h-5 w-5" />}
@@ -1570,8 +1509,8 @@ export default function OwnerDashboard() {
               value={verificationStateLabel}
               note={property.verificationStatus === "approved" ? "بيانات العقار جاهزة للعرض" : "راجع بيانات العقار أو شغل التحقق"}
               toneClass={verificationTone}
-              actionLabel={property.verificationStatus === "approved" ? "إعادة التحقق" : "تشغيل التحقق"}
-              onAction={startSmartVerification}
+              actionLabel={hasCompletedSmartVerification ? "تم الفحص" : "تشغيل التحقق"}
+              onAction={hasCompletedSmartVerification ? () => undefined : startSmartVerification}
             />
             <DashboardStatusTile
               icon={<Receipt className="h-5 w-5" />}
@@ -1701,7 +1640,7 @@ export default function OwnerDashboard() {
         </Card>
 
         {/* ===== قسم الإضافات (عرض دائماً) ===== */}
-        <Card className={`${ownerPanelClass} p-4 md:p-6`}>
+        <Card className={`hidden ${ownerPanelClass} p-4 md:p-6`}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-[#9a7623]" />
@@ -1980,16 +1919,16 @@ export default function OwnerDashboard() {
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
-          <Card className={`p-4 md:p-6 ${property.verificationStatus === "approved" ? "rounded-lg border border-[#cfe5d6] bg-[#f8fff9]" : "rounded-lg border border-[#d8e4ea] bg-[#f7fbfd]"}`}>
+          <Card className={`p-4 md:p-6 ${hasCompletedSmartVerification ? "rounded-lg border border-[#cfe5d6] bg-[#f8fff9]" : "rounded-lg border border-[#d8e4ea] bg-[#f7fbfd]"}`}>
             <div className="space-y-4">
               {/* العنوان والزر */}
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                    <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${property.verificationStatus === "approved" ? "text-[#128c47]" : "text-[#315f92]"}`}>
-                    {property.verificationStatus === "approved" ? (
+                    <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${hasCompletedSmartVerification ? "text-[#128c47]" : "text-[#315f92]"}`}>
+                    {hasCompletedSmartVerification ? (
                       <>
                         <CheckCircle2 className="w-6 h-6" />
-                        العقار معتمد ✓
+                        {property.verificationStatus === "approved" ? "العقار معتمد" : "اكتمل الفحص"}
                       </>
                     ) : (
                       <>
@@ -2000,7 +1939,9 @@ export default function OwnerDashboard() {
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
                     {property.verificationStatus === "approved" 
-                      ? "تم اعتماد بيانات عقارك - يمكنك إعادة التحقق بعد أي تعديل"
+                      ? "تم اعتماد بيانات عقارك"
+                      : hasCompletedSmartVerification
+                        ? "تم الفحص مرة واحدة والطلب بانتظار اعتماد الإدارة"
                       : "فحص ذكي لجميع بيانات عقارك - يحتاج موافقة الإدارة"
                     }
                   </p>
@@ -2011,10 +1952,11 @@ export default function OwnerDashboard() {
                     </p>
                   )}
                 </div>
-                {!isVerifying && (
+                {!isVerifying && !hasCompletedSmartVerification && (
                   <Button
+                    type="button"
                     onClick={startSmartVerification}
-                    className={`${property.verificationStatus === "approved" ? "bg-[#128c47]" : "bg-[#315f92]"} text-white flex-shrink-0`}
+                    className="bg-[#315f92] text-white flex-shrink-0"
                     data-testid="button-start-verification"
                   >
                     <Activity className="w-4 h-4 ml-2" />
@@ -2103,7 +2045,7 @@ export default function OwnerDashboard() {
                   )}
 
                   {/* نتيجة الفحص الواضحة للعميل */}
-                  {verificationResult && !isVerifying && (
+                  {verificationResult && !isVerifying && !verificationResult.success && (
                     <div
                       className={`mt-4 p-4 rounded-lg border-2 ${verificationResult.success
                         ? "bg-green-50 border-green-400 dark:bg-green-900/20"
@@ -2182,7 +2124,7 @@ export default function OwnerDashboard() {
         {/* ===== سجل المدفوعات ===== */}
         <Card
           id="payments-section"
-          className={`${ownerPanelClass} p-4 md:p-6 ${
+          className={`hidden ${ownerPanelClass} p-4 md:p-6 ${
             highlightPayments
               ? "ring-2 ring-[#b88d2b]/40 ring-offset-2"
               : ""
@@ -2352,9 +2294,9 @@ export default function OwnerDashboard() {
         </Card>
 
         {/* ===== معلومات العقار + أداء العقار ===== */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-4">
           {/* معلومات العقار */}
-          <Card className={`${ownerPanelClass} p-6`}>
+          <Card className={`hidden ${ownerPanelClass} p-6`}>
             <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
               معلومات العقار
             </h2>
@@ -2459,7 +2401,7 @@ export default function OwnerDashboard() {
           )}
 
           {/* ===== أداء العقار ===== */}
-          <Card className={`${ownerPanelClass} p-6`}>
+          <Card className={`hidden ${ownerPanelClass} p-6`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-[#2f2a1f]">أداء العقار</h2>
               <Badge variant="outline" className="flex items-center gap-1">
@@ -2505,7 +2447,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* ===== تحليلات وملخص ===== */}
-        <Card className={`${ownerPanelClass} p-6`}>
+        <Card className={`hidden ${ownerPanelClass} p-6`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#2f2a1f]">تحليلات وملخص</h2>
             <Badge variant="outline" className="text-xs">
@@ -2541,7 +2483,7 @@ export default function OwnerDashboard() {
         </Card>
 
         {/* ===== أزرار التحكم (أيقونات كبيرة) ===== */}
-        <Card className={`${ownerPanelClass} p-6`}>
+        <Card className={`hidden ${ownerPanelClass} p-6`}>
           <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
             إدارة العقار والإعدادات
           </h2>
@@ -2570,7 +2512,7 @@ export default function OwnerDashboard() {
 
         {/* ===== صور العقار ===== */}
         {property.imageUrls && property.imageUrls.length > 0 && (
-          <Card className={`${ownerPanelClass} p-6 mt-2`}>
+          <Card className={`hidden ${ownerPanelClass} p-6 mt-2`}>
             <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
               صور العقار ({property.imageUrls.length})
             </h2>
@@ -2735,7 +2677,8 @@ export default function OwnerDashboard() {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </OwnerPageMain>
+      <OwnerMobileNavigation />
     </div>
   );
 }

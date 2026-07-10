@@ -8,6 +8,7 @@
 
 export { propertyService } from "./PropertyService";
 export { subscriptionService } from "./SubscriptionService";
+export { SubscriptionLifecycleError } from "./subscriptionLifecycle";
 export { paymentService } from "./PaymentService";
 export { authService } from "./AuthService";
 export { notificationService } from "./NotificationService";
