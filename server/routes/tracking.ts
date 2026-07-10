@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { createHmac } from "node:crypto";
 import { analyticsService, propertyService, notificationService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { detectDeviceType } from "../utils/helpers";
+import type { InsertContactEvent } from "../../shared/schema";
 
 const router = Router();
 
@@ -9,28 +11,72 @@ const router = Router();
 const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
 const ipPropertyCounter = new Map<string, Map<string, number>>();
 
-router.post("/api/requests/smart", async (req, res) => {
+type ContactEventBase = Omit<InsertContactEvent, "outcome" | "requestCode">;
+
+function getClientIp(req: any): string {
+  return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+    || req.socket.remoteAddress
+    || "unknown";
+}
+
+function getContactActor(req: any): "owner" | "admin" | "anonymous" {
+  if (req.session?.propertyNumber) return "owner";
+  if (req.session?.isAdmin) return "admin";
+  return "anonymous";
+}
+
+function createVisitorKey(req: any, ipAddress: string): string {
+  const actor = getContactActor(req);
+  const source = actor === "owner"
+    ? `owner:${req.session.propertyNumber}`
+    : actor === "admin"
+      ? "admin"
+      : `anonymous:${ipAddress}`;
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret).update(source).digest("hex").slice(0, 24);
+}
+
+async function recordContactEvent(
+  base: ContactEventBase,
+  outcome: InsertContactEvent["outcome"],
+  requestCode?: string,
+): Promise<void> {
   try {
+    await analyticsService.recordContactEvent({ ...base, outcome, requestCode });
+  } catch (error) {
+    console.error("Contact analytics event error:", error);
+  }
+}
+
+router.post("/api/requests/smart", async (req, res) => {
+  let contactEventBase: ContactEventBase | null = null;
+  let acceptedEventRecorded = false;
+  try {
+    const propertyNumber = String(req.body?.propertyNumber || "").trim();
+    const ipAddress = getClientIp(req);
+    const userAgent = req.headers["user-agent"] || "";
+    const deviceType = detectDeviceType(userAgent);
+    contactEventBase = propertyNumber ? {
+      propertyNumber,
+      visitorKey: createVisitorKey(req, ipAddress),
+      actorType: getContactActor(req),
+      deviceType,
+    } : null;
+
     const isAuthenticated = Boolean(
       req.session?.propertyNumber || req.session?.isAdmin,
     );
     if (!isAuthenticated) {
+      if (contactEventBase) await recordContactEvent(contactEventBase, "auth_required");
       return res.status(401).json({
         code: "AUTH_REQUIRED",
         error: "سجّل الدخول للتواصل عبر واتساب",
       });
     }
 
-    const { propertyNumber } = req.body;
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
-
-    // احصل على IP العميل (يدعم proxies و localhost)
-    const ipAddress =
-      (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
-      req.socket.remoteAddress ||
-      "unknown";
 
     const now = Date.now();
     const thirtyMinutes = 30 * 60 * 1000;
@@ -53,6 +99,8 @@ router.post("/api/requests/smart", async (req, res) => {
       }
 
       console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
+
+      if (contactEventBase) await recordContactEvent(contactEventBase, "cooldown");
 
       return res.status(429).json({
         error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
@@ -95,10 +143,7 @@ router.post("/api/requests/smart", async (req, res) => {
     propertyMap.set(propertyNumber, newCount);
 
     // احفظ الطلب مع العدد من IP
-    const userAgent = req.headers["user-agent"] || "";
-    const deviceType = detectDeviceType(userAgent); // ← دالة موجودة أصلاً
-
-    const request = await analyticsService.recordRequest(
+    await analyticsService.recordRequest(
       {
         propertyNumber,
         requestCode,
@@ -110,6 +155,11 @@ router.post("/api/requests/smart", async (req, res) => {
       },
       newCount
     );
+
+    if (contactEventBase) {
+      await recordContactEvent(contactEventBase, "accepted", requestCode);
+      acceptedEventRecorded = true;
+    }
 
 
     // حدّث المتتبع
@@ -143,6 +193,9 @@ router.post("/api/requests/smart", async (req, res) => {
     });
   } catch (err: any) {
     console.error("Smart request error:", err);
+    if (contactEventBase && !acceptedEventRecorded) {
+      await recordContactEvent(contactEventBase, "error");
+    }
     res.status(500).json({ error: "خطأ في معالجة الطلب" });
   }
 });

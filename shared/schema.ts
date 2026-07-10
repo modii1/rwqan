@@ -175,6 +175,21 @@ export type Request = z.infer<typeof requestSchema>;
 export const insertRequestSchema = requestSchema.omit({ id: true, createdAt: true });
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
 
+export const contactEventSchema = z.object({
+  id: z.string(),
+  propertyNumber: z.string(),
+  timestamp: z.string(),
+  visitorKey: z.string(),
+  actorType: z.enum(["owner", "admin", "anonymous"]),
+  deviceType: z.enum(["mobile", "desktop", "tablet"]).default("desktop"),
+  outcome: z.enum(["accepted", "cooldown", "auth_required", "error"]),
+  requestCode: z.string().optional(),
+});
+
+export type ContactEvent = z.infer<typeof contactEventSchema>;
+export const insertContactEventSchema = contactEventSchema.omit({ id: true, timestamp: true });
+export type InsertContactEvent = z.infer<typeof insertContactEventSchema>;
+
 // =========================
 // Suggestion Schema (الاقتراحات)
 // =========================

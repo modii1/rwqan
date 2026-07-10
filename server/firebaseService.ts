@@ -14,6 +14,8 @@ import type {
     InsertSuggestion,
     Request,
     InsertRequest,
+    ContactEvent,
+    InsertContactEvent,
     Expense,
     InsertExpense,
     FeeConfig,
@@ -824,6 +826,23 @@ export class FirebaseService {
             }
         }
         throw new Error("الطلب غير موجود");
+    }
+
+    async createContactEvent(event: InsertContactEvent): Promise<ContactEvent> {
+        const id = `CONTACT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const newEvent: ContactEvent = {
+            id,
+            ...event,
+            timestamp: new Date().toISOString(),
+        };
+
+        await this.db.collection("contact_events").doc(id).set(newEvent);
+        return newEvent;
+    }
+
+    async getContactEvents(): Promise<ContactEvent[]> {
+        const snapshot = await this.db.collection("contact_events").orderBy("timestamp", "desc").get();
+        return snapshot.docs.map((doc) => doc.data() as ContactEvent);
     }
 
     // ================== أكواد الخصم ==================

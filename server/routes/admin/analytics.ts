@@ -4,6 +4,7 @@ import { analyticsService, propertyService, subscriptionService, paymentService,
 import { firebaseService } from "../../firebaseService";
 import { updateRemainingDaysInSheet } from "../../scheduler";
 import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
+import { buildContactAnalytics } from "../../services/contactAnalytics";
 
 const router = Router();
 
@@ -19,6 +20,32 @@ router.get("/api/admin/requests", requireAdmin, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: "فشل في جلب الطلبات" });
+  }
+});
+
+router.get("/api/admin/contact-analytics", requireAdmin, async (req, res) => {
+  try {
+    const requestedRange = String(req.query.days || "30");
+    const days = requestedRange === "all" ? null : Number(requestedRange);
+    if (days !== null && ![7, 30, 90, 365].includes(days)) {
+      return res.status(400).json({ error: "الفترة المطلوبة غير صالحة" });
+    }
+
+    const [contactEvents, requests, properties] = await Promise.all([
+      analyticsService.getContactEvents(),
+      analyticsService.getAllRequests(),
+      propertyService.getAll(),
+    ]);
+
+    return res.json(buildContactAnalytics({
+      contactEvents,
+      requests,
+      properties,
+      days,
+    }));
+  } catch (error) {
+    console.error("Contact analytics error:", error);
+    return res.status(500).json({ error: "فشل في جلب تحليلات التواصل" });
   }
 });
 

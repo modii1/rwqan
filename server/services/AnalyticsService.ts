@@ -4,7 +4,12 @@
  */
 
 import { firebaseService } from "../firebaseService";
-import type { Request as PropertyRequest, InsertRequest } from "../../shared/schema";
+import type {
+  ContactEvent,
+  InsertContactEvent,
+  Request as PropertyRequest,
+  InsertRequest,
+} from "../../shared/schema";
 
 export class AnalyticsService {
   // ─── Request Recording ──────────────────────────────────────────────────────
@@ -19,6 +24,14 @@ export class AnalyticsService {
 
   async deleteRequest(propertyNumber: string, requestId: string): Promise<void> {
     return firebaseService.deleteRequest(propertyNumber, requestId);
+  }
+
+  async recordContactEvent(data: InsertContactEvent): Promise<ContactEvent> {
+    return firebaseService.createContactEvent(data);
+  }
+
+  async getContactEvents(): Promise<ContactEvent[]> {
+    return firebaseService.getContactEvents();
   }
 
   // ─── Analytics Summary ──────────────────────────────────────────────────────

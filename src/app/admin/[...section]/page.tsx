@@ -8,11 +8,14 @@ export const metadata: Metadata = {
 
 const validSections: AdminSection[] = [
   "properties",
+  "linked-properties",
   "subscriptions",
+  "suspended-subscriptions",
   "packages",
   "discounts",
   "addons",
   "requests",
+  "contact-analytics",
   "payments",
   "analytics",
   "verification",

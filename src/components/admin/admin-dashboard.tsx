@@ -40,6 +40,8 @@ import {
   Flag,
   FileText,
   Link,
+  MousePointerClick,
+  PauseCircle,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -64,6 +66,8 @@ import FeatureFlagsSection from "./sections/feature-flags";
 import AdminBlogSection from "./sections/blog";
 import AdminLinkedPropertiesSection from "./sections/linked-properties";
 import AdminOccasionsSection from "./sections/occasions";
+import ContactAnalyticsSection from "./sections/contact-analytics";
+import SuspendedSubscriptionsSection from "./sections/suspended-subscriptions";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -72,10 +76,12 @@ export type AdminSection =
   | "properties"
   | "linked-properties"
   | "subscriptions"
+  | "suspended-subscriptions"
   | "packages"
   | "discounts"
   | "addons"
   | "requests"
+  | "contact-analytics"
   | "payments"
   | "analytics"
   | "verification"
@@ -209,6 +215,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         />
 
         <SidebarButton
+          icon={<PauseCircle className="w-4 h-4 text-slate-600" />}
+          label="الاشتراكات الموقوفة"
+          active={activeSection === "suspended-subscriptions"}
+          onClick={() => setActiveSection("suspended-subscriptions")}
+        />
+
+        <SidebarButton
           icon={<DollarSign className="w-4 h-4" />}
           label="المدفوعات"
           active={activeSection === "payments"}
@@ -241,6 +254,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           label="الطلبات"
           active={activeSection === "requests"}
           onClick={() => setActiveSection("requests")}
+        />
+
+        <SidebarButton
+          icon={<MousePointerClick className="w-4 h-4 text-green-700" />}
+          label="تحليلات التواصل"
+          active={activeSection === "contact-analytics"}
+          onClick={() => setActiveSection("contact-analytics")}
         />
 
         <SidebarButton
@@ -368,11 +388,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "properties" && <PropertiesSection />}
         {activeSection === "linked-properties" && <AdminLinkedPropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
+        {activeSection === "suspended-subscriptions" && <SuspendedSubscriptionsSection />}
         {activeSection === "payments" && <PaymentsSection />}
         {activeSection === "packages" && <PackagesSection />}
         {activeSection === "discounts" && <DiscountsSection />}
         {activeSection === "addons" && <AdminAddonsSection />}
         {activeSection === "requests" && <RequestsSection />}
+        {activeSection === "contact-analytics" && <ContactAnalyticsSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
         {activeSection === "code-backup" && <AdminCodeBackup />}
@@ -395,6 +417,8 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
   return (
     <button
       onClick={onClick}
+      title={label}
+      aria-label={label}
       className={`flex-shrink-0 flex items-center justify-center md:justify-start gap-2 px-2 md:px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm whitespace-nowrap md:whitespace-normal border transition ${active
         ? "bg-primary/10 text-primary border-primary/40"
         : "bg-transparent text-muted-foreground hover:bg-muted/50 border-transparent hover:text-foreground"
