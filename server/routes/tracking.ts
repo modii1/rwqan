@@ -63,17 +63,6 @@ router.post("/api/requests/smart", async (req, res) => {
       deviceType,
     } : null;
 
-    const isAuthenticated = Boolean(
-      req.session?.propertyNumber || req.session?.isAdmin,
-    );
-    if (!isAuthenticated) {
-      if (contactEventBase) await recordContactEvent(contactEventBase, "auth_required");
-      return res.status(401).json({
-        code: "AUTH_REQUIRED",
-        error: "سجّل الدخول للتواصل عبر واتساب",
-      });
-    }
-
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }

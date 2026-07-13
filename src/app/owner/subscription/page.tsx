@@ -26,7 +26,7 @@ import {
   formatDate as formatSubDate,
   canExtendSubscription,
 } from "@/lib/subscription-utils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType, isSubscriptionStatusActive } from "@shared/subscriptionType";
 import {
   OwnerMobileNavigation,
   OwnerPageHeader,
@@ -64,7 +64,7 @@ export default function OwnerSubscriptionPage() {
 
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const [action, setAction] = useState<"upgrade" | "extend">("upgrade");
+  const [action, setAction] = useState<"new" | "upgrade" | "extend">("upgrade");
   const [paymentMethod, setPaymentMethod] = useState<"online" | "bank" | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [discountCode, setDiscountCode] = useState("");
@@ -610,6 +610,9 @@ export default function OwnerSubscriptionPage() {
   
   const displayDays = Math.max(0, remainingDays);
   const isExpired = !isSuspended && remainingDays < 0;
+  const hasActiveCurrentSubscription =
+    !subscription?.isPlaceholder &&
+    isSubscriptionStatusActive(subscription?.status, isExpired);
   const isNearExpiry = !isSuspended && remainingDays >= 0 && remainingDays <= 10;
   const canExtend = !isSuspended && (
     subscription?.endDate
@@ -1478,12 +1481,12 @@ export default function OwnerSubscriptionPage() {
                 <Button
                   className="h-11 flex-1 rounded-lg bg-[#2f2d2b] text-white hover:bg-[#2f2d2b] gap-2"
                   onClick={() => {
-                    setAction("upgrade");
+                    setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
                     setShowUpgradeDialog(true);
                   }}
                 >
                   <Zap className="h-4 w-4" />
-                  تغيير الباقة
+                  {hasActiveCurrentSubscription ? "تغيير الباقة" : "اختيار باقة وتفعيل الاشتراك"}
                 </Button>
                 {canExtend && (
                   <Button
@@ -1651,12 +1654,12 @@ export default function OwnerSubscriptionPage() {
             <Button
               className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2 border-2 border-violet-600 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
               onClick={() => {
-                setAction("upgrade");
+                setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
                 setShowUpgradeDialog(true);
               }}
             >
               <Zap className="w-4 h-4" />
-              تغيير الباقة
+              {hasActiveCurrentSubscription ? "تغيير الباقة" : "اختيار باقة وتفعيل الاشتراك"}
             </Button>
             {canExtend && (
               <Button
@@ -1873,7 +1876,9 @@ export default function OwnerSubscriptionPage() {
         {showUpgradeDialog && currentStep === 1 && (
           <Card className="p-6" style={{ order: 2 }}>
           <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-[#434040]">اختر الباقة الجديدة</h2>
+              <h2 className="text-xl font-bold text-[#434040]">
+                {action === "new" ? "اختر باقة لتفعيل الاشتراك" : "اختر الباقة الجديدة"}
+              </h2>
               <Button variant="ghost" size="icon" onClick={() => setShowUpgradeDialog(false)}>
                 <X className="w-5 h-5" />
               </Button>
@@ -2030,7 +2035,7 @@ export default function OwnerSubscriptionPage() {
         {currentStep === 2 && selectedPackageId && (
           <Card className="p-8" style={{ order: 2 }}>
             <h2 className="text-xl font-bold text-[#434040] mb-6">
-              {action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"} — طريقة الدفع
+              {action === "new" ? "تفعيل الاشتراك" : action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"} — طريقة الدفع
             </h2>
             <form onSubmit={handleSubmit} className="space-y-6">
 

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, Home, Loader2, Lock, MapPin, Moon, Phone, Share2, Sparkles, Tags } from "lucide-react";
+import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, Home, Loader2, MapPin, Moon, Phone, Share2, Sparkles, Tags } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
@@ -13,7 +13,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
 import { isPublicPropertyPremium } from "@/lib/public-subscription";
-import { useSessionQuery } from "@/hooks/use-session";
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
 
 const DEFAULT_WHATSAPP = "966533220646";
@@ -119,13 +118,6 @@ interface PropertyDetailsClientProps {
 export default function PropertyDetailsClient({ propertyId, initialProperty, initialImages }: PropertyDetailsClientProps) {
     const router = useRouter();
     const { toast } = useToast();
-    const { data: ownerSession, isLoading: isOwnerSessionLoading } = useSessionQuery();
-    const { data: adminSession, isLoading: isAdminSessionLoading } = useQuery<{ isAdmin: boolean }>({
-        queryKey: ["/api/admin/session"],
-    });
-    const [isHydrated, setIsHydrated] = useState(false);
-    const canContact = isHydrated && Boolean(ownerSession?.isLoggedIn || adminSession?.isAdmin);
-    const isContactSessionLoading = !isHydrated || isOwnerSessionLoading || isAdminSessionLoading;
     const [isSending, setIsSending] = useState(false);
     const [shake, setShake] = useState(false);
 
@@ -134,10 +126,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const [imageLoaded, setImageLoaded] = useState(false);
     const [failedImageUrls, setFailedImageUrls] = useState<string[]>([]);
     const [showAllFacilities, setShowAllFacilities] = useState(false);
-
-    useEffect(() => {
-        setIsHydrated(true);
-    }, []);
 
     // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
     useEffect(() => {
@@ -470,8 +458,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     // الواتساب: رقم العقار المميّز أو رقم افتراضي
     const handleWhatsApp = async () => {
-        if (isContactSessionLoading || !canContact) return;
-
         // ⭐ عند الضغط المتكرر — اهتزاز فقط
         if (isSending) {
             setShake(true);
@@ -491,13 +477,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             const result = await response.json();
 
             if (!response.ok) {
-                if (result.code === "AUTH_REQUIRED") {
-                    toast({
-                        title: "يلزم تسجيل الدخول",
-                        description: result.error || "سجّل الدخول للتواصل عبر واتساب",
-                        variant: "destructive",
-                    });
-                }
                 if (result.remainingTimeFormatted) {
                     toast({
                         title: "⏱️ انتظر",
@@ -768,19 +747,15 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     </section>
 
                     <aside dir="rtl" className="min-w-0 space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:sticky lg:top-24 lg:self-start">
-                        <section className={`rounded-lg border p-4 sm:p-5 ${canContact ? "border-[#d8d1bf] bg-[#fffdf8]" : "border-[#d7dbd5] bg-[#f4f5f3]"}`}>
+                        <section className="rounded-lg border border-[#d8d1bf] bg-[#fffdf8] p-4 sm:p-5">
                             <div className="mb-4 flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                     <p className="text-xs font-semibold text-[#8b7140]">التواصل والحجز</p>
-                                    <h3 className="mt-1 text-xl font-bold text-[#2f2a1f]">{canContact ? "تواصل مع المعلن" : "متاح بعد تسجيل الدخول"}</h3>
-                                    <p className="mt-2 text-sm leading-6 text-[#6f6249]">
-                                        {canContact
-                                            ? "سيتم تسجيل طلبك قبل فتح واتساب"
-                                            : "خدمة التواصل مخصصة للمستخدمين المسجلين"}
-                                    </p>
+                                    <h3 className="mt-1 text-xl font-bold text-[#2f2a1f]">تواصل مع المعلن</h3>
+                                    <p className="mt-2 text-sm leading-6 text-[#6f6249]">سيتم تسجيل طلبك قبل فتح واتساب</p>
                                 </div>
-                                <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border ${canContact ? "border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]" : "border-[#d7dbd5] bg-[#eef0ed] text-[#697068]"}`}>
-                                    {canContact ? <Phone className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+                                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]">
+                                    <Phone className="h-5 w-5" />
                                 </div>
                             </div>
 
@@ -788,28 +763,14 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                 <Button
                                     type="button"
                                     onClick={handleWhatsApp}
-                                    disabled={isSending || isContactSessionLoading || !canContact}
-                                    className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold sm:text-base ${
-                                        !canContact || isContactSessionLoading
-                                            ? "border border-[#c8cdc7] bg-[#dfe3de] text-[#596159] disabled:cursor-not-allowed disabled:opacity-100"
-                                            : isSending
-                                                ? "bg-[#6f7a67] text-white"
-                                                : "bg-[#128c47] text-white"
+                                    disabled={isSending}
+                                    className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold text-white sm:text-base ${
+                                        isSending ? "bg-[#6f7a67]" : "bg-[#128c47]"
                                     } ${shake ? "animate-shake" : ""}`}
                                     size="lg"
                                     data-testid="button-whatsapp"
                                 >
-                                    {isContactSessionLoading ? (
-                                        <span className="flex items-center justify-center gap-2">
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                            جاري التحقق من تسجيل الدخول...
-                                        </span>
-                                    ) : !canContact ? (
-                                        <span className="flex items-center gap-2">
-                                            <Lock className="h-4 w-4" />
-                                            سجّل الدخول للتواصل عبر واتساب
-                                        </span>
-                                    ) : isSending ? (
+                                    {isSending ? (
                                         <span className="flex items-center gap-2">
                                             <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
