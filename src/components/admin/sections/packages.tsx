@@ -21,6 +21,7 @@ type AdminPackage = {
   price: number;
   pricePerProperty?: number;
   durationDays: number;
+  isActive: boolean;
   description?: string;
   propertyCount?: number;
   maxProperties?: number;
@@ -43,6 +44,15 @@ const ADDON_CATEGORIES = [
   { value: "تثبيت", label: "تثبيت", icon: Pin, color: "bg-blue-500" },
   { value: "توثيق", label: "توثيق", icon: ShieldCheck, color: "bg-emerald-500" },
 ];
+
+async function getApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    return typeof body?.error === "string" ? body.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export default function PackagesSection() {
   const queryClient = useQueryClient();
@@ -86,14 +96,14 @@ export default function PackagesSection() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error("فشل في إنشاء الباقة");
+        if (!res.ok) throw new Error(await getApiError(res, "فشل في إنشاء الباقة"));
       } else {
         const res = await fetch(`/api/admin/packages/${payload.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error("فشل في تحديث الباقة");
+        if (!res.ok) throw new Error(await getApiError(res, "فشل في تحديث الباقة"));
       }
     },
     onSuccess: () => {
@@ -144,6 +154,7 @@ export default function PackagesSection() {
       name: "",
       price: 0,
       durationDays: 30,
+      isActive: true,
       description: "",
     });
   };
@@ -211,6 +222,7 @@ export default function PackagesSection() {
                     <Th>السعر (ريال)</Th>
                     <Th>سعر للعقار</Th>
                     <Th>مدة الاشتراك (يوم)</Th>
+                    <Th>الحالة</Th>
                     <Th>الحد الأقصى</Th>
                     <Th>الوصف</Th>
                     <Th>تحكم</Th>
@@ -223,6 +235,11 @@ export default function PackagesSection() {
                       <Td>{pkg.price}</Td>
                       <Td>{pkg.pricePerProperty || "-"}</Td>
                       <Td>{pkg.durationDays}</Td>
+                      <Td>
+                        <Badge variant={pkg.isActive ? "default" : "secondary"}>
+                          {pkg.isActive ? "مفعّلة" : "معطّلة"}
+                        </Badge>
+                      </Td>
                       <Td>{pkg.maxProperties || "-"}</Td>
                       <Td className="max-w-xs truncate">{pkg.description || "-"}</Td>
                       <Td>
@@ -243,7 +260,7 @@ export default function PackagesSection() {
 
                   {(regularPackages || []).length === 0 && (
                     <tr>
-                      <Td colSpan={5}>
+                      <Td colSpan={8}>
                         <div className="p-4 text-center text-xs text-muted-foreground">
                           لا توجد باقات مسجلة حالياً.
                         </div>
@@ -399,10 +416,15 @@ export default function PackagesSection() {
                 </label>
                 <Input
                   type="number"
+                  min={1}
+                  max={editingPackage.isActive ? 40 : undefined}
                   value={editingPackage.durationDays}
                   onChange={(e) => setEditingPackage({ ...editingPackage, durationDays: Number(e.target.value || 0) })}
                   data-testid="input-package-duration"
                 />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  الحد الأقصى للباقة النشطة 40 يوماً. يمكن حفظ مدة أطول فقط عندما تكون الباقة معطّلة.
+                </p>
               </div>
 
               <div>
@@ -413,6 +435,23 @@ export default function PackagesSection() {
                   value={editingPackage.description || ""}
                   onChange={(e) => setEditingPackage({ ...editingPackage, description: e.target.value })}
                   data-testid="input-package-description"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div>
+                  <Label htmlFor="package-active" className="text-sm font-medium">
+                    حالة التفعيل
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {editingPackage.isActive ? "الباقة متاحة للشراء" : "الباقة غير متاحة للشراء"}
+                  </p>
+                </div>
+                <Switch
+                  id="package-active"
+                  checked={editingPackage.isActive}
+                  onCheckedChange={(checked) => setEditingPackage({ ...editingPackage, isActive: checked })}
+                  data-testid="switch-package-active"
                 />
               </div>
             </div>

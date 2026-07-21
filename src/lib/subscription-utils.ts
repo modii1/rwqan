@@ -58,6 +58,21 @@ export function resetToMidnight(date: Date): Date {
   return result;
 }
 
+function getRiyadhCalendarDay(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+  ) / (24 * 60 * 60 * 1000);
+}
+
 /**
  * حساب الأيام المتبقية من تاريخ الانتهاء
  * القاعدة: الاشتراك يبقى فعال طوال يوم الانتهاء (حتى 23:59:59)
@@ -70,18 +85,17 @@ export function calculateRemainingDays(endDate: any, startDate?: any): number {
   const end = parseDate(endDate);
   if (!end) return -1;
   
-  const today = resetToMidnight(new Date());
-  const endMidnight = resetToMidnight(end);
+  const todayDay = getRiyadhCalendarDay(new Date());
+  const endDay = getRiyadhCalendarDay(end);
   
   // إذا كان تاريخ البداية موجوداً وفي المستقبل
   if (startDate) {
     const start = parseDate(startDate);
     if (start) {
-      const startMidnight = resetToMidnight(start);
+      const startDay = getRiyadhCalendarDay(start);
       // إذا تاريخ البداية في المستقبل ← أرجع المدة الكاملة للاشتراك
-      if (startMidnight.getTime() > today.getTime()) {
-        const fullDuration = endMidnight.getTime() - startMidnight.getTime();
-        return Math.floor(fullDuration / (1000 * 60 * 60 * 24));
+      if (startDay > todayDay) {
+        return Math.floor(endDay - startDay);
       }
     }
   }
@@ -89,10 +103,7 @@ export function calculateRemainingDays(endDate: any, startDate?: any): number {
   // الحساب العادي: من اليوم لتاريخ الانتهاء (نفس منطق لوحة الأدمن)
   // 0 = اليوم الأخير (الاشتراك ينتهي في نهاية هذا اليوم)
   // سالب = منتهي
-  const diffTime = endMidnight.getTime() - today.getTime();
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-  
-  return diffDays;
+  return Math.floor(endDay - todayDay);
 }
 
 /**
@@ -266,6 +277,8 @@ export function getStatusInfo(status: SubscriptionStatus): StatusInfo {
  * هل يمكن التمديد؟
  * القاعدة: فقط إذا الأيام المتبقية ≤ 10
  */
+export const RENEWAL_WINDOW_DAYS = 10;
+
 export function canExtendSubscription(endDate: any, status?: SubscriptionStatus): boolean {
   const rawStatus = String(status || "").trim().toLowerCase();
   if (['منتهي', 'expired', 'موقوف مؤقتاً', 'suspended', 'موقوف', 'cancelled', 'قيد المراجعة', 'معلق', 'pending'].includes(rawStatus)) {
@@ -276,7 +289,7 @@ export function canExtendSubscription(endDate: any, status?: SubscriptionStatus)
   if (effectiveStatus !== 'active' && effectiveStatus !== 'expiring') return false;
   
   const remainingDays = calculateRemainingDays(endDate);
-  return remainingDays >= 0 && remainingDays <= 10;
+  return remainingDays >= 0 && remainingDays <= RENEWAL_WINDOW_DAYS;
 }
 
 /**

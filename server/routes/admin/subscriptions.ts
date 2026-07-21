@@ -13,7 +13,13 @@ import {
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
 } from "../../../shared/subscriptionType";
-import { calculateRemainingDays as calculateServerRemainingDays } from "../../utils/dateUtils";
+import {
+  MAX_SUBSCRIPTION_DAYS,
+  calculateRemainingDays as calculateServerRemainingDays,
+  calculateSubscriptionEndDate,
+  getMaxSubscriptionEndDate,
+  isSubscriptionEndDateWithinMaxDays,
+} from "../../utils/dateUtils";
 import {
   SUSPENDED_SUBSCRIPTION_STATUS,
   calculateFrozenRemainingDays,
@@ -46,6 +52,33 @@ function isValidDateInput(value: unknown): boolean {
   return !Number.isNaN(date.getTime());
 }
 
+function getSubscriptionDateValidationError(
+  startDate: unknown,
+  endDate: unknown,
+  referenceDate: Date = new Date(),
+): string | null {
+  const normalizedEndDate = String(endDate || "").trim();
+  if (!normalizedEndDate) return null;
+
+  if (!isSubscriptionEndDateWithinMaxDays(normalizedEndDate, referenceDate)) {
+    const maxEndDate = getMaxSubscriptionEndDate(referenceDate).toLocaleDateString("en-CA", {
+      timeZone: "Asia/Riyadh",
+    });
+    return `تاريخ انتهاء الاشتراك لا يمكن أن يتجاوز ${MAX_SUBSCRIPTION_DAYS} يوماً من اليوم (الحد الأقصى ${maxEndDate}).`;
+  }
+
+  const normalizedStartDate = String(startDate || "").trim();
+  if (normalizedStartDate) {
+    const parsedStartDate = new Date(normalizedStartDate);
+    const parsedEndDate = new Date(normalizedEndDate);
+    if (parsedEndDate.getTime() < parsedStartDate.getTime()) {
+      return "تاريخ انتهاء الاشتراك يجب أن يكون بعد تاريخ البداية أو مساوياً له.";
+    }
+  }
+
+  return null;
+}
+
 function subscriptionDocId(subscription: any): string {
   return subscription?.id || `SUB-${subscription.propertyNumber}`;
 }
@@ -74,7 +107,7 @@ router.get("/api/admin/multi-property-subscriptions", async (req, res) => {
   }
 });
 
-router.post("/api/multi-property-subscription", async (req, res) => {
+router.post("/api/multi-property-subscription", requireAdmin, async (req, res) => {
   try {
     const { packageId, propertyNumber1, propertyNumber2 } = req.body;
 
@@ -90,15 +123,14 @@ router.post("/api/multi-property-subscription", async (req, res) => {
     }
 
     // جلب الباقة
-    const pkg = await subscriptionService.getPackageById(packageId);
+    const pkg = await subscriptionService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(400).json({ error: "الباقة غير موجودة" });
     }
 
     // حساب التواريخ (duration بالأيام)
     const startDate = new Date().toISOString();
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() + (pkg.duration || 30));
+    const endDate = calculateSubscriptionEndDate(null, pkg.duration || 30);
 
     const sub = await firebaseService.createMultiPropertySubscription({
       packageId,
@@ -282,6 +314,24 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
         nextAction: "تأكد من رقم العقار أو حدّث قائمة الاشتراكات ثم حاول مرة أخرى.",
         nextUrl: "/admin",
         actionLabel: "تحديث الاشتراكات",
+      });
+    }
+
+    const requestedStartDate = startDate !== undefined
+      ? startDate
+      : currentSubscription.startDate;
+    const requestedEndDate = endDate !== undefined
+      ? endDate
+      : currentSubscription.endDate;
+    const dateValidationError = getSubscriptionDateValidationError(
+      requestedStartDate,
+      requestedEndDate,
+    );
+    if (dateValidationError) {
+      return res.status(400).json({
+        error: dateValidationError,
+        nextAction: `اختر تاريخ انتهاء لا يتجاوز ${MAX_SUBSCRIPTION_DAYS} يوماً من اليوم.`,
+        actionLabel: "تعديل تاريخ الانتهاء",
       });
     }
 
@@ -473,12 +523,20 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
       return res.status(400).json({ error: "propertyNumber, packageId, startDate, endDate مطلوبين" });
     }
 
+    if (!isValidDateInput(startDate) || !isValidDateInput(endDate)) {
+      return res.status(400).json({ error: "صيغة التاريخ غير صحيحة." });
+    }
+    const dateValidationError = getSubscriptionDateValidationError(startDate, endDate);
+    if (dateValidationError) {
+      return res.status(400).json({ error: dateValidationError });
+    }
+
     const property = await propertyService.getByNumber(propertyNumber);
     if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
-    const pkg = await subscriptionService.getPackageById(packageId);
+    const pkg = await subscriptionService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }

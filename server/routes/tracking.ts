@@ -2,19 +2,19 @@ import { Router } from "express";
 import { createHmac } from "node:crypto";
 import { analyticsService, propertyService, notificationService } from "../services";
 import { firebaseService } from "../firebaseService";
-import { detectDeviceType } from "../utils/helpers";
+import { detectDeviceType, normalizePhoneNumber } from "../utils/helpers";
 import type { InsertContactEvent } from "../../shared/schema";
 
 const router = Router();
 
-// في الذاكرة: تخزين آخر طلب من كل IP (30 دقيقة) وعدد طلبات كل IP لكل عقار
-const requestTracker = new Map<string, { timestamp: number; propertyNumber: string }>();
+// عدد الطلبات من كل IP لكل عقار (للتوافق مع حقل التحليلات القديم فقط).
 const ipPropertyCounter = new Map<string, Map<string, number>>();
 
 type ContactEventBase = Omit<InsertContactEvent, "outcome" | "requestCode">;
 
 function getClientIp(req: any): string {
-  return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+  // Express resolves this using the configured trusted-proxy boundary.
+  return req.ip
     || req.socket.remoteAddress
     || "unknown";
 }
@@ -36,13 +36,26 @@ function createVisitorKey(req: any, ipAddress: string): string {
   return createHmac("sha256", secret).update(source).digest("hex").slice(0, 24);
 }
 
+function createCooldownKey(visitorKey: string, propertyNumber: string): string {
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret)
+    .update(`contact-cooldown:${visitorKey}:${propertyNumber}`)
+    .digest("hex");
+}
+
 async function recordContactEvent(
   base: ContactEventBase,
   outcome: InsertContactEvent["outcome"],
   requestCode?: string,
+  clientPhone?: string,
 ): Promise<void> {
   try {
-    await analyticsService.recordContactEvent({ ...base, outcome, requestCode });
+    await analyticsService.recordContactEvent({
+      ...base,
+      outcome,
+      requestCode,
+      ...(clientPhone ? { clientPhone } : {}),
+    });
   } catch (error) {
     console.error("Contact analytics event error:", error);
   }
@@ -53,6 +66,31 @@ router.post("/api/requests/smart", async (req, res) => {
   let acceptedEventRecorded = false;
   try {
     const propertyNumber = String(req.body?.propertyNumber || "").trim();
+    const submittedPhone = String(req.body?.clientPhone || "").trim();
+
+    if (!propertyNumber) {
+      return res.status(400).json({ error: "رقم العقار مطلوب" });
+    }
+
+    if (!submittedPhone) {
+      return res.status(400).json({ error: "رقم الجوال مطلوب" });
+    }
+
+    let clientPhone: string;
+    try {
+      clientPhone = normalizePhoneNumber(submittedPhone);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || "رقم الجوال غير صحيح" });
+    }
+
+    const property = await propertyService.getByNumber(propertyNumber);
+    if (!property) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+    if (property.verificationStatus && property.verificationStatus !== "approved") {
+      return res.status(403).json({ error: "هذا العقار غير متاح حالياً" });
+    }
+
     const ipAddress = getClientIp(req);
     const userAgent = req.headers["user-agent"] || "";
     const deviceType = detectDeviceType(userAgent);
@@ -63,40 +101,8 @@ router.post("/api/requests/smart", async (req, res) => {
       deviceType,
     } : null;
 
-    if (!propertyNumber) {
-      return res.status(400).json({ error: "رقم العقار مطلوب" });
-    }
-
-    const now = Date.now();
     const thirtyMinutes = 30 * 60 * 1000;
-    const lastRequest = requestTracker.get(ipAddress);
-
-    // تحقق من التكرار في آخر 30 دقيقة
-    if (lastRequest && now - lastRequest.timestamp < thirtyMinutes && lastRequest.propertyNumber === propertyNumber) {
-      const remainingMs = thirtyMinutes - (now - lastRequest.timestamp);
-      const remainingSeconds = Math.ceil(remainingMs / 1000);
-
-      // تحويل إلى صيغة أجمل (دقائق وثواني)
-      const minutes = Math.floor(remainingSeconds / 60);
-      const seconds = remainingSeconds % 60;
-      let timeDisplay = "";
-      if (minutes > 0) {
-        timeDisplay = `${minutes} دقيقة`;
-        if (seconds > 0) timeDisplay += ` و${seconds} ثانية`;
-      } else {
-        timeDisplay = `${seconds} ثانية`;
-      }
-
-      console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
-
-      if (contactEventBase) await recordContactEvent(contactEventBase, "cooldown");
-
-      return res.status(429).json({
-        error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
-        remainingSeconds,
-        remainingTimeFormatted: timeDisplay,
-      });
-    }
+    const cooldownKey = createCooldownKey(contactEventBase!.visitorKey, propertyNumber);
 
     // CRITICAL: استخدام UTC فقط - الواجهة ستتولى التحويل
     const nowTimestamp = Date.now();
@@ -129,43 +135,61 @@ router.post("/api/requests/smart", async (req, res) => {
     const propertyMap = ipPropertyCounter.get(ipAddress)!;
     const currentCount = propertyMap.get(propertyNumber) || 0;
     const newCount = currentCount + 1;
-    propertyMap.set(propertyNumber, newCount);
 
-    // احفظ الطلب مع العدد من IP
-    await analyticsService.recordRequest(
+    // Commit the accepted request, event, and cooldown together.
+    const cooldown = await firebaseService.createContactRequestWithCooldown(
+      cooldownKey,
+      propertyNumber,
+      thirtyMinutes,
       {
         propertyNumber,
         requestCode,
         timestamp: String(nowTimestamp), // CRITICAL: حفظ epoch milliseconds فقط
+        clientPhone,
         ipAddress,
         dayOfWeek,
         hourOfDay,
         deviceType,
       },
-      newCount
+      newCount,
+      {
+        ...contactEventBase!,
+        outcome: "accepted",
+        requestCode,
+        clientPhone,
+      },
     );
 
-    if (contactEventBase) {
-      await recordContactEvent(contactEventBase, "accepted", requestCode);
-      acceptedEventRecorded = true;
+    // تحقق من التكرار في آخر 30 دقيقة
+    if (!cooldown.accepted) {
+      const remainingSeconds = Math.ceil(cooldown.remainingMs / 1000);
+      const minutes = Math.floor(remainingSeconds / 60);
+      const seconds = remainingSeconds % 60;
+      let timeDisplay = "";
+      if (minutes > 0) {
+        timeDisplay = `${minutes} دقيقة`;
+        if (seconds > 0) timeDisplay += ` و${seconds} ثانية`;
+      } else {
+        timeDisplay = `${seconds} ثانية`;
+      }
+
+      console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
+      if (contactEventBase) await recordContactEvent(contactEventBase, "cooldown");
+
+      return res.status(429).json({
+        error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
+        remainingSeconds,
+        remainingTimeFormatted: timeDisplay,
+      });
     }
 
+    propertyMap.set(propertyNumber, newCount);
+    acceptedEventRecorded = true;
 
     // حدّث المتتبع
-    requestTracker.set(ipAddress, { timestamp: now, propertyNumber });
     console.log(`✅ Request tracked - IP: ${ipAddress}, Property: ${propertyNumber}, Count: ${newCount}`);
 
-    // نظّف الطلبات القديمة (أكثر من ساعة)
-    const keysToDelete: string[] = [];
-    requestTracker.forEach((data, ip) => {
-      if (now - data.timestamp > 60 * 60 * 1000) {
-        keysToDelete.push(ip);
-      }
-    });
-    keysToDelete.forEach(ip => requestTracker.delete(ip));
-
     // إرسال إشعار واتساب عند طلب واتساب جديد
-    const property = await propertyService.getByNumber(propertyNumber);
     notificationService.smartRequest({
       propertyNumber,
       propertyName: property?.name || "",
@@ -198,9 +222,7 @@ router.post("/api/track-pageview", async (req, res) => {
     }
 
     // احصل على IP العميل من الطلب
-    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] ||
-      req.socket.remoteAddress ||
-      'unknown';
+    const ipAddress = getClientIp(req);
 
     const now_timestamp = Date.now();
 

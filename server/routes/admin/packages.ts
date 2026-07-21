@@ -1,8 +1,30 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { firebaseService } from "../../firebaseService";
+import {
+  MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS,
+  isSubscriptionPackageDurationAllowed,
+  normalizeSubscriptionPackageDuration,
+} from "../../../shared/subscriptionPackagePolicy";
 
 const router = Router();
+
+function parseSubscriptionPackageDuration(value: unknown): number | null {
+  return normalizeSubscriptionPackageDuration(value);
+}
+
+function packageDurationError(isActive: boolean): string {
+  return isActive
+    ? `مدة الباقة النشطة يجب أن تكون عدداً صحيحاً بين 1 و${MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS} يوماً. عطّل الباقة أولاً للاحتفاظ بمدة أطول.`
+    : "مدة باقة الاشتراك يجب أن تكون عدداً صحيحاً موجباً.";
+}
+
+function servicePackageError(error: unknown): string {
+  if (error instanceof RangeError && error.message.includes("cannot exceed")) {
+    return packageDurationError(true);
+  }
+  return "مدة باقة الاشتراك يجب أن تكون عدداً صحيحاً موجباً.";
+}
 
 // ======================
 // 📦 إدارة الباقات (Admin)
@@ -15,8 +37,9 @@ router.get("/api/admin/packages", async (_req, res) => {
     // Map fields for frontend compatibility: duration → durationDays, features → description
     const mapped = packages.map((pkg: any) => ({
       ...pkg,
-      durationDays: pkg.durationDays || pkg.duration || 30,
+      durationDays: pkg.durationDays ?? pkg.duration ?? 30,
       description: pkg.description || (pkg.features && pkg.features.length > 0 ? pkg.features.join("، ") : ""),
+      isActive: pkg.isActive === true,
     }));
     res.json(mapped);
   } catch (error) {
@@ -28,7 +51,20 @@ router.get("/api/admin/packages", async (_req, res) => {
 // إنشاء باقة جديدة
 router.post("/api/admin/packages", requireAdmin, async (req, res) => {
   try {
-    const durationValue = req.body.duration || req.body.durationDays || 30;
+    if (req.body.isActive !== undefined && typeof req.body.isActive !== "boolean") {
+      return res.status(400).json({ error: "حالة تفعيل الباقة غير صحيحة." });
+    }
+    const isActive = req.body.isActive !== false;
+    const requestedDuration = req.body.duration ?? req.body.durationDays ?? 30;
+    const durationValue = parseSubscriptionPackageDuration(requestedDuration);
+    if (
+      durationValue === null ||
+      !isSubscriptionPackageDurationAllowed(durationValue, isActive)
+    ) {
+      return res.status(400).json({
+        error: packageDurationError(isActive),
+      });
+    }
     const pkgData = {
       name: req.body.name || "",
       duration: durationValue,
@@ -38,7 +74,7 @@ router.post("/api/admin/packages", requireAdmin, async (req, res) => {
       type: req.body.type || "مميز",
       features: req.body.features || (req.body.description ? [req.body.description] : []),
       description: req.body.description || "",
-      isActive: req.body.isActive !== false,
+      isActive,
       propertyCount: req.body.propertyCount || 1,
       maxProperties: req.body.maxProperties || undefined,
     };
@@ -46,6 +82,9 @@ router.post("/api/admin/packages", requireAdmin, async (req, res) => {
     res.json(newPkg);
   } catch (error) {
     console.error("Error creating package:", error);
+    if (error instanceof RangeError) {
+      return res.status(400).json({ error: servicePackageError(error) });
+    }
     res.status(500).json({ error: "فشل في إنشاء الباقة" });
   }
 });
@@ -55,9 +94,19 @@ router.put("/api/admin/packages/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const pkgData: any = {};
+    if (req.body.isActive !== undefined && typeof req.body.isActive !== "boolean") {
+      return res.status(400).json({ error: "حالة تفعيل الباقة غير صحيحة." });
+    }
     if (req.body.name !== undefined) pkgData.name = req.body.name;
     if (req.body.duration !== undefined || req.body.durationDays !== undefined) {
-      const dur = req.body.duration || req.body.durationDays;
+      const dur = parseSubscriptionPackageDuration(
+        req.body.duration ?? req.body.durationDays,
+      );
+      if (dur === null) {
+        return res.status(400).json({
+          error: packageDurationError(false),
+        });
+      }
       pkgData.duration = dur;
       pkgData.durationDays = dur;
     }
@@ -79,6 +128,9 @@ router.put("/api/admin/packages/:id", requireAdmin, async (req, res) => {
     res.json(updated);
   } catch (error) {
     console.error("Error updating package:", error);
+    if (error instanceof RangeError) {
+      return res.status(400).json({ error: servicePackageError(error) });
+    }
     res.status(500).json({ error: "فشل في تحديث الباقة" });
   }
 });

@@ -1,3 +1,10 @@
+import {
+  MAX_SUBSCRIPTION_DAYS,
+  MAX_SUBSCRIPTION_DURATION_MS,
+  capAtMaxDays,
+  capSubscriptionDurationMs,
+} from "../utils/dateUtils";
+
 export const SUSPENDED_SUBSCRIPTION_STATUS = "موقوف مؤقتاً" as const;
 export const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -50,7 +57,7 @@ export function calculateRemainingDurationMs(
     );
   }
 
-  return remainingDurationMs;
+  return capSubscriptionDurationMs(remainingDurationMs);
 }
 
 export function calculateResumedEndDate(
@@ -69,10 +76,19 @@ export function calculateResumedEndDate(
     );
   }
 
-  return new Date(resumedTime + remainingDurationMs).toISOString();
+  const cappedRemainingDurationMs = capSubscriptionDurationMs(remainingDurationMs);
+  const candidateEndDate = new Date(resumedTime + cappedRemainingDurationMs);
+  return capAtMaxDays(
+    candidateEndDate,
+    MAX_SUBSCRIPTION_DAYS,
+    resumedAt,
+  ).toISOString();
 }
 
 export function calculateFrozenRemainingDays(remainingDurationMs: number): number {
   if (!Number.isFinite(remainingDurationMs) || remainingDurationMs <= 0) return 0;
-  return Math.ceil(remainingDurationMs / MILLISECONDS_PER_DAY);
+  return Math.min(
+    MAX_SUBSCRIPTION_DAYS,
+    Math.ceil(Math.min(remainingDurationMs, MAX_SUBSCRIPTION_DURATION_MS) / MILLISECONDS_PER_DAY),
+  );
 }

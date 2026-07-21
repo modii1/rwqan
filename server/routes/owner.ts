@@ -24,8 +24,11 @@ import {
   calculateActionDates,
   hasPriorSubscription,
   isActiveSubscription,
+  isLegacyPaymentFulfillment,
   normalizeLinkedPropertyNumbers,
   queueVerifiedNewPropertyForAdminApproval,
+  syncMultiPropertyRecord,
+  validatePaymentSubscriptionAction,
   validateSubscriptionAction,
 } from "../utils/paymentScenarioFlow";
 import {
@@ -37,7 +40,16 @@ import {
 
 const router = Router();
 
-const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set(["نشط", "ساري", "نشط مجاني", "active"]);
+const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set([
+  "نشط",
+  "ساري",
+  "نشط مجاني",
+  "ينتهي قريباً",
+  "قريب الانتهاء",
+  "active",
+  "free_active",
+  "expiring",
+]);
 const OWNER_PAYMENT_ATTENTION_STATUSES = new Set(["قيد المراجعة", "معلق", "قيد التحقق", "نجح - قيد التحقق", "pending"]);
 const manualVerificationInFlight = new Set<string>();
 
@@ -358,7 +370,9 @@ router.get("/api/owner/requests", requireOwner, async (req: any, res) => {
   try {
     const propertyNumber = req.propertyNumber;
     const allRequests = await analyticsService.getAllRequests();
-    const propertyRequests = allRequests.filter(r => r.propertyNumber === propertyNumber);
+    const propertyRequests = allRequests
+      .filter(r => r.propertyNumber === propertyNumber)
+      .map(({ clientPhone: _clientPhone, ...request }) => request);
     res.json(propertyRequests);
   } catch (err) {
     res.status(500).json({ error: "فشل في جلب الطلبات" });
@@ -716,18 +730,15 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     }
 
     // Get package and property
-    const pkg = await firebaseService.getPackageById(packageId);
+    const pkg = await firebaseService.getPurchasablePackageById(packageId);
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
     if (!property) return res.status(404).json({ error: "العقار غير موجود" });
 
-    const currentSubscriptionForAction =
-      action === "extend" || action === "upgrade"
-        ? await subscriptionService.getByProperty(propertyNumber)
-        : null;
-    if (action === "extend" || action === "upgrade") {
-      const actionValidation = validateSubscriptionAction(action, currentSubscriptionForAction);
+    const currentSubscriptionForAction = await subscriptionService.getByProperty(propertyNumber);
+    if (!isAddon) {
+      const actionValidation = validatePaymentSubscriptionAction(action, currentSubscriptionForAction);
       if (!actionValidation.ok) {
         return res.status(actionValidation.status).json({
           error: actionValidation.error,
@@ -1309,6 +1320,7 @@ router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
 });
 
 router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
+  let fulfillmentClaim: { paymentId: string; token: string } | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
     if (!propertyNumber) {
@@ -1345,7 +1357,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     if (!pendingPayment) {
       const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
       const isNewProperty = !hasPriorSubscription(currentSubscription);
-      const freePkg = await storage.getPackageById("pkg-free");
+      const freePkg = await firebaseService.getPurchasablePackageById("pkg-free");
 
       const currentStatus = property.verificationStatus || "pending";
 
@@ -1411,6 +1423,89 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     const paymentStatus = pendingPayment.status;
     const currentSubscriptionForActivation = await subscriptionService.getByProperty(propertyNumber);
     const isNewPropertyForActivation = !hasPriorSubscription(currentSubscriptionForActivation);
+    const isPartialFulfillment =
+      !pendingPayment.fulfilledAt &&
+      currentSubscriptionForActivation?.paymentId === pendingPayment.id;
+
+    if (pendingPayment.fulfilledAt) {
+      if (property.verificationStatus !== "approved") {
+        await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+      }
+      return res.json({
+        success: true,
+        message: "تم تفعيل هذه الدفعة مسبقاً",
+        alreadyActivated: true,
+        subscriptionActivated: true,
+        endDate: currentSubscriptionForActivation?.endDate || null,
+      });
+    }
+
+    if (isLegacyPaymentFulfillment(pendingPayment, currentSubscriptionForActivation)) {
+      const claimResult = await firebaseService.claimPaymentFulfillment(pendingPayment.id);
+      if (claimResult.status === "processing") {
+        return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
+      }
+      if (claimResult.status === "fulfilled") {
+        if (property.verificationStatus !== "approved") {
+          await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+        }
+        return res.json({
+          success: true,
+          message: "تم تفعيل هذه الدفعة مسبقاً",
+          alreadyActivated: true,
+          subscriptionActivated: true,
+          endDate: currentSubscriptionForActivation?.endDate || null,
+        });
+      }
+
+      fulfillmentClaim = { paymentId: pendingPayment.id, token: claimResult.token };
+      const hasLinkedGroup = Boolean((pendingPayment as any).secondPropertyNumber) ||
+        normalizeLinkedPropertyNumbers(pendingPayment as any, propertyNumber).length > 0 ||
+        (currentSubscriptionForActivation?.linkedProperties?.length || 0) > 0;
+      if (claimResult.previousState === undefined && !hasLinkedGroup) {
+        await firebaseService.completePaymentFulfillment(
+          pendingPayment.id,
+          claimResult.token,
+          currentSubscriptionForActivation?.id || `SUB-${propertyNumber}`,
+        );
+        fulfillmentClaim = null;
+        if (property.verificationStatus !== "approved") {
+          await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+        }
+        return res.json({
+          success: true,
+          message: "تم تفعيل هذه الدفعة مسبقاً",
+          alreadyActivated: true,
+          subscriptionActivated: true,
+          endDate: currentSubscriptionForActivation?.endDate || null,
+        });
+      }
+
+      await firebaseService.releasePaymentFulfillment(
+        pendingPayment.id,
+        claimResult.token,
+      );
+      fulfillmentClaim = null;
+    }
+
+    const pendingAction = pendingPayment.action || "new";
+    if (!["new", "extend", "upgrade"].includes(pendingAction)) {
+      return res.status(400).json({ error: "إجراء الدفعة غير صالح" });
+    }
+    if (isActiveSubscription(currentSubscriptionForActivation) && !isPartialFulfillment) {
+      const actionValidation = validatePaymentSubscriptionAction(
+        pendingAction,
+        currentSubscriptionForActivation,
+      );
+      if (!actionValidation.ok) {
+        return res.status(actionValidation.status).json({
+          error: actionValidation.error,
+          nextAction: actionValidation.nextAction,
+          nextUrl: actionValidation.nextUrl,
+          actionLabel: actionValidation.actionLabel,
+        });
+      }
+    }
 
     const canAutoActivate = !isBankTransfer && !isNewPropertyForActivation && (
       paymentStatus === "مكتمل" ||
@@ -1423,11 +1518,37 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         return res.status(404).json({ error: "الباقة غير موجودة" });
       }
 
-      const { startDate, endDate } = calculateActionDates(
+      const claimResult = await firebaseService.claimPaymentFulfillment(pendingPayment.id);
+      if (claimResult.status === "fulfilled") {
+        return res.json({
+          success: true,
+          message: "تم تفعيل هذه الدفعة مسبقاً",
+          alreadyActivated: true,
+          subscriptionActivated: true,
+        });
+      }
+      if (claimResult.status === "processing") {
+        return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
+      }
+      fulfillmentClaim = { paymentId: pendingPayment.id, token: claimResult.token };
+
+      const calculatedDates = calculateActionDates(
         pendingPayment.action,
         currentSubscriptionForActivation,
         pkg.duration,
       );
+      const pendingStartDate = pendingPayment.pendingStartDate
+        ? new Date(pendingPayment.pendingStartDate)
+        : null;
+      const pendingEndDate = pendingPayment.pendingEndDate
+        ? new Date(pendingPayment.pendingEndDate)
+        : null;
+      const startDate = pendingStartDate && Number.isFinite(pendingStartDate.getTime())
+        ? pendingStartDate
+        : calculatedDates.startDate;
+      const endDate = pendingEndDate && Number.isFinite(pendingEndDate.getTime())
+        ? pendingEndDate
+        : calculatedDates.endDate;
 
       const isPremiumApproval = isPremiumSubscriptionType(pkg.type) || pendingPayment.finalAmount > 0;
 
@@ -1464,13 +1585,12 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
             pendingPayment.receiptUrl || ""
           );
 
-          await firebaseService.createMultiPropertySubscription({
+          await syncMultiPropertyRecord({
+            mainPropertyNumber: propertyNumber,
+            linkedProperties: [(pendingPayment as any).secondPropertyNumber],
             packageId: pkg.id,
-            propertyNumber1: propertyNumber,
-            propertyNumber2: (pendingPayment as any).secondPropertyNumber,
             startDate: formatDateRiyadh(startDate),
             endDate: formatDateRiyadh(endDate),
-            status: "نشط",
             paymentId: pendingPayment.id,
           });
         }
@@ -1480,6 +1600,13 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       if ((pendingPayment as any).secondPropertyNumber) {
         await firebaseService.updateVerificationStatus((pendingPayment as any).secondPropertyNumber, "approved");
       }
+
+      await firebaseService.completePaymentFulfillment(
+        pendingPayment.id,
+        fulfillmentClaim.token,
+        `SUB-${propertyNumber}`,
+      );
+      fulfillmentClaim = null;
 
       await sendWhatsAppNotification(
         `🎉 *تم تفعيل الاشتراك بنجاح*\n\n` +
@@ -1540,6 +1667,12 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       paymentStatus: paymentStatus
     });
   } catch (err: any) {
+    if (fulfillmentClaim) {
+      await firebaseService.releasePaymentFulfillment(
+        fulfillmentClaim.paymentId,
+        fulfillmentClaim.token,
+      ).catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
+    }
     console.error("Property activation error:", err);
     res.status(500).json({
       success: false,
@@ -1730,7 +1863,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
-    const pkg = await storage.getPackageById(packageId);
+    const pkg = await firebaseService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
@@ -1786,19 +1919,18 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     }
 
     const currentSubscriptionForPaymentAction =
-      action === "extend" || action === "upgrade"
-        ? await firebaseService.getSubscriptionByPropertyNumber(propertyNumber)
-        : null;
-    if (action === "extend" || action === "upgrade") {
-      const actionValidation = validateSubscriptionAction(action, currentSubscriptionForPaymentAction);
-      if (!actionValidation.ok) {
-        return res.status(actionValidation.status).json({
-          error: actionValidation.error,
-          nextAction: actionValidation.nextAction,
-          nextUrl: actionValidation.nextUrl,
-          actionLabel: actionValidation.actionLabel,
-        });
-      }
+      await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    const actionValidation = validatePaymentSubscriptionAction(
+      action,
+      currentSubscriptionForPaymentAction,
+    );
+    if (!actionValidation.ok) {
+      return res.status(actionValidation.status).json({
+        error: actionValidation.error,
+        nextAction: actionValidation.nextAction,
+        nextUrl: actionValidation.nextUrl,
+        actionLabel: actionValidation.actionLabel,
+      });
     }
 
     // Check if this is a package downgrade (for extend/upgrade actions)
@@ -1918,16 +2050,58 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       return res.status(403).json({ error: "غير مصرح" });
     }
 
-    if (payment.status === "مكتمل" || payment.status === "completed") {
-      return res.status(400).json({ error: "الدفعة مكتملة مسبقاً" });
+    if (["مكتمل", "completed", "نجح", "نجاح", "نجح - قيد التحقق", "قيد التحقق"].includes(payment.status)) {
+      return res.status(400).json({
+        error: "تم استلام هذه الدفعة أو جارٍ التحقق منها، ولا يجب دفعها مرة أخرى",
+      });
+    }
+    if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") {
+      return res.status(400).json({ error: "تم تفعيل هذه الدفعة مسبقاً" });
+    }
+    if (payment.fulfillmentState === "processing") {
+      return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
+    }
+    if (payment.fulfillmentState === "failed") {
+      return res.status(409).json({
+        error: "تم استلام الدفعة وتحتاج عملية التفعيل إلى الاستكمال، ولا يجب دفعها مرة أخرى",
+      });
     }
 
-    const pkg = await storage.getPackageById(payment.packageId);
+    const pkg = await firebaseService.getPurchasablePackageById(payment.packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
 
     const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
+    const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(
+      payment.propertyNumber,
+    );
+    const actionValidation = validatePaymentSubscriptionAction(
+      payment.action,
+      currentSubscription,
+    );
+    if (!actionValidation.ok) {
+      return res.status(actionValidation.status).json({
+        error: actionValidation.error,
+        nextAction: actionValidation.nextAction,
+        nextUrl: actionValidation.nextUrl,
+        actionLabel: actionValidation.actionLabel,
+      });
+    }
+
+    let refreshedPendingDates: { pendingStartDate: string; pendingEndDate: string } | null = null;
+    if (payment.action === "extend" || payment.action === "upgrade") {
+      const refreshedDates = calculateActionDates(
+        payment.action,
+        currentSubscription,
+        pkg.duration,
+      );
+      refreshedPendingDates = {
+        pendingStartDate: formatDateRiyadh(refreshedDates.startDate),
+        pendingEndDate: formatDateRiyadh(refreshedDates.endDate),
+      };
+    }
+
     const phone = property?.whatsappNumber || "0500000000";
     const propertyName = property?.name || "عقار";
 
@@ -1944,6 +2118,7 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
     await paymentService.update(paymentId, {
       paymentReference: paymobResult.intentionId,
       transactionId: paymobResult.intentionId,
+      ...(refreshedPendingDates || {}),
     });
 
     res.json({
@@ -2414,7 +2589,7 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req,
       return res.status(400).json({ error: "إجراء غير صالح" });
     }
 
-    const newPackage = await storage.getPackageById(packageId);
+    const newPackage = await firebaseService.getPurchasablePackageById(packageId);
     if (!newPackage) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
@@ -2469,6 +2644,7 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req,
 // POST /api/owner/subscription/confirm
 // ======================================================
 router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) => {
+  let fulfillmentClaim: { paymentId: string; token: string } | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
     const { action, packageId, paymentId } = req.body;
@@ -2485,7 +2661,22 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       return res.status(400).json({ error: "الدفعة غير مكتملة" });
     }
 
-    const newPackage = await storage.getPackageById(packageId);
+    if (String(paymentRecord.propertyNumber || "") !== String(propertyNumber || "")) {
+      return res.status(403).json({ error: "هذه الدفعة لا تخص هذا العقار" });
+    }
+    if (String(paymentRecord.packageId || "") !== String(packageId || "")) {
+      return res.status(400).json({ error: "الباقة لا تطابق الباقة المدفوعة" });
+    }
+    const paidAction = String(paymentRecord.action || "new");
+    if (
+      (paidAction !== "extend" && paidAction !== "upgrade") ||
+      String(action || "") !== paidAction
+    ) {
+      return res.status(400).json({ error: "الإجراء لا يطابق الإجراء المدفوع" });
+    }
+
+    // A completed payment remains fulfillable if the package was disabled later.
+    const newPackage = await storage.getPackageById(paymentRecord.packageId);
     if (!newPackage) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
@@ -2500,26 +2691,95 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     const subscriptions = await firebaseService.getSubscriptionsByProperty(propertyNumber);
     console.log(`📋 Found ${subscriptions.length} subscriptions for ${propertyNumber}`);
 
+    const fulfilledSubscription = subscriptions.find(
+      (subscription) => subscription.paymentId === paymentRecord.id,
+    );
+    if (paymentRecord.fulfilledAt) {
+      const effectiveSubscription = fulfilledSubscription || subscriptions[0];
+      return res.json({
+        ok: true,
+        message: "تم تفعيل هذه الدفعة مسبقاً",
+        alreadyActivated: true,
+        subscription: effectiveSubscription || null,
+        endDate: effectiveSubscription?.endDate || null,
+      });
+    }
+
     const currentSubscription = subscriptions.find((s) => isActiveSubscription(s));
 
     console.log(`📋 [Owner Confirm] Current subscription:`, currentSubscription ?
       `status=${currentSubscription.status}, endDate=${currentSubscription.endDate}` : 'None');
 
-    const actionValidation = validateSubscriptionAction(action, currentSubscription);
-    if (!actionValidation.ok) {
-      return res.status(actionValidation.status).json({
-        error: actionValidation.error,
-        nextAction: actionValidation.nextAction,
-        nextUrl: actionValidation.nextUrl,
-        actionLabel: actionValidation.actionLabel,
+    const claimResult = await firebaseService.claimPaymentFulfillment(paymentRecord.id);
+    if (claimResult.status === "fulfilled") {
+      return res.json({
+        ok: true,
+        message: "تم تفعيل هذه الدفعة مسبقاً",
+        alreadyActivated: true,
+        subscription: fulfilledSubscription || currentSubscription || null,
+        endDate: fulfilledSubscription?.endDate || currentSubscription?.endDate || null,
+      });
+    }
+    if (claimResult.status === "processing") {
+      return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
+    }
+    fulfillmentClaim = { paymentId: paymentRecord.id, token: claimResult.token };
+
+    const hasLinkedGroup = normalizeLinkedPropertyNumbers(paymentRecord as any, propertyNumber).length > 0 ||
+      (fulfilledSubscription?.linkedProperties?.length || 0) > 0;
+    if (
+      claimResult.previousState === undefined &&
+      isLegacyPaymentFulfillment(paymentRecord, fulfilledSubscription) &&
+      !hasLinkedGroup
+    ) {
+      await firebaseService.completePaymentFulfillment(
+        paymentRecord.id,
+        claimResult.token,
+        fulfilledSubscription?.id || `SUB-${propertyNumber}`,
+      );
+      fulfillmentClaim = null;
+      return res.json({
+        ok: true,
+        message: "تم تفعيل هذه الدفعة مسبقاً",
+        alreadyActivated: true,
+        subscription: fulfilledSubscription || null,
+        endDate: fulfilledSubscription?.endDate || null,
       });
     }
 
-    const { startDate: newStartDate, endDate: newEndDate } = calculateActionDates(
-      action,
-      currentSubscription,
-      newPackage.duration,
-    );
+    // Fresh payments are validated against the current state. Failed partial
+    // attempts are reconciled from the payment's persisted dates below.
+    if (claimResult.previousState === undefined && !fulfilledSubscription) {
+      const actionValidation = validateSubscriptionAction(action, currentSubscription);
+      if (!actionValidation.ok) {
+        await firebaseService.releasePaymentFulfillment(paymentRecord.id, claimResult.token);
+        fulfillmentClaim = null;
+        return res.status(actionValidation.status).json({
+          error: actionValidation.error,
+          nextAction: actionValidation.nextAction,
+          nextUrl: actionValidation.nextUrl,
+          actionLabel: actionValidation.actionLabel,
+        });
+      }
+    }
+
+    const calculatedDates = calculateActionDates(action, currentSubscription, newPackage.duration);
+    const persistedStartDate = paymentRecord.pendingStartDate
+      ? new Date(paymentRecord.pendingStartDate)
+      : fulfilledSubscription?.startDate
+        ? new Date(fulfilledSubscription.startDate)
+        : null;
+    const persistedEndDate = paymentRecord.pendingEndDate
+      ? new Date(paymentRecord.pendingEndDate)
+      : fulfilledSubscription?.endDate
+        ? new Date(fulfilledSubscription.endDate)
+        : null;
+    const newStartDate = persistedStartDate && Number.isFinite(persistedStartDate.getTime())
+      ? persistedStartDate
+      : calculatedDates.startDate;
+    const newEndDate = persistedEndDate && Number.isFinite(persistedEndDate.getTime())
+      ? persistedEndDate
+      : calculatedDates.endDate;
     console.log(
       action === 'extend'
         ? `📅 [Owner Confirm] Extending from ${currentSubscription?.endDate} + ${newPackage.duration} days`
@@ -2527,6 +2787,33 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     );
 
     const isPremium = isPremiumSubscriptionType(newPackage.type) || newPackage.price > 0;
+    const paymentLinkedProperties = normalizeLinkedPropertyNumbers(
+      paymentRecord as any,
+      propertyNumber,
+    );
+    const linkedPropertiesSnapshot = paymentLinkedProperties.length > 0
+      ? paymentLinkedProperties
+      : normalizeLinkedPropertyNumbers(
+          { linkedProperties: currentSubscription?.linkedProperties || [] },
+          propertyNumber,
+        );
+
+    // Persist the original group before the first subscription write. A failed
+    // partial attempt can then retry without losing children after the main
+    // subscription has already been narrowed to the new package limit.
+    if (paymentLinkedProperties.length === 0 && linkedPropertiesSnapshot.length > 0) {
+      await firebaseService.updatePayment(paymentRecord.id, {
+        additionalProperties: linkedPropertiesSnapshot,
+        linkedProperties: linkedPropertiesSnapshot,
+      } as any);
+    }
+
+    const maxProperties = Number(
+      (newPackage as any).maxProperties || newPackage.propertyCount || 1,
+    );
+    const allowedLinkedProperties = Math.max(0, maxProperties - 1);
+    const retainedLinkedProperties = linkedPropertiesSnapshot.slice(0, allowedLinkedProperties);
+    const propertiesToUnlink = linkedPropertiesSnapshot.slice(allowedLinkedProperties);
 
     const subscriptionData = {
       propertyNumber,
@@ -2538,8 +2825,8 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       price: newPackage.price,
       subscriptionType: isPremium ? "مميز" : "عادي",
       packageType: isPremium ? "مميز" : "عادي",
-      linkedProperties: currentSubscription?.linkedProperties || undefined,
-      propertyCount: (currentSubscription?.linkedProperties?.length || 0) + 1,
+      linkedProperties: retainedLinkedProperties,
+      propertyCount: retainedLinkedProperties.length + 1,
     };
 
     await firebaseService.addSubscriptionToSheet(
@@ -2553,9 +2840,8 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
 
     // Auto-renew linked properties with same dates — sync BOTH subscription doc AND property doc
     // so the linked property always reflects the same state as the main (fixes "active parent, inactive linked").
-    const currentLinkedProperties = currentSubscription?.linkedProperties || [];
-    if (currentLinkedProperties.length > 0) {
-      console.log(`🔗 [Owner Confirm] Auto-renewing ${currentLinkedProperties.length} linked properties`);
+    if (retainedLinkedProperties.length > 0) {
+      console.log(`🔗 [Owner Confirm] Auto-renewing ${retainedLinkedProperties.length} linked properties`);
 
       const linkedSyncData = {
         subscriptionType: isPremium ? "مميز" : "عادي",
@@ -2566,37 +2852,26 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
         packageId: packageId,
       };
 
-      for (const linkedPropNum of currentLinkedProperties) {
+      for (const linkedPropNum of retainedLinkedProperties) {
         await firebaseService.syncLinkedProperty(linkedPropNum, propertyNumber, linkedSyncData);
         console.log(`✅ [Owner Confirm] Synced linked property ${linkedPropNum} (sub + property doc + verification=approved)`);
       }
     }
 
     // Auto-unlink excess properties if new package has fewer slots
-    const maxProperties = (newPackage as any).maxProperties || 1;
-    const allowedLinkedProperties = Math.max(0, maxProperties - 1);
-    const linkedPropertiesAfterRenew = currentSubscription?.linkedProperties || [];
-    
-    if (currentSubscription && linkedPropertiesAfterRenew.length > allowedLinkedProperties) {
-      const toUnlink = linkedPropertiesAfterRenew.slice(allowedLinkedProperties);
-      console.log(`🔗 [Owner Confirm] Auto-unlinking ${toUnlink.length} properties due to package downgrade`);
-      
-      const remainingLinked = linkedPropertiesAfterRenew.slice(0, allowedLinkedProperties);
-      
-      // Update main property's linkedProperties
-      await firebaseService.updateSubscription(currentSubscription.id, {
-        linkedProperties: remainingLinked,
-        propertyCount: remainingLinked.length + 1
-      });
-      
+    if (propertiesToUnlink.length > 0) {
+      console.log(`🔗 [Owner Confirm] Auto-unlinking ${propertiesToUnlink.length} properties due to package downgrade`);
+
       // Mark unlinked properties clearly: detach from group but keep subscription until expiry
-      for (const propNum of toUnlink) {
+      for (const propNum of propertiesToUnlink) {
         const unlinkedSub = await firebaseService.getSubscriptionByPropertyNumber(propNum);
         if (unlinkedSub) {
           const detachedEndDate = unlinkedSub.endDate || newEndDate.toISOString();
           await firebaseService.updateSubscription(unlinkedSub.id, {
             linkedProperty: "",
-            status: new Date(detachedEndDate) > new Date() ? "نشط" : "منتهي",
+            linkedProperties: [],
+            propertyCount: 1,
+            status: calculateRemainingDays(detachedEndDate) >= 0 ? "نشط" : "منتهي",
           });
           // Reflect detachment on the property doc too so the admin dashboard shows it consistently
           await firebaseService.updateProperty(propNum, { linkedProperty: "" });
@@ -2605,12 +2880,28 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       }
     }
 
+    await syncMultiPropertyRecord({
+      mainPropertyNumber: propertyNumber,
+      linkedProperties: retainedLinkedProperties,
+      packageId: newPackage.id,
+      startDate: newStartDate.toISOString(),
+      endDate: newEndDate.toISOString(),
+      paymentId: paymentRecord.id,
+    });
+
     // Update property's subscriptionType to match the package
     await firebaseService.updateProperty(propertyNumber, { 
       subscriptionType: isPremium ? "مميز" : "عادي" 
     });
 
     await firebaseService.updateVerificationStatus(propertyNumber, "approved");
+
+    await firebaseService.completePaymentFulfillment(
+      paymentRecord.id,
+      fulfillmentClaim.token,
+      `SUB-${propertyNumber}`,
+    );
+    fulfillmentClaim = null;
 
     res.json({
       ok: true,
@@ -2619,6 +2910,12 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
       endDate: newEndDate,
     });
   } catch (err: any) {
+    if (fulfillmentClaim) {
+      await firebaseService.releasePaymentFulfillment(
+        fulfillmentClaim.paymentId,
+        fulfillmentClaim.token,
+      ).catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
+    }
     console.error("Subscription confirm error:", err);
     res.status(500).json({ error: err?.message || "فشل في التأكيد" });
   }

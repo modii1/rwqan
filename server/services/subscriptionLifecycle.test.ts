@@ -6,6 +6,10 @@ import {
   calculateRemainingDurationMs,
   calculateResumedEndDate,
 } from "./subscriptionLifecycle";
+import {
+  MAX_SUBSCRIPTION_DURATION_MS,
+  getMaxSubscriptionEndDate,
+} from "../utils/dateUtils";
 
 test("resume shifts expiry by the exact suspension duration", () => {
   const originalEnd = "2026-07-20T18:30:00.000Z";
@@ -27,6 +31,38 @@ test("resume shifts expiry by the exact suspension duration", () => {
 test("frozen remaining days rounds partial days up for display", () => {
   assert.equal(calculateFrozenRemainingDays(24 * 60 * 60 * 1000), 1);
   assert.equal(calculateFrozenRemainingDays(24 * 60 * 60 * 1000 + 1), 2);
+});
+
+test("legacy frozen durations above 40 days are capped", () => {
+  const sixtyDays = 60 * 24 * 60 * 60 * 1000;
+
+  assert.equal(calculateFrozenRemainingDays(sixtyDays), 40);
+  assert.equal(
+    calculateRemainingDurationMs(
+      "2026-09-19T12:00:00.000Z",
+      new Date("2026-07-21T12:00:00.000Z"),
+    ),
+    MAX_SUBSCRIPTION_DURATION_MS,
+  );
+});
+
+test("resume cannot restore more than 40 days", () => {
+  const resumedAt = new Date("2026-07-21T12:00:00+03:00");
+  const resumedEnd = calculateResumedEndDate(
+    60 * 24 * 60 * 60 * 1000,
+    resumedAt,
+  );
+
+  assert.equal(
+    resumedEnd,
+    new Date(
+      resumedAt.getTime() + MAX_SUBSCRIPTION_DURATION_MS,
+    ).toISOString(),
+  );
+  assert.ok(
+    new Date(resumedEnd).getTime() <=
+      getMaxSubscriptionEndDate(resumedAt).getTime(),
+  );
 });
 
 test("a calendar-only end date includes the full final day in Riyadh", () => {

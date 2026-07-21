@@ -2,6 +2,7 @@
  * Shared constants and helpers for routes
  */
 import multer from "multer";
+import { normalizePhoneDigits, normalizeSaudiMobilePhone } from "../../shared/phone";
 
 export const upload = multer({
   storage: multer.memoryStorage(),
@@ -65,9 +66,12 @@ export function parseFeatures(val: any): string[] {
  */
 export function normalizePhoneNumber(phone: string | undefined | null): string {
   if (!phone) return "";
-  
-  // Remove any non-digits
-  const digits = phone.replace(/\D/g, "");
+
+  const normalized = normalizeSaudiMobilePhone(phone);
+  if (normalized) return normalized;
+
+  // Keep the existing detailed validation errors for route consumers.
+  const digits = normalizePhoneDigits(phone);
   
   // If starts with 966, remove it
   let cleaned = digits.startsWith("966") ? digits.slice(3) : digits;

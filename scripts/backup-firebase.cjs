@@ -13,7 +13,7 @@ const db = admin.firestore();
 
 const COLLECTIONS = [
     "properties", "subscriptions", "packages", "payments", "discounts",
-    "requests", "suggestions", "expenses", "bank_accounts", "feature_flags",
+    "requests", "contact_events", "contact_cooldowns", "suggestions", "expenses", "bank_accounts", "feature_flags",
     "partner_profits", "addon_packages", "property_addons", "multi_property_subscriptions",
     "fee_configs", "owners", "property_seo", "backups", "profits", "verification_logs",
 ];

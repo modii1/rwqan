@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   calculateActionDates,
   hasPriorSubscription,
+  isLegacyPaymentFulfillment,
+  validatePaymentSubscriptionAction,
   validateSubscriptionAction,
 } from "./paymentScenarioFlow";
 
@@ -41,9 +43,54 @@ test("starts a new activation from today for a prior inactive subscription", () 
 });
 
 test("keeps the ten-day extension window for active subscriptions", () => {
-  const tooEarly = validateSubscriptionAction("extend", subscription("نشط", 20));
-  const allowed = validateSubscriptionAction("extend", subscription("نشط", 5));
+  const elevenDays = validateSubscriptionAction("extend", subscription("نشط", 11));
+  const tenDays = validateSubscriptionAction("extend", subscription("نشط", 10));
+  const lastDay = validateSubscriptionAction("extend", subscription("نشط", 0));
+  const expiringStatus = validateSubscriptionAction("extend", subscription("expiring", 5));
+  const expired = validateSubscriptionAction("extend", subscription("نشط", -1));
 
-  assert.equal(tooEarly.ok, false);
-  assert.deepEqual(allowed, { ok: true });
+  assert.equal(elevenDays.ok, false);
+  assert.deepEqual(tenDays, { ok: true });
+  assert.deepEqual(lastDay, { ok: true });
+  assert.deepEqual(expiringStatus, { ok: true });
+  assert.equal(expired.ok, false);
+});
+
+test("new activation cannot replace an active subscription", () => {
+  assert.equal(validatePaymentSubscriptionAction("new", subscription("نشط", 20)).ok, false);
+  assert.deepEqual(
+    validatePaymentSubscriptionAction("new", subscription("منتهي", -1)),
+    { ok: true },
+  );
+  assert.equal(validatePaymentSubscriptionAction("unknown", null).ok, false);
+});
+
+test("legacy fulfillment detection never bypasses an existing claim state", () => {
+  const matchingSubscription = { paymentId: "PAY-1" } as any;
+
+  assert.equal(
+    isLegacyPaymentFulfillment({ id: "PAY-1" }, matchingSubscription),
+    true,
+  );
+  assert.equal(
+    isLegacyPaymentFulfillment(
+      { id: "PAY-1", fulfillmentState: "processing" },
+      matchingSubscription,
+    ),
+    false,
+  );
+  assert.equal(
+    isLegacyPaymentFulfillment(
+      { id: "PAY-1", fulfillmentState: "failed" },
+      matchingSubscription,
+    ),
+    false,
+  );
+  assert.equal(
+    isLegacyPaymentFulfillment(
+      { id: "PAY-1", fulfilledAt: new Date().toISOString() },
+      matchingSubscription,
+    ),
+    false,
+  );
 });

@@ -6,6 +6,7 @@
  * - جميع التواريخ تُخزن كـ epoch milliseconds
  * - لا تحويلات يدوية للتوقيت
  */
+import { MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS } from "../../shared/subscriptionPackagePolicy";
 
 /**
  * الحصول على الوقت الحالي كـ epoch milliseconds
@@ -164,17 +165,70 @@ export function calculateRemainingDays(endDate: Date | string | null): number {
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
 
-const MAX_SUBSCRIPTION_DAYS = 40;
+export const MAX_SUBSCRIPTION_DAYS = MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS;
+export const RENEWAL_WINDOW_DAYS = 10;
+export const SUBSCRIPTION_MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+export const MAX_SUBSCRIPTION_DURATION_MS =
+  MAX_SUBSCRIPTION_DAYS * SUBSCRIPTION_MILLISECONDS_PER_DAY;
+
+/**
+ * The final allowed instant for a subscription, measured from the Riyadh
+ * calendar day that contains `referenceDate`.
+ */
+export function getMaxSubscriptionEndDate(
+  referenceDate: Date = new Date(),
+  maxDays: number = MAX_SUBSCRIPTION_DAYS,
+): Date {
+  if (!Number.isFinite(referenceDate.getTime())) {
+    throw new RangeError("Invalid subscription reference date");
+  }
+  if (!Number.isFinite(maxDays) || maxDays < 0) {
+    throw new RangeError("Invalid maximum subscription duration");
+  }
+
+  // Riyadh has no daylight-saving transition. Advancing the Riyadh day by
+  // whole 24-hour blocks keeps the business-day boundary deterministic even
+  // when the Node process itself runs in another timezone.
+  const referenceStart = getStartOfDayRiyadh(referenceDate);
+  const maxDay = new Date(
+    referenceStart.getTime() + Math.floor(maxDays) * SUBSCRIPTION_MILLISECONDS_PER_DAY,
+  );
+  const maxDayString = maxDay.toLocaleDateString("en-CA", {
+    timeZone: "Asia/Riyadh",
+  });
+  return new Date(`${maxDayString}T23:59:59.999+03:00`);
+}
+
+export function isSubscriptionEndDateWithinMaxDays(
+  endDate: Date | string,
+  referenceDate: Date = new Date(),
+  maxDays: number = MAX_SUBSCRIPTION_DAYS,
+): boolean {
+  const parsedEndDate = endDate instanceof Date ? endDate : new Date(endDate);
+  if (!Number.isFinite(parsedEndDate.getTime())) return false;
+  return parsedEndDate.getTime() <= getMaxSubscriptionEndDate(referenceDate, maxDays).getTime();
+}
+
+export function capSubscriptionDurationMs(remainingDurationMs: number): number {
+  if (!Number.isFinite(remainingDurationMs) || remainingDurationMs < 0) {
+    throw new RangeError("Invalid remaining subscription duration");
+  }
+  return Math.min(remainingDurationMs, MAX_SUBSCRIPTION_DURATION_MS);
+}
 
 /**
  * تحديد الحد الأقصى للاشتراك: لا يزيد عن MAX_SUBSCRIPTION_DAYS يوماً من اليوم
  */
-export function capAtMaxDays(endDate: Date, maxDays: number = MAX_SUBSCRIPTION_DAYS): Date {
-  const today = getStartOfDayRiyadh();
-  const maxEnd = new Date(today);
-  maxEnd.setDate(maxEnd.getDate() + maxDays);
-  maxEnd.setHours(23, 59, 59, 999);
-  return endDate > maxEnd ? maxEnd : endDate;
+export function capAtMaxDays(
+  endDate: Date,
+  maxDays: number = MAX_SUBSCRIPTION_DAYS,
+  referenceDate: Date = new Date(),
+): Date {
+  if (!Number.isFinite(endDate.getTime())) {
+    throw new RangeError("Invalid subscription end date");
+  }
+  const maxEnd = getMaxSubscriptionEndDate(referenceDate, maxDays);
+  return endDate.getTime() > maxEnd.getTime() ? maxEnd : new Date(endDate);
 }
 
 /**
@@ -194,11 +248,12 @@ export function calculateSubscriptionEndDate(startDate: Date | null, durationDay
   // القاعدة: يوم البداية يُحسب كيوم كامل
   // مثال: 30 يوم بدءاً من 7 يناير = ينتهي نهاية 5 فبراير
   // لكن لعرض 30 يوم في الواجهة، نضيف durationDays مباشرة
-  const endDate = new Date(start);
-  endDate.setDate(endDate.getDate() + durationDays);
-  
-  // نهاية اليوم الأخير
-  endDate.setHours(23, 59, 59, 999);
+  const endDay = new Date(
+    start.getTime() + durationDays * SUBSCRIPTION_MILLISECONDS_PER_DAY,
+  );
+
+  // نهاية اليوم الأخير بتوقيت الرياض، بغض النظر عن توقيت الخادم.
+  const endDate = getEndOfDayRiyadh(endDay);
   
   return capAtMaxDays(endDate);
 }
@@ -214,9 +269,11 @@ export function calculateExtensionEndDate(currentEndDate: Date | null, durationD
     const currentEnd = new Date(currentEndDate);
     // إذا كان الاشتراك الحالي لم ينتهي بعد، نضيف من تاريخ انتهائه
     if (calculateRemainingDays(currentEnd) >= 0) {
-      const newEnd = new Date(currentEnd);
-      newEnd.setDate(newEnd.getDate() + durationDays);
-      newEnd.setHours(23, 59, 59, 999);
+      const currentEndDay = getStartOfDayRiyadh(currentEnd);
+      const extendedDay = new Date(
+        currentEndDay.getTime() + durationDays * SUBSCRIPTION_MILLISECONDS_PER_DAY,
+      );
+      const newEnd = getEndOfDayRiyadh(extendedDay);
       return capAtMaxDays(newEnd);
     }
   }

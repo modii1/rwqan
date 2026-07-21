@@ -150,6 +150,7 @@ export const validateBankTransferPayment = validateBody(bankTransferPaymentSchem
 /** POST /api/requests/smart */
 export const smartRequestSchema = z.object({
   propertyNumber: propertyNumberSchema,
+  clientPhone: z.string().trim().min(1, "رقم الجوال مطلوب"),
 });
 export type SmartRequestBody = z.infer<typeof smartRequestSchema>;
 export const validateSmartRequest = validateBody(smartRequestSchema);

@@ -237,33 +237,64 @@ export class PaymentService {
   async confirmManually(paymentId: string): Promise<void> {
     const payment = await firebaseService.getPaymentById(paymentId);
     if (!payment) throw new Error("الدفعة غير موجودة");
-    if (payment.status === "مكتمل") throw new Error("الدفعة مكتملة مسبقاً");
+    const hasPendingSubscriptionDates = Boolean(
+      payment.pendingStartDate && payment.pendingEndDate,
+    );
 
-    await firebaseService.updatePayment(paymentId, {
-      status: "مكتمل",
-      completedAt: new Date().toISOString(),
-      paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
-    });
+    // Payments without a pending subscription retain the original status-only flow.
+    if (!hasPendingSubscriptionDates) {
+      if (payment.status === "مكتمل") throw new Error("الدفعة مكتملة مسبقاً");
+      await firebaseService.updatePayment(paymentId, {
+        status: "مكتمل",
+        completedAt: new Date().toISOString(),
+        paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+      });
+      return;
+    }
 
-    if (payment.pendingStartDate && payment.pendingEndDate) {
+    const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(paymentId);
+    if (fulfillmentClaim.status === "fulfilled") {
+      if (payment.status !== "مكتمل") {
+        await firebaseService.updatePayment(paymentId, {
+          status: "مكتمل",
+          completedAt: payment.completedAt ?? new Date().toISOString(),
+          paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+        });
+      }
+      return;
+    }
+    if (fulfillmentClaim.status === "processing") {
+      throw new Error("Payment fulfillment is already in progress");
+    }
+
+    const fulfillmentToken = fulfillmentClaim.token;
+    try {
       const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
 
-      // Gather linked/additional properties from the payment record
-      const additionalProps: string[] = (payment as any).additionalProperties || [];
+      // Gather linked/additional properties from the payment record without mutating it.
+      const additionalProps = [...new Set<string>(
+        ((payment as any).additionalProperties || []).filter(Boolean),
+      )];
       const secondProp = (payment as any).secondPropertyNumber;
       if (secondProp && !additionalProps.includes(secondProp)) {
         additionalProps.push(secondProp);
       }
 
+      const paidAmount = Number(
+        payment.pendingPrice ?? payment.finalAmount ?? payment.amount ?? 0,
+      );
+      const subscriptionType = payment.pendingSubscriptionType ??
+        (paidAmount > 0 ? "مميز" : "عادي");
       const subscriptionData = {
         propertyNumber: payment.propertyNumber,
         packageId: payment.packageId,
-        startDate: payment.pendingStartDate,
-        endDate: payment.pendingEndDate,
+        startDate: payment.pendingStartDate!,
+        endDate: payment.pendingEndDate!,
         status: "نشط",
         paymentId,
         price: payment.amount ?? "",
-        packageType: payment.pendingSubscriptionType ?? "مميز",
+        subscriptionType,
+        packageType: subscriptionType,
         linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
         propertyCount: 1 + additionalProps.length,
       };
@@ -272,19 +303,18 @@ export class PaymentService {
         payment.propertyNumber,
         subscriptionData,
         property,
-        undefined
+        undefined,
       );
 
       // Activate linked/additional properties with the same dates — sync BOTH docs
       // and force verification=approved so linked props never lag behind the main.
-      const linkedSyncType = (payment.pendingSubscriptionType ?? "مميز") as string;
       for (const propNumber of additionalProps) {
         const additionalProperty = await firebaseService.getPropertyByNumber(propNumber);
         if (additionalProperty) {
           await firebaseService.syncLinkedProperty(propNumber, payment.propertyNumber, {
-            subscriptionType: linkedSyncType,
-            startDate: payment.pendingStartDate,
-            endDate: payment.pendingEndDate,
+            subscriptionType,
+            startDate: payment.pendingStartDate!,
+            endDate: payment.pendingEndDate!,
             status: "نشط",
             paymentId,
             packageId: payment.packageId,
@@ -293,18 +323,36 @@ export class PaymentService {
         }
       }
 
+      await firebaseService.completePaymentFulfillment(
+        paymentId,
+        fulfillmentToken,
+        `SUB-${payment.propertyNumber}`,
+      );
+      await firebaseService.updatePayment(paymentId, {
+        status: "مكتمل",
+        completedAt: new Date().toISOString(),
+        paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+      });
+
       if (property?.whatsappNumber) {
         try {
           await notifyOwnerSubscriptionActivated({
             ownerPhone: property.whatsappNumber,
             propertyNumber: payment.propertyNumber,
             propertyName: property.name ?? "",
-            endDate: payment.pendingEndDate,
+            endDate: payment.pendingEndDate!,
           });
         } catch (err) {
           console.error("❌ Failed to send owner notification:", err);
         }
       }
+    } catch (error) {
+      await firebaseService.releasePaymentFulfillment(paymentId, fulfillmentToken)
+        .catch((releaseError) => console.error(
+          "Failed to release manual payment fulfillment claim:",
+          releaseError,
+        ));
+      throw error;
     }
   }
 }

@@ -66,6 +66,7 @@ type ContactAnalyticsData = {
     propertyNumber: string;
     propertyName: string;
     timestamp: string;
+    clientPhone: string | null;
     deviceType: "mobile" | "desktop" | "tablet";
     outcome: ContactOutcome;
     requestCode: string | null;
@@ -95,6 +96,12 @@ function formatDateTime(value: string): string {
 function formatChartDate(value: string): string {
   const [, month, day] = value.split("-");
   return `${day}/${month}`;
+}
+
+function formatClientPhone(value: string | null): string {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (/^5\d{8}$/.test(digits)) return `0${digits}`;
+  return digits || "غير متوفر";
 }
 
 function DeviceIcon({ type }: { type: "mobile" | "desktop" | "tablet" }) {
@@ -170,7 +177,7 @@ export default function ContactAnalyticsSection() {
           </div>
           <h1 className="text-2xl font-bold text-[#34332f]">تحليلات التواصل</h1>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            تقيس ضغطات زر واتساب والطلبات المقبولة والتكرارات المحظورة، دون عرض أرقام الهواتف أو عناوين IP.
+            تقيس ضغطات زر واتساب والطلبات المقبولة والتكرارات المحظورة، مع رقم جوال العميل للسجلات الجديدة.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -281,7 +288,7 @@ export default function ContactAnalyticsSection() {
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
             <h2 className="font-bold text-[#34332f]">العقارات الأكثر طلباً</h2>
-            <p className="text-xs text-muted-foreground">مرتبة حسب عدد ضغطات التواصل</p>
+            <p className="text-xs text-muted-foreground">مرتبة حسب عدد الطلبات التي فُتح لها واتساب</p>
           </div>
           <div className="relative w-full sm:w-72">
             <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -297,8 +304,8 @@ export default function ContactAnalyticsSection() {
                 <p className="truncate text-xs text-muted-foreground">{property.propertyNumber} · {property.city} · {property.uniqueUsers} مستخدم</p>
               </div>
               <div className="text-left">
-                <p className="text-xl font-bold text-[#34332f]">{property.attempts}</p>
-                <p className="text-[10px] text-muted-foreground">{property.accepted} مقبولة</p>
+                <p className="text-xl font-bold text-[#34332f]">{property.accepted}</p>
+                <p className="text-[10px] text-muted-foreground">من {property.attempts} محاولة</p>
               </div>
             </div>
           )) : (
@@ -310,7 +317,7 @@ export default function ContactAnalyticsSection() {
       <Card className="min-w-0 overflow-hidden">
         <div className="border-b p-4 sm:p-5">
           <h2 className="font-bold text-[#34332f]">آخر محاولات التواصل</h2>
-          <p className="text-xs text-muted-foreground">لا يتم عرض بيانات المستخدم أو رقم المالك.</p>
+          <p className="text-xs text-muted-foreground">رقم العميل متاح للسجلات الجديدة فقط، ولا يتم عرض رقم المالك أو عنوان IP.</p>
         </div>
         <div className="divide-y">
           {data.recentEvents.length ? data.recentEvents.slice(0, 20).map((event) => {
@@ -323,7 +330,12 @@ export default function ContactAnalyticsSection() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-[#34332f]">{event.propertyName} <span className="font-normal text-muted-foreground">({event.propertyNumber})</span></p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{formatDateTime(event.timestamp)}{event.requestCode ? ` · ${event.requestCode}` : ""}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {formatDateTime(event.timestamp)}{event.requestCode ? ` · ${event.requestCode}` : ""}
+                  </p>
+                  <p className="mt-0.5 truncate text-right text-xs font-semibold text-[#5f543f]" dir={event.clientPhone ? "ltr" : "rtl"}>
+                    {formatClientPhone(event.clientPhone)}
+                  </p>
                 </div>
                 <Badge variant="outline" className={`flex-shrink-0 gap-1 ${config.className}`}>
                   <OutcomeIcon className="h-3 w-3" />

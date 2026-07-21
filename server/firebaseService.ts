@@ -38,12 +38,27 @@ import type {
     OcrResult,
     InsertOcrResult,
 } from "../shared/schema";
-import { calculateRemainingDays, getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, parseArabicDate, capAtMaxDays } from "./utils/dateUtils";
+import {
+    MAX_SUBSCRIPTION_DAYS,
+    calculateRemainingDays,
+    capAtMaxDays,
+    capSubscriptionDurationMs,
+    getEndOfMonthRiyadh,
+    getNowInRiyadh,
+    getStartOfMonthRiyadh,
+    parseArabicDate,
+    toRiyadhISO,
+} from "./utils/dateUtils";
 import {
     isActivePremiumSubscription,
     isPremiumSubscriptionType,
     isSubscriptionStatusActive,
 } from "../shared/subscriptionType";
+import {
+    isPurchasableSubscriptionPackage,
+    isSubscriptionPackageDurationAllowed,
+    normalizeSubscriptionPackageDuration,
+} from "../shared/subscriptionPackagePolicy";
 
 export class FirebaseService {
     private get db() {
@@ -54,6 +69,7 @@ export class FirebaseService {
     private getDateMillis(value: any): number {
         if (!value) return 0;
         if (typeof value === "number") return value;
+        if (value instanceof Date) return value.getTime();
         if (typeof value === "string") {
             const parsed = new Date(value).getTime();
             return Number.isNaN(parsed) ? 0 : parsed;
@@ -66,6 +82,48 @@ export class FirebaseService {
             return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
         }
         return 0;
+    }
+
+    /**
+     * Final persistence guard for every subscription-like write. Route and
+     * service validation provide useful errors, while this guard protects
+     * Firestore from legacy callers, webhook races, and direct service calls.
+     */
+    private enforceSubscriptionDurationLimit<T extends Record<string, any>>(
+        value: T,
+        referenceDate: Date = new Date(),
+    ): T {
+        const normalized = { ...value } as Record<string, any>;
+
+        if (
+            Object.prototype.hasOwnProperty.call(value, "endDate") &&
+            value.endDate !== undefined &&
+            value.endDate !== null &&
+            String(value.endDate).trim() !== ""
+        ) {
+            const endDateMillis = this.getDateMillis(value.endDate);
+            if (!Number.isFinite(endDateMillis) || endDateMillis <= 0) {
+                throw new RangeError("Invalid subscription end date");
+            }
+            const parsedEndDate = new Date(endDateMillis);
+            normalized.endDate = capAtMaxDays(
+                parsedEndDate,
+                MAX_SUBSCRIPTION_DAYS,
+                referenceDate,
+            ).toISOString();
+        }
+
+        if (
+            Object.prototype.hasOwnProperty.call(value, "remainingDurationMs") &&
+            value.remainingDurationMs !== undefined &&
+            value.remainingDurationMs !== null
+        ) {
+            normalized.remainingDurationMs = capSubscriptionDurationMs(
+                Number(value.remainingDurationMs),
+            );
+        }
+
+        return normalized as T;
     }
 
     // ================== العقارات (Properties) ==================
@@ -183,10 +241,9 @@ export class FirebaseService {
         }
 
         // Sort in JS to avoid composite index requirement
-        const docs = snapshot.docs.map((doc) => {
-            const data = doc.data();
-            return { ...data, id: data.id || doc.id } as Subscription;
-        });
+        const docs = snapshot.docs.map((doc) =>
+            ({ ...doc.data(), id: doc.data().id || doc.id } as Subscription)
+        );
         docs.sort((a, b) => {
             const dateA = a.endDate ? new Date(a.endDate).getTime() : 0;
             const dateB = b.endDate ? new Date(b.endDate).getTime() : 0;
@@ -199,9 +256,10 @@ export class FirebaseService {
 
     async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
         const id = `SUB-${subscription.propertyNumber}`;
+        const normalizedSubscription = this.enforceSubscriptionDurationLimit(subscription);
         const newSubscription: Subscription = {
             id,
-            ...subscription,
+            ...normalizedSubscription,
         } as Subscription;
 
         await this.db.collection("subscriptions").doc(id).set(newSubscription);
@@ -227,8 +285,8 @@ export class FirebaseService {
 
     async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
         const id = `SUB-${propertyNumber}`;
-        // فرض الحد الأقصى (40 يوماً من اليوم) كحاجز أخير — يمنع تسريب مدة 60 يوماً
-        // مهما كان المسار المستدعي. هذا هو نقطة التطبيق الوحيدة الموثوقة.
+        // فرض الحد الأقصى (40 يوماً من اليوم) عند تفعيل الاشتراك.
+        // توجد حماية إضافية موحدة عند جميع حدود الكتابة.
         const cappedEndDate = capAtMaxDays(new Date(subscriptionData.endDate));
         const endDate = cappedEndDate;
         const now = new Date();
@@ -613,18 +671,20 @@ export class FirebaseService {
         } else {
             updates.endDate = data.endDate;
         }
+
+        const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
         
-        console.log(`[FIREBASE] activateSubscription - updates to apply:`, updates);
+        console.log(`[FIREBASE] activateSubscription - updates to apply:`, normalizedUpdates);
         
         if (doc.exists) {
-            await ref.update(updates);
+            await ref.update(normalizedUpdates);
             console.log(`✅ [FIREBASE] Subscription activated for property ${propertyNumber}`);
         } else {
             // Create new subscription if doesn't exist
             await ref.set({
                 id,
                 propertyNumber,
-                ...updates,
+                ...normalizedUpdates,
                 createdAt: new Date().toISOString(),
             });
             console.log(`✅ [FIREBASE] New subscription created and activated for property ${propertyNumber}`);
@@ -636,21 +696,28 @@ export class FirebaseService {
             .where("propertyNumber", "==", propertyNumber)
             .orderBy("startDate", "desc")
             .get();
-        return snapshot.docs.map((doc) => doc.data() as Subscription);
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return { ...data, id: data.id || doc.id } as Subscription;
+        });
     }
 
     async getMultiPropertySubscriptions(): Promise<MultiPropertySubscription[]> {
         const snapshot = await this.db.collection("multi_property_subscriptions")
             .orderBy("createdAt", "desc")
             .get();
-        return snapshot.docs.map((doc) => doc.data() as MultiPropertySubscription);
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return { ...data, id: data.id || doc.id } as MultiPropertySubscription;
+        });
     }
 
     async createMultiPropertySubscription(data: InsertMultiPropertySubscription): Promise<MultiPropertySubscription> {
         const id = `MULTI-${Date.now()}`;
+        const normalizedData = this.enforceSubscriptionDurationLimit(data);
         const record: MultiPropertySubscription = {
             id,
-            ...data,
+            ...normalizedData,
             createdAt: toRiyadhISO(getNowInRiyadh()),
         } as MultiPropertySubscription;
         await this.db.collection("multi_property_subscriptions").doc(id).set(record);
@@ -658,7 +725,8 @@ export class FirebaseService {
     }
 
     async updateMultiPropertySubscription(id: string, updates: Partial<MultiPropertySubscription>): Promise<void> {
-        await this.db.collection("multi_property_subscriptions").doc(id).update(updates);
+        const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
+        await this.db.collection("multi_property_subscriptions").doc(id).update(normalizedUpdates);
     }
 
     async deleteMultiPropertySubscription(id: string): Promise<void> {
@@ -691,9 +759,27 @@ export class FirebaseService {
 
     // ================== الباقات (Packages) ==================
 
+    private normalizeSubscriptionPackage<T extends Record<string, any>>(pkg: T): T | null {
+        const duration = normalizeSubscriptionPackageDuration(
+            pkg.duration ?? pkg.durationDays,
+        );
+        if (duration === null) return null;
+        return { ...pkg, duration, durationDays: duration };
+    }
+
     async getPackages(): Promise<Package[]> {
         const snapshot = await this.db.collection("packages").where("isActive", "==", true).get();
-        const packages = snapshot.docs.map((doc) => doc.data() as Package);
+        const packages = snapshot.docs
+            .map((doc) => {
+                const data = { ...doc.data(), id: doc.data().id || doc.id } as Package;
+                const normalized = this.normalizeSubscriptionPackage(data);
+                if (!normalized || !isPurchasableSubscriptionPackage(normalized)) {
+                    console.warn(`[SUBSCRIPTION_CAP] Ignoring unavailable package ${data.id}`);
+                    return null;
+                }
+                return normalized as Package;
+            })
+            .filter((pkg): pkg is Package => pkg !== null);
 
         // إزالة التكرار بناءً على الـ ID (لضمان عدم وجود أخطاء في واجهة المستخدم)
         return Array.from(new Map(packages.map(pkg => [pkg.id, pkg])).values());
@@ -701,14 +787,39 @@ export class FirebaseService {
 
     async getPackageById(id: string): Promise<Package | null> {
         const doc = await this.db.collection("packages").doc(id).get();
-        return doc.exists ? (doc.data() as Package) : null;
+        if (!doc.exists) return null;
+        const data = { ...doc.data(), id: doc.data()?.id || doc.id } as Package;
+        const normalized = this.normalizeSubscriptionPackage(data);
+        if (!normalized) {
+            console.warn(`[SUBSCRIPTION_CAP] Invalid package duration for ${data.id}`);
+            return null;
+        }
+        return normalized;
+    }
+
+    async getPurchasablePackageById(id: string): Promise<Package | null> {
+        const pkg = await this.getPackageById(id);
+        if (!pkg || !isPurchasableSubscriptionPackage(pkg)) {
+            console.warn(`[SUBSCRIPTION_CAP] Blocked unavailable package ${id}`);
+            return null;
+        }
+        return pkg;
     }
 
     async createPackage(pkg: InsertPackage): Promise<Package> {
+        const normalizedPackage = this.normalizeSubscriptionPackage(pkg);
+        if (!normalizedPackage) {
+            throw new RangeError("Subscription package duration must be a positive whole number of days");
+        }
+        const isActive = pkg.isActive !== false;
+        if (!isSubscriptionPackageDurationAllowed(normalizedPackage.duration, isActive)) {
+            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_SUBSCRIPTION_DAYS} days`);
+        }
         const id = `pkg-${Date.now()}`;
         const newPackage: Package = {
             id,
-            ...pkg,
+            ...normalizedPackage,
+            isActive,
             createdAt: new Date().toISOString(),
         } as Package;
 
@@ -718,15 +829,40 @@ export class FirebaseService {
 
     async getAllPackages(): Promise<Package[]> {
         const snapshot = await this.db.collection("packages").get();
-        return snapshot.docs.map((doc) => doc.data() as Package);
+        return snapshot.docs.map((doc) => {
+            const data = doc.data();
+            return { ...data, id: data.id || doc.id } as Package;
+        });
     }
 
     async updatePackage(id: string, updates: Partial<Package>): Promise<Package | null> {
         const ref = this.db.collection("packages").doc(id);
         const doc = await ref.get();
         if (!doc.exists) return null;
-        await ref.update(updates);
-        return { ...doc.data(), ...updates } as Package;
+        const existing = { ...doc.data(), id: doc.data()?.id || doc.id } as Package;
+        const requestedDuration = Object.prototype.hasOwnProperty.call(updates, "duration")
+            ? updates.duration
+            : Object.prototype.hasOwnProperty.call(updates, "durationDays")
+                ? (updates as any).durationDays
+                : existing.duration ?? (existing as any).durationDays;
+        const duration = normalizeSubscriptionPackageDuration(requestedDuration);
+        if (duration === null) {
+            throw new RangeError("Subscription package duration must be a positive whole number of days");
+        }
+        const isActive = Object.prototype.hasOwnProperty.call(updates, "isActive")
+            ? updates.isActive === true
+            : existing.isActive !== false;
+        if (!isSubscriptionPackageDurationAllowed(duration, isActive)) {
+            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_SUBSCRIPTION_DAYS} days`);
+        }
+        const normalizedUpdates: Partial<Package> & { durationDays: number } = {
+            ...updates,
+            duration,
+            durationDays: duration,
+            isActive,
+        };
+        await ref.update(normalizedUpdates);
+        return { ...existing, ...normalizedUpdates } as Package;
     }
 
     async deletePackage(id: string): Promise<boolean> {
@@ -747,6 +883,84 @@ export class FirebaseService {
     async getPaymentById(id: string): Promise<Payment | null> {
         const doc = await this.db.collection("payments").doc(id).get();
         return doc.exists ? (doc.data() as Payment) : null;
+    }
+
+    async claimPaymentFulfillment(id: string): Promise<
+        | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
+        | { status: "fulfilled" }
+        | { status: "processing" }
+    > {
+        const ref = this.db.collection("payments").doc(id);
+        const now = Date.now();
+        const token = `FULFILL-${now}-${Math.random().toString(36).slice(2, 10)}`;
+        const staleAfterMs = 10 * 60 * 1000;
+
+        return this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            if (!doc.exists) throw new Error("Payment not found");
+            const payment = doc.data() as Payment;
+            if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") {
+                return { status: "fulfilled" as const };
+            }
+            const claimedAt = this.getDateMillis(payment.fulfillmentClaimedAt);
+            if (
+                payment.fulfillmentState === "processing" &&
+                claimedAt > 0 &&
+                now - claimedAt < staleAfterMs
+            ) {
+                return { status: "processing" as const };
+            }
+
+            transaction.update(ref, {
+                fulfillmentState: "processing",
+                fulfillmentClaimedAt: new Date(now).toISOString(),
+                fulfillmentClaimToken: token,
+            });
+            return {
+                status: "claimed" as const,
+                token,
+                previousState: payment.fulfillmentState,
+            };
+        });
+    }
+
+    async completePaymentFulfillment(
+        id: string,
+        token: string,
+        subscriptionId: string,
+    ): Promise<void> {
+        const ref = this.db.collection("payments").doc(id);
+        await this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            if (!doc.exists) throw new Error("Payment not found");
+            const payment = doc.data() as Payment;
+            if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") return;
+            if (
+                payment.fulfillmentState !== "processing" ||
+                payment.fulfillmentClaimToken !== token
+            ) {
+                throw new Error("Payment fulfillment claim was lost");
+            }
+            transaction.update(ref, {
+                fulfillmentState: "fulfilled",
+                fulfilledAt: new Date().toISOString(),
+                fulfilledSubscriptionId: subscriptionId,
+            });
+        });
+    }
+
+    async releasePaymentFulfillment(id: string, token: string): Promise<void> {
+        const ref = this.db.collection("payments").doc(id);
+        await this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            if (!doc.exists) return;
+            const payment = doc.data() as Payment;
+            if (
+                payment.fulfillmentState !== "processing" ||
+                payment.fulfillmentClaimToken !== token
+            ) return;
+            transaction.update(ref, { fulfillmentState: "failed" });
+        });
     }
 
     async createPayment(payment: InsertPayment): Promise<Payment> {
@@ -838,6 +1052,69 @@ export class FirebaseService {
 
         await this.db.collection("contact_events").doc(id).set(newEvent);
         return newEvent;
+    }
+
+    async createContactRequestWithCooldown(
+        key: string,
+        propertyNumber: string,
+        cooldownMs: number,
+        request: InsertRequest,
+        requestCountFromIP: number,
+        event: InsertContactEvent,
+    ): Promise<
+        | { accepted: false; remainingMs: number }
+        | { accepted: true; remainingMs: 0; request: Request; event: ContactEvent }
+    > {
+        const cooldownRef = this.db.collection("contact_cooldowns").doc(key);
+        const now = Date.now();
+        const timestamp = new Date(now).toISOString();
+        const requestId = `REQ-${now}-${Math.random().toString(36).slice(2, 8)}`;
+        const eventId = `CONTACT-${now}-${Math.random().toString(36).slice(2, 8)}`;
+        const requestRef = this.db.collection("requests").doc(requestId);
+        const eventRef = this.db.collection("contact_events").doc(eventId);
+
+        return this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(cooldownRef);
+            const lastAcceptedAt = doc.exists
+                ? this.getDateMillis(doc.data()?.lastAcceptedAt)
+                : 0;
+            const elapsed = now - lastAcceptedAt;
+            if (lastAcceptedAt > 0 && elapsed < cooldownMs) {
+                return {
+                    accepted: false,
+                    remainingMs: cooldownMs - elapsed,
+                } as const;
+            }
+
+            const newRequest: Request = {
+                id: requestId,
+                ...request,
+                requestCountFromIP,
+                timestamp,
+            } as Request;
+            const newEvent: ContactEvent = {
+                id: eventId,
+                ...event,
+                timestamp,
+            };
+
+            transaction.set(cooldownRef, {
+                propertyNumber,
+                lastAcceptedAt: now,
+                updatedAt: timestamp,
+                // Can be enabled as a Firestore TTL field; no raw IP or phone is stored.
+                expiresAt: new Date(now + cooldownMs * 2),
+            });
+            transaction.set(requestRef, newRequest);
+            transaction.set(eventRef, newEvent);
+
+            return {
+                accepted: true,
+                remainingMs: 0,
+                request: newRequest,
+                event: newEvent,
+            } as const;
+        });
     }
 
     async getContactEvents(): Promise<ContactEvent[]> {
@@ -1683,8 +1960,9 @@ export class FirebaseService {
     }
 
     async updateSubscription(id: string, updates: Partial<Subscription>): Promise<void> {
+        const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
         await this.db.collection("subscriptions").doc(id).update({
-            ...updates,
+            ...normalizedUpdates,
             updatedAt: new Date().toISOString()
         });
     }
@@ -1717,8 +1995,11 @@ export class FirebaseService {
             const subscriptionRef = this.db
                 .collection("subscriptions")
                 .doc(update.subscriptionId);
+            const normalizedSubscriptionUpdates = this.enforceSubscriptionDurationLimit(
+                update.subscriptionUpdates,
+            );
             batch.update(subscriptionRef, {
-                ...update.subscriptionUpdates,
+                ...normalizedSubscriptionUpdates,
                 updatedAt,
             });
 

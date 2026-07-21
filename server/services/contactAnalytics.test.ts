@@ -11,6 +11,7 @@ test("contact analytics combines legacy requests without double counting accepte
       id: "event-1",
       propertyNumber: "14006",
       timestamp: "2026-07-10T10:00:00.000Z",
+      clientPhone: "512345678",
       visitorKey: "owner:1",
       actorType: "owner",
       deviceType: "mobile",
@@ -43,6 +44,7 @@ test("contact analytics combines legacy requests without double counting accepte
       propertyNumber: "15000",
       requestCode: "REQ-OLD",
       timestamp: "2026-07-09T08:00:00.000Z",
+      clientPhone: "598765432",
       ipAddress: "10.0.0.2",
       deviceType: "desktop",
       dayOfWeek: "الأربعاء",
@@ -67,6 +69,9 @@ test("contact analytics combines legacy requests without double counting accepte
   assert.equal(result.outcomes.cooldown, 1);
   assert.equal(result.topProperties[0].propertyNumber, "14006");
   assert.equal(result.topProperties[0].attempts, 2);
+  assert.equal(result.recentEvents[0].clientPhone, null);
+  assert.equal(result.recentEvents[1].clientPhone, "512345678");
+  assert.equal(result.recentEvents[2].clientPhone, "598765432");
 });
 test("contact analytics applies the selected date range and never returns visitor keys", () => {
   const result = buildContactAnalytics({
@@ -103,4 +108,5 @@ test("contact analytics applies the selected date range and never returns visito
   assert.equal(result.daily.length, 7);
   assert.equal("visitorKey" in result.recentEvents[0], false);
   assert.equal(JSON.stringify(result).includes("10.0.0.3"), false);
+  assert.equal(result.recentEvents[0].clientPhone, null);
 });

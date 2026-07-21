@@ -11,6 +11,7 @@ type NormalizedContactEvent = {
   propertyNumber: string;
   timestamp: string;
   timestampMs: number;
+  clientPhone?: string;
   visitorKey: string;
   actorType: ContactEvent["actorType"] | "legacy";
   deviceType: ContactEvent["deviceType"];
@@ -57,6 +58,7 @@ function normalizeContactEvents(
       propertyNumber: request.propertyNumber,
       timestamp: request.timestamp,
       timestampMs: parseTimestamp(request.timestamp),
+      clientPhone: request.clientPhone,
       visitorKey: `legacy:${request.ipAddress || request.id}`,
       actorType: "legacy",
       deviceType: request.deviceType || "desktop",
@@ -141,7 +143,7 @@ export function buildContactAnalytics({
         lastContactAt: stats.lastContactAt,
       };
     })
-    .sort((a, b) => b.attempts - a.attempts || b.accepted - a.accepted)
+    .sort((a, b) => b.accepted - a.accepted || b.attempts - a.attempts)
     .slice(0, 50);
 
   const trendDays = days === null ? 30 : Math.min(days, 90);
@@ -166,6 +168,7 @@ export function buildContactAnalytics({
       propertyNumber: event.propertyNumber,
       propertyName: property?.name || `عقار ${event.propertyNumber}`,
       timestamp: event.timestamp,
+      clientPhone: event.clientPhone || null,
       deviceType: event.deviceType,
       outcome: event.outcome,
       requestCode: event.requestCode || null,

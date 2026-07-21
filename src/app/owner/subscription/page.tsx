@@ -613,11 +613,15 @@ export default function OwnerSubscriptionPage() {
   const hasActiveCurrentSubscription =
     !subscription?.isPlaceholder &&
     isSubscriptionStatusActive(subscription?.status, isExpired);
-  const isNearExpiry = !isSuspended && remainingDays >= 0 && remainingDays <= 10;
-  const canExtend = !isSuspended && (
-    subscription?.endDate
-      ? canExtendSubscription(subscription.endDate, subscription?.status)
-      : true
+  const isNearExpiry = hasActiveCurrentSubscription
+    && !isSuspended
+    && remainingDays >= 0
+    && remainingDays <= 10;
+  const canExtend = Boolean(
+    hasActiveCurrentSubscription &&
+    !isSuspended &&
+    subscription?.endDate &&
+    canExtendSubscription(subscription.endDate, subscription?.status),
   );
 
   // Subscription duration & status

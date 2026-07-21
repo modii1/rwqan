@@ -164,6 +164,7 @@ export const requestSchema = z.object({
   propertyNumber: z.string(),
   requestCode: z.string(), // كود قصير
   timestamp: z.string(),
+  clientPhone: z.string().optional(),
   ipAddress: z.string(), // IP العميل
   deviceType: z.enum(['mobile', 'desktop', 'tablet']).default('desktop'), // نوع الجهاز
   dayOfWeek: z.string(), // يوم الأسبوع (الجمعة، السبت، إلخ)
@@ -179,6 +180,7 @@ export const contactEventSchema = z.object({
   id: z.string(),
   propertyNumber: z.string(),
   timestamp: z.string(),
+  clientPhone: z.string().optional(),
   visitorKey: z.string(),
   actorType: z.enum(["owner", "admin", "anonymous"]),
   deviceType: z.enum(["mobile", "desktop", "tablet"]).default("desktop"),
@@ -227,6 +229,11 @@ export const paymentSchema = z.object({
   autoMatched: z.union([z.boolean(), z.string()]).optional(),
   createdAt: z.string().optional(),
   completedAt: z.string().optional(),
+  fulfilledAt: z.string().optional(),
+  fulfilledSubscriptionId: z.string().optional(),
+  fulfillmentState: z.enum(["processing", "fulfilled", "failed"]).optional(),
+  fulfillmentClaimedAt: z.string().optional(),
+  fulfillmentClaimToken: z.string().optional(),
   // بيانات الاشتراك المعلق (يتم حفظها فقط عند نجاح الدفع)
   action: z.enum(['new', 'extend', 'upgrade', 'addon']).optional(),
   pendingStartDate: z.string().optional(),

@@ -9,7 +9,27 @@ import {
 } from "./dateUtils";
 import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
 
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["نشط", "نشط مجاني", "ساري", "active"]);
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set([
+  "نشط",
+  "نشط مجاني",
+  "ساري",
+  "ينتهي قريباً",
+  "قريب الانتهاء",
+  "active",
+  "free_active",
+  "expiring",
+]);
+
+type SubscriptionActionValidation =
+  | { ok: true }
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      nextAction: string;
+      nextUrl: string;
+      actionLabel: string;
+    };
 
 function parsePropertyNumberList(value: unknown): string[] {
   if (!value) return [];
@@ -52,10 +72,21 @@ export function hasPriorSubscription(subscription?: Subscription | null): boolea
   return !!subscription?.endDate;
 }
 
+export function isLegacyPaymentFulfillment(
+  payment: Pick<Payment, "id" | "fulfilledAt" | "fulfillmentState">,
+  subscription?: Pick<Subscription, "paymentId"> | null,
+): boolean {
+  return (
+    !payment.fulfilledAt &&
+    payment.fulfillmentState === undefined &&
+    subscription?.paymentId === payment.id
+  );
+}
+
 export function validateSubscriptionAction(
   action: unknown,
   currentSubscription?: Subscription | null,
-): { ok: true } | { ok: false; status: number; error: string; nextAction: string; nextUrl: string; actionLabel: string } {
+): SubscriptionActionValidation {
   if (action !== "extend" && action !== "upgrade") {
     return {
       ok: false,
@@ -93,6 +124,34 @@ export function validateSubscriptionAction(
   }
 
   return { ok: true };
+}
+
+/**
+ * Validates the action before a charge is created. A new activation is only
+ * valid when there is no current active subscription; active subscriptions
+ * must use upgrade or the guarded ten-day extension flow.
+ */
+export function validatePaymentSubscriptionAction(
+  action: unknown,
+  currentSubscription?: Subscription | null,
+): SubscriptionActionValidation {
+  const normalizedAction = action === undefined || action === null || action === ""
+    ? "new"
+    : action;
+
+  if (normalizedAction === "new") {
+    if (!isActiveSubscription(currentSubscription)) return { ok: true };
+    return {
+      ok: false,
+      status: 400,
+      error: "لديك اشتراك نشط بالفعل. اختر تغيير الباقة، أو انتظر نافذة التمديد في آخر 10 أيام.",
+      nextAction: "اختر تغيير الباقة أو عد لاحقاً للتمديد.",
+      nextUrl: "/owner/subscription",
+      actionLabel: "العودة للاشتراك",
+    };
+  }
+
+  return validateSubscriptionAction(normalizedAction, currentSubscription);
 }
 
 export function calculateActionDates(
@@ -179,7 +238,7 @@ export function splitLinkedPropertiesByPackageLimit(
   };
 }
 
-async function syncMultiPropertyRecord(params: {
+export async function syncMultiPropertyRecord(params: {
   mainPropertyNumber: string;
   linkedProperties: string[];
   packageId: string;
@@ -251,23 +310,74 @@ export async function activateVerifiedPaymentSubscription(params: {
   const { payment, property, pkg, receiptUrl } = params;
   const mainPropertyNumber = payment.propertyNumber;
   const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
+  const fallbackStartDate = typeof params.startDate === "string"
+    ? params.startDate
+    : params.startDate.toISOString();
+  const fallbackEndDate = typeof params.endDate === "string"
+    ? params.endDate
+    : params.endDate.toISOString();
 
-  let linkedProperties = normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber);
-  if (linkedProperties.length === 0) {
-    linkedProperties = await resolveExistingLinkedProperties(mainPropertyNumber, currentSubscription);
+  if (payment.fulfilledAt) {
+    return {
+      startDate: currentSubscription?.startDate || fallbackStartDate,
+      endDate: currentSubscription?.endDate || fallbackEndDate,
+      linkedProperties: currentSubscription?.linkedProperties || [],
+      unlinkedProperties: [],
+      subscriptionType: currentSubscription?.subscriptionType || currentSubscription?.packageType || "عادي",
+    };
   }
 
-  const limited = splitLinkedPropertiesByPackageLimit(linkedProperties, pkg);
-  const totalProperties = limited.kept.length + 1;
-  const totalAmount = Number(params.finalAmount ?? payment.finalAmount ?? payment.amount ?? pkg.price ?? 0);
-  const pricePerProperty = totalProperties > 0 ? totalAmount / totalProperties : totalAmount;
-  const isPremium = isPremiumSubscriptionType(pkg.type) || pricePerProperty > 0;
-  const subscriptionType = isPremium ? "مميز" : "عادي";
-  const startDate = typeof params.startDate === "string" ? params.startDate : formatDateRiyadh(params.startDate);
-  const endDate = typeof params.endDate === "string" ? params.endDate : formatDateRiyadh(params.endDate);
+  const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(payment.id);
+  if (fulfillmentClaim.status === "fulfilled") {
+    return {
+      startDate: currentSubscription?.startDate || fallbackStartDate,
+      endDate: currentSubscription?.endDate || fallbackEndDate,
+      linkedProperties: currentSubscription?.linkedProperties || [],
+      unlinkedProperties: [],
+      subscriptionType: currentSubscription?.subscriptionType || currentSubscription?.packageType || "عادي",
+    };
+  }
+  if (fulfillmentClaim.status === "processing") {
+    throw new Error("Payment fulfillment is already in progress");
+  }
+  const fulfillmentToken = fulfillmentClaim.token;
+  const legacyFulfillment =
+    fulfillmentClaim.previousState === undefined &&
+    !payment.fulfilledAt &&
+    currentSubscription?.paymentId === payment.id &&
+    normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber).length === 0 &&
+    (currentSubscription.linkedProperties?.length || 0) === 0;
 
-  const touchedProperties: string[] = [];
   try {
+    if (legacyFulfillment && currentSubscription) {
+      await firebaseService.completePaymentFulfillment(
+        payment.id,
+        fulfillmentToken,
+        currentSubscription.id || `SUB-${mainPropertyNumber}`,
+      );
+      return {
+        startDate: currentSubscription.startDate || fallbackStartDate,
+        endDate: currentSubscription.endDate || fallbackEndDate,
+        linkedProperties: currentSubscription.linkedProperties || [],
+        unlinkedProperties: [],
+        subscriptionType: currentSubscription.subscriptionType || currentSubscription.packageType || "عادي",
+      };
+    }
+
+    let linkedProperties = normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber);
+    if (linkedProperties.length === 0) {
+      linkedProperties = await resolveExistingLinkedProperties(mainPropertyNumber, currentSubscription);
+    }
+
+    const limited = splitLinkedPropertiesByPackageLimit(linkedProperties, pkg);
+    const totalProperties = limited.kept.length + 1;
+    const totalAmount = Number(params.finalAmount ?? payment.finalAmount ?? payment.amount ?? pkg.price ?? 0);
+    const pricePerProperty = totalProperties > 0 ? totalAmount / totalProperties : totalAmount;
+    const isPremium = isPremiumSubscriptionType(pkg.type) || pricePerProperty > 0;
+    const subscriptionType = isPremium ? "مميز" : "عادي";
+    const startDate = typeof params.startDate === "string" ? params.startDate : formatDateRiyadh(params.startDate);
+    const endDate = typeof params.endDate === "string" ? params.endDate : formatDateRiyadh(params.endDate);
+
     await firebaseService.addSubscriptionToSheet(
       mainPropertyNumber,
       {
@@ -284,7 +394,6 @@ export async function activateVerifiedPaymentSubscription(params: {
       property,
       receiptUrl ?? payment.receiptUrl ?? "",
     );
-    touchedProperties.push(mainPropertyNumber);
     await firebaseService.updateVerificationStatus(mainPropertyNumber, "approved");
 
     for (const linkedPropertyNumber of limited.kept) {
@@ -296,7 +405,6 @@ export async function activateVerifiedPaymentSubscription(params: {
         paymentId: payment.id,
         packageId: pkg.id,
       });
-      touchedProperties.push(linkedPropertyNumber);
     }
 
     for (const unlinkedPropertyNumber of limited.unlinked) {
@@ -322,20 +430,25 @@ export async function activateVerifiedPaymentSubscription(params: {
       endDate,
       paymentId: payment.id,
     });
+
+    await firebaseService.completePaymentFulfillment(
+      payment.id,
+      fulfillmentToken,
+      `SUB-${mainPropertyNumber}`,
+    );
+
+    return {
+      startDate,
+      endDate,
+      linkedProperties: limited.kept,
+      unlinkedProperties: limited.unlinked,
+      subscriptionType,
+    };
   } catch (error) {
-    for (const propertyNumber of touchedProperties.reverse()) {
-      await firebaseService.cancelSubscription(propertyNumber, "فشل تفعيل العقارات المرتبطة - تم التراجع عن العملية");
-    }
+    await firebaseService.releasePaymentFulfillment(payment.id, fulfillmentToken)
+      .catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
     throw error;
   }
-
-  return {
-    startDate,
-    endDate,
-    linkedProperties: limited.kept,
-    unlinkedProperties: limited.unlinked,
-    subscriptionType,
-  };
 }
 
 export async function queueVerifiedNewPropertyForAdminApproval(params: {

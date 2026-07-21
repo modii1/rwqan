@@ -89,7 +89,7 @@ export class SubscriptionService {
       endDate = calculateExtensionEndDate(startDate, pkg.duration);
     } else {
       startDate = params.startDate ?? today;
-      endDate = calculateSubscriptionEndDate(null, pkg.duration);
+      endDate = calculateSubscriptionEndDate(startDate, pkg.duration);
     }
 
     const isMulti = pkg.propertyCount && pkg.propertyCount > 1;
@@ -355,6 +355,10 @@ export class SubscriptionService {
 
   async getPackageById(id: string): Promise<Package | null> {
     return firebaseService.getPackageById(id);
+  }
+
+  async getPurchasablePackageById(id: string): Promise<Package | null> {
+    return firebaseService.getPurchasablePackageById(id);
   }
 }
 

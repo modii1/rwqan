@@ -249,7 +249,7 @@ router.post("/api/payment/calculate", async (req, res) => {
     }
 
     // جلب بيانات الباقة
-    const pkg = await subscriptionService.getPackageById(packageId);
+    const pkg = await subscriptionService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
