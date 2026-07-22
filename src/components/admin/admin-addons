@@ -1,0 +1,26 @@
+import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+
+export default function AdminAddonsPage() {
+  const { data = [], refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/pending-addons"],
+  });
+
+  const approve = async (id: string) => {
+    await apiRequest("POST", "/api/admin/addons/approve", { propertyAddOnId: id });
+    refetch();
+  };
+
+  return (
+    <div className="p-6 space-y-3">
+      {data.map(a => (
+        <div key={a.id} className="border p-3">
+          <div>{a.propertyNumber}</div>
+          <Button onClick={() => approve(a.id)}>موافقة</Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+

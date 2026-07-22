@@ -6,7 +6,7 @@
  * - جميع التواريخ تُخزن كـ epoch milliseconds
  * - لا تحويلات يدوية للتوقيت
  */
-import { MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS } from "../../shared/core/subscriptions/package-policy";
+import { MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS } from "../../shared/subscriptionPackagePolicy";
 
 /**
  * الحصول على الوقت الحالي كـ epoch milliseconds

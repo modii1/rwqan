@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { PriceDisplay } from "@/components/core/price-display";
+import { PriceDisplay } from "@/components/price-display";
 import { formatDiscount } from "@/lib/currency";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -26,7 +26,7 @@ import {
   formatDate as formatSubDate,
   canExtendSubscription,
 } from "@/lib/subscription-utils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType, isSubscriptionStatusActive } from "@shared/core/subscriptions/type";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType, isSubscriptionStatusActive } from "@shared/subscriptionType";
 import {
   OwnerMobileNavigation,
   OwnerPageHeader,

@@ -9,7 +9,7 @@ import { Loader2, Plus, Trash2, Pencil, Search, Filter, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Th, Td } from "../components/Table";
-import { PriceDisplay } from "@/components/core/price-display";
+import { PriceDisplay } from "@/components/price-display";
 
 type Refund = {
   id: string;

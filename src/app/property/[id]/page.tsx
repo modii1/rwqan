@@ -1,6 +1,6 @@
 import { Metadata } from "next";
-import PropertyDetailsClient, { PropertyDetails } from "@/components/properties/property-details-client";
-import { getEffectiveSubscriptionType } from "@shared/core/subscriptions/type";
+import PropertyDetailsClient, { PropertyDetails } from "@/components/property-details-client";
+import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
 import { isPublicPropertyPremium } from "@/lib/public-subscription";
 import { buildServerUrl } from "@/lib/server-fetch";
 

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
-import PropertiesClient from "@/components/properties/properties-client";
+import PropertiesClient from "@/components/properties-client";
 
 interface Props {
     searchParams: Promise<{ [key: string]: string | string[] | undefined }>;

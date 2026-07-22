@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { firebaseService } from "../../firebaseService";
 import { propertyService } from "../../services";
-import { isSubscriptionStatusActive } from "../../../shared/core/subscriptions/type";
+import { isSubscriptionStatusActive } from "../../../shared/subscriptionType";
 import { calculateRemainingDays } from "../../utils/dateUtils";
 
 const router = Router();

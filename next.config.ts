@@ -6,9 +6,6 @@ const nextConfig: NextConfig = {
     experimental: {
         scrollRestoration: true,
     },
-    turbopack: {
-        root: process.cwd(),
-    },
     // Image optimization
     images: {
         unoptimized: true,

@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دليل المطور الشامل - نظام روقـان للعقارات</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+      font-size: 14px;
+      line-height: 1.8;
+      color: #333;
+      background: linear-gradient(135deg, #fafaf5 0%, #f5f0e5 100%);
+      padding: 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+      direction: rtl;
+      text-align: right;
+    }
+
+    h1 {
+      color: #b88d2b;
+      font-size: 32px;
+      font-weight: 700;
+      border-bottom: 4px solid #b88d2b;
+      padding-bottom: 15px;
+      margin-top: 50px;
+      margin-bottom: 25px;
+      background: linear-gradient(90deg, transparent 0%, #fffdf0 50%, transparent 100%);
+      padding: 20px;
+      border-radius: 10px;
+    }
+
+    h2 {
+      color: #8b6914;
+      font-size: 24px;
+      font-weight: 600;
+      border-bottom: 3px solid #e0c97b;
+      padding-bottom: 10px;
+      margin-top: 40px;
+      margin-bottom: 20px;
+      background: linear-gradient(90deg, transparent 0%, #fff8e5 50%, transparent 100%);
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    h3 {
+      color: #4a3b2a;
+      font-size: 20px;
+      font-weight: 600;
+      margin-top: 30px;
+      margin-bottom: 15px;
+      border-right: 4px solid #b88d2b;
+      padding-right: 15px;
+    }
+
+    h4 {
+      color: #5a4a3a;
+      font-size: 17px;
+      font-weight: 600;
+      margin-top: 25px;
+      margin-bottom: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13px;
+      box-shadow: 0 4px 15px rgba(184, 141, 43, 0.15);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    th {
+      background: linear-gradient(135deg, #b88d2b 0%, #d4a035 100%);
+      color: white;
+      padding: 15px 20px;
+      text-align: right;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    td {
+      border: 1px solid #e0c97b;
+      padding: 12px 18px;
+      text-align: right;
+      background: white;
+    }
+
+    tr:nth-child(even) td {
+      background-color: #fffdf0;
+    }
+
+    tr:hover td {
+      background-color: #fff8e5;
+      transition: background 0.3s;
+    }
+
+    code {
+      background: linear-gradient(135deg, #f5f0e0 0%, #ebe5d5 100%);
+      color: #8b6914;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      direction: ltr;
+      display: inline-block;
+      border: 1px solid #e0d5c0;
+    }
+
+    pre {
+      background: linear-gradient(135deg, #2d2a26 0%, #3d3a36 100%);
+      color: #f0e6d0;
+      padding: 20px 25px;
+      border-radius: 12px;
+      overflow-x: auto;
+      direction: ltr;
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.6;
+      border-right: 5px solid #b88d2b;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      margin: 20px 0;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      border: none;
+    }
+
+    blockquote {
+      border-right: 5px solid #b88d2b;
+      border-left: none;
+      padding: 20px 25px;
+      margin: 25px 0;
+      background: linear-gradient(135deg, #fffdf0 0%, #fff8e5 100%);
+      border-radius: 0 12px 12px 0;
+      box-shadow: 0 2px 10px rgba(184, 141, 43, 0.1);
+    }
+
+    ul, ol {
+      padding-right: 30px;
+      padding-left: 0;
+    }
+
+    li {
+      margin: 10px 0;
+      position: relative;
+    }
+
+    ul li::marker {
+      color: #b88d2b;
+    }
+
+    a {
+      color: #b88d2b;
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.3s;
+    }
+
+    a:hover {
+      color: #8b6914;
+      text-decoration: underline;
+    }
+
+    hr {
+      border: none;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, #e0c97b 50%, transparent 100%);
+      margin: 40px 0;
+    }
+
+    strong {
+      color: #4a3b2a;
+      font-weight: 600;
+    }
+
+    /* Header styling */
+    .header-banner {
+      background: linear-gradient(135deg, #b88d2b 0%, #d4a035 50%, #b88d2b 100%);
+      color: white;
+      padding: 30px 40px;
+      border-radius: 15px;
+      margin-bottom: 40px;
+      text-align: center;
+      box-shadow: 0 6px 25px rgba(184, 141, 43, 0.3);
+    }
+
+    .header-banner h1 {
+      color: white;
+      border: none;
+      margin: 0;
+      padding: 0;
+      background: none;
+      font-size: 36px;
+    }
+
+    /* Print styles */
+    @media print {
+      body {
+        background: white;
+        padding: 20px;
+        font-size: 11px;
+      }
+      
+      h1, h2, h3 {
+        page-break-after: avoid;
+      }
+      
+      pre, table, blockquote {
+        page-break-inside: avoid;
+      }
+      
+      .header-banner {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      table th {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+
+    @page {
+      margin: 1.5cm;
+      size: A4;
+    }
+
+    /* TOC styling */
+    #جدول-المحتويات + ol,
+    #جدول-المحتويات + ul {
+      background: #fffdf0;
+      padding: 25px 40px;
+      border-radius: 12px;
+      border: 2px solid #e0c97b;
+      box-shadow: 0 4px 15px rgba(184, 141, 43, 0.1);
+    }
+
+    /* Emoji replacement */
+    h1:first-of-type {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 15px;
+    }
+
+    /* Info boxes */
+    p strong:first-child {
+      background: linear-gradient(135deg, #b88d2b 0%, #d4a035 100%);
+      color: white;
+      padding: 3px 10px;
+      border-radius: 5px;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-banner">
+    <h1 style="font-size: 42px; margin-bottom: 10px;">🏡 دليل المطور الشامل</h1>
+    <p style="font-size: 18px; opacity: 0.9; margin: 0;">نظام روقـان لإدارة العقارات</p>
+    <p style="font-size: 14px; opacity: 0.7; margin-top: 10px;">إصدار 4.1.19 | يناير 2026</p>
+  </div>
+  
+  <h1>دليل المطور الشامل - نظام روقـان للعقارات 🏡</h1>
+<hr>
+<h2>جدول المحتويات</h2>
+<ol>
+<li><a href="#%D9%86%D8%B8%D8%B1%D8%A9-%D8%B9%D8%A7%D9%85%D8%A9-%D8%B9%D9%84%D9%89-%D8%A7%D9%84%D9%85%D8%B4%D8%B1%D9%88%D8%B9">نظرة عامة على المشروع</a></li>
+<li><a href="#%D9%87%D9%8A%D9%83%D9%84-%D8%A7%D9%84%D9%85%D8%AC%D9%84%D8%AF%D8%A7%D8%AA-%D9%88%D8%A7%D9%84%D9%85%D9%84%D9%81%D8%A7%D8%AA">هيكل المجلدات والملفات</a></li>
+<li><a href="#%D8%A7%D9%84%D8%AA%D9%82%D9%86%D9%8A%D8%A7%D8%AA-%D8%A7%D9%84%D9%85%D8%B3%D8%AA%D8%AE%D8%AF%D9%85%D8%A9">التقنيات المستخدمة</a></li>
+<li><a href="#%D8%AA%D8%B4%D8%BA%D9%8A%D9%84-%D8%A7%D9%84%D9%85%D8%B4%D8%B1%D9%88%D8%B9">تشغيل المشروع</a></li>
+<li><a href="#%D8%A7%D9%84%D8%B5%D9%81%D8%AD%D8%A7%D8%AA-%D9%88%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D8%B1%D8%A7%D8%AA">الصفحات والمسارات</a></li>
+<li><a href="#%D9%88%D8%A7%D8%AC%D9%87%D8%A7%D8%AA-api">واجهات API</a></li>
+<li><a href="#%D9%82%D8%A7%D8%B9%D8%AF%D8%A9-%D8%A7%D9%84%D8%A8%D9%8A%D8%A7%D9%86%D8%A7%D8%AA-google-sheets">قاعدة البيانات (Google Sheets)</a></li>
+<li><a href="#%D9%86%D8%B8%D8%A7%D9%85-%D8%A7%D9%84%D8%AF%D9%81%D8%B9-paymob">نظام الدفع (Paymob)</a></li>
+<li><a href="#%D9%86%D8%B8%D8%A7%D9%85-%D8%A7%D9%84%D8%A7%D8%B4%D8%AA%D8%B1%D8%A7%D9%83%D8%A7%D8%AA">نظام الاشتراكات</a></li>
+<li><a href="#%D8%AA%D8%AE%D8%B2%D9%8A%D9%86-%D8%A7%D9%84%D8%B5%D9%88%D8%B1-r2">تخزين الصور (R2)</a></li>
+<li><a href="#%D8%A5%D8%B4%D8%B9%D8%A7%D8%B1%D8%A7%D8%AA-whatsapp">إشعارات WhatsApp</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%AA%D8%BA%D9%8A%D9%8A%D8%B1-%D8%A7%D9%84%D8%AA%D8%B5%D9%85%D9%8A%D9%85">دليل تغيير التصميم</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%A5%D8%B6%D8%A7%D9%81%D8%A9-%D8%B5%D9%81%D8%AD%D8%A7%D8%AA-%D8%AC%D8%AF%D9%8A%D8%AF%D8%A9">دليل إضافة صفحات جديدة</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%AA%D8%B9%D8%AF%D9%8A%D9%84-%D9%84%D9%88%D8%AD%D8%A9-%D8%A7%D9%84%D8%A5%D8%AF%D8%A7%D8%B1%D8%A9">دليل تعديل لوحة الإدارة</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%AA%D8%B9%D8%AF%D9%8A%D9%84-%D9%84%D9%88%D8%AD%D8%A9-%D8%A7%D9%84%D9%85%D8%A7%D9%84%D9%83">دليل تعديل لوحة المالك</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%B5%D9%81%D8%AD%D8%A9-%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1%D8%A7%D8%AA">دليل صفحة العقارات</a></li>
+<li><a href="#%D8%AF%D9%84%D9%8A%D9%84-%D8%B5%D9%81%D8%AD%D8%A9-%D8%AA%D9%81%D8%A7%D8%B5%D9%8A%D9%84-%D8%A7%D9%84%D8%B9%D9%82%D8%A7%D8%B1">دليل صفحة تفاصيل العقار</a></li>
+<li><a href="#%D8%A7%D9%84%D9%85%D8%AA%D8%BA%D9%8A%D8%B1%D8%A7%D8%AA-%D9%88%D8%A7%D9%84%D8%A5%D8%B9%D8%AF%D8%A7%D8%AF%D8%A7%D8%AA">المتغيرات والإعدادات</a></li>
+<li><a href="#%D8%A7%D8%B3%D8%AA%D9%83%D8%B4%D8%A7%D9%81-%D8%A7%D9%84%D8%A3%D8%AE%D8%B7%D8%A7%D8%A1">استكشاف الأخطاء</a></li>
+</ol>
+<hr>
+<h2>نظرة عامة على المشروع</h2>
+<h3>ما هو روقـان؟</h3>
+<p>روقـان هو نظام إدارة عقارات شامل للشاليهات والاستراحات في منطقة القصيم بالسعودية. يوفر:</p>
+<ul>
+<li><strong>عرض العقارات</strong>: صفحة رئيسية لعرض جميع العقارات مع فلاتر ذكية</li>
+<li><strong>نظام اشتراكات</strong>: باقات مجانية ومدفوعة (مميز/موثوق)</li>
+<li><strong>لوحة إدارة</strong>: للتحكم في العقارات، الدفعات، الاشتراكات</li>
+<li><strong>لوحة مالك</strong>: لإدارة عقاره وصوره واشتراكه</li>
+<li><strong>نظام دفع</strong>: Paymob للبطاقات وApple Pay + تحويل بنكي</li>
+<li><strong>تحقق ذكي</strong>: فحص إيصالات التحويل البنكي بالذكاء الاصطناعي</li>
+</ul>
+<h3>التقنيات الرئيسية</h3>
+<table>
+<thead>
+<tr>
+<th>الجانب</th>
+<th>التقنية</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Frontend</td>
+<td>React + TypeScript + Vite</td>
+</tr>
+<tr>
+<td>Styling</td>
+<td>Tailwind CSS + shadcn/ui</td>
+</tr>
+<tr>
+<td>Backend</td>
+<td>Express.js + TypeScript</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>Google Sheets</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>Cloudflare R2</td>
+</tr>
+<tr>
+<td>Payments</td>
+<td>Paymob</td>
+</tr>
+<tr>
+<td>Notifications</td>
+<td>WhatsApp Business API</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>هيكل المجلدات والملفات</h2>
+<pre><code>workspace/
+├── client/                      # Frontend (React)
+│   └── src/
+│       ├── App.tsx              # ⭐ التطبيق الرئيسي + المسارات
+│       ├── main.tsx             # نقطة الدخول
+│       ├── index.css            # ⭐ الألوان والتصميم
+│       ├── assets/              # الصور والأيقونات
+│       │   ├── logo-icon.png    # شعار صغير
+│       │   └── logo-full.png    # شعار كامل
+│       ├── components/          # المكونات
+│       │   ├── ui/              # مكونات shadcn
+│       │   │   ├── button.tsx
+│       │   │   ├── card.tsx
+│       │   │   ├── dialog.tsx
+│       │   │   └── ...
+│       │   ├── price-display.tsx
+│       │   └── ai-receipt-scanner.tsx
+│       ├── hooks/               # React Hooks
+│       │   ├── use-session.ts   # ⭐ جلسة المالك
+│       │   ├── use-toast.ts     # الإشعارات
+│       │   └── use-analytics.tsx
+│       ├── lib/                 # دوال مساعدة
+│       │   ├── queryClient.ts   # إعدادات React Query
+│       │   ├── utils.ts         # cn() وغيرها
+│       │   ├── arabicSearch.ts  # بحث عربي ذكي
+│       │   ├── dateUtils.ts     # التواريخ
+│       │   └── subscription-utils.ts
+│       └── pages/               # ⭐ صفحات التطبيق
+│           ├── properties.tsx   # ⭐ الصفحة الرئيسية
+│           ├── property-details.tsx # تفاصيل العقار
+│           ├── owner-login.tsx  # تسجيل دخول المالك
+│           ├── owner-dashboard.tsx # ⭐ لوحة المالك
+│           ├── owner-subscription.tsx # اشتراك المالك
+│           ├── owner-images.tsx # صور المالك
+│           ├── subscription.tsx # صفحة الاشتراك
+│           ├── register.tsx     # تسجيل عقار جديد
+│           ├── blog.tsx         # المدونة
+│           ├── blog-post.tsx    # مقال المدونة
+│           └── admin/           # ⭐ لوحة الإدارة
+│               ├── index.tsx    # الصفحة الرئيسية
+│               └── sections/    # أقسام اللوحة
+│                   ├── properties.tsx   # العقارات
+│                   ├── payments.tsx     # الدفعات
+│                   ├── subscriptions.tsx # الاشتراكات
+│                   ├── packages.tsx     # الباقات
+│                   ├── discounts.tsx    # الخصومات
+│                   ├── verification.tsx # التحقق
+│                   ├── settings.tsx     # الإعدادات
+│                   ├── bank-accounts.tsx # الحسابات البنكية
+│                   ├── feature-flags.tsx # Feature Flags
+│                   └── ...
+├── server/                      # Backend (Express)
+│   ├── index.ts                 # ⭐ نقطة الدخول
+│   ├── routes.ts                # ⭐⭐ جميع API endpoints
+│   ├── googleSheets.ts          # ⭐⭐ التعامل مع Google Sheets
+│   ├── storage.ts               # تخزين في الذاكرة
+│   ├── paymob.ts                # ⭐ نظام الدفع
+│   ├── whatsapp.ts              # ⭐ إشعارات WhatsApp
+│   ├── aiReceiptScanner.ts      # ⭐ فحص الإيصالات بالذكاء الاصطناعي
+│   ├── ocrService.ts            # خدمة OCR
+│   ├── autoMatchService.ts      # مطابقة تلقائية
+│   ├── scheduler.ts             # المهام المجدولة
+│   ├── dateUtils.ts             # دوال التواريخ (التوقيت السعودي)
+│   ├── googleDrive.ts           # Google Drive
+│   └── vite.ts                  # إعدادات Vite
+├── shared/                      # مشترك بين Frontend/Backend
+│   └── schema.ts                # ⭐⭐ أنواع البيانات (Zod schemas)
+├── package.json                 # التبعيات
+├── tailwind.config.ts           # إعدادات Tailwind
+├── vite.config.ts               # إعدادات Vite
+├── tsconfig.json                # إعدادات TypeScript
+└── replit.md                    # ملخص المشروع
+</code></pre>
+<h3>الملفات الأهم (⭐)</h3>
+<table>
+<thead>
+<tr>
+<th>الملف</th>
+<th>الوظيفة</th>
+<th>متى تعدله</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>client/src/App.tsx</code></td>
+<td>المسارات + Header + Footer</td>
+<td>إضافة صفحة جديدة</td>
+</tr>
+<tr>
+<td><code>client/src/index.css</code></td>
+<td>الألوان + التصميم</td>
+<td>تغيير الألوان/الخطوط</td>
+</tr>
+<tr>
+<td><code>client/src/pages/properties.tsx</code></td>
+<td>الصفحة الرئيسية</td>
+<td>تعديل عرض العقارات</td>
+</tr>
+<tr>
+<td><code>client/src/pages/admin/index.tsx</code></td>
+<td>لوحة الإدارة</td>
+<td>إضافة قسم جديد</td>
+</tr>
+<tr>
+<td><code>server/routes.ts</code></td>
+<td>جميع APIs</td>
+<td>إضافة endpoint جديد</td>
+</tr>
+<tr>
+<td><code>server/googleSheets.ts</code></td>
+<td>قاعدة البيانات</td>
+<td>تعديل البيانات</td>
+</tr>
+<tr>
+<td><code>shared/schema.ts</code></td>
+<td>الأنواع</td>
+<td>إضافة حقل جديد</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>التقنيات المستخدمة</h2>
+<h3>Frontend</h3>
+<ul>
+<li><strong>React 18</strong>: مكتبة UI</li>
+<li><strong>TypeScript</strong>: لغة برمجة مع أنواع</li>
+<li><strong>Vite</strong>: أداة بناء سريعة</li>
+<li><strong>Tailwind CSS</strong>: تصميم CSS utility-first</li>
+<li><strong>shadcn/ui</strong>: مكونات UI جاهزة</li>
+<li><strong>React Query (TanStack)</strong>: إدارة البيانات من API</li>
+<li><strong>wouter</strong>: التوجيه (routing)</li>
+<li><strong>react-hook-form</strong>: النماذج</li>
+<li><strong>Zod</strong>: التحقق من البيانات</li>
+<li><strong>Lucide React</strong>: الأيقونات</li>
+</ul>
+<h3>Backend</h3>
+<ul>
+<li><strong>Express.js</strong>: خادم الويب</li>
+<li><strong>TypeScript</strong>: لغة برمجة</li>
+<li><strong>googleapis</strong>: التعامل مع Google APIs</li>
+<li><strong>multer</strong>: رفع الملفات</li>
+<li><strong>OpenAI</strong>: الذكاء الاصطناعي (GPT-4o)</li>
+<li><strong>AWS SDK</strong>: التعامل مع R2</li>
+</ul>
+<h3>خدمات خارجية</h3>
+<ul>
+<li><strong>Google Sheets</strong>: قاعدة البيانات</li>
+<li><strong>Google Drive</strong>: تخزين الصور (قديم)</li>
+<li><strong>Cloudflare R2</strong>: تخزين الصور (جديد)</li>
+<li><strong>Paymob</strong>: بوابة الدفع</li>
+<li><strong>Enjazatik</strong>: WhatsApp API</li>
+<li><strong>Meta WhatsApp Business</strong>: إشعارات</li>
+</ul>
+<hr>
+<h2>تشغيل المشروع</h2>
+<h3>التشغيل المحلي</h3>
+<pre><code class="language-bash">npm run dev
+</code></pre>
+<p>هذا يشغل:</p>
+<ul>
+<li>Vite (Frontend) على المنفذ 5000</li>
+<li>Express (Backend) على نفس المنفذ</li>
+</ul>
+<h3>البناء للإنتاج</h3>
+<pre><code class="language-bash">npm run build
+npm run start
+</code></pre>
+<h3>الأوامر المتاحة</h3>
+<pre><code class="language-json">{
+  &quot;dev&quot;: &quot;NODE_ENV=development tsx server/index.ts&quot;,
+  &quot;build&quot;: &quot;vite build &amp;&amp; esbuild server/index.ts ...&quot;,
+  &quot;start&quot;: &quot;NODE_ENV=production node dist/index.js&quot;,
+  &quot;check&quot;: &quot;tsc&quot;,
+  &quot;db:push&quot;: &quot;drizzle-kit push&quot;
+}
+</code></pre>
+<hr>
+<h2>الصفحات والمسارات</h2>
+<h3>المسارات (في App.tsx)</h3>
+<table>
+<thead>
+<tr>
+<th>المسار</th>
+<th>الصفحة</th>
+<th>الوصف</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/</code></td>
+<td><code>PropertiesPage</code></td>
+<td>الصفحة الرئيسية (عرض العقارات)</td>
+</tr>
+<tr>
+<td><code>/property/:id</code></td>
+<td><code>PropertyDetailsPage</code></td>
+<td>تفاصيل عقار</td>
+</tr>
+<tr>
+<td><code>/blog</code></td>
+<td><code>BlogPage</code></td>
+<td>المدونة</td>
+</tr>
+<tr>
+<td><code>/blog/:slug</code></td>
+<td><code>BlogPostPage</code></td>
+<td>مقال</td>
+</tr>
+<tr>
+<td><code>/owner/login</code></td>
+<td><code>OwnerLogin</code></td>
+<td>تسجيل دخول المالك</td>
+</tr>
+<tr>
+<td><code>/owner/dashboard</code></td>
+<td><code>OwnerDashboard</code></td>
+<td>لوحة المالك</td>
+</tr>
+<tr>
+<td><code>/owner/images</code></td>
+<td><code>OwnerImagesPage</code></td>
+<td>صور المالك</td>
+</tr>
+<tr>
+<td><code>/owner/update-property</code></td>
+<td><code>OwnerUpdateProperty</code></td>
+<td>تحديث العقار</td>
+</tr>
+<tr>
+<td><code>/owner/subscription</code></td>
+<td><code>OwnerSubscriptionPage</code></td>
+<td>اشتراك المالك</td>
+</tr>
+<tr>
+<td><code>/subscription</code></td>
+<td><code>SubscriptionPage</code></td>
+<td>صفحة الاشتراك العامة</td>
+</tr>
+<tr>
+<td><code>/register</code></td>
+<td><code>RegisterPage</code></td>
+<td>تسجيل عقار جديد</td>
+</tr>
+<tr>
+<td><code>/suggest</code></td>
+<td><code>SuggestPage</code></td>
+<td>اقتراحات</td>
+</tr>
+<tr>
+<td><code>/forgot-password</code></td>
+<td><code>ForgotPassword</code></td>
+<td>استعادة كلمة المرور</td>
+</tr>
+<tr>
+<td><code>/admin</code></td>
+<td><code>AdminDashboard</code></td>
+<td>لوحة الإدارة</td>
+</tr>
+<tr>
+<td><code>/admin/analytics</code></td>
+<td><code>AdminAnalytics</code></td>
+<td>التحليلات</td>
+</tr>
+<tr>
+<td><code>/admin/images/:propertyNumber</code></td>
+<td><code>AdminImagesPage</code></td>
+<td>صور عقار (للأدمن)</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>واجهات API</h2>
+<h3>هيكل الـ API</h3>
+<p>جميع APIs في ملف <code>server/routes.ts</code> وتبدأ بـ <code>/api/</code></p>
+<h3>APIs العقارات</h3>
+<pre><code>GET  /api/properties              # جلب جميع العقارات
+GET  /api/properties/:number      # جلب عقار بالرقم
+POST /api/properties              # إضافة عقار جديد
+PUT  /api/properties/:number      # تحديث عقار
+DELETE /api/properties/:number    # حذف عقار (أدمن)
+</code></pre>
+<h3>APIs الاشتراكات</h3>
+<pre><code>GET  /api/subscriptions           # جميع الاشتراكات
+GET  /api/subscriptions/:number   # اشتراك عقار
+POST /api/subscriptions           # إنشاء اشتراك
+PUT  /api/subscriptions/:id       # تحديث اشتراك
+</code></pre>
+<h3>APIs الدفع</h3>
+<pre><code>POST /api/payments/create-payment # إنشاء دفعة (Paymob)
+POST /api/payments/webhook        # Paymob webhook
+POST /api/payments/bank-transfer  # رفع إيصال تحويل بنكي
+GET  /api/payments                # جميع الدفعات
+PUT  /api/payments/:id/confirm    # تأكيد دفعة (أدمن)
+PUT  /api/payments/:id/reject     # رفض دفعة (أدمن)
+</code></pre>
+<h3>APIs المالك</h3>
+<pre><code>POST /api/owner/login             # تسجيل الدخول
+POST /api/owner/logout            # تسجيل الخروج
+GET  /api/owner/session           # الجلسة الحالية
+POST /api/owner/verify-property   # التحقق من بيانات العقار
+PUT  /api/owner/update-property   # تحديث العقار
+</code></pre>
+<h3>APIs الأدمن</h3>
+<pre><code>POST /api/admin/login             # تسجيل دخول الأدمن
+GET  /api/admin/session           # جلسة الأدمن
+GET  /api/admin/dashboard-stats   # إحصائيات
+PUT  /api/admin/properties/:number/approve  # قبول عقار
+PUT  /api/admin/properties/:number/reject   # رفض عقار
+</code></pre>
+<h3>APIs الباقات والخصومات</h3>
+<pre><code>GET  /api/packages                # جميع الباقات
+POST /api/packages                # إضافة باقة
+PUT  /api/packages/:id            # تحديث باقة
+GET  /api/discount-codes          # أكواد الخصم
+POST /api/discount-codes          # إضافة كود
+POST /api/discount-codes/validate # التحقق من كود
+</code></pre>
+<h3>APIs الصور</h3>
+<pre><code>GET  /api/images/:propertyNumber  # جلب صور عقار
+POST /api/images/upload           # رفع صورة
+DELETE /api/images/:key           # حذف صورة
+POST /api/images/reorder          # إعادة ترتيب
+</code></pre>
+<hr>
+<h2>قاعدة البيانات (Google Sheets)</h2>
+<h3>الشيتات (Sheets)</h3>
+<table>
+<thead>
+<tr>
+<th>اسم الشيت</th>
+<th>الوصف</th>
+<th>الملف المسؤول</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Properties</code></td>
+<td>العقارات</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Subscriptions</code></td>
+<td>الاشتراكات</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Payments</code></td>
+<td>المدفوعات</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Packages</code></td>
+<td>الباقات</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>DiscountCodes</code></td>
+<td>أكواد الخصم</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Requests</code></td>
+<td>طلبات WhatsApp</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Suggestions</code></td>
+<td>الاقتراحات</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Expenses</code></td>
+<td>المصاريف</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>Blog</code></td>
+<td>مقالات المدونة</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>BankAccounts</code></td>
+<td>الحسابات البنكية</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>FeatureFlags</code></td>
+<td>Feature Flags</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+<tr>
+<td><code>VerificationLogs</code></td>
+<td>سجل التحقق</td>
+<td><code>googleSheets.ts</code></td>
+</tr>
+</tbody></table>
+<h3>أعمدة شيت Properties (العقارات)</h3>
+<pre><code>A: propertyNumber    # رقم العقار (5 أرقام)
+B: name              # اسم العقار
+C: whatsappNumber    # رقم واتساب
+D: location          # رابط الموقع
+E: city              # المدينة
+F: direction         # الاتجاه
+G: type              # نوع (قسم/قسمين)
+H: facilities        # المرافق (JSON)
+I: imagesFolderUrl   # رابط مجلد الصور
+J: prices            # الأسعار (JSON)
+K: subscriptionType  # نوع الاشتراك (عادي/مميز)
+L: lastUpdate        # آخر تحديث
+M: subscriptionDate  # تاريخ الاشتراك
+N: pin               # الرقم السري
+O: verificationStatus # حالة التحقق
+P: driveFolderId     # معرف Google Drive
+Q: imageUrls         # روابط الصور (JSON)
+R: createdAt         # تاريخ الإنشاء
+S: updatedAt         # تاريخ التحديث
+</code></pre>
+<h3>أعمدة شيت Payments (الدفعات)</h3>
+<pre><code>A: id                # معرف الدفعة
+B: propertyNumber    # رقم العقار
+C: packageId         # معرف الباقة
+D: amount            # المبلغ الأصلي
+E: discountCode      # كود الخصم
+F: discountAmount    # مبلغ الخصم
+G: finalAmount       # المبلغ النهائي
+H: paymobOrderId     # معرف Paymob
+I: status            # الحالة
+J: paymentMethod     # طريقة الدفع
+K: receiptUrl        # رابط الإيصال
+L: createdAt         # تاريخ الإنشاء
+M: completedAt       # تاريخ الإكمال
+N: action            # الإجراء (new/extend/upgrade)
+O: pendingStartDate  # تاريخ البداية المعلق
+P: pendingEndDate    # تاريخ النهاية المعلق
+Q: pendingSubscriptionType # نوع الاشتراك المعلق
+R: pendingPrice      # السعر المعلق
+S: secondPropertyNumber # العقار الثاني
+</code></pre>
+<h3>كيف تضيف عمود جديد؟</h3>
+<ol>
+<li><strong>أضف العمود في Google Sheet</strong> يدوياً</li>
+<li><strong>عدّل <code>shared/schema.ts</code></strong> - أضف الحقل في الـ schema:<pre><code class="language-typescript">export const propertySchema = z.object({
+  // ... الحقول الموجودة
+  newField: z.string().optional(), // الحقل الجديد
+});
+</code></pre>
+</li>
+<li><strong>عدّل <code>server/googleSheets.ts</code></strong> - أضف الحقل في دوال القراءة والكتابة:<pre><code class="language-typescript">// في parsePropertyRow
+newField: row[20] || &#39;&#39;,
+
+// في propertyToRow
+property.newField || &#39;&#39;,
+</code></pre>
+</li>
+</ol>
+<hr>
+<h2>نظام الدفع (Paymob)</h2>
+<h3>كيف يعمل؟</h3>
+<ol>
+<li><strong>المستخدم يختار باقة</strong> ويضغط &quot;ادفع&quot;</li>
+<li><strong>Frontend</strong> يستدعي <code>/api/payments/create-payment</code></li>
+<li><strong>Backend</strong> ينشئ payment intention في Paymob</li>
+<li><strong>Frontend</strong> يفتح نافذة Paymob Checkout</li>
+<li><strong>المستخدم يدفع</strong> (بطاقة أو Apple Pay)</li>
+<li><strong>Paymob</strong> يرسل webhook إلى <code>/api/payments/webhook</code></li>
+<li><strong>Backend</strong> يحدث حالة الدفع ويفعّل الاشتراك</li>
+</ol>
+<h3>ملف paymob.ts</h3>
+<pre><code class="language-typescript">// إنشاء Payment Intention
+export async function createPaymentIntention(amount, propertyNumber, packageId) {
+  // ...
+}
+
+// التحقق من HMAC
+export function verifyHmac(requestBody, hmacHeader) {
+  // ...
+}
+</code></pre>
+<h3>المتغيرات المطلوبة</h3>
+<pre><code>PAYMOB_SECRET_KEY     # مفتاح API السري
+PAYMOB_PUBLIC_KEY     # المفتاح العام
+PAYMOB_HMAC_SECRET    # سر HMAC للتحقق
+</code></pre>
+<h3>حالات الدفع</h3>
+<table>
+<thead>
+<tr>
+<th>الحالة</th>
+<th>المعنى</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>معلق</code></td>
+<td>بانتظار الدفع</td>
+</tr>
+<tr>
+<td><code>مكتمل</code></td>
+<td>تم الدفع بنجاح</td>
+</tr>
+<tr>
+<td><code>فشل</code></td>
+<td>فشل الدفع</td>
+</tr>
+<tr>
+<td><code>قيد التحقق</code></td>
+<td>تحويل بنكي بانتظار المراجعة</td>
+</tr>
+<tr>
+<td><code>نجح - قيد التحقق</code></td>
+<td>بطاقة/Apple Pay ناجحة بانتظار التحقق</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>نظام الاشتراكات</h2>
+<h3>أنواع الاشتراكات</h3>
+<table>
+<thead>
+<tr>
+<th>النوع</th>
+<th>الوصف</th>
+<th>المميزات</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>عادي</code></td>
+<td>مجاني</td>
+<td>عرض أساسي</td>
+</tr>
+<tr>
+<td><code>مميز</code></td>
+<td>مدفوع</td>
+<td>أولوية في الظهور، شارة &quot;موثوق&quot;</td>
+</tr>
+</tbody></table>
+<h3>حالات الاشتراك</h3>
+<table>
+<thead>
+<tr>
+<th>الحالة</th>
+<th>المعنى</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>نشط</code></td>
+<td>الاشتراك ساري</td>
+</tr>
+<tr>
+<td><code>منتهي</code></td>
+<td>انتهى الاشتراك</td>
+</tr>
+<tr>
+<td><code>معلق</code></td>
+<td>بانتظار الدفع</td>
+</tr>
+<tr>
+<td><code>موقوف</code></td>
+<td>معلق بواسطة الإدارة</td>
+</tr>
+<tr>
+<td><code>ينتهي قريباً</code></td>
+<td>أقل من 7 أيام</td>
+</tr>
+</tbody></table>
+<h3>حساب تواريخ الاشتراك</h3>
+<pre><code class="language-typescript">// في server/dateUtils.ts
+export function getStartOfDayRiyadh() { ... }
+export function calculateSubscriptionEndDate(startDate, durationDays) { ... }
+export function calculateExtensionEndDate(currentEndDate, durationDays) { ... }
+export function formatDateRiyadh(date) { ... }
+</code></pre>
+<hr>
+<h2>تخزين الصور (R2)</h2>
+<h3>كيف يعمل؟</h3>
+<ol>
+<li><strong>الصور تُرفع</strong> عبر <code>/api/images/upload</code></li>
+<li><strong>تُخزن في Cloudflare R2</strong> (S3-compatible)</li>
+<li><strong>الروابط تُحفظ</strong> في Google Sheets</li>
+</ol>
+<h3>المتغيرات المطلوبة</h3>
+<pre><code>R2_ACCESS_KEY_ID      # مفتاح الوصول
+R2_SECRET_ACCESS_KEY  # المفتاح السري
+R2_BUCKET_NAME        # اسم الـ bucket
+R2_ENDPOINT           # نقطة النهاية
+R2_REGION             # المنطقة
+</code></pre>
+<h3>رفع صورة</h3>
+<pre><code class="language-typescript">// في server/routes.ts
+app.post(&quot;/api/images/upload&quot;, upload.single(&quot;image&quot;), async (req, res) =&gt; {
+  const { key } = await uploadToR2(buffer, filename);
+  // ...
+});
+</code></pre>
+<hr>
+<h2>إشعارات WhatsApp</h2>
+<h3>أنواع الإشعارات</h3>
+<ul>
+<li>إشعار عقار جديد</li>
+<li>إشعار دفعة جديدة</li>
+<li>إشعار رفع إيصال</li>
+<li>إشعار تفعيل اشتراك</li>
+<li>إشعار للمالك عند التفعيل</li>
+</ul>
+<h3>ملف whatsapp.ts</h3>
+<pre><code class="language-typescript">export async function sendWhatsAppNotification(message) { ... }
+export async function notifyNewProperty(data) { ... }
+export async function notifyNewPayment(data) { ... }
+export async function notifyReceiptUpload(data) { ... }
+export async function notifyOwnerSubscriptionActivated(data) { ... }
+</code></pre>
+<h3>المتغيرات المطلوبة</h3>
+<pre><code>ENJAZATIK_URL         # رابط API
+ENJAZATIK_TOKEN       # التوكن
+</code></pre>
+<hr>
+<h2>دليل تغيير التصميم</h2>
+<h3>1. تغيير الألوان</h3>
+<p><strong>الملف:</strong> <code>client/src/index.css</code></p>
+<pre><code class="language-css">:root {
+  /* اللون الذهبي الرئيسي */
+  --primary: 42 75% 45%; /* #b88d2b */
+  
+  /* الخلفية */
+  --background: 40 15% 97%;
+  
+  /* النصوص */
+  --foreground: 28 38% 25%;
+  
+  /* البطاقات */
+  --card: 40 20% 98%;
+  
+  /* ألوان خاصة */
+  --golden-light: #d4a035;
+  --golden-border: #e0c97b;
+  --premium-bg: #fffdf0;
+  --whatsapp: #25D366;
+}
+</code></pre>
+<p><strong>لتغيير اللون الذهبي الرئيسي:</strong></p>
+<pre><code class="language-css">--primary: 42 75% 45%; /* غيّر هذه القيم */
+</code></pre>
+<h3>2. تغيير الخط</h3>
+<p><strong>الملف:</strong> <code>client/src/index.css</code></p>
+<pre><code class="language-css">@import url(&#39;https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;700&amp;display=swap&#39;);
+
+:root {
+  --font-sans: &#39;Cairo&#39;, sans-serif;
+}
+</code></pre>
+<p><strong>لتغيير الخط:</strong></p>
+<ol>
+<li>أضف رابط Google Fonts جديد</li>
+<li>غيّر <code>--font-sans</code></li>
+</ol>
+<h3>3. تغيير الشعار</h3>
+<p><strong>الملفات:</strong></p>
+<ul>
+<li><code>client/src/assets/logo-icon.png</code> - الشعار الصغير (في Header)</li>
+<li><code>client/src/assets/logo-full.png</code> - الشعار الكامل (في Footer)</li>
+</ul>
+<p><strong>في App.tsx:</strong></p>
+<pre><code class="language-tsx">import logoIcon from &quot;./assets/logo-icon.png&quot;;
+import logoFull from &quot;./assets/logo-full.png&quot;;
+
+// Header
+&lt;img src={logoIcon} alt=&quot;روقـان&quot; className=&quot;h-[110px] w-auto&quot; /&gt;
+
+// Footer
+&lt;img src={logoFull} alt=&quot;روقـان&quot; className=&quot;h-[300px] w-auto&quot; /&gt;
+</code></pre>
+<h3>4. تغيير حجم الأزرار</h3>
+<p><strong>الملف:</strong> <code>client/src/components/ui/button.tsx</code></p>
+<pre><code class="language-tsx">const buttonVariants = cva(
+  &quot;...&quot;,
+  {
+    variants: {
+      size: {
+        default: &quot;h-9 px-4 py-2&quot;,
+        sm: &quot;h-8 rounded-md px-3 text-xs&quot;,
+        lg: &quot;h-10 rounded-md px-8&quot;,
+        icon: &quot;h-9 w-9&quot;,
+      },
+    },
+  }
+);
+</code></pre>
+<h3>5. تغيير نصف القطر (Border Radius)</h3>
+<p><strong>الملف:</strong> <code>client/src/index.css</code></p>
+<pre><code class="language-css">:root {
+  --radius: 0.625rem; /* 10px */
+}
+</code></pre>
+<hr>
+<h2>دليل إضافة صفحات جديدة</h2>
+<h3>الخطوات:</h3>
+<h4>1. أنشئ ملف الصفحة</h4>
+<pre><code class="language-tsx">// client/src/pages/my-new-page.tsx
+export default function MyNewPage() {
+  return (
+    &lt;div className=&quot;max-w-7xl mx-auto px-4 py-6&quot;&gt;
+      &lt;h1 className=&quot;text-2xl font-bold&quot;&gt;صفحتي الجديدة&lt;/h1&gt;
+    &lt;/div&gt;
+  );
+}
+</code></pre>
+<h4>2. أضف المسار في App.tsx</h4>
+<pre><code class="language-tsx">// في الأعلى
+import MyNewPage from &quot;@/pages/my-new-page&quot;;
+
+// في Router()
+&lt;Route path=&quot;/my-new-page&quot; component={MyNewPage} /&gt;
+</code></pre>
+<h4>3. (اختياري) أضف رابط في Header</h4>
+<pre><code class="language-tsx">// في App.tsx - داخل &lt;nav&gt;
+&lt;Button
+  variant=&quot;ghost&quot;
+  size=&quot;icon&quot;
+  onClick={() =&gt; setLocation(&quot;/my-new-page&quot;)}
+  title=&quot;صفحتي&quot;
+&gt;
+  &lt;SomeIcon className=&quot;w-5 h-5&quot; /&gt;
+&lt;/Button&gt;
+</code></pre>
+<h3>مثال صفحة مع بيانات من API:</h3>
+<pre><code class="language-tsx">import { useQuery } from &quot;@tanstack/react-query&quot;;
+import { Card, CardContent, CardHeader, CardTitle } from &quot;@/components/ui/card&quot;;
+
+export default function MyDataPage() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [&quot;/api/my-data&quot;],
+  });
+
+  if (isLoading) return &lt;div&gt;جاري التحميل...&lt;/div&gt;;
+  if (error) return &lt;div&gt;خطأ في التحميل&lt;/div&gt;;
+
+  return (
+    &lt;div className=&quot;max-w-7xl mx-auto px-4 py-6&quot;&gt;
+      &lt;Card&gt;
+        &lt;CardHeader&gt;
+          &lt;CardTitle&gt;البيانات&lt;/CardTitle&gt;
+        &lt;/CardHeader&gt;
+        &lt;CardContent&gt;
+          {/* عرض البيانات */}
+        &lt;/CardContent&gt;
+      &lt;/Card&gt;
+    &lt;/div&gt;
+  );
+}
+</code></pre>
+<hr>
+<h2>دليل تعديل لوحة الإدارة</h2>
+<h3>هيكل لوحة الإدارة</h3>
+<p><strong>الملف الرئيسي:</strong> <code>client/src/pages/admin/index.tsx</code></p>
+<pre><code class="language-tsx">// الأقسام المتاحة
+const sections = [
+  { id: &quot;properties&quot;, label: &quot;العقارات&quot;, icon: Building2 },
+  { id: &quot;payments&quot;, label: &quot;المدفوعات&quot;, icon: CreditCard },
+  { id: &quot;subscriptions&quot;, label: &quot;الاشتراكات&quot;, icon: Calendar },
+  { id: &quot;packages&quot;, label: &quot;الباقات&quot;, icon: Package },
+  { id: &quot;discounts&quot;, label: &quot;أكواد الخصم&quot;, icon: Percent },
+  { id: &quot;verification&quot;, label: &quot;التحقق&quot;, icon: CheckCircle },
+  // ...
+];
+</code></pre>
+<h3>إضافة قسم جديد</h3>
+<h4>1. أنشئ ملف القسم</h4>
+<pre><code class="language-tsx">// client/src/pages/admin/sections/my-section.tsx
+import { Card, CardContent, CardHeader, CardTitle } from &quot;@/components/ui/card&quot;;
+
+export default function MySection() {
+  return (
+    &lt;Card&gt;
+      &lt;CardHeader&gt;
+        &lt;CardTitle&gt;القسم الجديد&lt;/CardTitle&gt;
+      &lt;/CardHeader&gt;
+      &lt;CardContent&gt;
+        {/* محتوى القسم */}
+      &lt;/CardContent&gt;
+    &lt;/Card&gt;
+  );
+}
+</code></pre>
+<h4>2. أضف القسم في index.tsx</h4>
+<pre><code class="language-tsx">// استيراد
+import MySection from &quot;./sections/my-section&quot;;
+import { NewIcon } from &quot;lucide-react&quot;;
+
+// في sections array
+{ id: &quot;my-section&quot;, label: &quot;القسم الجديد&quot;, icon: NewIcon },
+
+// في renderSection()
+case &quot;my-section&quot;:
+  return &lt;MySection /&gt;;
+</code></pre>
+<h3>تعديل قسم العقارات</h3>
+<p><strong>الملف:</strong> <code>client/src/pages/admin/sections/properties.tsx</code></p>
+<h3>تعديل قسم الدفعات</h3>
+<p><strong>الملف:</strong> <code>client/src/pages/admin/sections/payments.tsx</code></p>
+<h3>تعديل قسم الاشتراكات</h3>
+<p><strong>الملف:</strong> <code>client/src/pages/admin/sections/subscriptions.tsx</code></p>
+<hr>
+<h2>دليل تعديل لوحة المالك</h2>
+<h3>الملفات الرئيسية</h3>
+<table>
+<thead>
+<tr>
+<th>الملف</th>
+<th>الوصف</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>owner-dashboard.tsx</code></td>
+<td>لوحة التحكم الرئيسية</td>
+</tr>
+<tr>
+<td><code>owner-subscription.tsx</code></td>
+<td>إدارة الاشتراك</td>
+</tr>
+<tr>
+<td><code>owner-images.tsx</code></td>
+<td>إدارة الصور</td>
+</tr>
+<tr>
+<td><code>owner-update-property.tsx</code></td>
+<td>تحديث بيانات العقار</td>
+</tr>
+</tbody></table>
+<h3>تعديل لوحة التحكم الرئيسية</h3>
+<p><strong>الملف:</strong> <code>client/src/pages/owner-dashboard.tsx</code></p>
+<pre><code class="language-tsx">// الأقسام الموجودة:
+// 1. معلومات العقار الأساسية
+// 2. حالة الاشتراك
+// 3. الأسعار
+// 4. المرافق
+// 5. الصور
+// 6. إحصائيات WhatsApp
+</code></pre>
+<h3>إضافة قسم جديد في Dashboard</h3>
+<pre><code class="language-tsx">// في owner-dashboard.tsx
+&lt;Card&gt;
+  &lt;CardHeader&gt;
+    &lt;CardTitle&gt;القسم الجديد&lt;/CardTitle&gt;
+  &lt;/CardHeader&gt;
+  &lt;CardContent&gt;
+    {/* المحتوى */}
+  &lt;/CardContent&gt;
+&lt;/Card&gt;
+</code></pre>
+<h3>تعديل صفحة الاشتراك</h3>
+<p><strong>الملف:</strong> <code>client/src/pages/owner-subscription.tsx</code></p>
+<p>هذا الملف يتضمن:</p>
+<ul>
+<li>عرض حالة الاشتراك الحالي</li>
+<li>اختيار الباقة</li>
+<li>الدفع (Paymob أو تحويل بنكي)</li>
+<li>رفع إيصال التحويل</li>
+</ul>
+<hr>
+<h2>دليل صفحة العقارات</h2>
+<h3>الملف</h3>
+<p><code>client/src/pages/properties.tsx</code></p>
+<h3>الفلاتر المتاحة</h3>
+<pre><code class="language-typescript">interface Filters {
+  city: string;       // المدينة
+  direction: string;  // الاتجاه
+  type: string;       // النوع (قسم/قسمين)
+  priceRange: string; // نطاق السعر
+  facilities: string[]; // المرافق (100 مرفق)
+  searchQuery: string;  // البحث
+}
+</code></pre>
+<h3>إضافة فلتر جديد</h3>
+<h4>1. أضف الحقل في الـ state</h4>
+<pre><code class="language-tsx">const [filters, setFilters] = useState({
+  // ... الفلاتر الموجودة
+  newFilter: &quot;&quot;,
+});
+</code></pre>
+<h4>2. أضف عنصر الفلتر في UI</h4>
+<pre><code class="language-tsx">&lt;Select
+  value={filters.newFilter}
+  onValueChange={(v) =&gt; setFilters(f =&gt; ({ ...f, newFilter: v }))}
+&gt;
+  &lt;SelectTrigger&gt;
+    &lt;SelectValue placeholder=&quot;الفلتر الجديد&quot; /&gt;
+  &lt;/SelectTrigger&gt;
+  &lt;SelectContent&gt;
+    &lt;SelectItem value=&quot;option1&quot;&gt;خيار 1&lt;/SelectItem&gt;
+    &lt;SelectItem value=&quot;option2&quot;&gt;خيار 2&lt;/SelectItem&gt;
+  &lt;/SelectContent&gt;
+&lt;/Select&gt;
+</code></pre>
+<h4>3. أضف منطق الفلترة</h4>
+<pre><code class="language-tsx">const filteredProperties = properties.filter(p =&gt; {
+  // ... الفلاتر الموجودة
+  if (filters.newFilter &amp;&amp; p.newField !== filters.newFilter) return false;
+  return true;
+});
+</code></pre>
+<h3>تغيير طريقة عرض العقارات</h3>
+<pre><code class="language-tsx">// في properties.tsx
+// البطاقة الحالية
+&lt;Card className=&quot;...&quot;&gt;
+  {/* محتوى البطاقة */}
+&lt;/Card&gt;
+
+// تغيير التصميم
+&lt;Card className=&quot;bg-card hover:shadow-lg transition-shadow&quot;&gt;
+  &lt;CardContent className=&quot;p-4&quot;&gt;
+    {/* تصميم جديد */}
+  &lt;/CardContent&gt;
+&lt;/Card&gt;
+</code></pre>
+<hr>
+<h2>دليل صفحة تفاصيل العقار</h2>
+<h3>الملف</h3>
+<p><code>client/src/pages/property-details.tsx</code></p>
+<h3>المكونات الرئيسية</h3>
+<ol>
+<li><strong>معرض الصور</strong> - عرض الصور بـ carousel</li>
+<li><strong>معلومات العقار</strong> - الاسم، الموقع، النوع</li>
+<li><strong>الأسعار</strong> - جدول الأسعار</li>
+<li><strong>المرافق</strong> - قائمة المرافق (100 مرفق)</li>
+<li><strong>زر WhatsApp</strong> - للتواصل</li>
+</ol>
+<h3>تعديل معرض الصور</h3>
+<pre><code class="language-tsx">// في property-details.tsx
+&lt;Carousel className=&quot;w-full&quot;&gt;
+  &lt;CarouselContent&gt;
+    {images.map((image, index) =&gt; (
+      &lt;CarouselItem key={index}&gt;
+        &lt;img src={image} alt={`صورة ${index + 1}`} className=&quot;...&quot; /&gt;
+      &lt;/CarouselItem&gt;
+    ))}
+  &lt;/CarouselContent&gt;
+  &lt;CarouselPrevious /&gt;
+  &lt;CarouselNext /&gt;
+&lt;/Carousel&gt;
+</code></pre>
+<h3>تعديل عرض الأسعار</h3>
+<pre><code class="language-tsx">// جدول الأسعار
+&lt;Table&gt;
+  &lt;TableHeader&gt;
+    &lt;TableRow&gt;
+      &lt;TableHead&gt;الفترة&lt;/TableHead&gt;
+      &lt;TableHead&gt;السعر&lt;/TableHead&gt;
+    &lt;/TableRow&gt;
+  &lt;/TableHeader&gt;
+  &lt;TableBody&gt;
+    &lt;TableRow&gt;
+      &lt;TableCell&gt;وسط الأسبوع&lt;/TableCell&gt;
+      &lt;TableCell&gt;{prices.weekday} ر.س&lt;/TableCell&gt;
+    &lt;/TableRow&gt;
+    {/* ... */}
+  &lt;/TableBody&gt;
+&lt;/Table&gt;
+</code></pre>
+<hr>
+<h2>المتغيرات والإعدادات</h2>
+<h3>متغيرات البيئة (Secrets)</h3>
+<table>
+<thead>
+<tr>
+<th>المتغير</th>
+<th>الوصف</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>GOOGLE_SHEET_ID</code></td>
+<td>معرف Google Sheet</td>
+</tr>
+<tr>
+<td><code>PAYMOB_SECRET_KEY</code></td>
+<td>مفتاح Paymob السري</td>
+</tr>
+<tr>
+<td><code>PAYMOB_PUBLIC_KEY</code></td>
+<td>مفتاح Paymob العام</td>
+</tr>
+<tr>
+<td><code>PAYMOB_HMAC_SECRET</code></td>
+<td>سر HMAC</td>
+</tr>
+<tr>
+<td><code>R2_ACCESS_KEY_ID</code></td>
+<td>مفتاح R2</td>
+</tr>
+<tr>
+<td><code>R2_SECRET_ACCESS_KEY</code></td>
+<td>سر R2</td>
+</tr>
+<tr>
+<td><code>R2_BUCKET_NAME</code></td>
+<td>اسم الـ bucket</td>
+</tr>
+<tr>
+<td><code>R2_ENDPOINT</code></td>
+<td>نقطة نهاية R2</td>
+</tr>
+<tr>
+<td><code>ENJAZATIK_URL</code></td>
+<td>رابط WhatsApp API</td>
+</tr>
+<tr>
+<td><code>ENJAZATIK_TOKEN</code></td>
+<td>توكن WhatsApp</td>
+</tr>
+</tbody></table>
+<h3>Feature Flags</h3>
+<p>في Google Sheet &quot;FeatureFlags&quot;:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>الوصف</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>FEATURE_BANK_ACCOUNTS_UI</code></td>
+<td>عرض تفاصيل الحسابات البنكية</td>
+</tr>
+<tr>
+<td><code>FEATURE_BANK_RECEIPT_REQUIRED</code></td>
+<td>إلزامية رفع الإيصال</td>
+</tr>
+<tr>
+<td><code>FEATURE_TIMEOUTS</code></td>
+<td>انتهاء صلاحية الدفعات تلقائياً</td>
+</tr>
+<tr>
+<td><code>FEATURE_OCR_ENABLED</code></td>
+<td>تفعيل OCR</td>
+</tr>
+<tr>
+<td><code>FEATURE_BANK_AUTO_MATCH</code></td>
+<td>المطابقة التلقائية</td>
+</tr>
+<tr>
+<td><code>FEATURE_SMART_VERIFICATION</code></td>
+<td>التحقق الذكي</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>استكشاف الأخطاء</h2>
+<h3>مشاكل شائعة</h3>
+<h4>1. الصفحة لا تظهر</h4>
+<ul>
+<li>تأكد من إضافة المسار في <code>App.tsx</code></li>
+<li>تأكد من استيراد الصفحة بشكل صحيح</li>
+</ul>
+<h4>2. خطأ في API</h4>
+<ul>
+<li>تحقق من Console في المتصفح</li>
+<li>تحقق من سجلات الخادم</li>
+<li>تأكد من أن الـ endpoint موجود في <code>routes.ts</code></li>
+</ul>
+<h4>3. الألوان لا تتغير</h4>
+<ul>
+<li>تأكد من تحديث <code>index.css</code></li>
+<li>أعد تشغيل الخادم</li>
+<li>امسح الكاش في المتصفح</li>
+</ul>
+<h4>4. الصور لا تظهر</h4>
+<ul>
+<li>تأكد من إعدادات R2</li>
+<li>تحقق من الروابط في Google Sheet</li>
+<li>تأكد من صلاحيات الـ bucket</li>
+</ul>
+<h4>5. الدفع لا يعمل</h4>
+<ul>
+<li>تأكد من إعدادات Paymob</li>
+<li>تحقق من Webhook URL</li>
+<li>راجع سجلات Paymob</li>
+</ul>
+<h3>أوامر مفيدة</h3>
+<pre><code class="language-bash"># تشغيل المشروع
+npm run dev
+
+# فحص TypeScript
+npm run check
+
+# بناء للإنتاج
+npm run build
+</code></pre>
+<h3>سجلات الأخطاء</h3>
+<ul>
+<li><strong>Frontend</strong>: Console في المتصفح (F12)</li>
+<li><strong>Backend</strong>: Terminal أو سجلات Replit</li>
+</ul>
+<hr>
+<h2>ملاحظات إضافية</h2>
+<h3>التوقيت</h3>
+<ul>
+<li><strong>الخادم</strong>: يستخدم UTC</li>
+<li><strong>العرض</strong>: يُحوّل للتوقيت السعودي (Asia/Riyadh)</li>
+<li><strong>التخزين</strong>: epoch milliseconds أو ISO strings</li>
+</ul>
+<h3>الأمان</h3>
+<ul>
+<li>لا تكشف المفاتيح السرية أبداً</li>
+<li>استخدم HMAC للتحقق من Webhooks</li>
+<li>تحقق من صلاحيات المستخدم</li>
+</ul>
+<h3>الأداء</h3>
+<ul>
+<li>استخدم React Query للكاش</li>
+<li>لا تجلب بيانات غير ضرورية</li>
+<li>استخدم pagination للقوائم الطويلة</li>
+</ul>
+<hr>
+<p><strong>آخر تحديث:</strong> يناير 2026</p>
+<p><strong>المشروع:</strong> روقـان - نظام إدارة العقارات</p>
+<p><strong>الإصدار:</strong> 4.1.19</p>
+
+  
+  <div style="text-align: center; margin-top: 60px; padding: 30px; background: linear-gradient(135deg, #fffdf0 0%, #fff8e5 100%); border-radius: 15px; border: 2px solid #e0c97b;">
+    <p style="color: #b88d2b; font-size: 18px; font-weight: 600; margin: 0;">روقـان - نُـزل ورفـاهية</p>
+    <p style="color: #666; font-size: 14px; margin-top: 10px;">للشاليهات والاستراحات والعقارات في منطقة القصيم</p>
+    <p style="color: #999; font-size: 12px; margin-top: 15px;">© 2026 جميع الحقوق محفوظة</p>
+  </div>
+
+  <script>
+    // Print button
+    document.addEventListener('DOMContentLoaded', function() {
+      const printBtn = document.createElement('button');
+      printBtn.innerHTML = '🖨️ طباعة / حفظ PDF';
+      printBtn.style.cssText = 'position: fixed; bottom: 30px; left: 30px; padding: 15px 25px; background: linear-gradient(135deg, #b88d2b 0%, #d4a035 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-family: Cairo; font-size: 16px; font-weight: 600; box-shadow: 0 4px 15px rgba(184, 141, 43, 0.4); z-index: 9999;';
+      printBtn.onclick = () => window.print();
+      document.body.appendChild(printBtn);
+    });
+  </script>
+</body>
+</html>

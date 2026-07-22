@@ -20,7 +20,7 @@ import { BadgeDollarSign, Building2, ListChecks, Save, Star, X, Search, Lock } f
 import { FACILITIES } from "@shared/schema";
 import Link from "next/link";
 import { validateTextInput, validateNumericInput, validateWhatsAppInput } from "@/lib/validation";
-import { isPremiumSubscriptionType } from "@shared/core/subscriptions/type";
+import { isPremiumSubscriptionType } from "@shared/subscriptionType";
 import {
     OwnerLoadingState,
     OwnerMobileNavigation,

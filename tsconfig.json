@@ -49,6 +49,7 @@
     "_client_backup",
     "scripts",
     "server/_legacy",
-    "server/replit_integrations"
+    "server/replit_integrations",
+    "test-firebase-write.ts"
   ]
 }

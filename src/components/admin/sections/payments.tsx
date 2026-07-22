@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, Search, Filter, X, CheckCircle2, XCircle } from "lucide-react";
 import { Th, Td } from "../components/Table";
-import { PriceDisplay } from "@/components/core/price-display";
+import { PriceDisplay } from "@/components/price-display";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 

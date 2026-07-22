@@ -15,7 +15,7 @@ import {
   calculateActionDates,
   hasPriorSubscription,
   queueVerifiedNewPropertyForAdminApproval,
-} from "./payments/paymentScenarioFlow";
+} from "../utils/paymentScenarioFlow";
 
 export class PaymentService {
   // ─── Read ───────────────────────────────────────────────────────────────────

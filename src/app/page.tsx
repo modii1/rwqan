@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
-import HomeClient from "@/components/home/home-client";
+import HomeClient from "@/components/home-client";
 import { isPublicPropertyPremium } from "@/lib/public-subscription";
 
 export default async function HomePage() {

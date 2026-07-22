@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LinkIcon } from "lucide-react";
-import { getSubscriptionTypeLabel } from "@shared/core/subscriptions/type";
+import { getSubscriptionTypeLabel } from "@shared/subscriptionType";
 
 interface LinkedProperty {
   propertyNumber: string;

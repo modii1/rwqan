@@ -53,12 +53,12 @@ import {
     isActivePremiumSubscription,
     isPremiumSubscriptionType,
     isSubscriptionStatusActive,
-} from "../shared/core/subscriptions/type";
+} from "../shared/subscriptionType";
 import {
     isPurchasableSubscriptionPackage,
     isSubscriptionPackageDurationAllowed,
     normalizeSubscriptionPackageDuration,
-} from "../shared/core/subscriptions/package-policy";
+} from "../shared/subscriptionPackagePolicy";
 
 export class FirebaseService {
     private get db() {

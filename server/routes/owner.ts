@@ -30,13 +30,13 @@ import {
   syncMultiPropertyRecord,
   validatePaymentSubscriptionAction,
   validateSubscriptionAction,
-} from "../services/payments/paymentScenarioFlow";
+} from "../utils/paymentScenarioFlow";
 import {
   getEffectiveSubscriptionType,
   getSubscriptionTypeLabel,
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
-} from "../../shared/core/subscriptions/type";
+} from "../../shared/subscriptionType";
 
 const router = Router();
 

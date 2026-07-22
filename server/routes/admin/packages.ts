@@ -5,7 +5,7 @@ import {
   MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS,
   isSubscriptionPackageDurationAllowed,
   normalizeSubscriptionPackageDuration,
-} from "../../../shared/core/subscriptions/package-policy";
+} from "../../../shared/subscriptionPackagePolicy";
 
 const router = Router();
 

@@ -7,7 +7,7 @@ import { firebaseService } from "../firebaseService";
 import { googleDriveService } from "../integrations/googleDrive";
 import type { InsertProperty } from "../../shared/schema";
 import { normalizeArabicText } from "../../src/lib/arabicSearch";
-import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/core/subscriptions/type";
+import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
 
 const router = Router();

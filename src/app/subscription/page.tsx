@@ -1,4 +1,4 @@
-import SubscriptionPage from "@/components/subscriptions/subscription-page";
+import SubscriptionPage from "@/components/subscription-page";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {

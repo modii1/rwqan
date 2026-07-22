@@ -8,7 +8,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Home, Loader2, Lock, LogIn } from "lucide-react";
 import { cleanPropertyNumber } from "@/lib/validation";
-import { BrandWordmark } from "@/components/core/brand/brand-wordmark";
 
 export default function OwnerLogin() {
   const router = useRouter();
@@ -131,7 +130,7 @@ export default function OwnerLogin() {
     <main className="flex min-h-screen items-center justify-center bg-[#f5f6f3] px-3 py-6 sm:px-6">
       <Card className="w-full max-w-md overflow-hidden rounded-lg border border-[#dfe2dc] bg-white shadow-xl shadow-black/[0.05]">
         <div className="border-b border-[#eceee9] bg-[#fbfcfa] px-5 py-5 text-center sm:px-7">
-          <BrandWordmark className="mx-auto h-14 w-auto object-contain" />
+          <img src="/assets/logo-full.png" alt="روقان" className="mx-auto h-14 w-auto object-contain" />
           <h1 className="mt-3 text-xl font-bold text-[#242822]" data-testid="text-login-title">
             {mode === "owner" ? "دخول مالك العقار" : "دخول المسؤول"}
           </h1>
