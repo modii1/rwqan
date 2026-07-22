@@ -4,8 +4,24 @@ import { analyticsService, propertyService, notificationService } from "../servi
 import { firebaseService } from "../firebaseService";
 import { detectDeviceType, normalizePhoneNumber } from "../utils/helpers";
 import type { InsertContactEvent } from "../../shared/schema";
+import {
+  CONTACT_IDENTITY_COOKIE_NAME,
+  ContactIdentityRateLimitError,
+  contactIdentityService,
+  getContactIdentityClearCookieOptions,
+  getContactIdentityCookieOptions,
+} from "../services/ContactIdentityService";
+import {
+  getContactIdentityCookieToken,
+  getContactIdentityIssueLimitKeyForRequest,
+  getOwnerContactPhone,
+} from "../utils/contactIdentityRequest";
+import { isSameOriginRequest } from "../utils/requestOrigin";
 
 const router = Router();
+
+export const CONTACT_REQUEST_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
+export const CONTACT_REQUEST_MAX_ATTEMPTS_PER_WINDOW = 60;
 
 // عدد الطلبات من كل IP لكل عقار (للتوافق مع حقل التحليلات القديم فقط).
 const ipPropertyCounter = new Map<string, Map<string, number>>();
@@ -43,6 +59,28 @@ function createCooldownKey(visitorKey: string, propertyNumber: string): string {
     .digest("hex");
 }
 
+function createRememberedVisitorKey(visitorId: string): string {
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret)
+    .update(`remembered-contact:${visitorId}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function createIpAbuseLimitKey(ipAddress: string, propertyNumber: string): string {
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret)
+    .update(`contact-ip-limit:${ipAddress}:${propertyNumber}`)
+    .digest("hex");
+}
+
+function createContactAttemptLimitKey(ipAddress: string): string {
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret)
+    .update(`contact-attempt-limit:${ipAddress}`)
+    .digest("hex");
+}
+
 async function recordContactEvent(
   base: ContactEventBase,
   outcome: InsertContactEvent["outcome"],
@@ -65,6 +103,10 @@ router.post("/api/requests/smart", async (req, res) => {
   let contactEventBase: ContactEventBase | null = null;
   let acceptedEventRecorded = false;
   try {
+    if (!isSameOriginRequest(req)) {
+      return res.status(403).json({ code: "CROSS_ORIGIN_REQUEST", error: "الطلب غير مسموح" });
+    }
+
     const propertyNumber = String(req.body?.propertyNumber || "").trim();
     const submittedPhone = String(req.body?.clientPhone || "").trim();
 
@@ -72,15 +114,23 @@ router.post("/api/requests/smart", async (req, res) => {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
-    if (!submittedPhone) {
-      return res.status(400).json({ error: "رقم الجوال مطلوب" });
-    }
-
-    let clientPhone: string;
-    try {
-      clientPhone = normalizePhoneNumber(submittedPhone);
-    } catch (error: any) {
-      return res.status(400).json({ error: error?.message || "رقم الجوال غير صحيح" });
+    const ipAddress = getClientIp(req);
+    // Requests without Origin are supported for non-browser clients, but they
+    // pass through the same persistent abuse boundary as browser requests.
+    const attemptLimit = await firebaseService.consumeContactRequestAttemptLimit(
+      createContactAttemptLimitKey(ipAddress),
+      Date.now(),
+      CONTACT_REQUEST_ATTEMPT_WINDOW_MS,
+      CONTACT_REQUEST_MAX_ATTEMPTS_PER_WINDOW,
+    );
+    if (!attemptLimit.allowed) {
+      const retryAfterSeconds = Math.ceil(attemptLimit.retryAfterMs / 1000);
+      res.set("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({
+        code: "CONTACT_ATTEMPT_RATE_LIMIT",
+        error: "تم إجراء محاولات تواصل كثيرة. حاول مرة أخرى لاحقاً.",
+        retryAfterSeconds,
+      });
     }
 
     const property = await propertyService.getByNumber(propertyNumber);
@@ -91,15 +141,105 @@ router.post("/api/requests/smart", async (req, res) => {
       return res.status(403).json({ error: "هذا العقار غير متاح حالياً" });
     }
 
-    const ipAddress = getClientIp(req);
     const userAgent = req.headers["user-agent"] || "";
     const deviceType = detectDeviceType(userAgent);
-    contactEventBase = propertyNumber ? {
+    const actor = getContactActor(req);
+    contactEventBase = {
       propertyNumber,
       visitorKey: createVisitorKey(req, ipAddress),
-      actorType: getContactActor(req),
+      actorType: actor,
       deviceType,
-    } : null;
+    };
+    let clientPhone: string | null = null;
+    let contactVisitorId: string | null = null;
+
+    if (actor === "owner") {
+      clientPhone = await getOwnerContactPhone(String(req.session.propertyNumber));
+      if (!clientPhone) {
+        await recordContactEvent(contactEventBase, "auth_required");
+        return res.status(409).json({
+          code: "OWNER_PHONE_MISSING",
+          error: "لا يوجد رقم جوال صحيح مسجل للعقار. يرجى تحديث بيانات العقار أولاً.",
+        });
+      }
+    } else if (actor === "admin") {
+      if (submittedPhone) {
+        try {
+          clientPhone = normalizePhoneNumber(submittedPhone);
+        } catch (error: any) {
+          return res.status(400).json({
+            code: "INVALID_CONTACT_PHONE",
+            error: error?.message || "رقم الجوال غير صحيح",
+          });
+        }
+      }
+
+      if (!clientPhone) {
+        await recordContactEvent(contactEventBase, "auth_required");
+        return res.status(428).json({
+          code: "CONTACT_PHONE_REQUIRED",
+          error: "أدخل رقم الجوال للمتابعة إلى واتساب",
+        });
+      }
+    } else {
+      const cookieToken = getContactIdentityCookieToken(req);
+      const rememberedIdentity = await contactIdentityService.resolve(cookieToken);
+
+      if (cookieToken && !rememberedIdentity) {
+        res.clearCookie(CONTACT_IDENTITY_COOKIE_NAME, getContactIdentityClearCookieOptions());
+      }
+
+      if (rememberedIdentity) {
+        clientPhone = rememberedIdentity.clientPhone;
+        contactVisitorId = rememberedIdentity.visitorId;
+      } else if (submittedPhone) {
+        try {
+          clientPhone = normalizePhoneNumber(submittedPhone);
+        } catch (error: any) {
+          return res.status(400).json({
+            code: "INVALID_CONTACT_PHONE",
+            error: error?.message || "رقم الجوال غير صحيح",
+          });
+        }
+
+        try {
+          const issued = await contactIdentityService.issue(
+            clientPhone,
+            cookieToken,
+            getContactIdentityIssueLimitKeyForRequest(req),
+          );
+          contactVisitorId = issued.visitorId;
+          res.cookie(CONTACT_IDENTITY_COOKIE_NAME, issued.token, getContactIdentityCookieOptions());
+        } catch (error) {
+          if (error instanceof ContactIdentityRateLimitError) {
+            const retryAfterSeconds = Math.ceil(error.retryAfterMs / 1000);
+            res.set("Retry-After", String(retryAfterSeconds));
+            return res.status(429).json({
+              code: "CONTACT_IDENTITY_RATE_LIMIT",
+              error: error.message,
+              retryAfterSeconds,
+            });
+          }
+          console.error("Contact identity issuance error:", error);
+          return res.status(500).json({
+            code: "CONTACT_IDENTITY_SAVE_FAILED",
+            error: "تعذر حفظ رقم التواصل. حاول مرة أخرى.",
+          });
+        }
+      }
+
+      if (!clientPhone) {
+        await recordContactEvent(contactEventBase, "auth_required");
+        return res.status(428).json({
+          code: "CONTACT_PHONE_REQUIRED",
+          error: "أدخل رقم جوالك للمتابعة إلى واتساب",
+        });
+      }
+    }
+
+    if (contactVisitorId) {
+      contactEventBase.visitorKey = createRememberedVisitorKey(contactVisitorId);
+    }
 
     const thirtyMinutes = 30 * 60 * 1000;
     const cooldownKey = createCooldownKey(contactEventBase!.visitorKey, propertyNumber);
@@ -158,6 +298,11 @@ router.post("/api/requests/smart", async (req, res) => {
         requestCode,
         clientPhone,
       },
+      {
+        key: createIpAbuseLimitKey(ipAddress, propertyNumber),
+        windowMs: thirtyMinutes,
+        maxAcceptedRequests: 10,
+      },
     );
 
     // تحقق من التكرار في آخر 30 دقيقة
@@ -174,7 +319,6 @@ router.post("/api/requests/smart", async (req, res) => {
       }
 
       console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
-      if (contactEventBase) await recordContactEvent(contactEventBase, "cooldown");
 
       return res.status(429).json({
         error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",

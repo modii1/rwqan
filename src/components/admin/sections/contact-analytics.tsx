@@ -317,7 +317,7 @@ export default function ContactAnalyticsSection() {
       <Card className="min-w-0 overflow-hidden">
         <div className="border-b p-4 sm:p-5">
           <h2 className="font-bold text-[#34332f]">آخر محاولات التواصل</h2>
-          <p className="text-xs text-muted-foreground">رقم العميل متاح للسجلات الجديدة فقط، ولا يتم عرض رقم المالك أو عنوان IP.</p>
+          <p className="text-xs text-muted-foreground">رقم التواصل متاح للسجلات الجديدة فقط، ولا يتم عرض عنوان IP.</p>
         </div>
         <div className="divide-y">
           {data.recentEvents.length ? data.recentEvents.slice(0, 20).map((event) => {

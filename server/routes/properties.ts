@@ -9,6 +9,7 @@ import type { InsertProperty } from "../../shared/schema";
 import { normalizeArabicText } from "../../src/lib/arabicSearch";
 import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
+import { requireAdmin, requireSameOrigin } from "./middleware";
 
 const router = Router();
 
@@ -115,7 +116,7 @@ router.get("/api/properties/:id", async (req, res) => {
 });
 
 // CREATE property (admin shortcut)
-router.post("/api/properties", async (req, res) => {
+router.post("/api/properties", requireSameOrigin, requireAdmin, async (req, res) => {
   try {
     const data = req.body;
     const exists = await propertyService.getByNumber(data.propertyNumber);
@@ -139,7 +140,7 @@ router.post("/api/properties", async (req, res) => {
 });
 
 // UPDATE property
-router.put("/api/properties/:propertyNumber", async (req, res) => {
+router.put("/api/properties/:propertyNumber", requireSameOrigin, requireAdmin, async (req, res) => {
   try {
     const incoming = req.body;
     const { SHEET_MAP } = await import("../utils/helpers");
@@ -193,7 +194,7 @@ router.put("/api/properties/:propertyNumber", async (req, res) => {
 });
 
 // DELETE property
-router.delete("/api/properties/:propertyNumber", async (req, res) => {
+router.delete("/api/properties/:propertyNumber", requireSameOrigin, requireAdmin, async (req, res) => {
   try {
     await propertyService.delete(req.params.propertyNumber);
     res.json({ ok: true });

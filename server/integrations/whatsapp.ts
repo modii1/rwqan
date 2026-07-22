@@ -2,8 +2,14 @@
 import express from "express";
 import { firebaseService } from "../firebaseService";
 import type { NotificationSettings } from "../../shared/schema";
+import { requireAdmin, requireSameOrigin } from "../routes/middleware";
 
 const router = express.Router();
+
+// Every HTTP endpoint on this router exposes privileged operational data or
+// can trigger a paid outbound message. Internal notification helpers exported
+// below remain callable by trusted server code without going through Express.
+router.use(requireSameOrigin, requireAdmin);
 
 // إعدادات Meta WhatsApp Business API من المتغيرات البيئية
 const META_WHATSAPP_TOKEN = process.env.META_WHATSAPP_TOKEN || "";

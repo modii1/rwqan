@@ -4,10 +4,11 @@
  * and PIN management.
  */
 
+import { timingSafeEqual } from "node:crypto";
 import { firebaseService } from "../firebaseService";
 
-const ADMIN_CODE = process.env.ADMIN_CODE ?? "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin123";
+const ADMIN_CODE = process.env.ADMIN_CODE;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 const ENJAZATIK_URL = process.env.ENJAZATIK_URL;
 const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN;
@@ -15,8 +16,11 @@ const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN;
 export class AuthService {
   // ─── Admin Auth ─────────────────────────────────────────────────────────────
 
-  validateAdminCredentials(code: string, password: string): boolean {
-    return code === ADMIN_CODE && password === ADMIN_PASSWORD;
+  validateAdminCredentials(code: unknown, password: unknown): boolean {
+    return (
+      this._safeCredentialMatch(code, ADMIN_CODE) &&
+      this._safeCredentialMatch(password, ADMIN_PASSWORD)
+    );
   }
 
   // ─── Owner Auth ─────────────────────────────────────────────────────────────
@@ -138,6 +142,17 @@ export class AuthService {
     if (phone.startsWith("0")) phone = "966" + phone.slice(1);
     if (!phone.startsWith("966")) phone = "966" + phone;
     return phone;
+  }
+
+  private _safeCredentialMatch(candidate: unknown, expected?: string): boolean {
+    if (typeof candidate !== "string" || !expected) return false;
+
+    const candidateBytes = Buffer.from(candidate);
+    const expectedBytes = Buffer.from(expected);
+    return (
+      candidateBytes.length === expectedBytes.length &&
+      timingSafeEqual(candidateBytes, expectedBytes)
+    );
   }
 }
 

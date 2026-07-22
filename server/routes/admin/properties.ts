@@ -206,7 +206,9 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
         updates[key] = value;
       }
     }
-    console.log(`[ADMIN_PROPERTY_UPDATE] Processed updates: ${JSON.stringify(updates)}`);
+    console.log(
+      `[ADMIN_PROPERTY_UPDATE] Processed update fields: ${Object.keys(updates).join(", ")}`,
+    );
 
     // Log PIN changes so they are traceable in server logs
     if (updates.pin !== undefined) {
@@ -227,7 +229,7 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
     if (updates.whatsappNumber) {
       try {
         updates.whatsappNumber = normalizePhoneNumber(updates.whatsappNumber);
-        console.log(`[ADMIN UPDATE] Phone normalized to: ${updates.whatsappNumber}`);
+        console.log(`[ADMIN UPDATE] Phone normalized for property ${propertyNumber}`);
       } catch (err: any) {
         console.log(`[ADMIN UPDATE] Phone validation failed: ${err.message}`);
         return res.status(400).json({ error: err.message });
@@ -306,8 +308,7 @@ router.post("/api/admin/properties", async (req, res) => {
   try {
     const body = req.body;
 
-    // Log property name for debugging
-    console.log(`[ADMIN_PROPERTY_CREATE] Name: "${body.name}", Length: ${body.name?.length || 0}`);
+    console.log(`[ADMIN_PROPERTY_CREATE] Name length: ${body.name?.length || 0}`);
 
     // Validate name length
     if (body.name && body.name.length > 30) {
@@ -330,7 +331,7 @@ router.post("/api/admin/properties", async (req, res) => {
     if (data.whatsappNumber) {
       try {
         data.whatsappNumber = normalizePhoneNumber(data.whatsappNumber);
-        console.log(`[ADMIN_PROPERTY_CREATE] Phone normalized to: ${data.whatsappNumber}`);
+        console.log("[ADMIN_PROPERTY_CREATE] Phone normalized");
       } catch (err: any) {
         console.log(`[ADMIN_PROPERTY_CREATE] Phone validation failed: ${err.message}`);
         return res.status(400).json({ error: err.message });

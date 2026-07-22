@@ -10,6 +10,8 @@ import { startSmartScheduler } from "./smartScheduler";
 import { startScheduler } from "./scheduler";
 import next from "next";
 import cookieParser from "cookie-parser";
+import { randomBytes } from "node:crypto";
+import { assertProductionSecurityEnvironment } from "./config/runtimeEnvironment";
 
 
 const app = express();
@@ -23,6 +25,7 @@ const handle = nextApp.getRequestHandler();
 (async () => {
   console.log("🚀 [Server] Entering main startup IIFE...");
   try {
+    assertProductionSecurityEnvironment();
     await nextApp.prepare();
     console.log("✅ [Server] Next.js prepared successfully.");
 
@@ -34,7 +37,9 @@ const handle = nextApp.getRequestHandler();
       "PAYMOB_API_KEY",
       "PAYMOB_PUBLIC_KEY",
       "PAYMOB_HMAC_SECRET",
-      "SESSION_SECRET"
+      "SESSION_SECRET",
+      "ADMIN_CODE",
+      "ADMIN_PASSWORD"
     ];
     const missingEnv = requiredEnv.filter(k => !process.env[k]);
     if (missingEnv.length > 0) {
@@ -65,9 +70,12 @@ const handle = nextApp.getRequestHandler();
 
     app.set("trust proxy", 1);
 
+    const sessionSecret =
+      process.env.SESSION_SECRET || randomBytes(32).toString("hex");
+
     app.use(
       session({
-        secret: process.env.SESSION_SECRET || "moddy-secret-key-2025",
+        secret: sessionSecret,
         resave: false,
         saveUninitialized: false,
         store: memoryStore,

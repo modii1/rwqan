@@ -194,6 +194,18 @@ async function updateRemainingDaysInSheet() {
     } catch (addOnError) {
       console.error("❌ [Scheduler] خطأ في تحديث الإضافات:", addOnError);
     }
+
+    // Remove abandoned remembered-contact sessions and short-lived security counters.
+    // Active sessions are also checked lazily on every request, while this
+    // daily cleanup covers browsers whose cookies were cleared or abandoned.
+    try {
+      const deletedSecurityRows = await firebaseService.deleteExpiredEphemeralSecurityData();
+      if (deletedSecurityRows > 0) {
+        console.log(`🧹 [Scheduler] Removed ${deletedSecurityRows} expired security rows`);
+      }
+    } catch (contactIdentityCleanupError) {
+      console.error("❌ [Scheduler] Contact identity cleanup error:", contactIdentityCleanupError);
+    }
     
     // =====================
     // إلغاء الدفعات المعلقة المنتهية الصلاحية

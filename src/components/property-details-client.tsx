@@ -1,33 +1,28 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ArrowRight, BadgeCheck, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Compass, Home, Loader2, MapPin, Moon, Phone, Share2, Sparkles, Tags } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
-import type { FormEvent, TouchEvent } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { TouchEvent } from "react";
 import { PriceDisplay } from "@/components/price-display";
 import { useToast } from "@/hooks/use-toast";
+import { useSessionQuery } from "@/hooks/use-session";
+import {
+    CONTACT_IDENTITY_QUERY_KEY,
+    EMPTY_CONTACT_IDENTITY,
+    useContactIdentityQuery,
+    useSaveContactIdentity,
+} from "@/hooks/use-contact-identity";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
-import {
-    normalizePhoneDigits,
-    normalizeSaudiMobilePhone,
-    normalizeWhatsAppDestination,
-} from "@shared/phone";
+import { normalizeWhatsAppDestination } from "@shared/phone";
 import { isPublicPropertyPremium } from "@/lib/public-subscription";
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
+import { ContactPhoneDialog } from "@/components/contact/contact-phone-dialog";
 
 const DEFAULT_WHATSAPP = "966533220646";
 
@@ -103,19 +98,17 @@ function normalizeWhatsAppNumber(value?: string) {
     return normalizeWhatsAppDestination(value) || DEFAULT_WHATSAPP;
 }
 
-function validateClientPhone(value: string): { phone?: string; error?: string } {
-    const normalized = normalizeSaudiMobilePhone(value);
-    if (normalized) return { phone: normalized };
+type ContactRequestErrorKind = "phone_required" | "cooldown" | "general";
 
-    let digits = normalizePhoneDigits(value);
-    if (digits.startsWith("00966")) digits = digits.slice(5);
-    else if (digits.startsWith("966")) digits = digits.slice(3);
-    else if (digits.startsWith("0")) digits = digits.slice(1);
-
-    if (!digits) return { error: "رقم الجوال مطلوب" };
-    if (!digits.startsWith("5")) return { error: "رقم الجوال السعودي يجب أن يبدأ بـ 5" };
-    if (digits.length !== 9) return { error: "أدخل رقم جوال صحيحاً من 9 أرقام بعد حذف الصفر" };
-    return { error: "رقم الجوال غير صحيح" };
+class ContactRequestError extends Error {
+    constructor(
+        message: string,
+        readonly kind: ContactRequestErrorKind,
+        readonly remainingTimeFormatted?: string,
+    ) {
+        super(message);
+        this.name = "ContactRequestError";
+    }
 }
 
 function detectDeviceType() {
@@ -145,12 +138,15 @@ interface PropertyDetailsClientProps {
 
 export default function PropertyDetailsClient({ propertyId, initialProperty, initialImages }: PropertyDetailsClientProps) {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const { toast } = useToast();
+    const { data: ownerSession } = useSessionQuery();
+    const contactIdentityQuery = useContactIdentityQuery();
+    const saveContactIdentity = useSaveContactIdentity();
+    const contactButtonRef = useRef<HTMLButtonElement>(null);
     const [isSending, setIsSending] = useState(false);
     const [shake, setShake] = useState(false);
     const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
-    const [clientPhone, setClientPhone] = useState("");
-    const [phoneError, setPhoneError] = useState("");
 
     const [selectedImage, setSelectedImage] = useState<number>(0);
     const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -487,92 +483,154 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     // إخفاء اسم العقار لغير المشتركين
     const displayName = isVerified(property) ? property.name : "";
 
-    // الواتساب: رقم العقار المميّز أو رقم افتراضي
-    const openContactDialog = () => {
-        setPhoneError("");
-        setIsContactDialogOpen(true);
+    const showContactRequestError = (error: unknown) => {
+        if (error instanceof ContactRequestError && error.kind === "cooldown") {
+            toast({
+                title: "⏱️ انتظر",
+                description: error.remainingTimeFormatted
+                    ? `${error.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`
+                    : error.message,
+                variant: "destructive",
+            });
+            return;
+        }
+
+        console.error("Error creating WhatsApp request:", error);
+        toast({
+            title: "خطأ",
+            description: error instanceof Error ? error.message : "حدث خطأ عند تسجيل الطلب",
+            variant: "destructive",
+        });
     };
 
-    const handleWhatsApp = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
+    // الواتساب: سجّل الطلب أولاً، ثم افتح رقم العقار المميّز أو الرقم الافتراضي.
+    const sendWhatsAppRequest = async (submittedPhone?: string) => {
+        if (isSending) {
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            throw new ContactRequestError("جاري تسجيل طلبك بالفعل", "general");
+        }
 
-        // ⭐ عند الضغط المتكرر — اهتزاز فقط
+        setIsSending(true);
+        try {
+            const response = await fetch("/api/requests/smart", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    propertyNumber: property.propertyNumber,
+                    ...(submittedPhone ? { clientPhone: submittedPhone } : {}),
+                }),
+            });
+
+            const result = await response.json().catch(() => ({})) as Record<string, unknown>;
+            if (!response.ok) {
+                const errorMessage = typeof result.error === "string"
+                    ? result.error
+                    : "تعذر تسجيل طلب التواصل";
+                const responseCode = typeof result.code === "string" ? result.code : "";
+
+                if (response.status === 428 || responseCode === "CONTACT_PHONE_REQUIRED") {
+                    throw new ContactRequestError(errorMessage, "phone_required");
+                }
+
+                const remainingTimeFormatted = typeof result.remainingTimeFormatted === "string"
+                    ? result.remainingTimeFormatted
+                    : undefined;
+                if (remainingTimeFormatted) {
+                    throw new ContactRequestError(errorMessage, "cooldown", remainingTimeFormatted);
+                }
+
+                throw new ContactRequestError(errorMessage, "general");
+            }
+
+            const requestCode = typeof result.requestCode === "string" ? result.requestCode : "";
+            const requestTime = typeof result.requestTime === "string" ? result.requestTime : "";
+            const whatsappNumber = normalizeWhatsAppNumber(
+                typeof result.whatsappNumber === "string" ? result.whatsappNumber : undefined,
+            );
+            const nameText = isVerified(property) ? ` - ${property.name}` : "";
+            const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${requestCode}`;
+
+            const isMobile =
+                /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+                    navigator.userAgent,
+                );
+            const url = isMobile
+                ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
+                : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+
+            setIsContactDialogOpen(false);
+            toast({
+                title: "✅ تم تسجيل طلبك",
+                description: requestTime ? `في ${requestTime}` : undefined,
+            });
+
+            // A same-tab navigation remains reliable after the awaited API call;
+            // browsers may block window.open here because user activation expired.
+            window.location.href = url;
+        } catch (error) {
+            if (error instanceof ContactRequestError) throw error;
+            console.error("Unexpected WhatsApp contact error:", error);
+            throw new ContactRequestError("حدث خطأ عند تسجيل الطلب. تحقق من اتصالك وحاول مرة أخرى.", "general");
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const handleContactClick = async () => {
         if (isSending) {
             setShake(true);
             setTimeout(() => setShake(false), 500);
             return;
         }
 
-        const phoneValidation = validateClientPhone(clientPhone);
-        if (!phoneValidation.phone) {
-            setPhoneError(phoneValidation.error || "رقم الجوال غير صحيح");
+        let identity = contactIdentityQuery.data;
+        const ownerIsLoggedIn = Boolean(ownerSession?.user);
+        if (!ownerIsLoggedIn && !identity) {
+            const refreshedIdentity = await contactIdentityQuery.refetch();
+            identity = refreshedIdentity.data;
+        }
+
+        const canContactImmediately =
+            ownerIsLoggedIn || identity?.kind === "owner" || identity?.kind === "client";
+        if (!canContactImmediately) {
+            setIsContactDialogOpen(true);
             return;
         }
 
-        setPhoneError("");
-        setIsSending(true);
-
         try {
-            const response = await fetch("/api/requests/smart", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    propertyNumber: property.propertyNumber,
-                    clientPhone: phoneValidation.phone,
-                }),
-            });
-
-            const result = await response.json();
-
-            if (!response.ok) {
-                if (result.remainingTimeFormatted) {
-                    toast({
-                        title: "⏱️ انتظر",
-                        description: `${result.remainingTimeFormatted}\nقبل إرسال طلب آخر لنفس العقار`,
-                        variant: "destructive",
-                    });
-                } else {
-                    setPhoneError(result.error || "تعذر تسجيل طلب التواصل");
-                }
-                setIsSending(false);
+            await sendWhatsAppRequest();
+        } catch (error) {
+            const isOwnerContact = ownerIsLoggedIn || identity?.kind === "owner";
+            if (error instanceof ContactRequestError && error.kind === "phone_required" && !isOwnerContact) {
+                queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                setIsContactDialogOpen(true);
                 return;
             }
+            showContactRequestError(error);
+        }
+    };
 
-            const nameText = isVerified(property) ? ` - ${property.name}` : "";
-            const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${result.requestCode}`;
-            const whatsappNumber = normalizeWhatsAppNumber(result.whatsappNumber);
+    const handleContactPhoneSubmit = async (phone: string) => {
+        const isAdminContact = contactIdentityQuery.data?.kind === "admin";
+        if (!isAdminContact) {
+            await saveContactIdentity.mutateAsync(phone);
+        }
 
-            const isMobile =
-                /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-                    navigator.userAgent,
-                );
-
-            const url = isMobile
-                ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
-                : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
-
-            setIsContactDialogOpen(false);
-            setClientPhone("");
-
-            // A same-tab navigation remains reliable after the awaited API call;
-            // browsers may block window.open here because user activation expired.
-            window.location.href = url;
-
-            toast({
-                title: "✅ تم تسجيل طلبك",
-                description: `في ${result.requestTime}`,
-            });
-
-            // رجوع الزر بعد ثانيتين
-            setTimeout(() => setIsSending(false), 2000);
+        try {
+            await sendWhatsAppRequest(phone);
         } catch (error) {
-            console.error("Error creating WhatsApp request:", error);
-            toast({
-                title: "خطأ",
-                description: "حدث خطأ عند تسجيل الطلب",
-                variant: "destructive",
-            });
-            setIsSending(false);
+            if (error instanceof ContactRequestError && error.kind === "phone_required") {
+                queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                throw new Error("تعذر استخدام رقم التواصل المحفوظ. حاول حفظه مرة أخرى.");
+            }
+            if (error instanceof ContactRequestError && error.kind === "cooldown") {
+                setIsContactDialogOpen(false);
+                showContactRequestError(error);
+                return;
+            }
+            throw error;
         }
     };
 
@@ -625,90 +683,14 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
     return (
         <div className="min-h-screen bg-[#faf8f1]" dir="rtl">
-            <Dialog
+            <ContactPhoneDialog
                 open={isContactDialogOpen}
-                onOpenChange={(open) => {
-                    if (isSending) return;
-                    setIsContactDialogOpen(open);
-                    if (!open) {
-                        setPhoneError("");
-                        setClientPhone("");
-                    }
-                }}
-            >
-                <DialogContent dir="rtl" className="max-w-md border-[#ded3bc] bg-[#fffdf8] text-right">
-                    <DialogHeader className="text-right sm:text-right">
-                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-lg border border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]">
-                            <Phone className="h-5 w-5" />
-                        </div>
-                        <DialogTitle className="text-xl text-[#2f2a1f]">أدخل رقم جوالك للمتابعة</DialogTitle>
-                        <DialogDescription className="pt-1 leading-6 text-[#6f6249]">
-                            سنسجل رقمك مع طلب التواصل على العقار، ثم نفتح لك واتساب مباشرة.
-                        </DialogDescription>
-                    </DialogHeader>
-
-                    <form onSubmit={handleWhatsApp} className="space-y-4" noValidate>
-                        <div className="space-y-2">
-                            <Label htmlFor="contact-client-phone" className="font-semibold text-[#2f2a1f]">
-                                رقم الجوال
-                            </Label>
-                            <Input
-                                id="contact-client-phone"
-                                type="tel"
-                                inputMode="tel"
-                                autoComplete="tel"
-                                autoFocus
-                                dir="ltr"
-                                value={clientPhone}
-                                onChange={(event) => {
-                                    setClientPhone(event.target.value.slice(0, 20));
-                                    if (phoneError) setPhoneError("");
-                                }}
-                                placeholder="05XXXXXXXX"
-                                aria-invalid={Boolean(phoneError)}
-                                aria-describedby={phoneError ? "contact-client-phone-error" : undefined}
-                                className={phoneError ? "border-red-500 focus-visible:ring-red-500" : ""}
-                                disabled={isSending}
-                            />
-                            {phoneError ? (
-                                <p id="contact-client-phone-error" className="text-sm font-medium text-red-600" role="alert">
-                                    {phoneError}
-                                </p>
-                            ) : (
-                                <p className="text-xs leading-5 text-[#7a705f]">يمكنك إدخاله بصيغة 05XXXXXXXX أو 9665XXXXXXXX.</p>
-                            )}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 pt-1">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                    setIsContactDialogOpen(false);
-                                    setClientPhone("");
-                                    setPhoneError("");
-                                }}
-                                disabled={isSending}
-                            >
-                                إلغاء
-                            </Button>
-                            <Button type="submit" className="bg-[#128c47] text-white hover:bg-[#0f783d]" disabled={isSending}>
-                                {isSending ? (
-                                    <span className="flex items-center gap-2">
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        جاري الفتح...
-                                    </span>
-                                ) : (
-                                    <span className="flex items-center gap-2">
-                                        <Phone className="h-4 w-4" />
-                                        المتابعة لواتساب
-                                    </span>
-                                )}
-                            </Button>
-                        </div>
-                    </form>
-                </DialogContent>
-            </Dialog>
+                onOpenChange={setIsContactDialogOpen}
+                onSubmit={handleContactPhoneSubmit}
+                isSubmitting={isSending || saveContactIdentity.isPending}
+                mode="contact"
+                returnFocusRef={contactButtonRef}
+            />
 
             <EdgeSwipeIndicator />
 
@@ -897,9 +879,10 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
                             <div className="space-y-3">
                                 <Button
+                                    ref={contactButtonRef}
                                     type="button"
-                                    onClick={openContactDialog}
-                                    disabled={isSending}
+                                    onClick={() => void handleContactClick()}
+                                    disabled={isSending || saveContactIdentity.isPending}
                                     className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold text-white sm:text-base ${
                                         isSending ? "bg-[#6f7a67]" : "bg-[#128c47]"
                                     } ${shake ? "animate-shake" : ""}`}

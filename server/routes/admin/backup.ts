@@ -1,11 +1,27 @@
 import { Router } from "express";
 import fs from "fs";
 import path from "path";
-import { requireAdmin } from "../middleware";
+import { requireAdmin, requireSameOrigin } from "../middleware";
 import { storage } from "../../storage";
 import { propertyService, subscriptionService, paymentService, discountService, analyticsService } from "../../services";
+import type { Backup, CodeBackup } from "../../../shared/schema";
 
 const router = Router();
+
+router.use("/api/backups", requireSameOrigin, requireAdmin);
+router.use("/api/code-backup", requireSameOrigin, requireAdmin);
+
+const toBackupSummary = (backup: Backup) => {
+  const summary: Partial<Backup> = { ...backup };
+  delete summary.backupData;
+  return summary;
+};
+
+const toCodeBackupSummary = (backup: CodeBackup) => {
+  const summary: Partial<CodeBackup> = { ...backup };
+  delete summary.files;
+  return summary;
+};
 
 // ======================
 // DATA BACKUP SYSTEM
@@ -14,7 +30,7 @@ const router = Router();
 router.get("/api/backups", async (req, res) => {
   try {
     const backups = await storage.getBackups();
-    res.json(backups);
+    res.json(backups.map(toBackupSummary));
   } catch (err: any) {
     console.error("Get backups error:", err?.message);
     res.status(500).json({ error: "Failed to load backups" });
@@ -106,7 +122,7 @@ router.post("/api/backups", async (req, res) => {
     });
 
     console.log(`✅ Backup created successfully: ${backup.id}`);
-    res.json(completed);
+    res.json(toBackupSummary(completed));
   } catch (err: any) {
     console.error("Create backup error:", err?.message);
     res.status(500).json({ error: "Failed to create backup" });
@@ -196,7 +212,7 @@ const readCodeFiles = (dir: string, fileList: Record<string, string> = {}): Reco
 router.get("/api/code-backup/list", async (req, res) => {
   try {
     const backups = await storage.getCodeBackups();
-    res.json(backups);
+    res.json(backups.map(toCodeBackupSummary));
   } catch (err: any) {
     console.error("Get code backups error:", err?.message);
     res.status(500).json({ error: "Failed to load code backups" });
@@ -242,7 +258,7 @@ router.post("/api/code-backup/create", async (req, res) => {
     });
 
     console.log(`✅ Code backup created: ${backup.id} (${fileCount} files, ${backup.totalSize}MB)`);
-    res.json(backup);
+    res.json(toCodeBackupSummary(backup));
   } catch (err: any) {
     console.error("Create code backup error:", err?.message);
     res.status(500).json({ error: "Failed to create code backup" });

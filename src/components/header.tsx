@@ -1,26 +1,34 @@
 "use client";
 
 import { useSessionQuery } from "@/hooks/use-session";
+import { useContactIdentityQuery } from "@/hooks/use-contact-identity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard, Shield, BookOpen, ChevronDown } from "lucide-react";
+import { Home, Lightbulb, LogIn, LogOut, LayoutDashboard, Shield, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
+import { ContactIdentityMenu } from "@/components/contact/contact-identity-menu";
 import Link from "next/link";
 
 export function Header() {
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { data: session } = useSessionQuery();
+    const { data: session, isFetched: isOwnerSessionFetched } = useSessionQuery();
+    const { data: contactIdentity } = useContactIdentityQuery();
 
     // التحقق من الأدمن
-    const { data: adminSession } = useQuery<{ isAdmin: boolean }>({
+    const { data: adminSession, isFetched: isAdminSessionFetched } = useQuery<{ isAdmin: boolean }>({
         queryKey: ["/api/admin/session"],
         staleTime: 1000 * 60 * 5,
     });
 
     // Check if user is authenticated (owner or admin)
     const isAuthenticated = session?.user || adminSession?.isAdmin;
+    const showClientIdentity =
+        isOwnerSessionFetched &&
+        isAdminSessionFetched &&
+        !session?.user &&
+        !adminSession?.isAdmin &&
+        contactIdentity?.kind === "client";
 
     const handleHome = () => {
         sessionStorage.removeItem("propertyFilters");
@@ -57,7 +65,7 @@ export function Header() {
                         className="h-[80px] w-auto drop-shadow-sm"
                     />
                 </Link>
-                <nav className="flex items-center gap-1 md:gap-2">
+                <nav className="flex items-center gap-0.5 sm:gap-1 md:gap-2">
                     <Button
                         variant="ghost"
                         size="icon"
@@ -88,6 +96,10 @@ export function Header() {
                     >
                         <BookOpen className="w-5 h-5 text-foreground/80" />
                     </Button>
+
+                    {showClientIdentity && contactIdentity && (
+                        <ContactIdentityMenu identity={contactIdentity} />
+                    )}
 
                     {session?.user && (
                         <Button

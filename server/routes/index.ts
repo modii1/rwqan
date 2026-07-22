@@ -19,7 +19,9 @@ import ownerRoutes from "./owner";
 import propertiesRoutes from "./properties";
 import publicRoutes from "./public";
 import trackingRoutes from "./tracking";
+import contactIdentityRoutes from "./contactIdentity";
 import webhookRoutes from "./webhooks";
+import { requireAdmin, requireSameOrigin } from "./middleware";
 
 // Admin route modules
 import adminAnalyticsRoutes from "./admin/analytics";
@@ -75,6 +77,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes (login, logout, session, password reset)
   app.use(authRoutes);
 
+  // Remembered public-client contact phone (separate from owner/admin auth)
+  app.use(contactIdentityRoutes);
+
   // Tracking routes (smart requests, pageview)
   app.use(trackingRoutes);
 
@@ -86,6 +91,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Webhook routes (Paymob)
   app.use(webhookRoutes);
+
+  // Central privileged boundary. Admin login/session routes are intentionally
+  // registered above; every modular /api/admin handler below requires a session.
+  app.use("/api/admin", requireSameOrigin, requireAdmin);
 
   // Admin routes
   app.use(adminAnalyticsRoutes);

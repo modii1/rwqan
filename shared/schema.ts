@@ -193,6 +193,26 @@ export const insertContactEventSchema = contactEventSchema.omit({ id: true, time
 export type InsertContactEvent = z.infer<typeof insertContactEventSchema>;
 
 // =========================
+// Remembered Contact Identity Sessions
+// =========================
+// The document ID is a SHA-256 hash of the opaque browser token. The raw
+// token is only stored in an HttpOnly cookie and never persisted in Firebase.
+export const contactIdentitySessionSchema = z.object({
+  id: z.string(),
+  // Stable browser identity, independent from the rotatable bearer token.
+  // Optional only so sessions issued before this field existed remain valid.
+  visitorId: z.string().optional(),
+  clientPhone: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  expiresAt: z.string(),
+  // Firestore Timestamp-compatible field used by scheduled/TTL cleanup.
+  expiresAtTtl: z.date(),
+});
+
+export type ContactIdentitySession = z.infer<typeof contactIdentitySessionSchema>;
+
+// =========================
 // Suggestion Schema (الاقتراحات)
 // =========================
 export const suggestionSchema = z.object({

@@ -16,6 +16,7 @@ import type {
     InsertRequest,
     ContactEvent,
     InsertContactEvent,
+    ContactIdentitySession,
     Expense,
     InsertExpense,
     FeeConfig,
@@ -1061,6 +1062,11 @@ export class FirebaseService {
         request: InsertRequest,
         requestCountFromIP: number,
         event: InsertContactEvent,
+        ipAbuseLimit?: {
+            key: string;
+            windowMs: number;
+            maxAcceptedRequests: number;
+        },
     ): Promise<
         | { accepted: false; remainingMs: number }
         | { accepted: true; remainingMs: 0; request: Request; event: ContactEvent }
@@ -1072,6 +1078,9 @@ export class FirebaseService {
         const eventId = `CONTACT-${now}-${Math.random().toString(36).slice(2, 8)}`;
         const requestRef = this.db.collection("requests").doc(requestId);
         const eventRef = this.db.collection("contact_events").doc(eventId);
+        const ipLimitRef = ipAbuseLimit
+            ? this.db.collection("contact_ip_rate_limits").doc(ipAbuseLimit.key)
+            : null;
 
         return this.db.runTransaction(async (transaction) => {
             const doc = await transaction.get(cooldownRef);
@@ -1084,6 +1093,28 @@ export class FirebaseService {
                     accepted: false,
                     remainingMs: cooldownMs - elapsed,
                 } as const;
+            }
+
+            let ipWindowStartedAt = now;
+            let ipAcceptedCount = 0;
+            if (ipLimitRef && ipAbuseLimit) {
+                const ipLimitDoc = await transaction.get(ipLimitRef);
+                const ipLimitData = ipLimitDoc.data();
+                const previousWindowStart = Number(ipLimitData?.windowStartedAt || 0);
+                const inCurrentWindow = previousWindowStart > 0
+                    && now - previousWindowStart < ipAbuseLimit.windowMs;
+                ipWindowStartedAt = inCurrentWindow ? previousWindowStart : now;
+                ipAcceptedCount = inCurrentWindow ? Number(ipLimitData?.acceptedCount || 0) : 0;
+
+                if (ipAcceptedCount >= ipAbuseLimit.maxAcceptedRequests) {
+                    return {
+                        accepted: false,
+                        remainingMs: Math.max(
+                            1,
+                            ipAbuseLimit.windowMs - (now - ipWindowStartedAt),
+                        ),
+                    } as const;
+                }
             }
 
             const newRequest: Request = {
@@ -1105,6 +1136,14 @@ export class FirebaseService {
                 // Can be enabled as a Firestore TTL field; no raw IP or phone is stored.
                 expiresAt: new Date(now + cooldownMs * 2),
             });
+            if (ipLimitRef && ipAbuseLimit) {
+                transaction.set(ipLimitRef, {
+                    windowStartedAt: ipWindowStartedAt,
+                    acceptedCount: ipAcceptedCount + 1,
+                    updatedAt: timestamp,
+                    expiresAtTtl: new Date(ipWindowStartedAt + ipAbuseLimit.windowMs * 2),
+                });
+            }
             transaction.set(requestRef, newRequest);
             transaction.set(eventRef, newEvent);
 
@@ -1120,6 +1159,163 @@ export class FirebaseService {
     async getContactEvents(): Promise<ContactEvent[]> {
         const snapshot = await this.db.collection("contact_events").orderBy("timestamp", "desc").get();
         return snapshot.docs.map((doc) => doc.data() as ContactEvent);
+    }
+
+    // ================== Remembered Contact Identity Sessions ==================
+
+    async getContactIdentitySession(id: string): Promise<ContactIdentitySession | null> {
+        const doc = await this.db.collection("contact_identity_sessions").doc(id).get();
+        return doc.exists ? (doc.data() as ContactIdentitySession) : null;
+    }
+
+    async replaceContactIdentitySession(
+        session: ContactIdentitySession,
+        previousId?: string,
+    ): Promise<void> {
+        const collection = this.db.collection("contact_identity_sessions");
+        const batch = this.db.batch();
+        batch.set(collection.doc(session.id), session);
+        if (previousId && previousId !== session.id) {
+            batch.delete(collection.doc(previousId));
+        }
+        await batch.commit();
+    }
+
+    async consumeContactIdentityIssueLimit(
+        id: string,
+        now: number,
+        windowMs: number,
+        maxIssues: number,
+    ): Promise<{ allowed: true; retryAfterMs: 0 } | { allowed: false; retryAfterMs: number }> {
+        const ref = this.db.collection("contact_identity_issue_limits").doc(id);
+
+        return this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            const data = doc.data();
+            const previousWindowStart = Number(data?.windowStartedAt || 0);
+            const inCurrentWindow = previousWindowStart > 0 && now - previousWindowStart < windowMs;
+            const windowStartedAt = inCurrentWindow ? previousWindowStart : now;
+            const issueCount = inCurrentWindow ? Number(data?.issueCount || 0) : 0;
+
+            if (issueCount >= maxIssues) {
+                return {
+                    allowed: false,
+                    retryAfterMs: Math.max(1, windowMs - (now - windowStartedAt)),
+                } as const;
+            }
+
+            transaction.set(ref, {
+                windowStartedAt,
+                issueCount: issueCount + 1,
+                updatedAt: new Date(now).toISOString(),
+                expiresAtTtl: new Date(windowStartedAt + windowMs * 2),
+            });
+            return { allowed: true, retryAfterMs: 0 } as const;
+        });
+    }
+
+    async consumeContactRequestAttemptLimit(
+        id: string,
+        now: number,
+        windowMs: number,
+        maxAttempts: number,
+    ): Promise<{ allowed: true; retryAfterMs: 0 } | { allowed: false; retryAfterMs: number }> {
+        const ref = this.db.collection("contact_request_attempt_limits").doc(id);
+
+        return this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            const data = doc.data();
+            const previousWindowStart = Number(data?.windowStartedAt || 0);
+            const inCurrentWindow = previousWindowStart > 0 && now - previousWindowStart < windowMs;
+            const windowStartedAt = inCurrentWindow ? previousWindowStart : now;
+            const attemptCount = inCurrentWindow ? Number(data?.attemptCount || 0) : 0;
+
+            if (attemptCount >= maxAttempts) {
+                return {
+                    allowed: false,
+                    retryAfterMs: Math.max(1, windowMs - (now - windowStartedAt)),
+                } as const;
+            }
+
+            transaction.set(ref, {
+                windowStartedAt,
+                attemptCount: attemptCount + 1,
+                updatedAt: new Date(now).toISOString(),
+                expiresAtTtl: new Date(windowStartedAt + windowMs * 2),
+            });
+            return { allowed: true, retryAfterMs: 0 } as const;
+        });
+    }
+
+    async consumeAdminLoginAttemptLimit(
+        id: string,
+        now: number,
+        windowMs: number,
+        maxAttempts: number,
+    ): Promise<{ allowed: true; retryAfterMs: 0 } | { allowed: false; retryAfterMs: number }> {
+        const ref = this.db.collection("admin_login_attempt_limits").doc(id);
+
+        return this.db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            const data = doc.data();
+            const previousWindowStart = Number(data?.windowStartedAt || 0);
+            const inCurrentWindow = previousWindowStart > 0 && now - previousWindowStart < windowMs;
+            const windowStartedAt = inCurrentWindow ? previousWindowStart : now;
+            const attemptCount = inCurrentWindow ? Number(data?.attemptCount || 0) : 0;
+
+            if (attemptCount >= maxAttempts) {
+                return {
+                    allowed: false,
+                    retryAfterMs: Math.max(1, windowMs - (now - windowStartedAt)),
+                } as const;
+            }
+
+            transaction.set(ref, {
+                windowStartedAt,
+                attemptCount: attemptCount + 1,
+                updatedAt: new Date(now).toISOString(),
+                expiresAtTtl: new Date(windowStartedAt + windowMs * 2),
+            });
+            return { allowed: true, retryAfterMs: 0 } as const;
+        });
+    }
+
+    async deleteAdminLoginAttemptLimit(id: string): Promise<void> {
+        await this.db.collection("admin_login_attempt_limits").doc(id).delete();
+    }
+
+    async deleteContactIdentitySession(id: string): Promise<void> {
+        await this.db.collection("contact_identity_sessions").doc(id).delete();
+    }
+
+    async deleteExpiredEphemeralSecurityData(referenceDate: Date = new Date()): Promise<number> {
+        const collectionNames = [
+            "contact_identity_sessions",
+            "contact_identity_issue_limits",
+            "contact_request_attempt_limits",
+            "contact_ip_rate_limits",
+            "admin_login_attempt_limits",
+        ];
+        const batchSize = 400;
+        let deleted = 0;
+
+        for (const collectionName of collectionNames) {
+            while (true) {
+                const snapshot = await this.db.collection(collectionName)
+                    .where("expiresAtTtl", "<=", referenceDate)
+                    .limit(batchSize)
+                    .get();
+                if (snapshot.empty) break;
+
+                const batch = this.db.batch();
+                snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+                await batch.commit();
+                deleted += snapshot.size;
+                if (snapshot.size < batchSize) break;
+            }
+        }
+
+        return deleted;
     }
 
     // ================== أكواد الخصم ==================

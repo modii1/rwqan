@@ -287,7 +287,6 @@ const router = Router();
   router.post("/api/paymob/webhook", async (req, res) => {
     try {
       console.log("📥 Paymob webhook received");
-      console.log("📥 Body:", JSON.stringify(req.body, null, 2));
 
       const webhook = req.body;
       const t = webhook.obj;

@@ -1,15 +1,30 @@
 /**
  * Auth Routes - Login, logout, password reset, session checks
  */
-import { Router } from "express";
+import { createHmac, randomBytes } from "node:crypto";
+import { Router, type Request } from "express";
 import { authService } from "../services";
-import { requireOwner, requireAdmin } from "./middleware";
+import { firebaseService } from "../firebaseService";
+import {
+  ADMIN_LOGIN_MAX_ATTEMPTS,
+  ADMIN_LOGIN_WINDOW_MS,
+  AdminLoginRateLimiter,
+} from "../services/AdminLoginRateLimiter";
+import { isSameOriginRequest } from "../utils/requestOrigin";
+import { requireOwner } from "./middleware";
 
 const router = Router();
 
-// Admin credentials
-const ADMIN_CODE = process.env.ADMIN_CODE || "Rwq";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Qw@123";
+const adminLoginRateLimiter = new AdminLoginRateLimiter();
+const adminLoginKeySecret =
+  process.env.SESSION_SECRET || randomBytes(32).toString("hex");
+
+function adminLoginClientKey(req: Request): string {
+  const clientAddress = req.ip || req.socket.remoteAddress || "unknown";
+  return createHmac("sha256", adminLoginKeySecret)
+    .update(`admin-login:${clientAddress}`)
+    .digest("hex");
+}
 
 // ======================
 // OWNER LOGIN/LOGOUT
@@ -43,9 +58,48 @@ router.post("/api/owner/logout", (req, res) => {
 // ADMIN LOGIN
 // ======================
 router.post("/api/admin/login", async (req, res) => {
-  const { code, password } = req.body;
-  if (code !== ADMIN_CODE || password !== ADMIN_PASSWORD) {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({
+      code: "CROSS_ORIGIN_REQUEST",
+      error: "Cross-origin admin login is not allowed",
+    });
+  }
+
+  const clientKey = adminLoginClientKey(req);
+  const limit = adminLoginRateLimiter.consume(clientKey);
+  if (!limit.allowed) {
+    res.setHeader("Retry-After", Math.max(1, Math.ceil(limit.retryAfterMs / 1000)));
+    return res.status(429).json({ error: "Too Many Login Attempts" });
+  }
+
+  try {
+    const sharedLimit = await firebaseService.consumeAdminLoginAttemptLimit(
+      clientKey,
+      Date.now(),
+      ADMIN_LOGIN_WINDOW_MS,
+      ADMIN_LOGIN_MAX_ATTEMPTS,
+    );
+    if (!sharedLimit.allowed) {
+      res.setHeader(
+        "Retry-After",
+        Math.max(1, Math.ceil(sharedLimit.retryAfterMs / 1000)),
+      );
+      return res.status(429).json({ error: "Too Many Login Attempts" });
+    }
+  } catch (error) {
+    console.error("Admin login rate-limit service error:", error);
+    return res.status(503).json({ error: "Admin Login Temporarily Unavailable" });
+  }
+
+  const { code, password } = req.body || {};
+  if (!authService.validateAdminCredentials(code, password)) {
     return res.status(401).json({ error: "Invalid Admin Credentials" });
+  }
+  adminLoginRateLimiter.clear(clientKey);
+  try {
+    await firebaseService.deleteAdminLoginAttemptLimit(clientKey);
+  } catch (error) {
+    console.error("Admin login rate-limit cleanup error:", error);
   }
   (req.session as any).isAdmin = true;
   req.session.save((err: any) => {
