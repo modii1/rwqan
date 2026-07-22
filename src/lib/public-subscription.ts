@@ -1,4 +1,4 @@
-import { isActivePremiumSubscription } from "@shared/subscriptionType";
+import { isActivePremiumSubscription } from "@shared/core/subscriptions/type";
 
 interface PublicSubscriptionState {
   subscriptionType?: string | null;

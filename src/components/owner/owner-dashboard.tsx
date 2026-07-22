@@ -40,7 +40,7 @@ import {
   PauseCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { PriceDisplay } from "@/components/price-display";
+import { PriceDisplay } from "@/components/core/price-display";
 import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
 import {
@@ -60,7 +60,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/core/subscriptions/type";
 import {
   OwnerMobileNavigation,
   OwnerPageHeader,

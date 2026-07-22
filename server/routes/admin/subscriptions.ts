@@ -12,7 +12,7 @@ import {
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
-} from "../../../shared/subscriptionType";
+} from "../../../shared/core/subscriptions/type";
 import {
   MAX_SUBSCRIPTION_DAYS,
   calculateRemainingDays as calculateServerRemainingDays,

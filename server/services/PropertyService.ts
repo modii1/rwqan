@@ -12,7 +12,7 @@ import {
 } from "../utils/verification";
 import { calculateRemainingDays, toRiyadhISO, getNowInRiyadh } from "../utils/dateUtils";
 import { countR2Images } from "../utils/r2";
-import { isActivePremiumSubscription, isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import { isActivePremiumSubscription, isPremiumSubscriptionType } from "../../shared/core/subscriptions/type";
 
 export class PropertyService {
   // ─── Read ───────────────────────────────────────────────────────────────────

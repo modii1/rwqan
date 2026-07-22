@@ -5,7 +5,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build && tsc --project tsconfig.server.json && echo '{\"type\":\"commonjs\"}' > dist/package.json",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build && tsc --project tsconfig.server.json && node scripts/write-dist-package.cjs",
+    "test": "node scripts/run-tests.cjs",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.server.json --noEmit && tsc --project scripts/tsconfig.json --noEmit",
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "lint": "next lint",
     "db:push": "drizzle-kit push"

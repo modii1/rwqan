@@ -2,7 +2,7 @@
  * Smart verification system for property data completeness
  */
 import { dbProxy } from "../config/dbConfig";
-import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import { isPremiumSubscriptionType } from "../../shared/core/subscriptions/type";
 
 // Sensitive fields that require re-verification
 const SENSITIVE_FIELDS = ['location', 'city', 'type', 'imagesLink', 'images'];

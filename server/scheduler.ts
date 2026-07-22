@@ -14,7 +14,7 @@ import {
 } from "./integrations/whatsapp";
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
-import { isPremiumSubscriptionType } from "../shared/subscriptionType";
+import { isPremiumSubscriptionType } from "../shared/core/subscriptions/type";
 
 
 

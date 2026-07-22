@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator, Trash2, MinusCircle, Banknote, ChevronDown } from "lucide-react";
 import type { PartnerProfit, Payment, Expense } from "@shared/schema";
 import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/core/subscriptions/type";
 
 // رسوم Paymob
 const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {

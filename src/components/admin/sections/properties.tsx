@@ -14,7 +14,7 @@ import { FACILITIES } from "@shared/schema";
 import { useRouter } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/core/subscriptions/type";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'رياض الخبراء'] as const;
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;

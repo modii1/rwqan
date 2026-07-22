@@ -172,7 +172,7 @@ async function generatePDF() {
     console.log('🔄 جاري إنشاء ملف PDF...');
     
     const pdf = await mdToPdf(
-      { path: 'DEVELOPER_GUIDE.md' },
+      { path: 'docs/guides/developer-guide.md' },
       {
         css: cssStyles,
         pdf_options: {
@@ -192,8 +192,8 @@ async function generatePDF() {
     );
     
     if (pdf) {
-      writeFileSync('DEVELOPER_GUIDE.pdf', pdf.content);
-      console.log('✅ تم إنشاء DEVELOPER_GUIDE.pdf بنجاح!');
+      writeFileSync('docs/guides/developer-guide.pdf', pdf.content);
+      console.log('✅ تم إنشاء docs/guides/developer-guide.pdf بنجاح!');
       console.log('📄 حجم الملف:', Math.round(pdf.content.length / 1024), 'KB');
     }
   } catch (error) {

@@ -34,7 +34,7 @@ import {
   getSubscriptionStatus,
   getStatusInfo,
 } from "@/lib/subscription-utils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/core/subscriptions/type";
 
 // Override formatDate to always show English numbers
 function formatDate(dateStr: any): string {

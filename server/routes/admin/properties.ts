@@ -9,13 +9,13 @@ import { storage } from "../../storage";
 import {
   activateVerifiedPaymentSubscription,
   calculateActionDates,
-} from "../../utils/paymentScenarioFlow";
+} from "../../services/payments/paymentScenarioFlow";
 import {
   getEffectiveSubscriptionType,
   getSubscriptionTypeLabel,
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
-} from "../../../shared/subscriptionType";
+} from "../../../shared/core/subscriptions/type";
 import { calculateRemainingDays } from "../../utils/dateUtils";
 
 const router = Router();

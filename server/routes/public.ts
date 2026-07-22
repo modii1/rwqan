@@ -15,7 +15,7 @@ const router = Router();
 // ======================
 router.get("/developer-guide", async (_req, res) => {
   try {
-    const filePath = path.join(process.cwd(), "DEVELOPER_GUIDE.html");
+    const filePath = path.join(process.cwd(), "public", "DEVELOPER_GUIDE.html");
     if (fs.existsSync(filePath)) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.sendFile(filePath);

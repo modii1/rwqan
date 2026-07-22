@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import { readFileSync, writeFileSync } from 'fs';
 
-const markdown = readFileSync('DEVELOPER_GUIDE.md', 'utf-8');
+const markdown = readFileSync('docs/guides/developer-guide.md', 'utf-8');
 const htmlContent = marked.parse(markdown);
 
 const fullHtml = `<!DOCTYPE html>
@@ -298,6 +298,6 @@ const fullHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 
-writeFileSync('DEVELOPER_GUIDE.html', fullHtml);
-console.log('✅ تم إنشاء DEVELOPER_GUIDE.html بنجاح!');
+writeFileSync('public/DEVELOPER_GUIDE.html', fullHtml);
+console.log('✅ تم إنشاء public/DEVELOPER_GUIDE.html بنجاح!');
 console.log('📄 افتح الملف في المتصفح واضغط Ctrl+P للحفظ كـ PDF');

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, RefreshCw, Search } from "lucide-react";
 import type { Property } from "@shared/schema";
-import { isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { isPremiumSubscriptionType } from "@shared/core/subscriptions/type";
 
 type Level = "ok" | "warning" | "danger";
 

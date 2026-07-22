@@ -15,7 +15,7 @@ import {
 import {
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
-} from "../../shared/subscriptionType";
+} from "../../shared/core/subscriptions/type";
 import {
   SUSPENDED_SUBSCRIPTION_STATUS,
   SubscriptionLifecycleError,

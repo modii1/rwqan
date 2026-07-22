@@ -2,7 +2,7 @@
  * Shared constants and helpers for routes
  */
 import multer from "multer";
-import { normalizePhoneDigits, normalizeSaudiMobilePhone } from "../../shared/phone";
+import { normalizePhoneDigits, normalizeSaudiMobilePhone } from "../../shared/core/contact/phone";
 
 export const upload = multer({
   storage: multer.memoryStorage(),

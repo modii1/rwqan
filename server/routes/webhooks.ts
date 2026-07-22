@@ -10,7 +10,7 @@ import {
   calculateActionDates,
   hasPriorSubscription,
   queueVerifiedNewPropertyForAdminApproval,
-} from "../utils/paymentScenarioFlow";
+} from "../services/payments/paymentScenarioFlow";
 
 const router = Router();
 

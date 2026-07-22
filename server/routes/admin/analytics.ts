@@ -3,7 +3,7 @@ import { requireAdmin } from "../middleware";
 import { analyticsService, propertyService, subscriptionService, paymentService, addOnService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { updateRemainingDaysInSheet } from "../../scheduler";
-import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
+import { isPremiumSubscriptionType } from "../../../shared/core/subscriptions/type";
 import { buildContactAnalytics } from "../../services/contactAnalytics";
 
 const router = Router();
