@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 
 export type ContactIdentityKind = "none" | "client" | "owner" | "admin";
 
@@ -13,6 +18,19 @@ export const EMPTY_CONTACT_IDENTITY: ContactIdentity = {
   kind: "none",
   maskedPhone: null,
 };
+
+export async function commitContactIdentityCache(
+  queryClient: QueryClient,
+  identity: ContactIdentity,
+): Promise<void> {
+  // A focus-triggered GET may start while POST/DELETE is pending. Cancel it
+  // again at commit time so an older response cannot overwrite the mutation.
+  await queryClient.cancelQueries({
+    queryKey: CONTACT_IDENTITY_QUERY_KEY,
+    exact: true,
+  });
+  queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
+}
 
 async function readJson(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") || "";
@@ -44,10 +62,11 @@ function parseIdentity(payload: unknown): ContactIdentity {
   };
 }
 
-async function fetchContactIdentity(): Promise<ContactIdentity> {
+async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdentity> {
   const response = await fetch("/api/contact-identity", {
     credentials: "include",
     cache: "no-store",
+    signal,
   });
   const payload = await readJson(response);
 
@@ -93,7 +112,7 @@ async function deleteContactIdentity(): Promise<void> {
 export function useContactIdentityQuery() {
   return useQuery<ContactIdentity>({
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
-    queryFn: fetchContactIdentity,
+    queryFn: ({ signal }) => fetchContactIdentity(signal),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: "always",
     retry: false,
@@ -105,9 +124,13 @@ export function useSaveContactIdentity() {
 
   return useMutation({
     mutationFn: saveContactIdentity,
-    onSuccess: (identity) => {
-      queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
+    onMutate: async () => {
+      await queryClient.cancelQueries({
+        queryKey: CONTACT_IDENTITY_QUERY_KEY,
+        exact: true,
+      });
     },
+    onSuccess: (identity) => commitContactIdentityCache(queryClient, identity),
   });
 }
 
@@ -116,8 +139,13 @@ export function useDeleteContactIdentity() {
 
   return useMutation({
     mutationFn: deleteContactIdentity,
-    onSuccess: () => {
-      queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+    onMutate: async () => {
+      await queryClient.cancelQueries({
+        queryKey: CONTACT_IDENTITY_QUERY_KEY,
+        exact: true,
+      });
     },
+    onSuccess: () =>
+      commitContactIdentityCache(queryClient, EMPTY_CONTACT_IDENTITY),
   });
 }

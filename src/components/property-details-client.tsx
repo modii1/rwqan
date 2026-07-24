@@ -21,6 +21,13 @@ import Link from "next/link";
 import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
 import { normalizeWhatsAppDestination } from "@shared/phone";
 import { isPublicPropertyPremium } from "@/lib/public-subscription";
+import {
+    buildWhatsAppUrl,
+    closeReservedWhatsAppTab,
+    navigateReservedWhatsAppTab,
+    reserveWhatsAppTab,
+    type ReservedWhatsAppTab,
+} from "@/lib/whatsapp-navigation";
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
 import { ContactPhoneDialog } from "@/components/contact/contact-phone-dialog";
 
@@ -144,9 +151,12 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const contactIdentityQuery = useContactIdentityQuery();
     const saveContactIdentity = useSaveContactIdentity();
     const contactButtonRef = useRef<HTMLButtonElement>(null);
+    const isSendingRef = useRef(false);
+    const contactFlowActiveRef = useRef(false);
     const [isSending, setIsSending] = useState(false);
     const [shake, setShake] = useState(false);
     const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
+    const [whatsappFallbackUrl, setWhatsAppFallbackUrl] = useState<string | null>(null);
 
     const [selectedImage, setSelectedImage] = useState<number>(0);
     const [touchStartX, setTouchStartX] = useState<number | null>(null);
@@ -504,13 +514,17 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     };
 
     // الواتساب: سجّل الطلب أولاً، ثم افتح رقم العقار المميّز أو الرقم الافتراضي.
-    const sendWhatsAppRequest = async (submittedPhone?: string) => {
-        if (isSending) {
+    const sendWhatsAppRequest = async (
+        submittedPhone: string | undefined,
+        whatsappTab: ReservedWhatsAppTab,
+    ) => {
+        if (isSendingRef.current) {
             setShake(true);
             setTimeout(() => setShake(false), 500);
             throw new ContactRequestError("جاري تسجيل طلبك بالفعل", "general");
         }
 
+        isSendingRef.current = true;
         setIsSending(true);
         try {
             const response = await fetch("/api/requests/smart", {
@@ -552,85 +566,123 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             const nameText = isVerified(property) ? ` - ${property.name}` : "";
             const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${requestCode}`;
 
-            const isMobile =
-                /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-                    navigator.userAgent,
-                );
-            const url = isMobile
-                ? `whatsapp://send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`
-                : `https://web.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
+            const url = buildWhatsAppUrl(whatsappNumber, message);
 
+            if (!navigateReservedWhatsAppTab(whatsappTab, url)) {
+                setIsContactDialogOpen(false);
+                setWhatsAppFallbackUrl(url);
+                throw new ContactRequestError(
+                    "تم تسجيل طلبك، لكن أُغلقت علامة واتساب. استخدم زر فتح واتساب الظاهر في الصفحة.",
+                    "general",
+                );
+            }
+
+            setWhatsAppFallbackUrl(null);
             setIsContactDialogOpen(false);
             toast({
                 title: "✅ تم تسجيل طلبك",
                 description: requestTime ? `في ${requestTime}` : undefined,
             });
-
-            // A same-tab navigation remains reliable after the awaited API call;
-            // browsers may block window.open here because user activation expired.
-            window.location.href = url;
         } catch (error) {
             if (error instanceof ContactRequestError) throw error;
             console.error("Unexpected WhatsApp contact error:", error);
             throw new ContactRequestError("حدث خطأ عند تسجيل الطلب. تحقق من اتصالك وحاول مرة أخرى.", "general");
         } finally {
+            isSendingRef.current = false;
             setIsSending(false);
         }
     };
 
     const handleContactClick = async () => {
-        if (isSending) {
+        if (contactFlowActiveRef.current || isSendingRef.current) {
             setShake(true);
             setTimeout(() => setShake(false), 500);
             return;
         }
 
-        let identity = contactIdentityQuery.data;
-        const ownerIsLoggedIn = Boolean(ownerSession?.user);
-        if (!ownerIsLoggedIn && !identity) {
-            const refreshedIdentity = await contactIdentityQuery.refetch();
-            identity = refreshedIdentity.data;
-        }
-
-        const canContactImmediately =
-            ownerIsLoggedIn || identity?.kind === "owner" || identity?.kind === "client";
-        if (!canContactImmediately) {
-            setIsContactDialogOpen(true);
-            return;
-        }
-
+        contactFlowActiveRef.current = true;
         try {
-            await sendWhatsAppRequest();
-        } catch (error) {
-            const isOwnerContact = ownerIsLoggedIn || identity?.kind === "owner";
-            if (error instanceof ContactRequestError && error.kind === "phone_required" && !isOwnerContact) {
-                queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+            let identity = contactIdentityQuery.data;
+            const ownerIsLoggedIn = Boolean(ownerSession?.user);
+            if (
+                !ownerIsLoggedIn &&
+                (!identity || identity.kind === "none" || identity.kind === "admin")
+            ) {
                 setIsContactDialogOpen(true);
                 return;
             }
-            showContactRequestError(error);
+
+            const whatsappTab = reserveWhatsAppTab();
+            if (!whatsappTab) {
+                showContactRequestError(
+                    new ContactRequestError(
+                        "المتصفح منع فتح واتساب في علامة جديدة. اسمح بالنوافذ المنبثقة ثم حاول مجدداً.",
+                        "general",
+                    ),
+                );
+                return;
+            }
+
+            const canContactImmediately =
+                ownerIsLoggedIn || identity?.kind === "owner" || identity?.kind === "client";
+            if (!canContactImmediately) {
+                closeReservedWhatsAppTab(whatsappTab);
+                setIsContactDialogOpen(true);
+                return;
+            }
+
+            try {
+                await sendWhatsAppRequest(undefined, whatsappTab);
+            } catch (error) {
+                closeReservedWhatsAppTab(whatsappTab);
+                const isOwnerContact = ownerIsLoggedIn || identity?.kind === "owner";
+                if (error instanceof ContactRequestError && error.kind === "phone_required" && !isOwnerContact) {
+                    queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                    setIsContactDialogOpen(true);
+                    return;
+                }
+                showContactRequestError(error);
+            }
+        } finally {
+            contactFlowActiveRef.current = false;
         }
     };
 
     const handleContactPhoneSubmit = async (phone: string) => {
-        const isAdminContact = contactIdentityQuery.data?.kind === "admin";
-        if (!isAdminContact) {
-            await saveContactIdentity.mutateAsync(phone);
+        if (contactFlowActiveRef.current || isSendingRef.current) {
+            throw new Error("جاري تسجيل طلبك بالفعل");
         }
 
+        contactFlowActiveRef.current = true;
         try {
-            await sendWhatsAppRequest(phone);
-        } catch (error) {
-            if (error instanceof ContactRequestError && error.kind === "phone_required") {
-                queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
-                throw new Error("تعذر استخدام رقم التواصل المحفوظ. حاول حفظه مرة أخرى.");
+            const whatsappTab = reserveWhatsAppTab();
+            if (!whatsappTab) {
+                throw new Error(
+                    "المتصفح منع فتح واتساب في علامة جديدة. اسمح بالنوافذ المنبثقة ثم حاول مجدداً.",
+                );
             }
-            if (error instanceof ContactRequestError && error.kind === "cooldown") {
-                setIsContactDialogOpen(false);
-                showContactRequestError(error);
-                return;
+
+            const isAdminContact = contactIdentityQuery.data?.kind === "admin";
+            try {
+                if (!isAdminContact) {
+                    await saveContactIdentity.mutateAsync(phone);
+                }
+                await sendWhatsAppRequest(phone, whatsappTab);
+            } catch (error) {
+                closeReservedWhatsAppTab(whatsappTab);
+                if (error instanceof ContactRequestError && error.kind === "phone_required") {
+                    queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                    throw new Error("تعذر استخدام رقم التواصل المحفوظ. حاول حفظه مرة أخرى.");
+                }
+                if (error instanceof ContactRequestError && error.kind === "cooldown") {
+                    setIsContactDialogOpen(false);
+                    showContactRequestError(error);
+                    return;
+                }
+                throw error;
             }
-            throw error;
+        } finally {
+            contactFlowActiveRef.current = false;
         }
     };
 
@@ -691,6 +743,38 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 mode="contact"
                 returnFocusRef={contactButtonRef}
             />
+
+            {whatsappFallbackUrl && (
+                <div
+                    role="alert"
+                    className="fixed inset-x-3 bottom-3 z-[100] mx-auto max-w-md rounded-xl border border-emerald-200 bg-white p-4 text-right shadow-2xl"
+                    data-testid="whatsapp-fallback"
+                >
+                    <p className="font-semibold text-[#2f2a1f]">تم تسجيل طلب التواصل</p>
+                    <p className="mt-1 text-sm leading-6 text-[#6f6249]">
+                        أُغلقت علامة واتساب قبل اكتمال الفتح. يمكنك فتحها مجدداً من هنا دون تسجيل طلب آخر.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                        <Button asChild className="flex-1 bg-[#128c47] text-white hover:bg-[#0f783d]">
+                            <a
+                                href={whatsappFallbackUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => setWhatsAppFallbackUrl(null)}
+                            >
+                                فتح واتساب
+                            </a>
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setWhatsAppFallbackUrl(null)}
+                        >
+                            إغلاق
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             <EdgeSwipeIndicator />
 
@@ -882,20 +966,24 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     ref={contactButtonRef}
                                     type="button"
                                     onClick={() => void handleContactClick()}
-                                    disabled={isSending || saveContactIdentity.isPending}
+                                    disabled={
+                                        isSending ||
+                                        saveContactIdentity.isPending ||
+                                        contactIdentityQuery.isPending
+                                    }
                                     className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold text-white sm:text-base ${
-                                        isSending ? "bg-[#6f7a67]" : "bg-[#128c47]"
+                                        isSending || contactIdentityQuery.isPending ? "bg-[#6f7a67]" : "bg-[#128c47]"
                                     } ${shake ? "animate-shake" : ""}`}
                                     size="lg"
                                     data-testid="button-whatsapp"
                                 >
-                                    {isSending ? (
+                                    {isSending || contactIdentityQuery.isPending ? (
                                         <span className="flex items-center gap-2">
                                             <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                                             </svg>
-                                            جاري التحميل...
+                                            {isSending ? "جاري تسجيل الطلب..." : "جاري التحقق..."}
                                         </span>
                                     ) : (
                                         <>

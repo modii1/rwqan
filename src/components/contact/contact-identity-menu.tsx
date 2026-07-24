@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronDown, LogOut, Pencil, UserRoundCheck } from "lucide-react";
+import { ChevronDown, LogIn, LogOut, Pencil, UserRoundCheck } from "lucide-react";
+import Link from "next/link";
 import type { ContactIdentity } from "@/hooks/use-contact-identity";
 import {
   useDeleteContactIdentity,
@@ -65,11 +66,13 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
             variant="outline"
             title="رقم التواصل محفوظ"
             aria-label="إدارة رقم التواصل المحفوظ"
-            className="h-9 w-9 rounded-xl border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 md:h-10 md:w-auto md:px-3"
+            className="h-10 w-10 rounded-xl border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 md:w-auto md:px-3"
             data-testid="button-contact-identity"
           >
             <UserRoundCheck className="h-5 w-5" />
-            <span className="hidden whitespace-nowrap md:inline">رقم التواصل محفوظ</span>
+            <span className="hidden whitespace-nowrap font-semibold md:inline" dir="ltr">
+              {identity.maskedPhone || "رقم محفوظ"}
+            </span>
             <ChevronDown className="hidden h-4 w-4 md:block" />
           </Button>
         </DropdownMenuTrigger>
@@ -92,6 +95,13 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
           >
             <LogOut className="h-4 w-4" />
             {deleteIdentity.isPending ? "جاري تسجيل الخروج..." : "تسجيل الخروج"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link href="/owner/login">
+              <LogIn className="h-4 w-4" />
+              دخول الملاك
+            </Link>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

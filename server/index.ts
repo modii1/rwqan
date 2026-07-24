@@ -19,7 +19,7 @@ const port = parseInt(process.env.PORT || "5000", 10);
 const dev = process.env.NODE_ENV !== "production";
 
 // Initialize Next.js
-const nextApp = next({ dev });
+const nextApp = next(dev ? { dev, webpack: true } : { dev });
 const handle = nextApp.getRequestHandler();
 
 (async () => {
