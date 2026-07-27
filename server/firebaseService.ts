@@ -61,6 +61,97 @@ import {
     normalizeSubscriptionPackageDuration,
 } from "../shared/subscriptionPackagePolicy";
 
+type PaymentFulfillmentClaimResult =
+    | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
+    | { status: "fulfilled" }
+    | { status: "processing" }
+    | { status: "action_conflict"; conflictingPaymentId?: string }
+    | { status: "action_ineligible"; action: "new" | "extend" | "upgrade" };
+
+type GuardedPaymentFulfillmentClaimResult =
+    | PaymentFulfillmentClaimResult
+    | { status: "invalid_status"; currentStatus: string };
+
+type PaymentFulfillmentClaimOptions = {
+    purpose?: "fulfill" | "reject";
+};
+
+type PaymentActionLock = {
+    propertyNumber: string;
+    paymentId: string;
+    action: "new" | "extend" | "upgrade";
+    state: "reserved" | "retrying" | "processing" | "fulfilled" | "released";
+    reservedAt: string;
+    claimedAt?: string;
+    claimToken?: string;
+    retryToken?: string;
+    completedAt?: string;
+    releasedAt?: string;
+};
+
+export class PaymentActionConflictError extends Error {
+    readonly status = 409;
+    readonly code = "PAYMENT_ACTION_IN_PROGRESS";
+
+    constructor() {
+        super("يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار. أكمل الدفع الحالي أو ألغِه قبل بدء دفع جديد.");
+        this.name = "PaymentActionConflictError";
+    }
+}
+
+export class PaymentActionEligibilityError extends Error {
+    readonly status = 409;
+    readonly code = "PAYMENT_ACTION_NO_LONGER_ELIGIBLE";
+
+    constructor(action: "new" | "extend" | "upgrade") {
+        const message = action === "new"
+            ? "لم يعد بدء اشتراك جديد متاحاً لأن للعقار اشتراكاً نشطاً. اختر تغيير الباقة أو انتظر نافذة التمديد."
+            : action === "extend"
+                ? "لم يعد التمديد متاحاً بحالة الاشتراك الحالية. يمكن التمديد فقط عندما يتبقى 10 أيام أو أقل من اشتراك نشط."
+                : "لم يعد تغيير الباقة متاحاً لأن الاشتراك الحالي غير نشط. اختر اشتراكاً جديداً بدلاً من ذلك.";
+        super(message);
+        this.name = "PaymentActionEligibilityError";
+    }
+}
+
+export class PaymentRetryNotAllowedError extends Error {
+    readonly status = 409;
+    readonly code = "PAYMENT_RETRY_NOT_ALLOWED";
+
+    constructor() {
+        super("لا يمكن إنشاء عملية دفع بديلة لهذه الدفعة. توجد عملية سابقة أو أن نتيجتها تحتاج التحقق من مزود الدفع.");
+        this.name = "PaymentRetryNotAllowedError";
+    }
+}
+
+export class LinkedPropertyMutationError extends Error {
+    constructor(
+        message: string,
+        readonly status: number,
+        readonly code: string,
+    ) {
+        super(message);
+        this.name = "LinkedPropertyMutationError";
+    }
+}
+
+type LinkedPropertyGroupMutationParams = {
+    mainPropertyNumber: string;
+    addPropertyNumbers?: string[];
+    removePropertyNumbers?: string[];
+    replacePropertyNumbers?: string[];
+    approveAddedProperties?: boolean;
+    cancelRemovedSubscriptions?: boolean;
+};
+
+type LinkedPropertyGroupMutationResult = {
+    mainPropertyNumber: string;
+    linkedProperties: string[];
+    addedProperties: string[];
+    removedProperties: string[];
+    mainSubscription: Subscription;
+};
+
 export class FirebaseService {
     private get db() {
         if (!db) throw new Error("Firebase not initialized");
@@ -83,6 +174,329 @@ export class FirebaseService {
             return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
         }
         return 0;
+    }
+
+    private isActionableSubscriptionPayment(
+        payment: Pick<Payment, "action">,
+    ): boolean {
+        return payment.action !== "addon";
+    }
+
+    private getSubscriptionPaymentAction(
+        payment: Pick<Payment, "action">,
+    ): "new" | "extend" | "upgrade" {
+        return payment.action === "extend" || payment.action === "upgrade"
+            ? payment.action
+            : "new";
+    }
+
+    private getPaymentActionLockRef(propertyNumber: string) {
+        return this.db
+            .collection("payment_action_locks")
+            .doc(encodeURIComponent(propertyNumber));
+    }
+
+    private isReleasableFailedPaymentStatus(status: unknown): boolean {
+        return new Set([
+            "مرفوض",
+            "فشل",
+            "ملغي",
+            "منتهي الصلاحية",
+            "ملغي - انتهت المهلة",
+            "failed",
+            "cancelled",
+            "canceled",
+            "rejected",
+            "expired",
+        ]).has(String(status || "").trim().toLowerCase());
+    }
+
+    private isPaymentEligibleForNewIntention(payment: Payment): boolean {
+        const retryableStatuses = new Set([
+            "فشل",
+            "منتهي الصلاحية",
+            "ملغي",
+            "ملغي - انتهت المهلة",
+            "failed",
+            "expired",
+            "cancelled",
+            "canceled",
+        ]);
+        const status = String(payment.status || "").trim().toLowerCase();
+        return (
+            retryableStatuses.has(status) &&
+            !payment.transactionId &&
+            !payment.paymentReference &&
+            (payment.intentionState === undefined || payment.intentionState === "failed")
+        );
+    }
+
+    private hasUnresolvedProviderAttempt(payment: Payment): boolean {
+        const paymentMethod = String(payment.paymentMethod || "")
+            .trim()
+            .toLowerCase();
+        const isBankTransfer =
+            paymentMethod === "تحويل بنكي" ||
+            paymentMethod.includes("bank");
+        return (
+            payment.intentionState === "creating" ||
+            payment.intentionState === "created" ||
+            payment.intentionState === "unknown" ||
+            (
+                !isBankTransfer &&
+                (Boolean(payment.transactionId) || Boolean(payment.paymentReference))
+            )
+        );
+    }
+
+    private isActivePaymentActionLockState(
+        state: PaymentActionLock["state"],
+    ): boolean {
+        return state === "reserved" || state === "retrying" || state === "processing";
+    }
+
+    private isPaymentActionLockOwnerReleasable(
+        lock: PaymentActionLock,
+        ownerPayment: Payment | null,
+        now: number = Date.now(),
+    ): boolean {
+        if (!ownerPayment) return true;
+        if (!this.isReleasableFailedPaymentStatus(ownerPayment.status)) return false;
+        // A timeout/failure status is not proof that Paymob rejected the
+        // attempt. Never let another payment steal the lock while a provider
+        // intention exists or its outcome is ambiguous.
+        if (this.hasUnresolvedProviderAttempt(ownerPayment)) return false;
+        if (lock.state !== "retrying") return true;
+        const retryStartedAt = this.getDateMillis(ownerPayment.retryReservationAt);
+        return retryStartedAt <= 0 || now - retryStartedAt >= 10 * 60 * 1000;
+    }
+
+    private isActionablePaymentAllowedForSubscription(
+        action: "new" | "extend" | "upgrade",
+        subscription?: Subscription | null,
+    ): boolean {
+        const remainingDays = calculateRemainingDays(subscription?.endDate || null);
+        const isActive = Boolean(
+            subscription?.endDate &&
+            isSubscriptionStatusActive(subscription.status) &&
+            remainingDays >= 0,
+        );
+        if (action === "new") return !isActive;
+        if (!isActive) return false;
+        return action !== "extend" || remainingDays <= 10;
+    }
+
+    private hasNonEmptyPropertyList(value: unknown): boolean {
+        return this.parsePropertyNumberList(value).length > 0;
+    }
+
+    private parsePropertyNumberList(value: unknown): string[] {
+        if (Array.isArray(value)) {
+            return value
+                .flatMap((item) => this.parsePropertyNumberList(item))
+                .filter(Boolean);
+        }
+        if (typeof value !== "string") {
+            return value ? [String(value).trim()].filter(Boolean) : [];
+        }
+        const trimmed = value.trim();
+        if (!trimmed || trimmed === "[]") return [];
+        try {
+            return this.parsePropertyNumberList(JSON.parse(trimmed));
+        } catch {
+            return [trimmed];
+        }
+    }
+
+    private selectLatestSubscription(documents: Array<{
+        id: string;
+        data(): FirebaseFirestore.DocumentData;
+    }>): Subscription | null {
+        const subscriptions = documents.map((document) => ({
+            ...document.data(),
+            id: document.data().id || document.id,
+        } as Subscription));
+        subscriptions.sort((left, right) =>
+            this.getDateMillis(right.endDate) - this.getDateMillis(left.endDate),
+        );
+        return subscriptions[0] || null;
+    }
+
+    private async resolvePaymentActionLockContext(
+        transaction: FirebaseFirestore.Transaction,
+        payment: Pick<
+            Payment,
+            | "propertyNumber"
+            | "secondPropertyNumber"
+            | "additionalProperties"
+            | "linkedProperties"
+            | "fulfillmentActionLockKey"
+            | "fulfillmentActionLockKeys"
+        >,
+    ): Promise<{
+        keys: string[];
+        subscription: Subscription | null;
+        hasForeignRequestedMember: boolean;
+    }> {
+        const subscriptionSnapshot = await transaction.get(
+            this.db
+                .collection("subscriptions")
+                .where("propertyNumber", "==", payment.propertyNumber),
+        );
+        const subscription = this.selectLatestSubscription(
+            subscriptionSnapshot.docs,
+        );
+        let parentSubscription: Subscription | null = null;
+        if (
+            subscription?.linkedProperty &&
+            subscription.linkedProperty !== payment.propertyNumber
+        ) {
+            const parentSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", subscription.linkedProperty),
+            );
+            parentSubscription = this.selectLatestSubscription(parentSnapshot.docs);
+        }
+
+        const canonicalParent = String(
+            subscription?.linkedProperty || payment.propertyNumber,
+        ).trim();
+        const childSnapshot = await transaction.get(
+            this.db
+                .collection("subscriptions")
+                .where("linkedProperty", "==", canonicalParent),
+        );
+        const childCandidateNumbers = new Set<string>();
+        for (const value of [
+            subscription?.linkedProperties,
+            parentSubscription?.linkedProperties,
+        ]) {
+            for (const propertyNumber of this.parsePropertyNumberList(value)) {
+                if (propertyNumber !== canonicalParent) {
+                    childCandidateNumbers.add(propertyNumber);
+                }
+            }
+        }
+        for (const document of childSnapshot.docs) {
+            const propertyNumber = String(
+                (document.data() as Subscription).propertyNumber || "",
+            ).trim();
+            if (propertyNumber) childCandidateNumbers.add(propertyNumber);
+        }
+        const childSubscriptions: Subscription[] = [];
+        for (const childPropertyNumber of Array.from(childCandidateNumbers).sort(
+            (left, right) => left.localeCompare(right),
+        )) {
+            // Legacy duplicate rows can retain an obsolete linkedProperty.
+            // Resolve the latest row for each child before treating it as a
+            // current member of this group.
+            const latestChildSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", childPropertyNumber),
+            );
+            const latestChild = this.selectLatestSubscription(
+                latestChildSnapshot.docs,
+            );
+            const latestChildIsActive = Boolean(
+                latestChild?.endDate &&
+                isSubscriptionStatusActive(latestChild.status) &&
+                calculateRemainingDays(latestChild.endDate) >= 0,
+            );
+            if (
+                latestChild?.linkedProperty === canonicalParent &&
+                latestChildIsActive
+            ) {
+                childSubscriptions.push(latestChild);
+            }
+        }
+
+        const explicitRequestedMembers = new Set<string>();
+        for (const value of [
+            payment.secondPropertyNumber,
+            payment.additionalProperties,
+            payment.linkedProperties,
+        ]) {
+            for (const propertyNumber of this.parsePropertyNumberList(value)) {
+                if (propertyNumber !== payment.propertyNumber) {
+                    explicitRequestedMembers.add(propertyNumber);
+                }
+            }
+        }
+        let hasForeignRequestedMember = false;
+        const requestedSubscriptions: Subscription[] = [];
+        for (const requestedPropertyNumber of Array.from(
+            explicitRequestedMembers,
+        ).sort((left, right) => left.localeCompare(right))) {
+            const requestedSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", requestedPropertyNumber),
+            );
+            const requestedSubscription = this.selectLatestSubscription(
+                requestedSnapshot.docs,
+            );
+            if (!requestedSubscription) continue;
+            requestedSubscriptions.push(requestedSubscription);
+            const requestedIsActive = Boolean(
+                requestedSubscription.endDate &&
+                isSubscriptionStatusActive(requestedSubscription.status) &&
+                calculateRemainingDays(requestedSubscription.endDate) >= 0,
+            );
+            const requestedCanonicalParent = String(
+                requestedSubscription.linkedProperty ||
+                requestedSubscription.propertyNumber,
+            ).trim();
+            const hasForeignHistoricalLink = Boolean(
+                String(requestedSubscription.linkedProperty || "").trim() &&
+                requestedCanonicalParent !== canonicalParent,
+            );
+            const ownsAnotherGroup = this.parsePropertyNumberList(
+                requestedSubscription.linkedProperties,
+            ).some(
+                (member) =>
+                    member !== requestedPropertyNumber &&
+                    member !== canonicalParent,
+            );
+            if (
+                hasForeignHistoricalLink ||
+                ownsAnotherGroup ||
+                (requestedIsActive && requestedCanonicalParent !== canonicalParent)
+            ) {
+                hasForeignRequestedMember = true;
+            }
+        }
+
+        const keys = new Set<string>([
+            String(payment.propertyNumber).trim(),
+            canonicalParent,
+        ]);
+        for (const value of [
+            payment.fulfillmentActionLockKey,
+            payment.fulfillmentActionLockKeys,
+            payment.secondPropertyNumber,
+            payment.additionalProperties,
+            payment.linkedProperties,
+            subscription?.linkedProperty,
+            parentSubscription?.propertyNumber,
+            childSubscriptions.map((child) => child.propertyNumber),
+            childSubscriptions.flatMap((child) => child.linkedProperties || []),
+            requestedSubscriptions.map((requested) => requested.propertyNumber),
+            requestedSubscriptions.map((requested) => requested.linkedProperty),
+            requestedSubscriptions.flatMap(
+                (requested) => requested.linkedProperties || [],
+            ),
+        ]) {
+            for (const propertyNumber of this.parsePropertyNumberList(value)) {
+                keys.add(propertyNumber);
+            }
+        }
+        return {
+            keys: Array.from(keys).sort((left, right) => left.localeCompare(right)),
+            subscription,
+            hasForeignRequestedMember,
+        };
     }
 
     /**
@@ -428,6 +842,712 @@ export class FirebaseService {
         await this.updateProperty(propertyNumber, {
             linkedProperty: "",
             subscriptionType: "عادي",
+        });
+    }
+
+    /**
+     * Cancel only subscription state that still belongs to the expected
+     * payment. The ownership comparison and the subscription/property writes
+     * share one Firestore transaction, so a replacement payment cannot be
+     * cancelled through a stale read. This method intentionally never
+     * cascades; rejection callers invoke it separately for each linked child.
+     */
+    async cancelSubscriptionIfOwnedByPayment(
+        propertyNumber: string,
+        expectedPaymentId: string,
+        reason?: string,
+    ): Promise<boolean> {
+        const visited = new Set<string>();
+
+        const cancelOwned = async (
+            currentPropertyNumber: string,
+            cancellationReason?: string,
+        ): Promise<boolean> => {
+            if (visited.has(currentPropertyNumber)) return false;
+            visited.add(currentPropertyNumber);
+
+            const propertyRef = this.db
+                .collection("properties")
+                .doc(currentPropertyNumber);
+            const cancelledAt = new Date().toISOString();
+
+            const cancellation = await this.db.runTransaction(
+                async (transaction) => {
+                    const subscriptionSnapshot = await transaction.get(
+                        this.db
+                            .collection("subscriptions")
+                            .where("propertyNumber", "==", currentPropertyNumber),
+                    );
+                    const subscriptionDocs = [...subscriptionSnapshot.docs].sort(
+                        (left, right) =>
+                            this.getDateMillis(right.data()?.endDate) -
+                            this.getDateMillis(left.data()?.endDate),
+                    );
+                    const subscriptionDoc = subscriptionDocs[0];
+                    if (!subscriptionDoc) {
+                        return { cancelled: false as const };
+                    }
+
+                    const subscription = subscriptionDoc.data() as Subscription;
+                    if (subscription.paymentId !== expectedPaymentId) {
+                        return { cancelled: false as const };
+                    }
+
+                    const ownedSubscriptionDocs = subscriptionDocs.filter(
+                        (candidate) =>
+                            (candidate.data() as Subscription).paymentId ===
+                            expectedPaymentId,
+                    );
+
+                    // Read the property before issuing any transaction writes.
+                    const propertyDoc = await transaction.get(propertyRef);
+                    for (const ownedSubscriptionDoc of ownedSubscriptionDocs) {
+                        transaction.update(ownedSubscriptionDoc.ref, {
+                            status: "منتهي",
+                            endDate: cancelledAt,
+                            cancelledAt,
+                            cancelReason: cancellationReason ?? "admin",
+                            linkedProperty: "",
+                            linkedProperties: [],
+                            propertyCount: 1,
+                        });
+                    }
+                    if (propertyDoc.exists) {
+                        transaction.update(propertyRef, {
+                            linkedProperty: "",
+                            subscriptionType: "عادي",
+                            updatedAt: cancelledAt,
+                        });
+                    }
+
+                    return {
+                        cancelled: true as const,
+                        subscription,
+                    };
+                },
+            );
+
+            if (!cancellation.cancelled) return false;
+            const subscription = cancellation.subscription;
+
+            // If this was a child, only alter a parent that is still owned by
+            // the same payment. A newer parent payment must remain untouched.
+            if (subscription.linkedProperty) {
+                await this.db.runTransaction(async (transaction) => {
+                    const parentSnapshot = await transaction.get(
+                        this.db
+                            .collection("subscriptions")
+                            .where(
+                                "propertyNumber",
+                                "==",
+                                subscription.linkedProperty,
+                            ),
+                    );
+                    const parentDoc = [...parentSnapshot.docs].sort(
+                        (left, right) =>
+                            this.getDateMillis(right.data()?.endDate) -
+                            this.getDateMillis(left.data()?.endDate),
+                    )[0];
+                    if (!parentDoc) return;
+                    const parent = parentDoc.data() as Subscription;
+                    if (parent.paymentId !== expectedPaymentId) return;
+
+                    const linkedProperties = Array.isArray(parent.linkedProperties)
+                        ? parent.linkedProperties.filter(
+                            (linkedProperty) =>
+                                linkedProperty !== currentPropertyNumber,
+                        )
+                        : [];
+                    for (const candidate of parentSnapshot.docs) {
+                        const candidateParent = candidate.data() as Subscription;
+                        if (candidateParent.paymentId !== expectedPaymentId) continue;
+                        const candidateLinkedProperties = Array.isArray(
+                            candidateParent.linkedProperties,
+                        )
+                            ? candidateParent.linkedProperties.filter(
+                                (linkedProperty) =>
+                                    linkedProperty !== currentPropertyNumber,
+                            )
+                            : linkedProperties;
+                        transaction.update(candidate.ref, {
+                            linkedProperties: candidateLinkedProperties,
+                            propertyCount: candidateLinkedProperties.length + 1,
+                        });
+                    }
+                });
+            }
+
+            // Multi-property records are also guarded at their write boundary;
+            // a record replaced by another payment must not be deleted/edited.
+            const multiQuery = await this.db
+                .collection("multi_property_subscriptions")
+                .where("status", "==", "نشط")
+                .get();
+            for (const multiDoc of multiQuery.docs) {
+                await this.db.runTransaction(async (transaction) => {
+                    const freshDoc = await transaction.get(multiDoc.ref);
+                    if (!freshDoc.exists) return;
+                    const multiSubscription = freshDoc.data() as MultiPropertySubscription;
+                    if (multiSubscription.paymentId !== expectedPaymentId) return;
+
+                    const members = new Set<string>();
+                    if (multiSubscription.propertyNumber1) {
+                        members.add(multiSubscription.propertyNumber1);
+                    }
+                    if (multiSubscription.propertyNumber2) {
+                        members.add(multiSubscription.propertyNumber2);
+                    }
+                    for (const linkedProperty of
+                        multiSubscription.additionalProperties ?? []) {
+                        members.add(linkedProperty);
+                    }
+                    if (!members.has(currentPropertyNumber)) return;
+
+                    if (
+                        currentPropertyNumber ===
+                        multiSubscription.propertyNumber1
+                    ) {
+                        transaction.delete(multiDoc.ref);
+                        return;
+                    }
+
+                    const additionalProperties = (
+                        multiSubscription.additionalProperties ?? []
+                    ).filter(
+                        (linkedProperty) =>
+                            linkedProperty !== currentPropertyNumber,
+                    );
+                    const propertyNumber2 =
+                        multiSubscription.propertyNumber2 === currentPropertyNumber
+                            ? null
+                            : multiSubscription.propertyNumber2;
+                    const remainingMembers = new Set<string>([
+                        multiSubscription.propertyNumber1,
+                    ]);
+                    if (propertyNumber2) remainingMembers.add(propertyNumber2);
+                    for (const linkedProperty of additionalProperties) {
+                        remainingMembers.add(linkedProperty);
+                    }
+                    transaction.update(multiDoc.ref, {
+                        propertyNumber2,
+                        additionalProperties,
+                        linkedProperties: Array.from(remainingMembers),
+                        propertyCount: remainingMembers.size,
+                    });
+                });
+            }
+
+            console.log(
+                `✅ Subscription cancelled for property ${currentPropertyNumber} only for payment ${expectedPaymentId}`,
+            );
+            return true;
+        };
+
+        return cancelOwned(propertyNumber, reason);
+    }
+
+    /**
+     * Mutate a subscription group through one Firestore transaction. Every
+     * membership writer (owner or admin) must use this boundary so concurrent
+     * approvals cannot lose an update or exceed package capacity, and a group
+     * cannot change while one of its properties has an actionable payment in
+     * flight.
+     */
+    async mutateLinkedPropertyGroupAtomically(
+        params: LinkedPropertyGroupMutationParams,
+    ): Promise<LinkedPropertyGroupMutationResult> {
+        const mainPropertyNumber = String(params.mainPropertyNumber || "").trim();
+        const normalize = (values: unknown): string[] => Array.from(
+            new Set(
+                this.parsePropertyNumberList(values)
+                    .map((value) => String(value).trim())
+                    .filter(
+                        (value) => value && value !== mainPropertyNumber,
+                    ),
+            ),
+        ).sort((left, right) => left.localeCompare(right));
+        const requestedAdds = normalize(params.addPropertyNumbers);
+        const requestedRemovals = normalize(params.removePropertyNumbers);
+        const requestedReplacement = params.replacePropertyNumbers === undefined
+            ? null
+            : normalize(params.replacePropertyNumbers);
+
+        if (!mainPropertyNumber) {
+            throw new LinkedPropertyMutationError(
+                "رقم العقار الرئيسي مطلوب",
+                400,
+                "MAIN_PROPERTY_REQUIRED",
+            );
+        }
+        if (
+            requestedReplacement === null &&
+            requestedAdds.length === 0 &&
+            requestedRemovals.length === 0
+        ) {
+            throw new LinkedPropertyMutationError(
+                "لم يتم تحديد أي تغيير على العقارات المرتبطة",
+                400,
+                "LINKED_PROPERTY_MUTATION_EMPTY",
+            );
+        }
+
+        return this.db.runTransaction(async (transaction) => {
+            const subscriptionCollection = this.db.collection("subscriptions");
+            const mainSubscriptionSnapshot = await transaction.get(
+                subscriptionCollection.where(
+                    "propertyNumber",
+                    "==",
+                    mainPropertyNumber,
+                ),
+            );
+            const mainSubscriptionDoc = [...mainSubscriptionSnapshot.docs].sort(
+                (left, right) =>
+                    this.getDateMillis(right.data()?.endDate) -
+                    this.getDateMillis(left.data()?.endDate),
+            )[0];
+            if (!mainSubscriptionDoc) {
+                throw new LinkedPropertyMutationError(
+                    "العقار الرئيسي ليس لديه اشتراك",
+                    404,
+                    "MAIN_SUBSCRIPTION_NOT_FOUND",
+                );
+            }
+
+            const mainSubscription = {
+                ...mainSubscriptionDoc.data(),
+                id:
+                    mainSubscriptionDoc.data()?.id ||
+                    mainSubscriptionDoc.id,
+            } as Subscription;
+            const mainIsActive = Boolean(
+                mainSubscription.endDate &&
+                isSubscriptionStatusActive(mainSubscription.status) &&
+                calculateRemainingDays(mainSubscription.endDate) >= 0,
+            );
+            if (!mainIsActive) {
+                throw new LinkedPropertyMutationError(
+                    "لا يمكن تعديل العقارات المرتبطة لأن اشتراك العقار الرئيسي غير ساري",
+                    409,
+                    "MAIN_SUBSCRIPTION_INACTIVE",
+                );
+            }
+            const foreignMain = String(mainSubscription.linkedProperty || "").trim();
+            if (foreignMain && foreignMain !== mainPropertyNumber) {
+                throw new LinkedPropertyMutationError(
+                    "العقار المحدد تابع لاشتراك رئيسي آخر",
+                    409,
+                    "MAIN_PROPERTY_IS_LINKED_CHILD",
+                );
+            }
+
+            const linkedChildSnapshot = await transaction.get(
+                subscriptionCollection.where(
+                    "linkedProperty",
+                    "==",
+                    mainPropertyNumber,
+                ),
+            );
+            const candidateCurrentMembers = new Set<string>(
+                normalize(mainSubscription.linkedProperties),
+            );
+            for (const childDoc of linkedChildSnapshot.docs) {
+                const propertyNumber = String(
+                    childDoc.data()?.propertyNumber || "",
+                ).trim();
+                if (propertyNumber && propertyNumber !== mainPropertyNumber) {
+                    candidateCurrentMembers.add(propertyNumber);
+                }
+            }
+
+            const relevantPropertyNumbers = new Set<string>([
+                ...candidateCurrentMembers,
+                ...requestedAdds,
+                ...requestedRemovals,
+                ...(requestedReplacement || []),
+            ]);
+            const childSnapshots = new Map<
+                string,
+                FirebaseFirestore.QuerySnapshot
+            >();
+            const latestChildDocuments = new Map<
+                string,
+                FirebaseFirestore.QueryDocumentSnapshot
+            >();
+            const latestChildSubscriptions = new Map<string, Subscription>();
+            for (const propertyNumber of Array.from(
+                relevantPropertyNumbers,
+            ).sort((left, right) => left.localeCompare(right))) {
+                const snapshot = await transaction.get(
+                    subscriptionCollection.where(
+                        "propertyNumber",
+                        "==",
+                        propertyNumber,
+                    ),
+                );
+                childSnapshots.set(propertyNumber, snapshot);
+                const latestDocument = [...snapshot.docs].sort(
+                    (left, right) =>
+                        this.getDateMillis(right.data()?.endDate) -
+                        this.getDateMillis(left.data()?.endDate),
+                )[0];
+                if (latestDocument) {
+                    latestChildDocuments.set(propertyNumber, latestDocument);
+                    latestChildSubscriptions.set(propertyNumber, {
+                        ...latestDocument.data(),
+                        id: latestDocument.data()?.id || latestDocument.id,
+                    } as Subscription);
+                }
+            }
+
+            // Only the latest, active linkage is a current implicit member.
+            // Historical duplicate rows must not permanently expand a group.
+            const currentMembers = new Set<string>(
+                normalize(mainSubscription.linkedProperties),
+            );
+            for (const [propertyNumber, childSubscription] of
+                latestChildSubscriptions) {
+                if (
+                    childSubscription.linkedProperty === mainPropertyNumber &&
+                    childSubscription.endDate &&
+                    isSubscriptionStatusActive(childSubscription.status) &&
+                    calculateRemainingDays(childSubscription.endDate) >= 0
+                ) {
+                    currentMembers.add(propertyNumber);
+                }
+            }
+
+            const desiredMembers = requestedReplacement === null
+                ? new Set<string>(currentMembers)
+                : new Set<string>(requestedReplacement);
+            for (const propertyNumber of requestedAdds) {
+                desiredMembers.add(propertyNumber);
+            }
+            for (const propertyNumber of requestedRemovals) {
+                if (!currentMembers.has(propertyNumber)) {
+                    throw new LinkedPropertyMutationError(
+                        `العقار ${propertyNumber} غير مرتبط بالعقار الرئيسي`,
+                        409,
+                        "LINKED_PROPERTY_NOT_IN_GROUP",
+                    );
+                }
+                desiredMembers.delete(propertyNumber);
+            }
+            const linkedProperties = Array.from(desiredMembers).sort(
+                (left, right) => left.localeCompare(right),
+            );
+            const addedProperties = linkedProperties.filter(
+                (propertyNumber) => !currentMembers.has(propertyNumber),
+            );
+            const removedProperties = Array.from(currentMembers)
+                .filter((propertyNumber) => !desiredMembers.has(propertyNumber))
+                .sort((left, right) => left.localeCompare(right));
+
+            const packageRef = this.db
+                .collection("packages")
+                .doc(mainSubscription.packageId);
+            const mainPropertyRef = this.db
+                .collection("properties")
+                .doc(mainPropertyNumber);
+            const multiSnapshot = await transaction.get(
+                this.db
+                    .collection("multi_property_subscriptions")
+                    .where("propertyNumber1", "==", mainPropertyNumber),
+            );
+            const packageDoc = await transaction.get(packageRef);
+            const mainPropertyDoc = await transaction.get(mainPropertyRef);
+            if (!packageDoc.exists) {
+                throw new LinkedPropertyMutationError(
+                    "تعذر العثور على باقة الاشتراك الرئيسي لتحديد سعة العقارات",
+                    422,
+                    "SUBSCRIPTION_PACKAGE_NOT_FOUND",
+                );
+            }
+            if (!mainPropertyDoc.exists) {
+                throw new LinkedPropertyMutationError(
+                    "العقار الرئيسي غير موجود",
+                    404,
+                    "MAIN_PROPERTY_NOT_FOUND",
+                );
+            }
+            const packageData = packageDoc.data() as Package;
+            const maximumValue = Number(
+                packageData.maxProperties ?? packageData.propertyCount ?? 1,
+            );
+            const maxProperties = Number.isFinite(maximumValue) && maximumValue > 0
+                ? Math.floor(maximumValue)
+                : 1;
+            if (linkedProperties.length + 1 > maxProperties) {
+                throw new LinkedPropertyMutationError(
+                    `هذه الباقة تدعم ${maxProperties} عقار كحد أقصى`,
+                    409,
+                    "PACKAGE_PROPERTY_LIMIT_EXCEEDED",
+                );
+            }
+
+            const propertyDocuments = new Map<
+                string,
+                FirebaseFirestore.DocumentSnapshot
+            >();
+            for (const propertyNumber of Array.from(
+                new Set([...linkedProperties, ...removedProperties]),
+            ).sort((left, right) => left.localeCompare(right))) {
+                const propertyDoc = await transaction.get(
+                    this.db.collection("properties").doc(propertyNumber),
+                );
+                if (!propertyDoc.exists && desiredMembers.has(propertyNumber)) {
+                    throw new LinkedPropertyMutationError(
+                        `العقار ${propertyNumber} غير موجود`,
+                        404,
+                        "LINKED_PROPERTY_NOT_FOUND",
+                    );
+                }
+                if (propertyDoc.exists) {
+                    propertyDocuments.set(propertyNumber, propertyDoc);
+                }
+            }
+
+            const lockKeys = Array.from(
+                new Set([
+                    mainPropertyNumber,
+                    ...currentMembers,
+                    ...linkedProperties,
+                    ...removedProperties,
+                ]),
+            ).sort((left, right) => left.localeCompare(right));
+            for (const propertyNumber of lockKeys) {
+                const lockDoc = await transaction.get(
+                    this.getPaymentActionLockRef(propertyNumber),
+                );
+                if (
+                    lockDoc.exists &&
+                    this.isActivePaymentActionLockState(
+                        (lockDoc.data() as PaymentActionLock).state,
+                    )
+                ) {
+                    throw new LinkedPropertyMutationError(
+                        "لا يمكن تعديل العقارات المرتبطة أثناء وجود عملية دفع قيد التنفيذ",
+                        409,
+                        "PAYMENT_ACTION_IN_PROGRESS",
+                    );
+                }
+            }
+
+            for (const propertyNumber of linkedProperties) {
+                const childSubscription = latestChildSubscriptions.get(
+                    propertyNumber,
+                );
+                if (!childSubscription) continue;
+                const linkedParent = String(
+                    childSubscription.linkedProperty || "",
+                ).trim();
+                const childIsActive = Boolean(
+                    childSubscription.endDate &&
+                    isSubscriptionStatusActive(childSubscription.status) &&
+                    calculateRemainingDays(childSubscription.endDate) >= 0,
+                );
+                const ownsAnotherGroup = normalize(
+                    childSubscription.linkedProperties,
+                ).some(
+                    (member) =>
+                        member !== mainPropertyNumber &&
+                        member !== propertyNumber,
+                );
+                if (
+                    (linkedParent && linkedParent !== mainPropertyNumber) ||
+                    ownsAnotherGroup ||
+                    (childIsActive && linkedParent !== mainPropertyNumber)
+                ) {
+                    throw new LinkedPropertyMutationError(
+                        `العقار ${propertyNumber} مرتبط باشتراك آخر`,
+                        409,
+                        "LINKED_PROPERTY_ALREADY_ACTIVE",
+                    );
+                }
+            }
+
+            const now = new Date();
+            const nowIso = now.toISOString();
+            const normalizedEndDate = capAtMaxDays(
+                new Date(mainSubscription.endDate),
+                MAX_SUBSCRIPTION_DAYS,
+                now,
+            ).toISOString();
+            const premiumPropertyType = isActivePremiumSubscription({
+                subscriptionType:
+                    mainSubscription.subscriptionType ||
+                    mainSubscription.packageType,
+                status: mainSubscription.status,
+                isExpired: calculateRemainingDays(normalizedEndDate) < 0,
+            })
+                ? "مميز"
+                : "عادي";
+
+            transaction.update(mainSubscriptionDoc.ref, {
+                linkedProperties,
+                propertyCount: linkedProperties.length + 1,
+                endDate: normalizedEndDate,
+                updatedAt: nowIso,
+            });
+
+            for (const propertyNumber of linkedProperties) {
+                const existingDocument = latestChildDocuments.get(propertyNumber);
+                const childRef = existingDocument?.ref ||
+                    subscriptionCollection.doc(`SUB-${propertyNumber}`);
+                const childRecord = {
+                    id: existingDocument?.data()?.id || `SUB-${propertyNumber}`,
+                    propertyNumber,
+                    packageId: mainSubscription.packageId,
+                    subscriptionType:
+                        mainSubscription.subscriptionType ||
+                        mainSubscription.packageType ||
+                        "عادي",
+                    packageType:
+                        mainSubscription.packageType ||
+                        mainSubscription.subscriptionType ||
+                        "عادي",
+                    startDate: mainSubscription.startDate,
+                    endDate: normalizedEndDate,
+                    status: mainSubscription.status,
+                    paymentId: mainSubscription.paymentId,
+                    linkedProperty: mainPropertyNumber,
+                    linkedProperties: [],
+                    propertyCount: 1,
+                    cancelledAt: null,
+                    cancelReason: null,
+                    updatedAt: nowIso,
+                    ...(existingDocument ? {} : { createdAt: nowIso }),
+                };
+                transaction.set(childRef, childRecord, { merge: true });
+
+                const propertyUpdates: Record<string, unknown> = {
+                    linkedProperty: mainPropertyNumber,
+                    subscriptionType: premiumPropertyType,
+                    pendingApprovalFrom: "",
+                    subscriptionDate: mainSubscription.startDate.split("T")[0],
+                    lastUpdate: nowIso.split("T")[0],
+                    updatedAt: nowIso,
+                };
+                if (params.approveAddedProperties) {
+                    propertyUpdates.verificationStatus = "approved";
+                }
+                transaction.update(
+                    propertyDocuments.get(propertyNumber)!.ref,
+                    propertyUpdates,
+                );
+            }
+
+            for (const propertyNumber of removedProperties) {
+                const snapshot = childSnapshots.get(propertyNumber);
+                const latestDocument = latestChildDocuments.get(propertyNumber);
+                const latestBelongsToMain =
+                    latestDocument?.data()?.linkedProperty === mainPropertyNumber;
+                for (const childDocument of snapshot?.docs || []) {
+                    if (childDocument.data()?.linkedProperty !== mainPropertyNumber) {
+                        continue;
+                    }
+                    const childUpdates: Record<string, unknown> = {
+                        linkedProperty: "",
+                        linkedProperties: [],
+                        propertyCount: 1,
+                        updatedAt: nowIso,
+                    };
+                    if (
+                        params.cancelRemovedSubscriptions &&
+                        childDocument.id === latestDocument?.id
+                    ) {
+                        childUpdates.status = "منتهي";
+                        childUpdates.endDate = nowIso;
+                        childUpdates.cancelledAt = nowIso;
+                        childUpdates.cancelReason = "تم فصل العقار من المجموعة";
+                    }
+                    transaction.update(childDocument.ref, childUpdates);
+                }
+                const removedPropertyDocument = propertyDocuments.get(
+                    propertyNumber,
+                );
+                if (removedPropertyDocument) {
+                    const propertyData = removedPropertyDocument.data() || {};
+                    const mirroredParent = String(
+                        propertyData.linkedProperty || "",
+                    ).trim();
+                    const pendingParent = String(
+                        propertyData.pendingApprovalFrom || "",
+                    ).trim();
+                    transaction.update(removedPropertyDocument.ref, {
+                        ...(!mirroredParent || mirroredParent === mainPropertyNumber
+                            ? { linkedProperty: "" }
+                            : {}),
+                        ...(pendingParent === mainPropertyNumber
+                            ? { pendingApprovalFrom: "" }
+                            : {}),
+                        ...(params.cancelRemovedSubscriptions &&
+                        latestBelongsToMain
+                            ? { subscriptionType: "عادي" }
+                            : {}),
+                        updatedAt: nowIso,
+                    });
+                }
+            }
+
+            const activeMultiDocument = [...multiSnapshot.docs]
+                .filter((document) => {
+                    const data = document.data() as MultiPropertySubscription;
+                    return (
+                        isSubscriptionStatusActive(data.status) &&
+                        calculateRemainingDays(data.endDate) >= 0
+                    );
+                })
+                .sort(
+                    (left, right) =>
+                        this.getDateMillis(right.data()?.endDate) -
+                        this.getDateMillis(left.data()?.endDate),
+                )[0];
+            if (linkedProperties.length === 0) {
+                if (activeMultiDocument) {
+                    transaction.delete(activeMultiDocument.ref);
+                }
+            } else {
+                const multiRef = activeMultiDocument?.ref ||
+                    this.db
+                        .collection("multi_property_subscriptions")
+                        .doc(`MULTI-${encodeURIComponent(mainPropertyNumber)}`);
+                transaction.set(
+                    multiRef,
+                    {
+                        id:
+                            activeMultiDocument?.data()?.id ||
+                            `MULTI-${encodeURIComponent(mainPropertyNumber)}`,
+                        packageId: mainSubscription.packageId,
+                        propertyNumber1: mainPropertyNumber,
+                        propertyNumber2: linkedProperties[0],
+                        additionalProperties: linkedProperties.slice(1),
+                        linkedProperties: [
+                            mainPropertyNumber,
+                            ...linkedProperties,
+                        ],
+                        propertyCount: linkedProperties.length + 1,
+                        startDate: mainSubscription.startDate,
+                        endDate: normalizedEndDate,
+                        status: "نشط",
+                        paymentId: mainSubscription.paymentId,
+                        ...(activeMultiDocument ? {} : { createdAt: nowIso }),
+                    },
+                    { merge: true },
+                );
+            }
+
+            return {
+                mainPropertyNumber,
+                linkedProperties,
+                addedProperties,
+                removedProperties,
+                mainSubscription: {
+                    ...mainSubscription,
+                    endDate: normalizedEndDate,
+                    linkedProperties,
+                    propertyCount: linkedProperties.length + 1,
+                },
+            };
         });
     }
 
@@ -886,11 +2006,70 @@ export class FirebaseService {
         return doc.exists ? (doc.data() as Payment) : null;
     }
 
-    async claimPaymentFulfillment(id: string): Promise<
-        | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
-        | { status: "fulfilled" }
-        | { status: "processing" }
-    > {
+    /**
+     * Repair the display status of a payment whose fulfillment marker or
+     * subscription ownership proves that its main activation write landed.
+     * This intentionally does not manufacture a fulfillment token/state for a
+     * possibly partial linked-property retry; it only removes the stale
+     * pending status atomically after checking the subscription.
+     */
+    async reconcileAppliedPaymentStatus(id: string): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            const subscriptionSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", payment.propertyNumber),
+            );
+            const subscription = this.selectLatestSubscription(
+                subscriptionSnapshot.docs,
+            );
+            const hasLinkedGroup =
+                Boolean(payment.secondPropertyNumber) ||
+                this.hasNonEmptyPropertyList(payment.additionalProperties) ||
+                this.hasNonEmptyPropertyList(payment.linkedProperties) ||
+                Boolean(subscription?.linkedProperty) ||
+                this.hasNonEmptyPropertyList(subscription?.linkedProperties);
+            const safeLegacySinglePropertyMatch =
+                payment.fulfillmentState === undefined &&
+                !payment.fulfilledAt &&
+                subscription?.paymentId === payment.id &&
+                !hasLinkedGroup;
+            const isApplied =
+                !!payment.fulfilledAt ||
+                payment.fulfillmentState === "fulfilled" ||
+                safeLegacySinglePropertyMatch;
+            if (!isApplied) return false;
+
+            if (payment.status !== "مكتمل") {
+                transaction.update(paymentRef, {
+                    status: "مكتمل",
+                    completedAt:
+                        payment.completedAt ||
+                        payment.fulfilledAt ||
+                        new Date().toISOString(),
+                });
+            }
+            return true;
+        });
+    }
+
+    async claimPaymentFulfillment(
+        id: string,
+    ): Promise<PaymentFulfillmentClaimResult>;
+    async claimPaymentFulfillment(
+        id: string,
+        allowedStatuses: string[],
+        options?: PaymentFulfillmentClaimOptions,
+    ): Promise<GuardedPaymentFulfillmentClaimResult>;
+    async claimPaymentFulfillment(
+        id: string,
+        allowedStatuses?: string[],
+        options: PaymentFulfillmentClaimOptions = {},
+    ): Promise<GuardedPaymentFulfillmentClaimResult> {
         const ref = this.db.collection("payments").doc(id);
         const now = Date.now();
         const token = `FULFILL-${now}-${Math.random().toString(36).slice(2, 10)}`;
@@ -901,7 +2080,25 @@ export class FirebaseService {
             if (!doc.exists) throw new Error("Payment not found");
             const payment = doc.data() as Payment;
             if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") {
+                if (payment.status !== "مكتمل") {
+                    transaction.update(ref, {
+                        status: "مكتمل",
+                        completedAt:
+                            payment.completedAt ||
+                            payment.fulfilledAt ||
+                            new Date(now).toISOString(),
+                    });
+                }
                 return { status: "fulfilled" as const };
+            }
+            if (
+                allowedStatuses &&
+                !allowedStatuses.includes(String(payment.status || ""))
+            ) {
+                return {
+                    status: "invalid_status" as const,
+                    currentStatus: String(payment.status || ""),
+                };
             }
             const claimedAt = this.getDateMillis(payment.fulfillmentClaimedAt);
             if (
@@ -912,11 +2109,140 @@ export class FirebaseService {
                 return { status: "processing" as const };
             }
 
+            let actionLocks: Array<{
+                key: string;
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            let actionLockKey: string | null = null;
+            let actionLockKeys: string[] = [];
+            if (this.isActionableSubscriptionPayment(payment)) {
+                const context = await this.resolvePaymentActionLockContext(
+                    transaction,
+                    payment,
+                );
+                const subscription = context.subscription;
+                if (
+                    options.purpose !== "reject" &&
+                    context.hasForeignRequestedMember
+                ) {
+                    return {
+                        status: "action_ineligible" as const,
+                        action: this.getSubscriptionPaymentAction(payment),
+                    };
+                }
+                actionLockKeys = context.keys;
+                actionLockKey =
+                    payment.fulfillmentActionLockKey ||
+                    subscription?.linkedProperty ||
+                    payment.propertyNumber;
+                for (const key of actionLockKeys) {
+                    const ref = this.getPaymentActionLockRef(key);
+                    const lockDoc = await transaction.get(ref);
+                    actionLocks.push({
+                        key,
+                        ref,
+                        lock: lockDoc.exists
+                            ? (lockDoc.data() as PaymentActionLock)
+                            : null,
+                    });
+                }
+
+                const ownedLocks = actionLocks.filter(
+                    ({ lock }) => lock?.paymentId === payment.id,
+                );
+                if (
+                    ownedLocks.length === actionLocks.length &&
+                    ownedLocks.length > 0 &&
+                    ownedLocks.every(({ lock }) => lock?.state === "fulfilled")
+                ) {
+                    return { status: "fulfilled" as const };
+                }
+
+                if (options.purpose !== "reject") {
+                    const ownerPayments = new Map<string, Payment | null>();
+                    for (const { lock } of actionLocks) {
+                        if (
+                            !lock ||
+                            lock.paymentId === payment.id ||
+                            ownerPayments.has(lock.paymentId) ||
+                            !this.isActivePaymentActionLockState(lock.state)
+                        ) continue;
+                        const ownerDoc = await transaction.get(
+                            this.db.collection("payments").doc(lock.paymentId),
+                        );
+                        ownerPayments.set(
+                            lock.paymentId,
+                            ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
+                        );
+                    }
+                    for (const { lock } of actionLocks) {
+                        if (!lock || lock.paymentId === payment.id) continue;
+                        const completedAt = this.getDateMillis(lock.completedAt);
+                        const paymentCreatedAt = this.getDateMillis(payment.createdAt);
+                        const predatesCompletedAction =
+                            lock.state === "fulfilled" &&
+                            (completedAt <= 0 || paymentCreatedAt <= 0 || paymentCreatedAt <= completedAt);
+                        const activeOtherPayment =
+                            this.isActivePaymentActionLockState(lock.state) &&
+                            !this.isPaymentActionLockOwnerReleasable(
+                                lock,
+                                ownerPayments.get(lock.paymentId) || null,
+                                now,
+                            );
+                        if (activeOtherPayment || predatesCompletedAction) {
+                            return {
+                                status: "action_conflict" as const,
+                                conflictingPaymentId: lock.paymentId,
+                            };
+                        }
+                    }
+                    if (
+                        actionLocks.some(({ lock }) => lock?.paymentId !== payment.id) &&
+                        !this.isActionablePaymentAllowedForSubscription(
+                            this.getSubscriptionPaymentAction(payment),
+                            subscription,
+                        )
+                    ) {
+                        return {
+                            status: "action_ineligible" as const,
+                            action: this.getSubscriptionPaymentAction(payment),
+                        };
+                    }
+                }
+            }
+
             transaction.update(ref, {
                 fulfillmentState: "processing",
                 fulfillmentClaimedAt: new Date(now).toISOString(),
                 fulfillmentClaimToken: token,
+                ...(actionLockKey
+                    ? {
+                        fulfillmentActionLockKey: actionLockKey,
+                        fulfillmentActionLockKeys: actionLockKeys,
+                    }
+                    : {}),
             });
+            if (actionLockKey && this.isActionableSubscriptionPayment(payment)) {
+                for (const { key, ref: actionLockRef, lock: actionLock } of actionLocks) {
+                    if (
+                        options.purpose === "reject" &&
+                        actionLock?.paymentId !== payment.id
+                    ) continue;
+                    transaction.set(actionLockRef, {
+                    propertyNumber: key,
+                    paymentId: payment.id,
+                    action: this.getSubscriptionPaymentAction(payment),
+                    state: "processing",
+                    reservedAt:
+                        actionLock?.paymentId === payment.id
+                            ? actionLock.reservedAt
+                            : new Date(now).toISOString(),
+                    claimedAt: new Date(now).toISOString(),
+                    claimToken: token,
+                } satisfies PaymentActionLock);
+                }
+            }
             return {
                 status: "claimed" as const,
                 token,
@@ -935,18 +2261,63 @@ export class FirebaseService {
             const doc = await transaction.get(ref);
             if (!doc.exists) throw new Error("Payment not found");
             const payment = doc.data() as Payment;
-            if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") return;
+            if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") {
+                if (payment.status !== "مكتمل") {
+                    transaction.update(ref, {
+                        status: "مكتمل",
+                        completedAt:
+                            payment.completedAt ||
+                            payment.fulfilledAt ||
+                            new Date().toISOString(),
+                    });
+                }
+                return;
+            }
             if (
                 payment.fulfillmentState !== "processing" ||
                 payment.fulfillmentClaimToken !== token
             ) {
                 throw new Error("Payment fulfillment claim was lost");
             }
+
+            const actionLockRefs: Array<ReturnType<FirebaseService["getPaymentActionLockRef"]>> = [];
+            if (this.isActionableSubscriptionPayment(payment)) {
+                const actionLockKeys = payment.fulfillmentActionLockKeys?.length
+                    ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
+                    : [payment.fulfillmentActionLockKey || payment.propertyNumber];
+                for (const key of actionLockKeys) {
+                    const actionLockRef = this.getPaymentActionLockRef(key);
+                    const actionLockDoc = await transaction.get(actionLockRef);
+                    const actionLock = actionLockDoc.exists
+                        ? (actionLockDoc.data() as PaymentActionLock)
+                        : null;
+                    if (
+                        !actionLock ||
+                        actionLock.paymentId !== payment.id ||
+                        actionLock.state !== "processing" ||
+                        actionLock.claimToken !== token
+                    ) {
+                        throw new Error("Payment action claim was lost");
+                    }
+                    actionLockRefs.push(actionLockRef);
+                }
+            }
+
+            const completedAt = new Date().toISOString();
             transaction.update(ref, {
                 fulfillmentState: "fulfilled",
-                fulfilledAt: new Date().toISOString(),
+                fulfilledAt: completedAt,
                 fulfilledSubscriptionId: subscriptionId,
+                status: "مكتمل",
+                completedAt,
+                pendingPropertyApproval: false,
             });
+            for (const actionLockRef of actionLockRefs) {
+                transaction.update(actionLockRef, {
+                    state: "fulfilled",
+                    completedAt,
+                });
+            }
         });
     }
 
@@ -960,12 +2331,50 @@ export class FirebaseService {
                 payment.fulfillmentState !== "processing" ||
                 payment.fulfillmentClaimToken !== token
             ) return;
+
+            const actionLocks: Array<{
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            if (this.isActionableSubscriptionPayment(payment)) {
+                const actionLockKeys = payment.fulfillmentActionLockKeys?.length
+                    ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
+                    : [payment.fulfillmentActionLockKey || payment.propertyNumber];
+                for (const key of actionLockKeys) {
+                    const actionLockRef = this.getPaymentActionLockRef(key);
+                    const actionLockDoc = await transaction.get(actionLockRef);
+                    actionLocks.push({
+                        ref: actionLockRef,
+                        lock: actionLockDoc.exists
+                            ? (actionLockDoc.data() as PaymentActionLock)
+                            : null,
+                    });
+                }
+            }
+
             transaction.update(ref, { fulfillmentState: "failed" });
+            for (const { ref: actionLockRef, lock: actionLock } of actionLocks) {
+                if (
+                    actionLock?.paymentId !== payment.id ||
+                    actionLock.claimToken !== token
+                ) continue;
+                transaction.update(actionLockRef, this.isPaymentActionLockOwnerReleasable(
+                    actionLock,
+                    payment,
+                )
+                    ? {
+                        state: "released",
+                        releasedAt: new Date().toISOString(),
+                    }
+                    : {
+                        state: "reserved",
+                    });
+            }
         });
     }
 
     async createPayment(payment: InsertPayment): Promise<Payment> {
-        const id = payment.id || `PAY-${Date.now()}`;
+        const id = payment.id || `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const newPayment: Payment = {
             ...payment,
             id,
@@ -974,11 +2383,857 @@ export class FirebaseService {
         } as Payment;
 
         console.log(`[DEBUG createPayment] Creating payment: id=${id}, propertyNumber="${payment.propertyNumber}", packageId="${payment.packageId}", status="${payment.status}"`);
-        
-        await this.db.collection("payments").doc(id).set(newPayment);
+
+        const paymentRef = this.db.collection("payments").doc(id);
+        let storedPayment = newPayment;
+        if (this.isActionableSubscriptionPayment(newPayment)) {
+            storedPayment = await this.db.runTransaction(async (transaction) => {
+                const {
+                    keys: actionLockKeys,
+                    subscription,
+                    hasForeignRequestedMember,
+                } =
+                    await this.resolvePaymentActionLockContext(
+                        transaction,
+                        newPayment,
+                    );
+                if (hasForeignRequestedMember) {
+                    throw new PaymentActionEligibilityError(
+                        this.getSubscriptionPaymentAction(newPayment),
+                    );
+                }
+                const actionLockKey =
+                    subscription?.linkedProperty || newPayment.propertyNumber;
+                const actionLocks: Array<{
+                    key: string;
+                    ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                    lock: PaymentActionLock | null;
+                }> = [];
+                for (const key of actionLockKeys) {
+                    const ref = this.getPaymentActionLockRef(key);
+                    const lockDoc = await transaction.get(ref);
+                    actionLocks.push({
+                        key,
+                        ref,
+                        lock: lockDoc.exists
+                            ? (lockDoc.data() as PaymentActionLock)
+                            : null,
+                    });
+                }
+                const ownerPayments = new Map<string, Payment | null>();
+                for (const { lock } of actionLocks) {
+                    if (
+                        !lock ||
+                        lock.paymentId === id ||
+                        ownerPayments.has(lock.paymentId) ||
+                        !this.isActivePaymentActionLockState(lock.state)
+                    ) continue;
+                    const ownerDoc = await transaction.get(
+                        this.db.collection("payments").doc(lock.paymentId),
+                    );
+                    ownerPayments.set(
+                        lock.paymentId,
+                        ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
+                    );
+                }
+                for (const { lock } of actionLocks) {
+                    if (!lock || lock.paymentId === id) continue;
+                    const blocked =
+                        this.isActivePaymentActionLockState(lock.state) &&
+                        !this.isPaymentActionLockOwnerReleasable(
+                            lock,
+                            ownerPayments.get(lock.paymentId) || null,
+                        );
+                    if (blocked) throw new PaymentActionConflictError();
+                }
+                if (!this.isActionablePaymentAllowedForSubscription(
+                    this.getSubscriptionPaymentAction(newPayment),
+                    subscription,
+                )) {
+                    throw new PaymentActionEligibilityError(
+                        this.getSubscriptionPaymentAction(newPayment),
+                    );
+                }
+
+                const paymentWithActionLock = {
+                    ...newPayment,
+                    fulfillmentActionLockKey: actionLockKey,
+                    fulfillmentActionLockKeys: actionLockKeys,
+                };
+                transaction.set(paymentRef, paymentWithActionLock);
+                for (const { key, ref } of actionLocks) {
+                    transaction.set(ref, {
+                        propertyNumber: key,
+                        paymentId: id,
+                        action: this.getSubscriptionPaymentAction(newPayment),
+                        state: "reserved",
+                        reservedAt: newPayment.createdAt || new Date().toISOString(),
+                    } satisfies PaymentActionLock);
+                }
+                return paymentWithActionLock;
+            });
+        } else {
+            await paymentRef.set(newPayment);
+        }
         
         console.log(`[DEBUG createPayment] ✅ Payment created successfully: ${id} for property: ${payment.propertyNumber}`);
-        return newPayment;
+        return storedPayment;
+    }
+
+    /**
+     * Release only an unclaimed subscription-action reservation owned by this
+     * payment. This is used when card-intention creation fails before a usable
+     * checkout URL exists, so an abandoned local record cannot block retries.
+     */
+    async releasePaymentActionReservation(
+        id: string,
+        paymentUpdates?: Partial<Payment>,
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            if (!this.isActionableSubscriptionPayment(payment)) return false;
+
+            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
+                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
+                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
+            const actionLocks: Array<{
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            for (const key of actionLockKeys) {
+                const ref = this.getPaymentActionLockRef(key);
+                const lockDoc = await transaction.get(ref);
+                actionLocks.push({
+                    ref,
+                    lock: lockDoc.exists
+                        ? (lockDoc.data() as PaymentActionLock)
+                        : null,
+                });
+            }
+            if (actionLocks.some(({ lock }) =>
+                !lock ||
+                lock.paymentId !== payment.id ||
+                (
+                    lock.state !== "reserved" &&
+                    !(
+                        lock.state === "retrying" &&
+                        Boolean(payment.retryReservationToken) &&
+                        lock.retryToken === payment.retryReservationToken
+                    )
+                )
+            )) return false;
+            if (paymentUpdates) {
+                transaction.update(paymentRef, {
+                    ...paymentUpdates,
+                    retryReservationToken: "",
+                });
+            }
+            for (const { ref } of actionLocks) {
+                transaction.update(ref, {
+                    state: "released",
+                    releasedAt: new Date().toISOString(),
+                    retryToken: "",
+                });
+            }
+            return true;
+        });
+    }
+
+    /**
+     * Atomically accept a signed provider success before the webhook performs
+     * any property or subscription mutation. The route's lookup is only a
+     * convenience; this transaction is the authority for the current attempt,
+     * amount, transaction, and terminal fulfillment state.
+     */
+    async acceptSuccessfulPaymentIntention(
+        id: string,
+        expected: {
+            merchantAttemptKey: string;
+            transactionId: string;
+            paymobOrderId: string;
+            amountCents: number;
+            currency: string;
+        },
+        details: Partial<Payment>,
+    ): Promise<
+        | { status: "accepted"; payment: Payment }
+        | { status: "already_processed"; payment: Payment }
+        | {
+            status: "rejected";
+            reason:
+                | "not_found"
+                | "stale_attempt"
+                | "legacy_identity_conflict"
+                | "amount_or_currency_mismatch"
+                | "transaction_conflict"
+                | "terminal_failure";
+        }
+    > {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) {
+                return { status: "rejected" as const, reason: "not_found" as const };
+            }
+            const payment = paymentDoc.data() as Payment;
+            const expectedAttemptKey = String(
+                expected?.merchantAttemptKey || "",
+            ).trim();
+            const expectedTransactionId = String(
+                expected?.transactionId || "",
+            ).trim();
+            const expectedPaymobOrderId = String(
+                expected?.paymobOrderId || "",
+            ).trim();
+            const expectedAmountCents = Number(expected?.amountCents);
+            const expectedCurrency = String(expected?.currency || "")
+                .trim()
+                .toUpperCase();
+
+            if (payment.merchantAttemptKey) {
+                if (
+                    !expectedAttemptKey ||
+                    payment.merchantAttemptKey !== expectedAttemptKey
+                ) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "stale_attempt" as const,
+                    };
+                }
+            } else {
+                // Legacy callbacks have no attempt key. Recheck their unique,
+                // HMAC-covered Paymob order id inside the same transaction so
+                // a concurrent duplicate cannot make a stale route lookup safe.
+                if (expectedAttemptKey || !expectedPaymobOrderId) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "legacy_identity_conflict" as const,
+                    };
+                }
+                const legacyMatches = await transaction.get(
+                    this.db
+                        .collection("payments")
+                        .where("paymobOrderId", "==", expectedPaymobOrderId),
+                );
+                const exactLegacyMatches = legacyMatches.docs.filter(
+                    (candidate) => {
+                        const candidatePayment = candidate.data() as Payment;
+                        return !candidatePayment.merchantAttemptKey;
+                    },
+                );
+                if (
+                    exactLegacyMatches.length !== 1 ||
+                    exactLegacyMatches[0].id !== id
+                ) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "legacy_identity_conflict" as const,
+                    };
+                }
+            }
+
+            const finalAmount = Number(payment.finalAmount);
+            if (
+                !Number.isSafeInteger(expectedAmountCents) ||
+                !Number.isFinite(finalAmount) ||
+                expectedAmountCents !== Math.round(finalAmount * 100) ||
+                expectedCurrency !== "SAR"
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "amount_or_currency_mismatch" as const,
+                };
+            }
+
+            const status = String(payment.status || "").trim().toLowerCase();
+            const completedStatuses = new Set([
+                "مكتمل",
+                "completed",
+            ]);
+            if (
+                payment.fulfilledAt ||
+                payment.fulfillmentState === "fulfilled" ||
+                payment.fulfillmentState === "processing" ||
+                completedStatuses.has(status)
+            ) {
+                return { status: "already_processed" as const, payment };
+            }
+            if (
+                payment.intentionState === "failed" ||
+                new Set(["مرفوض", "rejected", "cancelled", "canceled"])
+                    .has(status)
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "terminal_failure" as const,
+                };
+            }
+
+            const currentTransactionId = String(payment.transactionId || "").trim();
+            const currentIntentionId = String(payment.paymentReference || "").trim();
+            if (
+                !expectedTransactionId ||
+                (
+                    currentTransactionId &&
+                    currentTransactionId !== currentIntentionId &&
+                    currentTransactionId !== expectedTransactionId
+                )
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "transaction_conflict" as const,
+                };
+            }
+
+            const acceptedAt = new Date().toISOString();
+            const acceptedUpdates: Partial<Payment> = {
+                ...details,
+                status: "نجح - قيد التحقق",
+                completedAt: details.completedAt || acceptedAt,
+                transactionId: expectedTransactionId,
+                ...(expectedPaymobOrderId
+                    ? { paymobOrderId: expectedPaymobOrderId }
+                    : {}),
+            };
+            transaction.update(paymentRef, acceptedUpdates);
+            return {
+                status: "accepted" as const,
+                payment: {
+                    ...payment,
+                    ...acceptedUpdates,
+                } as Payment,
+            };
+        });
+    }
+
+    /**
+     * Atomically settle a signed add-on transaction callback. The first
+     * callback claims the HMAC-covered Paymob order for this exact local
+     * payment. Success is terminal; a failed transaction keeps that order
+     * reserved so a later success from the same checkout can supersede it.
+     */
+    async settleAddOnPaymentCallback(
+        id: string,
+        expected: {
+            transactionId: string;
+            paymobOrderId: string;
+            amountCents: number;
+            currency: string;
+            success: boolean;
+        },
+        successDetails: Partial<Payment> = {},
+    ): Promise<
+        | { status: "accepted_success"; payment: Payment }
+        | { status: "recorded_failure"; payment: Payment }
+        | { status: "already_processed"; payment: Payment }
+        | {
+            status: "rejected";
+            reason:
+                | "not_found"
+                | "not_addon"
+                | "identity_conflict"
+                | "amount_or_currency_mismatch"
+                | "terminal_state";
+        }
+    > {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) {
+                return { status: "rejected" as const, reason: "not_found" as const };
+            }
+            const payment = paymentDoc.data() as Payment;
+            if (payment.id && payment.id !== id) {
+                return {
+                    status: "rejected" as const,
+                    reason: "identity_conflict" as const,
+                };
+            }
+            if (payment.action !== "addon") {
+                return { status: "rejected" as const, reason: "not_addon" as const };
+            }
+
+            const expectedTransactionId = String(
+                expected?.transactionId || "",
+            ).trim();
+            const expectedPaymobOrderId = String(
+                expected?.paymobOrderId || "",
+            ).trim();
+            const expectedAmountCents = Number(expected?.amountCents);
+            const expectedCurrency = String(expected?.currency || "")
+                .trim()
+                .toUpperCase();
+            if (!expectedTransactionId || !expectedPaymobOrderId) {
+                return {
+                    status: "rejected" as const,
+                    reason: "identity_conflict" as const,
+                };
+            }
+
+            const orderMatches = await transaction.get(
+                this.db
+                    .collection("payments")
+                    .where("paymobOrderId", "==", expectedPaymobOrderId),
+            );
+            if (orderMatches.docs.some((candidate) => candidate.id !== id)) {
+                return {
+                    status: "rejected" as const,
+                    reason: "identity_conflict" as const,
+                };
+            }
+            if (
+                payment.paymobOrderId &&
+                payment.paymobOrderId !== expectedPaymobOrderId
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "identity_conflict" as const,
+                };
+            }
+
+            const finalAmount = Number(payment.finalAmount);
+            if (
+                !Number.isSafeInteger(expectedAmountCents) ||
+                !Number.isFinite(finalAmount) ||
+                expectedAmountCents !== Math.round(finalAmount * 100) ||
+                expectedCurrency !== "SAR"
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "amount_or_currency_mismatch" as const,
+                };
+            }
+
+            const currentStatus = String(payment.status || "").trim().toLowerCase();
+            const successfulStatuses = new Set([
+                "مكتمل",
+                "نجح",
+                "نجح - قيد التحقق",
+                "مدفوع",
+                "paid",
+                "success",
+                "successful",
+                "completed",
+            ]);
+            if (
+                payment.completedAt ||
+                payment.fulfilledAt ||
+                payment.fulfillmentState === "processing" ||
+                payment.fulfillmentState === "fulfilled" ||
+                successfulStatuses.has(currentStatus)
+            ) {
+                return { status: "already_processed" as const, payment };
+            }
+            if (
+                new Set([
+                    "مرفوض",
+                    "ملغي",
+                    "rejected",
+                    "cancelled",
+                    "canceled",
+                ]).has(currentStatus)
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "terminal_state" as const,
+                };
+            }
+
+            const settledAt = new Date().toISOString();
+            if (!expected.success) {
+                const failureUpdates: Partial<Payment> = {
+                    status: "فشل",
+                    paymobOrderId: expectedPaymobOrderId,
+                    lastFailedTransactionId: expectedTransactionId,
+                    lastProviderFailureAt: settledAt,
+                    intentionState:
+                        payment.intentionState === "created"
+                            ? "created"
+                            : "unknown",
+                };
+                transaction.update(paymentRef, failureUpdates);
+                return {
+                    status: "recorded_failure" as const,
+                    payment: { ...payment, ...failureUpdates } as Payment,
+                };
+            }
+
+            const successUpdates: Partial<Payment> = {
+                ...successDetails,
+                status: "نجح - قيد التحقق",
+                paymobOrderId: expectedPaymobOrderId,
+                transactionId: expectedTransactionId,
+                completedAt: successDetails.completedAt || settledAt,
+            };
+            transaction.update(paymentRef, successUpdates);
+            return {
+                status: "accepted_success" as const,
+                payment: { ...payment, ...successUpdates } as Payment,
+            };
+        });
+    }
+
+    /**
+     * Record a failed transaction callback without abandoning its Paymob
+     * intention. A checkout can emit a failed transaction and later a
+     * successful transaction for the same intention, so provider identity and
+     * action locks must remain reserved until an exact success or an explicit
+     * abandonment flow settles the intention.
+     */
+    async finalizeFailedPaymentIntention(
+        id: string,
+        expected: {
+            merchantAttemptKey: string;
+            transactionId: string;
+            paymobOrderId: string;
+            amountCents: number;
+            currency: string;
+        },
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            const expectedAttemptKey = String(
+                expected?.merchantAttemptKey || "",
+            ).trim();
+            const expectedTransactionId = String(
+                expected?.transactionId || "",
+            ).trim();
+            const expectedPaymobOrderId = String(
+                expected?.paymobOrderId || "",
+            ).trim();
+            const expectedAmountCents = Number(expected?.amountCents);
+            const expectedCurrency = String(expected?.currency || "")
+                .trim()
+                .toUpperCase();
+            if (!expectedTransactionId) return false;
+            if (payment.merchantAttemptKey) {
+                if (payment.merchantAttemptKey !== expectedAttemptKey) return false;
+            } else {
+                if (expectedAttemptKey || !expectedPaymobOrderId) return false;
+                const legacyMatches = await transaction.get(
+                    this.db
+                        .collection("payments")
+                        .where("paymobOrderId", "==", expectedPaymobOrderId),
+                );
+                const exactLegacyMatches = legacyMatches.docs.filter(
+                    (candidate) =>
+                        !(candidate.data() as Payment).merchantAttemptKey,
+                );
+                if (
+                    exactLegacyMatches.length !== 1 ||
+                    exactLegacyMatches[0].id !== id
+                ) return false;
+            }
+
+            const finalAmount = Number(payment.finalAmount);
+            if (
+                !Number.isSafeInteger(expectedAmountCents) ||
+                !Number.isFinite(finalAmount) ||
+                expectedAmountCents !== Math.round(finalAmount * 100) ||
+                expectedCurrency !== "SAR"
+            ) {
+                return false;
+            }
+
+            const currentTransactionId = String(payment.transactionId || "").trim();
+            const currentIntentionId = String(payment.paymentReference || "").trim();
+            // Before settlement transactionId historically stored the Paymob
+            // intention id. Once a transaction callback has been persisted, a
+            // different transaction must never be allowed to finalize it.
+            if (
+                currentTransactionId &&
+                currentTransactionId !== currentIntentionId &&
+                currentTransactionId !== expectedTransactionId
+            ) {
+                return false;
+            }
+
+            const status = String(payment.status || "").trim().toLowerCase();
+            const successfulStatuses = new Set([
+                "مكتمل",
+                "نجح",
+                "نجح - قيد التحقق",
+                "مدفوع",
+                "paid",
+                "success",
+                "successful",
+                "completed",
+                "processing",
+            ]);
+            if (
+                payment.completedAt ||
+                payment.fulfilledAt ||
+                payment.fulfillmentState === "processing" ||
+                payment.fulfillmentState === "fulfilled" ||
+                successfulStatuses.has(status)
+            ) {
+                return false;
+            }
+            transaction.update(paymentRef, {
+                status: "فشل",
+                // "failed" is reserved for a definitively abandoned or
+                // rejected intention. This callback settles one transaction,
+                // not necessarily the whole checkout intention.
+                intentionState:
+                    payment.intentionState === "created"
+                        ? "created"
+                        : "unknown",
+                lastFailedTransactionId: expectedTransactionId,
+                lastProviderFailureAt: new Date().toISOString(),
+            });
+            return true;
+        });
+    }
+
+    async reservePaymentActionForRetry(id: string): Promise<{
+        token: string;
+        subscription: Subscription | null;
+        merchantAttemptKey: string;
+    }> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        const now = Date.now();
+        const token = `RETRY-${now}-${Math.random().toString(36).slice(2, 10)}`;
+        const merchantAttemptKey = `RWQN-RETRY-${now}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+        const staleAfterMs = 10 * 60 * 1000;
+
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) throw new Error("Payment not found");
+            const payment = paymentDoc.data() as Payment;
+            if (!this.isActionableSubscriptionPayment(payment)) {
+                throw new PaymentRetryNotAllowedError();
+            }
+            if (!this.isPaymentEligibleForNewIntention(payment)) {
+                throw new PaymentRetryNotAllowedError();
+            }
+            if (
+                payment.fulfilledAt ||
+                payment.fulfillmentState === "fulfilled" ||
+                payment.fulfillmentState === "processing" ||
+                payment.fulfillmentState === "failed"
+            ) {
+                throw new PaymentActionConflictError();
+            }
+
+            const {
+                keys: actionLockKeys,
+                subscription,
+                hasForeignRequestedMember,
+            } =
+                await this.resolvePaymentActionLockContext(transaction, payment);
+            if (hasForeignRequestedMember) {
+                throw new PaymentActionEligibilityError(
+                    this.getSubscriptionPaymentAction(payment),
+                );
+            }
+            if (!this.isActionablePaymentAllowedForSubscription(
+                this.getSubscriptionPaymentAction(payment),
+                subscription,
+            )) {
+                throw new PaymentActionEligibilityError(
+                    this.getSubscriptionPaymentAction(payment),
+                );
+            }
+
+            const actionLockKey =
+                payment.fulfillmentActionLockKey ||
+                subscription?.linkedProperty ||
+                payment.propertyNumber;
+            const actionLocks: Array<{
+                key: string;
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            for (const key of actionLockKeys) {
+                const ref = this.getPaymentActionLockRef(key);
+                const lockDoc = await transaction.get(ref);
+                actionLocks.push({
+                    key,
+                    ref,
+                    lock: lockDoc.exists
+                        ? (lockDoc.data() as PaymentActionLock)
+                        : null,
+                });
+            }
+            const ownerPayments = new Map<string, Payment | null>();
+            for (const { lock } of actionLocks) {
+                if (
+                    !lock ||
+                    lock.paymentId === payment.id ||
+                    ownerPayments.has(lock.paymentId) ||
+                    !this.isActivePaymentActionLockState(lock.state)
+                ) continue;
+                const ownerDoc = await transaction.get(
+                    this.db.collection("payments").doc(lock.paymentId),
+                );
+                ownerPayments.set(
+                    lock.paymentId,
+                    ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
+                );
+            }
+            for (const { lock } of actionLocks) {
+                if (!lock) continue;
+                if (lock.paymentId !== payment.id) {
+                    const predatesCompletedAction =
+                        lock.state === "fulfilled" &&
+                        (
+                            this.getDateMillis(lock.completedAt) <= 0 ||
+                            this.getDateMillis(payment.createdAt) <= 0 ||
+                            this.getDateMillis(payment.createdAt) <=
+                                this.getDateMillis(lock.completedAt)
+                        );
+                    const activeOtherPayment =
+                        this.isActivePaymentActionLockState(lock.state) &&
+                        !this.isPaymentActionLockOwnerReleasable(
+                            lock,
+                            ownerPayments.get(lock.paymentId) || null,
+                            now,
+                        );
+                    if (activeOtherPayment || predatesCompletedAction) {
+                        throw new PaymentActionConflictError();
+                    }
+                    continue;
+                }
+                if (lock.state === "fulfilled" || lock.state === "processing") {
+                    throw new PaymentActionConflictError();
+                }
+                if (
+                    lock.state === "retrying" &&
+                    this.getDateMillis(payment.retryReservationAt) > 0 &&
+                    now - this.getDateMillis(payment.retryReservationAt) < staleAfterMs
+                ) {
+                    throw new PaymentActionConflictError();
+                }
+            }
+
+            transaction.update(paymentRef, {
+                fulfillmentActionLockKey: actionLockKey,
+                fulfillmentActionLockKeys: actionLockKeys,
+                retryReservationToken: token,
+                retryReservationAt: new Date(now).toISOString(),
+                merchantAttemptKey,
+            });
+            for (const { key, ref, lock } of actionLocks) {
+                transaction.set(ref, {
+                    propertyNumber: key,
+                    paymentId: payment.id,
+                    action: this.getSubscriptionPaymentAction(payment),
+                    state: "retrying",
+                    reservedAt:
+                        lock?.paymentId === payment.id
+                            ? lock.reservedAt
+                            : new Date(now).toISOString(),
+                    retryToken: token,
+                } satisfies PaymentActionLock);
+            }
+            return { token, subscription, merchantAttemptKey };
+        });
+    }
+
+    async completePaymentActionRetryReservation(
+        id: string,
+        token: string,
+        updates: Partial<Payment>,
+    ): Promise<void> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        await this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) throw new Error("Payment not found");
+            const payment = paymentDoc.data() as Payment;
+            if (payment.retryReservationToken !== token) {
+                throw new PaymentActionConflictError();
+            }
+            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
+                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
+                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
+            const actionLocks: Array<{
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            for (const key of actionLockKeys) {
+                const ref = this.getPaymentActionLockRef(key);
+                const lockDoc = await transaction.get(ref);
+                const lock = lockDoc.exists
+                    ? (lockDoc.data() as PaymentActionLock)
+                    : null;
+                if (
+                    !lock ||
+                    lock.paymentId !== payment.id ||
+                    lock.state !== "retrying" ||
+                    lock.retryToken !== token
+                ) {
+                    throw new PaymentActionConflictError();
+                }
+                actionLocks.push({ ref, lock });
+            }
+
+            transaction.update(paymentRef, {
+                ...updates,
+                retryReservationToken: "",
+            });
+            for (const { ref } of actionLocks) {
+                transaction.update(ref, {
+                    state: "reserved",
+                    retryToken: "",
+                });
+            }
+        });
+    }
+
+    async releasePaymentActionRetryReservation(
+        id: string,
+        token: string,
+        paymentUpdates?: Partial<Payment>,
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            if (payment.retryReservationToken !== token) return false;
+            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
+                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
+                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
+            const actionLocks: Array<{
+                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
+                lock: PaymentActionLock | null;
+            }> = [];
+            for (const key of actionLockKeys) {
+                const ref = this.getPaymentActionLockRef(key);
+                const lockDoc = await transaction.get(ref);
+                actionLocks.push({
+                    ref,
+                    lock: lockDoc.exists
+                        ? (lockDoc.data() as PaymentActionLock)
+                        : null,
+                });
+            }
+
+            if (actionLocks.some(({ lock }) =>
+                !lock ||
+                lock.paymentId !== payment.id ||
+                lock.state !== "retrying" ||
+                lock.retryToken !== token
+            )) return false;
+            transaction.update(paymentRef, {
+                ...(paymentUpdates || {}),
+                retryReservationToken: "",
+            });
+            for (const { ref } of actionLocks) {
+                transaction.update(ref, {
+                    state: "released",
+                    releasedAt: new Date().toISOString(),
+                    retryToken: "",
+                });
+            }
+            return true;
+        });
     }
 
     async updatePayment(id: string, updates: Partial<Payment>): Promise<Payment> {

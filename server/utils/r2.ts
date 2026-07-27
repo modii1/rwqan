@@ -74,19 +74,54 @@ export const r2 = process.env.R2_REGION && r2Endpoint && process.env.R2_ACCESS_K
 
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 
-export async function countR2Images(propertyNumber: string): Promise<number> {
-  if (!r2 || !R2_BUCKET) return 0;
+export type R2ImageCountClient = {
+  send(command: ListObjectsV2Command): Promise<{
+    Contents?: Array<{ Key?: string }>;
+  }>;
+};
+
+export type R2ImageCountDependencies = {
+  client: R2ImageCountClient | null;
+  bucket: string | undefined;
+};
+
+export class R2ImageStorageUnavailableError extends Error {
+  constructor() {
+    super("R2 image storage is unavailable");
+    this.name = "R2ImageStorageUnavailableError";
+  }
+}
+
+export async function countR2ImagesStrict(
+  propertyNumber: string,
+  dependencies: R2ImageCountDependencies = {
+    client: r2,
+    bucket: R2_BUCKET,
+  },
+): Promise<number> {
+  const { client, bucket } = dependencies;
+  if (!client || !bucket) throw new R2ImageStorageUnavailableError();
+
   try {
-    const list = await r2.send(
+    const list = await client.send(
       new ListObjectsV2Command({
-        Bucket: R2_BUCKET,
+        Bucket: bucket,
         Prefix: `${propertyNumber}/`,
         MaxKeys: 200,
       })
     );
     return (list.Contents || []).filter(
-      (obj) => obj.Key && /\.(jpg|jpeg|png|webp|gif)$/i.test(obj.Key)
+      (obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key)
     ).length;
+  } catch (error) {
+    if (error instanceof R2ImageStorageUnavailableError) throw error;
+    throw new R2ImageStorageUnavailableError();
+  }
+}
+
+export async function countR2Images(propertyNumber: string): Promise<number> {
+  try {
+    return await countR2ImagesStrict(propertyNumber);
   } catch {
     return 0;
   }

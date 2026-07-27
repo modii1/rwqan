@@ -14,270 +14,46 @@ import {
 
 const router = Router();
 
+function callbackBoolean(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function callbackMatchesPayment(
+  payment: { finalAmount: unknown },
+  transaction: { amount_cents?: unknown; currency?: unknown },
+): boolean {
+  const amountCents = Number(transaction.amount_cents);
+  const finalAmount = Number(payment.finalAmount);
+  return (
+    Number.isSafeInteger(amountCents) &&
+    Number.isFinite(finalAmount) &&
+    amountCents === Math.round(finalAmount * 100) &&
+    String(transaction.currency || "").trim().toUpperCase() === "SAR"
+  );
+}
+
   // ======================
-  // PAYMOB WEBHOOK - GET (Return URL redirect)
+  // PAYMOB RETURN URL - GET (browser UX only)
   // ======================
-  router.get("/api/paymob/webhook", async (req, res) => {
-    try {
-      console.log("📥 Paymob GET redirect received");
-      console.log("📥 Query params:", req.query);
+  router.get("/api/paymob/webhook", (req, res) => {
+    // This URL is opened in the customer's browser and every query parameter
+    // can be forged. It must never settle a payment or fulfill a subscription.
+    // The signed server-to-server POST callback below is the only mutation path.
+    const success = req.query.success === "true";
+    const specialReference = typeof req.query.special_reference === "string"
+      ? req.query.special_reference
+      : "";
+    const isAddon = specialReference.startsWith("PAY-ADDON-") ||
+      specialReference.startsWith("addon-");
 
-      const success = req.query.success === "true";
-      const orderId = (req.query.order as string) || "";
-      const transactionId = (req.query.id as string) || "";
-      const merchantOrderId = (req.query.merchant_order_id as string) || "";
-
-      console.log(`📊 success=${success}, order=${orderId}, txn=${transactionId}, merchantOrderId=${merchantOrderId}`);
-
-      // 🔍 استخراج رقم العقار من merchant_order_id أو special_reference
-      let propertyNumber = "";
-      let isAddonPaymentFromRef = false;
-
-      // التحقق من special_reference أولاً للإضافات
-      const specialRef = req.query.special_reference as string || "";
-      if (specialRef && specialRef.startsWith("addon-")) {
-        // صيغة الإضافات: addon-propertyNumber-timestamp
-        const parts = specialRef.split("-");
-        if (parts.length >= 2) {
-          propertyNumber = parts[1];
-          isAddonPaymentFromRef = true;
-        }
-      }
-
-      // إذا لم نجد من special_reference، نحاول من merchant_order_id
-      if (!propertyNumber && merchantOrderId && merchantOrderId.includes("-")) {
-        if (merchantOrderId.startsWith("addon-")) {
-          // صيغة الإضافات
-          const parts = merchantOrderId.split("-");
-          if (parts.length >= 2) {
-            propertyNumber = parts[1];
-            isAddonPaymentFromRef = true;
-          }
-        } else {
-          // صيغة الاشتراكات العادية: propertyNumber-timestamp
-          propertyNumber = merchantOrderId.split("-")[0];
-        }
-      }
-
-      console.log("🏡 Extracted property number:", propertyNumber, "isAddon:", isAddonPaymentFromRef);
-
-      // 🔎 استعلام الرسوم (اختياري)
-      if (success && orderId) {
-        try {
-          const { paymobService } = await import("../integrations/paymob");
-          console.log(`📡 Calling Paymob Inquiry API with order_id: ${orderId}`);
-          const inquiry = await paymobService.inquiryByOrderId(orderId);
-
-          if (inquiry?.ok) {
-            console.log("✅ Inquiry fees:", inquiry);
-          } else {
-            console.log("⚠️ Inquiry returned no data");
-          }
-        } catch (err) {
-          console.log("❌ Inquiry API Error:", err);
-        }
-      }
-
-      // 🎯 إعادة التوجيه بناءً على نوع العملية
-      if (success) {
-        let paymentAction = '';
-
-        // 📲 إرسال إشعار واتساب عند نجاح الدفع الإلكتروني + تحديث حالة الدفع
-        if (propertyNumber) {
-          try {
-            const property = await propertyService.getByNumber(propertyNumber);
-            const payments = await paymentService.getAll();
-
-            // البحث عن الدفعة الأحدث للعقار (POST webhook قد يصل قبل GET ويغير الحالة)
-            // لذلك نبحث عن أي دفعة أُنشئت خلال آخر 10 دقائق
-            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-            const payment = payments
-              .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
-              .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-
-            console.log(`🔍 Looking for payment: propertyNumber=${propertyNumber}, found=${!!payment}, action=${(payment as any)?.action}, status=${payment?.status}`);
-
-            // حفظ نوع العملية
-            paymentAction = (payment as any)?.action || '';
-
-            // تحديث حالة الدفع (فقط إذا كان لا يزال معلقاً - POST webhook قد يكون سبقنا)
-            if (payment && (payment.status === "معلق" || payment.status === "قيد المراجعة")) {
-              // جميع المدفوعات تذهب للمرحلة الإجبارية: التحقق
-              await paymentService.update(payment.id, {
-                status: "نجح - قيد التحقق" as any,
-                transactionId,
-                completedAt: new Date().toISOString()
-              });
-
-              // التحقق التلقائي من بيانات العقار
-              let autoVerified = false;
-              let missingFields: string[] = [];
-              if (property) {
-                const { checkPropertyDataComplete } = await import("../utils/verification");
-                const { countR2Images } = await import("../utils/r2");
-                const r2ImgCount = await countR2Images(propertyNumber);
-                const dataCheck = await checkPropertyDataComplete(property, r2ImgCount);
-                missingFields = dataCheck.missingFields;
-                autoVerified = dataCheck.isComplete;
-              }
-
-              if (autoVerified) {
-                // فحص: هل هذا عقار جديد (لا يملك اشتراك سابق)؟
-                const existingSubGet = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
-                const pkg = await subscriptionService.getPackageById(payment.packageId);
-                if (property && pkg) {
-                  const calculatedDates = calculateActionDates(payment.action, existingSubGet, pkg.duration);
-                  if (!hasPriorSubscription(existingSubGet)) {
-                    const queued = await queueVerifiedNewPropertyForAdminApproval({
-                      payment,
-                      property,
-                      pkg,
-                      startDate: payment.pendingStartDate || calculatedDates.startDate,
-                      endDate: payment.pendingEndDate || calculatedDates.endDate,
-                      finalAmount: payment.pendingPrice || payment.finalAmount,
-                    });
-                    if (property.whatsappNumber) {
-                      await sendOwnerWhatsApp(
-                        property.whatsappNumber,
-                        `تم التحقق من الدفع وبيانات العقار ${property.name || propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن.`,
-                      ).catch(err => console.error("Owner pending approval notification failed:", err));
-                    }
-                    console.log(`🆕 Payment verified for new property ${propertyNumber}; queued for admin approval until ${queued.endDate}`);
-                  } else {
-                    const activation = await activateVerifiedPaymentSubscription({
-                      payment,
-                      property,
-                      pkg,
-                      startDate: payment.pendingStartDate || calculatedDates.startDate,
-                      endDate: payment.pendingEndDate || calculatedDates.endDate,
-                      finalAmount: payment.pendingPrice || payment.finalAmount,
-                    });
-                    await paymentService.update(payment.id, {
-                      status: "مكتمل" as any,
-                      completedAt: new Date().toISOString(),
-                    });
-                    if (property.whatsappNumber) {
-                      await notifyOwnerSubscriptionActivated({
-                        ownerPhone: property.whatsappNumber,
-                        propertyNumber,
-                        propertyName: property.name || "",
-                        endDate: activation.endDate,
-                      }).catch(err => console.error("Owner activation notification failed:", err));
-                    }
-                  }
-                } else {
-                  await paymentService.update(payment.id, {
-                    status: "مرفوض" as any,
-                    notes: "تعذر تفعيل الاشتراك: الباقة غير موجودة",
-                  });
-                }
-                console.log(`✅ Payment auto-verified: ${payment.id} (property ${propertyNumber}, hasPrior: ${hasPriorSubscription(existingSubGet)})`);
-              } else {
-                await paymentService.update(payment.id, {
-                  status: "نجح - قيد التحقق" as any,
-                  notes: `بيانات العقار غير مكتملة: ${missingFields.join('، ')}`
-                });
-                if (property) {
-                  await firebaseService.updateVerificationStatus(propertyNumber, "pending");
-                  if (property.whatsappNumber) {
-                    await sendOwnerWhatsApp(
-                      property.whatsappNumber,
-                      `تم استلام الدفع، لكن بيانات العقار ${property.name || propertyNumber} غير مكتملة.\n\nالحقول المطلوبة: ${missingFields.join("، ")}\n\nالخطوة التالية: عدّل بيانات العقار وارفع الصور المطلوبة ثم شغّل التحقق من صفحة الاشتراك.`,
-                    ).catch(err => console.error("Owner incomplete data notification failed:", err));
-                  }
-                }
-                console.log("⏳ Payment kept pending verification (incomplete data):", payment.id, missingFields);
-              }
-            } else if (payment && payment.status === "مرفوض") {
-              console.log("⚠️ Payment was already rejected by POST webhook:", payment.id);
-            }
-
-            // رسالة مختلفة حسب نوع العملية
-            const isAddonPayment = payment?.packageId?.startsWith('addon-') || isAddonPaymentFromRef;
-            let actionLabel = 'اشتراك جديد';
-            if (isAddonPayment) {
-              actionLabel = 'شراء إضافة';
-            } else if (paymentAction === 'upgrade') {
-              actionLabel = 'ترقية';
-            } else if (paymentAction === 'extend') {
-              actionLabel = 'تمديد';
-            }
-
-            const paymentStatus = payment?.status || "غير معروف";
-            const isRejected = paymentStatus === "مرفوض";
-            const isAwaitingAdminApproval = paymentStatus === "نجح - قيد التحقق";
-            const paymentStateLabel = isRejected
-              ? "مرفوض - راجع سبب الرفض"
-              : isAddonPayment
-                ? "نجح - قيد مراجعة الإدارة"
-                : isAwaitingAdminApproval
-                  ? "نجح - بانتظار اعتماد الإدارة أو استكمال البيانات"
-                  : "نجح - تم التحقق التلقائي";
-            
-            await sendWhatsAppNotification(
-              `💳 *${isRejected ? 'تم رفض الدفع' : 'تم استلام دفعة إلكترونية'}*\n\n` +
-              `🏠 العقار: ${property?.name || propertyNumber}\n` +
-              `🔢 رقم العقار: ${propertyNumber}\n` +
-              `💰 المبلغ: ${payment?.finalAmount || 'غير محدد'} ر.س\n` +
-              `🔢 رقم العملية: ${transactionId}\n` +
-              `📋 نوع العملية: ${actionLabel}\n` +
-              `📋 الحالة: ${paymentStateLabel}`
-            );
-            console.log("✅ WhatsApp notification sent for electronic payment:", transactionId);
-          } catch (notifyErr) {
-            console.log("⚠️ Failed to send WhatsApp notification:", notifyErr);
-          }
-        }
-
-        // التوجيه حسب نوع العملية وحالة الدفع
-        let redirectUrl: string;
-        let currentPaymentStatus = '';
-
-        // التحقق من حالة الدفع (قد يكون مرفوضاً بسبب سبب نهائي مثل باقة غير موجودة)
-        if (propertyNumber) {
-          const payments = await paymentService.getAll();
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const recentPayment = payments
-            .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
-            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-          currentPaymentStatus = recentPayment?.status || '';
-        }
-
-        // التحقق من نوع الباقة (إضافة أم اشتراك)
-        let isAddonPaymentRedirect = isAddonPaymentFromRef;
-        if (!isAddonPaymentRedirect && propertyNumber) {
-          const payments = await paymentService.getAll();
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const recentPayment = payments
-            .filter(p => p.propertyNumber === propertyNumber && new Date(p.createdAt || 0) > tenMinutesAgo)
-            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-          isAddonPaymentRedirect = recentPayment?.packageId?.startsWith('addon-') || false;
-        }
-
-        if (currentPaymentStatus === "مرفوض") {
-          // تم رفض الدفع بسبب سبب نهائي
-          redirectUrl = `/subscription?payment=rejected&property=${propertyNumber}&reason=verification_failed`;
-        } else if (isAddonPaymentRedirect) {
-          // إضافة: توجيه للوحة التحكم مع تحديد نجاح الدفع
-          redirectUrl = `/owner/dashboard?addon_payment=success`;
-        } else if (paymentAction === 'upgrade' || paymentAction === 'extend') {
-          // الترقية والتمديد: توجيه للوحة التحكم
-          redirectUrl = `/owner/dashboard?payment=success`;
-        } else {
-          // تسجيل جديد: توجيه لصفحة المراجعة
-          redirectUrl = `/subscription?payment=success&property=${propertyNumber}`;
-        }
-
-        console.log(`🔁 Redirecting to: ${redirectUrl} (action: ${paymentAction || 'new'}, isAddon: ${isAddonPaymentRedirect}, status: ${currentPaymentStatus})`);
-        return res.redirect(redirectUrl);
-      } else {
-        return res.redirect(`/subscription?payment=failed`);
-      }
-
-    } catch (error) {
-      console.error("❌ GET Webhook Error:", error);
-      return res.redirect(`/subscription?payment=error`);
+    if (!success) {
+      return res.redirect("/subscription?payment=failed");
     }
+    return res.redirect(
+      isAddon
+        ? "/owner/dashboard?addon_payment=processing"
+        : "/subscription?payment=processing",
+    );
   });
 
 
@@ -289,53 +65,79 @@ const router = Router();
       console.log("📥 Paymob webhook received");
 
       const webhook = req.body;
-      const t = webhook.obj;
+      const receivedHmac =
+        (typeof req.query.hmac === "string" ? req.query.hmac : undefined) ||
+        (typeof webhook?.hmac === "string" ? webhook.hmac : undefined) ||
+        (typeof webhook?.obj?.hmac === "string" ? webhook.obj.hmac : undefined);
+      if (!paymobService.verifyWebhookSignature(webhook, receivedHmac)) {
+        console.error("Rejected Paymob webhook with an invalid signature");
+        return res.status(401).json({
+          ok: false,
+          error: "Invalid Paymob webhook signature",
+        });
+      }
+
+      const t = webhook?.obj;
       if (!t) {
         console.log("⚠️ Missing obj");
-        return res.json({ ok: true });
+        return res.status(400).json({ ok: false, error: "Missing callback object" });
       }
 
       // استخراج المعلومات الأساسية
-      const transactionId = String(t.id || "");
-      const isSuccess = t.success;
+      const transactionId = String(t.id ?? "");
+      const isSuccess = callbackBoolean(t.success);
+      const isPending = callbackBoolean(t.pending);
       const paymobOrderId = String(t.order?.id || t.order || "");
-      const merchantOrderId =
-        t.merchant_order_id || t.order?.merchant_order_id || "";
+      const merchantOrderId = String(
+        t.merchant_order_id || t.order?.merchant_order_id || "",
+      );
       const amount = (t.amount_cents || 0) / 100;
       const creationExtras = t.order?.extras?.creation_extras || {};
+
+      if (!transactionId) {
+        return res.status(400).json({ ok: false, error: "Missing transaction id" });
+      }
+
+      // A pending callback is informational, not a final failure or success.
+      // Waiting for Paymob's final signed callback prevents premature retries.
+      if (isPending) {
+        return res.json({ ok: true, status: "pending" });
+      }
 
       // ===============================
       // معالجة دفعات الإضافات - طريقة موحدة
       // البحث في السجلات المعلقة أو من extras
       // ===============================
-      const specialReference = t.order?.special_reference || merchantOrderId || "";
+      const specialReference = String(
+        t.order?.special_reference || merchantOrderId || "",
+      );
+      const callbackAttemptKey = String(
+        creationExtras?.merchantAttemptKey ||
+        specialReference ||
+        merchantOrderId ||
+        "",
+      );
       const isAddonPayment = specialReference.startsWith("PAY-ADDON-") || creationExtras?.type === "addon";
 
       if (isAddonPayment) {
         console.log(`📦 Processing add-on payment webhook, special_reference: ${specialReference}`);
 
-        // البحث عن سجل الدفع المعلق
+        // Correlate add-on payments only by an explicit local payment id.
         const allPayments = await paymentService.getAll();
         let pendingPayment = null;
-
-        // أولاً: البحث بـ special_reference (paymentId)
+        const callbackPaymentIds = new Set<string>();
         if (specialReference.startsWith("PAY-ADDON-")) {
-          pendingPayment = allPayments.find(p => p.id === specialReference);
+          callbackPaymentIds.add(specialReference);
         }
-
-        // ثانياً: البحث بـ extras إذا لم نجد
-        if (!pendingPayment && creationExtras?.paymentId) {
-          pendingPayment = allPayments.find(p => p.id === creationExtras.paymentId);
+        if (creationExtras?.paymentId) {
+          callbackPaymentIds.add(String(creationExtras.paymentId));
         }
-
-        // ثالثاً: البحث بالحالة والمصدر
-        if (!pendingPayment) {
-          pendingPayment = allPayments.find(p =>
-            p.action === "addon" &&
-            p.status === "قيد الدفع" &&
-            p.paymentMethod === "paymob" &&
-            Math.abs(p.finalAmount - amount) < 1 // نفس المبلغ تقريباً
-          );
+        if (callbackPaymentIds.size === 1) {
+          const [paymentId] = callbackPaymentIds;
+          pendingPayment = allPayments.find((payment) => payment.id === paymentId) || null;
+        } else if (callbackPaymentIds.size > 1) {
+          console.error("Conflicting add-on payment identifiers in Paymob callback");
+          return res.status(409).json({ error: "Callback identifiers conflict" });
         }
 
         if (!pendingPayment) {
@@ -343,23 +145,45 @@ const router = Router();
           return res.json({ ok: true });
         }
 
-        const addonPropertyNumber = pendingPayment.propertyNumber;
-        const addonId = pendingPayment.packageId;
-        const addonName = pendingPayment.packageName;
-        const addonPrice = pendingPayment.finalAmount;
+        if (!callbackMatchesPayment(pendingPayment, t)) {
+          console.error(`Paymob amount/currency mismatch for add-on ${pendingPayment.id}`);
+          return res.status(422).json({ error: "Callback amount or currency mismatch" });
+        }
 
         if (!isSuccess) {
-          // فشل الدفع - تحديث الحالة
-          await paymentService.update(pendingPayment.id, {
-            status: "فشل",
-            paymobOrderId,
-            transactionId,
-          });
+          const failureSettlement = await firebaseService.settleAddOnPaymentCallback(
+            pendingPayment.id,
+            {
+              transactionId,
+              paymobOrderId,
+              amountCents: Number(t.amount_cents),
+              currency: String(t.currency || ""),
+              success: false,
+            },
+          );
+          if (failureSettlement.status === "already_processed") {
+            console.warn(`Ignoring late failed callback for add-on ${pendingPayment.id}`);
+            return res.json({ ok: true, status: "ignored_late_failure" });
+          }
+          if (failureSettlement.status === "rejected") {
+            const status = failureSettlement.reason === "amount_or_currency_mismatch"
+              ? 422
+              : failureSettlement.reason === "not_found"
+                ? 404
+                : 409;
+            return res.status(status).json({
+              error: "Add-on callback could not be accepted",
+              reason: failureSettlement.reason,
+            });
+          }
+          if (failureSettlement.status !== "recorded_failure") {
+            return res.status(409).json({
+              error: "Add-on failure callback reached an unexpected state",
+            });
+          }
           console.log(`❌ Addon payment failed: ${pendingPayment.id}`);
           return res.json({ ok: true });
         }
-
-        console.log(`📦 Found pending addon payment: ${pendingPayment.id} for property ${addonPropertyNumber}`);
 
         // ===============================
         // حساب الرسوم للإضافات
@@ -392,18 +216,48 @@ const router = Router();
           addonNetAmount = Math.round((amount - addonTotalFees) * 100) / 100;
         }
 
-        // تحديث سجل الدفع المعلق بدلاً من إنشاء جديد
-        await paymentService.update(pendingPayment.id, {
-          paymobOrderId,
-          status: "نجح - قيد التحقق",
-          transactionId,
-          merchantFees: addonMerchantFees,
-          acqFees: addonAcqFees,
-          vatAmount: addonVatAmount,
-          totalFees: addonTotalFees,
-          netAmount: addonNetAmount,
-          completedAt: new Date().toISOString(),
-        });
+        const successSettlement = await firebaseService.settleAddOnPaymentCallback(
+          pendingPayment.id,
+          {
+            transactionId,
+            paymobOrderId,
+            amountCents: Number(t.amount_cents),
+            currency: String(t.currency || ""),
+            success: true,
+          },
+          {
+            merchantFees: addonMerchantFees,
+            acqFees: addonAcqFees,
+            vatAmount: addonVatAmount,
+            totalFees: addonTotalFees,
+            netAmount: addonNetAmount,
+          },
+        );
+        if (successSettlement.status === "already_processed") {
+          return res.json({ ok: true, status: "already_processed" });
+        }
+        if (successSettlement.status === "rejected") {
+          const status = successSettlement.reason === "amount_or_currency_mismatch"
+            ? 422
+            : successSettlement.reason === "not_found"
+              ? 404
+              : 409;
+          return res.status(status).json({
+            error: "Add-on callback could not be accepted",
+            reason: successSettlement.reason,
+          });
+        }
+        if (successSettlement.status !== "accepted_success") {
+          return res.status(409).json({
+            error: "Add-on callback did not reach a successful terminal state",
+          });
+        }
+        pendingPayment = successSettlement.payment;
+        const addonPropertyNumber = pendingPayment.propertyNumber;
+        const addonId = pendingPayment.packageId;
+        const addonName = pendingPayment.packageName;
+        const addonPrice = pendingPayment.finalAmount;
+        console.log(`📦 Accepted add-on payment ${pendingPayment.id} for property ${addonPropertyNumber}`);
 
         // تسجيل العملية في سجل الإضافات
         await addOnService.logHistory({
@@ -511,6 +365,82 @@ const router = Router();
 
       if (!isSuccess) {
         console.log("⚠️ Payment failed");
+        const failedPayments = await paymentService.getAll();
+        const callbackPaymentId = creationExtras?.paymentId
+          ? String(creationExtras.paymentId)
+          : "";
+        const paymentById = callbackPaymentId
+          ? failedPayments.find((payment) => payment.id === callbackPaymentId) || null
+          : null;
+        const paymentByAttempt = callbackAttemptKey
+          ? failedPayments.find(
+            (payment) =>
+              payment.merchantAttemptKey === callbackAttemptKey,
+          ) || null
+          : null;
+        let failedPayment = null;
+        if (paymentById && paymentByAttempt && paymentById.id !== paymentByAttempt.id) {
+          console.error("Conflicting failed-payment identifiers in Paymob callback");
+        } else if (
+          paymentById?.merchantAttemptKey &&
+          callbackPaymentId &&
+          callbackAttemptKey &&
+          paymentByAttempt?.id === paymentById.id
+        ) {
+          // Modern intentions must supply both identifiers. An attempt key by
+          // itself is not enough to select a local payment.
+          failedPayment = paymentById;
+        } else if (paymobOrderId && !paymentByAttempt) {
+          // Legacy intentions predate stable attempt keys. The Paymob order id
+          // is covered by the callback HMAC, so only a unique exact match is
+          // eligible for this compatibility path.
+          const legacyMatches = failedPayments.filter(
+            (payment) =>
+              !payment.merchantAttemptKey &&
+              payment.paymobOrderId === paymobOrderId,
+          );
+          if (
+            legacyMatches.length === 1 &&
+            (!paymentById || paymentById.id === legacyMatches[0].id)
+          ) {
+            failedPayment = legacyMatches[0];
+          }
+        }
+        if (failedPayment) {
+          if (!callbackMatchesPayment(failedPayment, t)) {
+            console.error(
+              `Paymob amount/currency mismatch for failed payment ${failedPayment.id}`,
+            );
+            return res.status(422).json({
+              error: "Callback amount or currency mismatch",
+            });
+          }
+          const finalized = await firebaseService.finalizeFailedPaymentIntention(
+            failedPayment.id,
+            {
+              merchantAttemptKey: failedPayment.merchantAttemptKey
+                ? callbackAttemptKey
+                : "",
+              transactionId,
+              paymobOrderId,
+              amountCents: Number(t.amount_cents),
+              currency: String(t.currency || ""),
+            },
+          );
+          if (!finalized) {
+            console.error(
+              `Failed webhook could not finalize payment ${failedPayment.id}`,
+            );
+          }
+        } else {
+          // Property/amount matching is intentionally not used for failures:
+          // two attempts can share both values, and releasing the wrong lock
+          // could permit a duplicate charge.
+          console.error("Failed Paymob webhook requires exact reconciliation", {
+            paymentId: creationExtras?.paymentId,
+            specialReference,
+          });
+        }
         return res.json({ ok: true });
       }
 
@@ -529,48 +459,50 @@ const router = Router();
         status: p.status
       })));
 
-      // البحث 1: بـ merchant_order_id (الصيغة: propertyNumber-timestamp أو id)
-      if (!payment && merchantOrderId) {
-        // استخراج رقم العقار من merchant_order_id
-        const propNum = merchantOrderId.split("-")[0];
-        if (propNum) {
-          payment = payments.find((p) =>
-            p.propertyNumber === propNum &&
-            (p.status === "معلق" || p.status === "قيد المراجعة") &&
-            Math.abs(p.finalAmount - amount) < 0.01
-          );
-          if (payment) console.log("✅ Found by merchant_order_id property match");
+      const callbackPaymentId = creationExtras?.paymentId
+        ? String(creationExtras.paymentId)
+        : "";
+      const paymentById = callbackPaymentId
+        ? payments.find((candidate) => candidate.id === callbackPaymentId) || null
+        : null;
+      const paymentByAttempt = callbackAttemptKey
+        ? payments.find(
+          (candidate) => candidate.merchantAttemptKey === callbackAttemptKey,
+        ) || null
+        : null;
+
+      if (paymentById && paymentByAttempt && paymentById.id !== paymentByAttempt.id) {
+        console.error("Conflicting payment identifiers in Paymob callback");
+        return res.status(409).json({ error: "Callback identifiers conflict" });
+      }
+      if (paymentById?.merchantAttemptKey) {
+        // Modern records are bound to both the local id and the currently
+        // reserved provider-attempt key. A late callback from an old retry may
+        // carry the same local id and must not be applied to the new attempt.
+        if (
+          !callbackPaymentId ||
+          !callbackAttemptKey ||
+          paymentByAttempt?.id !== paymentById.id
+        ) {
+          console.error(`Stale Paymob attempt for payment ${paymentById.id}`);
+          return res.status(409).json({ error: "Stale payment attempt" });
         }
-      }
-
-      // البحث 2: بـ paymobOrderId المباشر (لو نفس الصيغة)
-      if (!payment && paymobOrderId) {
-        payment = payments.find((p) => p.paymobOrderId === paymobOrderId);
-        if (payment) console.log("✅ Found by paymobOrderId exact match");
-      }
-
-      // البحث 3: برقم العقار + مبلغ (معلق أو قيد المراجعة)
-      if (!payment && propertyNumber) {
-        payment = payments.find(
-          (p) =>
-            p.propertyNumber === propertyNumber &&
-            (p.status === "معلق" || p.status === "قيد المراجعة") &&
-            Math.abs(p.finalAmount - amount) < 0.01
+        payment = paymentById;
+      } else if (paymobOrderId) {
+        // Legacy fallback is permitted only for a unique record that predates
+        // merchant-attempt keys. Property/amount/recent-payment heuristics are
+        // intentionally excluded because retries can share those values.
+        const legacyMatches = payments.filter(
+          (candidate) =>
+            !candidate.merchantAttemptKey &&
+            candidate.paymobOrderId === paymobOrderId,
         );
-        if (payment) console.log("✅ Found by property + amount");
-      }
-
-      // البحث 4: آخر دفعة معلقة لنفس رقم العقار
-      if (!payment && propertyNumber) {
-        const pendingPayments = payments.filter(
-          (p) =>
-            p.propertyNumber === propertyNumber &&
-            (p.status === "معلق" || p.status === "قيد المراجعة")
-        ).sort((a, b) => new Date(b.createdAt || "").getTime() - new Date(a.createdAt || "").getTime());
-
-        if (pendingPayments.length > 0) {
-          payment = pendingPayments[0];
-          console.log("✅ Found latest pending payment for property");
+        if (
+          !paymentByAttempt &&
+          legacyMatches.length === 1 &&
+          (!paymentById || paymentById.id === legacyMatches[0].id)
+        ) {
+          payment = legacyMatches[0];
         }
       }
 
@@ -579,28 +511,62 @@ const router = Router();
         return res.status(404).json({ error: "Payment not found" });
       }
 
-      console.log("✅ Found Payment:", payment.id);
-
-      if (payment.status === "مكتمل") {
-        console.log("⚠️ Already completed");
-        return res.json({ ok: true });
+      if (!callbackMatchesPayment(payment, t)) {
+        console.error(`Paymob amount/currency mismatch for payment ${payment.id}`);
+        return res.status(422).json({
+          error: "Callback amount or currency mismatch",
+        });
       }
+
+      console.log("✅ Found Payment:", payment.id);
 
       // ===============================
       // 3) تحديث الدفع بالرسوم الحقيقية — جميع أنواع الدفع تبدأ بالتحقق
       // ===============================
-      await paymentService.update(payment.id, {
-        status: "نجح - قيد التحقق" as any,
-        completedAt: new Date().toISOString(),
-        transactionId,
-        paymentMethod: cardSubType || paymentMethod || "بطاقة",
-        merchantFees,
-        acqFees,
+      const successAcceptance = await firebaseService.acceptSuccessfulPaymentIntention(
+        payment.id,
+        {
+          merchantAttemptKey: payment.merchantAttemptKey
+            ? callbackAttemptKey
+            : "",
+          transactionId,
+          paymobOrderId,
+          amountCents: Number(t.amount_cents),
+          currency: String(t.currency || ""),
+        },
+        {
+          paymentMethod: cardSubType || paymentMethod || "بطاقة",
+          merchantFees,
+          acqFees,
         vatAmount,
-        totalFees,
-        feeAmount: merchantFees + acqFees,
-        netAmount,
-      });
+          totalFees,
+          feeAmount: merchantFees + acqFees,
+          netAmount,
+        },
+      );
+      if (successAcceptance.status === "already_processed") {
+        console.log("⚠️ Payment success was already processed");
+        return res.json({ ok: true, status: "already_processed" });
+      }
+      if (successAcceptance.status === "rejected") {
+        if (successAcceptance.reason === "terminal_failure") {
+          console.warn(`Ignoring late success for terminal payment ${payment.id}`);
+          return res.json({ ok: true, status: "ignored_late_success" });
+        }
+        const status = successAcceptance.reason === "not_found"
+          ? 404
+          : successAcceptance.reason === "amount_or_currency_mismatch"
+            ? 422
+            : 409;
+        console.error(
+          `Paymob success acceptance rejected for ${payment.id}: ${successAcceptance.reason}`,
+        );
+        return res.status(status).json({
+          error: "Payment callback could not be accepted",
+          reason: successAcceptance.reason,
+        });
+      }
+      payment = successAcceptance.payment;
 
       console.log(`💰 Payment Updated: ${payment.id} - Status: نجح - قيد التحقق`);
 

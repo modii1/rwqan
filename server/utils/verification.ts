@@ -46,8 +46,8 @@ export async function checkPropertyDataComplete(property: any, r2ImageCount?: nu
   }
 
   // 2. المرافق (20 نقطة)
-  const facilities = property.facilities || [];
-  if (!facilities || facilities.length === 0) {
+  const facilities = property.facilities;
+  if (!Array.isArray(facilities) || facilities.length === 0) {
     missingFields.push('المرافق');
   } else {
     score += 20;

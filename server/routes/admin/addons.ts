@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { requireAdmin } from "../middleware";
 import { requireOwner } from "../middleware";
 import { firebaseService } from "../../firebaseService";
 import { addOnService, paymentService, propertyService } from "../../services";
@@ -264,19 +263,13 @@ router.get("/api/owner/addons", async (req, res) => {
 // =======================================
 // OWNER – Get Property Add-Ons
 // =======================================
-router.get("/api/owner/property-addons", async (req, res) => {
+router.get("/api/owner/property-addons", requireOwner, async (req, res) => {
   try {
-    // 1️⃣ حاول من session
-    let propertyNumber = (req as any).session?.propertyNumber;
-
-    // 2️⃣ لو ما فيه session خذه من query
-    if (!propertyNumber && req.query.propertyNumber) {
-      propertyNumber = String(req.query.propertyNumber);
-    }
-
-    // 3️⃣ لو ما زال فاضي
+    // Property selection must come only from the authenticated server session.
+    // Query parameters are caller-controlled and cannot establish ownership.
+    const propertyNumber = (req.session as any)?.propertyNumber;
     if (!propertyNumber) {
-      return res.status(400).json({ error: "propertyNumber مطلوب" });
+      return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
     const addons = await addOnService.getForProperty(propertyNumber);
@@ -290,9 +283,10 @@ router.get("/api/owner/property-addons", async (req, res) => {
 // =======================================
 // OWNER – Pay Add-On (Paymob) - موحد مع التحويل البنكي
 // =======================================
-router.post("/api/owner/addons/pay", async (req, res) => {
+router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
   try {
-    const { propertyNumber, addOnPackageId, discountCode } = req.body;
+    const propertyNumber = (req.session as any)?.propertyNumber;
+    const { addOnPackageId, discountCode } = req.body;
 
     if (!propertyNumber || !addOnPackageId) {
       return res.status(400).json({ error: "بيانات ناقصة" });
@@ -389,9 +383,10 @@ router.post("/api/owner/addons/pay", async (req, res) => {
 // =======================================
 // OWNER – Bank Transfer for Add-On
 // =======================================
-router.post("/api/owner/addons/bank-transfer", upload.single('receipt'), async (req, res) => {
+router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('receipt'), async (req, res) => {
   try {
-    const { propertyNumber, addOnPackageId, amount, discountCode } = req.body;
+    const propertyNumber = (req.session as any)?.propertyNumber;
+    const { addOnPackageId, amount, discountCode } = req.body;
     const receiptFile = req.file;
 
     if (!propertyNumber || !addOnPackageId || !receiptFile) {

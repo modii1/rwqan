@@ -10,17 +10,18 @@ export function normalizeSaudiMobilePhone(value: unknown): string | null {
   let digits = normalizePhoneDigits(value);
   if (digits.startsWith("00966")) digits = digits.slice(5);
   else if (digits.startsWith("966")) digits = digits.slice(3);
-  else if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.startsWith("0")) digits = digits.slice(1);
 
   return /^5\d{8}$/.test(digits) ? digits : null;
 }
 
 /** Returns the international digits-only form required by WhatsApp links. */
 export function normalizeWhatsAppDestination(value: unknown): string | null {
+  const saudiMobile = normalizeSaudiMobilePhone(value);
+  if (saudiMobile) return `966${saudiMobile}`;
+
   let digits = normalizePhoneDigits(value);
   if (digits.startsWith("00")) digits = digits.slice(2);
-  if (/^05\d{8}$/.test(digits)) return `966${digits.slice(1)}`;
-  if (/^5\d{8}$/.test(digits)) return `966${digits}`;
-  if (/^9665\d{8}$/.test(digits)) return digits;
+  if (digits.startsWith("0") || digits.startsWith("966")) return null;
   return /^\d{8,15}$/.test(digits) ? digits : null;
 }

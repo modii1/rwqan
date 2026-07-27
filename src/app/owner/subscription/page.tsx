@@ -33,6 +33,7 @@ import {
   OwnerPageMain,
 } from "@/components/owner/owner-page";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
+import { getOwnerPendingPaymentRefetchInterval } from "@/lib/workflow-query-refresh";
 
 function getPaymentTime(value: any): number {
   if (!value) return 0;
@@ -204,6 +205,13 @@ export default function OwnerSubscriptionPage() {
   const { data: pendingPayment } = useQuery<any>({
     queryKey: ["/api/owner/payment/check-pending"],
     enabled: !!property?.propertyNumber,
+    staleTime: 0,
+    refetchOnWindowFocus: "always",
+    refetchInterval: (query) =>
+      getOwnerPendingPaymentRefetchInterval(
+        query.state.data as { hasPending?: boolean } | undefined,
+      ),
+    refetchIntervalInBackground: false,
   });
 
   const { data: paymentsData = [] } = useQuery<any[]>({

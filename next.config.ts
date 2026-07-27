@@ -1,11 +1,15 @@
 import type { NextConfig } from "next";
 
+// The flag is defined only in ignored .env.local for this workstation. Cloud
+// builds do not receive it, so the root override remains local-only.
+const useLocalTurbopackRoot = process.env.RWQAN_LOCAL_TURBOPACK_ROOT === "1";
+
 const nextConfig: NextConfig = {
     /* config options here */
     reactStrictMode: true,
-    turbopack: {
-        root: process.cwd(),
-    },
+    ...(useLocalTurbopackRoot
+        ? { turbopack: { root: process.cwd() } }
+        : {}),
     experimental: {
         scrollRestoration: true,
     },

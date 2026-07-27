@@ -9,10 +9,83 @@ const INTEGRATION_ID_APPLEPAY = parseInt(process.env.PAYMOB_INTEGRATION_ID_APPLE
 
 const PAYMOB_API_URL = 'https://ksa.paymob.com';
 
+type PaymobCallbackData = Record<string, any>;
+
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+/**
+ * Build Paymob's transaction-callback HMAC payload in the documented field
+ * order. Paymob sends nested fields in POST callbacks and flattened fields in
+ * browser/query callbacks, so both representations are accepted here.
+ */
+export function buildPaymobWebhookHmacPayload(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const envelope = data as PaymobCallbackData;
+  const obj = (envelope.obj && typeof envelope.obj === "object")
+    ? envelope.obj as PaymobCallbackData
+    : envelope;
+  const orderId = firstDefined(
+    obj.order?.id,
+    obj.order_id,
+    typeof obj.order === "object" ? undefined : obj.order,
+  );
+  const sourcePan = firstDefined(
+    obj.source_data?.pan,
+    obj.source_data_pan,
+    obj["source_data.pan"],
+  );
+  const sourceSubType = firstDefined(
+    obj.source_data?.sub_type,
+    obj.source_data_sub_type,
+    obj["source_data.sub_type"],
+  );
+  const sourceType = firstDefined(
+    obj.source_data?.type,
+    obj.source_data_type,
+    obj["source_data.type"],
+  );
+  const values = [
+    obj.amount_cents,
+    obj.created_at,
+    obj.currency,
+    obj.error_occured,
+    obj.has_parent_transaction,
+    obj.id,
+    obj.integration_id,
+    obj.is_3d_secure,
+    obj.is_auth,
+    obj.is_capture,
+    obj.is_refunded,
+    obj.is_standalone_payment,
+    obj.is_voided,
+    orderId,
+    obj.owner,
+    obj.pending,
+    sourcePan,
+    sourceSubType,
+    sourceType,
+    obj.success,
+  ];
+  if (values.some((value) => value === undefined || value === null)) {
+    return null;
+  }
+  return values.map((value) => String(value)).join("");
+}
+
+export function calculatePaymobWebhookHmac(
+  data: unknown,
+  secret: string,
+): string | null {
+  const payload = buildPaymobWebhookHmacPayload(data);
+  if (!payload || !secret) return null;
+  return crypto.createHmac("sha512", secret).update(payload).digest("hex");
+}
+
 console.log("🔑 Paymob Config:", {
   hasSecretKey: !!SECRET_KEY,
   secretKeyLength: SECRET_KEY?.length || 0,
-  secretKeyPrefix: SECRET_KEY?.substring(0, 10) || "none",
   hasPublicKey: !!PUBLIC_KEY,
   hasHmacSecret: !!HMAC_SECRET,
   hasLegacyApiKey: !!LEGACY_API_KEY,
@@ -27,6 +100,17 @@ interface IntentionResponse {
   [key: string]: any;
 }
 
+export class PaymobIntentionError extends Error {
+  constructor(
+    message: string,
+    readonly certainty: "rejected" | "unknown",
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "PaymobIntentionError";
+  }
+}
+
 export class PaymobService {
 
   /* ==========================================================
@@ -39,7 +123,8 @@ export class PaymobService {
     phone: string,
     packageName: string,
     packageDays: number,
-    paymentMethod: 'cards' | 'applepay' = 'cards'
+    paymentMethod: 'cards' | 'applepay' = 'cards',
+    attempt?: { merchantAttemptKey?: string; paymentId?: string },
   ) {
     const integrationId = paymentMethod === 'applepay'
       ? INTEGRATION_ID_APPLEPAY
@@ -74,7 +159,7 @@ export class PaymobService {
         last_name: 'N/A',
         email: `${phone}@example.com`,
       },
-      special_reference: `${propertyNumber}-${Date.now()}`,
+      special_reference: attempt?.merchantAttemptKey || `${propertyNumber}-${Date.now()}`,
       extras: {
         creation_extras: {
           type: "subscription",
@@ -83,23 +168,57 @@ export class PaymobService {
           days: packageDays,
           price: amount,
           addonId: undefined,
+          paymentId: attempt?.paymentId,
+          merchantAttemptKey: attempt?.merchantAttemptKey,
 
         },
       },
     };
 
-    const response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SECRET_KEY}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SECRET_KEY}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "تعذر تأكيد نتيجة إنشاء عملية الدفع لدى مزود الخدمة",
+        "unknown",
+        { cause: error },
+      );
+    }
 
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new PaymobIntentionError(
+        message || "رفض مزود الدفع إنشاء العملية",
+        new Set([400, 401, 403, 404, 422]).has(response.status)
+          ? "rejected"
+          : "unknown",
+      );
+    }
 
-    const data: IntentionResponse = await response.json();
+    let data: IntentionResponse;
+    try {
+      data = await response.json() as IntentionResponse;
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "أنشأ مزود الدفع استجابة غير قابلة للتحقق",
+        "unknown",
+        { cause: error },
+      );
+    }
+    if (!data?.id || !data?.client_secret) {
+      throw new PaymobIntentionError(
+        "تعذر التحقق من معرف عملية الدفع التي أنشأها المزود",
+        "unknown",
+      );
+    }
 
     const checkoutUrl =
       `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${data.client_secret}`;
@@ -206,22 +325,34 @@ export class PaymobService {
   /* ==========================================================
       2) التحقق من Webhook — بدون تعديل
   =========================================================== */
-  verifyWebhookSignature(data: any): boolean {
-    const obj = data.obj;
+  verifyWebhookSignature(data: unknown, receivedHmac?: unknown): boolean {
+    const envelope = data && typeof data === "object"
+      ? data as PaymobCallbackData
+      : {};
+    const suppliedHmac = firstDefined(
+      receivedHmac,
+      envelope.hmac,
+      envelope.obj?.hmac,
+    );
+    if (
+      typeof suppliedHmac !== "string" ||
+      !/^[a-f0-9]{128}$/i.test(suppliedHmac.trim())
+    ) {
+      return false;
+    }
 
-    const concatenatedString =
-      `${obj.amount_cents}${obj.created_at}${obj.currency}${obj.error_occured}` +
-      `${obj.has_parent_transaction}${obj.id}${obj.integration_id}${obj.is_3d_secure}` +
-      `${obj.is_auth}${obj.is_capture}${obj.is_refunded}${obj.is_standalone_payment}` +
-      `${obj.is_voided}${obj.order.id}${obj.owner}${obj.pending}${obj.source_data_pan}` +
-      `${obj.source_data_sub_type}${obj.source_data_type}${obj.success}`;
+    const expectedHmac = calculatePaymobWebhookHmac(
+      data,
+      process.env.PAYMOB_HMAC_SECRET || HMAC_SECRET || "",
+    );
+    if (!expectedHmac) return false;
 
-    const hash = crypto
-      .createHmac('sha512', HMAC_SECRET)
-      .update(concatenatedString)
-      .digest('hex');
-
-    return hash === obj.hmac;
+    const supplied = Buffer.from(suppliedHmac.trim(), "hex");
+    const expected = Buffer.from(expectedHmac, "hex");
+    return supplied.length === expected.length && crypto.timingSafeEqual(
+      supplied,
+      expected,
+    );
   }
 
   extractPaymentInfo(data: any) {

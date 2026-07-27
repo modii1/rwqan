@@ -4,10 +4,16 @@ import {
   calculateExtensionEndDate,
   calculateRemainingDays,
   calculateSubscriptionEndDate,
+  capAtMaxDays,
   formatDateRiyadh,
   getStartOfDayRiyadh,
+  MAX_SUBSCRIPTION_DAYS,
 } from "./dateUtils";
 import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import {
+  AdminApprovalError,
+  PartialMutationError,
+} from "../errors/AdminApprovalError";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set([
   "نشط",
@@ -30,6 +36,26 @@ type SubscriptionActionValidation =
       nextUrl: string;
       actionLabel: string;
     };
+
+/**
+ * Canonicalize legacy pending end dates before they cross an activation or
+ * approval-queue boundary. The same capped ISO value is then persisted,
+ * returned, and passed to notification callers.
+ */
+export function normalizeSubscriptionBoundaryEndDate(
+  value: Date | string,
+  referenceDate: Date = new Date(),
+): string {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new RangeError("Invalid subscription end date");
+  }
+  return capAtMaxDays(
+    parsed,
+    MAX_SUBSCRIPTION_DAYS,
+    referenceDate,
+  ).toISOString();
+}
 
 function parsePropertyNumberList(value: unknown): string[] {
   if (!value) return [];
@@ -238,6 +264,37 @@ export function splitLinkedPropertiesByPackageLimit(
   };
 }
 
+export type PaymentPropertyPlan = ReturnType<
+  typeof splitLinkedPropertiesByPackageLimit
+>;
+
+/** Resolve the exact linked-property set that a fulfillment will mutate. */
+export async function resolvePaymentPropertyPlan(
+  payment: Payment,
+  pkg: Package,
+  currentSubscription?: Subscription | null,
+): Promise<PaymentPropertyPlan> {
+  if (payment.fulfillmentPlan) {
+    return {
+      kept: [...payment.fulfillmentPlan.kept],
+      unlinked: [...payment.fulfillmentPlan.unlinked],
+      maxProperties: payment.fulfillmentPlan.maxProperties,
+      allowedLinkedCount: payment.fulfillmentPlan.allowedLinkedCount,
+    };
+  }
+  let linkedProperties = normalizeLinkedPropertyNumbers(
+    payment as any,
+    payment.propertyNumber,
+  );
+  if (linkedProperties.length === 0) {
+    linkedProperties = await resolveExistingLinkedProperties(
+      payment.propertyNumber,
+      currentSubscription,
+    );
+  }
+  return splitLinkedPropertiesByPackageLimit(linkedProperties, pkg);
+}
+
 export async function syncMultiPropertyRecord(params: {
   mainPropertyNumber: string;
   linkedProperties: string[];
@@ -300,6 +357,8 @@ export async function activateVerifiedPaymentSubscription(params: {
   startDate: Date | string;
   endDate: Date | string;
   finalAmount?: number;
+  propertyPlan?: PaymentPropertyPlan;
+  allowedPaymentStatuses?: string[];
 }): Promise<{
   startDate: string;
   endDate: string;
@@ -313,9 +372,7 @@ export async function activateVerifiedPaymentSubscription(params: {
   const fallbackStartDate = typeof params.startDate === "string"
     ? params.startDate
     : params.startDate.toISOString();
-  const fallbackEndDate = typeof params.endDate === "string"
-    ? params.endDate
-    : params.endDate.toISOString();
+  const fallbackEndDate = normalizeSubscriptionBoundaryEndDate(params.endDate);
 
   if (payment.fulfilledAt) {
     return {
@@ -327,7 +384,13 @@ export async function activateVerifiedPaymentSubscription(params: {
     };
   }
 
-  const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(payment.id);
+  const allowedPaymentStatuses = params.allowedPaymentStatuses ?? Array.from(
+    new Set([String(payment.status || ""), "نجح - قيد التحقق"]),
+  );
+  const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(
+    payment.id,
+    allowedPaymentStatuses,
+  );
   if (fulfillmentClaim.status === "fulfilled") {
     return {
       startDate: currentSubscription?.startDate || fallbackStartDate,
@@ -340,14 +403,41 @@ export async function activateVerifiedPaymentSubscription(params: {
   if (fulfillmentClaim.status === "processing") {
     throw new Error("Payment fulfillment is already in progress");
   }
+  if (fulfillmentClaim.status === "action_conflict") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_ACTION_IN_PROGRESS",
+      message:
+        "يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار. أكمل الدفع الجاري أو ألغِه قبل تفعيل دفعة أخرى.",
+    });
+  }
+  if (fulfillmentClaim.status === "action_ineligible") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_ACTION_NO_LONGER_ELIGIBLE",
+      message:
+        "لم تعد حالة الاشتراك تسمح بتنفيذ إجراء هذه الدفعة. حدّث الصفحة وراجع الاشتراك قبل المتابعة.",
+    });
+  }
+  if (fulfillmentClaim.status === "invalid_status") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_NOT_PENDING",
+      message:
+        "تغيّرت حالة الدفع أثناء المعالجة. حدّث الصفحة وتحقق من حالته قبل تنفيذ أي إجراء جديد.",
+    });
+  }
   const fulfillmentToken = fulfillmentClaim.token;
+  const subscriptionAlreadyApplied =
+    currentSubscription?.paymentId === payment.id;
   const legacyFulfillment =
     fulfillmentClaim.previousState === undefined &&
     !payment.fulfilledAt &&
-    currentSubscription?.paymentId === payment.id &&
+    subscriptionAlreadyApplied &&
     normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber).length === 0 &&
     (currentSubscription.linkedProperties?.length || 0) === 0;
 
+  let activationWriteAttempted = false;
   try {
     if (legacyFulfillment && currentSubscription) {
       await firebaseService.completePaymentFulfillment(
@@ -364,36 +454,66 @@ export async function activateVerifiedPaymentSubscription(params: {
       };
     }
 
-    let linkedProperties = normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber);
-    if (linkedProperties.length === 0) {
-      linkedProperties = await resolveExistingLinkedProperties(mainPropertyNumber, currentSubscription);
+    const limited = payment.fulfillmentPlan
+      ? await resolvePaymentPropertyPlan(payment, pkg, currentSubscription)
+      : params.propertyPlan ??
+        (await resolvePaymentPropertyPlan(payment, pkg, currentSubscription));
+    if (!payment.fulfillmentPlan) {
+      // Persist the immutable group/downgrade decision before any subscription
+      // mutation. A partial retry must not recompute from already-narrowed data
+      // and forget which properties still need unlinking.
+      await firebaseService.updatePayment(payment.id, {
+        fulfillmentPlan: limited,
+      });
     }
-
-    const limited = splitLinkedPropertiesByPackageLimit(linkedProperties, pkg);
     const totalProperties = limited.kept.length + 1;
     const totalAmount = Number(params.finalAmount ?? payment.finalAmount ?? payment.amount ?? pkg.price ?? 0);
     const pricePerProperty = totalProperties > 0 ? totalAmount / totalProperties : totalAmount;
     const isPremium = isPremiumSubscriptionType(pkg.type) || pricePerProperty > 0;
     const subscriptionType = isPremium ? "مميز" : "عادي";
-    const startDate = typeof params.startDate === "string" ? params.startDate : formatDateRiyadh(params.startDate);
-    const endDate = typeof params.endDate === "string" ? params.endDate : formatDateRiyadh(params.endDate);
+    const requestedStartDate = typeof params.startDate === "string" ? params.startDate : formatDateRiyadh(params.startDate);
+    const requestedEndDate = normalizeSubscriptionBoundaryEndDate(params.endDate);
+    const startDate = subscriptionAlreadyApplied
+      ? currentSubscription?.startDate || requestedStartDate
+      : requestedStartDate;
+    const endDate = subscriptionAlreadyApplied
+      ? currentSubscription?.endDate || requestedEndDate
+      : requestedEndDate;
 
-    await firebaseService.addSubscriptionToSheet(
-      mainPropertyNumber,
-      {
-        packageId: pkg.id,
-        price: pricePerProperty,
-        subscriptionType,
-        packageType: subscriptionType,
-        startDate,
-        endDate,
-        paymentId: payment.id,
-        linkedProperties: limited.kept.length > 0 ? limited.kept : undefined,
-        propertyCount: totalProperties,
-      },
-      property,
-      receiptUrl ?? payment.receiptUrl ?? "",
-    );
+    activationWriteAttempted = subscriptionAlreadyApplied;
+    if (!subscriptionAlreadyApplied) {
+      activationWriteAttempted = true;
+      await firebaseService.addSubscriptionToSheet(
+        mainPropertyNumber,
+        {
+          packageId: pkg.id,
+          price: pricePerProperty,
+          subscriptionType,
+          packageType: subscriptionType,
+          startDate,
+          endDate,
+          paymentId: payment.id,
+          linkedProperties: limited.kept.length > 0 ? limited.kept : undefined,
+          propertyCount: totalProperties,
+        },
+        property,
+        receiptUrl ?? payment.receiptUrl ?? "",
+      );
+    } else {
+      // addSubscriptionToSheet writes the subscription document before it
+      // mirrors the subscription fields to the property. A retry after that
+      // second write failed must repair the mirror before fulfillment can be
+      // considered complete.
+      await firebaseService.updateProperty(mainPropertyNumber, {
+        subscriptionType:
+          calculateRemainingDays(endDate) >= 0 &&
+          isPremiumSubscriptionType(subscriptionType)
+            ? "مميز"
+            : "عادي",
+        lastUpdate: new Date().toISOString().split("T")[0],
+        subscriptionDate: startDate.split("T")[0],
+      });
+    }
     await firebaseService.updateVerificationStatus(mainPropertyNumber, "approved");
 
     for (const linkedPropertyNumber of limited.kept) {
@@ -445,6 +565,12 @@ export async function activateVerifiedPaymentSubscription(params: {
       subscriptionType,
     };
   } catch (error) {
+    if (activationWriteAttempted) {
+      // Keep the fulfillment claim in processing state. Releasing it here can
+      // let an extension retry calculate from the newly-written end date and
+      // grant the same payment twice.
+      throw new PartialMutationError(error);
+    }
     await firebaseService.releasePaymentFulfillment(payment.id, fulfillmentToken)
       .catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
     throw error;
@@ -459,61 +585,136 @@ export async function queueVerifiedNewPropertyForAdminApproval(params: {
   endDate: Date | string;
   finalAmount?: number;
   notes?: string;
+  propertyPlan?: PaymentPropertyPlan;
+  allowedPaymentStatuses?: string[];
 }): Promise<{
   startDate: string;
   endDate: string;
   linkedProperties: string[];
   unlinkedProperties: string[];
   subscriptionType: string;
+  alreadyFulfilled?: boolean;
 }> {
   const { payment, pkg } = params;
   const mainPropertyNumber = payment.propertyNumber;
   const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
 
-  let linkedProperties = normalizeLinkedPropertyNumbers(payment as any, mainPropertyNumber);
-  if (linkedProperties.length === 0) {
-    linkedProperties = await resolveExistingLinkedProperties(mainPropertyNumber, currentSubscription);
-  }
-
-  const limited = splitLinkedPropertiesByPackageLimit(linkedProperties, pkg);
+  const limited = payment.fulfillmentPlan
+    ? await resolvePaymentPropertyPlan(payment, pkg, currentSubscription)
+    : params.propertyPlan ??
+      (await resolvePaymentPropertyPlan(payment, pkg, currentSubscription));
   const totalProperties = limited.kept.length + 1;
   const totalAmount = Number(params.finalAmount ?? payment.finalAmount ?? payment.amount ?? pkg.price ?? 0);
   const pricePerProperty = totalProperties > 0 ? totalAmount / totalProperties : totalAmount;
   const subscriptionType = isPremiumSubscriptionType(pkg.type) || pricePerProperty > 0 ? "مميز" : "عادي";
   const startDate = typeof params.startDate === "string" ? params.startDate : formatDateRiyadh(params.startDate);
-  const endDate = typeof params.endDate === "string" ? params.endDate : formatDateRiyadh(params.endDate);
+  const endDate = normalizeSubscriptionBoundaryEndDate(params.endDate);
 
-  await firebaseService.updatePayment(payment.id, {
-    status: "نجح - قيد التحقق",
-    pendingStartDate: startDate,
-    pendingEndDate: endDate,
-    pendingPrice: totalAmount,
-    pendingSubscriptionType: subscriptionType,
-    additionalProperties: limited.kept,
-    linkedProperties: limited.kept,
-    notes: params.notes || "تم التحقق من الدفع وبيانات العقار - بانتظار اعتماد الإدارة للعقار الجديد",
-  } as any);
+  const queueStatuses =
+    params.allowedPaymentStatuses ??
+    [
+      "قيد المراجعة",
+      "معلق",
+      "قيد التحقق",
+      "pending",
+      "نجح - قيد التحقق",
+    ];
+  const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(
+    payment.id,
+    queueStatuses,
+  );
+  if (fulfillmentClaim.status === "fulfilled") {
+    return {
+      startDate: currentSubscription?.startDate || startDate,
+      endDate: currentSubscription?.endDate || endDate,
+      linkedProperties: currentSubscription?.linkedProperties || limited.kept,
+      unlinkedProperties: limited.unlinked,
+      subscriptionType:
+        currentSubscription?.subscriptionType ||
+        currentSubscription?.packageType ||
+        subscriptionType,
+      alreadyFulfilled: true,
+    };
+  }
+  if (fulfillmentClaim.status === "processing") {
+    throw new Error("Payment fulfillment is already in progress");
+  }
+  if (fulfillmentClaim.status === "action_conflict") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_ACTION_IN_PROGRESS",
+      message:
+        "يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار. أكمل الدفع الجاري أو ألغِه قبل تجهيز طلب آخر.",
+    });
+  }
+  if (fulfillmentClaim.status === "action_ineligible") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_ACTION_NO_LONGER_ELIGIBLE",
+      message:
+        "لم يعد هذا العقار مؤهلاً لانتظار اعتماد اشتراك جديد. حدّث الصفحة وراجع الاشتراك الحالي.",
+    });
+  }
+  if (fulfillmentClaim.status === "invalid_status") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_NOT_PENDING",
+      message:
+        "تغيّرت حالة الدفع أثناء تجهيز انتظار الاعتماد. حدّث الصفحة وتحقق من حالته الحالية.",
+    });
+  }
+  const fulfillmentToken = fulfillmentClaim.token;
 
-  await firebaseService.updateProperty(mainPropertyNumber, {
-    verificationStatus: "pending",
-    smartVerificationPassed: true,
-    smartVerificationPassedAt: new Date().toISOString(),
-    pendingPaidSubscription: true,
-  } as any);
+  let queueWriteAttempted = false;
+  try {
+    queueWriteAttempted = true;
+    await firebaseService.updatePayment(payment.id, {
+      status: "نجح - قيد التحقق",
+      pendingStartDate: startDate,
+      pendingEndDate: endDate,
+      pendingPropertyApproval: true,
+      pendingPrice: totalAmount,
+      pendingSubscriptionType: subscriptionType,
+      additionalProperties: limited.kept,
+      linkedProperties: limited.kept,
+      fulfillmentPlan: payment.fulfillmentPlan ?? limited,
+      notes: params.notes || "تم التحقق من الدفع وبيانات العقار - بانتظار اعتماد الإدارة للعقار الجديد",
+    } as any);
 
-  for (const unlinkedPropertyNumber of limited.unlinked) {
-    const unlinkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(unlinkedPropertyNumber);
-    if (unlinkedSubscription) {
-      await firebaseService.updateSubscription(unlinkedSubscription.id, {
+    await firebaseService.updateProperty(mainPropertyNumber, {
+      verificationStatus: "pending",
+      smartVerificationPassed: true,
+      smartVerificationPassedAt: new Date().toISOString(),
+      pendingPaidSubscription: true,
+    } as any);
+
+    for (const unlinkedPropertyNumber of limited.unlinked) {
+      const unlinkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(unlinkedPropertyNumber);
+      if (unlinkedSubscription) {
+        await firebaseService.updateSubscription(unlinkedSubscription.id, {
+          linkedProperty: "",
+          linkedProperties: [],
+          propertyCount: 1,
+        } as any);
+      }
+      await firebaseService.updateProperty(unlinkedPropertyNumber, {
         linkedProperty: "",
-        linkedProperties: [],
-        propertyCount: 1,
+        pendingApprovalFrom: "",
       } as any);
     }
-    await firebaseService.updateProperty(unlinkedPropertyNumber, {
-      linkedProperty: "",
-      pendingApprovalFrom: "",
-    } as any);
+
+    await firebaseService.releasePaymentFulfillment(
+      payment.id,
+      fulfillmentToken,
+    );
+  } catch (error) {
+    if (queueWriteAttempted) throw new PartialMutationError(error);
+    await firebaseService
+      .releasePaymentFulfillment(payment.id, fulfillmentToken)
+      .catch((releaseError) =>
+        console.error("Failed to release queued-payment claim:", releaseError),
+      );
+    throw error;
   }
 
   return {

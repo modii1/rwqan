@@ -2,6 +2,7 @@ const PRODUCTION_SECURITY_ENV_KEYS = [
   "ADMIN_CODE",
   "ADMIN_PASSWORD",
   "SESSION_SECRET",
+  "PAYMOB_HMAC_SECRET",
 ] as const;
 
 /** Refuse to expose privileged routes with missing production credentials. */

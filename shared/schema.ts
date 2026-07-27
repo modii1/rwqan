@@ -254,10 +254,24 @@ export const paymentSchema = z.object({
   fulfillmentState: z.enum(["processing", "fulfilled", "failed"]).optional(),
   fulfillmentClaimedAt: z.string().optional(),
   fulfillmentClaimToken: z.string().optional(),
+  fulfillmentActionLockKey: z.string().optional(),
+  fulfillmentActionLockKeys: z.array(z.string()).optional(),
+  retryReservationToken: z.string().optional(),
+  retryReservationAt: z.string().optional(),
+  intentionState: z.enum(["creating", "created", "failed", "unknown"]).optional(),
+  merchantAttemptKey: z.string().optional(),
+  paymentCheckoutUrl: z.string().optional(),
+  fulfillmentPlan: z.object({
+    kept: z.array(z.string()),
+    unlinked: z.array(z.string()),
+    maxProperties: z.number(),
+    allowedLinkedCount: z.number(),
+  }).optional(),
   // بيانات الاشتراك المعلق (يتم حفظها فقط عند نجاح الدفع)
   action: z.enum(['new', 'extend', 'upgrade', 'addon']).optional(),
   pendingStartDate: z.string().optional(),
   pendingEndDate: z.string().optional(),
+  pendingPropertyApproval: z.boolean().optional(),
   pendingSubscriptionType: z.string().optional(),
   pendingPrice: z.number().optional(),
   secondPropertyNumber: z.string().optional(), // رقم العقار الثاني (لباقات العقارين) - للتوافق مع الكود القديم
@@ -265,6 +279,8 @@ export const paymentSchema = z.object({
   linkedProperties: z.array(z.string()).optional(), // جميع العقارات المرتبطة (بما فيها الرئيسي)
   // بيانات Paymob Transaction
   transactionId: z.string().optional(),
+  lastFailedTransactionId: z.string().optional(),
+  lastProviderFailureAt: z.string().optional(),
   merchantFees: z.number().optional(), // رسوم التاجر (merchant_fees)
   acqFees: z.number().optional(), // رسوم البنك (acquirer fees)
   vatAmount: z.number().optional(), // ضريبة القيمة المضافة على الرسوم

@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { propertyService } from "../../services";
-import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
+import {
+  R2ImageStorageUnavailableError,
+  R2_BUCKET,
+  R2_PUBLIC_URL,
+  countR2ImagesStrict,
+  r2,
+} from "../../utils/r2";
 import { uploadImages } from "../../utils/helpers";
 import {
   PutObjectCommand,
@@ -13,7 +19,14 @@ const router = Router();
 
 router.get("/api/admin/r2-images-count", async (req, res) => {
     try {
-      if (!r2 || !R2_BUCKET) return res.json({});
+      if (!r2 || !R2_BUCKET) {
+        return res.status(503).json({
+          available: false,
+          code: "IMAGE_STORAGE_UNAVAILABLE",
+          error:
+            "تعذر التحقق من صور العقارات حالياً. تحقق من إعدادات تخزين الصور ثم حاول مرة أخرى.",
+        });
+      }
       // جلب جميع العقارات
       const properties = await propertyService.getAll();
       const counts: Record<string, number> = {};
@@ -22,28 +35,28 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
       for (const prop of properties) {
         const propertyNumber = prop.propertyNumber;
         try {
-          const list = await r2.send(
-            new ListObjectsV2Command({
-              Bucket: R2_BUCKET,
-              Prefix: `${propertyNumber}/`,
-            })
-          );
-
-          // عد الصور فقط (jpg, png, webp)
-          const imageCount = (list.Contents || []).filter(
-            (obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key)
-          ).length;
-
-          counts[propertyNumber] = imageCount;
-        } catch {
-          counts[propertyNumber] = 0;
+          counts[propertyNumber] = await countR2ImagesStrict(propertyNumber);
+        } catch (error) {
+          if (error instanceof R2ImageStorageUnavailableError) {
+            return res.status(503).json({
+              available: false,
+              code: "IMAGE_STORAGE_UNAVAILABLE",
+              error:
+                "تعذر التحقق من صور العقارات حالياً. حاول مرة أخرى قبل الاعتماد على عدد الصور.",
+            });
+          }
+          throw error;
         }
       }
 
-      res.json({ counts });
+      res.json({ available: true, counts });
     } catch (err) {
       console.error("R2 COUNT ERROR:", err);
-      res.status(500).json({ error: "Failed to count R2 images" });
+      res.status(500).json({
+        available: false,
+        code: "IMAGE_COUNT_FAILED",
+        error: "تعذر تحميل أعداد صور العقارات حالياً.",
+      });
     }
   });
 

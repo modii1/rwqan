@@ -1,15 +1,20 @@
 "use client";
 // client/src/pages/admin/sections/payments.tsx
-import { useState, Fragment, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, Fragment, useMemo, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, Calculator, TrendingUp, CreditCard, Percent, ChevronDown, ChevronUp, Search, Filter, X, CheckCircle2, XCircle } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { PriceDisplay } from "@/components/price-display";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  AdminActionError,
+  getAdminActionErrorMessage,
+  readAdminActionResponse,
+} from "@/lib/admin-action-response";
 import { useToast } from "@/hooks/use-toast";
+import { getAdminPaymentsRefetchInterval } from "@/lib/workflow-query-refresh";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +50,24 @@ type Payment = {
   netAmount?: number;
   action?: string;
   notes?: string;
+  fulfillmentState?: string;
+};
+
+type PaymentApprovalResult = {
+  ok: boolean;
+  outcome: "queued" | "activated";
+  message: string;
+};
+
+type PaymentActionFailure = {
+  action: "approval" | "rejection";
+  message: string;
+  partial: boolean;
+};
+
+type PaymentRejectionResult = {
+  ok: boolean;
+  message: string;
 };
 
 type AddOnPackage = {
@@ -143,7 +166,13 @@ function formatDate(dateStr: string) {
 }
 
 export default function PaymentsSection() {
+  const queryClient = useQueryClient();
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  // Query refreshes never clear these; only a deliberate retry/success does.
+  const [paymentActionErrors, setPaymentActionErrors] = useState<
+    Record<string, PaymentActionFailure>
+  >({});
+  const paymentActionInFlightRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [methodFilter, setMethodFilter] = useState<string>("all");
@@ -155,55 +184,143 @@ export default function PaymentsSection() {
   // Mutation للموافقة على التحويل البنكي (تجاوز يدوي)
   const approvePaymentMutation = useMutation({
     mutationFn: async (paymentId: string) => {
-      const response = await apiRequest("POST", "/api/admin/payment/approve", { paymentId });
-      return response.json();
+      const response = await fetch("/api/admin/payment/approve", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      });
+      return readAdminActionResponse<PaymentApprovalResult>(
+        response,
+        "فشل قبول التحويل",
+        (payload) =>
+          payload.outcome === "queued" || payload.outcome === "activated",
+      );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
+    onMutate: (paymentId: string) => {
+      setPaymentActionErrors((current) => {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      });
+    },
+    onSuccess: (data, paymentId) => {
+      setPaymentActionErrors((current) => {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      });
       toast({
         title: "✅ تم قبول التحويل",
-        description: "تم تفعيل الاشتراك بنجاح",
+        description:
+          data.outcome === "queued"
+            ? "تم التحقق من الدفع والبيانات، والعقار بانتظار اعتماد الإدارة"
+            : "تم تفعيل الاشتراك بنجاح",
       });
     },
-    onError: () => {
+    onError: (error, paymentId) => {
+      const reason = getAdminActionErrorMessage(error, "فشل قبول التحويل");
+      const partial = error instanceof AdminActionError && error.partial;
+      setPaymentActionErrors((current) => ({
+        ...current,
+        [paymentId]: { action: "approval", message: reason, partial },
+      }));
       toast({
-        title: "❌ خطأ",
-        description: "فشل قبول التحويل",
+        title: partial ? "اكتمل القبول جزئياً" : "تعذر قبول التحويل",
+        description: reason,
         variant: "destructive",
       });
+    },
+    onSettled: async () => {
+      try {
+        await queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
+      } finally {
+        paymentActionInFlightRef.current = false;
+      }
     },
   });
 
   // Mutation لرفض التحويل البنكي (تجاوز يدوي)
   const rejectPaymentMutation = useMutation({
     mutationFn: async (paymentId: string) => {
-      const response = await apiRequest("POST", "/api/admin/payment/reject", { paymentId });
-      return response.json();
+      const response = await fetch("/api/admin/payment/reject", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      });
+      return readAdminActionResponse<PaymentRejectionResult>(
+        response,
+        "فشل رفض التحويل",
+      );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
+    onMutate: (paymentId: string) => {
+      setPaymentActionErrors((current) => {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      });
+    },
+    onSuccess: (_data, paymentId) => {
+      setPaymentActionErrors((current) => {
+        const next = { ...current };
+        delete next[paymentId];
+        return next;
+      });
       toast({
         title: "✅ تم رفض التحويل",
         description: "تم رفض الدفع بنجاح",
       });
     },
-    onError: () => {
+    onError: (error, paymentId) => {
+      const reason = getAdminActionErrorMessage(error, "فشل رفض التحويل");
+      const partial = error instanceof AdminActionError && error.partial;
+      setPaymentActionErrors((current) => ({
+        ...current,
+        [paymentId]: { action: "rejection", message: reason, partial },
+      }));
       toast({
-        title: "❌ خطأ",
-        description: "فشل رفض التحويل",
+        title: partial ? "اكتمل الرفض جزئياً" : "تعذر رفض التحويل",
+        description: reason,
         variant: "destructive",
       });
     },
+    onSettled: async () => {
+      try {
+        await queryClient.invalidateQueries({ queryKey: ["admin-payments"] });
+      } finally {
+        paymentActionInFlightRef.current = false;
+      }
+    },
   });
+
+  const startPaymentApproval = (paymentId: string) => {
+    if (paymentActionInFlightRef.current) return;
+    paymentActionInFlightRef.current = true;
+    approvePaymentMutation.mutate(paymentId);
+  };
+
+  const startPaymentRejection = (paymentId: string) => {
+    if (paymentActionInFlightRef.current) return;
+    paymentActionInFlightRef.current = true;
+    rejectPaymentMutation.mutate(paymentId);
+  };
   
   
-  const { data, isLoading } = useQuery<Payment[]>({
+  const { data, isLoading, isError, refetch } = useQuery<Payment[]>({
     queryKey: ["admin-payments"],
     queryFn: async () => {
       const res = await fetch("/api/admin/payments");
       if (!res.ok) throw new Error("فشل في جلب المدفوعات");
       return res.json();
     },
+    staleTime: 0,
+    refetchOnWindowFocus: "always",
+    refetchInterval: (query) =>
+      getAdminPaymentsRefetchInterval(
+        query.state.data as Payment[] | undefined,
+      ),
+    refetchIntervalInBackground: false,
   });
 
   // جلب باقات الإضافات لعرض أسمائها
@@ -301,6 +418,15 @@ const totals = completedPayments.reduce((acc, p) => {
 
   return (
     <section className="space-y-4" dir="rtl">
+      {isError && data && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800"
+        >
+          تعذر تحديث المدفوعات؛ البيانات الحالية ما زالت معروضة. حاول إعادة
+          التحميل بعد التحقق من الاتصال.
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold">المدفوعات</h2>
@@ -491,6 +617,16 @@ const totals = completedPayments.reduce((acc, p) => {
             <Loader2 className="w-4 h-4 animate-spin" />
             جاري تحميل المدفوعات...
           </div>
+        ) : isError && !data ? (
+          <div
+            role="alert"
+            className="p-4 flex flex-col items-center gap-3 text-sm text-destructive"
+          >
+            <span>تعذر تحميل المدفوعات. تحقق من الاتصال ثم حاول مرة أخرى.</span>
+            <Button size="sm" variant="outline" onClick={() => void refetch()}>
+              إعادة المحاولة
+            </Button>
+          </div>
         ) : (
           <table className="w-full text-xs md:text-sm">
             <thead className="bg-muted/50 text-right">
@@ -515,6 +651,15 @@ const totals = completedPayments.reduce((acc, p) => {
                 const isCompleted = p.status === "مكتمل";
                 const isPendingVerification = p.status === "نجح - قيد التحقق";
                 const showFees = isCompleted || isPendingVerification;
+                const anyPaymentActionPending =
+                  approvePaymentMutation.isPending ||
+                  rejectPaymentMutation.isPending;
+                const isApprovingThisPayment =
+                  approvePaymentMutation.isPending &&
+                  approvePaymentMutation.variables === p.id;
+                const isRejectingThisPayment =
+                  rejectPaymentMutation.isPending &&
+                  rejectPaymentMutation.variables === p.id;
 
                 return (
                   <Fragment key={p.id}>
@@ -691,11 +836,11 @@ const totals = completedPayments.reduce((acc, p) => {
                                   size="sm"
                                   variant="default"
                                   className="bg-green-600 hover:bg-green-700 text-white"
-                                  onClick={() => approvePaymentMutation.mutate(p.id)}
-                                  disabled={approvePaymentMutation.isPending}
+                                  onClick={() => startPaymentApproval(p.id)}
+                                  disabled={anyPaymentActionPending}
                                   data-testid={`button-approve-payment-${p.id}`}
                                 >
-                                  {approvePaymentMutation.isPending ? (
+                                  {isApprovingThisPayment ? (
                                     <Loader2 className="w-4 h-4 ml-2 animate-spin" />
                                   ) : (
                                     <CheckCircle2 className="w-4 h-4 ml-2" />
@@ -708,11 +853,11 @@ const totals = completedPayments.reduce((acc, p) => {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  onClick={() => rejectPaymentMutation.mutate(p.id)}
-                                  disabled={rejectPaymentMutation.isPending}
+                                  onClick={() => startPaymentRejection(p.id)}
+                                  disabled={anyPaymentActionPending}
                                   data-testid={`button-reject-payment-${p.id}`}
                                 >
-                                  {rejectPaymentMutation.isPending ? (
+                                  {isRejectingThisPayment ? (
                                     <Loader2 className="w-4 h-4 ml-2 animate-spin" />
                                   ) : (
                                     <XCircle className="w-4 h-4 ml-2" />
@@ -721,6 +866,28 @@ const totals = completedPayments.reduce((acc, p) => {
                                 </Button>
                               )}
                             </div>
+                            {paymentActionErrors[p.id] && (
+                              <div
+                                role="alert"
+                                className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium leading-6 text-red-700"
+                                data-testid={
+                                  paymentActionErrors[p.id].action === "approval"
+                                    ? `payment-approval-error-${p.id}`
+                                    : `payment-rejection-error-${p.id}`
+                                }
+                              >
+                                <span className="font-bold">
+                                  {paymentActionErrors[p.id].partial
+                                    ? paymentActionErrors[p.id].action === "approval"
+                                      ? "تنبيه حالة القبول: "
+                                      : "تنبيه حالة الرفض: "
+                                    : paymentActionErrors[p.id].action === "approval"
+                                      ? "سبب تعذر القبول: "
+                                      : "سبب تعذر الرفض: "}
+                                </span>
+                                {paymentActionErrors[p.id].message}
+                              </div>
+                            )}
                           </div>
                         </Td>
                       </tr>

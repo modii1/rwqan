@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
 import { propertyService, analyticsService, subscriptionService, paymentService } from "../../services";
-import { firebaseService } from "../../firebaseService";
+import {
+  firebaseService,
+  LinkedPropertyMutationError,
+} from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
 import { SHEET_MAP, normalizePhoneNumber } from "../../utils/helpers";
 import { notifyOwnerSubscriptionActivated, notifyPropertyVerification } from "../../integrations/whatsapp";
@@ -9,6 +12,7 @@ import { storage } from "../../storage";
 import {
   activateVerifiedPaymentSubscription,
   calculateActionDates,
+  resolvePaymentPropertyPlan,
 } from "../../utils/paymentScenarioFlow";
 import {
   getEffectiveSubscriptionType,
@@ -17,6 +21,13 @@ import {
   isPremiumSubscriptionType,
 } from "../../../shared/subscriptionType";
 import { calculateRemainingDays } from "../../utils/dateUtils";
+import { adminApprovalService } from "../../services/AdminApprovalService";
+import {
+  AdminApprovalError,
+  PartialMutationError,
+  runAdminApprovalStage,
+  sendAdminApprovalError,
+} from "../../errors/AdminApprovalError";
 
 const router = Router();
 
@@ -381,76 +392,204 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     const { propertyNumber } = req.params;
     console.log(`[APPROVE] Starting approval for property: ${propertyNumber}`);
 
-    // تحديث الحالة في الشيت
-    const updated = await firebaseService.updateVerificationStatus(
-      propertyNumber,
-      "approved"
-    );
-    console.log(`[APPROVE] Verification status updated to approved for: ${propertyNumber}`);
-
-    // تسجيل العملية داخل storage
-    await analyticsService.addVerificationLog({
-      propertyNumber,
-      action: "approved",
-    });
+    // Validate the property and live R2 image count before any approval or
+    // payment-fulfillment mutation. This also returns structured 404/422/503
+    // errors for the admin UI.
+    const { property: propertyForApproval } =
+      await adminApprovalService.requireCompleteProperty(propertyNumber);
 
     // اعتماد العقار الجديد المدفوع يفعّل الاشتراك من بيانات الدفع المعلقة.
     let subscriptionType = "عادي";
-    try {
-      const payments = await paymentService.getByProperty(propertyNumber);
-      const pendingPayment = payments
-        .filter(p => p.status === "نجح - قيد التحقق")
-        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-      
-      if (pendingPayment) {
-        const pkg = await subscriptionService.getPackageById(pendingPayment.packageId);
-        if (!pkg) {
-          console.warn(`[APPROVE] Pending payment ${pendingPayment.id} has missing package: ${pendingPayment.packageId}`);
-        } else {
-          const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
-          const calculatedDates = calculateActionDates(pendingPayment.action, currentSubscription, pkg.duration);
-          const activation = await activateVerifiedPaymentSubscription({
+    let updated = propertyForApproval;
+    const payments = await runAdminApprovalStage(
+      () => paymentService.getByProperty(propertyNumber),
+      {
+        status: 503,
+        code: "PAYMENT_LOOKUP_FAILED",
+        message:
+          "تعذر تحميل الدفعات المرتبطة بالعقار حالياً. حدّث الصفحة ثم حاول مرة أخرى.",
+      },
+    );
+    const pendingPayment = payments
+      .filter(p => p.status === "نجح - قيد التحقق")
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+
+    if (pendingPayment) {
+      if (!pendingPayment.packageId) {
+        throw new AdminApprovalError({
+          status: 422,
+          code: "PAYMENT_PACKAGE_MISSING",
+          message:
+            "لا توجد باقة مرتبطة بالدفع المعلق. حدّث بيانات الدفع قبل قبول العقار.",
+        });
+      }
+
+      const pkg = await runAdminApprovalStage(
+        () => subscriptionService.getPackageById(pendingPayment.packageId!),
+        {
+          status: 503,
+          code: "PACKAGE_LOOKUP_FAILED",
+          message:
+            "تعذر تحميل الباقة المرتبطة بالدفع المعلق. حدّث الصفحة ثم حاول مرة أخرى.",
+        },
+      );
+      if (!pkg) {
+        throw new AdminApprovalError({
+          status: 404,
+          code: "PACKAGE_NOT_FOUND",
+          message: "الباقة المرتبطة بالدفع المعلق غير موجودة أو حُذفت.",
+        });
+      }
+
+      const currentSubscription = await runAdminApprovalStage(
+        () => subscriptionService.getByProperty(propertyNumber),
+        {
+          status: 503,
+          code: "SUBSCRIPTION_LOOKUP_FAILED",
+          message:
+            "تعذر تحميل حالة الاشتراك الحالية. حدّث الصفحة ثم حاول مرة أخرى.",
+        },
+      );
+      const calculatedDates = await runAdminApprovalStage(
+        () =>
+          calculateActionDates(
+            pendingPayment.action,
+            currentSubscription,
+            pkg.duration,
+          ),
+        {
+          status: 500,
+          code: "SUBSCRIPTION_PREPARATION_FAILED",
+          message:
+            "تعذر تجهيز مدة الاشتراك من بيانات الدفع والباقة. راجع الباقة وتواريخ الدفع قبل إعادة المحاولة.",
+        },
+      );
+      const propertyPlan = await runAdminApprovalStage(
+        () =>
+          resolvePaymentPropertyPlan(
+            pendingPayment,
+            pkg,
+            currentSubscription,
+          ),
+        {
+          status: 503,
+          code: "SUBSCRIPTION_PREPARATION_FAILED",
+          message:
+            "تعذر تحديد العقارات المرتبطة بهذا الدفع. حدّث الصفحة وراجع روابط العقارات قبل إعادة المحاولة.",
+        },
+      );
+      await adminApprovalService.requireCompleteLinkedProperties(
+        propertyPlan.kept,
+      );
+      const activation = await runAdminApprovalStage(
+        () =>
+          activateVerifiedPaymentSubscription({
             payment: pendingPayment,
-            property: updated,
+            property: propertyForApproval,
             pkg,
             receiptUrl: pendingPayment.receiptUrl || "",
-            startDate: pendingPayment.pendingStartDate || calculatedDates.startDate,
-            endDate: pendingPayment.pendingEndDate || calculatedDates.endDate,
-            finalAmount: pendingPayment.pendingPrice || pendingPayment.finalAmount,
-          });
+            startDate:
+              pendingPayment.pendingStartDate || calculatedDates.startDate,
+            endDate:
+              pendingPayment.pendingEndDate || calculatedDates.endDate,
+            finalAmount:
+              pendingPayment.pendingPrice || pendingPayment.finalAmount,
+            propertyPlan,
+            allowedPaymentStatuses: [
+              String(pendingPayment.status || ""),
+            ],
+          }),
+        {
+          status: 500,
+          code: "PAYMENT_ACTIVATION_FAILED",
+          message:
+            "تعذر إكمال تفعيل الاشتراك. قد تكون بعض خطوات التفعيل حُفظت؛ حدّث الصفحة وتحقق من حالة العقار والدفع قبل إعادة المحاولة.",
+        },
+      );
 
-          await paymentService.update(pendingPayment.id, {
+      // Persist the authoritative approval state before finalizing the payment
+      // record, so any later partial failure cannot leave acceptance ambiguous.
+      updated = await runAdminApprovalStage(
+        () =>
+          firebaseService.updateVerificationStatus(propertyNumber, "approved"),
+        {
+          status: 500,
+          code: "APPROVAL_PARTIALLY_COMPLETED",
+          message:
+            "تم تفعيل الاشتراك، لكن تعذر تأكيد حالة قبول العقار. حدّث الصفحة وراجع حالة العقار قبل تنفيذ أي محاولة أخرى.",
+          partial: true,
+        },
+      );
+
+      await runAdminApprovalStage(
+        () =>
+          paymentService.update(pendingPayment.id, {
             status: "مكتمل" as any,
             completedAt: new Date().toISOString(),
             notes: "تم تفعيل الاشتراك بعد اعتماد العقار من الإدارة",
-          });
+          }),
+        {
+          status: 500,
+          code: "APPROVAL_PARTIALLY_COMPLETED",
+          message:
+            "تم تفعيل الاشتراك وقبول العقار، لكن تعذر إنهاء حالة الدفع. حدّث الصفحة وراجع الدفع قبل تنفيذ أي محاولة أخرى.",
+          partial: true,
+        },
+      );
 
-          subscriptionType = activation.subscriptionType;
-          console.log(`[APPROVE] ✅ Activated pending payment ${pendingPayment.id}. Linked: ${activation.linkedProperties.join(", ") || "none"}`);
+      subscriptionType = activation.subscriptionType;
+      console.log(`[APPROVE] ✅ Activated pending payment ${pendingPayment.id}. Linked: ${activation.linkedProperties.join(", ") || "none"}`);
 
-          const property = await propertyService.getByNumber(propertyNumber);
-          if (property?.whatsappNumber) {
-            notifyOwnerSubscriptionActivated({
-              ownerPhone: property.whatsappNumber,
-              propertyNumber,
-              propertyName: property.name || "",
-              endDate: activation.endDate,
-            }).catch(err => console.error("Owner activation notify error:", err));
-          }
-        }
+      if (propertyForApproval.whatsappNumber) {
+        notifyOwnerSubscriptionActivated({
+          ownerPhone: propertyForApproval.whatsappNumber,
+          propertyNumber,
+          propertyName: propertyForApproval.name || "",
+          endDate: activation.endDate,
+        }).catch(err => console.error("Owner activation notify error:", err));
       }
+    }
 
-      // Determine subscription type from existing subscription or payment
-      const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
-      if (currentSubscription && currentSubscription.subscriptionType) {
-        subscriptionType = currentSubscription.subscriptionType;
-      }
-    } catch (payErr) {
-      console.error(`[APPROVE] Error checking payments:`, payErr);
+    // Properties without a pending paid activation still need the explicit
+    // approval write here.
+    if (!pendingPayment) {
+      updated = await runAdminApprovalStage(
+        () =>
+          firebaseService.updateVerificationStatus(propertyNumber, "approved"),
+        {
+          status: 500,
+          code: "VERIFICATION_UPDATE_FAILED",
+          message:
+            "اكتملت مراجعة البيانات، لكن تعذر حفظ قبول العقار. حدّث الصفحة ثم حاول مرة أخرى.",
+        },
+      );
+    }
+    console.log(`[APPROVE] Verification status updated to approved for: ${propertyNumber}`);
+
+    await analyticsService.addVerificationLog({
+      propertyNumber,
+      action: "approved",
+    }).catch((error) =>
+      console.error("[APPROVE] Failed to add verification log:", error),
+    );
+
+    // Determine subscription type from existing subscription or payment.
+    const currentSubscription = await runAdminApprovalStage(
+      () => subscriptionService.getByProperty(propertyNumber),
+      {
+        status: 500,
+        code: "APPROVAL_PARTIALLY_COMPLETED",
+        message:
+          "تم قبول العقار، لكن تعذر مزامنة نوع الاشتراك. حدّث الصفحة وراجع حالة الاشتراك قبل أي محاولة أخرى.",
+        partial: true,
+      },
+    );
+    if (currentSubscription?.subscriptionType) {
+      subscriptionType = currentSubscription.subscriptionType;
     }
 
     // Approval never grants premium by itself; only a valid premium subscription does.
-    const effectiveSubscription = await subscriptionService.getByProperty(propertyNumber);
+    const effectiveSubscription = currentSubscription;
     const effectiveSubscriptionExpired = !effectiveSubscription || calculateRemainingDays(effectiveSubscription.endDate) < 0;
     subscriptionType = isActivePremiumSubscription({
       subscriptionType: effectiveSubscription?.subscriptionType,
@@ -460,13 +599,28 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     }) ? "مميز" : "عادي";
 
     // Update the property's subscriptionType to match the valid subscription state.
-    await firebaseService.updateProperty(propertyNumber, { 
-      subscriptionType: subscriptionType as "عادي" | "مميز" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined
-    });
+    await runAdminApprovalStage(
+      () =>
+        firebaseService.updateProperty(propertyNumber, {
+          subscriptionType: subscriptionType as "عادي" | "مميز" | "premium" | "trusted" | "normal" | "free" | "مجاني" | undefined,
+        }),
+      {
+        status: 500,
+        code: "APPROVAL_PARTIALLY_COMPLETED",
+        message:
+          "تم قبول العقار، لكن تعذر حفظ نوع الاشتراك النهائي. حدّث الصفحة وراجع العقار قبل أي محاولة أخرى.",
+        partial: true,
+      },
+    );
     console.log(`[APPROVE] Property subscriptionType updated to: ${subscriptionType}`);
 
     // إرسال إشعار واتساب عند قبول العقار
-    const property = await propertyService.getByNumber(propertyNumber);
+    const property = await propertyService
+      .getByNumber(propertyNumber)
+      .catch((error) => {
+        console.error("[APPROVE] Failed to load property for notification:", error);
+        return propertyForApproval;
+      });
     notifyPropertyVerification({
       propertyNumber,
       propertyName: property?.name || "",
@@ -481,9 +635,13 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       property: updated,
     });
 
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[APPROVE] Error:", err);
-    res.status(500).json({ success: false, message: "فشل في قبول العقار" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر قبول العقار حالياً. حاول مرة أخرى.",
+    );
   }
 });
 
@@ -493,27 +651,61 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
     const { reason } = req.body;
     console.log(`[REJECT] Starting rejection for property: ${propertyNumber}, reason: ${reason}`);
 
+    const property = await runAdminApprovalStage(
+      () => propertyService.getByNumber(propertyNumber),
+      {
+        status: 503,
+        code: "PROPERTY_LOOKUP_FAILED",
+        message:
+          "تعذر تحميل بيانات العقار قبل الرفض. تحقق من الاتصال بقاعدة البيانات ثم حاول مرة أخرى.",
+      },
+    );
+    if (!property) {
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PROPERTY_NOT_FOUND",
+        message: "العقار المطلوب رفضه غير موجود.",
+      });
+    }
+
     // تحديث الحالة في الشيت
-    const updated = await firebaseService.updateVerificationStatus(
-      propertyNumber,
-      "rejected"
+    const updated = await runAdminApprovalStage(
+      async () => {
+        try {
+          return await firebaseService.updateVerificationStatus(
+            propertyNumber,
+            "rejected",
+          );
+        } catch (error) {
+          throw new PartialMutationError(error);
+        }
+      },
+      {
+        status: 500,
+        code: "PROPERTY_REJECTION_FAILED",
+        message:
+          "تعذر تأكيد حفظ رفض العقار. حدّث الصفحة وتحقق من حالته قبل إعادة المحاولة.",
+      },
     );
     console.log(`[REJECT] Verification status updated to rejected for: ${propertyNumber}`);
 
     // تسجيل العملية داخل storage
-    await analyticsService.addVerificationLog({
-      propertyNumber,
-      action: "rejected",
-      reason: reason || "",
-      admin: "Admin",
-    });
+    await analyticsService
+      .addVerificationLog({
+        propertyNumber,
+        action: "rejected",
+        reason: reason || "",
+        admin: "Admin",
+      })
+      .catch((error) =>
+        console.error("[REJECT] Failed to add verification log:", error),
+      );
 
     // الرفض لا يؤثر على الاشتراك - الاشتراك يبقى ساري من يوم الدفع
     // الرفض يؤثر فقط على ظهور العقار في صفحات العقارات
     console.log(`[REJECT] Property rejected but subscription remains active for: ${propertyNumber}`);
 
     // إرسال إشعار واتساب عند رفض العقار
-    const property = await propertyService.getByNumber(propertyNumber);
     notifyPropertyVerification({
       propertyNumber,
       propertyName: property?.name || "",
@@ -529,9 +721,13 @@ router.put("/api/admin/properties/:propertyNumber/reject", async (req, res) => {
       property: updated,
     });
 
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Reject Error:", err);
-    res.status(500).json({ success: false, message: "فشل في رفض العقار" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر رفض العقار حالياً. حاول مرة أخرى.",
+    );
   }
 });
 
@@ -542,76 +738,63 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
   try {
     const { propertyNumber } = req.params;
 
-    const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (!property) {
-      return res.status(404).json({ success: false, message: "العقار غير موجود" });
-    }
+    // Resolve and validate the complete linked pair before the first write.
+    // requireCompleteProperty uses the live R2 count, so an unavailable image
+    // store is never mistaken for a property with zero images.
+    const { property } =
+      await adminApprovalService.requireCompleteProperty(propertyNumber);
 
-    const mainPropertyNumber = property.pendingApprovalFrom;
+    const mainPropertyNumber = String(property.pendingApprovalFrom || "").trim();
     if (!mainPropertyNumber) {
-      return res.status(400).json({ success: false, message: "هذا العقار ليس لديه طلب إضافة من عقار آخر" });
+      throw new AdminApprovalError({
+        status: 409,
+        code: "PROPERTY_VALIDATION_FAILED",
+        message: "لا يوجد طلب إضافة معلّق لهذا العقار، وقد تكون حالته تغيّرت بالفعل.",
+      });
     }
 
-    const mainProperty = await firebaseService.getPropertyByNumber(mainPropertyNumber);
-    if (!mainProperty) {
-      return res.status(404).json({ success: false, message: "العقار الرئيسي غير موجود" });
-    }
+    const { property: mainProperty } =
+      await adminApprovalService.requireCompleteProperty(mainPropertyNumber);
 
-    // Get the main property subscription to copy dates
-    const mainSubscription = await subscriptionService.getByProperty(mainPropertyNumber);
-    if (!mainSubscription) {
-      return res.status(400).json({ success: false, message: "العقار الرئيسي ليس لديه اشتراك نشط" });
-    }
-
-    // Update additional property status
-    await firebaseService.updateVerificationStatus(propertyNumber, "approved");
-    await firebaseService.updateProperty(propertyNumber, {
-      pendingApprovalFrom: "",
-      subscriptionType: mainProperty.subscriptionType || "عادي"
-    });
-
-    // Create subscription for the additional property with same dates as main
-    // Price is 0 since the main property already paid for all properties
-    const subscriptionData = {
-      packageId: mainSubscription.packageId,
-      price: 0,
-      subscriptionType: mainSubscription.subscriptionType || "عادي",
-      packageType: mainSubscription.packageType || "عادي",
-      startDate: mainSubscription.startDate,
-      endDate: mainSubscription.endDate,
-      linkedProperty: mainPropertyNumber,
-      status: "نشط"
-    };
-
-    await firebaseService.addSubscriptionToSheet(
-      propertyNumber,
-      subscriptionData,
-      property,
-      ""
+    // Preload the subscription that will be copied and mutated. No database
+    // read is deferred until after approval writes have started.
+    const mainSubscription = await runAdminApprovalStage(
+      () => subscriptionService.getByProperty(mainPropertyNumber),
+      {
+        status: 503,
+        code: "SUBSCRIPTION_LOOKUP_FAILED",
+        message:
+          "تعذر تحميل اشتراك العقار الرئيسي حالياً. حدّث الصفحة ثم حاول مرة أخرى.",
+      },
     );
-
-    // Update main property's subscription to include the new additional property in linkedProperties array
-    const mainPropertySubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
-    if (mainPropertySubscription) {
-      const currentLinkedProperties = mainPropertySubscription.linkedProperties || [];
-      if (!currentLinkedProperties.includes(propertyNumber)) {
-        const updatedLinkedProperties = [...currentLinkedProperties, propertyNumber];
-        await firebaseService.updateSubscription(mainPropertySubscription.id, {
-          linkedProperties: updatedLinkedProperties,
-          propertyCount: updatedLinkedProperties.length + 1
-        });
-      }
+    if (!mainSubscription) {
+      throw new AdminApprovalError({
+        status: 422,
+        code: "SUBSCRIPTION_LOOKUP_FAILED",
+        message: "لا يمكن قبول العقار الإضافي لأن العقار الرئيسي ليس لديه اشتراك.",
+      });
     }
 
-    // Log the verification
-    await analyticsService.addVerificationLog({
-      propertyNumber,
-      action: "approved",
-      reason: "تمت الموافقة على إضافة العقار من قبل الأدمن",
-      admin: "Admin",
+    const mutation = await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber,
+      addPropertyNumbers: [propertyNumber],
+      approveAddedProperties: true,
     });
 
-    // Send notification to additional property owner
+    await analyticsService
+      .addVerificationLog({
+        propertyNumber,
+        action: "approved",
+        reason: "تمت الموافقة على إضافة العقار من قبل الأدمن",
+        admin: "Admin",
+      })
+      .catch((error) =>
+        console.error(
+          "[APPROVE_ADDITIONAL] Failed to add verification log:",
+          error,
+        ),
+      );
+
     if (property.whatsappNumber) {
       notifyPropertyVerification({
         propertyNumber,
@@ -624,13 +807,30 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
     res.json({
       success: true,
       message: "تمت الموافقة على إضافة العقار الإضافي",
-      property: property,
-      subscription: subscriptionData
+      property: {
+        ...property,
+        verificationStatus: "approved",
+        pendingApprovalFrom: "",
+        subscriptionType: mainProperty.subscriptionType || "عادي",
+      },
+      subscription: mutation.mainSubscription,
     });
 
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[APPROVE_ADDITIONAL] Error:", err);
-    res.status(500).json({ success: false, message: "فشل في الموافقة على العقار الإضافي" });
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        code: err.code,
+        message: err.message,
+        error: err.message,
+      });
+    }
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر قبول العقار الإضافي حالياً. حاول مرة أخرى.",
+    );
   }
 });
 

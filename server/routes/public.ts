@@ -161,6 +161,25 @@ router.post("/api/properties/register", async (req, res) => {
     };
 
     const created = await propertyService.create(newProperty);
+    // Establish a fresh owner session only after creation succeeds. A session
+    // store failure must not turn the durable registration into an apparent
+    // failure that encourages the owner to submit the same property again.
+    let ownerSessionEstablished = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((error) => error ? reject(error) : resolve());
+      });
+      req.session.propertyNumber = newProperty.propertyNumber;
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((error) => error ? reject(error) : resolve());
+      });
+    } catch (sessionError) {
+      ownerSessionEstablished = false;
+      console.error(
+        "Property registered but owner session setup failed:",
+        sessionError,
+      );
+    }
 
     // إرسال إشعار واتساب للمدير عند تسجيل عقار جديد
     console.log("📲 Sending WhatsApp notification for new registration:", data.propertyNumber);
@@ -175,6 +194,18 @@ router.post("/api/properties/register", async (req, res) => {
     }).catch(err => {
       console.error("❌ WhatsApp notify error:", err);
     });
+
+    if (!ownerSessionEstablished) {
+      return res.status(201).json({
+        ...created,
+        registered: true,
+        partial: true,
+        sessionEstablished: false,
+        loginRequired: true,
+        message:
+          "تم تسجيل العقار بنجاح، لكن تعذر تسجيل الدخول تلقائياً. سجّل الدخول برقم العقار والرقم السري لإكمال الاشتراك.",
+      });
+    }
 
     res.json(created);
 

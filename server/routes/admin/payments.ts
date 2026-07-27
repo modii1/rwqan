@@ -6,6 +6,10 @@ import {
   calculateSubscriptionEndDate,
   formatDateRiyadh,
 } from "../../utils/dateUtils";
+import {
+  AdminApprovalError,
+  sendAdminApprovalError,
+} from "../../errors/AdminApprovalError";
 
 const router = Router();
 
@@ -13,13 +17,29 @@ const router = Router();
 router.post("/api/admin/payment/approve", requireAdmin, async (req, res) => {
   try {
     const { paymentId } = req.body;
-    if (!paymentId) return res.status(400).json({ error: "معرف الدفع مطلوب" });
-    await paymentService.approveBankTransfer(paymentId);
-    res.json({ ok: true, message: "تم قبول التحويل وتفعيل الاشتراك" });
-  } catch (err: any) {
+    if (!paymentId) {
+      throw new AdminApprovalError({
+        status: 400,
+        code: "PAYMENT_ID_REQUIRED",
+        message: "معرف الدفع مطلوب.",
+      });
+    }
+    const result = await paymentService.approveBankTransfer(paymentId);
+    res.json({
+      ok: true,
+      outcome: result.outcome,
+      message:
+        result.outcome === "queued"
+          ? "تم قبول التحويل والتحقق من البيانات، والعقار بانتظار اعتماد الإدارة"
+          : "تم قبول التحويل وتفعيل الاشتراك",
+    });
+  } catch (err: unknown) {
     console.error("Approve payment error:", err);
-    const status = err.message?.includes("ليس معلقاً") ? 400 : err.message?.includes("غير موجود") ? 404 : 500;
-    res.status(status).json({ error: err.message || "خطأ في قبول الدفع" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر قبول الدفع حالياً. حاول مرة أخرى.",
+    );
   }
 });
 
@@ -27,12 +47,22 @@ router.post("/api/admin/payment/approve", requireAdmin, async (req, res) => {
 router.post("/api/admin/payment/reject", requireAdmin, async (req, res) => {
   try {
     const { paymentId } = req.body;
-    if (!paymentId) return res.status(400).json({ error: "معرف الدفع مطلوب" });
+    if (!paymentId) {
+      throw new AdminApprovalError({
+        status: 400,
+        code: "PAYMENT_ID_REQUIRED",
+        message: "معرف الدفع مطلوب.",
+      });
+    }
     await paymentService.rejectBankTransfer(paymentId);
     res.json({ ok: true, message: "تم رفض التحويل" });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Reject payment error:", err);
-    res.status(500).json({ error: "خطأ في رفض الدفع" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر رفض الدفع حالياً. حاول مرة أخرى.",
+    );
   }
 });
 

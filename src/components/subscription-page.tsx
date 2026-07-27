@@ -109,6 +109,7 @@ export default function SubscriptionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredPropertyNumber, setRegisteredPropertyNumber] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [registrationLoginRequired, setRegistrationLoginRequired] = useState(false);
   const [bankTransferResult, setBankTransferResult] = useState<{
     autoActivated?: boolean;
     verificationFailed?: boolean;
@@ -286,6 +287,18 @@ export default function SubscriptionPage() {
       const propertyNumber = registrationData.propertyNumber;
       setRegisteredPropertyNumber(propertyNumber);
 
+      if (registrationData.loginRequired === true) {
+        setRegistrationLoginRequired(true);
+        setRegistrationSuccess(true);
+        toast({
+          title: "تم تسجيل العقار بنجاح",
+          description:
+            registrationData.message ||
+            "سجّل الدخول برقم العقار والرقم السري لإكمال الاشتراك.",
+        });
+        return;
+      }
+
       toast({
         title: "تم تسجيل العقار بنجاح",
         description: "جاري إكمال عملية الاشتراك...",
@@ -424,6 +437,8 @@ export default function SubscriptionPage() {
             <h1 className="text-2xl font-bold text-[#434040] mb-2">
               {isVerificationFailed || isPaymentRejected
                 ? "تعذر تفعيل الاشتراك"
+                : registrationLoginRequired
+                  ? "تم تسجيل العقار بنجاح"
                 : isAutoActivated
                   ? "تم تفعيل اشتراكك بنجاح!"
                   : "تم استلام طلبك بنجاح!"}
@@ -431,6 +446,8 @@ export default function SubscriptionPage() {
             <p className="text-muted-foreground">
               {isVerificationFailed || isPaymentRejected
                 ? (bankTransferResult?.message || "يرجى مراجعة سبب الرفض بالأسفل.")
+                : registrationLoginRequired
+                  ? "تعذر تسجيل الدخول تلقائياً، ولم تبدأ عملية الدفع بعد."
                 : isAutoActivated
                   ? "تم التحقق من الدفع وبيانات العقار تلقائياً"
                   : isPendingManualReview
@@ -489,6 +506,8 @@ export default function SubscriptionPage() {
                 }`}>
                   {isVerificationFailed || isPaymentRejected
                     ? "مطلوب إجراء من المالك"
+                    : registrationLoginRequired
+                      ? "مطلوب تسجيل الدخول"
                     : isAutoActivated
                       ? "الاشتراك نشط الآن"
                       : "قيد المراجعة"}
@@ -504,6 +523,8 @@ export default function SubscriptionPage() {
                     ? `يرجى استكمال بيانات العقار: ${bankTransferResult?.missingFields?.join("، ") || "بيانات ناقصة"}`
                     : isPaymentRejected
                       ? (bankTransferResult?.nextAction || "يرجى رفع إيصال تحويل صحيح وإعادة المحاولة.")
+                      : registrationLoginRequired
+                        ? "سجّل الدخول برقم العقار والرقم السري اللذين أدخلتهما، ثم أكمل اختيار طريقة الدفع من لوحة المالك."
                       : isAutoActivated
                         ? "يمكنك تسجيل الدخول الآن ومتابعة بيانات اشتراكك من لوحة التحكم."
                         : isPendingManualReview

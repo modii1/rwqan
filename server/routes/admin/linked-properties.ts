@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware";
-import { firebaseService } from "../../firebaseService";
+import {
+  firebaseService,
+  LinkedPropertyMutationError,
+} from "../../firebaseService";
 import { propertyService } from "../../services";
 import { isSubscriptionStatusActive } from "../../../shared/subscriptionType";
 import { calculateRemainingDays } from "../../utils/dateUtils";
@@ -202,40 +205,26 @@ router.post("/api/admin/linked-properties/groups", async (req, res) => {
       }
     }
 
-    const allLinkedProps = [propertyNumber1, propertyNumber2, ...(additionalProperties || [])];
-
-    const multiSub = await firebaseService.createMultiPropertySubscription({
-      packageId: packageId || mainSub.packageId || "",
-      propertyNumber1,
+    const childProperties = Array.from(new Set([
       propertyNumber2,
-      additionalProperties: additionalProperties || [],
-      linkedProperties: allLinkedProps,
-      propertyCount: allLinkedProps.length,
-      startDate: mainSub.startDate,
-      endDate: mainSub.endDate,
-      status: "نشط",
-      paymentId: mainSub.paymentId,
+      ...(additionalProperties || []),
+    ])).filter((propertyNumber) => propertyNumber !== propertyNumber1);
+    const mutation = await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: propertyNumber1,
+      replacePropertyNumbers: childProperties,
+      approveAddedProperties: true,
     });
 
-    const childProperties = allLinkedProps.filter((pn) => pn !== propertyNumber1);
-    await firebaseService.updateSubscription(mainSub.id, {
-      linkedProperties: childProperties,
-      propertyCount: allLinkedProps.length,
-    });
-    for (const pn of childProperties) {
-      await firebaseService.syncLinkedProperty(pn, propertyNumber1, {
-        packageId: mainSub.packageId,
-        subscriptionType: mainSub.subscriptionType || mainSub.packageType || "عادي",
-        startDate: mainSub.startDate,
-        endDate: mainSub.endDate,
-        status: mainSub.status,
-        paymentId: mainSub.paymentId,
-      });
-    }
-
-    res.json({ success: true, message: "تم إنشاء مجموعة العقارات بنجاح", data: multiSub });
+    res.json({ success: true, message: "تم إنشاء مجموعة العقارات بنجاح", data: mutation });
   } catch (err) {
     console.error("[CREATE_LINKED_PROPERTY_GROUP] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في إنشاء مجموعة العقارات" });
   }
 });
@@ -264,22 +253,35 @@ router.put("/api/admin/linked-properties/groups/:id", async (req, res) => {
       });
     }
 
-    const updatedLinkedProps = [
-      current.propertyNumber1,
-      current.propertyNumber2,
-      ...(additionalProperties !== undefined ? additionalProperties : current.additionalProperties || []),
-    ].filter(Boolean);
+    if (additionalProperties !== undefined) {
+      await firebaseService.mutateLinkedPropertyGroupAtomically({
+        mainPropertyNumber: current.propertyNumber1,
+        replacePropertyNumbers: [
+          current.propertyNumber2,
+          ...(additionalProperties || []),
+        ].filter(Boolean),
+        approveAddedProperties: true,
+      });
+    }
 
-    await firebaseService.updateMultiPropertySubscription(id, {
-      ...(additionalProperties !== undefined && { additionalProperties, linkedProperties: updatedLinkedProps, propertyCount: updatedLinkedProps.length }),
-      ...(startDate && { startDate }),
-      ...(endDate && { endDate }),
-      ...(status && { status }),
-    });
+    if (startDate || endDate || status) {
+      await firebaseService.updateMultiPropertySubscription(id, {
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
+        ...(status && { status }),
+      });
+    }
 
     res.json({ success: true, message: "تم تحديث المجموعة بنجاح" });
   } catch (err) {
     console.error("[UPDATE_LINKED_PROPERTY_GROUP] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في تحديث المجموعة" });
   }
 });
@@ -333,37 +335,22 @@ router.post("/api/admin/linked-properties/groups/:id/add", async (req, res) => {
       }
     }
 
-    const newAdditional = [...(current.additionalProperties || []), propertyNumber];
-    const uniqueAdd = new Set<string>();
-    uniqueAdd.add(current.propertyNumber1);
-    if (current.propertyNumber2) uniqueAdd.add(current.propertyNumber2);
-    for (const ap of newAdditional) {
-      if (ap !== current.propertyNumber1) uniqueAdd.add(ap);
-    }
-    const allLinked = Array.from(uniqueAdd);
-
-    await firebaseService.updateMultiPropertySubscription(id, {
-      additionalProperties: newAdditional,
-      linkedProperties: allLinked,
-      propertyCount: allLinked.length,
-    });
-
-    await firebaseService.updateSubscription(mainSub.id, {
-      linkedProperties: allLinked.filter((pn) => pn !== current.propertyNumber1),
-      propertyCount: allLinked.length,
-    });
-    await firebaseService.syncLinkedProperty(propertyNumber, current.propertyNumber1, {
-      packageId: mainSub.packageId,
-      subscriptionType: mainSub.subscriptionType || mainSub.packageType || "عادي",
-      startDate: mainSub.startDate,
-      endDate: mainSub.endDate,
-      status: mainSub.status,
-      paymentId: mainSub.paymentId,
+    await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: current.propertyNumber1,
+      addPropertyNumbers: [propertyNumber],
+      approveAddedProperties: true,
     });
 
     res.json({ success: true, message: `تم إضافة العقار ${propertyNumber} للمجموعة` });
   } catch (err) {
     console.error("[ADD_TO_LINKED_GROUP] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في إضافة العقار" });
   }
 });
@@ -388,42 +375,22 @@ router.post("/api/admin/linked-properties/groups/:id/remove", async (req, res) =
       return res.status(400).json({ success: false, message: "لا يمكن إزالة العقار الرئيسي من المجموعة" });
     }
 
-    let newPropertyNumber2: string | undefined = current.propertyNumber2;
-    let newAdditional: string[] = current.additionalProperties || [];
-
-    if (propertyNumber === current.propertyNumber2) {
-      newPropertyNumber2 = undefined;
-      newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-    } else {
-      newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-    }
-
-    const uniqueRemove = new Set<string>();
-    uniqueRemove.add(current.propertyNumber1);
-    if (newPropertyNumber2) uniqueRemove.add(newPropertyNumber2);
-    for (const ap of newAdditional) {
-      if (ap !== current.propertyNumber1) uniqueRemove.add(ap);
-    }
-    const allLinked = Array.from(uniqueRemove);
-
-    await firebaseService.updateMultiPropertySubscription(id, {
-      ...(newPropertyNumber2 !== current.propertyNumber2 && { propertyNumber2: newPropertyNumber2 }),
-      additionalProperties: newAdditional,
-      linkedProperties: allLinked,
-      propertyCount: allLinked.length,
+    await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: current.propertyNumber1,
+      removePropertyNumbers: [propertyNumber],
+      cancelRemovedSubscriptions: true,
     });
-
-    const prop = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (prop) {
-      await firebaseService.updateProperty(propertyNumber, { subscriptionType: "عادي", linkedProperty: "" });
-    }
-
-    // Cancel the subscription for the removed property
-    await firebaseService.cancelSubscription(propertyNumber, "تم إزالة العقار من المجموعة");
 
     res.json({ success: true, message: `تم إزالة العقار ${propertyNumber} من المجموعة` });
   } catch (err) {
     console.error("[REMOVE_FROM_LINKED_GROUP] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في إزالة العقار" });
   }
 });
@@ -439,22 +406,26 @@ router.delete("/api/admin/linked-properties/groups/:id", async (req, res) => {
       return res.status(404).json({ success: false, message: "المجموعة غير موجودة" });
     }
 
-    const allProps: string[] = ([
+    await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: current.propertyNumber1,
+      replacePropertyNumbers: [],
+      cancelRemovedSubscriptions: true,
+    });
+    await firebaseService.cancelSubscription(
       current.propertyNumber1,
-      current.propertyNumber2,
-      ...(current.additionalProperties || []),
-    ] as string[]).filter(Boolean);
-
-    for (const pn of allProps) {
-      await firebaseService.updateProperty(pn, { subscriptionType: "عادي", linkedProperty: "" });
-      await firebaseService.cancelSubscription(pn, "تم حذف مجموعة العقارات");
-    }
-
-    await firebaseService.deleteMultiPropertySubscription(id);
+      "تم حذف مجموعة العقارات",
+    );
 
     res.json({ success: true, message: "تم حذف المجموعة بنجاح" });
   } catch (err) {
     console.error("[DELETE_LINKED_GROUP] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في حذف المجموعة" });
   }
 });
@@ -490,42 +461,22 @@ const allProps = Array.from(uniqueProps2);
       return res.status(400).json({ success: false, message: "لا يمكن فك ارتباط العقار الرئيسي. احذف المجموعة كاملة." });
     }
 
-    let newPropertyNumber2: string | undefined = foundGroup.propertyNumber2;
-    let newAdditional: string[] = foundGroup.additionalProperties || [];
-
-    if (propertyNumber === foundGroup.propertyNumber2) {
-      newPropertyNumber2 = undefined;
-      newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-    } else {
-      newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-    }
-
-    const uniqueProps = new Set<string>();
-    uniqueProps.add(foundGroup.propertyNumber1);
-    if (newPropertyNumber2) uniqueProps.add(newPropertyNumber2);
-    for (const ap of newAdditional) {
-      if (ap !== foundGroup.propertyNumber1) uniqueProps.add(ap);
-    }
-    const allLinked = Array.from(uniqueProps);
-
-    await firebaseService.updateMultiPropertySubscription(foundGroup.id, {
-      ...(newPropertyNumber2 !== foundGroup.propertyNumber2 && { propertyNumber2: newPropertyNumber2 }),
-      additionalProperties: newAdditional,
-      linkedProperties: allLinked,
-      propertyCount: allLinked.length,
+    await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: foundGroup.propertyNumber1,
+      removePropertyNumbers: [propertyNumber],
+      cancelRemovedSubscriptions: true,
     });
-
-    const prop = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (prop) {
-      await firebaseService.updateProperty(propertyNumber, { subscriptionType: "عادي", linkedProperty: "" });
-    }
-
-    // Also cancel the linked subscription
-    await firebaseService.cancelSubscription(propertyNumber, "فك ارتباط العقار");
 
     res.json({ success: true, message: `تم فك ارتباط العقار ${propertyNumber} بنجاح` });
   } catch (err) {
     console.error("[UNLINK_PROPERTY] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في فك الارتباط" });
   }
 });
@@ -577,29 +528,10 @@ router.delete("/api/admin/linked-properties/:propertyNumber", async (req, res) =
           return res.status(400).json({ success: false, message: "لا يمكن حذف العقار الرئيسي. احذف المجموعة كاملة." });
         }
 
-        let newPropertyNumber2: string | undefined = multiSub.propertyNumber2;
-        let newAdditional: string[] = multiSub.additionalProperties || [];
-
-        if (propertyNumber === multiSub.propertyNumber2) {
-          newPropertyNumber2 = undefined;
-          newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-        } else {
-          newAdditional = newAdditional.filter((p: string) => p !== propertyNumber);
-        }
-
-        const uniqueFinal = new Set<string>();
-        uniqueFinal.add(multiSub.propertyNumber1);
-        if (newPropertyNumber2) uniqueFinal.add(newPropertyNumber2);
-        for (const ap of newAdditional) {
-          if (ap !== multiSub.propertyNumber1) uniqueFinal.add(ap);
-        }
-        const allLinked = Array.from(uniqueFinal);
-
-        await firebaseService.updateMultiPropertySubscription(multiSub.id, {
-          ...(newPropertyNumber2 !== multiSub.propertyNumber2 && { propertyNumber2: newPropertyNumber2 }),
-          additionalProperties: newAdditional,
-          linkedProperties: allLinked,
-          propertyCount: allLinked.length,
+        await firebaseService.mutateLinkedPropertyGroupAtomically({
+          mainPropertyNumber: multiSub.propertyNumber1,
+          removePropertyNumbers: [propertyNumber],
+          cancelRemovedSubscriptions: true,
         });
         break;
       }
@@ -610,6 +542,13 @@ router.delete("/api/admin/linked-properties/:propertyNumber", async (req, res) =
     res.json({ success: true, message: "تم حذف العقار بنجاح", propertyNumber });
   } catch (err) {
     console.error("[DELETE_LINKED_PROPERTY] Error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في حذف العقار" });
   }
 });

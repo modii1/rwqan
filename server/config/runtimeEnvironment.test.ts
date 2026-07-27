@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assertProductionSecurityEnvironment } from "./runtimeEnvironment";
 
-test("production requires admin credentials and a session secret", () => {
+test("production requires credentials, a session secret, and Paymob HMAC", () => {
   assert.throws(
     () => assertProductionSecurityEnvironment({ NODE_ENV: "production" }),
-    /ADMIN_CODE, ADMIN_PASSWORD, SESSION_SECRET/,
+    /ADMIN_CODE, ADMIN_PASSWORD, SESSION_SECRET, PAYMOB_HMAC_SECRET/,
   );
 });
 
@@ -16,6 +16,7 @@ test("production accepts complete security configuration", () => {
       ADMIN_CODE: "configured-code",
       ADMIN_PASSWORD: "configured-password",
       SESSION_SECRET: "configured-session-secret",
+      PAYMOB_HMAC_SECRET: "configured-paymob-hmac",
     }),
   );
 });

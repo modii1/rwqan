@@ -15,6 +15,11 @@ import { useRouter } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
+import {
+  AdminActionError,
+  getAdminActionErrorMessage,
+  readAdminActionResponse,
+} from "@/lib/admin-action-response";
 
 const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'رياض الخبراء'] as const;
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
@@ -190,6 +195,9 @@ export default function PropertiesSection() {
   const [showAdditionalRequests, setShowAdditionalRequests] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'linked'>('all');
   const [linkedPropertiesList, setLinkedPropertiesList] = useState<{ propertyNumber: string; data: any[]; loading?: boolean } | null>(null);
+  const [additionalApprovalErrors, setAdditionalApprovalErrors] = useState<
+    Record<string, { message: string; partial: boolean; warnings: string[] }>
+  >({});
 
   // Query for additional property requests
   const { data: additionalRequests, isLoading: additionalRequestsLoading, refetch: refetchAdditionalRequests } = useQuery<any[]>({
@@ -221,16 +229,47 @@ export default function PropertiesSection() {
       const res = await fetch(`/api/admin/properties/${propertyNumber}/approve-additional`, {
         method: "PUT",
       });
-      if (!res.ok) throw new Error("فشل في الموافقة");
-      return res.json();
+      return readAdminActionResponse<{ success: boolean }>(
+        res,
+        "تعذر قبول العقار الإضافي حالياً. حاول مرة أخرى.",
+      );
     },
-    onSuccess: () => {
+    onMutate: (propertyNumber: string) => {
+      setAdditionalApprovalErrors((current) => {
+        const next = { ...current };
+        delete next[propertyNumber];
+        return next;
+      });
+    },
+    onSuccess: (_result, propertyNumber) => {
+      setAdditionalApprovalErrors((current) => {
+        const next = { ...current };
+        delete next[propertyNumber];
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
       queryClient.invalidateQueries({ queryKey: ["admin-additional-property-requests"] });
       toast({ title: "تم الموافقة ✓", description: "تمت الموافقة على إضافة العقار" });
     },
-    onError: (error: Error) => {
-      toast({ title: "خطأ", description: error.message, variant: "destructive" });
+    onError: (error: unknown, propertyNumber) => {
+      const message = getAdminActionErrorMessage(
+        error,
+        "تعذر قبول العقار الإضافي حالياً. حاول مرة أخرى.",
+      );
+      setAdditionalApprovalErrors((current) => ({
+        ...current,
+        [propertyNumber]: {
+          message,
+          partial: error instanceof AdminActionError && error.partial,
+          warnings:
+            error instanceof AdminActionError ? error.warnings : [],
+        },
+      }));
+      toast({
+        title: "تعذر قبول العقار الإضافي",
+        description: message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -507,39 +546,67 @@ export default function PropertiesSection() {
           ) : additionalRequests && additionalRequests.length > 0 ? (
             <div className="space-y-3">
               {additionalRequests.map((req: any) => (
-                <div key={req.propertyNumber} className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <p className="font-bold">{req.propertyNumber}</p>
-                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
-                      <p className="text-xs text-blue-600 mt-1">
-                        مضاف من العقار: {req.pendingApprovalFrom} ({req.mainPropertyName})
-                      </p>
+                <div key={req.propertyNumber} className="bg-white p-3 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <p className="font-bold">{req.propertyNumber}</p>
+                        <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          مضاف من العقار: {req.pendingApprovalFrom} ({req.mainPropertyName})
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => approveAdditionalMutation.mutate(req.propertyNumber)}
+                        disabled={approveAdditionalMutation.isPending}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        {approveAdditionalMutation.isPending &&
+                          approveAdditionalMutation.variables === req.propertyNumber ? (
+                          <Loader2 className="w-4 h-4 ml-1 animate-spin" />
+                        ) : (
+                          <Check className="w-4 h-4 ml-1" />
+                        )}
+                        موافقة
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (confirm("هل أنت متأكد من رفض هذا الطلب؟")) {
+                            rejectAdditionalMutation.mutate({ propertyNumber: req.propertyNumber });
+                          }
+                        }}
+                        disabled={rejectAdditionalMutation.isPending}
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                      >
+                        <X className="w-4 h-4 ml-1" /> رفض
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => approveAdditionalMutation.mutate(req.propertyNumber)}
-                      disabled={approveAdditionalMutation.isPending}
-                      className="bg-green-600 hover:bg-green-700"
+                  {additionalApprovalErrors[req.propertyNumber] && (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
                     >
-                      <Check className="w-4 h-4 ml-1" /> موافقة
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (confirm("هل أنت متأكد من رفض هذا الطلب؟")) {
-                          rejectAdditionalMutation.mutate({ propertyNumber: req.propertyNumber });
-                        }
-                      }}
-                      disabled={rejectAdditionalMutation.isPending}
-                      className="border-red-300 text-red-600 hover:bg-red-50"
-                    >
-                      <X className="w-4 h-4 ml-1" /> رفض
-                    </Button>
-                  </div>
+                      <p className="font-semibold">
+                        {additionalApprovalErrors[req.propertyNumber].partial
+                          ? "قد يكون القبول نُفّذ جزئياً؛ حدّث الصفحة وراجع حالة العقارين قبل إعادة المحاولة."
+                          : "سبب تعذر القبول:"}
+                      </p>
+                      <p className="mt-1">
+                        {additionalApprovalErrors[req.propertyNumber].message}
+                      </p>
+                      {additionalApprovalErrors[req.propertyNumber].warnings.length > 0 && (
+                        <p className="mt-1 text-amber-800">
+                          {additionalApprovalErrors[req.propertyNumber].warnings.join("، ")}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

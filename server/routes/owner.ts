@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { requireOwner } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
-import { firebaseService } from "../firebaseService";
+import {
+  firebaseService,
+  LinkedPropertyMutationError,
+  PaymentActionConflictError,
+  PaymentActionEligibilityError,
+  PaymentRetryNotAllowedError,
+} from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL, countR2Images } from "../utils/r2";
 import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
 import multer from "multer";
@@ -17,7 +23,7 @@ import {
   notifyReceiptUpload,
   notifyNewPayment,
 } from "../integrations/whatsapp";
-import { paymobService } from "../integrations/paymob";
+import { PaymobIntentionError, paymobService } from "../integrations/paymob";
 import { scanReceiptWithAI } from "../integrations/aiReceiptScanner";
 import {
   activateVerifiedPaymentSubscription,
@@ -26,6 +32,7 @@ import {
   isActiveSubscription,
   isLegacyPaymentFulfillment,
   normalizeLinkedPropertyNumbers,
+  normalizeSubscriptionBoundaryEndDate,
   queueVerifiedNewPropertyForAdminApproval,
   syncMultiPropertyRecord,
   validatePaymentSubscriptionAction,
@@ -37,6 +44,7 @@ import {
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
 } from "../../shared/subscriptionType";
+import type { Payment } from "../../shared/schema";
 
 const router = Router();
 
@@ -55,6 +63,155 @@ const manualVerificationInFlight = new Set<string>();
 
 function isLinkedSubscriptionActive(status?: string | null): boolean {
   return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
+}
+
+/**
+ * Owner payment history is a UI summary, not a raw payment-document export.
+ * Provider correlation keys, checkout secrets, fulfillment locks and merchant
+ * fee details remain server-only for reconciliation.
+ */
+function toOwnerPaymentSummary(payment: Payment) {
+  return {
+    id: payment.id,
+    propertyNumber: payment.propertyNumber,
+    packageId: payment.packageId,
+    packageName: payment.packageName,
+    amount: payment.amount,
+    discountCode: payment.discountCode,
+    discountAmount: payment.discountAmount,
+    finalAmount: payment.finalAmount,
+    status: payment.status,
+    paymentMethod: payment.paymentMethod,
+    receiptUrl: payment.receiptUrl,
+    createdAt: payment.createdAt,
+    completedAt: payment.completedAt,
+    action: payment.action,
+    pendingStartDate: payment.pendingStartDate,
+    pendingEndDate: payment.pendingEndDate,
+    pendingPropertyApproval: payment.pendingPropertyApproval,
+    pendingSubscriptionType: payment.pendingSubscriptionType,
+    pendingPrice: payment.pendingPrice,
+    secondPropertyNumber: payment.secondPropertyNumber,
+    additionalProperties: payment.additionalProperties,
+    linkedProperties: payment.linkedProperties,
+    notes: payment.notes,
+  };
+}
+
+class LinkedPropertyRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+    readonly missingFields?: string[],
+  ) {
+    super(message);
+    this.name = "LinkedPropertyRequestError";
+  }
+}
+
+async function validateRequestedLinkedProperties(params: {
+  mainProperty: any;
+  currentSubscription?: any;
+  requestedPropertyNumbers: string[];
+  pkg: any;
+}): Promise<void> {
+  const { mainProperty, currentSubscription, requestedPropertyNumbers, pkg } = params;
+  const maxPropertiesValue = Number(pkg.maxProperties || pkg.propertyCount || 1);
+  const maxProperties = Number.isFinite(maxPropertiesValue) && maxPropertiesValue > 0
+    ? Math.floor(maxPropertiesValue)
+    : 1;
+  if (requestedPropertyNumbers.length + 1 > maxProperties) {
+    throw new LinkedPropertyRequestError(
+      `هذه الباقة تدعم ${maxProperties} عقار كحد أقصى`,
+      400,
+      "PACKAGE_PROPERTY_LIMIT_EXCEEDED",
+    );
+  }
+
+  const ownerPin = String(mainProperty?.pin || "").trim();
+  const canonicalGroup = String(
+    currentSubscription?.linkedProperty || mainProperty.propertyNumber,
+  ).trim();
+  const currentMembers = new Set<string>([
+    canonicalGroup,
+    mainProperty.propertyNumber,
+    ...(Array.isArray(currentSubscription?.linkedProperties)
+      ? currentSubscription.linkedProperties
+      : []),
+  ]);
+
+  for (const requestedPropertyNumber of requestedPropertyNumbers) {
+    const linkedProperty = await firebaseService.getPropertyByNumber(
+      requestedPropertyNumber,
+    );
+    if (!linkedProperty) {
+      throw new LinkedPropertyRequestError(
+        `العقار المرتبط ${requestedPropertyNumber} غير موجود`,
+        404,
+        "LINKED_PROPERTY_NOT_FOUND",
+      );
+    }
+    const linkedPin = String(linkedProperty.pin || "").trim();
+    if (!ownerPin || !linkedPin || linkedPin !== ownerPin) {
+      throw new LinkedPropertyRequestError(
+        `العقار ${requestedPropertyNumber} يخص مالكاً آخر`,
+        403,
+        "LINKED_PROPERTY_FORBIDDEN",
+      );
+    }
+
+    const [linkedSubscription, imageCount] = await Promise.all([
+      firebaseService.getSubscriptionByPropertyNumber(requestedPropertyNumber),
+      countR2Images(requestedPropertyNumber),
+    ]);
+    const userDataCheck = checkPropertyUserDataComplete(linkedProperty);
+    const approvalDataCheck = await checkPropertyDataComplete(
+      linkedProperty,
+      imageCount,
+    );
+    const missingFields = Array.from(new Set([
+      ...userDataCheck.missingFields,
+      ...approvalDataCheck.missingFields,
+    ]));
+    if (missingFields.length > 0) {
+      throw new LinkedPropertyRequestError(
+        `بيانات العقار ${requestedPropertyNumber} غير مكتملة`,
+        400,
+        "LINKED_PROPERTY_INCOMPLETE",
+        missingFields,
+      );
+    }
+
+    const linkedIsActive = Boolean(
+      linkedSubscription?.endDate &&
+      isLinkedSubscriptionActive(linkedSubscription.status) &&
+      calculateRemainingDays(linkedSubscription.endDate) >= 0,
+    );
+    const belongsToCurrentGroup =
+      currentMembers.has(requestedPropertyNumber) ||
+      linkedSubscription?.linkedProperty === canonicalGroup;
+    const linkedParent = String(linkedSubscription?.linkedProperty || "").trim();
+    const hasForeignHistoricalLink = Boolean(
+      linkedParent && linkedParent !== canonicalGroup,
+    );
+    const ownsAnotherGroup = Array.isArray(linkedSubscription?.linkedProperties) &&
+      linkedSubscription.linkedProperties.some(
+        (member: string) =>
+          member !== requestedPropertyNumber && member !== canonicalGroup,
+      );
+    if (
+      hasForeignHistoricalLink ||
+      ownsAnotherGroup ||
+      (linkedIsActive && !belongsToCurrentGroup)
+    ) {
+      throw new LinkedPropertyRequestError(
+        `العقار ${requestedPropertyNumber} مرتبط باشتراك آخر`,
+        409,
+        "LINKED_PROPERTY_ALREADY_ACTIVE",
+      );
+    }
+  }
 }
 
 function getPaymentTime(value: any): number {
@@ -400,9 +557,7 @@ router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => 
 // ======================================================
 router.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
   try {
-    const propertyNumber =
-      req.cookies?.ownerPropertyNumber ||
-      (req.session as any)?.propertyNumber;
+    const propertyNumber = (req.session as any)?.propertyNumber;
 
     if (!propertyNumber) {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
@@ -446,9 +601,7 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
     });
   } catch (err: any) {
     console.error("Get subscription error:", err?.message);
-    const propertyNumber =
-      req.cookies?.ownerPropertyNumber ||
-      (req.session as any)?.propertyNumber || "unknown";
+    const propertyNumber = (req.session as any)?.propertyNumber || "unknown";
     res.json({
       id: `SUB-${propertyNumber}`,
       propertyNumber,
@@ -466,10 +619,9 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
 // ======================================================
 router.get("/api/owner/payments", requireOwner, async (req, res) => {
   try {
-    // اقرأ رقم العقار من الكوكي وليس السيشن
-    const propertyNumber =
-      req.cookies?.ownerPropertyNumber ||
-      (req.session as any)?.propertyNumber;
+    // Bind record selection only to the authenticated server-side session.
+    // The legacy ownerPropertyNumber cookie is caller-controlled.
+    const propertyNumber = (req.session as any)?.propertyNumber;
 
     if (!propertyNumber) {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
@@ -477,7 +629,7 @@ router.get("/api/owner/payments", requireOwner, async (req, res) => {
 
     const payments = await paymentService.getByProperty(propertyNumber);
 
-    res.json(payments);
+    res.json(payments.map(toOwnerPaymentSummary));
   } catch (err: any) {
     console.error("Get owner payments error:", err?.message);
     res.status(500).json({ error: "Failed to load payments" });
@@ -648,6 +800,21 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
     const payments = sortPaymentsNewestFirst(await paymentService.getByProperty(propertyNumber));
     const latestPayment = payments[0];
 
+    if (
+      latestPayment &&
+      OWNER_PAYMENT_ATTENTION_STATUSES.has(latestPayment.status) &&
+      await firebaseService.reconcileAppliedPaymentStatus(latestPayment.id)
+    ) {
+      return res.json({
+        hasPending: false,
+        reconciled: true,
+        payment: {
+          ...latestPayment,
+          status: "مكتمل",
+        },
+      });
+    }
+
     if (!latestPayment || !OWNER_PAYMENT_ATTENTION_STATUSES.has(latestPayment.status)) {
       if (latestPayment?.status === "مرفوض") {
         return res.json({
@@ -716,13 +883,20 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 // 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
 // ======================================================
-router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async (req, res) => {
+router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
+  let uploadedReceiptKey: string | null = null;
   try {
     const { propertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
     const isAddon = action === "addon";
 
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
+    }
+    if (propertyNumber !== (req.session as any).propertyNumber) {
+      return res.status(403).json({
+        error: "لا يمكنك إنشاء دفعة لعقار آخر",
+        code: "PROPERTY_SESSION_MISMATCH",
+      });
     }
 
     if (!req.file) {
@@ -780,6 +954,14 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
       { additionalProperties: allAdditionalProps, secondPropertyNumber: parsedSecondPropertyNumber },
       propertyNumber,
     );
+    if (!isAddon && allAdditionalProps.length > 0) {
+      await validateRequestedLinkedProperties({
+        mainProperty: property,
+        currentSubscription: currentSubscriptionForAction,
+        requestedPropertyNumbers: allAdditionalProps,
+        pkg,
+      });
+    }
     
     // Calculate final price based on number of properties
     // Pricing model: 50 SAR for main property + 25 SAR for each additional property
@@ -826,6 +1008,7 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
           ContentType: contentType,
         })
       );
+      uploadedReceiptKey = receiptKey;
       receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
     }
 
@@ -1175,6 +1358,27 @@ router.post("/api/owner/payment/bank-transfer", upload.single("receipt"), async 
     });
   } catch (err: any) {
     console.error("Bank transfer error:", err);
+    if (
+      err instanceof PaymentActionConflictError ||
+      err instanceof PaymentActionEligibilityError ||
+      err instanceof LinkedPropertyRequestError
+    ) {
+      if (uploadedReceiptKey && r2 && R2_BUCKET) {
+        await r2.send(new DeleteObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: uploadedReceiptKey,
+        })).catch((cleanupError) =>
+          console.error("Failed to remove unused bank-transfer receipt:", cleanupError),
+        );
+      }
+      return res.status(err.status).json({
+        error: err.message,
+        code: err.code,
+        ...(err instanceof LinkedPropertyRequestError && err.missingFields
+          ? { missingFields: err.missingFields }
+          : {}),
+      });
+    }
     res.status(500).json({ error: "خطأ في معالجة التحويل البنكي" });
   }
 });
@@ -1445,6 +1649,18 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       if (claimResult.status === "processing") {
         return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
       }
+      if (claimResult.status === "action_conflict") {
+        return res.status(409).json({
+          error: "يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار",
+          code: "PAYMENT_ACTION_IN_PROGRESS",
+        });
+      }
+      if (claimResult.status === "action_ineligible") {
+        return res.status(409).json({
+          error: "لم تعد حالة الاشتراك تسمح بتنفيذ إجراء هذه الدفعة",
+          code: "PAYMENT_ACTION_NO_LONGER_ELIGIBLE",
+        });
+      }
       if (claimResult.status === "fulfilled") {
         if (property.verificationStatus !== "approved") {
           await firebaseService.updateVerificationStatus(propertyNumber, "approved");
@@ -1530,6 +1746,18 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       if (claimResult.status === "processing") {
         return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
       }
+      if (claimResult.status === "action_conflict") {
+        return res.status(409).json({
+          error: "يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار",
+          code: "PAYMENT_ACTION_IN_PROGRESS",
+        });
+      }
+      if (claimResult.status === "action_ineligible") {
+        return res.status(409).json({
+          error: "لم تعد حالة الاشتراك تسمح بتنفيذ إجراء هذه الدفعة",
+          code: "PAYMENT_ACTION_NO_LONGER_ELIGIBLE",
+        });
+      }
       fulfillmentClaim = { paymentId: pendingPayment.id, token: claimResult.token };
 
       const calculatedDates = calculateActionDates(
@@ -1549,6 +1777,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       const endDate = pendingEndDate && Number.isFinite(pendingEndDate.getTime())
         ? pendingEndDate
         : calculatedDates.endDate;
+      const normalizedEndDate = normalizeSubscriptionBoundaryEndDate(endDate);
 
       const isPremiumApproval = isPremiumSubscriptionType(pkg.type) || pendingPayment.finalAmount > 0;
 
@@ -1558,7 +1787,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         subscriptionType: isPremiumApproval ? "مميز" : "عادي",
         packageType: isPremiumApproval ? "مميز" : "عادي",
         startDate: formatDateRiyadh(startDate),
-        endDate: formatDateRiyadh(endDate),
+        endDate: normalizedEndDate,
         paymentId: pendingPayment.id,
       };
 
@@ -1590,7 +1819,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
             linkedProperties: [(pendingPayment as any).secondPropertyNumber],
             packageId: pkg.id,
             startDate: formatDateRiyadh(startDate),
-            endDate: formatDateRiyadh(endDate),
+            endDate: normalizedEndDate,
             paymentId: pendingPayment.id,
           });
         }
@@ -1848,7 +2077,14 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
 });
 
 
-router.post("/api/owner/payment/initiate", async (req, res) => {
+router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
+  let createdPaymentId: string | null = null;
+  let paymentIntentionRequestStarted = false;
+  let paymentIntentionPersisted = false;
+  let knownPaymentIntention: {
+    intentionId: string;
+    checkoutUrl: string;
+  } | null = null;
   try {
     const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
     const sessionPropertyNumber = (req.session as any).propertyNumber;
@@ -1857,9 +2093,15 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     if (!propertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
+    if (propertyNumber !== sessionPropertyNumber) {
+      return res.status(403).json({
+        error: "لا يمكنك إنشاء دفعة لعقار آخر",
+        code: "PROPERTY_SESSION_MISMATCH",
+      });
+    }
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (!property && action !== 'new') {
+    if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
@@ -1920,6 +2162,14 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
 
     const currentSubscriptionForPaymentAction =
       await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    if (allAdditionalProps.length > 0) {
+      await validateRequestedLinkedProperties({
+        mainProperty: property,
+        currentSubscription: currentSubscriptionForPaymentAction,
+        requestedPropertyNumbers: allAdditionalProps,
+        pkg,
+      });
+    }
     const actionValidation = validatePaymentSubscriptionAction(
       action,
       currentSubscriptionForPaymentAction,
@@ -1977,6 +2227,7 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
     } as any);
+    createdPaymentId = payment.id;
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
     // للتمديد/الترقية بالبطاقة: احفظ التواريخ المعلقة (محدودة بـ40 يوماً) حتى يتمكن
@@ -1997,22 +2248,32 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
       });
     }
 
-    const paymentReference = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-    await paymentService.update(payment.id, { paymentReference });
+    const merchantAttemptKey = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    await paymentService.update(payment.id, {
+      merchantAttemptKey,
+      intentionState: "creating",
+    });
 
+    paymentIntentionRequestStarted = true;
     const paymobPayment = await paymobService.createIntention(
       finalAmount,
       propertyNumber,
       property?.name || "عقار",
       property?.whatsappNumber || "0500000000",
       pkg.name,
-      pkg.duration || 30
+      pkg.duration || 30,
+      "cards",
+      { merchantAttemptKey, paymentId: payment.id },
     );
+    knownPaymentIntention = paymobPayment;
 
     await paymentService.update(payment.id, {
       paymentReference: paymobPayment.intentionId,
       transactionId: paymobPayment.intentionId,
+      paymentCheckoutUrl: paymobPayment.checkoutUrl,
+      intentionState: "created",
     });
+    paymentIntentionPersisted = true;
 
     res.json({
       ok: true,
@@ -2027,12 +2288,64 @@ router.post("/api/owner/payment/initiate", async (req, res) => {
     });
   } catch (err: any) {
     console.error("Initiate payment error:", err);
+    if (createdPaymentId && !paymentIntentionPersisted) {
+      if (knownPaymentIntention) {
+        // Paymob returned a usable intention. Preserve and reuse it even when
+        // the first local persistence attempt failed; never mint a duplicate.
+        await paymentService.update(createdPaymentId, {
+          paymentReference: knownPaymentIntention.intentionId,
+          transactionId: knownPaymentIntention.intentionId,
+          paymentCheckoutUrl: knownPaymentIntention.checkoutUrl,
+          intentionState: "created",
+        }).catch((cleanupError) =>
+          console.error("Failed to persist known Paymob intention:", cleanupError),
+        );
+      } else if (
+        !paymentIntentionRequestStarted ||
+        (err instanceof PaymobIntentionError && err.certainty === "rejected")
+      ) {
+        await firebaseService.releasePaymentActionReservation(createdPaymentId, {
+          status: "فشل" as any,
+          intentionState: "failed",
+        }).catch((cleanupError) =>
+          console.error("Failed to finalize rejected Paymob intention:", cleanupError),
+        );
+      } else {
+        // A timeout/5xx/malformed provider response can still have created an
+        // intention. Retain all action locks and fail closed until reconciled.
+        await paymentService.update(createdPaymentId, {
+          intentionState: "unknown",
+        }).catch((cleanupError) =>
+          console.error("Failed to mark ambiguous Paymob intention:", cleanupError),
+        );
+      }
+    }
+    if (
+      err instanceof PaymentActionConflictError ||
+      err instanceof PaymentActionEligibilityError ||
+      err instanceof LinkedPropertyRequestError
+    ) {
+      return res.status(err.status).json({
+        error: err.message,
+        code: err.code,
+        ...(err instanceof LinkedPropertyRequestError && err.missingFields
+          ? { missingFields: err.missingFields }
+          : {}),
+      });
+    }
     res.status(500).json({ error: err.message || "خطأ في بدء الدفع" });
   }
 });
 
 // POST /api/owner/payment/retry - Retry failed/pending payment
 router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
+  let retryReservation: { paymentId: string; token: string } | null = null;
+  let retryIntentionRequestStarted = false;
+  let retryIntentionPersisted = false;
+  let knownRetryIntention: {
+    intentionId: string;
+    checkoutUrl: string;
+  } | null = null;
   try {
     const { paymentId } = req.body;
     const propertyNumber = (req.session as any).propertyNumber;
@@ -2058,6 +2371,31 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
     if (payment.fulfilledAt || payment.fulfillmentState === "fulfilled") {
       return res.status(400).json({ error: "تم تفعيل هذه الدفعة مسبقاً" });
     }
+
+    if (
+      payment.intentionState === "created" &&
+      payment.paymentCheckoutUrl &&
+      (payment.transactionId || payment.paymentReference)
+    ) {
+      return res.json({
+        ok: true,
+        checkoutUrl: payment.paymentCheckoutUrl,
+        paymentId: payment.id,
+        reused: true,
+      });
+    }
+    if (
+      payment.intentionState === "creating" ||
+      payment.intentionState === "unknown" ||
+      payment.transactionId ||
+      payment.paymentReference
+    ) {
+      return res.status(409).json({
+        error: "تعذر تأكيد نتيجة محاولة الدفع السابقة. لن يتم إنشاء دفعة جديدة حتى التحقق منها.",
+        code: "PAYMENT_INTENTION_UNRESOLVED",
+      });
+    }
+
     if (payment.fulfillmentState === "processing") {
       return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
     }
@@ -2089,11 +2427,19 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       });
     }
 
+    const reservedRetry = await firebaseService.reservePaymentActionForRetry(
+      payment.id,
+    );
+    retryReservation = {
+      paymentId: payment.id,
+      token: reservedRetry.token,
+    };
+
     let refreshedPendingDates: { pendingStartDate: string; pendingEndDate: string } | null = null;
     if (payment.action === "extend" || payment.action === "upgrade") {
       const refreshedDates = calculateActionDates(
         payment.action,
-        currentSubscription,
+        reservedRetry.subscription,
         pkg.duration,
       );
       refreshedPendingDates = {
@@ -2105,6 +2451,8 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
     const phone = property?.whatsappNumber || "0500000000";
     const propertyName = property?.name || "عقار";
 
+    await paymentService.update(payment.id, { intentionState: "creating" });
+    retryIntentionRequestStarted = true;
     const paymobResult = await paymobService.createIntention(
       payment.finalAmount,
       payment.propertyNumber,
@@ -2112,14 +2460,27 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       phone,
       pkg.name,
       pkg.duration || 30,
-      "cards"
+      "cards",
+      {
+        merchantAttemptKey: reservedRetry.merchantAttemptKey,
+        paymentId: payment.id,
+      },
     );
+    knownRetryIntention = paymobResult;
 
-    await paymentService.update(paymentId, {
-      paymentReference: paymobResult.intentionId,
-      transactionId: paymobResult.intentionId,
-      ...(refreshedPendingDates || {}),
-    });
+    await firebaseService.completePaymentActionRetryReservation(
+      paymentId,
+      reservedRetry.token,
+      {
+        paymentReference: paymobResult.intentionId,
+        transactionId: paymobResult.intentionId,
+        paymentCheckoutUrl: paymobResult.checkoutUrl,
+        intentionState: "created",
+        ...(refreshedPendingDates || {}),
+      },
+    );
+    retryIntentionPersisted = true;
+    retryReservation = null;
 
     res.json({
       ok: true,
@@ -2127,7 +2488,56 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       paymentId: paymentId,
     });
   } catch (err: any) {
+    if (retryReservation) {
+      if (knownRetryIntention && !retryIntentionPersisted) {
+        await firebaseService.completePaymentActionRetryReservation(
+          retryReservation.paymentId,
+          retryReservation.token,
+          {
+            paymentReference: knownRetryIntention.intentionId,
+            transactionId: knownRetryIntention.intentionId,
+            paymentCheckoutUrl: knownRetryIntention.checkoutUrl,
+            intentionState: "created",
+          },
+        ).catch((persistenceError) =>
+          console.error("Failed to persist known retry intention:", persistenceError),
+        );
+      } else if (
+        !retryIntentionRequestStarted ||
+        (err instanceof PaymobIntentionError && err.certainty === "rejected")
+      ) {
+        await firebaseService.releasePaymentActionRetryReservation(
+          retryReservation.paymentId,
+          retryReservation.token,
+          {
+            status: "فشل" as any,
+            intentionState: "failed",
+          },
+        ).catch((releaseError) =>
+          console.error("Failed to release rejected payment retry:", releaseError),
+        );
+      } else {
+        await firebaseService.completePaymentActionRetryReservation(
+          retryReservation.paymentId,
+          retryReservation.token,
+          { intentionState: "unknown" },
+        ).catch((persistenceError) =>
+          console.error("Failed to retain ambiguous payment retry:", persistenceError),
+        );
+      }
+      retryReservation = null;
+    }
     console.error("Payment retry error:", err);
+    if (
+      err instanceof PaymentActionConflictError ||
+      err instanceof PaymentActionEligibilityError ||
+      err instanceof PaymentRetryNotAllowedError
+    ) {
+      return res.status(err.status).json({
+        error: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ error: err.message || "خطأ في إعادة الدفع" });
   }
 });
@@ -2273,8 +2683,22 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
 
     // Check if already linked
     const existingSub = await firebaseService.getSubscriptionByPropertyNumber(additionalPropertyNumber);
-    if (existingSub && (existingSub.linkedProperty === ownerPropertyNumber || isLinkedSubscriptionActive(existingSub.status))) {
-      return res.status(400).json({ error: "هذا العقار مرتبط بالفعل بعقار آخر" });
+    const existingParent = String(existingSub?.linkedProperty || "").trim();
+    if (
+      existingSub &&
+      (
+        (existingParent && existingParent !== ownerPropertyNumber) ||
+        (
+          isLinkedSubscriptionActive(existingSub.status) &&
+          calculateRemainingDays(existingSub.endDate) >= 0 &&
+          existingParent !== ownerPropertyNumber
+        )
+      )
+    ) {
+      return res.status(409).json({
+        error: "هذا العقار مرتبط بالفعل باشتراك آخر",
+        code: "LINKED_PROPERTY_ALREADY_ACTIVE",
+      });
     }
 
     // Get the owner's active subscription to auto-activate
@@ -2299,106 +2723,11 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       });
     }
 
-    // Check maxProperties limit
-    const currentLinkedProperties = ownerSubscription.linkedProperties || [];
-    const linkedCount = currentLinkedProperties.filter(lp => lp !== ownerPropertyNumber).length;
-    
-    let maxProperties = 30;
-    if (ownerSubscription.packageId) {
-      const ownerPackage = await firebaseService.getPackageById(ownerSubscription.packageId);
-      if (ownerPackage) {
-        maxProperties = (ownerPackage as any).maxProperties || 30;
-      }
-    }
-    
-    if (linkedCount >= maxProperties) {
-      return res.status(400).json({
-        error: `لا يمكن إضافة أكثر من ${maxProperties} عقار في هذه الباقة`
-      });
-    }
-
-    // Cross-validate: check if the original payment covered enough properties
-    if (ownerSubscription.paymentId) {
-      const linkedPayment = await firebaseService.getPaymentById(ownerSubscription.paymentId);
-      if (linkedPayment) {
-        const paymentTotalProps = 1 + ((linkedPayment as any).additionalProperties?.length || 0) + ((linkedPayment as any).secondPropertyNumber ? 1 : 0);
-        const currentlyLinked = linkedCount + 1; // +1 for this new property
-        if (currentlyLinked > paymentTotalProps) {
-          console.log(`[request-additional-property] ⚠️ Payment (${ownerSubscription.paymentId}) covered ${paymentTotalProps} properties, but ${currentlyLinked} would be linked`);
-          // Don't block — the package maxProperties is the final authority
-          // But log the discrepancy for audit
-        }
-      }
-    }
-
-    // Auto-activate: create subscription for the additional property
-    const linkedSubData = {
-      packageId: ownerSubscription.packageId,
-      price: 0,
-      subscriptionType: getSubscriptionTypeLabel(ownerSubscription.subscriptionType || ownerSubscription.packageType),
-      packageType: getSubscriptionTypeLabel(ownerSubscription.packageType || ownerSubscription.subscriptionType),
-      startDate: ownerSubscription.startDate,
-      endDate: ownerSubscription.endDate,
-      linkedProperty: ownerPropertyNumber,
-      status: "نشط"
-    };
-
-    await firebaseService.addSubscriptionToSheet(
-      additionalPropertyNumber,
-      linkedSubData,
-      additionalProperty,
-      ""
-    );
-
-    // Update main property's subscription linkedProperties
-    const mainSubDoc = await firebaseService.getSubscriptionByPropertyNumber(ownerPropertyNumber);
-    if (mainSubDoc) {
-      const updatedLinkedProps = [...(mainSubDoc.linkedProperties || []), additionalPropertyNumber];
-      await firebaseService.updateSubscription(mainSubDoc.id, {
-        linkedProperties: updatedLinkedProps,
-        propertyCount: updatedLinkedProps.length + 1
-      });
-    }
-
-    // Update multi_property_subscriptions record
-    const multiSubs = await firebaseService.getMultiPropertySubscriptions();
-    const existingMulti = multiSubs.find(m => m.propertyNumber1 === ownerPropertyNumber && isLinkedSubscriptionActive(m.status));
-    if (existingMulti) {
-      const newAdditional = [...(existingMulti.additionalProperties || []), additionalPropertyNumber];
-      const uniqueAdd = new Set<string>([existingMulti.propertyNumber1]);
-      if (existingMulti.propertyNumber2) uniqueAdd.add(existingMulti.propertyNumber2);
-      for (const ap of newAdditional) uniqueAdd.add(ap);
-      const allLinked = Array.from(uniqueAdd);
-      
-      await firebaseService.updateMultiPropertySubscription(existingMulti.id, {
-        additionalProperties: newAdditional,
-        linkedProperties: allLinked,
-        propertyCount: allLinked.length
-      });
-    } else {
-      await firebaseService.createMultiPropertySubscription({
-        packageId: ownerSubscription.packageId,
-        propertyNumber1: ownerPropertyNumber,
-        propertyNumber2: additionalPropertyNumber,
-        additionalProperties: [additionalPropertyNumber],
-        linkedProperties: [ownerPropertyNumber, additionalPropertyNumber],
-        propertyCount: 2,
-        startDate: ownerSubscription.startDate,
-        endDate: ownerSubscription.endDate,
-        status: "نشط",
-        paymentId: ownerSubscription.paymentId
-      });
-    }
-
-    // Update property fields
-    await firebaseService.updateProperty(additionalPropertyNumber, {
-      subscriptionType: getSubscriptionTypeLabel(ownerSubscription.subscriptionType || ownerSubscription.packageType),
-      pendingApprovalFrom: "" as any
+    const mutation = await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: ownerPropertyNumber,
+      addPropertyNumbers: [additionalPropertyNumber],
+      approveAddedProperties: true,
     });
-
-    // العقار المضاف يرث حالة التحقق من العقار الرئيسي — يُوافق عليه تلقائياً
-    // (بدلاً من تركه معلقاً/مرفوضاً مما يُظهر العقار الرئيسي نشطاً والمضاف غير نشط)
-    await firebaseService.updateVerificationStatus(additionalPropertyNumber, "approved");
 
     res.json({
       ok: true,
@@ -2407,11 +2736,14 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       additionalProperty: {
         number: additionalProperty.propertyNumber,
         name: additionalProperty.name,
-        subscription: linkedSubData
+        subscription: mutation.mainSubscription,
       }
     });
   } catch (err: any) {
     console.error("Request additional property error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     res.status(500).json({ error: err?.message || "فشل في إضافة العقار" });
   }
 });
@@ -2530,21 +2862,10 @@ router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requi
       return res.status(400).json({ success: false, message: "العقار غير مرتبط بعقارك" });
     }
 
-    const updatedLinkedProperties = currentLinkedProperties.filter((p: string) => p !== linkedPropertyNumber);
-    await firebaseService.updateSubscription(mainSubscription.id, {
-      linkedProperties: updatedLinkedProperties,
-      propertyCount: updatedLinkedProperties.length + 1
-    });
-
-    const linkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(linkedPropertyNumber);
-    if (linkedSubscription) {
-      await firebaseService.updateSubscription(linkedSubscription.id, {
-        linkedProperty: ""
-      });
-    }
-
-    await firebaseService.updateProperty(linkedPropertyNumber, {
-      pendingApprovalFrom: ""
+    await firebaseService.mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber,
+      removePropertyNumbers: [linkedPropertyNumber],
+      cancelRemovedSubscriptions: true,
     });
 
     // Log the unlink against the payment record for audit trail
@@ -2572,6 +2893,13 @@ router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requi
     });
   } catch (err: any) {
     console.error("Unlink property error:", err);
+    if (err instanceof LinkedPropertyMutationError) {
+      return res.status(err.status).json({
+        success: false,
+        message: err.message,
+        code: err.code,
+      });
+    }
     res.status(500).json({ success: false, message: "فشل في فصل العقار المرتبط" });
   }
 });
@@ -2723,6 +3051,18 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     if (claimResult.status === "processing") {
       return res.status(409).json({ error: "تفعيل هذه الدفعة قيد التنفيذ بالفعل" });
     }
+    if (claimResult.status === "action_conflict") {
+      return res.status(409).json({
+        error: "يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار",
+        code: "PAYMENT_ACTION_IN_PROGRESS",
+      });
+    }
+    if (claimResult.status === "action_ineligible") {
+      return res.status(409).json({
+        error: "لم تعد حالة الاشتراك تسمح بتنفيذ إجراء هذه الدفعة",
+        code: "PAYMENT_ACTION_NO_LONGER_ELIGIBLE",
+      });
+    }
     fulfillmentClaim = { paymentId: paymentRecord.id, token: claimResult.token };
 
     const hasLinkedGroup = normalizeLinkedPropertyNumbers(paymentRecord as any, propertyNumber).length > 0 ||
@@ -2777,9 +3117,12 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     const newStartDate = persistedStartDate && Number.isFinite(persistedStartDate.getTime())
       ? persistedStartDate
       : calculatedDates.startDate;
-    const newEndDate = persistedEndDate && Number.isFinite(persistedEndDate.getTime())
+    const uncappedEndDate = persistedEndDate && Number.isFinite(persistedEndDate.getTime())
       ? persistedEndDate
       : calculatedDates.endDate;
+    const newEndDate = new Date(
+      normalizeSubscriptionBoundaryEndDate(uncappedEndDate),
+    );
     console.log(
       action === 'extend'
         ? `📅 [Owner Confirm] Extending from ${currentSubscription?.endDate} + ${newPackage.duration} days`
