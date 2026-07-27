@@ -4,6 +4,7 @@ import { firebaseService } from "../firebaseService";
 import type { NotificationSettings } from "../../shared/schema";
 import { requireAdmin, requireSameOrigin } from "../routes/middleware";
 import { isPropertySuspended } from "../services/propertySuspension";
+import { formatDateRiyadh } from "../utils/dateUtils";
 
 const router = express.Router();
 
@@ -712,6 +713,25 @@ export async function sendPropertyOwnerWhatsApp(options: {
   return sendPropertyOwnerWhatsAppWithDefaults(options);
 }
 
+export function buildOwnerSubscriptionActivatedMessage(data: {
+  propertyNumber: string;
+  propertyName: string;
+  endDate: string;
+}): string {
+  const parsedEndDate = new Date(data.endDate);
+  const displayedEndDate = Number.isFinite(parsedEndDate.getTime())
+    ? formatDateRiyadh(parsedEndDate)
+    : data.endDate;
+
+  return `مرحبا بك في نظام روقـان للعقارات
+
+تم تفعيل اشتراكك للعقار ${data.propertyName} رقم ${data.propertyNumber}
+
+صالح حتى ${displayedEndDate}
+
+شكرا لثقتك بنا`;
+}
+
 /**
  * إشعار تفعيل الاشتراك للمالك
  */
@@ -722,13 +742,7 @@ export async function notifyOwnerSubscriptionActivated(data: {
   endDate: string;
   message?: string;
 }) {
-  const defaultMessage = `مرحبا بك في نظام روقـان للعقارات
-
-تم تفعيل اشتراكك للعقار ${data.propertyName} رقم ${data.propertyNumber}
-
-صالح حتى ${data.endDate}
-
-شكرا لثقتك بنا`;
+  const defaultMessage = buildOwnerSubscriptionActivatedMessage(data);
 
   const finalMessage = data.message || defaultMessage;
 

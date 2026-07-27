@@ -4,11 +4,23 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { firebaseService } from "../firebaseService";
 import whatsappRouter, {
+  buildOwnerSubscriptionActivatedMessage,
   createPropertyOwnerWhatsAppSender,
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
 } from "./whatsapp";
+
+test("subscription activation message displays an ISO end date as a Riyadh calendar date", () => {
+  const message = buildOwnerSubscriptionActivatedMessage({
+    propertyNumber: "66077",
+    propertyName: "ڤي ڤي فيلا الفندقيه",
+    endDate: "2026-08-28T00:00:00.000Z",
+  });
+
+  assert.match(message, /صالح حتى 2026-08-28/);
+  assert.doesNotMatch(message, /T00:00:00\.000Z/);
+});
 
 test("property owner sender rechecks suspension immediately before every retry", async () => {
   const suspensionStates = [false, true];
