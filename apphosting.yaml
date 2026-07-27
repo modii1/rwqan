@@ -23,6 +23,11 @@ env:
     value: production
     availability:
       - RUNTIME
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://rwqan.sa
+    availability:
+      - BUILD
+      - RUNTIME
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
   # - variable: MESSAGE

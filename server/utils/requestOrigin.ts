@@ -14,7 +14,13 @@ function normalizeOrigin(value: string | undefined): string | null {
  * non-browser/server clients that legitimately omit Origin.
  */
 export function isSameOriginRequest(req: Request): boolean {
-  if (req.get("sec-fetch-site") === "cross-site") return false;
+  const fetchSite = req.get("sec-fetch-site")?.trim().toLowerCase();
+  if (fetchSite === "cross-site") return false;
+
+  // Sec-Fetch-Site is a browser-controlled forbidden request header. When it
+  // says same-origin, trust that signal even if a managed reverse proxy exposes
+  // its internal Host to Express instead of the public browser-facing host.
+  if (fetchSite === "same-origin") return true;
 
   const requestOrigin = normalizeOrigin(req.get("origin"));
   if (!requestOrigin) return !req.get("origin");

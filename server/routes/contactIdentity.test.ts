@@ -223,6 +223,19 @@ test("contact identity API returns only masked state and manages its own protect
         else process.env.NEXT_PUBLIC_BASE_URL = previousBaseUrl;
       }
     });
+
+    await t.test("same-origin browser metadata is accepted behind an internal App Hosting host", async () => {
+      const response = await fetch(`${baseUrl}/api/contact-identity`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://rwqan.sa",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ clientPhone: "0512345678" }),
+      });
+      assert.equal(response.status, 200);
+    });
   } finally {
     propertyService.getByNumber = originals.getByNumber;
     contactIdentityService.resolve = originals.resolve;

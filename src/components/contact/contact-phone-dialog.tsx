@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
-import { Loader2, Phone } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { normalizePhoneDigits, normalizeSaudiMobilePhone } from "@shared/phone";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,9 +102,6 @@ export function ContactPhoneDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent dir="rtl" className="max-w-md border-[#ded3bc] bg-[#fffdf8] text-right">
         <DialogHeader className="text-right sm:text-right">
-          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-lg border border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]">
-            <Phone className="h-5 w-5" />
-          </div>
           <DialogTitle className="text-xl text-[#2f2a1f]">
             {isChangeMode ? "تغيير رقم التواصل" : "أدخل رقم جوالك للمتابعة"}
           </DialogTitle>
@@ -166,8 +163,7 @@ export function ContactPhoneDialog({
                   {isChangeMode ? "جاري الحفظ..." : "جاري الفتح..."}
                 </span>
               ) : (
-                <span className="flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
+                <span>
                   {isChangeMode ? "حفظ الرقم الجديد" : "حفظ والمتابعة لواتساب"}
                 </span>
               )}

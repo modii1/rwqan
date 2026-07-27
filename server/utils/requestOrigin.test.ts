@@ -26,6 +26,17 @@ test("same-origin validation accepts direct and non-browser requests", () => {
   );
 });
 
+test("browser same-origin metadata survives a managed proxy with an internal Host", () => {
+  assert.equal(
+    isSameOriginRequest(requestWith({
+      host: "internal-service.local",
+      origin: "https://rwqan.example",
+      "sec-fetch-site": "same-origin",
+    }, "http")),
+    true,
+  );
+});
+
 test("same-origin validation rejects explicit cross-site and malformed origins", () => {
   assert.equal(
     isSameOriginRequest(requestWith({ host: "rwqan.example", origin: "https://evil.example" })),
@@ -52,6 +63,17 @@ test("forwarded host cannot authorize an attacker-controlled origin", () => {
       origin: "https://evil.example",
       "x-forwarded-host": "evil.example",
       "x-forwarded-proto": "https",
+    })),
+    false,
+  );
+});
+
+test("same-site metadata alone does not authorize an unconfigured origin", () => {
+  assert.equal(
+    isSameOriginRequest(requestWith({
+      host: "rwqan.example",
+      origin: "https://sibling.example",
+      "sec-fetch-site": "same-site",
     })),
     false,
   );
