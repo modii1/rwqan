@@ -183,18 +183,26 @@ test("new-property queue stores and returns the same capped legacy pending end d
     updateProperty: firebaseService.updateProperty,
     releasePaymentFulfillment: firebaseService.releasePaymentFulfillment,
   };
-  let paymentUpdate: any;
+  let paymentUpdate: any = {};
+  const queueOperations: string[] = [];
   (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
   (firebaseService as any).claimPaymentFulfillment = async () => ({
     status: "claimed",
     token: "queue-token",
   });
   (firebaseService as any).updatePayment = async (_id: string, updates: any) => {
-    paymentUpdate = updates;
+    paymentUpdate = { ...paymentUpdate, ...updates };
+    queueOperations.push(
+      updates.propertyApprovalQueuedAt ? "queue-marker" : "payment-pending",
+    );
     return updates;
   };
-  (firebaseService as any).updateProperty = async () => undefined;
-  (firebaseService as any).releasePaymentFulfillment = async () => undefined;
+  (firebaseService as any).updateProperty = async () => {
+    queueOperations.push("property-pending");
+  };
+  (firebaseService as any).releasePaymentFulfillment = async () => {
+    queueOperations.push("claim-release");
+  };
 
   try {
     const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
@@ -224,6 +232,13 @@ test("new-property queue stores and returns the same capped legacy pending end d
 
     assert.equal(result.endDate, paymentUpdate.pendingEndDate);
     assert.equal(paymentUpdate.pendingPropertyApproval, true);
+    assert.ok(Number.isFinite(Date.parse(paymentUpdate.propertyApprovalQueuedAt)));
+    assert.deepEqual(queueOperations, [
+      "payment-pending",
+      "property-pending",
+      "queue-marker",
+      "claim-release",
+    ]);
     assert.ok(new Date(result.endDate).getTime() < farFuture.getTime());
   } finally {
     firebaseService.getSubscriptionByPropertyNumber =
@@ -448,6 +463,8 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
   let persistedPlan: any = null;
   let appliedMainSubscription: any = null;
   let failFirstVerification = true;
+  let mainSubscriptionWrites = 0;
+  let fulfillmentCompletions = 0;
   const propertyWrites: string[] = [];
   const unlinkedSubscriptionWrites: string[] = [];
 
@@ -472,6 +489,7 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
     propertyNumber: string,
     data: any,
   ) => {
+    mainSubscriptionWrites += 1;
     appliedMainSubscription = {
       id: "LEGACY-MAIN",
       propertyNumber,
@@ -494,7 +512,12 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
   };
   (firebaseService as any).getMultiPropertySubscriptions = async () => [];
   (firebaseService as any).createMultiPropertySubscription = async () => ({});
-  (firebaseService as any).completePaymentFulfillment = async () => undefined;
+  (firebaseService as any).completePaymentFulfillment = async () => {
+    fulfillmentCompletions += 1;
+  };
+
+  const requestedStartDate = new Date("2026-07-27T00:00:00.000Z");
+  const requestedEndDate = new Date("2026-08-26T20:59:59.999Z");
 
   try {
     await assert.rejects(
@@ -502,13 +525,16 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
         payment: basePayment,
         property: { propertyNumber: "PROP-MAIN" } as any,
         pkg,
-        startDate: new Date(),
-        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        startDate: requestedStartDate,
+        endDate: requestedEndDate,
       }),
       PartialMutationError,
     );
     assert.deepEqual(persistedPlan.unlinked, ["PROP-UNLINK"]);
     assert.deepEqual(appliedMainSubscription.linkedProperties, ["PROP-KEEP"]);
+    const endDateAfterFirstWrite = appliedMainSubscription.endDate;
+    assert.equal(mainSubscriptionWrites, 1);
+    assert.equal(fulfillmentCompletions, 0);
 
     const result = await activateVerifiedPaymentSubscription({
       payment: {
@@ -519,11 +545,15 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
       },
       property: { propertyNumber: "PROP-MAIN" } as any,
       pkg,
-      startDate: new Date(),
-      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      startDate: requestedStartDate,
+      endDate: requestedEndDate,
     });
 
     assert.deepEqual(result.unlinkedProperties, ["PROP-UNLINK"]);
+    assert.equal(result.endDate, endDateAfterFirstWrite);
+    assert.equal(appliedMainSubscription.endDate, endDateAfterFirstWrite);
+    assert.equal(mainSubscriptionWrites, 1);
+    assert.equal(fulfillmentCompletions, 1);
     assert.ok(propertyWrites.includes("PROP-UNLINK"));
     assert.deepEqual(unlinkedSubscriptionWrites, ["LEGACY-UNLINK"]);
   } finally {
@@ -538,5 +568,168 @@ test("activation downgrade retry uses its persisted pre-mutation group snapshot"
     firebaseService.getMultiPropertySubscriptions = originals.getMultiPropertySubscriptions;
     firebaseService.createMultiPropertySubscription = originals.createMultiPropertySubscription;
     firebaseService.completePaymentFulfillment = originals.completePaymentFulfillment;
+  }
+});
+
+test("new-property queue uses the atomic queue claim and performs no writes when already queued", async () => {
+  const originals = {
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    updatePayment: firebaseService.updatePayment,
+    updateProperty: firebaseService.updateProperty,
+    updateSubscription: firebaseService.updateSubscription,
+    releasePaymentFulfillment: firebaseService.releasePaymentFulfillment,
+  };
+  const writes: string[] = [];
+  let claimArguments: any[] | undefined;
+
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
+  (firebaseService as any).claimPaymentFulfillment = async (...args: any[]) => {
+    claimArguments = args;
+    return { status: "queued" };
+  };
+  for (const methodName of [
+    "updatePayment",
+    "updateProperty",
+    "updateSubscription",
+    "releasePaymentFulfillment",
+  ] as const) {
+    (firebaseService as any)[methodName] = async () => {
+      writes.push(methodName);
+      throw new Error(`Unexpected write: ${methodName}`);
+    };
+  }
+
+  try {
+    const result = await queueVerifiedNewPropertyForAdminApproval({
+      payment: {
+        id: "PAY-ALREADY-QUEUED",
+        propertyNumber: "PROP-ALREADY-QUEUED",
+        packageId: "PKG-1",
+        amount: 100,
+        status: "provider-paid",
+        action: "new",
+      } as any,
+      property: { propertyNumber: "PROP-ALREADY-QUEUED" } as any,
+      pkg: {
+        id: "PKG-1",
+        duration: 30,
+        price: 100,
+        type: "premium",
+      } as any,
+      startDate: "2026-07-27T00:00:00.000Z",
+      endDate: "2026-08-26T20:59:59.999Z",
+      propertyPlan: emptyPropertyPlan,
+      allowedPaymentStatuses: ["provider-paid"],
+    });
+
+    assert.equal(result.alreadyQueued, true);
+    assert.equal(result.alreadyFulfilled, undefined);
+    assert.deepEqual(claimArguments, [
+      "PAY-ALREADY-QUEUED",
+      ["provider-paid"],
+      { purpose: "queue" },
+    ]);
+    assert.deepEqual(writes, []);
+  } finally {
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.updatePayment = originals.updatePayment;
+    firebaseService.updateProperty = originals.updateProperty;
+    firebaseService.updateSubscription = originals.updateSubscription;
+    firebaseService.releasePaymentFulfillment =
+      originals.releasePaymentFulfillment;
+  }
+});
+
+test("activation returns the atomic fulfilled result without repeating writes", async () => {
+  const originals = {
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    updatePayment: firebaseService.updatePayment,
+    addSubscriptionToSheet: firebaseService.addSubscriptionToSheet,
+    updateProperty: firebaseService.updateProperty,
+    updateVerificationStatus: firebaseService.updateVerificationStatus,
+    completePaymentFulfillment: firebaseService.completePaymentFulfillment,
+    releasePaymentFulfillment: firebaseService.releasePaymentFulfillment,
+  };
+  const writes: string[] = [];
+  const existingSubscription = {
+    id: "SUB-PROP-ALREADY-FULFILLED",
+    propertyNumber: "PROP-ALREADY-FULFILLED",
+    packageId: "PKG-1",
+    startDate: "2026-07-27T00:00:00.000Z",
+    endDate: "2026-08-26T20:59:59.999Z",
+    status: "active",
+    subscriptionType: "premium",
+    linkedProperties: ["PROP-LINKED"],
+  } as any;
+
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () =>
+    existingSubscription;
+  (firebaseService as any).claimPaymentFulfillment = async () => ({
+    status: "fulfilled",
+  });
+  for (const methodName of [
+    "updatePayment",
+    "addSubscriptionToSheet",
+    "updateProperty",
+    "updateVerificationStatus",
+    "completePaymentFulfillment",
+    "releasePaymentFulfillment",
+  ] as const) {
+    (firebaseService as any)[methodName] = async () => {
+      writes.push(methodName);
+      throw new Error(`Unexpected write: ${methodName}`);
+    };
+  }
+
+  try {
+    const result = await activateVerifiedPaymentSubscription({
+      payment: {
+        id: "PAY-ALREADY-FULFILLED",
+        propertyNumber: "PROP-ALREADY-FULFILLED",
+        packageId: "PKG-1",
+        amount: 100,
+        status: "provider-paid",
+        action: "upgrade",
+      } as any,
+      property: { propertyNumber: "PROP-ALREADY-FULFILLED" } as any,
+      pkg: {
+        id: "PKG-1",
+        duration: 30,
+        price: 100,
+        type: "premium",
+      } as any,
+      startDate: "2026-07-27T00:00:00.000Z",
+      endDate: "2026-08-26T20:59:59.999Z",
+      propertyPlan: emptyPropertyPlan,
+      allowedPaymentStatuses: ["provider-paid"],
+    });
+
+    assert.equal(result.alreadyFulfilled, true);
+    assert.equal(result.startDate, existingSubscription.startDate);
+    assert.equal(result.endDate, existingSubscription.endDate);
+    assert.deepEqual(result.linkedProperties, ["PROP-LINKED"]);
+    assert.deepEqual(writes, []);
+  } finally {
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.updatePayment = originals.updatePayment;
+    firebaseService.addSubscriptionToSheet =
+      originals.addSubscriptionToSheet;
+    firebaseService.updateProperty = originals.updateProperty;
+    firebaseService.updateVerificationStatus =
+      originals.updateVerificationStatus;
+    firebaseService.completePaymentFulfillment =
+      originals.completePaymentFulfillment;
+    firebaseService.releasePaymentFulfillment =
+      originals.releasePaymentFulfillment;
   }
 });

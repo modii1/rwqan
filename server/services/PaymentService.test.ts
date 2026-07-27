@@ -21,6 +21,13 @@ const completeApproval = (propertyNumber: string) => ({
   },
 }) as any;
 
+const emptyFulfillmentPlan = {
+  kept: [],
+  unlinked: [],
+  maxProperties: 1,
+  allowedLinkedCount: 0,
+};
+
 async function captureAdminApprovalError(
   operation: () => Promise<unknown>,
 ): Promise<AdminApprovalError> {
@@ -365,6 +372,7 @@ test("a queue failure after the payment write is reported as partial", async () 
     requireCompleteProperty: adminApprovalService.requireCompleteProperty,
   };
   let paymentWrites = 0;
+  let queueMarkerWrites = 0;
   let propertyWriteAttempts = 0;
   let releaseCalls = 0;
 
@@ -385,8 +393,9 @@ test("a queue failure after the payment write is reported as partial", async () 
   });
   (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
   (firebaseService as any).getMultiPropertySubscriptions = async () => [];
-  (firebaseService as any).updatePayment = async () => {
+  (firebaseService as any).updatePayment = async (_id: string, updates: any) => {
     paymentWrites += 1;
+    if (updates.propertyApprovalQueuedAt) queueMarkerWrites += 1;
   };
   (firebaseService as any).updateProperty = async () => {
     propertyWriteAttempts += 1;
@@ -413,6 +422,7 @@ test("a queue failure after the payment write is reported as partial", async () 
         code: error.code,
         partial: error.partial,
         paymentWrites,
+        queueMarkerWrites,
         propertyWriteAttempts,
         releaseCalls,
       },
@@ -420,6 +430,7 @@ test("a queue failure after the payment write is reported as partial", async () 
         code: "PAYMENT_QUEUE_FAILED",
         partial: true,
         paymentWrites: 1,
+        queueMarkerWrites: 0,
         propertyWriteAttempts: 1,
         releaseCalls: 0,
       },
@@ -900,5 +911,348 @@ test("manual confirmation preflights every linked property before fulfillment", 
       originals.claimPaymentFulfillment;
     firebaseService.addSubscriptionToSheet =
       originals.addSubscriptionToSheet;
+  }
+});
+
+test("durably queued retries cannot duplicate queue side effects", async () => {
+  const originals = {
+    getPaymentById: firebaseService.getPaymentById,
+    getPackageById: firebaseService.getPackageById,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    addVerificationLog: firebaseService.addVerificationLog,
+    requireCompleteProperty: adminApprovalService.requireCompleteProperty,
+  };
+  const unexpectedCalls: string[] = [];
+
+  (firebaseService as any).getPaymentById = async () => ({
+    id: "PAY-SERVICE-DURABLY-QUEUED",
+    propertyNumber: "PROP-SERVICE-DURABLY-QUEUED",
+    packageId: "PKG-1",
+    status: "نجح - قيد التحقق",
+    action: "new",
+    pendingPropertyApproval: true,
+    propertyApprovalQueuedAt: "2026-07-27T16:00:00.000Z",
+  });
+  for (const methodName of [
+    "getPackageById",
+    "getSubscriptionByPropertyNumber",
+    "claimPaymentFulfillment",
+    "addVerificationLog",
+  ] as const) {
+    (firebaseService as any)[methodName] = async () => {
+      unexpectedCalls.push(methodName);
+      throw new Error(`Unexpected call: ${methodName}`);
+    };
+  }
+  (adminApprovalService as any).requireCompleteProperty = async () => {
+    unexpectedCalls.push("requireCompleteProperty");
+    throw new Error("Property preflight must not repeat for a completed queue");
+  };
+
+  try {
+    const firstResult = await paymentService.approveBankTransfer(
+      "PAY-SERVICE-DURABLY-QUEUED",
+    );
+    const replayResult = await paymentService.approveBankTransfer(
+      "PAY-SERVICE-DURABLY-QUEUED",
+    );
+
+    assert.deepEqual(firstResult, {
+      outcome: "queued",
+      alreadyProcessed: true,
+    });
+    assert.deepEqual(replayResult, {
+      outcome: "queued",
+      alreadyProcessed: true,
+    });
+    assert.deepEqual(unexpectedCalls, []);
+  } finally {
+    firebaseService.getPaymentById = originals.getPaymentById;
+    firebaseService.getPackageById = originals.getPackageById;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.addVerificationLog = originals.addVerificationLog;
+    adminApprovalService.requireCompleteProperty =
+      originals.requireCompleteProperty;
+  }
+});
+
+test("approval repairs partial and rejected stale-marker queue states through the atomic claim", async () => {
+  const originals = {
+    getPaymentById: firebaseService.getPaymentById,
+    getPackageById: firebaseService.getPackageById,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    updatePayment: firebaseService.updatePayment,
+    updateProperty: firebaseService.updateProperty,
+    updateSubscription: firebaseService.updateSubscription,
+    releasePaymentFulfillment: firebaseService.releasePaymentFulfillment,
+    addVerificationLog: firebaseService.addVerificationLog,
+    requireCompleteProperty: adminApprovalService.requireCompleteProperty,
+    requireCompleteLinkedProperties:
+      adminApprovalService.requireCompleteLinkedProperties,
+  };
+  const writes: string[] = [];
+  let subscriptionReads = 0;
+  let claimArguments: any[] | undefined;
+  let paymentRecord: any = {
+    id: "PAY-SERVICE-ALREADY-QUEUED",
+    propertyNumber: "PROP-SERVICE-ALREADY-QUEUED",
+    packageId: "PKG-1",
+    status: "pending",
+    action: "new",
+    amount: 100,
+    pendingPropertyApproval: true,
+    fulfillmentState: "processing",
+    fulfillmentClaimToken: "stale-queue-claim",
+    fulfillmentClaimedAt: "2026-07-27T15:00:00.000Z",
+    fulfillmentPlan: emptyFulfillmentPlan,
+  };
+
+  (firebaseService as any).getPaymentById = async () => paymentRecord;
+  (firebaseService as any).getPackageById = async () => ({
+    id: "PKG-1",
+    duration: 30,
+    price: 100,
+    type: "premium",
+    maxProperties: 1,
+  });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => {
+    subscriptionReads += 1;
+    return null;
+  };
+  (firebaseService as any).claimPaymentFulfillment = async (...args: any[]) => {
+    claimArguments = args;
+    return {
+      status: "claimed",
+      token: "retry-queue-claim",
+      previousState: "processing",
+    };
+  };
+  (firebaseService as any).updatePayment = async (
+    _id: string,
+    updates: any,
+  ) => {
+    writes.push(
+      updates.propertyApprovalQueuedAt ? "queue-marker" : "payment-pending",
+    );
+  };
+  (firebaseService as any).updateProperty = async () => {
+    writes.push("property-pending");
+  };
+  (firebaseService as any).updateSubscription = async () => {
+    writes.push("unexpected-subscription-write");
+  };
+  (firebaseService as any).releasePaymentFulfillment = async () => {
+    writes.push("claim-release");
+  };
+  (firebaseService as any).addVerificationLog = async () => {
+    writes.push("verification-log");
+  };
+  (adminApprovalService as any).requireCompleteProperty = async () => ({
+    ...completeApproval("PROP-SERVICE-ALREADY-QUEUED"),
+    property: {
+      propertyNumber: "PROP-SERVICE-ALREADY-QUEUED",
+      name: "Already queued property",
+      whatsappNumber: "",
+    },
+  });
+  (adminApprovalService as any).requireCompleteLinkedProperties = async () =>
+    undefined;
+
+  try {
+    const result = await paymentService.approveBankTransfer(
+      "PAY-SERVICE-ALREADY-QUEUED",
+    );
+
+    assert.deepEqual(result, { outcome: "queued" });
+    assert.deepEqual(claimArguments, [
+      "PAY-SERVICE-ALREADY-QUEUED",
+      ["pending"],
+      { purpose: "queue" },
+    ]);
+    assert.deepEqual(writes, [
+      "payment-pending",
+      "property-pending",
+      "queue-marker",
+      "claim-release",
+      "verification-log",
+    ]);
+    // The partial pending flag does not bypass suspension/preflight/current
+    // subscription reads; the queue is repaired through the normal claim.
+    assert.equal(subscriptionReads, 3);
+
+    writes.length = 0;
+    subscriptionReads = 0;
+    claimArguments = undefined;
+    paymentRecord = {
+      ...paymentRecord,
+      status: "مرفوض",
+      propertyApprovalQueuedAt: "2026-07-27T16:00:00.000Z",
+    };
+
+    const rejectedRetry = await paymentService.approveBankTransfer(
+      "PAY-SERVICE-ALREADY-QUEUED",
+    );
+
+    assert.deepEqual(rejectedRetry, { outcome: "queued" });
+    assert.deepEqual(claimArguments, [
+      "PAY-SERVICE-ALREADY-QUEUED",
+      ["مرفوض"],
+      { purpose: "queue" },
+    ]);
+    assert.deepEqual(writes, [
+      "payment-pending",
+      "property-pending",
+      "queue-marker",
+      "claim-release",
+      "verification-log",
+    ]);
+    assert.equal(subscriptionReads, 3);
+  } finally {
+    firebaseService.getPaymentById = originals.getPaymentById;
+    firebaseService.getPackageById = originals.getPackageById;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.updatePayment = originals.updatePayment;
+    firebaseService.updateProperty = originals.updateProperty;
+    firebaseService.updateSubscription = originals.updateSubscription;
+    firebaseService.releasePaymentFulfillment =
+      originals.releasePaymentFulfillment;
+    firebaseService.addVerificationLog = originals.addVerificationLog;
+    adminApprovalService.requireCompleteProperty =
+      originals.requireCompleteProperty;
+    adminApprovalService.requireCompleteLinkedProperties =
+      originals.requireCompleteLinkedProperties;
+  }
+});
+
+test("approval treats an atomic fulfilled activation as already processed without duplicate status, log, or notification writes", async () => {
+  const originals = {
+    getPaymentById: firebaseService.getPaymentById,
+    getPackageById: firebaseService.getPackageById,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    updatePayment: firebaseService.updatePayment,
+    addSubscriptionToSheet: firebaseService.addSubscriptionToSheet,
+    updateProperty: firebaseService.updateProperty,
+    updateVerificationStatus: firebaseService.updateVerificationStatus,
+    completePaymentFulfillment: firebaseService.completePaymentFulfillment,
+    releasePaymentFulfillment: firebaseService.releasePaymentFulfillment,
+    addVerificationLog: firebaseService.addVerificationLog,
+    requireCompleteProperty: adminApprovalService.requireCompleteProperty,
+    requireCompleteLinkedProperties:
+      adminApprovalService.requireCompleteLinkedProperties,
+  };
+  const writes: string[] = [];
+  let subscriptionReads = 0;
+  let claimArguments: any[] | undefined;
+  const currentSubscription = {
+    id: "SUB-PROP-SERVICE-FULFILLED",
+    propertyNumber: "PROP-SERVICE-FULFILLED",
+    packageId: "PKG-OLD",
+    startDate: "2026-07-01T00:00:00.000Z",
+    endDate: "2026-08-06T20:59:59.999Z",
+    status: "active",
+    paymentId: "PAY-OLDER",
+    subscriptionType: "premium",
+  } as any;
+
+  (firebaseService as any).getPaymentById = async () => ({
+    id: "PAY-SERVICE-ALREADY-FULFILLED",
+    propertyNumber: "PROP-SERVICE-FULFILLED",
+    packageId: "PKG-1",
+    status: "pending",
+    action: "upgrade",
+    amount: 100,
+    fulfillmentPlan: emptyFulfillmentPlan,
+  });
+  (firebaseService as any).getPackageById = async () => ({
+    id: "PKG-1",
+    duration: 30,
+    price: 100,
+    type: "premium",
+    maxProperties: 1,
+  });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => {
+    subscriptionReads += 1;
+    return currentSubscription;
+  };
+  (firebaseService as any).claimPaymentFulfillment = async (...args: any[]) => {
+    claimArguments = args;
+    return { status: "fulfilled" };
+  };
+  for (const methodName of [
+    "updatePayment",
+    "addSubscriptionToSheet",
+    "updateProperty",
+    "updateVerificationStatus",
+    "completePaymentFulfillment",
+    "releasePaymentFulfillment",
+    "addVerificationLog",
+  ] as const) {
+    (firebaseService as any)[methodName] = async () => {
+      writes.push(methodName);
+      throw new Error(`Unexpected write: ${methodName}`);
+    };
+  }
+  (adminApprovalService as any).requireCompleteProperty = async () => ({
+    ...completeApproval("PROP-SERVICE-FULFILLED"),
+    property: {
+      propertyNumber: "PROP-SERVICE-FULFILLED",
+      name: "Already fulfilled property",
+      whatsappNumber: "+966500000002",
+    },
+  });
+  (adminApprovalService as any).requireCompleteLinkedProperties = async () =>
+    undefined;
+
+  try {
+    const result = await paymentService.approveBankTransfer(
+      "PAY-SERVICE-ALREADY-FULFILLED",
+    );
+
+    assert.deepEqual(result, {
+      outcome: "activated",
+      alreadyProcessed: true,
+    });
+    assert.deepEqual(claimArguments, [
+      "PAY-SERVICE-ALREADY-FULFILLED",
+      ["pending"],
+    ]);
+    assert.deepEqual(writes, []);
+    // Suspension preflight, current-subscription lookup, and activation helper
+    // read. A duplicate activation notification would add another read.
+    assert.equal(subscriptionReads, 3);
+  } finally {
+    firebaseService.getPaymentById = originals.getPaymentById;
+    firebaseService.getPackageById = originals.getPackageById;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.updatePayment = originals.updatePayment;
+    firebaseService.addSubscriptionToSheet =
+      originals.addSubscriptionToSheet;
+    firebaseService.updateProperty = originals.updateProperty;
+    firebaseService.updateVerificationStatus =
+      originals.updateVerificationStatus;
+    firebaseService.completePaymentFulfillment =
+      originals.completePaymentFulfillment;
+    firebaseService.releasePaymentFulfillment =
+      originals.releasePaymentFulfillment;
+    firebaseService.addVerificationLog = originals.addVerificationLog;
+    adminApprovalService.requireCompleteProperty =
+      originals.requireCompleteProperty;
+    adminApprovalService.requireCompleteLinkedProperties =
+      originals.requireCompleteLinkedProperties;
   }
 });

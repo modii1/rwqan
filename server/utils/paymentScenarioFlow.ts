@@ -390,6 +390,7 @@ export async function activateVerifiedPaymentSubscription(params: {
   linkedProperties: string[];
   unlinkedProperties: string[];
   subscriptionType: string;
+  alreadyFulfilled?: boolean;
 }> {
   const { payment, property, pkg, receiptUrl } = params;
   const mainPropertyNumber = payment.propertyNumber;
@@ -415,6 +416,7 @@ export async function activateVerifiedPaymentSubscription(params: {
       linkedProperties: currentSubscription?.linkedProperties || [],
       unlinkedProperties: [],
       subscriptionType: currentSubscription?.subscriptionType || currentSubscription?.packageType || "عادي",
+      alreadyFulfilled: true,
     };
   }
 
@@ -432,6 +434,7 @@ export async function activateVerifiedPaymentSubscription(params: {
       linkedProperties: currentSubscription?.linkedProperties || [],
       unlinkedProperties: [],
       subscriptionType: currentSubscription?.subscriptionType || currentSubscription?.packageType || "عادي",
+      alreadyFulfilled: true,
     };
   }
   if (fulfillmentClaim.status === "processing") {
@@ -485,6 +488,7 @@ export async function activateVerifiedPaymentSubscription(params: {
         linkedProperties: currentSubscription.linkedProperties || [],
         unlinkedProperties: [],
         subscriptionType: currentSubscription.subscriptionType || currentSubscription.packageType || "عادي",
+        alreadyFulfilled: true,
       };
     }
 
@@ -642,6 +646,7 @@ export async function queueVerifiedNewPropertyForAdminApproval(params: {
   unlinkedProperties: string[];
   subscriptionType: string;
   alreadyFulfilled?: boolean;
+  alreadyQueued?: boolean;
 }> {
   const { payment, pkg } = params;
   const mainPropertyNumber = payment.propertyNumber;
@@ -670,6 +675,7 @@ export async function queueVerifiedNewPropertyForAdminApproval(params: {
   const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(
     payment.id,
     queueStatuses,
+    { purpose: "queue" },
   );
   if (fulfillmentClaim.status === "fulfilled") {
     return {
@@ -682,6 +688,16 @@ export async function queueVerifiedNewPropertyForAdminApproval(params: {
         currentSubscription?.packageType ||
         subscriptionType,
       alreadyFulfilled: true,
+    };
+  }
+  if (fulfillmentClaim.status === "queued") {
+    return {
+      startDate,
+      endDate,
+      linkedProperties: limited.kept,
+      unlinkedProperties: limited.unlinked,
+      subscriptionType,
+      alreadyQueued: true,
     };
   }
   if (fulfillmentClaim.status === "processing") {
@@ -750,6 +766,13 @@ export async function queueVerifiedNewPropertyForAdminApproval(params: {
         pendingApprovalFrom: "",
       } as any);
     }
+
+    // pendingPropertyApproval is written before several property-side effects
+    // and therefore cannot prove that queuing finished. Publish the durable
+    // marker only after every idempotent queue mutation has succeeded.
+    await firebaseService.updatePayment(payment.id, {
+      propertyApprovalQueuedAt: new Date().toISOString(),
+    });
 
     await firebaseService.releasePaymentFulfillment(
       payment.id,

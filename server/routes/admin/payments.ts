@@ -13,7 +13,7 @@ import {
 
 const router = Router();
 
-// قبول التحويل البنكي — تجاوز يدوي للتحقق التلقائي
+// اعتماد الدفع — التحويل البنكي يدوي، وPaymob يُطابق مع المزود أولاً
 router.post("/api/admin/payment/approve", requireAdmin, async (req, res) => {
   try {
     const { paymentId } = req.body;
@@ -24,14 +24,14 @@ router.post("/api/admin/payment/approve", requireAdmin, async (req, res) => {
         message: "معرف الدفع مطلوب.",
       });
     }
-    const result = await paymentService.approveBankTransfer(paymentId);
+    const result = await paymentService.approveAdminPayment(paymentId);
     res.json({
       ok: true,
       outcome: result.outcome,
       message:
         result.outcome === "queued"
-          ? "تم قبول التحويل والتحقق من البيانات، والعقار بانتظار اعتماد الإدارة"
-          : "تم قبول التحويل وتفعيل الاشتراك",
+          ? "تم اعتماد الدفع والتحقق من البيانات، والعقار بانتظار اعتماد الإدارة"
+          : "تم اعتماد الدفع وتفعيل الاشتراك",
     });
   } catch (err: unknown) {
     console.error("Approve payment error:", err);
@@ -54,8 +54,8 @@ router.post("/api/admin/payment/reject", requireAdmin, async (req, res) => {
         message: "معرف الدفع مطلوب.",
       });
     }
-    await paymentService.rejectBankTransfer(paymentId);
-    res.json({ ok: true, message: "تم رفض التحويل" });
+    await paymentService.rejectAdminPayment(paymentId);
+    res.json({ ok: true, message: "تم رفض الدفع" });
   } catch (err: unknown) {
     console.error("Reject payment error:", err);
     return sendAdminApprovalError(

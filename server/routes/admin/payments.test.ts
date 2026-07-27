@@ -8,8 +8,8 @@ import { PropertySuspendedError } from "../../services/propertySuspension";
 import paymentsRouter from "./payments";
 
 test("payment approval returns structured, safe admin errors", async (t) => {
-  const originalApproveBankTransfer = paymentService.approveBankTransfer;
-  const originalRejectBankTransfer = paymentService.rejectBankTransfer;
+  const originalApproveAdminPayment = paymentService.approveAdminPayment;
+  const originalRejectAdminPayment = paymentService.rejectAdminPayment;
   const originalConfirmManually = paymentService.confirmManually;
 
   const app = express();
@@ -51,7 +51,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
 
   try {
     await t.test("reports when a new property is queued instead of activated", async () => {
-      (paymentService as any).approveBankTransfer = async () => ({
+      (paymentService as any).approveAdminPayment = async () => ({
         outcome: "queued",
       });
 
@@ -65,7 +65,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
     });
 
     await t.test("reports when an existing subscription is activated", async () => {
-      (paymentService as any).approveBankTransfer = async () => ({
+      (paymentService as any).approveAdminPayment = async () => ({
         outcome: "activated",
       });
 
@@ -79,7 +79,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
     });
 
     await t.test("incomplete properties retain all validation details", async () => {
-      (paymentService as any).approveBankTransfer = async () => {
+      (paymentService as any).approveAdminPayment = async () => {
         throw new AdminApprovalError({
           status: 422,
           code: "PROPERTY_INCOMPLETE",
@@ -102,7 +102,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
     });
 
     await t.test("an in-progress fulfillment receives a contextual conflict", async () => {
-      (paymentService as any).approveBankTransfer = async () => {
+      (paymentService as any).approveAdminPayment = async () => {
         throw new Error("Payment fulfillment is already in progress");
       };
 
@@ -119,7 +119,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
 
     await t.test("unexpected internal errors are not leaked", async () => {
       const internalDetail = "SECRET_FIREBASE_DOCUMENT_PATH";
-      (paymentService as any).approveBankTransfer = async () => {
+      (paymentService as any).approveAdminPayment = async () => {
         throw new Error(internalDetail);
       };
 
@@ -136,7 +136,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
 
     await t.test("a missing payment identifier is a structured client error", async () => {
       let serviceCalls = 0;
-      (paymentService as any).approveBankTransfer = async () => {
+      (paymentService as any).approveAdminPayment = async () => {
         serviceCalls += 1;
       };
 
@@ -153,8 +153,44 @@ test("payment approval returns structured, safe admin errors", async (t) => {
       assert.equal(serviceCalls, 0);
     });
 
+    for (const providerFailure of [
+      {
+        status: 409,
+        code: "PAYMOB_PAYMENT_NOT_PAID" as const,
+        message: "Paymob has not confirmed this payment.",
+      },
+      {
+        status: 503,
+        code: "PAYMOB_PROVIDER_UNAVAILABLE" as const,
+        message: "Paymob is temporarily unavailable.",
+      },
+      {
+        status: 409,
+        code: "PAYMOB_PAYMENT_IDENTITY_MISMATCH" as const,
+        message: "The provider identity does not match.",
+      },
+    ]) {
+      await t.test(
+        `preserves the structured ${providerFailure.code} provider error`,
+        async () => {
+          (paymentService as any).approveAdminPayment = async () => {
+            throw new AdminApprovalError(providerFailure);
+          };
+
+          const response = await approve();
+          assert.equal(response.status, providerFailure.status);
+          assert.deepEqual(await response.json(), {
+            success: false,
+            code: providerFailure.code,
+            message: providerFailure.message,
+            error: providerFailure.message,
+          });
+        },
+      );
+    }
+
     await t.test("payment rejection preserves its exact partial failure", async () => {
-      (paymentService as any).rejectBankTransfer = async () => {
+      (paymentService as any).rejectAdminPayment = async () => {
         throw new AdminApprovalError({
           status: 500,
           code: "PAYMENT_REJECTION_FAILED",
@@ -176,7 +212,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
 
     await t.test("payment rejection requires an identifier before service work", async () => {
       let serviceCalls = 0;
-      (paymentService as any).rejectBankTransfer = async () => {
+      (paymentService as any).rejectAdminPayment = async () => {
         serviceCalls += 1;
       };
 
@@ -190,7 +226,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
 
     await t.test("unexpected payment rejection errors stay private", async () => {
       const internalDetail = "SECRET_REJECTION_DOCUMENT_PATH";
-      (paymentService as any).rejectBankTransfer = async () => {
+      (paymentService as any).rejectAdminPayment = async () => {
         throw new Error(internalDetail);
       };
 
@@ -218,8 +254,8 @@ test("payment approval returns structured, safe admin errors", async (t) => {
       assert.match(payload.error, /موقوف مؤقتاً/);
     });
   } finally {
-    paymentService.approveBankTransfer = originalApproveBankTransfer;
-    paymentService.rejectBankTransfer = originalRejectBankTransfer;
+    paymentService.approveAdminPayment = originalApproveAdminPayment;
+    paymentService.rejectAdminPayment = originalRejectAdminPayment;
     paymentService.confirmManually = originalConfirmManually;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));

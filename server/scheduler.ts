@@ -13,6 +13,7 @@ import {
 } from "./integrations/whatsapp";
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
+import { paymentService } from "./services/PaymentService";
 import {
   isPremiumSubscriptionType,
   isSubscriptionStatusSuspended,
@@ -238,8 +239,9 @@ async function expireOldPendingPayments(): Promise<number> {
     // التحقق من حالة FEATURE_TIMEOUTS
     const isTimeoutsEnabled = await firebaseService.getFeatureFlag("FEATURE_TIMEOUTS");
     if (!isTimeoutsEnabled) {
-      console.log("⏸️ [Scheduler] ميزة المهلات الزمنية معطلة (FEATURE_TIMEOUTS)");
-      return 0;
+      console.log(
+        "⏸️ [Scheduler] ميزة المهلات الزمنية معطلة؛ تستمر مطابقة Paymob دون إلغاء أي دفعة",
+      );
     }
     
     const payments = await firebaseService.getPayments();
@@ -249,27 +251,195 @@ async function expireOldPendingPayments(): Promise<number> {
     // المهلة الزمنية
     const CARD_TIMEOUT_MS = 30 * 60 * 1000; // 30 دقيقة للبطاقات
     const BANK_TIMEOUT_MS = 72 * 60 * 60 * 1000; // 72 ساعة للتحويل البنكي
+    const PAYMOB_RECONCILIATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+    const PAYMOB_RECONCILIATION_INTERVAL_MS = 60 * 60 * 1000;
+    const PAYMOB_OLD_CATCH_UP_WINDOW_MS = 24 * 60 * 60 * 1000;
     
+    // This list is intentionally limited to identity-free legacy attempts.
+    // Modern Paymob attempts are selected by their persisted provider
+    // capability below, regardless of whether the confirmed subtype is VISA,
+    // MADA, MASTERCARD, APPLE_PAY, or another exact provider value.
+    const legacyCardMethods = new Set([
+      "بطاقة",
+      "apple pay",
+      "apple_pay",
+      "applepay",
+      "paymob",
+      "card",
+      "cards",
+    ]);
+    const cardCutoffMs = now - CARD_TIMEOUT_MS;
+    const bankCutoffMs = now - BANK_TIMEOUT_MS;
+
     for (const payment of payments) {
-      const paymentDate = new Date(payment.createdAt || "").getTime();
-      const ageMs = now - paymentDate;
-      
-      // البطاقة: قيد المراجعة لأكثر من 30 دقيقة
-      if (payment.status === "قيد المراجعة" && 
-          (payment.paymentMethod === "بطاقة" || payment.paymentMethod === "Apple Pay" || payment.paymentMethod === "paymob") &&
-          ageMs > CARD_TIMEOUT_MS) {
-        await firebaseService.updatePaymentStatus(payment.id, "ملغي - انتهت المهلة");
-        console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);
-        expiredCount++;
+      const normalizedMethod = String(payment.paymentMethod || "")
+        .trim()
+        .toLowerCase();
+
+      const paymentDateMs = Date.parse(String(payment.createdAt || ""));
+      const isOldEnoughForCardReconciliation =
+        Number.isFinite(paymentDateMs) && paymentDateMs < cardCutoffMs;
+      const isInsideCardReconciliationWindow =
+        Number.isFinite(paymentDateMs) &&
+        paymentDateMs >= now - PAYMOB_RECONCILIATION_WINDOW_MS;
+      const providerCatchUpStartedMs = Date.parse(
+        String(payment.providerReconciliationStartedAt || ""),
+      );
+      const isInsideOldProviderCatchUpWindow =
+        !isInsideCardReconciliationWindow &&
+        (
+          !Number.isFinite(providerCatchUpStartedMs) ||
+          providerCatchUpStartedMs >= now - PAYMOB_OLD_CATCH_UP_WINDOW_MS
+        );
+      const isAddonPayment = payment.action === "addon";
+      const hasRetrievablePaymobIntention = Boolean(
+        String(payment.merchantAttemptKey || "").trim() &&
+        String(payment.paymentReference || "").trim() &&
+        String(payment.paymentCheckoutUrl || "").trim() &&
+        (
+          !isAddonPayment ||
+          (
+            String(payment.paymobOrderId || "").trim() &&
+            payment.intentionState === "created"
+          )
+        ),
+      );
+      // A complete Paymob capability is authoritative even if an older or
+      // corrupt display label says "bank transfer". Identity-free real bank
+      // rows never satisfy this predicate.
+      const isRetrievableElectronicProviderAttempt =
+        hasRetrievablePaymobIntention;
+      const paymentStatus = String(payment.status || "").trim();
+      const isRecoverableCardStatus = (
+        isAddonPayment && paymentStatus === "قيد الدفع"
+      ) || new Set([
+        "قيد المراجعة",
+        "فشل",
+        "ملغي - انتهت المهلة",
+        "نجح - قيد التحقق",
+      ]).has(paymentStatus);
+
+      if (
+        isRetrievableElectronicProviderAttempt &&
+        isRecoverableCardStatus &&
+        isOldEnoughForCardReconciliation &&
+        hasRetrievablePaymobIntention &&
+        (!isAddonPayment || !payment.completedAt)
+      ) {
+        if (
+          !isInsideCardReconciliationWindow &&
+          !isInsideOldProviderCatchUpWindow
+        ) {
+          // The signed Paymob callback remains valid indefinitely, but polling
+          // old checkout capabilities forever would create unbounded provider
+          // traffic on every web instance.
+          continue;
+        }
+        try {
+          const checkedAt = new Date(now).toISOString();
+          const claim = await firebaseService.claimPaymentProviderReconciliation(
+            payment,
+            {
+              checkedAt,
+              createdBeforeMs: cardCutoffMs,
+              createdAfterMs: isInsideOldProviderCatchUpWindow
+                ? 0
+                : now - PAYMOB_RECONCILIATION_WINDOW_MS,
+              minIntervalMs: PAYMOB_RECONCILIATION_INTERVAL_MS,
+            },
+          );
+          if (!claim.claimed) continue;
+
+          const reconciliation = claim.payment.action === "addon"
+            ? await paymentService.reconcilePaymobAddonIntention(
+                claim.payment.id,
+              )
+            : await paymentService.reconcilePaymobIntention(
+                claim.payment.id,
+              );
+          if (reconciliation.status === "paid") {
+            const outcome = "activation" in reconciliation
+              ? reconciliation.activation
+              : "addon_pending_review";
+            console.log(
+              `✅ [Scheduler] تمت مطابقة دفعة Paymob وتحديثها: ${payment.id} (${outcome})`,
+            );
+          } else if (
+            isTimeoutsEnabled &&
+            reconciliation.status === "unpaid" &&
+            claim.payment.action !== "addon" &&
+            claim.payment.status === "قيد المراجعة"
+          ) {
+            // paid=false is enough for the requested 30-minute display timeout,
+            // but it is not treated as terminal abandonment. Provider identity
+            // and the action lock stay intact so a late signed success can
+            // still recover the exact attempt.
+            const expired = await firebaseService.expirePendingPaymentIfEligible(
+              claim.payment,
+              "card",
+              cardCutoffMs,
+              { providerUnpaidClaimToken: claim.token },
+            );
+            if (expired) {
+              console.log(
+                `⏰ [Scheduler] إلغاء دفعة بطاقة غير مدفوعة بعد التحقق: ${payment.id}`,
+              );
+              expiredCount++;
+            }
+          }
+        } catch (error) {
+          // A provider outage or ambiguous response is never evidence of
+          // non-payment. Leave the attempt unchanged for the next callback/run.
+          console.error(
+            `❌ [Scheduler] تعذر التحقق من دفعة Paymob ${payment.id}:`,
+            error,
+          );
+        }
+        continue;
       }
-      
-      // التحويل البنكي: قيد التحقق لأكثر من 72 ساعة
-      if (payment.status === "قيد التحقق" && 
-          payment.paymentMethod === "تحويل بنكي" &&
-          ageMs > BANK_TIMEOUT_MS) {
-        await firebaseService.updatePaymentStatus(payment.id, "منتهي الصلاحية");
-        console.log(`⏰ [Scheduler] انتهاء صلاحية تحويل بنكي: ${payment.id}`);
-        expiredCount++;
+
+      // An add-on with incomplete or ambiguous provider identity cannot be
+      // settled or timed out safely. Leave it untouched for an exact signed
+      // callback or manual investigation; never route it through subscription
+      // fulfillment or a legacy card timeout.
+      if (
+        isAddonPayment &&
+        normalizedMethod !== "تحويل بنكي"
+      ) continue;
+
+      // The final decision is an atomic Firestore compare-and-set. In
+      // particular, a known/ambiguous Paymob attempt is never cancelled merely
+      // because its webhook has not arrived yet.
+      if (
+        isTimeoutsEnabled &&
+        payment.status === "قيد المراجعة" &&
+        legacyCardMethods.has(normalizedMethod)
+      ) {
+        const expired = await firebaseService.expirePendingPaymentIfEligible(
+          payment,
+          "card",
+          cardCutoffMs,
+        );
+        if (expired) {
+          console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);
+          expiredCount++;
+        }
+      }
+
+      if (
+        isTimeoutsEnabled &&
+        payment.status === "قيد التحقق" &&
+        String(payment.paymentMethod || "").trim() === "تحويل بنكي"
+      ) {
+        const expired = await firebaseService.expirePendingPaymentIfEligible(
+          payment,
+          "bank",
+          bankCutoffMs,
+        );
+        if (expired) {
+          console.log(`⏰ [Scheduler] انتهاء صلاحية تحويل بنكي: ${payment.id}`);
+          expiredCount++;
+        }
       }
     }
     

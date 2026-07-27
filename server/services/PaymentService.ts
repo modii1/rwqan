@@ -24,6 +24,40 @@ import {
   resolvePaymentPropertyPlan,
 } from "../utils/paymentScenarioFlow";
 import { assertPropertyNotSuspended } from "./propertySuspension";
+import {
+  getExactPaymobPaymentMethod,
+  isGenericPaymobPaymentMethod,
+} from "../utils/paymobPaymentMethod";
+
+function hasAnyPaymobIdentity(payment: Payment): boolean {
+  const paymentMethod = String(payment.paymentMethod || "").trim();
+  // Strong provider identity always wins over a potentially stale or corrupt
+  // display label. Only an identity-free bank-transfer record may enter the
+  // manual approval/rejection path.
+  const hasStrongProviderIdentity = Boolean(
+    String(payment.merchantAttemptKey || "").trim() ||
+    String(payment.paymentCheckoutUrl || "").trim() ||
+    String(payment.paymobOrderId || "").trim() ||
+    String(payment.transactionId || "").trim() ||
+    String(payment.intentionState || "").trim()
+  );
+  if (hasStrongProviderIdentity) return true;
+  if (paymentMethod === "تحويل بنكي") return false;
+  const methodSignalsElectronicProvider = Boolean(
+    paymentMethod &&
+    paymentMethod !== "بطاقة" &&
+    paymentMethod !== "تأكيد يدوي",
+  );
+  return Boolean(
+    String(payment.paymentReference || "").trim() ||
+    String(payment.merchantAttemptKey || "").trim() ||
+    String(payment.paymentCheckoutUrl || "").trim() ||
+    String(payment.paymobOrderId || "").trim() ||
+    String(payment.transactionId || "").trim() ||
+    String(payment.intentionState || "").trim() ||
+    methodSignalsElectronicProvider,
+  );
+}
 
 export class PaymentService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -56,6 +90,88 @@ export class PaymentService {
     return firebaseService.updatePaymentStatus(paymentId, status);
   }
 
+  /**
+   * Approve a payment from the admin dashboard.
+   *
+   * A current Paymob checkout is not a bank transfer and cannot be manually
+   * asserted as paid. It must first be matched to the exact provider
+   * intention, attempt, amount, order and signed transaction. Any partial or
+   * ambiguous Paymob identity fails closed; only identity-free legacy records
+   * retain the existing manual fallback.
+   */
+  async approveAdminPayment(paymentId: string): Promise<{
+    outcome: "queued" | "activated";
+    alreadyProcessed?: boolean;
+  }> {
+    const payment = await runAdminApprovalStage(
+      () => firebaseService.getPaymentById(paymentId),
+      {
+        status: 503,
+        code: "PAYMENT_LOOKUP_FAILED",
+        message:
+          "تعذر تحميل بيانات الدفع حالياً. تحقق من الاتصال بقاعدة البيانات ثم حاول مرة أخرى.",
+      },
+    );
+    if (!payment) {
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PAYMENT_NOT_FOUND",
+        message: "الدفع المطلوب غير موجود.",
+      });
+    }
+
+    if (!hasAnyPaymobIdentity(payment)) {
+      return this.approveBankTransfer(paymentId);
+    }
+
+    const reconciliation = await this.reconcilePaymobIntention(paymentId, {
+      propagateActivationError: true,
+      repairProcessedMetadata: true,
+    });
+    switch (reconciliation.status) {
+      case "paid":
+        if (reconciliation.activation === "pending") {
+          throw new AdminApprovalError({
+            status: 409,
+            code: "PAYMENT_ACTIVATION_FAILED",
+            message:
+              "أكد Paymob الدفع، لكن لم يكتمل تفعيل الاشتراك. راجع بيانات العقار وحالة الاشتراك قبل إعادة المحاولة.",
+          });
+        }
+        return { outcome: reconciliation.activation };
+      case "already_processed":
+        return { outcome: "activated", alreadyProcessed: true };
+      case "unpaid":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_NOT_PAID",
+          message:
+            "لم يؤكد Paymob اكتمال هذه الدفعة، لذلك لم يتم تفعيل الاشتراك. تحقق من العملية لدى Paymob ولا تعتمدها يدوياً.",
+        });
+      case "provider_unavailable":
+        throw new AdminApprovalError({
+          status: 503,
+          code: "PAYMOB_PROVIDER_UNAVAILABLE",
+          message:
+            "تعذر التحقق من حالة الدفعة لدى Paymob حالياً. لم يتم تفعيل الاشتراك؛ حاول مرة أخرى بعد قليل.",
+        });
+      case "identity_mismatch":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_IDENTITY_MISMATCH",
+          message:
+            "بيانات دفعة Paymob لا تطابق محاولة الدفع المسجلة أو العملية الموقعة. لم يتم التفعيل ويجب مراجعة العملية.",
+        });
+      case "not_supported":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_NOT_RECONCILABLE",
+          message:
+            "لا يمكن مطابقة دفعة Paymob هذه بأمان من شاشة الاشتراكات. لم يتم تفعيل الاشتراك.",
+        });
+    }
+  }
+
   // ─── Bank Transfer: Approve ─────────────────────────────────────────────────
 
   /**
@@ -74,6 +190,7 @@ export class PaymentService {
    */
   async approveBankTransfer(paymentId: string): Promise<{
     outcome: "queued" | "activated";
+    alreadyProcessed?: boolean;
   }> {
     console.log(`[approveBankTransfer] Starting for paymentId: ${paymentId}`);
     const payment = await runAdminApprovalStage(
@@ -91,6 +208,17 @@ export class PaymentService {
         code: "PAYMENT_NOT_FOUND",
         message: "الدفع المطلوب غير موجود.",
       });
+    }
+
+    // This durable completion marker is written only after every property and
+    // unlink mutation for the queue succeeds. The earlier pending flag alone
+    // may represent a partial write that still needs stale-claim recovery.
+    if (
+      payment.propertyApprovalQueuedAt &&
+      payment.pendingPropertyApproval &&
+      payment.status === "نجح - قيد التحقق"
+    ) {
+      return { outcome: "queued", alreadyProcessed: true };
     }
 
     await assertPropertyNotSuspended(payment.propertyNumber);
@@ -195,7 +323,10 @@ export class PaymentService {
         },
       );
       if (queued.alreadyFulfilled) {
-        return { outcome: "activated" };
+        return { outcome: "activated", alreadyProcessed: true };
+      }
+      if (queued.alreadyQueued) {
+        return { outcome: "queued", alreadyProcessed: true };
       }
       await firebaseService.addVerificationLog({
         date: new Date().toISOString(),
@@ -239,6 +370,10 @@ export class PaymentService {
       },
     );
 
+    if (activation.alreadyFulfilled) {
+      return { outcome: "activated", alreadyProcessed: true };
+    }
+
     await runAdminApprovalStage(
       () =>
         firebaseService.updatePayment(paymentId, {
@@ -280,6 +415,79 @@ export class PaymentService {
   }
 
   // ─── Bank Transfer: Reject ──────────────────────────────────────────────────
+
+  /**
+   * Reject a payment from the admin dashboard.
+   *
+   * Modern Paymob attempts fail closed: a confirmed payment is reconciled and
+   * activated instead of rejected, while an unpaid or unreadable provider
+   * state remains recoverable for the signed callback / timeout scheduler.
+   */
+  async rejectAdminPayment(paymentId: string): Promise<void> {
+    const payment = await runAdminApprovalStage(
+      () => firebaseService.getPaymentById(paymentId),
+      {
+        status: 503,
+        code: "PAYMENT_LOOKUP_FAILED",
+        message:
+          "تعذر تحميل بيانات الدفع قبل الرفض. تحقق من الاتصال بقاعدة البيانات ثم حاول مرة أخرى.",
+      },
+    );
+    if (!payment) {
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PAYMENT_NOT_FOUND",
+        message: "الدفع المطلوب رفضه غير موجود.",
+      });
+    }
+
+    if (!hasAnyPaymobIdentity(payment)) {
+      return this.rejectBankTransfer(paymentId);
+    }
+
+    const reconciliation = await this.reconcilePaymobIntention(paymentId, {
+      propagateActivationError: true,
+      repairProcessedMetadata: true,
+    });
+    switch (reconciliation.status) {
+      case "paid":
+      case "already_processed":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_ALREADY_PAID",
+          message:
+            "أكد Paymob اكتمال هذه الدفعة، لذلك تمت مطابقتها ولم تُرفض. حدّث الصفحة وراجع حالة الاشتراك.",
+        });
+      case "unpaid":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_REJECTION_DEFERRED",
+          message:
+            "لم يؤكد Paymob الدفع بعد. تُركت المحاولة قابلة لاستقبال النتيجة الموقعة، وسيتولى النظام إنهاء مهلة الدفع تلقائياً إن بقيت غير مدفوعة.",
+        });
+      case "provider_unavailable":
+        throw new AdminApprovalError({
+          status: 503,
+          code: "PAYMOB_PROVIDER_UNAVAILABLE",
+          message:
+            "تعذر التحقق من حالة الدفعة لدى Paymob حالياً. لم يتم رفضها حتى لا تضيع نتيجة دفع متأخرة؛ حاول مرة أخرى لاحقاً.",
+        });
+      case "identity_mismatch":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_IDENTITY_MISMATCH",
+          message:
+            "بيانات دفعة Paymob لا تطابق محاولة الدفع المسجلة أو العملية الموقعة. لم يتم رفضها ويجب مراجعة العملية.",
+        });
+      case "not_supported":
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_NOT_RECONCILABLE",
+          message:
+            "لا يمكن مطابقة دفعة Paymob هذه بأمان من شاشة الاشتراكات. لم يتم رفضها.",
+        });
+    }
+  }
 
   async rejectBankTransfer(paymentId: string): Promise<void> {
     const payment = await runAdminApprovalStage(
@@ -533,6 +741,311 @@ export class PaymentService {
     return paymobService.inquiryBySpecialReference(ref);
   }
 
+  /**
+   * Recover a Paymob payment when the normal signed callback was delayed or
+   * missed. Provider data is accepted only when the stored intention,
+   * merchant attempt, amount, currency and (when present) order all agree.
+   * A provider/network ambiguity never changes the local payment state.
+   */
+  async reconcilePaymobIntention(
+    paymentId: string,
+    options: {
+      propagateActivationError?: boolean;
+      repairProcessedMetadata?: boolean;
+    } = {},
+  ): Promise<
+    | { status: "not_supported" | "provider_unavailable" | "unpaid" | "identity_mismatch" }
+    | { status: "already_processed" }
+    | { status: "paid"; activation: "activated" | "queued" | "pending" }
+  > {
+    const payment = await firebaseService.getPaymentById(paymentId);
+    if (!payment) return { status: "not_supported" };
+    // Add-ons have their own review-only settlement path. They must never
+    // enter subscription fulfillment, including after a failed transaction
+    // is later shown as paid by Paymob.
+    if (payment.action === "addon") return { status: "not_supported" };
+    const processed =
+      payment.status === "مكتمل" ||
+      payment.status === "completed" ||
+      payment.fulfillmentState === "fulfilled" ||
+      Boolean(payment.fulfilledAt);
+    const storedTransactionId = String(payment.transactionId || "").trim();
+    const storedIntentionId = String(payment.paymentReference || "").trim();
+    const needsProcessedMetadataRepair =
+      isGenericPaymobPaymentMethod(payment.paymentMethod) ||
+      !String(payment.paymobOrderId || "").trim() ||
+      !storedTransactionId ||
+      storedTransactionId === storedIntentionId;
+    if (
+      processed &&
+      !(options.repairProcessedMetadata && needsProcessedMetadataRepair)
+    ) {
+      return { status: "already_processed" };
+    }
+
+    const intentionId = String(payment.paymentReference || "").trim();
+    const attemptKey = String(payment.merchantAttemptKey || "").trim();
+    const checkoutUrl = String(payment.paymentCheckoutUrl || "").trim();
+    if (!intentionId || !attemptKey || !checkoutUrl) {
+      return { status: "not_supported" };
+    }
+
+    const lookup = await paymobService.retrieveIntention(checkoutUrl);
+    if (!lookup.ok) return { status: "provider_unavailable" };
+    const { snapshot } = lookup;
+    const amountCents = Math.round(Number(payment.finalAmount) * 100);
+    if (
+      snapshot.intentionId !== intentionId ||
+      snapshot.specialReference !== attemptKey ||
+      !Number.isSafeInteger(amountCents) ||
+      snapshot.amountCents !== amountCents ||
+      snapshot.currency !== "SAR" ||
+      (payment.paymobOrderId && payment.paymobOrderId !== snapshot.orderId)
+    ) {
+      console.error(`Paymob reconciliation identity mismatch for ${payment.id}`);
+      return { status: "identity_mismatch" };
+    }
+    if (!snapshot.paid) return { status: "unpaid" };
+    if (!snapshot.confirmed) {
+      console.error(
+        `Paymob paid intention is not provider-confirmed for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+    const signedTransaction = snapshot.signedTransaction;
+    if (
+      !signedTransaction ||
+      signedTransaction.orderId !== snapshot.orderId ||
+      signedTransaction.merchantOrderId !== attemptKey ||
+      signedTransaction.amountCents !== snapshot.amountCents ||
+      signedTransaction.currency !== snapshot.currency
+    ) {
+      console.error(
+        `Paymob paid intention lacks matching signed transaction evidence for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+    const providerPaymentMethod = getExactPaymobPaymentMethod(signedTransaction);
+    if (!providerPaymentMethod) {
+      console.error(
+        `Paymob paid intention lacks an exact card subtype for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+    if (
+      storedTransactionId &&
+      storedTransactionId !== intentionId &&
+      storedTransactionId !== signedTransaction.transactionId
+    ) {
+      console.error(
+        `Paymob paid intention conflicts with the stored transaction for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+
+    const reconciledAt = new Date().toISOString();
+    const acceptance = await firebaseService.acceptSuccessfulPaymentIntention(
+      payment.id,
+      {
+        merchantAttemptKey: attemptKey,
+        transactionId: signedTransaction.transactionId,
+        paymobOrderId: snapshot.orderId,
+        amountCents: snapshot.amountCents,
+        currency: snapshot.currency,
+      },
+      {
+        paymentMethod: providerPaymentMethod,
+        providerReconciledAt: reconciledAt,
+        ...(snapshot.paidAt ? { providerPaidAt: snapshot.paidAt } : {}),
+      },
+    );
+    if (acceptance.status === "rejected") {
+      console.error(
+        `Paymob reconciliation rejected for ${payment.id}: ${acceptance.reason}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+    if (acceptance.status === "already_processed") {
+      if (needsProcessedMetadataRepair) {
+        await firebaseService.updatePayment(payment.id, {
+          paymentMethod: providerPaymentMethod,
+          transactionId: signedTransaction.transactionId,
+          paymobOrderId: snapshot.orderId,
+          providerReconciledAt: reconciledAt,
+          ...(snapshot.paidAt ? { providerPaidAt: snapshot.paidAt } : {}),
+        });
+      }
+      return { status: "already_processed" };
+    }
+    if (
+      acceptance.status === "already_accepted" &&
+      (isGenericPaymobPaymentMethod(acceptance.payment.paymentMethod) ||
+        acceptance.payment.paymentMethod !== providerPaymentMethod)
+    ) {
+      await firebaseService.updatePayment(payment.id, {
+        paymentMethod: providerPaymentMethod,
+        transactionId: signedTransaction.transactionId,
+        paymobOrderId: snapshot.orderId,
+        providerReconciledAt: reconciledAt,
+        ...(snapshot.paidAt ? { providerPaidAt: snapshot.paidAt } : {}),
+      });
+    }
+
+    try {
+      const result = await this.approveBankTransfer(payment.id);
+      return { status: "paid", activation: result.outcome };
+    } catch (error) {
+      // Financial success is authoritative even when property verification or
+      // subscription activation still needs attention. Never roll it back to a
+      // timeout/failure state.
+      console.error(
+        `Paymob payment ${payment.id} was reconciled but activation is pending:`,
+        error,
+      );
+      if (options.propagateActivationError) throw error;
+      return { status: "paid", activation: "pending" };
+    }
+  }
+
+  /**
+   * Recover an add-on checkout whose signed callback was delayed or missed.
+   * Add-ons remain pending for admin review after financial settlement. Every
+   * provider identifier must already be persisted and unique; reconciliation
+   * never binds an order discovered after the fact.
+   */
+  async reconcilePaymobAddonIntention(paymentId: string): Promise<
+    | { status: "not_supported" | "provider_unavailable" | "unpaid" | "identity_mismatch" }
+    | { status: "already_processed" }
+    | { status: "paid"; review: "pending" }
+  > {
+    const payment = await firebaseService.getPaymentById(paymentId);
+    if (!payment || payment.action !== "addon") {
+      return { status: "not_supported" };
+    }
+    if (
+      payment.status === "مكتمل" ||
+      payment.status === "completed" ||
+      payment.completedAt ||
+      payment.fulfilledAt ||
+      payment.fulfillmentState === "fulfilled"
+    ) {
+      return { status: "already_processed" };
+    }
+
+    const intentionId = String(payment.paymentReference || "").trim();
+    const attemptKey = String(payment.merchantAttemptKey || "").trim();
+    const checkoutUrl = String(payment.paymentCheckoutUrl || "").trim();
+    const persistedOrderId = String(payment.paymobOrderId || "").trim();
+    if (
+      !intentionId ||
+      !attemptKey ||
+      !checkoutUrl ||
+      !persistedOrderId ||
+      payment.intentionState !== "created"
+    ) {
+      return { status: "not_supported" };
+    }
+
+    const lookup = await paymobService.retrieveIntention(checkoutUrl);
+    if (!lookup.ok) return { status: "provider_unavailable" };
+    const { snapshot } = lookup;
+    const amountCents = Math.round(Number(payment.finalAmount) * 100);
+    if (
+      snapshot.intentionId !== intentionId ||
+      snapshot.specialReference !== attemptKey ||
+      snapshot.orderId !== persistedOrderId ||
+      !Number.isSafeInteger(amountCents) ||
+      snapshot.amountCents !== amountCents ||
+      snapshot.currency !== "SAR"
+    ) {
+      console.error(`Paymob add-on reconciliation identity mismatch for ${payment.id}`);
+      return { status: "identity_mismatch" };
+    }
+    if (!snapshot.paid) return { status: "unpaid" };
+    if (!snapshot.confirmed) {
+      console.error(
+        `Paymob paid add-on intention is not provider-confirmed for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+
+    const signedTransaction = snapshot.signedTransaction;
+    if (
+      !signedTransaction ||
+      signedTransaction.orderId !== persistedOrderId ||
+      signedTransaction.merchantOrderId !== attemptKey ||
+      signedTransaction.amountCents !== amountCents ||
+      signedTransaction.currency !== "SAR"
+    ) {
+      console.error(
+        `Paymob paid add-on intention lacks matching signed transaction evidence for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+
+    const exactPaymentMethod = getExactPaymobPaymentMethod({
+      cardSubType: signedTransaction.cardSubType,
+      paymentMethod: signedTransaction.paymentMethod,
+    });
+    if (!exactPaymentMethod) {
+      console.error(
+        `Paymob paid add-on intention lacks an exact payment subtype for ${payment.id}`,
+      );
+      return { status: "identity_mismatch" };
+    }
+
+    const amount = Number(payment.finalAmount);
+    const merchantFees = 0;
+    const acqFees = 0;
+    const vatAmount = 0;
+    const totalFees = Math.round(amount * 0.069 * 100) / 100;
+    const netAmount = Math.round((amount - totalFees) * 100) / 100;
+    // The legacy Transaction Inquiry endpoint has no bounded request timeout.
+    // Reconciliation runs inside the scheduler, so use the same documented
+    // fallback as the callback instead of allowing one fee lookup to stall all
+    // subsequent payment recovery. The exact signed transaction above remains
+    // the authoritative financial evidence.
+
+    const reconciledAt = new Date().toISOString();
+    const settlement = await firebaseService.settleAddOnPaymentCallback(
+      payment.id,
+      {
+        merchantAttemptKey: attemptKey,
+        transactionId: signedTransaction.transactionId,
+        paymobOrderId: persistedOrderId,
+        amountCents,
+        currency: "SAR",
+        success: true,
+      },
+      {
+        paymentMethod: exactPaymentMethod,
+        merchantFees,
+        acqFees,
+        vatAmount,
+        totalFees,
+        netAmount,
+        providerReconciledAt: reconciledAt,
+        ...(snapshot.paidAt ? { providerPaidAt: snapshot.paidAt } : {}),
+      },
+      {
+        recordReconciliationHistory: true,
+        expectedIntentionId: intentionId,
+      },
+    );
+    if (settlement.status === "accepted_success") {
+      return { status: "paid", review: "pending" };
+    }
+    if (settlement.status === "already_processed") {
+      return { status: "already_processed" };
+    }
+    console.error(
+      settlement.status === "rejected"
+        ? `Paymob add-on reconciliation rejected for ${payment.id}: ${settlement.reason}`
+        : `Paymob add-on reconciliation reached an unexpected state for ${payment.id}: ${settlement.status}`,
+    );
+    return { status: "identity_mismatch" };
+  }
+
   // ─── Manual Confirmation ─────────────────────────────────────────────────────
 
   async confirmManually(paymentId: string): Promise<void> {
@@ -551,7 +1064,7 @@ export class PaymentService {
       await firebaseService.updatePayment(paymentId, {
         status: "مكتمل",
         completedAt: new Date().toISOString(),
-        paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+        paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
       });
       return;
     }
@@ -593,7 +1106,7 @@ export class PaymentService {
         await firebaseService.updatePayment(paymentId, {
           status: "مكتمل",
           completedAt: payment.completedAt ?? new Date().toISOString(),
-          paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+          paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
         });
       }
       return;
@@ -673,7 +1186,7 @@ export class PaymentService {
       await firebaseService.updatePayment(paymentId, {
         status: "مكتمل",
         completedAt: new Date().toISOString(),
-        paymentMethod: (payment.paymentMethod as any) ?? "تأكيد يدوي",
+        paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
       });
 
       if (property?.whatsappNumber) {

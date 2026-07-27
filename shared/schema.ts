@@ -242,7 +242,10 @@ export const paymentSchema = z.object({
   finalAmount: z.number(), // السعر بعد الخصم
   paymobOrderId: z.string().optional(),
   status: z.enum(["مرفوض", 'معلق', 'مكتمل', 'فشل', 'ملغي', 'قيد المراجعة', 'نجح - قيد التحقق', 'قيد التحقق', 'منتهي الصلاحية', 'ملغي - انتهت المهلة', 'completed', 'نجح', 'نجاح', 'pending', 'قيد الدفع']),
-  paymentMethod: z.enum(['بطاقة', 'Apple Pay', 'تحويل بنكي', 'paymob', 'تأكيد يدوي']).optional(),
+  // Paymob returns an exact provider subtype (for example APPLE_PAY, VISA,
+  // MASTERCARD, or MADA). Keep the persisted value exact instead of forcing
+  // confirmed transactions back into the legacy generic "بطاقة" bucket.
+  paymentMethod: z.string().trim().min(1).max(64).optional(),
   receiptUrl: z.string().optional(),
   packageName: z.string().optional(),
   ocrConfidence: z.number().optional(),
@@ -272,6 +275,7 @@ export const paymentSchema = z.object({
   pendingStartDate: z.string().optional(),
   pendingEndDate: z.string().optional(),
   pendingPropertyApproval: z.boolean().optional(),
+  propertyApprovalQueuedAt: z.string().optional(),
   pendingSubscriptionType: z.string().optional(),
   pendingPrice: z.number().optional(),
   secondPropertyNumber: z.string().optional(), // رقم العقار الثاني (لباقات العقارين) - للتوافق مع الكود القديم
@@ -281,6 +285,12 @@ export const paymentSchema = z.object({
   transactionId: z.string().optional(),
   lastFailedTransactionId: z.string().optional(),
   lastProviderFailureAt: z.string().optional(),
+  providerReconciledAt: z.string().optional(),
+  providerPaidAt: z.string().optional(),
+  providerLastCheckedAt: z.string().optional(),
+  providerReconciliationStartedAt: z.string().optional(),
+  providerReconciliationClaimToken: z.string().optional(),
+  providerCreationFailedAt: z.string().optional(),
   merchantFees: z.number().optional(), // رسوم التاجر (merchant_fees)
   acqFees: z.number().optional(), // رسوم البنك (acquirer fees)
   vatAmount: z.number().optional(), // ضريبة القيمة المضافة على الرسوم
@@ -551,6 +561,7 @@ export const propertyAddOnSchema = z.object({
 
   createdAt: z.string(),
   updatedAt: z.string().optional(),
+  cancellationReason: z.string().optional(),
 });
 
 export type PropertyAddOn = z.infer<typeof propertyAddOnSchema>;

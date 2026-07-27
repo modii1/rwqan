@@ -2,14 +2,134 @@ import { Router } from "express";
 import { requireOwner } from "../middleware";
 import { firebaseService } from "../../firebaseService";
 import { addOnService, paymentService, propertyService } from "../../services";
-import { paymobService } from "../../integrations/paymob";
+import { PaymobIntentionError, paymobService } from "../../integrations/paymob";
 import { sendWhatsAppNotification } from "../../integrations/whatsapp";
 import { upload } from "../../utils/helpers";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { scanReceiptWithAI } from "../../integrations/aiReceiptScanner";
+import { randomUUID } from "node:crypto";
+import {
+  AdminApprovalError,
+  sendAdminApprovalError,
+} from "../../errors/AdminApprovalError";
+import type {
+  AdminPropertyAddOnDecisionResult,
+  AdminPropertyAddOnDecisionMode,
+} from "../../firebaseService";
 
 const router = Router();
+
+const BANK_TRANSFER_METHODS = new Set([
+  "تحويل بنكي",
+  "bank_transfer",
+  "bank transfer",
+]);
+
+function isProviderBackedAddOnPayment(addon: any, payment: any): boolean {
+  const method = String(payment?.paymentMethod || "").trim();
+  const strongProviderIdentity = Boolean(
+    String(payment?.merchantAttemptKey || "").trim() ||
+    String(payment?.paymentCheckoutUrl || "").trim() ||
+    String(payment?.paymobOrderId || "").trim() ||
+    String(payment?.intentionState || "").trim(),
+  );
+  if (addon?.source === "paymob" || strongProviderIdentity) return true;
+  return Boolean(method && !BANK_TRANSFER_METHODS.has(method));
+}
+
+function decisionModeFor(addon: any, payment: any): AdminPropertyAddOnDecisionMode {
+  if (!payment) return "legacy_without_payment";
+  if (isProviderBackedAddOnPayment(addon, payment)) return "settled_paymob";
+  return "bank_transfer";
+}
+
+function assertExactAddOnPaymentLink(addon: any, payment: any): void {
+  if (!addon.paymentId || !payment) {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMOB_PAYMENT_NOT_RECONCILABLE",
+      message: "لا يمكن مطابقة طلب الإضافة بسجل دفع محدد. لم يتم تغيير الطلب.",
+    });
+  }
+  if (
+    payment.id !== addon.paymentId ||
+    payment.action !== "addon" ||
+    payment.propertyNumber !== addon.propertyNumber ||
+    payment.packageId !== addon.addOnPackageId
+  ) {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMOB_PAYMENT_IDENTITY_MISMATCH",
+      message: "سجل الدفع المرتبط لا يطابق هذه الإضافة بدقة. لم يتم تغيير الطلب.",
+    });
+  }
+}
+
+function assertAdminAddOnDecisionApplied(
+  result: AdminPropertyAddOnDecisionResult,
+): void {
+  if (result.status !== "rejected") return;
+  if (result.reason === "not_found" || result.reason === "payment_not_found") {
+    throw new AdminApprovalError({
+      status: 404,
+      code: "PAYMENT_NOT_FOUND",
+      message: "طلب الإضافة أو سجل الدفع المرتبط به غير موجود.",
+    });
+  }
+  if (result.reason === "not_pending") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMENT_NOT_PENDING",
+      message: "طلب الإضافة لم يعد قيد المراجعة، لذلك لم يتم تغييره.",
+    });
+  }
+  throw new AdminApprovalError({
+    status: 409,
+    code: result.reason === "link_conflict"
+      ? "PAYMOB_PAYMENT_IDENTITY_MISMATCH"
+      : "PAYMOB_PAYMENT_NOT_RECONCILABLE",
+    message: result.reason === "link_conflict"
+      ? "بيانات الإضافة لا تطابق سجل الدفع المرتبط بها. لم يتم تغيير الطلب."
+      : "حالة الدفع لا توفر دليلاً آمناً لهذا القرار. لم يتم تغيير الطلب.",
+  });
+}
+
+function throwPaymobAddOnReconciliationError(
+  status: "not_supported" | "provider_unavailable" | "unpaid" | "identity_mismatch",
+  decision: "approve" | "reject",
+): never {
+  if (status === "provider_unavailable") {
+    throw new AdminApprovalError({
+      status: 503,
+      code: "PAYMOB_PROVIDER_UNAVAILABLE",
+      message: "تعذر التحقق من دفعة الإضافة لدى Paymob حالياً. لم يتم تغيير الطلب.",
+    });
+  }
+  if (status === "identity_mismatch") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: "PAYMOB_PAYMENT_IDENTITY_MISMATCH",
+      message: "بيانات Paymob لا تطابق محاولة دفع الإضافة المسجلة. لم يتم تغيير الطلب.",
+    });
+  }
+  if (status === "unpaid") {
+    throw new AdminApprovalError({
+      status: 409,
+      code: decision === "approve"
+        ? "PAYMOB_PAYMENT_NOT_PAID"
+        : "PAYMOB_REJECTION_DEFERRED",
+      message: decision === "approve"
+        ? "لم يؤكد Paymob اكتمال دفع الإضافة، لذلك لم يتم تفعيلها."
+        : "دفعة الإضافة ما زالت قابلة لاستقبال نتيجة Paymob. لم يتم رفضها حتى لا تضيع دفعة متأخرة.",
+    });
+  }
+  throw new AdminApprovalError({
+    status: 409,
+    code: "PAYMOB_PAYMENT_NOT_RECONCILABLE",
+    message: "لا توجد هوية Paymob كاملة وآمنة لهذه الإضافة. لم يتم تغيير الطلب.",
+  });
+}
 
 // =======================================
 // ADMIN – Get Add-On Packages
@@ -93,77 +213,73 @@ router.post("/api/admin/addons/approve", async (req, res) => {
     const { propertyAddOnId } = req.body;
 
     if (!propertyAddOnId) {
-      return res.status(400).json({ error: "propertyAddOnId مطلوب" });
+      throw new AdminApprovalError({
+        status: 400,
+        code: "PAYMENT_ID_REQUIRED",
+        message: "معرف طلب الإضافة مطلوب.",
+      });
     }
 
-    // جلب الإضافة للحصول على معرف الباقة
-    const addOns = await addOnService.getAll();
-    const addon = addOns.find(a => a.id === propertyAddOnId);
-
+    const addon = await firebaseService.getPropertyAddOnById(propertyAddOnId);
     if (!addon) {
-      return res.status(404).json({ error: "الإضافة غير موجودة" });
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PAYMENT_NOT_FOUND",
+        message: "طلب الإضافة غير موجود.",
+      });
     }
+    const payment = addon.paymentId
+      ? await paymentService.getById(addon.paymentId)
+      : null;
+    if (addon.paymentId) assertExactAddOnPaymentLink(addon, payment);
+    const mode = decisionModeFor(addon, payment);
 
-    // جلب باقة الإضافة لحساب تاريخ الانتهاء
     const pkg = await addOnService.getPackageById(addon.addOnPackageId);
+    if (!pkg) {
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PACKAGE_NOT_FOUND",
+        message: "باقة الإضافة المرتبطة بالطلب غير موجودة، لذلك لم يتم التفعيل.",
+      });
+    }
 
     const startDate = new Date();
     let endDate: Date | null = null;
-
-    if (pkg && pkg.durationDays > 0) {
+    if (pkg.durationDays > 0) {
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + pkg.durationDays);
     }
 
-    const updated = await firebaseService.updatePropertyAddOn(
-      propertyAddOnId,
-      {
-        status: "active",
-        startDate: startDate.toISOString(),
-        endDate: endDate ? endDate.toISOString() : undefined,
-        source: "bank",
-      }
-    );
-
-    if (!updated) {
-      return res.status(404).json({ error: "فشل تحديث الإضافة" });
-    }
-
-    // تحديث سجل الدفع المرتبط ليصبح مكتمل
-    try {
-      const allPayments = await paymentService.getAll();
-      const pendingPayment = allPayments.find(p =>
-        p.action === "addon" &&
-        (p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") &&
-        p.propertyNumber === addon.propertyNumber &&
-        p.packageId === addon.addOnPackageId
+    if (mode === "settled_paymob") {
+      const reconciliation = await paymentService.reconcilePaymobAddonIntention(
+        addon.paymentId!,
       );
-
-      if (pendingPayment) {
-        await paymentService.update(pendingPayment.id, {
-          status: "مكتمل",
-          completedAt: new Date().toISOString(),
-        });
-        console.log(`✅ Updated addon payment ${pendingPayment.id} to completed`);
+      if (
+        reconciliation.status !== "paid" &&
+        reconciliation.status !== "already_processed"
+      ) {
+        throwPaymobAddOnReconciliationError(reconciliation.status, "approve");
       }
-    } catch (paymentError) {
-      console.error("Error updating addon payment:", paymentError);
-      // لا نوقف العملية إذا فشل تحديث الدفع
     }
 
-    await addOnService.logHistory({
-      propertyNumber: updated.propertyNumber,
-      addOnPackageId: updated.addOnPackageId,
-      action: "activated",
-      notes: "تم التفعيل بعد التحويل البنكي",
-      timestamp: new Date().toISOString(),
-      createdBy: "admin",
+    const result = await firebaseService.applyAdminPropertyAddOnDecision({
+      addonId: addon.id,
+      ...(addon.paymentId ? { paymentId: addon.paymentId } : {}),
+      decision: "approve",
+      mode,
+      startDate: startDate.toISOString(),
+      ...(endDate ? { endDate: endDate.toISOString() } : {}),
     });
+    assertAdminAddOnDecisionApplied(result);
 
-    res.json({ ok: true });
-  } catch (err) {
+    res.json({ ok: true, alreadyProcessed: result.status === "already_applied" });
+  } catch (err: unknown) {
     console.error("Approve addon error:", err);
-    res.status(500).json({ error: "فشل تفعيل الإضافة" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر تفعيل الإضافة حالياً. لم يتم إجراء أي تغيير.",
+    );
   }
 });
 
@@ -175,61 +291,60 @@ router.post("/api/admin/addons/reject", async (req, res) => {
     const { propertyAddOnId } = req.body;
 
     if (!propertyAddOnId) {
-      return res.status(400).json({ error: "propertyAddOnId مطلوب" });
+      throw new AdminApprovalError({
+        status: 400,
+        code: "PAYMENT_ID_REQUIRED",
+        message: "معرف طلب الإضافة مطلوب.",
+      });
     }
 
-    const addOns = await addOnService.getAll();
-    const addon = addOns.find(a => a.id === propertyAddOnId);
-
+    const addon = await firebaseService.getPropertyAddOnById(propertyAddOnId);
     if (!addon) {
-      return res.status(404).json({ error: "الإضافة غير موجودة" });
+      throw new AdminApprovalError({
+        status: 404,
+        code: "PAYMENT_NOT_FOUND",
+        message: "طلب الإضافة غير موجود.",
+      });
     }
+    const payment = addon.paymentId
+      ? await paymentService.getById(addon.paymentId)
+      : null;
+    if (addon.paymentId) assertExactAddOnPaymentLink(addon, payment);
+    const mode = decisionModeFor(addon, payment);
 
-    const updated = await firebaseService.updatePropertyAddOn(
-      propertyAddOnId,
-      {
-        status: "rejected",
-      }
-    );
-
-    if (!updated) {
-      return res.status(404).json({ error: "فشل تحديث الإضافة" });
-    }
-
-    // تحديث سجل الدفع المرتبط ليصبح مرفوض
-    try {
-      const allPayments = await paymentService.getAll();
-      const pendingPayment = allPayments.find(p =>
-        p.action === "addon" &&
-        (p.status === "قيد المراجعة" || p.status === "نجح - قيد التحقق") &&
-        p.propertyNumber === addon.propertyNumber &&
-        p.packageId === addon.addOnPackageId
+    if (mode === "settled_paymob") {
+      const reconciliation = await paymentService.reconcilePaymobAddonIntention(
+        addon.paymentId!,
       );
-
-      if (pendingPayment) {
-        await paymentService.update(pendingPayment.id, {
-          status: "ملغي",
-          completedAt: new Date().toISOString(),
+      if (
+        reconciliation.status === "paid" ||
+        reconciliation.status === "already_processed"
+      ) {
+        throw new AdminApprovalError({
+          status: 409,
+          code: "PAYMOB_PAYMENT_ALREADY_PAID",
+          message: "أكد Paymob اكتمال دفعة الإضافة، لذلك لم يتم رفضها. يمكن اعتمادها بعد مراجعة البيانات.",
         });
-        console.log(`❌ Updated addon payment ${pendingPayment.id} to rejected`);
       }
-    } catch (paymentError) {
-      console.error("Error updating addon payment:", paymentError);
+      throwPaymobAddOnReconciliationError(reconciliation.status, "reject");
     }
 
-    await addOnService.logHistory({
-      propertyNumber: addon.propertyNumber,
-      addOnPackageId: addon.addOnPackageId,
-      action: "rejected",
-      notes: "تم رفض الطلب",
-      timestamp: new Date().toISOString(),
-      createdBy: "admin",
+    const result = await firebaseService.applyAdminPropertyAddOnDecision({
+      addonId: addon.id,
+      ...(addon.paymentId ? { paymentId: addon.paymentId } : {}),
+      decision: "reject",
+      mode,
     });
+    assertAdminAddOnDecisionApplied(result);
 
-    res.json({ ok: true });
-  } catch (err) {
+    res.json({ ok: true, alreadyProcessed: result.status === "already_applied" });
+  } catch (err: unknown) {
     console.error("Reject addon error:", err);
-    res.status(500).json({ error: "فشل رفض الإضافة" });
+    return sendAdminApprovalError(
+      res,
+      err,
+      "تعذر رفض الإضافة حالياً. لم يتم إجراء أي تغيير.",
+    );
   }
 });
 
@@ -284,6 +399,15 @@ router.get("/api/owner/property-addons", requireOwner, async (req, res) => {
 // OWNER – Pay Add-On (Paymob) - موحد مع التحويل البنكي
 // =======================================
 router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
+  let createdPaymentId: string | null = null;
+  let createdAddOnId: string | null = null;
+  let paymentIntentionRequestStarted = false;
+  let paymentIntentionPersisted = false;
+  let knownPaymentIntention: {
+    intentionId: string;
+    checkoutUrl: string;
+    paymobOrderId: string;
+  } | null = null;
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
     const { addOnPackageId, discountCode } = req.body;
@@ -306,8 +430,10 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
     // إنشاء سجلات الدفع والإضافة فوراً (مثل التحويل البنكي)
     // ======================================
     const now = new Date();
-    const paymentId = `PAY-ADDON-${Date.now()}`;
-    const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
+    const uniqueAttemptId = randomUUID().toUpperCase();
+    const paymentId = `PAY-ADDON-${Date.now()}-${uniqueAttemptId.slice(0, 8)}`;
+    const addOnId = `ADDON-${propertyNumber}-${Date.now()}-${uniqueAttemptId.slice(9, 17)}`;
+    const merchantAttemptKey = `RWQN-ADDON-${uniqueAttemptId}`;
 
     // إنشاء سجل دفع بحالة "قيد الدفع" (ينتظر اكتمال الدفع من Paymob)
     await paymentService.create({
@@ -329,7 +455,10 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
       pendingEndDate: undefined,
       pendingSubscriptionType: undefined,
       pendingPrice: addon.price,
+      merchantAttemptKey,
+      intentionState: "creating",
     });
+    createdPaymentId = paymentId;
 
     // إنشاء سجل إضافة بحالة "pending"
     await firebaseService.createPropertyAddOn({
@@ -344,6 +473,7 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
       source: "paymob",
       createdAt: now.toISOString(),
     });
+    createdAddOnId = addOnId;
 
     // تسجيل في سجل الإضافات
     await addOnService.logHistory({
@@ -358,7 +488,8 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
     console.log(`📦 Created addon payment record: ${paymentId}, addon: ${addOnId}`);
 
     // الحصول على رابط الدفع من Paymob مع تمرير paymentId
-    const { checkoutUrl } = await paymobService.initiateAddOnPayment(
+    paymentIntentionRequestStarted = true;
+    const paymobPayment = await paymobService.initiateAddOnPayment(
       addon.price,
       propertyNumber,
       property.name,
@@ -367,15 +498,90 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
       addon.name,
       addon.durationDays,
       'cards',
-      paymentId // تمرير paymentId للتتبع
+      { merchantAttemptKey, paymentId },
     );
 
     // تحديث سجل الدفع بمعلومات إضافية (الـ reference)
     // سيتم تحديث paymobOrderId من الـ webhook
 
-    res.json({ checkoutUrl, paymentId });
-  } catch (err) {
+    knownPaymentIntention = paymobPayment;
+    await paymentService.update(paymentId, {
+      paymentReference: paymobPayment.intentionId,
+      transactionId: paymobPayment.intentionId,
+      paymentCheckoutUrl: paymobPayment.checkoutUrl,
+      paymobOrderId: paymobPayment.paymobOrderId,
+      intentionState: "created",
+    });
+    paymentIntentionPersisted = true;
+
+    res.json({ checkoutUrl: paymobPayment.checkoutUrl, paymentId });
+  } catch (err: any) {
     console.error("Pay addon error:", err);
+    if (createdPaymentId && !paymentIntentionPersisted) {
+      const recoverableIntention = knownPaymentIntention ||
+        (err instanceof PaymobIntentionError ? err.createdIntention : undefined);
+      if (recoverableIntention) {
+        // A provider request that may have succeeded is never replaced. Keep
+        // every known identifier so reconciliation can recover it safely.
+        await paymentService.update(createdPaymentId, {
+          paymentReference: recoverableIntention.intentionId,
+          transactionId: recoverableIntention.intentionId,
+          paymentCheckoutUrl: recoverableIntention.checkoutUrl,
+          ...(recoverableIntention.paymobOrderId
+            ? { paymobOrderId: recoverableIntention.paymobOrderId }
+            : {}),
+          intentionState: recoverableIntention.paymobOrderId
+            ? "created"
+            : "unknown",
+        }).catch((persistenceError) =>
+          console.error(
+            "Failed to preserve known add-on Paymob intention:",
+            persistenceError,
+          ),
+        );
+      } else if (
+        !paymentIntentionRequestStarted ||
+        (err instanceof PaymobIntentionError && err.certainty === "rejected")
+      ) {
+        if (createdAddOnId) {
+          await firebaseService.cancelRejectedAddOnIntentionCreation(
+            createdPaymentId,
+            createdAddOnId,
+          ).then(async (cancelled) => {
+            if (!cancelled) {
+              console.error(
+                "Rejected add-on Paymob intention could not be cancelled safely",
+                { createdPaymentId, createdAddOnId },
+              );
+            }
+          }).catch((persistenceError) =>
+            console.error(
+              "Failed to atomically cancel rejected add-on Paymob intention:",
+              persistenceError,
+            ),
+          );
+        } else {
+          await paymentService.update(createdPaymentId, {
+            status: "فشل",
+            intentionState: "failed",
+          }).catch((persistenceError) =>
+            console.error(
+              "Failed to finalize rejected add-on Paymob intention:",
+              persistenceError,
+            ),
+          );
+        }
+      } else {
+        await paymentService.update(createdPaymentId, {
+          intentionState: "unknown",
+        }).catch((persistenceError) =>
+          console.error(
+            "Failed to mark ambiguous add-on Paymob intention:",
+            persistenceError,
+          ),
+        );
+      }
+    }
     res.status(500).json({ error: "فشل الدفع" });
   }
 });

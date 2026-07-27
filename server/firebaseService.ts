@@ -62,6 +62,7 @@ import {
     isSubscriptionPackageDurationAllowed,
     normalizeSubscriptionPackageDuration,
 } from "../shared/subscriptionPackagePolicy";
+import { getExactPaymobPaymentMethod } from "./utils/paymobPaymentMethod";
 
 type PaymentFulfillmentClaimResult =
     | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
@@ -74,9 +75,32 @@ type GuardedPaymentFulfillmentClaimResult =
     | PaymentFulfillmentClaimResult
     | { status: "invalid_status"; currentStatus: string };
 
+type QueuePaymentFulfillmentClaimResult =
+    | GuardedPaymentFulfillmentClaimResult
+    | { status: "queued" };
+
 type PaymentFulfillmentClaimOptions = {
-    purpose?: "fulfill" | "reject";
+    purpose?: "fulfill" | "queue" | "reject";
 };
+
+export type AdminPropertyAddOnDecisionMode =
+    | "settled_paymob"
+    | "bank_transfer"
+    | "legacy_without_payment";
+
+export type AdminPropertyAddOnDecisionResult =
+    | { status: "applied" | "already_applied"; addon: PropertyAddOn }
+    | {
+        status: "rejected";
+        reason:
+            | "not_found"
+            | "payment_not_found"
+            | "link_conflict"
+            | "not_pending"
+            | "unsafe_provider_state"
+            | "unsafe_bank_state"
+            | "unsafe_legacy_state";
+    };
 
 type PaymentActionLock = {
     propertyNumber: string;
@@ -2279,13 +2303,18 @@ export class FirebaseService {
     async claimPaymentFulfillment(
         id: string,
         allowedStatuses: string[],
-        options?: PaymentFulfillmentClaimOptions,
+        options: { purpose: "queue" },
+    ): Promise<QueuePaymentFulfillmentClaimResult>;
+    async claimPaymentFulfillment(
+        id: string,
+        allowedStatuses: string[],
+        options?: { purpose?: "fulfill" | "reject" },
     ): Promise<GuardedPaymentFulfillmentClaimResult>;
     async claimPaymentFulfillment(
         id: string,
         allowedStatuses?: string[],
         options: PaymentFulfillmentClaimOptions = {},
-    ): Promise<GuardedPaymentFulfillmentClaimResult> {
+    ): Promise<QueuePaymentFulfillmentClaimResult> {
         const ref = this.db.collection("payments").doc(id);
         const now = Date.now();
         const token = `FULFILL-${now}-${Math.random().toString(36).slice(2, 10)}`;
@@ -2306,6 +2335,19 @@ export class FirebaseService {
                     });
                 }
                 return { status: "fulfilled" as const };
+            }
+            // Queuing a verified new property deliberately releases the
+            // short-lived fulfillment claim while it waits for an admin. The
+            // durable completion marker must therefore participate in the
+            // next atomic claim, otherwise two concurrent provider callbacks
+            // can both queue and notify the same paid property.
+            if (
+                options.purpose === "queue" &&
+                payment.propertyApprovalQueuedAt &&
+                payment.pendingPropertyApproval &&
+                String(payment.status || "").trim() === "نجح - قيد التحقق"
+            ) {
+                return { status: "queued" as const };
             }
             if (
                 allowedStatuses &&
@@ -2577,7 +2619,18 @@ export class FirebaseService {
                 }
             }
 
-            transaction.update(ref, { fulfillmentState: "failed" });
+            const rejected = new Set(["مرفوض", "rejected"]).has(
+                String(payment.status || "").trim().toLowerCase(),
+            );
+            transaction.update(ref, {
+                fulfillmentState: "failed",
+                ...(rejected
+                    ? {
+                        pendingPropertyApproval: false,
+                        propertyApprovalQueuedAt: "",
+                    }
+                    : {}),
+            });
             for (const { ref: actionLockRef, lock: actionLock } of actionLocks) {
                 if (
                     actionLock?.paymentId !== payment.id ||
@@ -2790,12 +2843,15 @@ export class FirebaseService {
         details: Partial<Payment>,
     ): Promise<
         | { status: "accepted"; payment: Payment }
+        | { status: "already_accepted"; payment: Payment }
         | { status: "already_processed"; payment: Payment }
         | {
             status: "rejected";
             reason:
                 | "not_found"
                 | "stale_attempt"
+                | "attempt_identity_conflict"
+                | "provider_order_conflict"
                 | "legacy_identity_conflict"
                 | "amount_or_currency_mismatch"
                 | "transaction_conflict"
@@ -2824,14 +2880,74 @@ export class FirebaseService {
                 .toUpperCase();
 
             if (payment.merchantAttemptKey) {
+                const currentPaymobOrderId = String(
+                    payment.paymobOrderId || "",
+                ).trim();
+                let matchedPersistedPaymobOrder = false;
+                if (expectedPaymobOrderId) {
+                    const orderMatches = await transaction.get(
+                        this.db
+                            .collection("payments")
+                            .where("paymobOrderId", "==", expectedPaymobOrderId),
+                    );
+                    if (orderMatches.docs.some((candidate) => candidate.id !== id)) {
+                        return {
+                            status: "rejected" as const,
+                            reason: "provider_order_conflict" as const,
+                        };
+                    }
+                    if (
+                        currentPaymobOrderId &&
+                        currentPaymobOrderId !== expectedPaymobOrderId
+                    ) {
+                        return {
+                            status: "rejected" as const,
+                            reason: "provider_order_conflict" as const,
+                        };
+                    }
+                    matchedPersistedPaymobOrder =
+                        currentPaymobOrderId === expectedPaymobOrderId;
+                } else if (currentPaymobOrderId) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "provider_order_conflict" as const,
+                    };
+                }
+
                 if (
-                    !expectedAttemptKey ||
+                    expectedAttemptKey &&
                     payment.merchantAttemptKey !== expectedAttemptKey
                 ) {
                     return {
                         status: "rejected" as const,
                         reason: "stale_attempt" as const,
                     };
+                }
+                if (!expectedAttemptKey && !matchedPersistedPaymobOrder) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "stale_attempt" as const,
+                    };
+                }
+                // special_reference is the only local identifier retained by
+                // some live Paymob intention callbacks. Recheck uniqueness in
+                // the authoritative transaction so an accidental duplicate or
+                // concurrent write can never select an arbitrary payment.
+                if (expectedAttemptKey) {
+                    const attemptMatches = await transaction.get(
+                        this.db
+                            .collection("payments")
+                            .where("merchantAttemptKey", "==", expectedAttemptKey),
+                    );
+                    if (
+                        attemptMatches.docs.length !== 1 ||
+                        attemptMatches.docs[0].id !== id
+                    ) {
+                        return {
+                            status: "rejected" as const,
+                            reason: "attempt_identity_conflict" as const,
+                        };
+                    }
                 }
             } else {
                 // Legacy callbacks have no attempt key. Recheck their unique,
@@ -2883,25 +2999,17 @@ export class FirebaseService {
                 "مكتمل",
                 "completed",
             ]);
+            // `processing` is a recoverable claim, not a terminal outcome.
+            // An exact signed replay must be allowed to return accepted /
+            // already_accepted so the caller can reclaim a stale fulfillment
+            // and finish the idempotent property writes.
             if (
                 payment.fulfilledAt ||
                 payment.fulfillmentState === "fulfilled" ||
-                payment.fulfillmentState === "processing" ||
                 completedStatuses.has(status)
             ) {
                 return { status: "already_processed" as const, payment };
             }
-            if (
-                payment.intentionState === "failed" ||
-                new Set(["مرفوض", "rejected", "cancelled", "canceled"])
-                    .has(status)
-            ) {
-                return {
-                    status: "rejected" as const,
-                    reason: "terminal_failure" as const,
-                };
-            }
-
             const currentTransactionId = String(payment.transactionId || "").trim();
             const currentIntentionId = String(payment.paymentReference || "").trim();
             if (
@@ -2916,6 +3024,25 @@ export class FirebaseService {
                     status: "rejected" as const,
                     reason: "transaction_conflict" as const,
                 };
+            }
+            if (
+                payment.intentionState === "failed" ||
+                new Set(["مرفوض", "rejected", "cancelled", "canceled"])
+                    .has(status)
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "terminal_failure" as const,
+                };
+            }
+            if (
+                currentTransactionId === expectedTransactionId &&
+                Boolean(payment.completedAt)
+            ) {
+                // The financial write committed but verification/activation may
+                // have crashed afterwards. Callers can resume the idempotent
+                // fulfillment path without accepting or notifying twice.
+                return { status: "already_accepted" as const, payment };
             }
 
             const acceptedAt = new Date().toISOString();
@@ -2940,14 +3067,49 @@ export class FirebaseService {
     }
 
     /**
-     * Atomically settle a signed add-on transaction callback. The first
-     * callback claims the HMAC-covered Paymob order for this exact local
-     * payment. Success is terminal; a failed transaction keeps that order
-     * reserved so a later success from the same checkout can supersede it.
+     * Store a recoverable business-activation reason without allowing a slow
+     * callback to roll a concurrently fulfilled payment back to pending.
+     */
+    async recordPaidPaymentActivationPending(
+        id: string,
+        expectedTransactionId: string,
+        notes: string,
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            if (
+                !expectedTransactionId ||
+                String(payment.transactionId || "").trim() !==
+                    String(expectedTransactionId).trim() ||
+                !payment.completedAt ||
+                payment.fulfilledAt ||
+                payment.fulfillmentState === "fulfilled" ||
+                String(payment.status || "").trim() === "مكتمل"
+            ) {
+                return false;
+            }
+            transaction.update(paymentRef, {
+                status: "نجح - قيد التحقق",
+                notes,
+            });
+            return true;
+        });
+    }
+
+    /**
+     * Atomically settle a signed add-on transaction callback. Provider
+     * identity must already be bound locally before checkout is exposed; a
+     * callback can never claim an unbound payment/order. Success is terminal,
+     * while a failed transaction keeps the exact attempt reserved so a later
+     * success from the same checkout can supersede it.
      */
     async settleAddOnPaymentCallback(
         id: string,
         expected: {
+            merchantAttemptKey: string;
             transactionId: string;
             paymobOrderId: string;
             amountCents: number;
@@ -2955,6 +3117,10 @@ export class FirebaseService {
             success: boolean;
         },
         successDetails: Partial<Payment> = {},
+        options: {
+            recordReconciliationHistory?: boolean;
+            expectedIntentionId?: string;
+        } = {},
     ): Promise<
         | { status: "accepted_success"; payment: Payment }
         | { status: "recorded_failure"; payment: Payment }
@@ -2986,6 +3152,9 @@ export class FirebaseService {
                 return { status: "rejected" as const, reason: "not_addon" as const };
             }
 
+            const expectedAttemptKey = String(
+                expected?.merchantAttemptKey || "",
+            ).trim();
             const expectedTransactionId = String(
                 expected?.transactionId || "",
             ).trim();
@@ -2996,7 +3165,45 @@ export class FirebaseService {
             const expectedCurrency = String(expected?.currency || "")
                 .trim()
                 .toUpperCase();
-            if (!expectedTransactionId || !expectedPaymobOrderId) {
+            const currentAttemptKey = String(
+                payment.merchantAttemptKey || "",
+            ).trim();
+            const currentPaymobOrderId = String(
+                payment.paymobOrderId || "",
+            ).trim();
+            const expectedIntentionId = String(
+                options.expectedIntentionId || "",
+            ).trim();
+            const currentIntentionId = String(
+                payment.paymentReference || "",
+            ).trim();
+            if (
+                !expectedAttemptKey ||
+                !expectedTransactionId ||
+                !expectedPaymobOrderId ||
+                !currentAttemptKey ||
+                !currentPaymobOrderId ||
+                currentAttemptKey !== expectedAttemptKey ||
+                currentPaymobOrderId !== expectedPaymobOrderId ||
+                (expectedIntentionId &&
+                    currentIntentionId !== expectedIntentionId) ||
+                payment.intentionState !== "created"
+            ) {
+                return {
+                    status: "rejected" as const,
+                    reason: "identity_conflict" as const,
+                };
+            }
+
+            const attemptMatches = await transaction.get(
+                this.db
+                    .collection("payments")
+                    .where("merchantAttemptKey", "==", expectedAttemptKey),
+            );
+            if (
+                attemptMatches.docs.length !== 1 ||
+                attemptMatches.docs[0].id !== id
+            ) {
                 return {
                     status: "rejected" as const,
                     reason: "identity_conflict" as const,
@@ -3008,15 +3215,9 @@ export class FirebaseService {
                     .collection("payments")
                     .where("paymobOrderId", "==", expectedPaymobOrderId),
             );
-            if (orderMatches.docs.some((candidate) => candidate.id !== id)) {
-                return {
-                    status: "rejected" as const,
-                    reason: "identity_conflict" as const,
-                };
-            }
             if (
-                payment.paymobOrderId &&
-                payment.paymobOrderId !== expectedPaymobOrderId
+                orderMatches.docs.length !== 1 ||
+                orderMatches.docs[0].id !== id
             ) {
                 return {
                     status: "rejected" as const,
@@ -3098,7 +3299,49 @@ export class FirebaseService {
                 transactionId: expectedTransactionId,
                 completedAt: successDetails.completedAt || settledAt,
             };
+
+            let reconciliationHistoryRef:
+                | ReturnType<ReturnType<typeof this.db.collection>["doc"]>
+                | undefined;
+            if (options.recordReconciliationHistory) {
+                reconciliationHistoryRef = this.db
+                    .collection("addon_history")
+                    .doc(`AH-PAYMOB-RECON-${id}`);
+                const existingHistory = await transaction.get(
+                    reconciliationHistoryRef,
+                );
+                if (existingHistory.exists) {
+                    const history = existingHistory.data() as AddOnHistory;
+                    if (
+                        history.propertyNumber !== payment.propertyNumber ||
+                        history.addOnPackageId !== payment.packageId ||
+                        history.action !== "pending" ||
+                        history.createdBy !== "system"
+                    ) {
+                        return {
+                            status: "rejected" as const,
+                            reason: "identity_conflict" as const,
+                        };
+                    }
+                }
+            }
+
             transaction.update(paymentRef, successUpdates);
+            if (reconciliationHistoryRef) {
+                const totalFees = Number(successDetails.totalFees || 0);
+                transaction.set(reconciliationHistoryRef, {
+                    id: reconciliationHistoryRef.id,
+                    propertyNumber: payment.propertyNumber,
+                    addOnPackageId: payment.packageId,
+                    action: "pending",
+                    notes:
+                        `تم استلام الدفع الإلكتروني بنجاح - المبلغ: ${payment.finalAmount} ر.س` +
+                        ` - الرسوم: ${totalFees} ر.س - بانتظار مراجعة الإدارة`,
+                    timestamp: settledAt,
+                    createdBy: "system",
+                    createdAt: settledAt,
+                });
+            }
             return {
                 status: "accepted_success" as const,
                 payment: { ...payment, ...successUpdates } as Payment,
@@ -3143,7 +3386,49 @@ export class FirebaseService {
                 .toUpperCase();
             if (!expectedTransactionId) return false;
             if (payment.merchantAttemptKey) {
-                if (payment.merchantAttemptKey !== expectedAttemptKey) return false;
+                const currentPaymobOrderId = String(
+                    payment.paymobOrderId || "",
+                ).trim();
+                let matchedPersistedPaymobOrder = false;
+                if (expectedPaymobOrderId) {
+                    const orderMatches = await transaction.get(
+                        this.db
+                            .collection("payments")
+                            .where("paymobOrderId", "==", expectedPaymobOrderId),
+                    );
+                    if (orderMatches.docs.some((candidate) => candidate.id !== id)) {
+                        return false;
+                    }
+                    if (
+                        currentPaymobOrderId &&
+                        currentPaymobOrderId !== expectedPaymobOrderId
+                    ) {
+                        return false;
+                    }
+                    matchedPersistedPaymobOrder =
+                        currentPaymobOrderId === expectedPaymobOrderId;
+                } else if (currentPaymobOrderId) {
+                    return false;
+                }
+
+                if (expectedAttemptKey) {
+                    if (payment.merchantAttemptKey !== expectedAttemptKey) {
+                        return false;
+                    }
+                    const attemptMatches = await transaction.get(
+                        this.db
+                            .collection("payments")
+                            .where("merchantAttemptKey", "==", expectedAttemptKey),
+                    );
+                    if (
+                        attemptMatches.docs.length !== 1 ||
+                        attemptMatches.docs[0].id !== id
+                    ) {
+                        return false;
+                    }
+                } else if (!matchedPersistedPaymobOrder) {
+                    return false;
+                }
             } else {
                 if (expectedAttemptKey || !expectedPaymobOrderId) return false;
                 const legacyMatches = await transaction.get(
@@ -3207,6 +3492,9 @@ export class FirebaseService {
             }
             transaction.update(paymentRef, {
                 status: "فشل",
+                ...(expectedPaymobOrderId
+                    ? { paymobOrderId: expectedPaymobOrderId }
+                    : {}),
                 // "failed" is reserved for a definitively abandoned or
                 // rejected intention. This callback settles one transaction,
                 // not necessarily the whole checkout intention.
@@ -3353,6 +3641,15 @@ export class FirebaseService {
                 retryReservationToken: token,
                 retryReservationAt: new Date(now).toISOString(),
                 merchantAttemptKey,
+                paymobOrderId: "",
+                paymentReference: "",
+                transactionId: "",
+                paymentCheckoutUrl: "",
+                providerReconciledAt: "",
+                providerPaidAt: "",
+                providerLastCheckedAt: "",
+                providerReconciliationStartedAt: "",
+                providerReconciliationClaimToken: "",
             });
             for (const { key, ref, lock } of actionLocks) {
                 transaction.set(ref, {
@@ -3953,6 +4250,285 @@ export class FirebaseService {
         return snapshot.docs.map(doc => doc.data() as PropertyAddOn);
     }
 
+    async getPropertyAddOnById(id: string): Promise<PropertyAddOn | null> {
+        const doc = await this.db.collection("property_addons").doc(id).get();
+        return doc.exists ? (doc.data() as PropertyAddOn) : null;
+    }
+
+    /**
+     * Apply an admin add-on decision as one compare-and-set operation. Modern
+     * add-ons are linked only through their persisted paymentId; property and
+     * package equality can validate that link, but can never discover it.
+     */
+    async applyAdminPropertyAddOnDecision(params: {
+        addonId: string;
+        paymentId?: string;
+        decision: "approve" | "reject";
+        mode: AdminPropertyAddOnDecisionMode;
+        startDate?: string;
+        endDate?: string;
+    }): Promise<AdminPropertyAddOnDecisionResult> {
+        const addonRef = this.db.collection("property_addons").doc(params.addonId);
+        const paymentRef = params.paymentId
+            ? this.db.collection("payments").doc(params.paymentId)
+            : null;
+        const now = new Date().toISOString();
+
+        return this.db.runTransaction(async (transaction) => {
+            const addonDoc = await transaction.get(addonRef);
+            if (!addonDoc.exists) {
+                return { status: "rejected" as const, reason: "not_found" as const };
+            }
+            const addon = addonDoc.data() as PropertyAddOn;
+            const linkedPaymentId = String(addon.paymentId || "").trim();
+            const requestedPaymentId = String(params.paymentId || "").trim();
+            if (linkedPaymentId !== requestedPaymentId) {
+                return {
+                    status: "rejected" as const,
+                    reason: "link_conflict" as const,
+                };
+            }
+
+            let payment: Payment | null = null;
+            if (paymentRef) {
+                const paymentDoc = await transaction.get(paymentRef);
+                if (!paymentDoc.exists) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "payment_not_found" as const,
+                    };
+                }
+                payment = paymentDoc.data() as Payment;
+                if (
+                    payment.id !== requestedPaymentId ||
+                    payment.action !== "addon" ||
+                    payment.propertyNumber !== addon.propertyNumber ||
+                    payment.packageId !== addon.addOnPackageId
+                ) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "link_conflict" as const,
+                    };
+                }
+            }
+
+            const targetStatus = params.decision === "approve" ? "active" : "rejected";
+            if (addon.status === targetStatus) {
+                return { status: "already_applied" as const, addon };
+            }
+            if (addon.status !== "pending") {
+                return {
+                    status: "rejected" as const,
+                    reason: "not_pending" as const,
+                };
+            }
+
+            if (params.mode === "settled_paymob") {
+                const intentionId = String(payment?.paymentReference || "").trim();
+                const transactionId = String(payment?.transactionId || "").trim();
+                const exactPaymentMethod = getExactPaymobPaymentMethod({
+                    paymentMethod: payment?.paymentMethod,
+                });
+                const successfulStatuses = new Set<string>([
+                    "نجح - قيد التحقق",
+                    "مكتمل",
+                    "completed",
+                    "نجح",
+                    "نجاح",
+                ]);
+                const hasCompleteSettlement = Boolean(
+                    payment &&
+                    payment.merchantAttemptKey &&
+                    intentionId &&
+                    payment.paymentCheckoutUrl &&
+                    payment.paymobOrderId &&
+                    payment.intentionState === "created" &&
+                    transactionId &&
+                    transactionId !== intentionId &&
+                    payment.completedAt &&
+                    exactPaymentMethod &&
+                    successfulStatuses.has(String(payment.status || "").trim()),
+                );
+                if (params.decision !== "approve" || !hasCompleteSettlement) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "unsafe_provider_state" as const,
+                    };
+                }
+            } else if (params.mode === "bank_transfer") {
+                const bankMethods = new Set<string>([
+                    "تحويل بنكي",
+                    "bank_transfer",
+                    "bank transfer",
+                ]);
+                const pendingStatuses = new Set<string>([
+                    "قيد المراجعة",
+                    "pending",
+                ]);
+                const hasProviderIdentity = Boolean(
+                    payment?.merchantAttemptKey ||
+                    payment?.paymentCheckoutUrl ||
+                    payment?.paymobOrderId ||
+                    payment?.intentionState,
+                );
+                const receiptUrl = String(
+                    payment?.receiptUrl || addon.receiptUrl || "",
+                ).trim();
+                if (
+                    !payment ||
+                    (addon.source !== "bank" && addon.source !== "bank_transfer") ||
+                    hasProviderIdentity ||
+                    !bankMethods.has(String(payment.paymentMethod || "").trim()) ||
+                    !receiptUrl ||
+                    !pendingStatuses.has(String(payment.status || "").trim())
+                ) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "unsafe_bank_state" as const,
+                    };
+                }
+            } else {
+                const defensibleAdminSource =
+                    !payment &&
+                    !linkedPaymentId &&
+                    (
+                        addon.source === "admin" ||
+                        addon.source === "system" ||
+                        (
+                            (addon.source === "bank" ||
+                                addon.source === "bank_transfer") &&
+                            Boolean(String(addon.receiptUrl || "").trim())
+                        )
+                    );
+                if (!defensibleAdminSource) {
+                    return {
+                        status: "rejected" as const,
+                        reason: "unsafe_legacy_state" as const,
+                    };
+                }
+            }
+
+            const addonUpdates: Partial<PropertyAddOn> = params.decision === "approve"
+                ? {
+                    status: "active",
+                    startDate: params.startDate || now,
+                    ...(params.endDate ? { endDate: params.endDate } : {}),
+                    updatedAt: now,
+                }
+                : { status: "rejected", updatedAt: now };
+            const historyRef = this.db
+                .collection("addon_history")
+                .doc(
+                    `AH-ADMIN-${params.decision === "approve" ? "APPROVE" : "REJECT"}-${params.addonId}`,
+                );
+            const historyDoc = await transaction.get(historyRef);
+
+            transaction.update(addonRef, addonUpdates);
+            if (paymentRef && payment) {
+                transaction.update(paymentRef, {
+                    status: params.decision === "approve"
+                        ? "مكتمل"
+                        : "ملغي",
+                    completedAt: payment.completedAt || now,
+                });
+            }
+            if (!historyDoc.exists) {
+                transaction.set(historyRef, {
+                    id: historyRef.id,
+                    propertyNumber: addon.propertyNumber,
+                    addOnPackageId: addon.addOnPackageId,
+                    action: params.decision === "approve" ? "activated" : "rejected",
+                    notes: params.decision === "approve"
+                        ? "تم التفعيل بعد تحقق الإدارة من وسيلة الدفع المرتبطة"
+                        : "تم رفض الطلب بعد تحقق الإدارة من وسيلة الدفع المرتبطة",
+                    timestamp: now,
+                    createdBy: "admin",
+                });
+            }
+
+            return {
+                status: "applied" as const,
+                addon: { ...addon, ...addonUpdates } as PropertyAddOn,
+            };
+        });
+    }
+
+    /**
+     * Cancel the pre-created pending add-on only when Paymob definitively
+     * rejected intention creation and no provider checkout identity exists.
+     */
+    async cancelRejectedAddOnIntentionCreation(
+        paymentId: string,
+        addonId: string,
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(paymentId);
+        const addonRef = this.db.collection("property_addons").doc(addonId);
+        const now = new Date().toISOString();
+        return this.db.runTransaction(async (transaction) => {
+            const [paymentDoc, addonDoc] = await Promise.all([
+                transaction.get(paymentRef),
+                transaction.get(addonRef),
+            ]);
+            if (!paymentDoc.exists || !addonDoc.exists) return false;
+            const payment = paymentDoc.data() as Payment;
+            const addon = addonDoc.data() as PropertyAddOn;
+            const safeInitialStatuses = new Set<string>([
+                "قيد الدفع",
+                "فشل",
+            ]);
+            if (
+                payment.id !== paymentId ||
+                payment.action !== "addon" ||
+                addon.id !== addonId ||
+                addon.paymentId !== paymentId ||
+                addon.propertyNumber !== payment.propertyNumber ||
+                addon.addOnPackageId !== payment.packageId ||
+                addon.status !== "pending" ||
+                !safeInitialStatuses.has(String(payment.status || "").trim()) ||
+                !new Set(["creating", "failed"]).has(
+                    String(payment.intentionState || "creating"),
+                ) ||
+                Boolean(
+                    payment.paymentReference ||
+                    payment.transactionId ||
+                    payment.paymentCheckoutUrl ||
+                    payment.paymobOrderId ||
+                    payment.completedAt,
+                )
+            ) {
+                return false;
+            }
+
+            const historyRef = this.db
+                .collection("addon_history")
+                .doc(`AH-PAYMOB-CREATE-FAILED-${addonId}`);
+            const historyDoc = await transaction.get(historyRef);
+
+            transaction.update(paymentRef, {
+                status: "فشل",
+                intentionState: "failed",
+                providerCreationFailedAt: now,
+            });
+            transaction.update(addonRef, {
+                status: "cancelled",
+                cancellationReason: "paymob_intention_rejected",
+                updatedAt: now,
+            });
+            if (!historyDoc.exists) {
+                transaction.set(historyRef, {
+                    id: historyRef.id,
+                    propertyNumber: addon.propertyNumber,
+                    addOnPackageId: addon.addOnPackageId,
+                    action: "cancelled",
+                    notes: "أُلغي الطلب لأن Paymob رفض إنشاء عملية الدفع قبل إصدار رابط الدفع",
+                    timestamp: now,
+                    createdBy: "system",
+                });
+            }
+            return true;
+        });
+    }
+
     async createPropertyAddOn(addon: InsertPropertyAddOn): Promise<PropertyAddOn> {
         const id = addon.id || `ADDON-${Date.now()}`;
         const newAddon = {
@@ -3982,9 +4558,9 @@ export class FirebaseService {
         const doc = await ref.get();
         if (!doc.exists) return null;
         const updates: Partial<PropertyAddOn> = {
-            status: "cancelled" as any,
+            status: "cancelled",
             updatedAt: new Date().toISOString(),
-            ...(reason ? { cancellationReason: reason } as any : {}),
+            ...(reason ? { cancellationReason: reason } : {}),
         };
         await ref.update(updates);
         const updatedDoc = await ref.get();
@@ -4584,6 +5160,299 @@ export class FirebaseService {
     }
 
     // ================== Payment Status ==================
+
+    /**
+     * Claim one exact Paymob attempt for a provider-state read. The claim is
+     * written before the network call so multiple Cloud Run instances cannot
+     * repeatedly query the same checkout in parallel. A signed callback does
+     * not depend on this claim and can still settle the payment at any time.
+     */
+    async claimPaymentProviderReconciliation(
+        candidate: Pick<
+            Payment,
+            | "id"
+            | "action"
+            | "status"
+            | "paymentMethod"
+            | "createdAt"
+            | "merchantAttemptKey"
+            | "intentionState"
+            | "paymentReference"
+            | "transactionId"
+            | "paymobOrderId"
+            | "paymentCheckoutUrl"
+        >,
+        options: {
+            checkedAt: string;
+            createdBeforeMs: number;
+            createdAfterMs: number;
+            minIntervalMs: number;
+        },
+    ): Promise<
+        | { claimed: false }
+        | { claimed: true; token: string; payment: Payment }
+    > {
+        const paymentRef = this.db.collection("payments").doc(candidate.id);
+        const checkedAtMs = Date.parse(String(options.checkedAt || ""));
+        const token = `PAYMOB-CHECK-${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 10)}`;
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return { claimed: false as const };
+            const payment = paymentDoc.data() as Payment;
+            const sameValue = (current: unknown, expected: unknown) =>
+                String(current ?? "") === String(expected ?? "");
+
+            if (
+                !sameValue(payment.action, candidate.action) ||
+                !sameValue(payment.status, candidate.status) ||
+                !sameValue(payment.paymentMethod, candidate.paymentMethod) ||
+                !sameValue(payment.createdAt, candidate.createdAt) ||
+                !sameValue(payment.merchantAttemptKey, candidate.merchantAttemptKey) ||
+                !sameValue(payment.intentionState, candidate.intentionState) ||
+                !sameValue(payment.paymentReference, candidate.paymentReference) ||
+                !sameValue(payment.transactionId, candidate.transactionId) ||
+                !sameValue(payment.paymobOrderId, candidate.paymobOrderId) ||
+                !sameValue(payment.paymentCheckoutUrl, candidate.paymentCheckoutUrl)
+            ) {
+                return { claimed: false as const };
+            }
+
+            const paymentDateMs = Date.parse(String(payment.createdAt || ""));
+            if (
+                !Number.isFinite(checkedAtMs) ||
+                !Number.isFinite(options.createdBeforeMs) ||
+                !Number.isFinite(options.createdAfterMs) ||
+                !Number.isFinite(options.minIntervalMs) ||
+                options.minIntervalMs <= 0 ||
+                !Number.isFinite(paymentDateMs) ||
+                paymentDateMs >= options.createdBeforeMs ||
+                paymentDateMs < options.createdAfterMs ||
+                !String(payment.merchantAttemptKey || "").trim() ||
+                !String(payment.paymentReference || "").trim() ||
+                !String(payment.paymentCheckoutUrl || "").trim()
+            ) {
+                return { claimed: false as const };
+            }
+
+            const recoverableStatuses = new Set([
+                "قيد المراجعة",
+                "فشل",
+                "ملغي - انتهت المهلة",
+                "نجح - قيد التحقق",
+            ]);
+            const paymentStatus = String(payment.status || "").trim();
+            const fulfillmentClaimedAtMs = this.getDateMillis(
+                payment.fulfillmentClaimedAt,
+            );
+            // The scheduler must not race an active fulfillment. Once its
+            // ten-minute lease is stale, provider reconciliation may replay
+            // the exact paid attempt and obtain a fresh fulfillment token.
+            const staleProcessingClaim =
+                payment.fulfillmentState === "processing" &&
+                (
+                    fulfillmentClaimedAtMs <= 0 ||
+                    checkedAtMs - fulfillmentClaimedAtMs >= 10 * 60 * 1000
+                );
+            if (
+                !(
+                    recoverableStatuses.has(paymentStatus) ||
+                    (payment.action === "addon" && paymentStatus === "قيد الدفع")
+                ) ||
+                payment.fulfilledAt ||
+                (
+                    payment.pendingPropertyApproval &&
+                    payment.propertyApprovalQueuedAt
+                ) ||
+                (
+                    payment.fulfillmentState === "processing" &&
+                    !staleProcessingClaim
+                ) ||
+                payment.fulfillmentState === "fulfilled" ||
+                (payment.action === "addon" && Boolean(payment.completedAt)) ||
+                payment.status === "مكتمل" ||
+                payment.status === "completed"
+            ) {
+                return { claimed: false as const };
+            }
+
+            const previousCheckMs = Date.parse(
+                String(payment.providerLastCheckedAt || ""),
+            );
+            if (
+                Number.isFinite(previousCheckMs) &&
+                previousCheckMs > checkedAtMs - options.minIntervalMs
+            ) {
+                return { claimed: false as const };
+            }
+
+            const claimUpdates: Partial<Payment> = {
+                providerLastCheckedAt: options.checkedAt,
+                ...(!payment.providerReconciliationStartedAt
+                    ? { providerReconciliationStartedAt: options.checkedAt }
+                    : {}),
+                providerReconciliationClaimToken: token,
+            };
+            transaction.update(paymentRef, claimUpdates);
+            return {
+                claimed: true as const,
+                token,
+                payment: { ...payment, ...claimUpdates } as Payment,
+            };
+        });
+    }
+
+    /**
+     * Atomically expire the exact pending payment attempt observed by the
+     * scheduler. A scheduler scan is necessarily stale by the time it reaches
+     * Firestore, so every eligibility check is repeated inside the transaction
+     * before the status is changed.
+     *
+     * Electronic payments with any unresolved Paymob identity intentionally
+     * fail closed. The absence of a webhook is not proof that the card was not
+     * charged; those attempts must be reconciled with Paymob instead.
+     */
+    async expirePendingPaymentIfEligible(
+        candidate: Pick<
+            Payment,
+            | "id"
+            | "status"
+            | "paymentMethod"
+            | "createdAt"
+            | "merchantAttemptKey"
+            | "intentionState"
+            | "paymentReference"
+            | "transactionId"
+            | "paymobOrderId"
+            | "paymentCheckoutUrl"
+            | "providerReconciliationClaimToken"
+        >,
+        kind: "card" | "bank",
+        createdBeforeMs: number,
+        options: { providerUnpaidClaimToken?: string } = {},
+    ): Promise<boolean> {
+        const paymentRef = this.db.collection("payments").doc(candidate.id);
+        return this.db.runTransaction(async (transaction) => {
+            const paymentDoc = await transaction.get(paymentRef);
+            if (!paymentDoc.exists) return false;
+
+            const payment = paymentDoc.data() as Payment;
+            const sameValue = (current: unknown, expected: unknown) =>
+                String(current ?? "") === String(expected ?? "");
+
+            // The scheduler may only act on the exact attempt it scanned.
+            if (
+                !sameValue(payment.status, candidate.status) ||
+                !sameValue(payment.paymentMethod, candidate.paymentMethod) ||
+                !sameValue(payment.createdAt, candidate.createdAt) ||
+                !sameValue(payment.merchantAttemptKey, candidate.merchantAttemptKey) ||
+                !sameValue(payment.intentionState, candidate.intentionState) ||
+                !sameValue(payment.paymentReference, candidate.paymentReference) ||
+                !sameValue(payment.transactionId, candidate.transactionId) ||
+                !sameValue(payment.paymobOrderId, candidate.paymobOrderId) ||
+                !sameValue(payment.paymentCheckoutUrl, candidate.paymentCheckoutUrl) ||
+                !sameValue(
+                    payment.providerReconciliationClaimToken,
+                    candidate.providerReconciliationClaimToken,
+                )
+            ) {
+                return false;
+            }
+
+            const paymentDateMs = Date.parse(String(payment.createdAt || ""));
+            if (
+                !Number.isFinite(createdBeforeMs) ||
+                !Number.isFinite(paymentDateMs) ||
+                paymentDateMs >= createdBeforeMs
+            ) {
+                return false;
+            }
+
+            const successfulStatuses = new Set([
+                "مكتمل",
+                "نجح",
+                "نجاح",
+                "نجح - قيد التحقق",
+                "مدفوع",
+                "completed",
+                "paid",
+                "success",
+                "successful",
+            ]);
+            const normalizedStatus = String(payment.status || "")
+                .trim()
+                .toLowerCase();
+            if (
+                successfulStatuses.has(normalizedStatus) ||
+                Boolean(payment.completedAt) ||
+                Boolean(payment.fulfilledAt) ||
+                payment.fulfillmentState === "processing" ||
+                payment.fulfillmentState === "fulfilled"
+            ) {
+                return false;
+            }
+
+            if (kind === "card") {
+                const normalizedMethod = String(payment.paymentMethod || "")
+                    .trim()
+                    .toLowerCase();
+                const cardMethods = new Set([
+                    "بطاقة",
+                    "apple pay",
+                    "apple_pay",
+                    "applepay",
+                    "paymob",
+                    "card",
+                    "cards",
+                ]);
+                if (
+                    payment.status !== "قيد المراجعة" ||
+                    !cardMethods.has(normalizedMethod)
+                ) {
+                    return false;
+                }
+
+                const unresolvedIntentionStates = new Set([
+                    "creating",
+                    "created",
+                    "unknown",
+                ]);
+                const hasUnresolvedProviderAttempt =
+                    Boolean(String(payment.merchantAttemptKey || "").trim()) ||
+                    unresolvedIntentionStates.has(
+                        String(payment.intentionState || "").trim().toLowerCase(),
+                    ) ||
+                    Boolean(String(payment.paymentReference || "").trim()) ||
+                    Boolean(String(payment.transactionId || "").trim()) ||
+                    Boolean(String(payment.paymobOrderId || "").trim()) ||
+                    Boolean(String(payment.paymentCheckoutUrl || "").trim());
+                if (
+                    hasUnresolvedProviderAttempt &&
+                    (
+                        !options.providerUnpaidClaimToken ||
+                        options.providerUnpaidClaimToken !==
+                            payment.providerReconciliationClaimToken
+                    )
+                ) return false;
+
+                transaction.update(paymentRef, {
+                    status: "ملغي - انتهت المهلة",
+                });
+                return true;
+            }
+
+            if (
+                payment.status !== "قيد التحقق" ||
+                String(payment.paymentMethod || "").trim() !== "تحويل بنكي"
+            ) {
+                return false;
+            }
+
+            transaction.update(paymentRef, { status: "منتهي الصلاحية" });
+            return true;
+        });
+    }
 
     async updatePaymentStatus(paymentId: string, newStatus: string): Promise<void> {
         const ref = this.db.collection("payments").doc(paymentId);

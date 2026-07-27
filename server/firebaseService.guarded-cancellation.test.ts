@@ -14,6 +14,8 @@ class FakeFirestore {
   private readonly collections = new Map<string, Map<string, FakeData>>();
   private transactionQueue: Promise<void> = Promise.resolve();
 
+  constructor(readonly enforceReadBeforeWrite = false) {}
+
   collection(name: string) {
     return new FakeCollectionReference(this, name);
   }
@@ -151,6 +153,8 @@ class FakeSnapshot {
 }
 
 class FakeTransaction {
+  private hasWritten = false;
+
   constructor(private readonly database: FakeFirestore) {}
 
   async get(ref: FakeDocumentReference): Promise<FakeSnapshot>;
@@ -158,19 +162,25 @@ class FakeTransaction {
   async get(
     ref: FakeDocumentReference | FakeQueryReference,
   ): Promise<FakeSnapshot | FakeQuerySnapshot> {
+    if (this.hasWritten && this.database.enforceReadBeforeWrite) {
+      throw new Error("Firestore transaction read attempted after a write");
+    }
     if (ref instanceof FakeQueryReference) return ref.snapshot();
     return new FakeSnapshot(this.database, ref);
   }
 
   update(ref: FakeDocumentReference, updates: FakeData): void {
+    this.hasWritten = true;
     this.database.update(ref.collectionName, ref.id, updates);
   }
 
   set(ref: FakeDocumentReference, data: FakeData): void {
+    this.hasWritten = true;
     this.database.set(ref.collectionName, ref.id, data);
   }
 
   delete(ref: FakeDocumentReference): void {
+    this.hasWritten = true;
     this.database.delete(ref.collectionName, ref.id);
   }
 }
@@ -412,6 +422,59 @@ test("a legacy duplicate created before another fulfillment cannot also succeed"
   assert.equal(secondClaim.status, "action_conflict");
   assert.equal(database.get("payments", "PAY-FIRST")?.status, "مكتمل");
   assert.equal(database.get("payments", "PAY-SECOND")?.fulfilledAt, undefined);
+});
+
+test("a stale processing fulfillment is reclaimed atomically and only the new token can complete", async () => {
+  const database = new FakeFirestore();
+  database.set("subscriptions", "SUB-PROP-RECOVER", activeSubscription("PROP-RECOVER"));
+  const service = createService(database);
+  await service.createPayment(
+    actionablePayment("PAY-RECOVER", "PROP-RECOVER") as any,
+  );
+
+  const firstClaim = await service.claimPaymentFulfillment("PAY-RECOVER");
+  assert.equal(firstClaim.status, "claimed");
+  assert.ok(firstClaim.status === "claimed");
+  assert.deepEqual(
+    await service.claimPaymentFulfillment("PAY-RECOVER"),
+    { status: "processing" },
+  );
+
+  database.update("payments", "PAY-RECOVER", {
+    fulfillmentClaimedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+  });
+  const recoveryClaim = await service.claimPaymentFulfillment("PAY-RECOVER");
+  assert.equal(recoveryClaim.status, "claimed");
+  assert.ok(recoveryClaim.status === "claimed");
+  assert.equal(recoveryClaim.previousState, "processing");
+  assert.notEqual(recoveryClaim.token, firstClaim.token);
+  assert.equal(
+    database.get("payment_action_locks", "PROP-RECOVER")?.claimToken,
+    recoveryClaim.token,
+  );
+
+  await assert.rejects(
+    () =>
+      service.completePaymentFulfillment(
+        "PAY-RECOVER",
+        firstClaim.token,
+        "SUB-PROP-RECOVER",
+      ),
+    /claim was lost/,
+  );
+  await service.completePaymentFulfillment(
+    "PAY-RECOVER",
+    recoveryClaim.token,
+    "SUB-PROP-RECOVER",
+  );
+  assert.equal(
+    database.get("payments", "PAY-RECOVER")?.fulfillmentState,
+    "fulfilled",
+  );
+  assert.equal(
+    database.get("payment_action_locks", "PROP-RECOVER")?.state,
+    "fulfilled",
+  );
 });
 
 test("rejection can claim a legacy payment without stealing another payment's action lock", async () => {
@@ -768,6 +831,43 @@ test("only one concurrent retry reservation can create a provider attempt", asyn
   );
 });
 
+test("retry reservation clears stale provider identity before creating a new attempt", async () => {
+  const database = new FakeFirestore();
+  const service = createService(database);
+  await service.createPayment(actionablePayment("PAY-RETRY", "PROP-1", {
+    action: "new",
+    merchantAttemptKey: "ATTEMPT-OLD",
+    paymobOrderId: "ORDER-OLD",
+    paymentCheckoutUrl: "https://checkout.example/old",
+    providerReconciledAt: "2026-07-27T10:00:00.000Z",
+    providerPaidAt: "2026-07-27T10:01:00.000Z",
+    providerLastCheckedAt: "2026-07-27T10:02:00.000Z",
+    providerReconciliationStartedAt: "2026-07-27T10:00:00.000Z",
+    providerReconciliationClaimToken: "CLAIM-OLD",
+  }) as any);
+  await service.releasePaymentActionReservation("PAY-RETRY", {
+    status: "فشل",
+    intentionState: "failed",
+    paymentReference: "",
+    transactionId: "",
+  });
+
+  const retry = await service.reservePaymentActionForRetry("PAY-RETRY");
+  const payment = database.get("payments", "PAY-RETRY");
+
+  assert.notEqual(retry.merchantAttemptKey, "ATTEMPT-OLD");
+  assert.equal(payment?.merchantAttemptKey, retry.merchantAttemptKey);
+  assert.equal(payment?.paymobOrderId, "");
+  assert.equal(payment?.paymentReference, "");
+  assert.equal(payment?.transactionId, "");
+  assert.equal(payment?.paymentCheckoutUrl, "");
+  assert.equal(payment?.providerReconciledAt, "");
+  assert.equal(payment?.providerPaidAt, "");
+  assert.equal(payment?.providerLastCheckedAt, "");
+  assert.equal(payment?.providerReconciliationStartedAt, "");
+  assert.equal(payment?.providerReconciliationClaimToken, "");
+});
+
 test("pending or provider-identified payments cannot reserve a new retry", async () => {
   for (const overrides of [
     { status: "pending" },
@@ -810,7 +910,7 @@ test("retry completion verifies every lock and token before writing provider ids
     ),
     PaymentActionConflictError,
   );
-  assert.equal(database.get("payments", "PAY-RETRY")?.paymentReference, undefined);
+  assert.equal(database.get("payments", "PAY-RETRY")?.paymentReference, "");
   assert.equal(database.get("payments", "PAY-RETRY")?.retryReservationToken, retry.token);
   assert.equal(database.get("payment_action_locks", "PROP-A")?.state, "retrying");
 });
@@ -956,6 +1056,60 @@ test("failed transaction retains every action lock owned by its intention", asyn
   );
 });
 
+test("order-only failed callback settles one unique modern persisted Paymob order", async () => {
+  const database = new FakeFirestore();
+  database.set("payments", "PAY-ORDER-ONLY", actionablePayment(
+    "PAY-ORDER-ONLY",
+    "PROP-1",
+    {
+      action: "new",
+      status: "قيد المراجعة",
+      paymentMethod: "بطاقة",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-NOT-ECHOED",
+      paymentReference: "INT-ORDER-ONLY",
+      transactionId: "INT-ORDER-ONLY",
+      paymobOrderId: "ORDER-PERSISTED",
+    },
+  ));
+  const service = createService(database);
+
+  assert.equal(
+    await service.finalizeFailedPaymentIntention("PAY-ORDER-ONLY", {
+      merchantAttemptKey: "",
+      transactionId: "TX-DECLINED",
+      paymobOrderId: "ORDER-PERSISTED",
+      amountCents: 10_000,
+      currency: "SAR",
+    }),
+    true,
+  );
+  assert.equal(database.get("payments", "PAY-ORDER-ONLY")?.status, "فشل");
+
+  database.set("payments", "PAY-DUPLICATE-ORDER", actionablePayment(
+    "PAY-DUPLICATE-ORDER",
+    "PROP-2",
+    {
+      merchantAttemptKey: "ATTEMPT-OTHER",
+      paymobOrderId: "ORDER-PERSISTED",
+    },
+  ));
+  database.update("payments", "PAY-ORDER-ONLY", {
+    status: "قيد المراجعة",
+    lastFailedTransactionId: "",
+  });
+  assert.equal(
+    await service.finalizeFailedPaymentIntention("PAY-ORDER-ONLY", {
+      merchantAttemptKey: "",
+      transactionId: "TX-DECLINED-2",
+      paymobOrderId: "ORDER-PERSISTED",
+      amountCents: 10_000,
+      currency: "SAR",
+    }),
+    false,
+  );
+});
+
 test("late provider failure cannot downgrade or unlock a successful payment", async () => {
   const database = new FakeFirestore();
   database.set("payments", "PAY-SUCCESS", actionablePayment(
@@ -1072,6 +1226,124 @@ test("successful callback acceptance rejects an attempt changed after route look
   assert.equal(database.get("payments", "PAY-RACE")?.merchantFees, undefined);
 });
 
+test("successful callback acceptance rejects duplicate merchant attempt keys", async () => {
+  const database = new FakeFirestore();
+  for (const [id, propertyNumber] of [
+    ["PAY-DUPLICATE-A", "PROP-A"],
+    ["PAY-DUPLICATE-B", "PROP-B"],
+  ]) {
+    database.set("payments", id, actionablePayment(
+      id,
+      propertyNumber,
+      {
+        action: "new",
+        intentionState: "created",
+        merchantAttemptKey: "ATTEMPT-DUPLICATE",
+        paymentReference: `INT-${id}`,
+        transactionId: `INT-${id}`,
+      },
+    ));
+  }
+
+  const result = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-DUPLICATE-A",
+    {
+      merchantAttemptKey: "ATTEMPT-DUPLICATE",
+      transactionId: "TX-DUPLICATE-SUCCESS",
+      paymobOrderId: "ORDER-DUPLICATE",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { merchantFees: 2 },
+  );
+
+  assert.deepEqual(result, {
+    status: "rejected",
+    reason: "attempt_identity_conflict",
+  });
+  assert.equal(database.get("payments", "PAY-DUPLICATE-A")?.status, "pending");
+  assert.equal(database.get("payments", "PAY-DUPLICATE-A")?.merchantFees, undefined);
+});
+
+test("successful callback acceptance prefers one persisted HMAC-covered Paymob order", async () => {
+  const database = new FakeFirestore();
+  database.set("payments", "PAY-BY-ORDER", actionablePayment(
+    "PAY-BY-ORDER",
+    "PROP-ORDER",
+    {
+      action: "new",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-NOT-ECHOED",
+      paymentReference: "INT-BY-ORDER",
+      transactionId: "INT-BY-ORDER",
+      paymobOrderId: "ORDER-PERSISTED",
+    },
+  ));
+
+  const result = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-BY-ORDER",
+    {
+      merchantAttemptKey: "",
+      transactionId: "TX-BY-ORDER",
+      paymobOrderId: "ORDER-PERSISTED",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { merchantFees: 2 },
+  );
+
+  assert.equal(result.status, "accepted");
+  assert.equal(database.get("payments", "PAY-BY-ORDER")?.transactionId, "TX-BY-ORDER");
+  assert.equal(database.get("payments", "PAY-BY-ORDER")?.status, "نجح - قيد التحقق");
+});
+
+test("successful callback acceptance rejects a conflicting persisted Paymob order", async () => {
+  const database = new FakeFirestore();
+  database.set("payments", "PAY-ORDER-A", actionablePayment(
+    "PAY-ORDER-A",
+    "PROP-A",
+    {
+      action: "new",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-A",
+      paymentReference: "INT-A",
+      transactionId: "INT-A",
+      paymobOrderId: "ORDER-A",
+    },
+  ));
+  database.set("payments", "PAY-ORDER-B", actionablePayment(
+    "PAY-ORDER-B",
+    "PROP-B",
+    {
+      action: "new",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-B",
+      paymentReference: "INT-B",
+      transactionId: "INT-B",
+      paymobOrderId: "ORDER-B",
+    },
+  ));
+
+  const result = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-ORDER-A",
+    {
+      merchantAttemptKey: "ATTEMPT-A",
+      transactionId: "TX-ORDER-CONFLICT",
+      paymobOrderId: "ORDER-B",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { merchantFees: 2 },
+  );
+
+  assert.deepEqual(result, {
+    status: "rejected",
+    reason: "provider_order_conflict",
+  });
+  assert.equal(database.get("payments", "PAY-ORDER-A")?.status, "pending");
+  assert.equal(database.get("payments", "PAY-ORDER-A")?.merchantFees, undefined);
+});
+
 test("success is terminal, while a failed transaction may be superseded by later success", async () => {
   const successFirstDatabase = new FakeFirestore();
   successFirstDatabase.set("payments", "PAY-SUCCESS-FIRST", actionablePayment(
@@ -1173,38 +1445,97 @@ test("success is terminal, while a failed transaction may be superseded by later
   );
 });
 
-test("successful callback acceptance stops on processing or fulfilled payments", async () => {
-  for (const fulfillmentState of ["processing", "fulfilled"] as const) {
-    const database = new FakeFirestore();
-    database.set("payments", `PAY-${fulfillmentState}`, actionablePayment(
-      `PAY-${fulfillmentState}`,
-      "PROP-1",
-      {
-        action: "new",
-        intentionState: "created",
-        merchantAttemptKey: "ATTEMPT-1",
-        paymentReference: "INT-1",
-        transactionId: "INT-1",
-        fulfillmentState,
-      },
-    ));
-    const result = await createService(database).acceptSuccessfulPaymentIntention(
-      `PAY-${fulfillmentState}`,
-      {
-        merchantAttemptKey: "ATTEMPT-1",
-        transactionId: "TX-1",
-        paymobOrderId: "ORDER-1",
-        amountCents: 10_000,
-        currency: "SAR",
-      },
-      { totalFees: 99 },
-    );
-    assert.equal(result.status, "already_processed");
-    assert.equal(
-      database.get("payments", `PAY-${fulfillmentState}`)?.totalFees,
-      undefined,
-    );
-  }
+test("successful callback acceptance keeps processing resumable but stops after fulfillment", async () => {
+  const processingDatabase = new FakeFirestore();
+  processingDatabase.set("payments", "PAY-processing", actionablePayment(
+    "PAY-processing",
+    "PROP-1",
+    {
+      action: "new",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-1",
+      paymentReference: "INT-1",
+      transactionId: "INT-1",
+      fulfillmentState: "processing",
+    },
+  ));
+  const firstSuccess = await createService(
+    processingDatabase,
+  ).acceptSuccessfulPaymentIntention(
+    "PAY-processing",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { totalFees: 99, paymentMethod: "APPLE_PAY" as any },
+  );
+  assert.equal(firstSuccess.status, "accepted");
+  assert.equal(
+    processingDatabase.get("payments", "PAY-processing")?.transactionId,
+    "TX-1",
+  );
+  assert.equal(
+    processingDatabase.get("payments", "PAY-processing")?.paymentMethod,
+    "APPLE_PAY",
+  );
+  assert.equal(
+    processingDatabase.get("payments", "PAY-processing")?.fulfillmentState,
+    "processing",
+  );
+
+  const exactReplay = await createService(
+    processingDatabase,
+  ).acceptSuccessfulPaymentIntention(
+    "PAY-processing",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { totalFees: 123 },
+  );
+  assert.equal(exactReplay.status, "already_accepted");
+  assert.equal(
+    processingDatabase.get("payments", "PAY-processing")?.totalFees,
+    99,
+  );
+
+  const fulfilledDatabase = new FakeFirestore();
+  fulfilledDatabase.set("payments", "PAY-fulfilled", actionablePayment(
+    "PAY-fulfilled",
+    "PROP-1",
+    {
+      action: "new",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-1",
+      paymentReference: "INT-1",
+      transactionId: "INT-1",
+      fulfillmentState: "fulfilled",
+    },
+  ));
+  const fulfilledReplay = await createService(
+    fulfilledDatabase,
+  ).acceptSuccessfulPaymentIntention(
+    "PAY-fulfilled",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { totalFees: 99 },
+  );
+  assert.equal(fulfilledReplay.status, "already_processed");
+  assert.equal(
+    fulfilledDatabase.get("payments", "PAY-fulfilled")?.totalFees,
+    undefined,
+  );
 });
 
 test("legacy success acceptance requires one exact signed Paymob order match", async () => {
@@ -1279,12 +1610,16 @@ test("add-on success is terminal against a later failed callback", async () => {
       action: "addon",
       status: "قيد الدفع",
       paymentMethod: "paymob",
+      merchantAttemptKey: "ATTEMPT-1",
+      paymobOrderId: "ORDER-1",
+      intentionState: "created",
     },
   ));
   const service = createService(database);
   const success = await service.settleAddOnPaymentCallback(
     "PAY-ADDON-1",
     {
+      merchantAttemptKey: "ATTEMPT-1",
       transactionId: "TX-SUCCESS",
       paymobOrderId: "ORDER-1",
       amountCents: 10_000,
@@ -1298,6 +1633,7 @@ test("add-on success is terminal against a later failed callback", async () => {
   const lateFailure = await service.settleAddOnPaymentCallback(
     "PAY-ADDON-1",
     {
+      merchantAttemptKey: "ATTEMPT-1",
       transactionId: "TX-LATE-FAILURE",
       paymobOrderId: "ORDER-1",
       amountCents: 10_000,
@@ -1320,12 +1656,16 @@ test("add-on failure retains its order and can be superseded by same-checkout su
       action: "addon",
       status: "قيد الدفع",
       paymentMethod: "paymob",
+      merchantAttemptKey: "ATTEMPT-2",
+      paymobOrderId: "ORDER-2",
+      intentionState: "created",
     },
   ));
   const service = createService(database);
   const failure = await service.settleAddOnPaymentCallback(
     "PAY-ADDON-2",
     {
+      merchantAttemptKey: "ATTEMPT-2",
       transactionId: "TX-FAILED",
       paymobOrderId: "ORDER-2",
       amountCents: 10_000,
@@ -1340,6 +1680,7 @@ test("add-on failure retains its order and can be superseded by same-checkout su
   const success = await service.settleAddOnPaymentCallback(
     "PAY-ADDON-2",
     {
+      merchantAttemptKey: "ATTEMPT-2",
       transactionId: "TX-SUCCESS",
       paymobOrderId: "ORDER-2",
       amountCents: 10_000,
@@ -1354,6 +1695,82 @@ test("add-on failure retains its order and can be superseded by same-checkout su
   assert.equal(database.get("payments", "PAY-ADDON-2")?.lastFailedTransactionId, "TX-FAILED");
 });
 
+test("reconciled add-on settlement writes one atomic history entry and a late callback is idempotent", async () => {
+  const database = new FakeFirestore();
+  const paymentId = "PAY-ADDON-RECON-HISTORY";
+  database.set("payments", paymentId, actionablePayment(
+    paymentId,
+    "PROP-RECON",
+    {
+      action: "addon",
+      packageId: "ADDON-RECON",
+      status: "قيد الدفع",
+      paymentMethod: "paymob",
+      merchantAttemptKey: "ATTEMPT-RECON",
+      paymentReference: "INTENTION-RECON",
+      transactionId: "INTENTION-RECON",
+      paymobOrderId: "ORDER-RECON",
+      intentionState: "created",
+    },
+  ));
+  const service = createService(database);
+  const expected = {
+    merchantAttemptKey: "ATTEMPT-RECON",
+    transactionId: "TX-RECON",
+    paymobOrderId: "ORDER-RECON",
+    amountCents: 10_000,
+    currency: "SAR",
+    success: true,
+  };
+
+  assert.deepEqual(
+    await service.settleAddOnPaymentCallback(
+      paymentId,
+      expected,
+      { totalFees: 99 },
+      {
+        recordReconciliationHistory: true,
+        expectedIntentionId: "INTENTION-STALE",
+      },
+    ),
+    { status: "rejected", reason: "identity_conflict" },
+  );
+  assert.equal(database.get("addon_history", `AH-PAYMOB-RECON-${paymentId}`), undefined);
+
+  const reconciled = await service.settleAddOnPaymentCallback(
+    paymentId,
+    expected,
+    {
+      totalFees: 6.9,
+      netAmount: 93.1,
+      providerReconciledAt: "2026-07-27T16:00:00.000Z",
+    },
+    {
+      recordReconciliationHistory: true,
+      expectedIntentionId: "INTENTION-RECON",
+    },
+  );
+  assert.equal(reconciled.status, "accepted_success");
+  const historyId = `AH-PAYMOB-RECON-${paymentId}`;
+  const history = database.get("addon_history", historyId);
+  assert.equal(history?.id, historyId);
+  assert.equal(history?.propertyNumber, "PROP-RECON");
+  assert.equal(history?.addOnPackageId, "ADDON-RECON");
+  assert.equal(history?.action, "pending");
+  assert.equal(history?.createdBy, "system");
+  assert.match(history?.notes || "", /6\.9/);
+
+  const lateCallback = await service.settleAddOnPaymentCallback(
+    paymentId,
+    { ...expected, transactionId: "TX-LATE-CALLBACK" },
+    { totalFees: 99 },
+  );
+  assert.equal(lateCallback.status, "already_processed");
+  assert.deepEqual(database.get("addon_history", historyId), history);
+  assert.equal(database.get("payments", paymentId)?.transactionId, "TX-RECON");
+  assert.equal(database.get("payments", paymentId)?.totalFees, 6.9);
+});
+
 test("concurrent opposite add-on callbacks converge to success in either arrival order", async () => {
   for (const successFirst of [false, true]) {
     const database = new FakeFirestore();
@@ -1365,12 +1782,16 @@ test("concurrent opposite add-on callbacks converge to success in either arrival
         action: "addon",
         status: "قيد الدفع",
         paymentMethod: "paymob",
+        merchantAttemptKey: `ATTEMPT-${paymentId}`,
+        paymobOrderId: `ORDER-${paymentId}`,
+        intentionState: "created",
       },
     ));
     const service = createService(database);
     const successCall = () => service.settleAddOnPaymentCallback(
       paymentId,
       {
+        merchantAttemptKey: `ATTEMPT-${paymentId}`,
         transactionId: `TX-SUCCESS-${paymentId}`,
         paymobOrderId: `ORDER-${paymentId}`,
         amountCents: 10_000,
@@ -1382,6 +1803,7 @@ test("concurrent opposite add-on callbacks converge to success in either arrival
     const failureCall = () => service.settleAddOnPaymentCallback(
       paymentId,
       {
+        merchantAttemptKey: `ATTEMPT-${paymentId}`,
         transactionId: `TX-FAILURE-${paymentId}`,
         paymobOrderId: `ORDER-${paymentId}`,
         amountCents: 10_000,
@@ -1412,12 +1834,20 @@ test("add-on settlement rejects wrong order ownership, amount, currency, and pay
       action: "addon",
       status: "قيد الدفع",
       paymobOrderId: "ORDER-OWNED",
+      merchantAttemptKey: "ATTEMPT-OWNED",
+      intentionState: "created",
     },
   ));
   database.set("payments", "PAY-ADDON-OTHER", actionablePayment(
     "PAY-ADDON-OTHER",
     "PROP-2",
-    { action: "addon", status: "قيد الدفع" },
+    {
+      action: "addon",
+      status: "قيد الدفع",
+      paymobOrderId: "ORDER-OTHER",
+      merchantAttemptKey: "ATTEMPT-OTHER",
+      intentionState: "created",
+    },
   ));
   database.set("payments", "PAY-SUBSCRIPTION", actionablePayment(
     "PAY-SUBSCRIPTION",
@@ -1427,6 +1857,7 @@ test("add-on settlement rejects wrong order ownership, amount, currency, and pay
   const service = createService(database);
 
   const common = {
+    merchantAttemptKey: "ATTEMPT-OWNED",
     transactionId: "TX-1",
     paymobOrderId: "ORDER-OWNED",
     amountCents: 10_000,
@@ -1465,4 +1896,962 @@ test("add-on settlement rejects wrong order ownership, amount, currency, and pay
     }),
     { status: "rejected", reason: "not_addon" },
   );
+});
+
+test("add-on settlement fails closed until the current attempt and provider order are persisted", async () => {
+  const variants = [
+    {},
+    { merchantAttemptKey: "ATTEMPT-BOUND", intentionState: "created" },
+    { paymobOrderId: "ORDER-BOUND", intentionState: "created" },
+    {
+      merchantAttemptKey: "ATTEMPT-BOUND",
+      paymobOrderId: "ORDER-BOUND",
+      intentionState: "unknown",
+    },
+  ];
+
+  for (const [index, identity] of variants.entries()) {
+    const database = new FakeFirestore();
+    const paymentId = `PAY-ADDON-UNBOUND-${index}`;
+    database.set("payments", paymentId, actionablePayment(
+      paymentId,
+      "PROP-1",
+      {
+        action: "addon",
+        status: "قيد الدفع",
+        ...identity,
+      },
+    ));
+
+    assert.deepEqual(
+      await createService(database).settleAddOnPaymentCallback(paymentId, {
+        merchantAttemptKey: "ATTEMPT-BOUND",
+        transactionId: "TX-1",
+        paymobOrderId: "ORDER-BOUND",
+        amountCents: 10_000,
+        currency: "SAR",
+        success: true,
+      }),
+      { status: "rejected", reason: "identity_conflict" },
+    );
+    assert.equal(database.get("payments", paymentId)?.transactionId, undefined);
+  }
+});
+
+test("add-on settlement rejects duplicate persisted attempt or order ownership", async () => {
+  for (const duplicateField of ["merchantAttemptKey", "paymobOrderId"] as const) {
+    const database = new FakeFirestore();
+    database.set("payments", "PAY-ADDON-TARGET", actionablePayment(
+      "PAY-ADDON-TARGET",
+      "PROP-1",
+      {
+        action: "addon",
+        status: "قيد الدفع",
+        merchantAttemptKey: "ATTEMPT-TARGET",
+        paymobOrderId: "ORDER-TARGET",
+        intentionState: "created",
+      },
+    ));
+    database.set("payments", `PAY-ADDON-DUP-${duplicateField}`, actionablePayment(
+      `PAY-ADDON-DUP-${duplicateField}`,
+      "PROP-2",
+      {
+        action: "addon",
+        status: "قيد الدفع",
+        merchantAttemptKey: duplicateField === "merchantAttemptKey"
+          ? "ATTEMPT-TARGET"
+          : "ATTEMPT-OTHER",
+        paymobOrderId: duplicateField === "paymobOrderId"
+          ? "ORDER-TARGET"
+          : "ORDER-OTHER",
+        intentionState: "created",
+      },
+    ));
+
+    assert.deepEqual(
+      await createService(database).settleAddOnPaymentCallback(
+        "PAY-ADDON-TARGET",
+        {
+          merchantAttemptKey: "ATTEMPT-TARGET",
+          transactionId: "TX-1",
+          paymobOrderId: "ORDER-TARGET",
+          amountCents: 10_000,
+          currency: "SAR",
+          success: true,
+        },
+      ),
+      { status: "rejected", reason: "identity_conflict" },
+    );
+  }
+});
+
+test("new-property queue completion requires its durable marker, not a partial pending flag", async () => {
+  const database = new FakeFirestore();
+  const service = createService(database);
+  await service.createPayment(
+    actionablePayment("PAY-QUEUE-MARKER", "PROP-QUEUE-MARKER", {
+      action: "new",
+    }) as any,
+  );
+  database.update("payments", "PAY-QUEUE-MARKER", {
+    pendingPropertyApproval: true,
+  });
+
+  const partialClaim = await service.claimPaymentFulfillment(
+    "PAY-QUEUE-MARKER",
+    ["pending"],
+    { purpose: "queue" },
+  );
+  assert.equal(partialClaim.status, "claimed");
+  assert.ok(partialClaim.status === "claimed");
+  await service.releasePaymentFulfillment(
+    "PAY-QUEUE-MARKER",
+    partialClaim.token,
+  );
+
+  database.update("payments", "PAY-QUEUE-MARKER", {
+    propertyApprovalQueuedAt: "2026-07-27T16:00:00.000Z",
+    status: "نجح - قيد التحقق",
+  });
+  assert.deepEqual(
+    await service.claimPaymentFulfillment(
+      "PAY-QUEUE-MARKER",
+      ["pending"],
+      { purpose: "queue" },
+    ),
+    { status: "queued" },
+  );
+});
+
+test("pending activation notes cannot roll a concurrently completed payment back", async () => {
+  const database = new FakeFirestore();
+  const service = createService(database);
+  database.set("payments", "PAY-ACTIVATION-REASON", {
+    ...actionablePayment("PAY-ACTIVATION-REASON", "PROP-1", {
+      status: "نجح - قيد التحقق",
+    }),
+    transactionId: "TX-PAID",
+    completedAt: "2026-07-27T16:00:00.000Z",
+  });
+
+  assert.equal(
+    await service.recordPaidPaymentActivationPending(
+      "PAY-ACTIVATION-REASON",
+      "TX-PAID",
+      "property images are incomplete",
+    ),
+    true,
+  );
+  assert.equal(
+    database.get("payments", "PAY-ACTIVATION-REASON")?.notes,
+    "property images are incomplete",
+  );
+  assert.equal(
+    await service.recordPaidPaymentActivationPending(
+      "PAY-ACTIVATION-REASON",
+      "TX-OTHER",
+      "must not be stored",
+    ),
+    false,
+  );
+
+  database.update("payments", "PAY-ACTIVATION-REASON", {
+    status: "مكتمل",
+    fulfillmentState: "fulfilled",
+    fulfilledAt: "2026-07-27T16:01:00.000Z",
+  });
+  assert.equal(
+    await service.recordPaidPaymentActivationPending(
+      "PAY-ACTIVATION-REASON",
+      "TX-PAID",
+      "late callback must not roll status back",
+    ),
+    false,
+  );
+  assert.equal(
+    database.get("payments", "PAY-ACTIVATION-REASON")?.status,
+    "مكتمل",
+  );
+  assert.equal(
+    database.get("payments", "PAY-ACTIVATION-REASON")?.notes,
+    "property images are incomplete",
+  );
+});
+
+test("payment timeout CAS fails closed for every unresolved Paymob identity", async () => {
+  const oldCreatedAt = "2026-07-27T15:00:00.000Z";
+  const cutoffMs = Date.parse("2026-07-27T15:30:00.000Z");
+  const unresolvedVariants = [
+    { merchantAttemptKey: "RWQN-ATTEMPT-1" },
+    { intentionState: "creating" },
+    { intentionState: "created" },
+    { intentionState: "unknown" },
+    { paymentReference: "pi_live_1" },
+    { transactionId: "pi_live_1" },
+    { paymobOrderId: "ORDER-1" },
+    { paymentCheckoutUrl: "https://checkout.example/attempt" },
+  ];
+
+  for (const [index, unresolved] of unresolvedVariants.entries()) {
+    const database = new FakeFirestore();
+    const id = `PAY-UNRESOLVED-${index}`;
+    database.set("payments", id, {
+      ...actionablePayment(id, "PROP-1", {
+        status: "قيد المراجعة",
+        paymentMethod: "بطاقة",
+        createdAt: oldCreatedAt,
+      }),
+      ...unresolved,
+    });
+    const candidate = database.get("payments", id) as any;
+
+    assert.equal(
+      await createService(database).expirePendingPaymentIfEligible(
+        candidate,
+        "card",
+        cutoffMs,
+      ),
+      false,
+    );
+    assert.equal(database.get("payments", id)?.status, "قيد المراجعة");
+  }
+});
+
+test("Paymob reconciliation claim is atomic, throttled, exact, and required for provider-backed timeout", async () => {
+  const database = new FakeFirestore();
+  const id = "PAY-CLAIMED-PROVIDER";
+  const checkedAt = "2026-07-27T16:00:00.000Z";
+  database.set("payments", id, actionablePayment(id, "PROP-1", {
+    status: "قيد المراجعة",
+    paymentMethod: "بطاقة",
+    createdAt: "2026-07-27T15:00:00.000Z",
+    intentionState: "created",
+    merchantAttemptKey: "ATTEMPT-CLAIM",
+    paymentReference: "INTENTION-CLAIM",
+    transactionId: "INTENTION-CLAIM",
+    paymobOrderId: "ORDER-CLAIM",
+    paymentCheckoutUrl: "https://checkout.example/claim",
+  }));
+  const service = createService(database);
+  const candidate = database.get("payments", id) as any;
+  const claimOptions = {
+    checkedAt,
+    createdBeforeMs: Date.parse("2026-07-27T15:30:00.000Z"),
+    createdAfterMs: Date.parse("2026-07-20T16:00:00.000Z"),
+    minIntervalMs: 60 * 60 * 1000,
+  };
+
+  const claims = await Promise.all([
+    service.claimPaymentProviderReconciliation(candidate, claimOptions),
+    service.claimPaymentProviderReconciliation(candidate, claimOptions),
+  ]);
+  const claimed = claims.find((result) => result.claimed);
+  assert.ok(claimed?.claimed);
+  assert.equal(claims.filter((result) => result.claimed).length, 1);
+  assert.equal(
+    database.get("payments", id)?.providerReconciliationClaimToken,
+    claimed.token,
+  );
+  assert.equal(
+    database.get("payments", id)?.providerReconciliationStartedAt,
+    checkedAt,
+  );
+
+  assert.equal(
+    await service.expirePendingPaymentIfEligible(
+      claimed.payment,
+      "card",
+      claimOptions.createdBeforeMs,
+      { providerUnpaidClaimToken: "WRONG-CLAIM" },
+    ),
+    false,
+  );
+  assert.equal(database.get("payments", id)?.status, "قيد المراجعة");
+  assert.equal(
+    await service.expirePendingPaymentIfEligible(
+      claimed.payment,
+      "card",
+      claimOptions.createdBeforeMs,
+      { providerUnpaidClaimToken: claimed.token },
+    ),
+    true,
+  );
+  assert.equal(database.get("payments", id)?.status, "ملغي - انتهت المهلة");
+  assert.equal(database.get("payments", id)?.paymentReference, "INTENTION-CLAIM");
+  assert.equal(database.get("payments", id)?.paymobOrderId, "ORDER-CLAIM");
+});
+
+test("provider reconciliation admits only a stale processing subscription fulfillment", async () => {
+  const checkedAt = "2026-07-27T16:00:00.000Z";
+  const options = {
+    checkedAt,
+    createdBeforeMs: Date.parse("2026-07-27T15:30:00.000Z"),
+    createdAfterMs: Date.parse("2026-07-20T16:00:00.000Z"),
+    minIntervalMs: 60 * 60 * 1000,
+  };
+
+  for (const scenario of [
+    {
+      id: "PAY-PROCESSING-RECENT",
+      fulfillmentClaimedAt: "2026-07-27T15:55:00.000Z",
+      pendingPropertyApproval: false,
+      expectedClaimed: false,
+    },
+    {
+      id: "PAY-PROCESSING-STALE",
+      fulfillmentClaimedAt: "2026-07-27T15:45:00.000Z",
+      pendingPropertyApproval: false,
+      expectedClaimed: true,
+    },
+    {
+      id: "PAY-PROCESSING-PARTIAL-QUEUE",
+      fulfillmentClaimedAt: "2026-07-27T15:45:00.000Z",
+      pendingPropertyApproval: true,
+      expectedClaimed: true,
+    },
+  ]) {
+    const database = new FakeFirestore();
+    database.set("payments", scenario.id, actionablePayment(
+      scenario.id,
+      "PROP-PROCESSING",
+      {
+        status: "نجح - قيد التحقق",
+        paymentMethod: "APPLE_PAY" as any,
+        createdAt: "2026-07-27T15:00:00.000Z",
+        completedAt: "2026-07-27T15:30:00.000Z",
+        intentionState: "created",
+        merchantAttemptKey: `ATTEMPT-${scenario.id}`,
+        paymentReference: `INTENTION-${scenario.id}`,
+        transactionId: `TX-${scenario.id}`,
+        paymobOrderId: `ORDER-${scenario.id}`,
+        paymentCheckoutUrl: "https://checkout.example/processing",
+        fulfillmentState: "processing",
+        fulfillmentClaimToken: `OLD-${scenario.id}`,
+        fulfillmentClaimedAt: scenario.fulfillmentClaimedAt,
+        pendingPropertyApproval: scenario.pendingPropertyApproval,
+      },
+    ));
+    const candidate = database.get("payments", scenario.id) as any;
+    const result = await createService(
+      database,
+    ).claimPaymentProviderReconciliation(candidate, options);
+    assert.equal(result.claimed, scenario.expectedClaimed, scenario.id);
+  }
+});
+
+test("Paymob reconciliation claim includes initial add-on state and exact action", async () => {
+  const database = new FakeFirestore();
+  const id = "PAY-ADDON-CLAIM";
+  database.set("payments", id, actionablePayment(id, "PROP-ADDON", {
+    action: "addon",
+    status: "قيد الدفع",
+    paymentMethod: "paymob",
+    createdAt: "2026-07-27T15:00:00.000Z",
+    intentionState: "created",
+    merchantAttemptKey: "ATTEMPT-ADDON-CLAIM",
+    paymentReference: "INTENTION-ADDON-CLAIM",
+    transactionId: "INTENTION-ADDON-CLAIM",
+    paymobOrderId: "ORDER-ADDON-CLAIM",
+    paymentCheckoutUrl: "https://checkout.example/addon-claim",
+  }));
+  const service = createService(database);
+  const candidate = database.get("payments", id) as any;
+  const options = {
+    checkedAt: "2026-07-27T16:00:00.000Z",
+    createdBeforeMs: Date.parse("2026-07-27T15:30:00.000Z"),
+    createdAfterMs: Date.parse("2026-07-20T16:00:00.000Z"),
+    minIntervalMs: 60 * 60 * 1000,
+  };
+
+  assert.equal(
+    (await service.claimPaymentProviderReconciliation(candidate, options)).claimed,
+    true,
+  );
+
+  const staleDatabase = new FakeFirestore();
+  staleDatabase.set("payments", id, { ...candidate, action: "addon" });
+  assert.deepEqual(
+    await createService(staleDatabase).claimPaymentProviderReconciliation(
+      { ...candidate, action: "extend" },
+      options,
+    ),
+    { claimed: false },
+  );
+});
+
+test("Paymob reconciliation claim rejects stale attempts, old repeats, and queued/completed payments", async () => {
+  const checkedAt = "2026-07-27T16:00:00.000Z";
+  const options = {
+    checkedAt,
+    createdBeforeMs: Date.parse("2026-07-27T15:30:00.000Z"),
+    createdAfterMs: Date.parse("2026-07-20T16:00:00.000Z"),
+    minIntervalMs: 60 * 60 * 1000,
+  };
+  for (const scenario of [
+    { name: "outside window", createdAt: "2026-07-20T15:59:59.999Z" },
+    { name: "recent check", providerLastCheckedAt: "2026-07-27T15:30:00.000Z" },
+    {
+      name: "queued",
+      pendingPropertyApproval: true,
+      propertyApprovalQueuedAt: "2026-07-27T15:20:00.000Z",
+    },
+    { name: "completed", completedAt: "2026-07-27T15:20:00.000Z", status: "مكتمل" },
+  ]) {
+    const database = new FakeFirestore();
+    const id = `PAY-CLAIM-${scenario.name}`;
+    database.set("payments", id, actionablePayment(id, "PROP-1", {
+      status: "قيد المراجعة",
+      paymentMethod: "بطاقة",
+      createdAt: "2026-07-27T15:00:00.000Z",
+      intentionState: "created",
+      merchantAttemptKey: `ATTEMPT-${scenario.name}`,
+      paymentReference: `INTENTION-${scenario.name}`,
+      transactionId: `INTENTION-${scenario.name}`,
+      paymentCheckoutUrl: "https://checkout.example/claim",
+      ...scenario,
+    }));
+    const service = createService(database);
+    const candidate = database.get("payments", id) as any;
+    assert.deepEqual(
+      await service.claimPaymentProviderReconciliation(candidate, options),
+      { claimed: false },
+      scenario.name,
+    );
+  }
+
+  const raceDatabase = new FakeFirestore();
+  raceDatabase.set("payments", "PAY-CLAIM-RACE", actionablePayment(
+    "PAY-CLAIM-RACE",
+    "PROP-1",
+    {
+      status: "قيد المراجعة",
+      paymentMethod: "بطاقة",
+      createdAt: "2026-07-27T15:00:00.000Z",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-OLD",
+      paymentReference: "INTENTION-OLD",
+      transactionId: "INTENTION-OLD",
+      paymentCheckoutUrl: "https://checkout.example/old",
+    },
+  ));
+  const staleCandidate = raceDatabase.get("payments", "PAY-CLAIM-RACE") as any;
+  raceDatabase.update("payments", "PAY-CLAIM-RACE", {
+    merchantAttemptKey: "ATTEMPT-NEW",
+    paymentReference: "INTENTION-NEW",
+    transactionId: "INTENTION-NEW",
+    paymentCheckoutUrl: "https://checkout.example/new",
+  });
+  assert.deepEqual(
+    await createService(raceDatabase).claimPaymentProviderReconciliation(
+      staleCandidate,
+      options,
+    ),
+    { claimed: false },
+  );
+});
+
+test("payment timeout CAS expires one safe legacy card attempt only once", async () => {
+  const database = new FakeFirestore();
+  const id = "PAY-SAFE-LEGACY";
+  database.set("payments", id, actionablePayment(id, "PROP-1", {
+    status: "قيد المراجعة",
+    paymentMethod: "بطاقة",
+    createdAt: "2026-07-27T15:00:00.000Z",
+  }));
+  const service = createService(database);
+  const candidate = database.get("payments", id) as any;
+
+  const outcomes = await Promise.all([
+    service.expirePendingPaymentIfEligible(
+      candidate,
+      "card",
+      Date.parse("2026-07-27T15:30:00.000Z"),
+    ),
+    service.expirePendingPaymentIfEligible(
+      candidate,
+      "card",
+      Date.parse("2026-07-27T15:30:00.000Z"),
+    ),
+  ]);
+
+  assert.deepEqual(outcomes.sort(), [false, true]);
+  assert.equal(database.get("payments", id)?.status, "ملغي - انتهت المهلة");
+});
+
+test("payment timeout CAS rejects stale, successful, active, and invalid candidates", async () => {
+  const basePayment = {
+    status: "قيد المراجعة",
+    paymentMethod: "بطاقة",
+    createdAt: "2026-07-27T15:00:00.000Z",
+  };
+  const cases: Array<{
+    name: string;
+    candidateUpdates?: FakeData;
+    freshUpdates?: FakeData;
+    cutoffMs?: number;
+  }> = [
+    { name: "status changed", freshUpdates: { status: "مكتمل" } },
+    { name: "method changed", freshUpdates: { paymentMethod: "تحويل بنكي" } },
+    {
+      name: "attempt changed",
+      candidateUpdates: { merchantAttemptKey: "ATTEMPT-OLD" },
+      freshUpdates: { merchantAttemptKey: "ATTEMPT-NEW" },
+    },
+    { name: "completed", freshUpdates: { completedAt: "2026-07-27T15:10:00.000Z" } },
+    { name: "fulfilled", freshUpdates: { fulfilledAt: "2026-07-27T15:10:00.000Z" } },
+    { name: "processing", freshUpdates: { fulfillmentState: "processing" } },
+    { name: "fulfilled state", freshUpdates: { fulfillmentState: "fulfilled" } },
+    {
+      name: "created date changed",
+      freshUpdates: { createdAt: "2026-07-27T15:01:00.000Z" },
+    },
+    {
+      name: "invalid date",
+      candidateUpdates: { createdAt: "not-a-date" },
+      freshUpdates: { createdAt: "not-a-date" },
+    },
+    {
+      name: "not old enough",
+      cutoffMs: Date.parse("2026-07-27T14:59:59.999Z"),
+    },
+    {
+      name: "exact timeout boundary",
+      cutoffMs: Date.parse("2026-07-27T15:00:00.000Z"),
+    },
+  ];
+
+  for (const scenario of cases) {
+    const database = new FakeFirestore();
+    const id = `PAY-${scenario.name}`;
+    const candidate = {
+      ...actionablePayment(id, "PROP-1", basePayment),
+      ...(scenario.candidateUpdates || {}),
+    };
+    database.set("payments", id, candidate);
+    if (scenario.freshUpdates) {
+      database.update("payments", id, scenario.freshUpdates);
+    }
+
+    assert.equal(
+      await createService(database).expirePendingPaymentIfEligible(
+        candidate as any,
+        "card",
+        scenario.cutoffMs ?? Date.parse("2026-07-27T15:30:00.000Z"),
+      ),
+      false,
+      scenario.name,
+    );
+    assert.notEqual(
+      database.get("payments", id)?.status,
+      "ملغي - انتهت المهلة",
+      scenario.name,
+    );
+  }
+});
+
+test("bank timeout CAS cannot overwrite concurrent approval and expires an unchanged transfer", async () => {
+  const cutoffMs = Date.parse("2026-07-27T15:30:00.000Z");
+  const oldCreatedAt = "2026-07-24T15:00:00.000Z";
+
+  const completedDatabase = new FakeFirestore();
+  completedDatabase.set("payments", "PAY-BANK-COMPLETE", actionablePayment(
+    "PAY-BANK-COMPLETE",
+    "PROP-1",
+    {
+      status: "قيد التحقق",
+      paymentMethod: "تحويل بنكي",
+      createdAt: oldCreatedAt,
+    },
+  ));
+  const staleCandidate = completedDatabase.get("payments", "PAY-BANK-COMPLETE") as any;
+  completedDatabase.update("payments", "PAY-BANK-COMPLETE", {
+    status: "مكتمل",
+    completedAt: "2026-07-27T15:20:00.000Z",
+  });
+  assert.equal(
+    await createService(completedDatabase).expirePendingPaymentIfEligible(
+      staleCandidate,
+      "bank",
+      cutoffMs,
+    ),
+    false,
+  );
+  assert.equal(completedDatabase.get("payments", "PAY-BANK-COMPLETE")?.status, "مكتمل");
+
+  const pendingDatabase = new FakeFirestore();
+  pendingDatabase.set("payments", "PAY-BANK-OLD", actionablePayment(
+    "PAY-BANK-OLD",
+    "PROP-2",
+    {
+      status: "قيد التحقق",
+      paymentMethod: "تحويل بنكي",
+      createdAt: oldCreatedAt,
+    },
+  ));
+  const pendingCandidate = pendingDatabase.get("payments", "PAY-BANK-OLD") as any;
+  assert.equal(
+    await createService(pendingDatabase).expirePendingPaymentIfEligible(
+      pendingCandidate,
+      "bank",
+      cutoffMs,
+    ),
+    true,
+  );
+  assert.equal(pendingDatabase.get("payments", "PAY-BANK-OLD")?.status, "منتهي الصلاحية");
+});
+
+test("an exact signed success can supersede an Arabic timeout status", async () => {
+  const database = new FakeFirestore();
+  database.set("payments", "PAY-LATE-SUCCESS", actionablePayment(
+    "PAY-LATE-SUCCESS",
+    "PROP-1",
+    {
+      status: "ملغي - انتهت المهلة",
+      paymentMethod: "بطاقة",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-1",
+      paymentReference: "INTENTION-1",
+      transactionId: "INTENTION-1",
+    },
+  ));
+
+  const result = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-LATE-SUCCESS",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-SUCCESS-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { totalFees: 4 },
+  );
+
+  assert.equal(result.status, "accepted");
+  assert.equal(database.get("payments", "PAY-LATE-SUCCESS")?.status, "نجح - قيد التحقق");
+  assert.equal(database.get("payments", "PAY-LATE-SUCCESS")?.transactionId, "TX-SUCCESS-1");
+});
+
+test("an exact duplicate success is already accepted without rewriting financial details", async () => {
+  const database = new FakeFirestore();
+  database.set("payments", "PAY-ALREADY-ACCEPTED", actionablePayment(
+    "PAY-ALREADY-ACCEPTED",
+    "PROP-1",
+    {
+      status: "نجح - قيد التحقق",
+      paymentMethod: "بطاقة",
+      intentionState: "created",
+      merchantAttemptKey: "ATTEMPT-1",
+      paymentReference: "INTENTION-1",
+      transactionId: "TX-SUCCESS-1",
+      paymobOrderId: "ORDER-1",
+      completedAt: "2026-07-27T15:20:00.000Z",
+      merchantFees: 2,
+    },
+  ));
+
+  const result = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-ALREADY-ACCEPTED",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-SUCCESS-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { merchantFees: 99 },
+  );
+
+  assert.equal(result.status, "already_accepted");
+  assert.equal(database.get("payments", "PAY-ALREADY-ACCEPTED")?.merchantFees, 2);
+
+  database.update("payments", "PAY-ALREADY-ACCEPTED", { status: "مرفوض" });
+  const terminal = await createService(database).acceptSuccessfulPaymentIntention(
+    "PAY-ALREADY-ACCEPTED",
+    {
+      merchantAttemptKey: "ATTEMPT-1",
+      transactionId: "TX-SUCCESS-1",
+      paymobOrderId: "ORDER-1",
+      amountCents: 10_000,
+      currency: "SAR",
+    },
+    { merchantFees: 99 },
+  );
+  assert.deepEqual(terminal, {
+    status: "rejected",
+    reason: "terminal_failure",
+  });
+});
+
+test("admin add-on approval atomically updates only its exact provider-settled payment", async () => {
+  const database = new FakeFirestore(true);
+  database.set("property_addons", "ADDON-EXACT", {
+    id: "ADDON-EXACT",
+    propertyNumber: "PROP-1",
+    addOnPackageId: "PKG-1",
+    paymentId: "PAY-EXACT",
+    source: "paymob",
+    status: "pending",
+    createdAt: "2026-07-27T09:00:00.000Z",
+  });
+  database.set("payments", "PAY-EXACT", {
+    id: "PAY-EXACT",
+    propertyNumber: "PROP-1",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "نجح - قيد التحقق",
+    paymentMethod: "VISA",
+    merchantAttemptKey: "ATTEMPT-EXACT",
+    paymentReference: "INTENTION-EXACT",
+    transactionId: "TX-EXACT",
+    paymentCheckoutUrl: "https://checkout.example/exact",
+    paymobOrderId: "ORDER-EXACT",
+    intentionState: "created",
+    completedAt: "2026-07-27T10:00:00.000Z",
+  });
+  database.set("payments", "PAY-SAME-PROPERTY-PACKAGE", {
+    id: "PAY-SAME-PROPERTY-PACKAGE",
+    propertyNumber: "PROP-1",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "قيد المراجعة",
+    paymentMethod: "تحويل بنكي",
+  });
+
+  const result = await createService(database).applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-EXACT",
+    paymentId: "PAY-EXACT",
+    decision: "approve",
+    mode: "settled_paymob",
+    startDate: "2026-07-27T11:00:00.000Z",
+    endDate: "2026-08-03T11:00:00.000Z",
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(database.get("property_addons", "ADDON-EXACT")?.status, "active");
+  assert.equal(database.get("property_addons", "ADDON-EXACT")?.source, "paymob");
+  assert.equal(database.get("payments", "PAY-EXACT")?.status, "مكتمل");
+  assert.equal(
+    database.get("payments", "PAY-SAME-PROPERTY-PACKAGE")?.status,
+    "قيد المراجعة",
+  );
+  assert.equal(
+    database.get("addon_history", "AH-ADMIN-APPROVE-ADDON-EXACT")?.action,
+    "activated",
+  );
+
+  const retry = await createService(database).applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-EXACT",
+    paymentId: "PAY-EXACT",
+    decision: "approve",
+    mode: "settled_paymob",
+    startDate: "2030-01-01T00:00:00.000Z",
+    endDate: "2030-02-01T00:00:00.000Z",
+  });
+  assert.equal(retry.status, "already_applied");
+  assert.equal(
+    database.get("property_addons", "ADDON-EXACT")?.startDate,
+    "2026-07-27T11:00:00.000Z",
+  );
+  assert.equal(
+    database.get("property_addons", "ADDON-EXACT")?.endDate,
+    "2026-08-03T11:00:00.000Z",
+  );
+
+  const opposite = await createService(database).applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-EXACT",
+    paymentId: "PAY-EXACT",
+    decision: "reject",
+    mode: "settled_paymob",
+  });
+  assert.deepEqual(opposite, {
+    status: "rejected",
+    reason: "not_pending",
+  });
+  assert.equal(database.get("property_addons", "ADDON-EXACT")?.status, "active");
+});
+
+test("admin add-on decisions reject generic or unresolved Paymob evidence without writes", async () => {
+  const database = new FakeFirestore(true);
+  database.set("property_addons", "ADDON-UNSAFE", {
+    id: "ADDON-UNSAFE",
+    propertyNumber: "PROP-1",
+    addOnPackageId: "PKG-1",
+    paymentId: "PAY-UNSAFE",
+    source: "paymob",
+    status: "pending",
+    createdAt: "2026-07-27T09:00:00.000Z",
+  });
+  database.set("payments", "PAY-UNSAFE", {
+    id: "PAY-UNSAFE",
+    propertyNumber: "PROP-1",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "نجح - قيد التحقق",
+    paymentMethod: "بطاقة",
+    merchantAttemptKey: "ATTEMPT-UNSAFE",
+    paymentReference: "INTENTION-UNSAFE",
+    transactionId: "TX-UNSAFE",
+    paymentCheckoutUrl: "https://checkout.example/unsafe",
+    paymobOrderId: "ORDER-UNSAFE",
+    intentionState: "created",
+    completedAt: "2026-07-27T10:00:00.000Z",
+  });
+  const service = createService(database);
+
+  const wrongLink = await service.applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-UNSAFE",
+    paymentId: "PAY-WRONG",
+    decision: "approve",
+    mode: "settled_paymob",
+  });
+  assert.deepEqual(wrongLink, {
+    status: "rejected",
+    reason: "link_conflict",
+  });
+
+  const genericMethod = await service.applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-UNSAFE",
+    paymentId: "PAY-UNSAFE",
+    decision: "approve",
+    mode: "settled_paymob",
+  });
+  assert.deepEqual(genericMethod, {
+    status: "rejected",
+    reason: "unsafe_provider_state",
+  });
+
+  database.update("payments", "PAY-UNSAFE", { paymentMethod: "MADA" });
+  const paidRejection = await service.applyAdminPropertyAddOnDecision({
+    addonId: "ADDON-UNSAFE",
+    paymentId: "PAY-UNSAFE",
+    decision: "reject",
+    mode: "settled_paymob",
+  });
+  assert.deepEqual(paidRejection, {
+    status: "rejected",
+    reason: "unsafe_provider_state",
+  });
+  assert.equal(database.get("property_addons", "ADDON-UNSAFE")?.status, "pending");
+  assert.equal(database.get("payments", "PAY-UNSAFE")?.status, "نجح - قيد التحقق");
+  assert.equal(database.get("addon_history", "AH-ADMIN-APPROVE-ADDON-UNSAFE"), undefined);
+  assert.equal(database.get("addon_history", "AH-ADMIN-REJECT-ADDON-UNSAFE"), undefined);
+});
+
+test("concurrent opposite bank add-on decisions allow exactly one atomic winner", async () => {
+  const database = new FakeFirestore(true);
+  database.set("property_addons", "ADDON-BANK-RACE", {
+    id: "ADDON-BANK-RACE",
+    propertyNumber: "PROP-1",
+    addOnPackageId: "PKG-1",
+    paymentId: "PAY-BANK-RACE",
+    source: "bank_transfer",
+    receiptUrl: "https://receipts.example/race.jpg",
+    status: "pending",
+    createdAt: "2026-07-27T09:00:00.000Z",
+  });
+  database.set("payments", "PAY-BANK-RACE", {
+    id: "PAY-BANK-RACE",
+    propertyNumber: "PROP-1",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "قيد المراجعة",
+    paymentMethod: "تحويل بنكي",
+    receiptUrl: "https://receipts.example/race.jpg",
+  });
+  const service = createService(database);
+
+  const [approve, reject] = await Promise.all([
+    service.applyAdminPropertyAddOnDecision({
+      addonId: "ADDON-BANK-RACE",
+      paymentId: "PAY-BANK-RACE",
+      decision: "approve",
+      mode: "bank_transfer",
+      startDate: "2026-07-27T11:00:00.000Z",
+    }),
+    service.applyAdminPropertyAddOnDecision({
+      addonId: "ADDON-BANK-RACE",
+      paymentId: "PAY-BANK-RACE",
+      decision: "reject",
+      mode: "bank_transfer",
+    }),
+  ]);
+
+  assert.equal(approve.status, "applied");
+  assert.deepEqual(reject, { status: "rejected", reason: "not_pending" });
+  assert.equal(database.get("property_addons", "ADDON-BANK-RACE")?.status, "active");
+  assert.equal(database.get("payments", "PAY-BANK-RACE")?.status, "مكتمل");
+  assert.equal(
+    database.get("addon_history", "AH-ADMIN-REJECT-ADDON-BANK-RACE"),
+    undefined,
+  );
+});
+
+test("definitively rejected add-on intention creation is cancelled atomically only before checkout exists", async () => {
+  const database = new FakeFirestore(true);
+  database.set("property_addons", "ADDON-CREATE", {
+    id: "ADDON-CREATE",
+    propertyNumber: "PROP-1",
+    addOnPackageId: "PKG-1",
+    paymentId: "PAY-CREATE",
+    source: "paymob",
+    status: "pending",
+    createdAt: "2026-07-27T09:00:00.000Z",
+  });
+  database.set("payments", "PAY-CREATE", {
+    id: "PAY-CREATE",
+    propertyNumber: "PROP-1",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "قيد الدفع",
+    paymentMethod: "paymob",
+    merchantAttemptKey: "ATTEMPT-CREATE",
+    intentionState: "creating",
+  });
+  const service = createService(database);
+
+  assert.equal(
+    await service.cancelRejectedAddOnIntentionCreation(
+      "PAY-CREATE",
+      "ADDON-CREATE",
+    ),
+    true,
+  );
+  assert.equal(database.get("payments", "PAY-CREATE")?.status, "فشل");
+  assert.equal(database.get("payments", "PAY-CREATE")?.intentionState, "failed");
+  assert.equal(database.get("property_addons", "ADDON-CREATE")?.status, "cancelled");
+  assert.equal(
+    database.get("addon_history", "AH-PAYMOB-CREATE-FAILED-ADDON-CREATE")?.action,
+    "cancelled",
+  );
+
+  database.set("property_addons", "ADDON-LIVE", {
+    id: "ADDON-LIVE",
+    propertyNumber: "PROP-2",
+    addOnPackageId: "PKG-1",
+    paymentId: "PAY-LIVE",
+    source: "paymob",
+    status: "pending",
+    createdAt: "2026-07-27T09:00:00.000Z",
+  });
+  database.set("payments", "PAY-LIVE", {
+    id: "PAY-LIVE",
+    propertyNumber: "PROP-2",
+    packageId: "PKG-1",
+    action: "addon",
+    status: "قيد الدفع",
+    paymentMethod: "paymob",
+    merchantAttemptKey: "ATTEMPT-LIVE",
+    intentionState: "created",
+    paymentReference: "INTENTION-LIVE",
+    transactionId: "INTENTION-LIVE",
+    paymentCheckoutUrl: "https://checkout.example/live",
+    paymobOrderId: "ORDER-LIVE",
+  });
+  assert.equal(
+    await service.cancelRejectedAddOnIntentionCreation("PAY-LIVE", "ADDON-LIVE"),
+    false,
+  );
+  assert.equal(database.get("payments", "PAY-LIVE")?.status, "قيد الدفع");
+  assert.equal(database.get("property_addons", "ADDON-LIVE")?.status, "pending");
 });

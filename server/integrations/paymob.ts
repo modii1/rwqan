@@ -15,6 +15,14 @@ function firstDefined(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined && value !== null);
 }
 
+function callbackBooleanValue(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function callbackFalseValue(value: unknown): boolean {
+  return value === false || value === "false";
+}
+
 /**
  * Build Paymob's transaction-callback HMAC payload in the documented field
  * order. Paymob sends nested fields in POST callbacks and flattened fields in
@@ -100,18 +108,214 @@ interface IntentionResponse {
   [key: string]: any;
 }
 
+export type PaymobIntentionSnapshot = {
+  intentionId: string;
+  specialReference: string;
+  orderId: string;
+  amountCents: number;
+  currency: string;
+  confirmed: boolean;
+  paid: boolean;
+  paidAt?: string;
+  cardExpired: boolean;
+  signedTransaction?: {
+    transactionId: string;
+    orderId: string;
+    merchantOrderId: string;
+    amountCents: number;
+    currency: string;
+    createdAt: string;
+    paymentMethod: string;
+    cardSubType: string;
+  };
+};
+
+export type PaymobIntentionLookup =
+  | { ok: true; snapshot: PaymobIntentionSnapshot }
+  | {
+      ok: false;
+      reason: "invalid_checkout_url" | "provider_unavailable" | "invalid_response";
+    };
+
 export class PaymobIntentionError extends Error {
+  readonly createdIntention?: {
+    intentionId: string;
+    checkoutUrl: string;
+    paymobOrderId?: string;
+  };
+
   constructor(
     message: string,
     readonly certainty: "rejected" | "unknown",
-    options?: { cause?: unknown },
+    options?: {
+      cause?: unknown;
+      createdIntention?: {
+        intentionId: string;
+        checkoutUrl: string;
+        paymobOrderId?: string;
+      };
+    },
   ) {
     super(message, options);
     this.name = "PaymobIntentionError";
+    this.createdIntention = options?.createdIntention;
   }
 }
 
 export class PaymobService {
+
+  /**
+   * Read the current provider state for an intention using the same scoped
+   * public-key/client-secret pair that Unified Checkout uses. This is a
+   * read-only fallback for a delayed or missed server callback; callers must
+   * still compare every returned identifier, amount and currency with the
+   * locally reserved payment before accepting a financial success.
+   */
+  async retrieveIntention(
+    checkoutUrl: string,
+  ): Promise<PaymobIntentionLookup> {
+    let checkout: URL;
+    try {
+      checkout = new URL(String(checkoutUrl || ""));
+    } catch {
+      return { ok: false, reason: "invalid_checkout_url" };
+    }
+
+    if (
+      checkout.origin !== PAYMOB_API_URL ||
+      checkout.pathname !== "/unifiedcheckout/"
+    ) {
+      return { ok: false, reason: "invalid_checkout_url" };
+    }
+
+    const publicKey = String(checkout.searchParams.get("publicKey") || "").trim();
+    const clientSecret = String(
+      checkout.searchParams.get("clientSecret") || "",
+    ).trim();
+    if (
+      !publicKey ||
+      !clientSecret ||
+      (PUBLIC_KEY && publicKey !== PUBLIC_KEY)
+    ) {
+      return { ok: false, reason: "invalid_checkout_url" };
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `${PAYMOB_API_URL}/v1/intention/element/${encodeURIComponent(publicKey)}/${encodeURIComponent(clientSecret)}/`,
+        {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+    } catch {
+      return { ok: false, reason: "provider_unavailable" };
+    }
+    if (!response.ok) {
+      return { ok: false, reason: "provider_unavailable" };
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      return { ok: false, reason: "invalid_response" };
+    }
+
+    const intentionId = String(data?.id || "").trim();
+    const specialReference = String(data?.special_reference || "").trim();
+    const orderId = String(data?.order_id || "").trim();
+    const amountCents = Number(data?.intention_detail?.amount);
+    const currency = String(data?.intention_detail?.currency || "")
+      .trim()
+      .toUpperCase();
+    if (
+      !intentionId ||
+      !specialReference ||
+      !orderId ||
+      !Number.isSafeInteger(amountCents) ||
+      !currency ||
+      typeof data?.confirmed !== "boolean" ||
+      typeof data?.paid !== "boolean"
+    ) {
+      return { ok: false, reason: "invalid_response" };
+    }
+
+    const paidAt = String(data?.paid_at || "").trim();
+    let signedTransaction: PaymobIntentionSnapshot["signedTransaction"];
+    try {
+      const redirect = new URL(String(data?.redirection_url || ""));
+      if (
+        redirect.origin === "https://rwqan.sa" &&
+        redirect.pathname === "/api/paymob/webhook"
+      ) {
+        const redirectData = Object.fromEntries(redirect.searchParams.entries());
+        const redirectHmac = redirect.searchParams.get("hmac") || "";
+        const redirectAmountCents = Number(redirectData.amount_cents);
+        const redirectTransactionId = String(redirectData.id || "").trim();
+        const redirectOrderId = String(redirectData.order || "").trim();
+        const redirectCurrency = String(redirectData.currency || "")
+          .trim()
+          .toUpperCase();
+        if (
+          this.verifyWebhookSignature(redirectData, redirectHmac) &&
+          callbackBooleanValue(redirectData.success) &&
+          !callbackBooleanValue(redirectData.pending) &&
+          callbackFalseValue(redirectData.error_occured) &&
+          callbackFalseValue(redirectData.is_refunded) &&
+          callbackFalseValue(redirectData.is_voided) &&
+          (
+            callbackBooleanValue(redirectData.is_standalone_payment) ||
+            callbackBooleanValue(redirectData.is_capture)
+          ) &&
+          redirectTransactionId &&
+          redirectOrderId &&
+          Number.isSafeInteger(redirectAmountCents) &&
+          redirectCurrency
+        ) {
+          signedTransaction = {
+            transactionId: redirectTransactionId,
+            orderId: redirectOrderId,
+            merchantOrderId: String(
+              redirectData.merchant_order_id || "",
+            ).trim(),
+            amountCents: redirectAmountCents,
+            currency: redirectCurrency,
+            createdAt: String(redirectData.created_at || "").trim(),
+            paymentMethod: String(
+              redirectData["source_data.type"] ||
+              redirectData.source_data_type ||
+              "",
+            ).trim(),
+            cardSubType: String(
+              redirectData["source_data.sub_type"] ||
+              redirectData.source_data_sub_type ||
+              "",
+            ).trim(),
+          };
+        }
+      }
+    } catch {
+      // A missing/invalid browser redirect is not itself a provider failure.
+      // Reconciliation callers can require signedTransaction before mutation.
+    }
+    return {
+      ok: true,
+      snapshot: {
+        intentionId,
+        specialReference,
+        orderId,
+        amountCents,
+        currency,
+        confirmed: data.confirmed,
+        paid: data.paid,
+        ...(paidAt ? { paidAt } : {}),
+        cardExpired: data?.is_card_expired === true,
+        ...(signedTransaction ? { signedTransaction } : {}),
+      },
+    };
+  }
 
   /* ==========================================================
       1) إنشاء Intention للدفع — لا تعديل
@@ -134,10 +338,15 @@ export class PaymobService {
     if (itemName.length > 50) itemName = itemName.slice(0, 50);
 
     const amountCents = Math.round(amount * 100);
+    const specialReference =
+      attempt?.merchantAttemptKey || `${propertyNumber}-${Date.now()}`;
 
     const payload = {
       amount: amountCents,
       currency: 'SAR',
+      // Paymob's server-to-server callback. The redirect URL below is browser
+      // UX only and must not be relied on for settlement.
+      notification_url: "https://rwqan.sa/api/paymob/webhook",
       payment_methods: [integrationId],
       items: [{
         name: itemName,
@@ -159,7 +368,7 @@ export class PaymobService {
         last_name: 'N/A',
         email: `${phone}@example.com`,
       },
-      special_reference: attempt?.merchantAttemptKey || `${propertyNumber}-${Date.now()}`,
+      special_reference: specialReference,
       extras: {
         creation_extras: {
           type: "subscription",
@@ -223,10 +432,27 @@ export class PaymobService {
     const checkoutUrl =
       `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${data.client_secret}`;
 
+    let paymobOrderId = String(
+      data?.order_id || data?.intention_order_id || "",
+    ).trim();
+    if (!paymobOrderId) {
+      const lookup = await this.retrieveIntention(checkoutUrl);
+      if (
+        lookup.ok &&
+        lookup.snapshot.intentionId === String(data.id) &&
+        lookup.snapshot.specialReference === specialReference &&
+        lookup.snapshot.amountCents === amountCents &&
+        lookup.snapshot.currency === "SAR"
+      ) {
+        paymobOrderId = lookup.snapshot.orderId;
+      }
+    }
+
     return {
       clientSecret: data.client_secret,
       intentionId: data.id,
       checkoutUrl,
+      ...(paymobOrderId ? { paymobOrderId } : {}),
     };
   }
 
@@ -251,8 +477,25 @@ export class PaymobService {
     addonName: string,
     addonDays: number,
     paymentMethod: 'cards' | 'applepay' = 'cards',
-    paymentId?: string // معرف الدفع للتتبع
+    attempt: { merchantAttemptKey: string; paymentId: string },
   ) {
+    const merchantAttemptKey = String(
+      attempt?.merchantAttemptKey || "",
+    ).trim();
+    const paymentId = String(attempt?.paymentId || "").trim();
+    const amountCents = Math.round(amount * 100);
+    if (
+      !merchantAttemptKey ||
+      !paymentId ||
+      !Number.isSafeInteger(amountCents) ||
+      amountCents <= 0
+    ) {
+      throw new PaymobIntentionError(
+        "Invalid local add-on payment identity",
+        "rejected",
+      );
+    }
+
     const integrationId = paymentMethod === 'applepay'
       ? INTEGRATION_ID_APPLEPAY
       : INTEGRATION_ID_CARDS;
@@ -260,11 +503,12 @@ export class PaymobService {
     let itemName = `${addonName} للعقار ${propertyName}`;
     if (itemName.length > 50) itemName = itemName.slice(0, 50);
 
-    const amountCents = Math.round(amount * 100);
-
     const payload = {
       amount: amountCents,
       currency: 'SAR',
+      // This endpoint is enabled only for add-on intentions backed by a
+      // stable local payment id and merchant attempt key.
+      notification_url: "https://rwqan.sa/api/paymob/webhook",
       payment_methods: [integrationId],
       items: [{
         name: itemName,
@@ -285,7 +529,7 @@ export class PaymobService {
         last_name: 'N/A',
         email: `${phone}@example.com`,
       },
-      special_reference: paymentId || `addon-${propertyNumber}-${Date.now()}`,
+      special_reference: merchantAttemptKey,
       extras: {
         creation_extras: {
           type: "addon",
@@ -294,31 +538,114 @@ export class PaymobService {
           addonName,
           days: addonDays,
           price: amount,
-          paymentId, // إضافة paymentId للتتبع في webhook
+          paymentId,
+          merchantAttemptKey,
         },
       },
     };
 
-    const response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SECRET_KEY}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SECRET_KEY}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "Unable to confirm add-on payment creation with provider",
+        "unknown",
+        { cause: error },
+      );
+    }
 
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new PaymobIntentionError(
+        message || "Provider rejected add-on payment creation",
+        new Set([400, 401, 403, 404, 422]).has(response.status)
+          ? "rejected"
+          : "unknown",
+      );
+    }
 
-    const data: IntentionResponse = await response.json();
+    let data: IntentionResponse;
+    try {
+      data = await response.json() as IntentionResponse;
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "Provider returned an unverifiable add-on payment response",
+        "unknown",
+        { cause: error },
+      );
+    }
+
+    const intentionId = String(data?.id || "").trim();
+    const clientSecret = String(data?.client_secret || "").trim();
+    if (!intentionId || !clientSecret) {
+      throw new PaymobIntentionError(
+        "Provider returned an incomplete add-on payment identity",
+        "unknown",
+      );
+    }
 
     const checkoutUrl =
-      `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${data.client_secret}`;
+      `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${clientSecret}`;
+    const createdIntention = { intentionId, checkoutUrl };
+    const responseReference = String(data?.special_reference || "").trim();
+    const responseAmount = Number(
+      data?.intention_detail?.amount ?? data?.amount,
+    );
+    const responseCurrency = String(
+      data?.intention_detail?.currency || data?.currency || "",
+    ).trim().toUpperCase();
+    if (
+      (responseReference && responseReference !== merchantAttemptKey) ||
+      (Number.isFinite(responseAmount) && responseAmount !== amountCents) ||
+      (responseCurrency && responseCurrency !== "SAR")
+    ) {
+      throw new PaymobIntentionError(
+        "Provider returned a conflicting add-on payment identity",
+        "unknown",
+        { createdIntention },
+      );
+    }
+
+    let paymobOrderId = String(
+      data?.order_id ||
+      data?.intention_order_id ||
+      data?.order?.id ||
+      (typeof data?.order === "object" ? "" : data?.order) ||
+      "",
+    ).trim();
+    if (!paymobOrderId) {
+      const lookup = await this.retrieveIntention(checkoutUrl);
+      if (
+        lookup.ok &&
+        lookup.snapshot.intentionId === intentionId &&
+        lookup.snapshot.specialReference === merchantAttemptKey &&
+        lookup.snapshot.amountCents === amountCents &&
+        lookup.snapshot.currency === "SAR"
+      ) {
+        paymobOrderId = lookup.snapshot.orderId;
+      }
+    }
+    if (!paymobOrderId) {
+      throw new PaymobIntentionError(
+        "Unable to bind add-on payment to its provider order",
+        "unknown",
+        { createdIntention },
+      );
+    }
 
     return {
-      clientSecret: data.client_secret,
-      intentionId: data.id,
+      clientSecret,
+      intentionId,
       checkoutUrl,
+      paymobOrderId,
     };
   }
 

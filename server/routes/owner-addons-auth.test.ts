@@ -6,7 +6,7 @@ import session from "express-session";
 
 import addonsRouter from "./admin/addons";
 import { firebaseService } from "../firebaseService";
-import { paymobService } from "../integrations/paymob";
+import { PaymobIntentionError, paymobService } from "../integrations/paymob";
 import { addOnService, paymentService, propertyService } from "../services";
 
 test("owner add-on routes bind every property operation to the authenticated session", async () => {
@@ -16,13 +16,28 @@ test("owner add-on routes bind every property operation to the authenticated ses
     logHistory: addOnService.logHistory,
     propertyGet: propertyService.getByNumber,
     paymentCreate: paymentService.create,
+    paymentUpdate: paymentService.update,
     createPropertyAddOn: firebaseService.createPropertyAddOn,
+    cancelRejectedAddOnIntentionCreation:
+      firebaseService.cancelRejectedAddOnIntentionCreation,
     initiateAddOnPayment: paymobService.initiateAddOnPayment,
   };
   const propertyReads: string[] = [];
   const addOnReads: string[] = [];
   const createdPayments: any[] = [];
+  const paymentUpdates: Array<{ id: string; updates: any }> = [];
   const createdAddOns: any[] = [];
+  const rejectedCreationCancellations: Array<{
+    paymentId: string;
+    addonId: string;
+  }> = [];
+  const paymobCalls: any[][] = [];
+  let failCreatedIdentityUpdateOnce = false;
+  let paymobImplementation = async (..._args: any[]) => ({
+    intentionId: "INT-ADDON-1",
+    checkoutUrl: "https://checkout.example/addon",
+    paymobOrderId: "ORDER-ADDON-1",
+  });
 
   (addOnService as any).getForProperty = async (propertyNumber: string) => {
     addOnReads.push(propertyNumber);
@@ -47,13 +62,29 @@ test("owner add-on routes bind every property operation to the authenticated ses
     createdPayments.push(payment);
     return payment;
   };
+  (paymentService as any).update = async (id: string, updates: any) => {
+    paymentUpdates.push({ id, updates });
+    if (failCreatedIdentityUpdateOnce && updates.intentionState === "created") {
+      failCreatedIdentityUpdateOnce = false;
+      throw new Error("simulated local persistence outage");
+    }
+    return { ...createdPayments.find((payment) => payment.id === id), ...updates };
+  };
   (firebaseService as any).createPropertyAddOn = async (addOn: any) => {
     createdAddOns.push(addOn);
     return addOn;
   };
-  (paymobService as any).initiateAddOnPayment = async () => ({
-    checkoutUrl: "https://checkout.example/addon",
-  });
+  (firebaseService as any).cancelRejectedAddOnIntentionCreation = async (
+    paymentId: string,
+    addonId: string,
+  ) => {
+    rejectedCreationCancellations.push({ paymentId, addonId });
+    return true;
+  };
+  (paymobService as any).initiateAddOnPayment = async (...args: any[]) => {
+    paymobCalls.push(args);
+    return paymobImplementation(...args);
+  };
 
   const app = express();
   app.use(express.json());
@@ -119,8 +150,111 @@ test("owner add-on routes bind every property operation to the authenticated ses
     assert.deepEqual(propertyReads, ["PROP-OWNER"]);
     assert.equal(createdPayments.length, 1);
     assert.equal(createdPayments[0].propertyNumber, "PROP-OWNER");
+    assert.ok(createdPayments[0].merchantAttemptKey);
+    assert.equal(createdPayments[0].intentionState, "creating");
     assert.equal(createdAddOns.length, 1);
     assert.equal(createdAddOns[0].propertyNumber, "PROP-OWNER");
+    assert.equal(paymobCalls.length, 1);
+    assert.deepEqual(paymobCalls[0][8], {
+      merchantAttemptKey: createdPayments[0].merchantAttemptKey,
+      paymentId: createdPayments[0].id,
+    });
+    assert.deepEqual(paymentUpdates, [{
+      id: createdPayments[0].id,
+      updates: {
+        paymentReference: "INT-ADDON-1",
+        transactionId: "INT-ADDON-1",
+        paymentCheckoutUrl: "https://checkout.example/addon",
+        paymobOrderId: "ORDER-ADDON-1",
+        intentionState: "created",
+      },
+    }]);
+
+    const postOwnerAddon = () => fetch(`${baseUrl}/api/owner/addons/pay`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-test-owner-property": "PROP-OWNER",
+      },
+      body: JSON.stringify({ addOnPackageId: "ADDON-PACKAGE" }),
+    });
+
+    paymobImplementation = async () => {
+      throw new PaymobIntentionError("provider timeout", "unknown");
+    };
+    const ambiguousResponse = await postOwnerAddon();
+    assert.equal(ambiguousResponse.status, 500);
+    const ambiguousPayment = createdPayments.at(-1);
+    assert.deepEqual(paymentUpdates.at(-1), {
+      id: ambiguousPayment.id,
+      updates: { intentionState: "unknown" },
+    });
+
+    paymobImplementation = async () => {
+      throw new PaymobIntentionError("provider rejected", "rejected");
+    };
+    const rejectedResponse = await postOwnerAddon();
+    assert.equal(rejectedResponse.status, 500);
+    const rejectedPayment = createdPayments.at(-1);
+    const rejectedAddOn = createdAddOns.at(-1);
+    assert.deepEqual(rejectedCreationCancellations.at(-1), {
+      paymentId: rejectedPayment.id,
+      addonId: rejectedAddOn.id,
+    });
+    assert.equal(
+      paymentUpdates.some(
+        ({ id, updates }) =>
+          id === rejectedPayment.id && updates.intentionState === "failed",
+      ),
+      false,
+    );
+
+    paymobImplementation = async () => {
+      throw new PaymobIntentionError(
+        "order lookup unavailable",
+        "unknown",
+        {
+          createdIntention: {
+            intentionId: "INT-ADDON-PARTIAL",
+            checkoutUrl: "https://checkout.example/addon-partial",
+          },
+        },
+      );
+    };
+    const partialResponse = await postOwnerAddon();
+    assert.equal(partialResponse.status, 500);
+    const partialPayment = createdPayments.at(-1);
+    assert.deepEqual(paymentUpdates.at(-1), {
+      id: partialPayment.id,
+      updates: {
+        paymentReference: "INT-ADDON-PARTIAL",
+        transactionId: "INT-ADDON-PARTIAL",
+        paymentCheckoutUrl: "https://checkout.example/addon-partial",
+        intentionState: "unknown",
+      },
+    });
+
+    paymobImplementation = async () => ({
+      intentionId: "INT-ADDON-RECOVERED",
+      checkoutUrl: "https://checkout.example/addon-recovered",
+      paymobOrderId: "ORDER-ADDON-RECOVERED",
+    });
+    failCreatedIdentityUpdateOnce = true;
+    const callsBeforeRecovery = paymobCalls.length;
+    const recoveryResponse = await postOwnerAddon();
+    assert.equal(recoveryResponse.status, 500);
+    assert.equal(paymobCalls.length, callsBeforeRecovery + 1);
+    const recoveredPayment = createdPayments.at(-1);
+    const recoveredUpdates = paymentUpdates.filter(
+      ({ id }) => id === recoveredPayment.id,
+    );
+    assert.equal(recoveredUpdates.length, 2);
+    assert.deepEqual(recoveredUpdates[0].updates, recoveredUpdates[1].updates);
+    assert.equal(recoveredUpdates[1].updates.intentionState, "created");
+    assert.equal(
+      recoveredUpdates[1].updates.paymobOrderId,
+      "ORDER-ADDON-RECOVERED",
+    );
 
     const anonymousBankTransfer = await fetch(
       `${baseUrl}/api/owner/addons/bank-transfer`,
@@ -133,7 +267,10 @@ test("owner add-on routes bind every property operation to the authenticated ses
     (addOnService as any).logHistory = originals.logHistory;
     (propertyService as any).getByNumber = originals.propertyGet;
     (paymentService as any).create = originals.paymentCreate;
+    (paymentService as any).update = originals.paymentUpdate;
     (firebaseService as any).createPropertyAddOn = originals.createPropertyAddOn;
+    (firebaseService as any).cancelRejectedAddOnIntentionCreation =
+      originals.cancelRejectedAddOnIntentionCreation;
     (paymobService as any).initiateAddOnPayment = originals.initiateAddOnPayment;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());

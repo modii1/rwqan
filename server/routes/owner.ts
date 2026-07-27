@@ -2179,6 +2179,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
   let knownPaymentIntention: {
     intentionId: string;
     checkoutUrl: string;
+    paymobOrderId?: string;
   } | null = null;
   try {
     const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
@@ -2366,6 +2367,9 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
       paymentReference: paymobPayment.intentionId,
       transactionId: paymobPayment.intentionId,
       paymentCheckoutUrl: paymobPayment.checkoutUrl,
+      ...(paymobPayment.paymobOrderId
+        ? { paymobOrderId: paymobPayment.paymobOrderId }
+        : {}),
       intentionState: "created",
     });
     paymentIntentionPersisted = true;
@@ -2391,6 +2395,9 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
           paymentReference: knownPaymentIntention.intentionId,
           transactionId: knownPaymentIntention.intentionId,
           paymentCheckoutUrl: knownPaymentIntention.checkoutUrl,
+          ...(knownPaymentIntention.paymobOrderId
+            ? { paymobOrderId: knownPaymentIntention.paymobOrderId }
+            : {}),
           intentionState: "created",
         }).catch((cleanupError) =>
           console.error("Failed to persist known Paymob intention:", cleanupError),
@@ -2441,6 +2448,7 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
   let knownRetryIntention: {
     intentionId: string;
     checkoutUrl: string;
+    paymobOrderId?: string;
   } | null = null;
   try {
     const { paymentId } = req.body;
@@ -2571,6 +2579,9 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
         paymentReference: paymobResult.intentionId,
         transactionId: paymobResult.intentionId,
         paymentCheckoutUrl: paymobResult.checkoutUrl,
+        ...(paymobResult.paymobOrderId
+          ? { paymobOrderId: paymobResult.paymobOrderId }
+          : {}),
         intentionState: "created",
         ...(refreshedPendingDates || {}),
       },
@@ -2593,6 +2604,9 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
             paymentReference: knownRetryIntention.intentionId,
             transactionId: knownRetryIntention.intentionId,
             paymentCheckoutUrl: knownRetryIntention.checkoutUrl,
+            ...(knownRetryIntention.paymobOrderId
+              ? { paymobOrderId: knownRetryIntention.paymobOrderId }
+              : {}),
             intentionState: "created",
           },
         ).catch((persistenceError) =>
