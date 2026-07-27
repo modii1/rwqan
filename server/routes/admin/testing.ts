@@ -3,6 +3,7 @@ import { requireAdmin } from "../middleware";
 import { propertyService, paymentService, analyticsService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { smartVerification } from "../../utils/verification";
+import { isPropertySuspended } from "../../services/propertySuspension";
 
 const router = Router();
 
@@ -57,6 +58,24 @@ router.post("/api/admin/smart-verify", async (req, res) => {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
+    if (await isPropertySuspended(propertyNumber)) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error:
+          "الاشتراك موقوف مؤقتاً من الإدارة. يجب استئنافه قبل تشغيل التحقق الذكي.",
+      });
+    }
+
+    if (secondPropertyNumber && await isPropertySuspended(secondPropertyNumber)) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error:
+          "الاشتراك موقوف مؤقتاً من الإدارة. يجب استئنافه قبل تشغيل التحقق الذكي.",
+      });
+    }
+
     const property = await propertyService.getByNumber(propertyNumber);
     if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
@@ -105,6 +124,15 @@ router.post("/api/admin/smart-verify", async (req, res) => {
 router.get("/api/admin/property-verification/:propertyNumber", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
+
+    if (await isPropertySuspended(propertyNumber)) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error:
+          "الاشتراك موقوف مؤقتاً من الإدارة. يجب استئنافه قبل تشغيل التحقق الذكي.",
+      });
+    }
 
     const property = await propertyService.getByNumber(propertyNumber);
     if (!property) {

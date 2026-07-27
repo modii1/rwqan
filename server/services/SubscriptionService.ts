@@ -15,6 +15,7 @@ import {
 import {
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
+  isSubscriptionStatusSuspended,
 } from "../../shared/subscriptionType";
 import {
   SUSPENDED_SUBSCRIPTION_STATUS,
@@ -23,6 +24,7 @@ import {
   calculateRemainingDurationMs,
   calculateResumedEndDate,
 } from "./subscriptionLifecycle";
+import { selectCurrentSubscriptionForProperty } from "../utils/subscriptionSelection";
 
 export interface SubscriptionLifecycleResult {
   subscription: Subscription;
@@ -194,23 +196,26 @@ export class SubscriptionService {
   ): Promise<SubscriptionLifecycleResult> {
     const { source, subscriptions } = await this.getLifecycleGroup(identifier);
 
-    if (source.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+    if (isSubscriptionStatusSuspended(source.status)) {
       throw new SubscriptionLifecycleError(
         "ALREADY_SUSPENDED",
         "الاشتراك موقوف مؤقتاً بالفعل.",
       );
     }
-    if (!isSubscriptionStatusActive(source.status) || source.cancelledAt) {
+    const remainingDurationMs = calculateRemainingDurationMs(
+      source.endDate,
+      suspendedAt,
+    );
+    if (
+      !isSubscriptionStatusActive(source.status) ||
+      source.cancelledAt ||
+      remainingDurationMs <= 0
+    ) {
       throw new SubscriptionLifecycleError(
         "NOT_ACTIVE",
         "يمكن إيقاف الاشتراكات السارية فقط مؤقتاً.",
       );
     }
-
-    const remainingDurationMs = calculateRemainingDurationMs(
-      source.endDate,
-      suspendedAt,
-    );
     const suspendedAtIso = suspendedAt.toISOString();
     const subscriptionUpdates: Partial<Subscription> = {
       status: SUSPENDED_SUBSCRIPTION_STATUS,
@@ -243,7 +248,7 @@ export class SubscriptionService {
   ): Promise<SubscriptionLifecycleResult> {
     const { source, subscriptions } = await this.getLifecycleGroup(identifier);
 
-    if (source.status !== SUSPENDED_SUBSCRIPTION_STATUS) {
+    if (!isSubscriptionStatusSuspended(source.status)) {
       throw new SubscriptionLifecycleError(
         "NOT_SUSPENDED",
         "الاشتراك غير موقوف مؤقتاً.",
@@ -296,11 +301,21 @@ export class SubscriptionService {
     subscriptions: Subscription[];
   }> {
     const subscriptions = await firebaseService.getSubscriptions();
-    const current = subscriptions.find((subscription) =>
-      subscription.id === identifier ||
-      subscription.propertyNumber === identifier ||
-      `SUB-${subscription.propertyNumber}` === identifier
+    const exact = subscriptions.find(
+      (subscription) => subscription.id === identifier,
     );
+    const requestedPropertyNumber = exact?.propertyNumber ||
+      subscriptions.find(
+        (subscription) =>
+          subscription.propertyNumber === identifier ||
+          `SUB-${subscription.propertyNumber}` === identifier,
+      )?.propertyNumber;
+    const current = requestedPropertyNumber
+      ? selectCurrentSubscriptionForProperty(
+          subscriptions,
+          requestedPropertyNumber,
+        )
+      : undefined;
 
     if (!current) {
       throw new SubscriptionLifecycleError(
@@ -310,8 +325,9 @@ export class SubscriptionService {
     }
 
     const requestedMainProperty = current.linkedProperty || current.propertyNumber;
-    const main = subscriptions.find(
-      ({ propertyNumber }) => propertyNumber === requestedMainProperty,
+    const main = selectCurrentSubscriptionForProperty(
+      subscriptions,
+      requestedMainProperty,
     );
     const source = main || current;
     const mainPropertyNumber = source.propertyNumber;

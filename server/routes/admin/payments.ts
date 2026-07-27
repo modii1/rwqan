@@ -72,9 +72,21 @@ router.post("/api/admin/payments/:paymentId/confirm", requireAdmin, async (req, 
     const { paymentId } = req.params;
     await paymentService.confirmManually(paymentId);
     res.json({ success: true, message: "تم تأكيد الدفعة وتفعيل الاشتراك بنجاح" });
-  } catch (err: any) {
-    const status = err.message?.includes("مكتملة مسبقاً") ? 400 : err.message?.includes("غير موجودة") ? 404 : 500;
-    res.status(status).json({ error: err.message || "فشل في تأكيد الدفعة" });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as { code?: unknown }).code === "PROPERTY_SUSPENDED"
+    ) {
+      return sendAdminApprovalError(
+        res,
+        err,
+        "تعذر تأكيد الدفعة حالياً. حاول مرة أخرى.",
+      );
+    }
+    const message = err instanceof Error ? err.message : "";
+    const status = message.includes("مكتملة مسبقاً") ? 400 : message.includes("غير موجودة") ? 404 : 500;
+    res.status(status).json({ error: message || "فشل في تأكيد الدفعة" });
   }
 });
 

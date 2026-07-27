@@ -100,6 +100,73 @@ test("legacy fulfillment detection never bypasses an existing claim state", () =
   );
 });
 
+test("administratively suspended subscriptions reject every payment action", () => {
+  for (const status of ["موقوف مؤقتاً", " suspended "]) {
+    const stopped = subscription(status, 20);
+    for (const action of ["new", "extend", "upgrade"] as const) {
+      const result = validatePaymentSubscriptionAction(action, stopped);
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.status, 423);
+        assert.match(result.error, /موقوف مؤقتاً/);
+      }
+    }
+  }
+});
+
+test("payment fulfillment cannot overwrite a suspension created after payment", async () => {
+  const originals = {
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+  };
+  let fulfillmentClaims = 0;
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => ({
+    ...subscription("موقوف مؤقتاً", 20),
+    suspendedAt: new Date().toISOString(),
+    remainingDurationMs: 20 * 24 * 60 * 60 * 1000,
+  });
+  (firebaseService as any).claimPaymentFulfillment = async () => {
+    fulfillmentClaims += 1;
+    return { status: "claimed", token: "must-not-be-created" };
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        activateVerifiedPaymentSubscription({
+          payment: {
+            id: "PAY-SUSPENDED",
+            propertyNumber: "12345",
+            packageId: "pkg-test",
+            status: "نجح - قيد التحقق",
+          } as any,
+          property: { propertyNumber: "12345" } as any,
+          pkg: {
+            id: "pkg-test",
+            duration: 30,
+            price: 100,
+            type: "مميز",
+          } as any,
+          startDate: new Date(),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as any).code, "PROPERTY_SUSPENDED");
+        assert.equal((error as any).status, 423);
+        return true;
+      },
+    );
+    assert.equal(fulfillmentClaims, 0);
+  } finally {
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+  }
+});
+
 const emptyPropertyPlan = {
   kept: [],
   unlinked: [],

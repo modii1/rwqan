@@ -9,7 +9,10 @@ import {
   getStartOfDayRiyadh,
   MAX_SUBSCRIPTION_DAYS,
 } from "./dateUtils";
-import { isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import {
+  isPremiumSubscriptionType,
+  isSubscriptionStatusSuspended,
+} from "../../shared/subscriptionType";
 import {
   AdminApprovalError,
   PartialMutationError,
@@ -36,6 +39,22 @@ type SubscriptionActionValidation =
       nextUrl: string;
       actionLabel: string;
     };
+
+function suspendedSubscriptionValidation(
+  currentSubscription?: Subscription | null,
+): Exclude<SubscriptionActionValidation, { ok: true }> | null {
+  if (!isSubscriptionStatusSuspended(currentSubscription?.status)) return null;
+
+  return {
+    ok: false,
+    status: 423,
+    error:
+      "الاشتراك موقوف مؤقتاً من الإدارة. لا يمكن تشغيل التحقق أو إنشاء أو تفعيل دفعة حتى تعيد الإدارة تفعيل الاشتراك.",
+    nextAction: "تواصل مع الإدارة أو انتظر إعادة تفعيل الاشتراك.",
+    nextUrl: "/owner/subscription",
+    actionLabel: "عرض حالة الاشتراك",
+  };
+}
 
 /**
  * Canonicalize legacy pending end dates before they cross an activation or
@@ -113,6 +132,9 @@ export function validateSubscriptionAction(
   action: unknown,
   currentSubscription?: Subscription | null,
 ): SubscriptionActionValidation {
+  const suspendedValidation = suspendedSubscriptionValidation(currentSubscription);
+  if (suspendedValidation) return suspendedValidation;
+
   if (action !== "extend" && action !== "upgrade") {
     return {
       ok: false,
@@ -161,6 +183,9 @@ export function validatePaymentSubscriptionAction(
   action: unknown,
   currentSubscription?: Subscription | null,
 ): SubscriptionActionValidation {
+  const suspendedValidation = suspendedSubscriptionValidation(currentSubscription);
+  if (suspendedValidation) return suspendedValidation;
+
   const normalizedAction = action === undefined || action === null || action === ""
     ? "new"
     : action;
@@ -374,6 +399,15 @@ export async function activateVerifiedPaymentSubscription(params: {
     : params.startDate.toISOString();
   const fallbackEndDate = normalizeSubscriptionBoundaryEndDate(params.endDate);
 
+  if (isSubscriptionStatusSuspended(currentSubscription?.status)) {
+    throw new AdminApprovalError({
+      status: 423,
+      code: "PROPERTY_SUSPENDED",
+      message:
+        "الاشتراك موقوف مؤقتاً من الإدارة. يجب استئنافه من لوحة الإدارة قبل تفعيل أي دفعة أو اعتماد جديد.",
+    });
+  }
+
   if (payment.fulfilledAt) {
     return {
       startDate: currentSubscription?.startDate || fallbackStartDate,
@@ -458,6 +492,20 @@ export async function activateVerifiedPaymentSubscription(params: {
       ? await resolvePaymentPropertyPlan(payment, pkg, currentSubscription)
       : params.propertyPlan ??
         (await resolvePaymentPropertyPlan(payment, pkg, currentSubscription));
+    for (const linkedPropertyNumber of limited.kept) {
+      const linkedSubscription =
+        await firebaseService.getSubscriptionByPropertyNumber(
+          linkedPropertyNumber,
+        );
+      if (isSubscriptionStatusSuspended(linkedSubscription?.status)) {
+        throw new AdminApprovalError({
+          status: 423,
+          code: "PROPERTY_SUSPENDED",
+          message:
+            `اشتراك العقار المرتبط ${linkedPropertyNumber} موقوف مؤقتاً من الإدارة. يجب استئنافه قبل تفعيل المجموعة.`,
+        });
+      }
+    }
     if (!payment.fulfillmentPlan) {
       // Persist the immutable group/downgrade decision before any subscription
       // mutation. A partial retry must not recompute from already-narrowed data

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { propertyService, paymentService, subscriptionService, addOnService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { paymobService } from "../integrations/paymob";
-import { sendWhatsAppNotification, notifyNewPayment, notifyOwnerSubscriptionActivated, sendOwnerWhatsApp } from "../integrations/whatsapp";
+import { sendWhatsAppNotification, notifyNewPayment, notifyOwnerSubscriptionActivated, sendPropertyOwnerWhatsApp } from "../integrations/whatsapp";
 import { checkPropertyDataComplete } from "../utils/verification";
 import { countR2Images } from "../utils/r2";
 import {
@@ -11,6 +11,7 @@ import {
   hasPriorSubscription,
   queueVerifiedNewPropertyForAdminApproval,
 } from "../utils/paymentScenarioFlow";
+import { isPropertySuspended } from "../services/propertySuspension";
 
 const router = Router();
 
@@ -574,6 +575,28 @@ function callbackMatchesPayment(
       // 4) التحقق التلقائي من بيانات العقار (مرحلة إجبارية قبل التفعيل)
       // ===============================
       const property = await propertyService.getByNumber(payment.propertyNumber);
+
+      // A signed financial success is still accepted while an administrator has
+      // paused the subscription. Keep it pending, but do not verify, activate,
+      // or notify the owner until the administrator explicitly resumes it.
+      if (await isPropertySuspended(payment.propertyNumber)) {
+        await paymentService.update(payment.id, {
+          status: "نجح - قيد التحقق" as any,
+          completedAt: new Date().toISOString(),
+          transactionId,
+          notes:
+            "تم استلام الدفع بنجاح، لكن التفعيل مؤجل لأن الاشتراك موقوف مؤقتاً من الإدارة.",
+        });
+        console.log(
+          `⏸️ [Webhook] Payment ${payment.id} accepted and held for suspended property ${payment.propertyNumber}`,
+        );
+        return res.json({
+          ok: true,
+          status: "property_suspended",
+          paymentId: payment.id,
+        });
+      }
+
       let verificationPassed = false;
       let verificationMissingFields: string[] = [];
 
@@ -631,10 +654,11 @@ function callbackMatchesPayment(
 
         if (property?.whatsappNumber) {
           try {
-            await sendOwnerWhatsApp(
-              property.whatsappNumber,
-              `تم استلام الدفع، لكن بيانات العقار ${property.name || payment.propertyNumber} غير مكتملة.\n\nالحقول المطلوبة: ${verificationMissingFields.join("، ")}\n\nالخطوة التالية: عدّل بيانات العقار وارفع الصور المطلوبة ثم شغّل التحقق من صفحة الاشتراك.`,
-            );
+            await sendPropertyOwnerWhatsApp({
+              ownerPhone: property.whatsappNumber,
+              propertyNumber: payment.propertyNumber,
+              message: `تم استلام الدفع، لكن بيانات العقار ${property.name || payment.propertyNumber} غير مكتملة.\n\nالحقول المطلوبة: ${verificationMissingFields.join("، ")}\n\nالخطوة التالية: عدّل بيانات العقار وارفع الصور المطلوبة ثم شغّل التحقق من صفحة الاشتراك.`,
+            });
           } catch (err) {
             console.error("❌ Owner rejection notification failed:", err);
           }
@@ -680,10 +704,11 @@ function callbackMatchesPayment(
 
           if (property.whatsappNumber) {
             try {
-              await sendOwnerWhatsApp(
-                property.whatsappNumber,
-                `تم التحقق من الدفع وبيانات العقار ${property.name || payment.propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن.`,
-              );
+              await sendPropertyOwnerWhatsApp({
+                ownerPhone: property.whatsappNumber,
+                propertyNumber: payment.propertyNumber,
+                message: `تم التحقق من الدفع وبيانات العقار ${property.name || payment.propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن.`,
+              });
             } catch (err) {
               console.error("❌ Owner pending approval notification failed:", err);
             }

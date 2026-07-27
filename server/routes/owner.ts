@@ -1,5 +1,5 @@
-import { Router } from "express";
-import { requireOwner } from "./middleware";
+import { Router, type Response } from "express";
+import { requireOwner, requireSameOrigin } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import {
   firebaseService,
@@ -7,6 +7,7 @@ import {
   PaymentActionConflictError,
   PaymentActionEligibilityError,
   PaymentRetryNotAllowedError,
+  SuspendedSubscriptionWriteError,
 } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL, countR2Images } from "../utils/r2";
 import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
@@ -18,7 +19,7 @@ import { storage } from "../storage";
 import {
   notifyPropertyUpdate,
   sendWhatsAppNotification,
-  sendOwnerWhatsApp,
+  sendPropertyOwnerWhatsApp,
   notifyOwnerSubscriptionActivated,
   notifyReceiptUpload,
   notifyNewPayment,
@@ -43,8 +44,13 @@ import {
   getSubscriptionTypeLabel,
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
+  isSubscriptionStatusSuspended,
 } from "../../shared/subscriptionType";
 import type { Payment } from "../../shared/schema";
+import {
+  assertPropertyNotSuspended,
+  isPropertySuspended,
+} from "../services/propertySuspension";
 
 const router = Router();
 
@@ -60,6 +66,29 @@ const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set([
 ]);
 const OWNER_PAYMENT_ATTENTION_STATUSES = new Set(["قيد المراجعة", "معلق", "قيد التحقق", "نجح - قيد التحقق", "pending"]);
 const manualVerificationInFlight = new Set<string>();
+
+function sendPropertySuspendedResponse(res: Response): Response {
+  const message =
+    "الاشتراك موقوف مؤقتاً من الإدارة. لا يمكن تشغيل التحقق أو تفعيل الاشتراك حتى تعيد الإدارة تفعيله.";
+  return res.status(423).json({
+    success: false,
+    verified: false,
+    notificationRequired: false,
+    code: "PROPERTY_SUSPENDED",
+    error: message,
+    message,
+  });
+}
+
+function hasPropertySuspendedCode(
+  error: unknown,
+): error is Error & { code: "PROPERTY_SUSPENDED"; status: number } {
+  return Boolean(
+    error instanceof Error &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "PROPERTY_SUSPENDED",
+  );
+}
 
 function isLinkedSubscriptionActive(status?: string | null): boolean {
   return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
@@ -161,10 +190,17 @@ async function validateRequestedLinkedProperties(params: {
       );
     }
 
-    const [linkedSubscription, imageCount] = await Promise.all([
-      firebaseService.getSubscriptionByPropertyNumber(requestedPropertyNumber),
-      countR2Images(requestedPropertyNumber),
-    ]);
+    const linkedSubscription = await firebaseService.getSubscriptionByPropertyNumber(
+      requestedPropertyNumber,
+    );
+    if (isSubscriptionStatusSuspended(linkedSubscription?.status)) {
+      throw new LinkedPropertyRequestError(
+        `العقار ${requestedPropertyNumber} موقوف مؤقتاً من الإدارة ولا يمكن ربطه أو تفعيله`,
+        423,
+        "PROPERTY_SUSPENDED",
+      );
+    }
+    const imageCount = await countR2Images(requestedPropertyNumber);
     const userDataCheck = checkPropertyUserDataComplete(linkedProperty);
     const approvalDataCheck = await checkPropertyDataComplete(
       linkedProperty,
@@ -392,30 +428,37 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     // إذا كان العقار جديد (لا اشتراك سابق) وحالة التحقق "pending" (لم يتحقق من قبل)
     // يتم تشغيل الفحص تلقائياً دون ضغط المالك على أي زر
     try {
-      const currentSub = await subscriptionService.getByProperty(propertyNumber);
-      const isNewProperty = !hasPriorSubscription(currentSub);
-      const hasPassedVerification =
-        updated.verificationStatus === "approved" ||
-        updated.verificationStatus === "verified" ||
-        (updated as any).smartVerificationPassed === true;
+      const verificationSuspended = await isPropertySuspended(propertyNumber);
+      if (verificationSuspended) {
+        console.log(
+          `🔒 [Auto Verify] Skipped owner-save verification for suspended property ${propertyNumber}`,
+        );
+      } else {
+        const currentSub = await subscriptionService.getByProperty(propertyNumber);
+        const isNewProperty = !hasPriorSubscription(currentSub);
+        const hasPassedVerification =
+          updated.verificationStatus === "approved" ||
+          updated.verificationStatus === "verified" ||
+          (updated as any).smartVerificationPassed === true;
 
-      if (isNewProperty && !hasPassedVerification) {
-        const r2ImgCount = await countR2Images(propertyNumber);
-        const verificationResult = await checkPropertyDataComplete(updated, r2ImgCount);
+        if (isNewProperty && !hasPassedVerification) {
+          const r2ImgCount = await countR2Images(propertyNumber);
+          const verificationResult = await checkPropertyDataComplete(updated, r2ImgCount);
 
-        if (verificationResult.isComplete) {
-          await firebaseService.updateProperty(propertyNumber, {
-            verificationStatus: "pending",
-            smartVerificationPassed: true,
-            smartVerificationPassedAt: new Date().toISOString(),
-            smartVerificationSource: "owner_save",
-          } as any);
-          console.log(`✅ [Auto Verify] العقار الجديد ${propertyNumber} - البيانات مكتملة وينتظر اعتماد الإدارة`);
-        } else {
-          if (updated.verificationStatus !== "pending") {
-            await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+          if (verificationResult.isComplete) {
+            await firebaseService.updateProperty(propertyNumber, {
+              verificationStatus: "pending",
+              smartVerificationPassed: true,
+              smartVerificationPassedAt: new Date().toISOString(),
+              smartVerificationSource: "owner_save",
+            } as any);
+            console.log(`✅ [Auto Verify] العقار الجديد ${propertyNumber} - البيانات مكتملة وينتظر اعتماد الإدارة`);
+          } else {
+            if (updated.verificationStatus !== "pending") {
+              await firebaseService.updateVerificationStatus(propertyNumber, "pending");
+            }
+            console.log(`⏳ [Auto Verify] العقار الجديد ${propertyNumber} - بيانات ناقصة: ${verificationResult.missingFields.join(', ')}`);
           }
-          console.log(`⏳ [Auto Verify] العقار الجديد ${propertyNumber} - بيانات ناقصة: ${verificationResult.missingFields.join(', ')}`);
         }
       }
     } catch (verifyErr) {
@@ -717,7 +760,7 @@ router.put("/api/owner/seo", requireOwner, async (req, res) => {
 // 🔬 POST /api/owner/payment/:paymentId/rescan - Re-scan receipt with AI
 // Allows both owners (for their own payments) and admins
 // ======================================================
-router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
+router.post("/api/owner/payment/:paymentId/rescan", requireSameOrigin, async (req, res) => {
   try {
     const { paymentId } = req.params;
     const isAdmin = !!(req.session as any)?.isAdmin;
@@ -726,6 +769,10 @@ router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
     // Allow admins or authenticated owners
     if (!isAdmin && !propertyNumber) {
       return res.status(401).json({ error: "غير مصرح" });
+    }
+
+    if (!isAdmin && await isPropertySuspended(propertyNumber)) {
+      return sendPropertySuspendedResponse(res);
     }
 
     // For owners, verify they own this payment
@@ -740,6 +787,11 @@ router.post("/api/owner/payment/:paymentId/rescan", async (req, res) => {
 
     if (!payment) {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
+    }
+
+    const paymentPropertyNumber = String(payment.propertyNumber || "").trim();
+    if (isAdmin && paymentPropertyNumber && await isPropertySuspended(paymentPropertyNumber)) {
+      return sendPropertySuspendedResponse(res);
     }
 
     if (!payment.receiptUrl) {
@@ -1127,6 +1179,10 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
         const r2ImgCount = await countR2Images(propertyNumber);
         const propertyComplete = await checkPropertyDataComplete(property, r2ImgCount);
 
+        if (await isPropertySuspended(propertyNumber)) {
+          return sendPropertySuspendedResponse(res);
+        }
+
         if (propertyComplete.isComplete) {
           const currentSubscription = currentSubscriptionForAction || await subscriptionService.getByProperty(propertyNumber);
           const activationDates = calculateActionDates(action, currentSubscription, pkg.duration);
@@ -1175,10 +1231,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
             await sendWhatsAppNotification(adminNotification).catch(err => console.error("WhatsApp notify error:", err));
 
             if (property.whatsappNumber) {
-              await sendOwnerWhatsApp(
-                property.whatsappNumber,
-                `تم التحقق من إيصال التحويل وبيانات العقار ${property.name || propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن، وسنبلغك عند الاعتماد.`,
-              ).catch(err => console.error("Owner pending approval notification error:", err));
+              await sendPropertyOwnerWhatsApp({
+                ownerPhone: property.whatsappNumber,
+                propertyNumber,
+                message: `تم التحقق من إيصال التحويل وبيانات العقار ${property.name || propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.\n\nالخطوة التالية: لا يلزمك إجراء إضافي الآن، وسنبلغك عند الاعتماد.`,
+              }).catch(err => console.error("Owner pending approval notification error:", err));
             }
           } else {
             const activation = await activateVerifiedPaymentSubscription({
@@ -1241,6 +1298,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
             status: "قيد المراجعة" as any,
             notes: `بيانات العقار غير مكتملة: ${propertyComplete.missingFields.join('، ')}`
           });
+          if (await isPropertySuspended(propertyNumber)) {
+            return sendPropertySuspendedResponse(res);
+          }
           await firebaseService.updateVerificationStatus(propertyNumber, "pending");
 
           await sendWhatsAppNotification(
@@ -1257,10 +1317,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
           ).catch(err => console.error("WhatsApp notify error:", err));
 
           if (property.whatsappNumber) {
-            await sendOwnerWhatsApp(
-              property.whatsappNumber,
-              `تعذر إكمال التحقق لعقارك ${property.name || propertyNumber} لأن البيانات غير مكتملة.\n\nالحقول المطلوبة: ${propertyComplete.missingFields.join("، ")}\n\nالخطوة التالية: افتح صفحة تعديل بيانات العقار وأكمل البيانات والصور. الدفعة لم تُرفض، وستبقى بانتظار المراجعة بعد التعديل.`,
-            ).catch(err => console.error("Owner rejection notification error:", err));
+            await sendPropertyOwnerWhatsApp({
+              ownerPhone: property.whatsappNumber,
+              propertyNumber,
+              message: `تعذر إكمال التحقق لعقارك ${property.name || propertyNumber} لأن البيانات غير مكتملة.\n\nالحقول المطلوبة: ${propertyComplete.missingFields.join("، ")}\n\nالخطوة التالية: افتح صفحة تعديل بيانات العقار وأكمل البيانات والصور. الدفعة لم تُرفض، وستبقى بانتظار المراجعة بعد التعديل.`,
+            }).catch(err => console.error("Owner rejection notification error:", err));
           }
         }
       } else if (aiScanResult?.recommendation === "رفض") {
@@ -1285,10 +1346,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
         ).catch(err => console.error("WhatsApp notify error:", err));
 
         if (property.whatsappNumber) {
-          await sendOwnerWhatsApp(
-            property.whatsappNumber,
-            `إيصال التحويل للعقار ${property.name || propertyNumber} يحتاج مراجعة لأنه غير واضح أو غير مطابق لبيانات الدفع المطلوبة.\n\nالخطوة التالية: يمكنك رفع إيصال تحويل صحيح وواضح من صفحة الاشتراك لتسريع المراجعة.`,
-          ).catch(err => console.error("Owner receipt rejection notification error:", err));
+          await sendPropertyOwnerWhatsApp({
+            ownerPhone: property.whatsappNumber,
+            propertyNumber,
+            message: `إيصال التحويل للعقار ${property.name || propertyNumber} يحتاج مراجعة لأنه غير واضح أو غير مطابق لبيانات الدفع المطلوبة.\n\nالخطوة التالية: يمكنك رفع إيصال تحويل صحيح وواضح من صفحة الاشتراك لتسريع المراجعة.`,
+          }).catch(err => console.error("Owner receipt rejection notification error:", err));
         }
       } else {
         pendingManualReview = true;
@@ -1312,6 +1374,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
         ).catch(err => console.error("WhatsApp notify error:", err));
       }
     } catch (aiErr) {
+      if (hasPropertySuspendedCode(aiErr)) throw aiErr;
       console.error("AI Scanner error:", aiErr);
       pendingManualReview = true;
       responseMessage = "حدث خطأ أثناء فحص الإيصال، وسيتم تحويله للمراجعة اليدوية.";
@@ -1361,6 +1424,8 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
     if (
       err instanceof PaymentActionConflictError ||
       err instanceof PaymentActionEligibilityError ||
+      err instanceof SuspendedSubscriptionWriteError ||
+      hasPropertySuspendedCode(err) ||
       err instanceof LinkedPropertyRequestError
     ) {
       if (uploadedReceiptKey && r2 && R2_BUCKET) {
@@ -1531,6 +1596,10 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    if (await isPropertySuspended(propertyNumber)) {
+      return sendPropertySuspendedResponse(res);
+    }
+
     const requestedStatus = req.body.status || 'approved';
     const property = await propertyService.getByNumber(propertyNumber);
     
@@ -1540,6 +1609,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 
     // Owner requesting rejection sets to pending - admin decides final status
     if (requestedStatus === 'rejected') {
+      await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateVerificationStatus(propertyNumber, "pending");
 
       return res.json({
@@ -1584,6 +1654,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       }
 
       if (!freePkg) {
+        await assertPropertyNotSuspended(propertyNumber);
         await firebaseService.updateVerificationStatus(propertyNumber, "approved");
         return res.json({
           success: true,
@@ -1593,6 +1664,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       }
 
       if (isNewProperty) {
+        await assertPropertyNotSuspended(propertyNumber);
         await firebaseService.updateVerificationStatus(propertyNumber, "pending");
 
         await sendWhatsAppNotification(
@@ -1613,6 +1685,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         });
       }
 
+      await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateVerificationStatus(propertyNumber, "approved");
       
       return res.json({
@@ -1633,6 +1706,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 
     if (pendingPayment.fulfilledAt) {
       if (property.verificationStatus !== "approved") {
+        await assertPropertyNotSuspended(propertyNumber);
         await firebaseService.updateVerificationStatus(propertyNumber, "approved");
       }
       return res.json({
@@ -1663,6 +1737,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       }
       if (claimResult.status === "fulfilled") {
         if (property.verificationStatus !== "approved") {
+          await assertPropertyNotSuspended(propertyNumber);
           await firebaseService.updateVerificationStatus(propertyNumber, "approved");
         }
         return res.json({
@@ -1686,6 +1761,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         );
         fulfillmentClaim = null;
         if (property.verificationStatus !== "approved") {
+          await assertPropertyNotSuspended(propertyNumber);
           await firebaseService.updateVerificationStatus(propertyNumber, "approved");
         }
         return res.json({
@@ -1825,8 +1901,10 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         }
       }
 
+      await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateVerificationStatus(propertyNumber, "approved");
       if ((pendingPayment as any).secondPropertyNumber) {
+        await assertPropertyNotSuspended((pendingPayment as any).secondPropertyNumber);
         await firebaseService.updateVerificationStatus((pendingPayment as any).secondPropertyNumber, "approved");
       }
 
@@ -1871,6 +1949,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
       });
     }
 
+    await assertPropertyNotSuspended(propertyNumber);
     await firebaseService.updateVerificationStatus(propertyNumber, "pending");
 
     await sendWhatsAppNotification(
@@ -1902,6 +1981,9 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
         fulfillmentClaim.token,
       ).catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
     }
+    if (hasPropertySuspendedCode(err)) {
+      return sendPropertySuspendedResponse(res);
+    }
     console.error("Property activation error:", err);
     res.status(500).json({
       success: false,
@@ -1920,6 +2002,10 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
     const propertyNumber = (req.session as any).propertyNumber;
     if (!propertyNumber) {
       return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (await isPropertySuspended(propertyNumber)) {
+      return sendPropertySuspendedResponse(res);
     }
 
     const property = await propertyService.getByNumber(propertyNumber);
@@ -1959,6 +2045,10 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
     const r2ImgCount = await countR2Images(propertyNumber);
     const verificationResult = await checkPropertyDataComplete(property, r2ImgCount);
 
+    if (await isPropertySuspended(propertyNumber)) {
+      return sendPropertySuspendedResponse(res);
+    }
+
     console.log(`🔍 [Owner Self-Verify] العقار ${propertyNumber} - النتيجة: ${verificationResult.isComplete ? 'مكتمل' : 'ناقص'} (${verificationResult.completionScore}%)`);
 
     if (!verificationResult.isComplete) {
@@ -1976,6 +2066,7 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
     const isNewProperty = !hasPriorSubscription(currentSubscription);
 
     if (isNewProperty) {
+      await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateProperty(propertyNumber, {
         verificationStatus: "pending",
         smartVerificationPassed: true,
@@ -1984,6 +2075,7 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
       } as any);
       console.log(`✅ [Owner Self-Verify] العقار الجديد ${propertyNumber} - البيانات مكتملة وينتظر اعتماد الإدارة`);
     } else {
+      await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateVerificationStatus(propertyNumber, "approved");
       console.log(`✅ [Owner Self-Verify] العقار القديم ${propertyNumber} - تم التحقق بنجاح`);
     }
@@ -2064,6 +2156,9 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
       actionLabel: pendingAdminApproval ? "متابعة الحالة" : undefined,
     });
   } catch (err: any) {
+    if (hasPropertySuspendedCode(err)) {
+      return sendPropertySuspendedResponse(res);
+    }
     console.error("Owner self-verification error:", err);
     res.status(500).json({
       success: false,
@@ -2323,6 +2418,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
     if (
       err instanceof PaymentActionConflictError ||
       err instanceof PaymentActionEligibilityError ||
+      err instanceof SuspendedSubscriptionWriteError ||
       err instanceof LinkedPropertyRequestError
     ) {
       return res.status(err.status).json({
@@ -2531,6 +2627,7 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
     if (
       err instanceof PaymentActionConflictError ||
       err instanceof PaymentActionEligibilityError ||
+      err instanceof SuspendedSubscriptionWriteError ||
       err instanceof PaymentRetryNotAllowedError
     ) {
       return res.status(err.status).json({
@@ -2600,6 +2697,10 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
       return res.status(400).json({ error: "لا يمكن اختيار نفس العقار" });
     }
 
+    if (await isPropertySuspended(ownerPropertyNumber)) {
+      return sendPropertySuspendedResponse(res);
+    }
+
     const ownerProperty = await firebaseService.getPropertyByNumber(ownerPropertyNumber);
     if (!ownerProperty) {
       return res.status(404).json({ error: "لم يتم العثور على عقارك" });
@@ -2612,6 +2713,11 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
 
     if (secondProperty.pin !== ownerProperty.pin) {
       return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
+    }
+
+    const subscription = await subscriptionService.getByProperty(secondPropertyNumber);
+    if (isSubscriptionStatusSuspended(subscription?.status)) {
+      return sendPropertySuspendedResponse(res);
     }
 
     const userDataCheck = checkPropertyUserDataComplete(secondProperty);
@@ -2628,7 +2734,6 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
       });
     }
 
-    const subscription = await subscriptionService.getByProperty(secondPropertyNumber);
     const isActive = subscription &&
       isLinkedSubscriptionActive(subscription.status) &&
       new Date(subscription.endDate) > new Date();
@@ -2667,6 +2772,10 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       return res.status(400).json({ error: "رقم العقار الإضافي مطلوب" });
     }
 
+    if (await isPropertySuspended(ownerPropertyNumber)) {
+      return sendPropertySuspendedResponse(res);
+    }
+
     const ownerProperty = await firebaseService.getPropertyByNumber(ownerPropertyNumber);
     if (!ownerProperty) {
       return res.status(404).json({ error: "لم يتم العثور على عقارك" });
@@ -2683,6 +2792,9 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
 
     // Check if already linked
     const existingSub = await firebaseService.getSubscriptionByPropertyNumber(additionalPropertyNumber);
+    if (isSubscriptionStatusSuspended(existingSub?.status)) {
+      return sendPropertySuspendedResponse(res);
+    }
     const existingParent = String(existingSub?.linkedProperty || "").trim();
     if (
       existingSub &&

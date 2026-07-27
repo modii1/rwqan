@@ -4,11 +4,13 @@ import test from "node:test";
 import express from "express";
 import { AdminApprovalError } from "../../errors/AdminApprovalError";
 import { paymentService } from "../../services";
+import { PropertySuspendedError } from "../../services/propertySuspension";
 import paymentsRouter from "./payments";
 
 test("payment approval returns structured, safe admin errors", async (t) => {
   const originalApproveBankTransfer = paymentService.approveBankTransfer;
   const originalRejectBankTransfer = paymentService.rejectBankTransfer;
+  const originalConfirmManually = paymentService.confirmManually;
 
   const app = express();
   app.use(express.json());
@@ -26,6 +28,7 @@ test("payment approval returns structured, safe admin errors", async (t) => {
   const { port } = server.address() as AddressInfo;
   const endpoint = `http://127.0.0.1:${port}/api/admin/payment/approve`;
   const rejectEndpoint = `http://127.0.0.1:${port}/api/admin/payment/reject`;
+  const confirmEndpoint = `http://127.0.0.1:${port}/api/admin/payments/payment-1/confirm`;
 
   const approve = (paymentId = "payment-1") =>
     fetch(endpoint, {
@@ -38,6 +41,12 @@ test("payment approval returns structured, safe admin errors", async (t) => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+    });
+  const confirmPayment = () =>
+    fetch(confirmEndpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
     });
 
   try {
@@ -193,9 +202,25 @@ test("payment approval returns structured, safe admin errors", async (t) => {
       assert.equal(payload.code, "APPROVAL_FAILED");
       assert.equal(responseText.includes(internalDetail), false);
     });
+
+    await t.test("manual confirmation reports a suspended property as locked", async () => {
+      (paymentService as any).confirmManually = async () => {
+        throw new PropertySuspendedError();
+      };
+
+      const response = await confirmPayment();
+      const payload = await response.json();
+
+      assert.equal(response.status, 423);
+      assert.equal(payload.success, false);
+      assert.equal(payload.code, "PROPERTY_SUSPENDED");
+      assert.equal(payload.message, payload.error);
+      assert.match(payload.error, /موقوف مؤقتاً/);
+    });
   } finally {
     paymentService.approveBankTransfer = originalApproveBankTransfer;
     paymentService.rejectBankTransfer = originalRejectBankTransfer;
+    paymentService.confirmManually = originalConfirmManually;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

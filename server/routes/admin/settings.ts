@@ -1,8 +1,12 @@
 import { Router } from "express";
-import { requireAdmin } from "../middleware";
 import { subscriptionService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { propertyService } from "../../services";
+import { isSubscriptionStatusSuspended } from "../../../shared/subscriptionType";
+import {
+  assertPropertyNotSuspended,
+  PropertySuspendedError,
+} from "../../services/propertySuspension";
 
 const router = Router();
 
@@ -44,6 +48,8 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
 
+    await assertPropertyNotSuspended(propertyNumber);
+
     // جلب بيانات العقار
     const property = await propertyService.getByNumber(propertyNumber);
     if (!property) {
@@ -60,7 +66,7 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
     const {
       notifyOwnerSubscriptionExpired,
       notifyOwnerSubscriptionExpiringSoon,
-      sendOwnerWhatsApp
+      sendPropertyOwnerWhatsApp
     } = await import("../../integrations/whatsapp");
 
     let result;
@@ -93,12 +99,34 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
         if (!customMessage) {
           return res.status(400).json({ error: "الرسالة المخصصة مطلوبة" });
         }
-        result = await sendOwnerWhatsApp(ownerPhone, customMessage);
+        result = await sendPropertyOwnerWhatsApp({
+          ownerPhone,
+          propertyNumber,
+          message: customMessage,
+        });
         messageType = "رسالة مخصصة";
         break;
 
       default:
         return res.status(400).json({ error: "نوع الإشعار غير صحيح" });
+    }
+
+    if (result?.suppressed) {
+      if (result.code === "PROPERTY_SUSPENDED") {
+        throw new PropertySuspendedError(result.error);
+      }
+      return res.status(503).json({
+        success: false,
+        code: result.code || "SUSPENSION_LOOKUP_FAILED",
+        error: result.error || "تعذر التحقق من حالة إيقاف العقار",
+      });
+    }
+
+    if (!result?.success) {
+      return res.status(502).json({
+        success: false,
+        error: result?.error || "فشل في إرسال الإشعار",
+      });
     }
 
     console.log(`📱 [Manual Notification] Sent ${notificationType} to ${ownerPhone} for property ${propertyNumber}`);
@@ -112,6 +140,13 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
     });
 
   } catch (err) {
+    if (err instanceof PropertySuspendedError) {
+      return res.status(err.status).json({
+        success: false,
+        code: err.code,
+        error: err.message,
+      });
+    }
     console.error("Manual notification error:", err);
     res.status(500).json({
       success: false,
@@ -142,10 +177,15 @@ router.post("/api/admin/send-bulk-notifications", async (req, res) => {
     } = await import("../../integrations/whatsapp");
 
     let sentCount = 0;
+    let suspendedCount = 0;
     const errors: string[] = [];
 
     for (const sub of subscriptions) {
       if (!sub.endDate || !sub.propertyNumber) continue;
+      if (isSubscriptionStatusSuspended(sub.status)) {
+        suspendedCount++;
+        continue;
+      }
 
       try {
         const endDate = new Date(sub.endDate);
@@ -187,6 +227,12 @@ router.post("/api/admin/send-bulk-notifications", async (req, res) => {
           if (result?.success) {
             sentCount++;
             console.log(`📱 [Bulk] Sent notification to ${sub.propertyNumber}`);
+          } else if (result?.suppressed && result.code === "PROPERTY_SUSPENDED") {
+            suspendedCount++;
+          } else if (result?.suppressed) {
+            errors.push(`${sub.propertyNumber}: ${result.error || "تعذر التحقق من حالة الإيقاف"}`);
+          } else if (result?.error) {
+            errors.push(`${sub.propertyNumber}: ${result.error}`);
           }
           // تأخير بسيط بين الرسائل لتجنب rate limiting
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -196,11 +242,12 @@ router.post("/api/admin/send-bulk-notifications", async (req, res) => {
       }
     }
 
-    console.log(`📱 [Bulk Notifications] Sent ${sentCount} notifications, ${errors.length} errors`);
+    console.log(`📱 [Bulk Notifications] Sent ${sentCount} notifications, suppressed ${suspendedCount}, ${errors.length} errors`);
 
     res.json({
       success: true,
       sentCount,
+      suspendedCount,
       errors: errors.length > 0 ? errors.slice(0, 5) : undefined,
     });
 

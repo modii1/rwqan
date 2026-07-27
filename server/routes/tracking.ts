@@ -10,6 +10,7 @@ import {
   contactIdentityService,
   getContactIdentityClearCookieOptions,
   getContactIdentityCookieOptions,
+  maskContactPhone,
 } from "../services/ContactIdentityService";
 import {
   getContactIdentityCookieToken,
@@ -341,12 +342,24 @@ router.post("/api/requests/smart", async (req, res) => {
       ip: ipAddress,
     }).catch(err => console.error("WhatsApp notify error:", err));
 
+    const maskedContactPhone = actor === "anonymous"
+      ? maskContactPhone(clientPhone)
+      : null;
+
     res.json({
       ok: true,
       message: "تم تسجيل طلبك بنجاح ✅",
       requestCode,
       requestTime: riyadhTimeDisplay,
       whatsappNumber: property?.whatsappNumber || "",
+      ...(maskedContactPhone
+        ? {
+            contactIdentity: {
+              kind: "client" as const,
+              maskedPhone: maskedContactPhone,
+            },
+          }
+        : {}),
     });
   } catch (err: any) {
     console.error("Smart request error:", err);

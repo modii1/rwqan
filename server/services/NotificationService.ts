@@ -6,7 +6,7 @@
 
 import {
   sendWhatsAppNotification,
-  sendOwnerWhatsApp,
+  sendPropertyOwnerWhatsApp,
   notifyNewSubscription,
   notifySubscriptionRenewal,
   notifyReceiptUpload,
@@ -27,9 +27,17 @@ export class NotificationService {
     await sendWhatsAppNotification(text);
   }
 
-  /** Direct message to an owner's phone number */
-  async sendToOwner(phone: string, message: string): Promise<{ success: boolean; error?: string }> {
-    return sendOwnerWhatsApp(phone, message);
+  /** Property-aware owner message; administrative suspension is enforced. */
+  async sendToOwner(
+    propertyNumber: string,
+    phone: string,
+    message: string,
+  ): Promise<{ success: boolean; error?: string; suppressed?: boolean }> {
+    return sendPropertyOwnerWhatsApp({
+      ownerPhone: phone,
+      propertyNumber,
+      message,
+    });
   }
 
   async newSubscription(data: Parameters<typeof notifyNewSubscription>[0]) {

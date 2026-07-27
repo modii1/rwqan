@@ -7,7 +7,7 @@
 import { firebaseService } from "../firebaseService";
 import type { Payment, InsertPayment } from "../../shared/schema";
 import { paymobService } from "../integrations/paymob";
-import { notifyOwnerSubscriptionActivated, sendOwnerWhatsApp } from "../integrations/whatsapp";
+import { notifyOwnerSubscriptionActivated, sendPropertyOwnerWhatsApp } from "../integrations/whatsapp";
 import {
   AdminApprovalError,
   PartialMutationError,
@@ -23,6 +23,7 @@ import {
   queueVerifiedNewPropertyForAdminApproval,
   resolvePaymentPropertyPlan,
 } from "../utils/paymentScenarioFlow";
+import { assertPropertyNotSuspended } from "./propertySuspension";
 
 export class PaymentService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -91,6 +92,8 @@ export class PaymentService {
         message: "الدفع المطلوب غير موجود.",
       });
     }
+
+    await assertPropertyNotSuspended(payment.propertyNumber);
 
     console.log(`[approveBankTransfer] Found payment: id=${payment.id}, propertyNumber="${payment.propertyNumber}", status="${payment.status}", packageId="${payment.packageId}"`);
 
@@ -204,10 +207,11 @@ export class PaymentService {
         console.error("Failed to add queued-payment verification log:", error),
       );
       if (mainPropertyForApproval.whatsappNumber) {
-        await sendOwnerWhatsApp(
-          mainPropertyForApproval.whatsappNumber,
-          `تم التحقق من الدفع وبيانات العقار ${mainPropertyForApproval.name || payment.propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.`,
-        ).catch(err => console.error("Failed to notify owner about pending approval:", err));
+        await sendPropertyOwnerWhatsApp({
+          ownerPhone: mainPropertyForApproval.whatsappNumber,
+          propertyNumber: payment.propertyNumber,
+          message: `تم التحقق من الدفع وبيانات العقار ${mainPropertyForApproval.name || payment.propertyNumber} بنجاح.\n\nلأن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.`,
+        }).catch(err => console.error("Failed to notify owner about pending approval:", err));
       }
       return { outcome: "queued" };
     }
@@ -551,6 +555,37 @@ export class PaymentService {
       });
       return;
     }
+    await assertPropertyNotSuspended(payment.propertyNumber);
+
+    // Resolve and validate every paid group member before claiming fulfillment
+    // or mutating the main subscription. A suspended child must not turn a
+    // manual confirmation into a partial activation.
+    const rawAdditionalProperties = Array.isArray(
+      (payment as any).additionalProperties,
+    )
+      ? (payment as any).additionalProperties
+      : [];
+    const additionalProps = [...new Set<string>(
+      rawAdditionalProperties
+        .map((value: unknown) => String(value || "").trim())
+        .filter(
+          (propertyNumber: string) =>
+            propertyNumber && propertyNumber !== payment.propertyNumber,
+        ),
+    )];
+    const secondProp = String(
+      (payment as any).secondPropertyNumber || "",
+    ).trim();
+    if (
+      secondProp &&
+      secondProp !== payment.propertyNumber &&
+      !additionalProps.includes(secondProp)
+    ) {
+      additionalProps.push(secondProp);
+    }
+    for (const additionalPropertyNumber of additionalProps) {
+      await assertPropertyNotSuspended(additionalPropertyNumber);
+    }
 
     const fulfillmentClaim = await firebaseService.claimPaymentFulfillment(paymentId);
     if (fulfillmentClaim.status === "fulfilled") {
@@ -586,15 +621,6 @@ export class PaymentService {
     const fulfillmentToken = fulfillmentClaim.token;
     try {
       const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
-
-      // Gather linked/additional properties from the payment record without mutating it.
-      const additionalProps = [...new Set<string>(
-        ((payment as any).additionalProperties || []).filter(Boolean),
-      )];
-      const secondProp = (payment as any).secondPropertyNumber;
-      if (secondProp && !additionalProps.includes(secondProp)) {
-        additionalProps.push(secondProp);
-      }
 
       const paidAmount = Number(
         payment.pendingPrice ?? payment.finalAmount ?? payment.amount ?? 0,

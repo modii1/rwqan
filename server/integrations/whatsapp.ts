@@ -3,6 +3,7 @@ import express from "express";
 import { firebaseService } from "../firebaseService";
 import type { NotificationSettings } from "../../shared/schema";
 import { requireAdmin, requireSameOrigin } from "../routes/middleware";
+import { isPropertySuspended } from "../services/propertySuspension";
 
 const router = express.Router();
 
@@ -618,6 +619,99 @@ export async function sendOwnerWhatsApp(phone: string, message: string, retries 
   return { success: false, error: "فشل في إرسال الرسالة بعد عدة محاولات" };
 }
 
+export interface PropertyOwnerWhatsAppResult {
+  success: boolean;
+  error?: string;
+  suppressed?: boolean;
+  code?: "PROPERTY_SUSPENDED" | "SUSPENSION_LOOKUP_FAILED";
+}
+
+interface PropertyOwnerWhatsAppDependencies {
+  isSuspended: (propertyNumber: string) => Promise<boolean>;
+  send: (
+    phone: string,
+    message: string,
+    retries: number,
+  ) => Promise<{ success: boolean; error?: string }>;
+  delay: (milliseconds: number) => Promise<void>;
+}
+
+export function createPropertyOwnerWhatsAppSender(
+  dependencies: PropertyOwnerWhatsAppDependencies,
+) {
+  return async function sendPropertyOwnerWhatsAppWithDependencies(options: {
+    ownerPhone: string;
+    propertyNumber: string;
+    message: string;
+    retries?: number;
+  }): Promise<PropertyOwnerWhatsAppResult> {
+    const requestedRetries = options.retries ?? 2;
+    const retries = Number.isFinite(requestedRetries)
+      ? Math.max(0, Math.floor(requestedRetries))
+      : 2;
+    let lastError = "فشل في إرسال الرسالة بعد عدة محاولات";
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        if (await dependencies.isSuspended(options.propertyNumber)) {
+          console.log(
+            `🔒 Owner notification suppressed for suspended property ${options.propertyNumber}`,
+          );
+          return {
+            success: false,
+            suppressed: true,
+            code: "PROPERTY_SUSPENDED",
+            error: "العقار موقوف مؤقتاً ولن تصله إشعارات حتى إعادة التفعيل",
+          };
+        }
+      } catch (error) {
+        console.error(
+          `❌ Could not verify suspension status for ${options.propertyNumber}; owner notification suppressed:`,
+          error,
+        );
+        return {
+          success: false,
+          suppressed: true,
+          code: "SUSPENSION_LOOKUP_FAILED",
+          error: "تعذر التحقق من حالة إيقاف العقار، لذلك لم يتم إرسال الإشعار",
+        };
+      }
+
+      const result = await dependencies.send(
+        options.ownerPhone,
+        options.message,
+        0,
+      );
+      if (result.success) return { success: true };
+
+      lastError = result.error || lastError;
+      if (lastError === "إعدادات الإرسال غير مكتملة") break;
+
+      if (attempt < retries) {
+        await dependencies.delay(5000 * (attempt + 1));
+      }
+    }
+
+    return { success: false, error: lastError };
+  };
+}
+
+const sendPropertyOwnerWhatsAppWithDefaults = createPropertyOwnerWhatsAppSender({
+  isSuspended: isPropertySuspended,
+  send: sendOwnerWhatsApp,
+  delay: (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+});
+
+export async function sendPropertyOwnerWhatsApp(options: {
+  ownerPhone: string;
+  propertyNumber: string;
+  message: string;
+  retries?: number;
+}): Promise<PropertyOwnerWhatsAppResult> {
+  return sendPropertyOwnerWhatsAppWithDefaults(options);
+}
+
 /**
  * إشعار تفعيل الاشتراك للمالك
  */
@@ -638,7 +732,11 @@ export async function notifyOwnerSubscriptionActivated(data: {
 
   const finalMessage = data.message || defaultMessage;
 
-  return sendOwnerWhatsApp(data.ownerPhone, finalMessage);
+  return sendPropertyOwnerWhatsApp({
+    ownerPhone: data.ownerPhone,
+    propertyNumber: data.propertyNumber,
+    message: finalMessage,
+  });
 }
 
 /**
@@ -657,7 +755,11 @@ export async function notifyOwnerSubscriptionExpiringSoon(data: {
 جدد الان للحفاظ على ظهورك المميز
 https://rwqan.sa/owner/login`;
 
-  return sendOwnerWhatsApp(data.ownerPhone, message);
+  return sendPropertyOwnerWhatsApp({
+    ownerPhone: data.ownerPhone,
+    propertyNumber: data.propertyNumber,
+    message,
+  });
 }
 
 /**
@@ -677,7 +779,11 @@ export async function notifyOwnerSubscriptionExpired(data: {
 جدد الان لاستعادة المميزات
 https://rwqan.sa/owner/login`;
 
-  return sendOwnerWhatsApp(data.ownerPhone, message);
+  return sendPropertyOwnerWhatsApp({
+    ownerPhone: data.ownerPhone,
+    propertyNumber: data.propertyNumber,
+    message,
+  });
 }
 
 // نصدر الراوتر كـ default

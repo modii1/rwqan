@@ -18,9 +18,13 @@ import {
   reserveWhatsAppTab,
   type ReservedWhatsAppTab,
 } from "@/lib/whatsapp-navigation";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { Loader2, PauseCircle, RefreshCw, Search } from "lucide-react";
 import { normalizeWhatsAppDestination } from "@shared/phone";
 import type { Property } from "@shared/schema";
+import {
+  isSubscriptionStatusActive,
+  isSubscriptionStatusSuspended,
+} from "@shared/subscriptionType";
 import {
   getVerificationStatus,
   type VerificationLevel,
@@ -36,9 +40,14 @@ type FilterType =
   | "rejected";
 
 type PropertyActionFailure = {
-  action: "approval" | "rejection";
+  action: "approval" | "rejection" | "suspension";
   message: string;
   partial: boolean;
+};
+
+type VerificationProperty = Property & {
+  subscriptionStatus?: string | null;
+  isSubscriptionExpired?: boolean;
 };
 
 export default function AdminVerificationSection() {
@@ -46,12 +55,14 @@ export default function AdminVerificationSection() {
   const [filter, setFilter] = useState<FilterType>("all");
   const [loadingApprove, setLoadingApprove] = useState<string | null>(null);
   const [loadingReject, setLoadingReject] = useState<string | null>(null);
+  const [loadingSuspend, setLoadingSuspend] = useState<string | null>(null);
   // Query refreshes never clear these; only a deliberate retry/success does.
   const [approvalErrors, setApprovalErrors] = useState<
     Record<string, PropertyActionFailure>
   >({});
   const approvalInFlightRef = useRef<string | null>(null);
   const rejectionInFlightRef = useRef<string | null>(null);
+  const suspensionInFlightRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   const {
@@ -59,13 +70,13 @@ export default function AdminVerificationSection() {
     isLoading,
     isError: isPropertiesError,
     refetch,
-  } = useQuery<Property[]>({
+  } = useQuery<VerificationProperty[]>({
     queryKey: ["/api/admin/properties"],
     staleTime: 0,
     refetchOnWindowFocus: "always",
     refetchInterval: (query) =>
       getAdminVerificationRefetchInterval(
-        query.state.data as Property[] | undefined,
+        query.state.data as VerificationProperty[] | undefined,
       ),
     refetchIntervalInBackground: false,
   });
@@ -92,7 +103,7 @@ export default function AdminVerificationSection() {
     isR2CountsError || r2CountsData?.available === false;
 
   const handleApprove = async (
-    property: Property,
+    property: VerificationProperty,
     whatsappTab: ReservedWhatsAppTab | null,
     whatsappDestination: string | null,
   ) => {
@@ -157,8 +168,12 @@ export default function AdminVerificationSection() {
     }
   };
 
-  const startApproval = (property: Property) => {
-    if (approvalInFlightRef.current || rejectionInFlightRef.current) return;
+  const startApproval = (property: VerificationProperty) => {
+    if (
+      approvalInFlightRef.current ||
+      rejectionInFlightRef.current ||
+      suspensionInFlightRef.current
+    ) return;
 
     approvalInFlightRef.current = property.propertyNumber;
     const whatsappDestination = normalizeWhatsAppDestination(
@@ -167,6 +182,91 @@ export default function AdminVerificationSection() {
     const whatsappTab = whatsappDestination ? reserveWhatsAppTab() : null;
 
     void handleApprove(property, whatsappTab, whatsappDestination);
+  };
+
+  const startSuspension = async (property: VerificationProperty) => {
+    if (
+      approvalInFlightRef.current ||
+      rejectionInFlightRef.current ||
+      suspensionInFlightRef.current
+    ) {
+      return;
+    }
+
+    const propertyNumber = property.propertyNumber;
+    const whatsappDestination = normalizeWhatsAppDestination(
+      property.whatsappNumber,
+    );
+    const whatsappTab = whatsappDestination ? reserveWhatsAppTab() : null;
+    suspensionInFlightRef.current = propertyNumber;
+    setLoadingSuspend(propertyNumber);
+    setApprovalErrors((current) => {
+      const next = { ...current };
+      delete next[propertyNumber];
+      return next;
+    });
+
+    try {
+      const response = await fetch(
+        `/api/admin/subscriptions/${encodeURIComponent(propertyNumber)}/suspend`,
+        { method: "POST", credentials: "include" },
+      );
+      await readAdminActionResponse(
+        response,
+        "لم يتم إيقاف الاشتراك مؤقتاً",
+      );
+
+      const message = `
+شريكنا العزيز،
+تم *إيقاف اشتراك عقاركم مؤقتاً* رقم ${propertyNumber} (${property.name || ""}) من قبل الإدارة.
+
+خلال فترة الإيقاف لن تصلكم إشعارات الاشتراك، ولن يمكن تشغيل التحقق أو تفعيل الاشتراك حتى تعيد الإدارة استئنافه.
+
+للاستفسار يرجى التواصل مع الإدارة.
+`;
+      const whatsappOpened = Boolean(
+        whatsappTab &&
+          whatsappDestination &&
+          navigateReservedWhatsAppTab(
+            whatsappTab,
+            buildWhatsAppUrl(whatsappDestination, message),
+          ),
+      );
+
+      toast({
+        title: "تم إيقاف الاشتراك مؤقتاً",
+        description: !whatsappDestination
+          ? `تم إيقاف اشتراك #${propertyNumber}، لكن لا يوجد رقم واتساب صالح للمالك`
+          : whatsappOpened
+            ? `تم الإيقاف وفتح رسالة واتساب للمالك في علامة جديدة`
+            : `تم الإيقاف، لكن المتصفح منع فتح واتساب في علامة جديدة`,
+      });
+      await refetch();
+    } catch (error) {
+      closeReservedWhatsAppTab(whatsappTab);
+      const reason = getAdminActionErrorMessage(
+        error,
+        "لم يتم إيقاف الاشتراك مؤقتاً",
+      );
+      const partial = error instanceof AdminActionError && error.partial;
+      setApprovalErrors((current) => ({
+        ...current,
+        [propertyNumber]: {
+          action: "suspension",
+          message: reason,
+          partial,
+        },
+      }));
+      toast({
+        title: partial ? "اكتمل الإيقاف جزئياً" : "تعذر إيقاف الاشتراك",
+        description: reason,
+        variant: "destructive",
+      });
+      await refetch();
+    } finally {
+      suspensionInFlightRef.current = null;
+      setLoadingSuspend(null);
+    }
   };
 
   const propertiesWithStatus = useMemo(() => {
@@ -538,6 +638,12 @@ export default function AdminVerificationSection() {
                     const vStatus = property.verificationStatus;
                     const isApproved = vStatus === "approved" || vStatus === "verified";
                     const isRejected = vStatus === "rejected";
+                    const isSuspended = isSubscriptionStatusSuspended(
+                      property.subscriptionStatus,
+                    );
+                    const canSuspend =
+                      property.isSubscriptionExpired !== true &&
+                      isSubscriptionStatusActive(property.subscriptionStatus);
 
                     return (
                       <>
@@ -547,7 +653,9 @@ export default function AdminVerificationSection() {
                             size="sm"
                             className="bg-green-600 hover:bg-green-700 text-white"
                             disabled={
-                              loadingApprove !== null || loadingReject !== null
+                              loadingApprove !== null ||
+                              loadingReject !== null ||
+                              loadingSuspend !== null
                             }
                             onClick={() => startApproval(property)}
                           >
@@ -565,12 +673,15 @@ export default function AdminVerificationSection() {
                             size="sm"
                             className="bg-red-600 hover:bg-red-700 text-white"
                             disabled={
-                              loadingApprove !== null || loadingReject !== null
+                              loadingApprove !== null ||
+                              loadingReject !== null ||
+                              loadingSuspend !== null
                             }
                             onClick={async () => {
                               if (
                                 approvalInFlightRef.current ||
-                                rejectionInFlightRef.current
+                                rejectionInFlightRef.current ||
+                                suspensionInFlightRef.current
                               ) {
                                 return;
                               }
@@ -709,6 +820,42 @@ ${rejectionFollowUp}
                             )}
                           </Button>
                         )}
+
+                        {canSuspend && (
+                          <Button
+                            size="sm"
+                            type="button"
+                            className="bg-amber-600 text-white hover:bg-amber-700"
+                            disabled={
+                              loadingApprove !== null ||
+                              loadingReject !== null ||
+                              loadingSuspend !== null
+                            }
+                            onClick={() => void startSuspension(property)}
+                          >
+                            {loadingSuspend === property.propertyNumber ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <PauseCircle className="ml-1 h-4 w-4" />
+                                إيقاف الاشتراك
+                              </>
+                            )}
+                          </Button>
+                        )}
+
+                        {isSuspended && (
+                          <Button
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            disabled
+                            className="border-slate-400 bg-slate-100 text-slate-700"
+                          >
+                            <PauseCircle className="ml-1 h-4 w-4" />
+                            الاشتراك موقوف مؤقتاً
+                          </Button>
+                        )}
                       </>
                     );
                   })()}
@@ -723,19 +870,27 @@ ${rejectionFollowUp}
                     approvalErrors[property.propertyNumber].action ===
                     "approval"
                       ? `property-approval-error-${property.propertyNumber}`
-                      : `property-rejection-error-${property.propertyNumber}`
+                      : approvalErrors[property.propertyNumber].action ===
+                          "rejection"
+                        ? `property-rejection-error-${property.propertyNumber}`
+                        : `property-suspension-error-${property.propertyNumber}`
                   }
                 >
                   <span className="font-bold">
-                    {approvalErrors[property.propertyNumber].partial
-                      ? approvalErrors[property.propertyNumber].action ===
-                        "approval"
-                        ? "تنبيه حالة القبول: "
-                        : "تنبيه حالة الرفض: "
-                      : approvalErrors[property.propertyNumber].action ===
+                    {approvalErrors[property.propertyNumber].action ===
+                    "suspension"
+                      ? approvalErrors[property.propertyNumber].partial
+                        ? "تنبيه حالة الإيقاف: "
+                        : "سبب تعذر الإيقاف: "
+                      : approvalErrors[property.propertyNumber].partial
+                        ? approvalErrors[property.propertyNumber].action ===
                           "approval"
-                        ? "سبب تعذر القبول: "
-                        : "سبب تعذر الرفض: "}
+                          ? "تنبيه حالة القبول: "
+                          : "تنبيه حالة الرفض: "
+                        : approvalErrors[property.propertyNumber].action ===
+                            "approval"
+                          ? "سبب تعذر القبول: "
+                          : "سبب تعذر الرفض: "}
                   </span>
                   {approvalErrors[property.propertyNumber].message}
                 </div>

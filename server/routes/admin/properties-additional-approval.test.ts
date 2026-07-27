@@ -16,6 +16,8 @@ test("additional-property approval preflights every property and reports exact f
   const originals = {
     requireCompleteProperty: adminApprovalService.requireCompleteProperty,
     getSubscriptionByProperty: subscriptionService.getByProperty,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
     updateVerificationStatus: firebaseService.updateVerificationStatus,
     updateProperty: firebaseService.updateProperty,
     addSubscriptionToSheet: firebaseService.addSubscriptionToSheet,
@@ -29,6 +31,7 @@ test("additional-property approval preflights every property and reports exact f
   let writes = 0;
 
   const installSuccessfulPreflight = () => {
+    (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
     (adminApprovalService as any).requireCompleteProperty = async (
       propertyNumber: string,
     ) => {
@@ -221,6 +224,8 @@ test("additional-property approval preflights every property and reports exact f
     adminApprovalService.requireCompleteProperty =
       originals.requireCompleteProperty;
     subscriptionService.getByProperty = originals.getSubscriptionByProperty;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
     firebaseService.updateVerificationStatus =
       originals.updateVerificationStatus;
     firebaseService.updateProperty = originals.updateProperty;

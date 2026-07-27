@@ -61,18 +61,18 @@ export class PropertyService {
       }
     }
 
-    const merged: Property = { ...(current as any), ...(updates as any) };
+    const persistedUpdates: Partial<Property> = { ...updates };
 
     if (!options.skipVerification) {
       const hasSensitiveChange = detectSensitiveChanges(current, updates);
       if (hasSensitiveChange.length > 0) {
-        merged.verificationStatus = "pending";
+        persistedUpdates.verificationStatus = "pending";
       }
     }
 
-    merged.lastUpdate = toRiyadhISO(getNowInRiyadh()).split("T")[0];
+    persistedUpdates.lastUpdate = toRiyadhISO(getNowInRiyadh()).split("T")[0];
 
-    return firebaseService.updateProperty(propertyNumber, merged);
+    return firebaseService.updateProperty(propertyNumber, persistedUpdates);
   }
 
   // ─── Verification ───────────────────────────────────────────────────────────

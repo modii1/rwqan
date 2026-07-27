@@ -60,7 +60,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+  getSubscriptionTypeLabel,
+  isPremiumSubscriptionType,
+  isSubscriptionStatusSuspended,
+} from "@shared/subscriptionType";
 import {
   OwnerMobileNavigation,
   OwnerPageHeader,
@@ -292,8 +296,11 @@ export default function OwnerDashboard() {
     queryKey: ["/api/owner/current-subscription"],
     enabled: sessionData?.isLoggedIn === true,
     retry: false,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
   });
+  const isSubscriptionSuspended = isSubscriptionStatusSuspended(
+    currentSubscription?.status,
+  );
 
   // 5.0.1) جلب بيانات الاشتراك للعقار المربوط
   const { data: linkedPropertySubscription } = useQuery<any>({
@@ -346,6 +353,16 @@ export default function OwnerDashboard() {
 
   // دالة التحقق التدريجي الذكي من بيانات العقار
   const startSmartVerification = async () => {
+    if (isSubscriptionSuspended) {
+      toast({
+        title: "التحقق موقوف مؤقتاً",
+        description:
+          "أوقفت الإدارة الاشتراك مؤقتاً. لا يمكن تشغيل التحقق حتى تعيد الإدارة تفعيله.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (
       isVerifying ||
       property?.verificationStatus === "approved" ||
@@ -810,7 +827,7 @@ export default function OwnerDashboard() {
   // استخدام الأيام المتبقية من شيت الاشتراكات مباشرة (العمود H)
   // إذا لم تكن موجودة، نحسبها محلياً كـ fallback
   const calculateRemainingDaysLocal = () => {
-    if (currentSubscription?.status === "موقوف مؤقتاً") {
+    if (isSubscriptionSuspended) {
       const frozenDuration = Number(currentSubscription.remainingDurationMs);
       return Number.isFinite(frozenDuration)
         ? Math.max(0, Math.ceil(frozenDuration / (24 * 60 * 60 * 1000)))
@@ -863,7 +880,6 @@ export default function OwnerDashboard() {
   const isNearExpiry =
     remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
 
-  const isSubscriptionSuspended = currentSubscription?.status === "موقوف مؤقتاً";
   const isVip = !isSubscriptionSuspended && isPremiumSubscriptionType(property.subscriptionType) && (remainingDays === null || remainingDays >= 0);
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
@@ -1925,7 +1941,12 @@ export default function OwnerDashboard() {
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                     <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${hasCompletedSmartVerification ? "text-[#128c47]" : "text-[#315f92]"}`}>
-                    {hasCompletedSmartVerification ? (
+                    {isSubscriptionSuspended ? (
+                      <>
+                        <PauseCircle className="w-6 h-6" />
+                        التحقق موقوف مؤقتاً
+                      </>
+                    ) : hasCompletedSmartVerification ? (
                       <>
                         <CheckCircle2 className="w-6 h-6" />
                         {property.verificationStatus === "approved" ? "العقار معتمد" : "اكتمل الفحص"}
@@ -1938,7 +1959,9 @@ export default function OwnerDashboard() {
                     )}
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {property.verificationStatus === "approved" 
+                    {isSubscriptionSuspended
+                      ? "أوقفت الإدارة الاشتراك مؤقتاً، ولا يمكن تشغيل التحقق حتى تعيد تفعيله"
+                      : property.verificationStatus === "approved"
                       ? "تم اعتماد بيانات عقارك"
                       : hasCompletedSmartVerification
                         ? "تم الفحص مرة واحدة والطلب بانتظار اعتماد الإدارة"
@@ -1952,7 +1975,7 @@ export default function OwnerDashboard() {
                     </p>
                   )}
                 </div>
-                {!isVerifying && !hasCompletedSmartVerification && (
+                {!isSubscriptionSuspended && !isVerifying && !hasCompletedSmartVerification && (
                   <Button
                     type="button"
                     onClick={startSmartVerification}

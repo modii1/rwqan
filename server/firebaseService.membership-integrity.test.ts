@@ -5,6 +5,7 @@ import {
   FirebaseService,
   LinkedPropertyMutationError,
   PaymentActionEligibilityError,
+  SuspendedSubscriptionWriteError,
 } from "./firebaseService";
 
 type FakeData = Record<string, any>;
@@ -489,4 +490,222 @@ test("unlink clears stale parent history without cancelling a newer standalone e
   assert.equal(database.get("subscriptions", "NEW-PROP-B-OWN")?.paymentId, "PAY-B-OWN");
   assert.equal(database.get("properties", "PROP-B")?.subscriptionType, "مميز");
   assert.deepEqual(database.get("subscriptions", "SUB-PROP-A")?.linkedProperties, []);
+});
+
+function suspensionUpdate(propertyNumber: string, endDate: string) {
+  return {
+    subscriptionId: `SUB-${propertyNumber}`,
+    propertyNumber,
+    subscriptionUpdates: {
+      status: "موقوف مؤقتاً" as const,
+      endDate,
+      suspendedAt: new Date().toISOString(),
+      remainingDurationMs: 5 * 24 * 60 * 60 * 1000,
+    },
+    propertySubscriptionType: "عادي" as const,
+  };
+}
+
+test("a concurrent suspension cannot be undone by an activation property mirror", async () => {
+  const database = new FakeFirestore();
+  const endDate = futureDate(5);
+  seedProperty(database, "PROP-RACE");
+  database.set(
+    "subscriptions",
+    "SUB-PROP-RACE",
+    activeSubscription("PROP-RACE", { endDate }),
+  );
+  const service = createService(database);
+
+  const outcomes = await Promise.allSettled([
+    service.addSubscriptionToSheet(
+      "PROP-RACE",
+      {
+        packageId: "PKG-GROUP",
+        subscriptionType: "مميز",
+        startDate: new Date().toISOString(),
+        endDate,
+        paymentId: "PAY-RACING-ACTIVATION",
+      },
+      { propertyNumber: "PROP-RACE" },
+    ),
+    service.updateSubscriptionLifecycleGroup([
+      suspensionUpdate("PROP-RACE", endDate),
+    ]),
+  ]);
+
+  assert.equal(outcomes.every((outcome) => outcome.status === "fulfilled"), true);
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-RACE")?.status,
+    "موقوف مؤقتاً",
+  );
+  assert.equal(
+    database.get("properties", "PROP-RACE")?.subscriptionType,
+    "عادي",
+  );
+});
+
+test("activation started after suspension is rejected at the transaction boundary", async () => {
+  const database = new FakeFirestore();
+  const endDate = futureDate(5);
+  seedProperty(database, "PROP-STOP-FIRST");
+  database.set(
+    "subscriptions",
+    "SUB-PROP-STOP-FIRST",
+    activeSubscription("PROP-STOP-FIRST", { endDate }),
+  );
+  const service = createService(database);
+
+  await service.updateSubscriptionLifecycleGroup([
+    suspensionUpdate("PROP-STOP-FIRST", endDate),
+  ]);
+  await assert.rejects(
+    () => service.addSubscriptionToSheet(
+      "PROP-STOP-FIRST",
+      {
+        packageId: "PKG-GROUP",
+        subscriptionType: "مميز",
+        startDate: new Date().toISOString(),
+        endDate,
+        paymentId: "PAY-AFTER-STOP",
+      },
+      { propertyNumber: "PROP-STOP-FIRST" },
+    ),
+    SuspendedSubscriptionWriteError,
+  );
+
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-STOP-FIRST")?.status,
+    "موقوف مؤقتاً",
+  );
+  assert.equal(
+    database.get("properties", "PROP-STOP-FIRST")?.subscriptionType,
+    "عادي",
+  );
+});
+
+test("lifecycle writes discover a newly linked child from the current main record", async () => {
+  const database = new FakeFirestore();
+  const endDate = futureDate(5);
+  for (const propertyNumber of ["PROP-GROUP-MAIN", "PROP-GROUP-CHILD"]) {
+    seedProperty(database, propertyNumber);
+  }
+  database.set(
+    "subscriptions",
+    "SUB-PROP-GROUP-MAIN",
+    activeSubscription("PROP-GROUP-MAIN", {
+      endDate,
+      linkedProperties: ["PROP-GROUP-CHILD"],
+    }),
+  );
+  database.set(
+    "subscriptions",
+    "SUB-PROP-GROUP-CHILD",
+    activeSubscription("PROP-GROUP-CHILD", {
+      endDate,
+      linkedProperty: "PROP-GROUP-MAIN",
+    }),
+  );
+
+  await createService(database).updateSubscriptionLifecycleGroup([
+    suspensionUpdate("PROP-GROUP-MAIN", endDate),
+  ]);
+
+  for (const propertyNumber of ["PROP-GROUP-MAIN", "PROP-GROUP-CHILD"]) {
+    assert.equal(
+      database.get("subscriptions", `SUB-${propertyNumber}`)?.status,
+      "موقوف مؤقتاً",
+    );
+    assert.equal(
+      database.get("properties", propertyNumber)?.subscriptionType,
+      "عادي",
+    );
+  }
+});
+
+test("direct activation, linked sync, generic updates, and verification cannot bypass suspension", async () => {
+  const database = new FakeFirestore();
+  const endDate = futureDate(5);
+  for (const propertyNumber of ["PROP-LOCKED", "PROP-LOCKED-CHILD"]) {
+    seedProperty(database, propertyNumber);
+  }
+  database.update("properties", "PROP-LOCKED", {
+    verificationStatus: "pending",
+  });
+  database.set(
+    "subscriptions",
+    "SUB-PROP-LOCKED",
+    activeSubscription("PROP-LOCKED", {
+      endDate,
+      status: "موقوف مؤقتاً",
+      linkedProperties: ["PROP-LOCKED-CHILD"],
+    }),
+  );
+  database.set(
+    "subscriptions",
+    "SUB-PROP-LOCKED-CHILD",
+    activeSubscription("PROP-LOCKED-CHILD", {
+      endDate,
+      linkedProperty: "PROP-LOCKED",
+    }),
+  );
+  const service = createService(database);
+
+  await assert.rejects(
+    () => service.activateSubscription("PROP-LOCKED", {
+      status: "ساري",
+      subscriptionType: "مميز",
+      packageId: "PKG-GROUP",
+      endDate,
+    }),
+    SuspendedSubscriptionWriteError,
+  );
+  await assert.rejects(
+    () => service.createSubscription({
+      propertyNumber: "PROP-LOCKED",
+      packageId: "PKG-GROUP",
+      paymentId: "PAY-CREATE-BYPASS",
+      startDate: new Date().toISOString(),
+      endDate,
+      status: "ساري",
+      subscriptionType: "مميز",
+    } as any),
+    SuspendedSubscriptionWriteError,
+  );
+  await assert.rejects(
+    () => service.syncLinkedProperty(
+      "PROP-LOCKED-CHILD",
+      "PROP-LOCKED",
+      {
+        subscriptionType: "مميز",
+        startDate: new Date().toISOString(),
+        endDate,
+        status: "ساري",
+      },
+    ),
+    SuspendedSubscriptionWriteError,
+  );
+  await assert.rejects(
+    () => service.updateSubscription("SUB-PROP-LOCKED", {
+      status: "منتهي",
+    }),
+    SuspendedSubscriptionWriteError,
+  );
+  await assert.rejects(
+    () => service.updateVerificationStatus("PROP-LOCKED", "approved"),
+    SuspendedSubscriptionWriteError,
+  );
+
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-LOCKED")?.status,
+    "موقوف مؤقتاً",
+  );
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-LOCKED-CHILD")?.paymentId,
+    "PAY-OLD",
+  );
+  assert.equal(
+    database.get("properties", "PROP-LOCKED")?.verificationStatus,
+    "pending",
+  );
 });

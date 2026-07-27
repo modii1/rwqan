@@ -44,6 +44,8 @@ test("manual payment approval performs no mutations when property preflight fail
     updateVerificationStatus: firebaseService.updateVerificationStatus,
     updateProperty: firebaseService.updateProperty,
     addVerificationLog: firebaseService.addVerificationLog,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
     requireCompleteProperty: adminApprovalService.requireCompleteProperty,
   };
   const mutations: string[] = [];
@@ -60,6 +62,7 @@ test("manual payment approval performs no mutations when property preflight fail
     price: 500,
     type: "مميز",
   });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
   for (const methodName of [
     "updatePaymentStatus",
     "updatePayment",
@@ -99,6 +102,8 @@ test("manual payment approval performs no mutations when property preflight fail
     firebaseService.updateVerificationStatus =
       originals.updateVerificationStatus;
     firebaseService.addVerificationLog = originals.addVerificationLog;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
     adminApprovalService.requireCompleteProperty =
       originals.requireCompleteProperty;
   }
@@ -835,5 +840,65 @@ test("rejecting an unfulfilled queued renewal preserves property approval", asyn
     firebaseService.releasePaymentFulfillment =
       originals.releasePaymentFulfillment;
     firebaseService.addVerificationLog = originals.addVerificationLog;
+  }
+});
+
+test("manual confirmation preflights every linked property before fulfillment", async () => {
+  const originals = {
+    getPaymentById: firebaseService.getPaymentById,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    claimPaymentFulfillment: firebaseService.claimPaymentFulfillment,
+    addSubscriptionToSheet: firebaseService.addSubscriptionToSheet,
+  };
+  let fulfillmentClaims = 0;
+  let subscriptionWrites = 0;
+
+  (firebaseService as any).getPaymentById = async () => ({
+    id: "PAY-MANUAL-GROUP",
+    propertyNumber: "PROP-MAIN",
+    packageId: "PKG-GROUP",
+    status: "نجح - قيد التحقق",
+    pendingStartDate: "2026-07-27T00:00:00.000Z",
+    pendingEndDate: "2026-08-20T00:00:00.000Z",
+    additionalProperties: ["PROP-CHILD"],
+  });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async (
+    propertyNumber: string,
+  ) => ({
+    id: `SUB-${propertyNumber}`,
+    propertyNumber,
+    status:
+      propertyNumber === "PROP-CHILD" ? "موقوف مؤقتاً" : "ساري",
+  });
+  (firebaseService as any).claimPaymentFulfillment = async () => {
+    fulfillmentClaims += 1;
+    throw new Error("fulfillment must not be claimed");
+  };
+  (firebaseService as any).addSubscriptionToSheet = async () => {
+    subscriptionWrites += 1;
+    throw new Error("subscriptions must not be mutated");
+  };
+
+  try {
+    await assert.rejects(
+      () => paymentService.confirmManually("PAY-MANUAL-GROUP"),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as any).code, "PROPERTY_SUSPENDED");
+        assert.equal((error as any).status, 423);
+        return true;
+      },
+    );
+    assert.equal(fulfillmentClaims, 0);
+    assert.equal(subscriptionWrites, 0);
+  } finally {
+    firebaseService.getPaymentById = originals.getPaymentById;
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.claimPaymentFulfillment =
+      originals.claimPaymentFulfillment;
+    firebaseService.addSubscriptionToSheet =
+      originals.addSubscriptionToSheet;
   }
 });

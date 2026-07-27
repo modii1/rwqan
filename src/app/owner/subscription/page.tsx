@@ -26,7 +26,12 @@ import {
   formatDate as formatSubDate,
   canExtendSubscription,
 } from "@/lib/subscription-utils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType, isSubscriptionStatusActive } from "@shared/subscriptionType";
+import {
+  getSubscriptionTypeLabel,
+  isPremiumSubscriptionType,
+  isSubscriptionStatusActive,
+  isSubscriptionStatusSuspended,
+} from "@shared/subscriptionType";
 import {
   OwnerMobileNavigation,
   OwnerPageHeader,
@@ -170,6 +175,7 @@ export default function OwnerSubscriptionPage() {
   const { data: subscription, isLoading: subLoading } = useQuery<any>({
     queryKey: ["/api/owner/current-subscription"],
   });
+  const isSuspended = isSubscriptionStatusSuspended(subscription?.status);
 
   // Fetch available packages
   const { data: rawPackages = [] } = useQuery<any[]>({
@@ -227,6 +233,16 @@ export default function OwnerSubscriptionPage() {
     property?.smartVerificationPassed === true;
   const runVerification = async () => {
     if (isRunningVerification || hasCompletedSmartVerification) return;
+
+    if (isSuspended) {
+      toast({
+        title: "التحقق موقوف مؤقتاً",
+        description:
+          "أوقفت الإدارة الاشتراك مؤقتاً. لا يمكن تشغيل التحقق حتى تعيد الإدارة تفعيله.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsRunningVerification(true);
     try {
@@ -296,6 +312,16 @@ export default function OwnerSubscriptionPage() {
 
   // Verify an additional property
   const verifyAdditionalProperty = async (index: number) => {
+    if (isSuspended) {
+      toast({
+        title: "التحقق موقوف مؤقتاً",
+        description:
+          "لا يمكن التحقق من عقار إضافي أثناء إيقاف الاشتراك من الإدارة.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const prop = additionalProperties[index];
     if (!prop.number || prop.number.length !== 5) {
       const updated = [...additionalProperties];
@@ -608,7 +634,6 @@ export default function OwnerSubscriptionPage() {
   };
 
   // Calculate remaining days using shared subscription-utils
-  const isSuspended = subscription?.status === "موقوف مؤقتاً";
   const frozenRemainingDuration = Number(subscription?.remainingDurationMs);
   const remainingDays = isSuspended && Number.isFinite(frozenRemainingDuration)
     ? Math.max(0, Math.ceil(frozenRemainingDuration / (24 * 60 * 60 * 1000)))
@@ -1736,7 +1761,21 @@ export default function OwnerSubscriptionPage() {
         )}
 
         {/* Owner Self-Service Verification (new property with successful payment awaiting admin) */}
-        {!hasCompletedSmartVerification && property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
+        {isSuspended && (
+          <Card className="border-slate-300 bg-slate-50 p-4">
+            <div className="flex items-start gap-3 text-slate-700">
+              <PauseCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+              <div>
+                <p className="font-semibold">التحقق موقوف مؤقتاً</p>
+                <p className="text-sm">
+                  أوقفت الإدارة الاشتراك مؤقتاً. لن يمكن تشغيل التحقق أو تفعيل
+                  الاشتراك حتى تعيد الإدارة استئنافه.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+        {!isSuspended && !hasCompletedSmartVerification && property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
           <Card className="p-4 border-blue-300 bg-blue-50">
             <div className="flex items-center gap-2 text-blue-700 mb-3">
               <CheckCircle2 className="w-5 h-5" />

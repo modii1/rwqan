@@ -15,6 +15,7 @@ import {
   isActivePremiumSubscription,
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
+  isSubscriptionStatusSuspended,
 } from "../../../shared/subscriptionType";
 import {
   MAX_SUBSCRIPTION_DAYS,
@@ -27,6 +28,7 @@ import {
   SUSPENDED_SUBSCRIPTION_STATUS,
   calculateFrozenRemainingDays,
 } from "../../services/subscriptionLifecycle";
+import { isPropertySuspended } from "../../services/propertySuspension";
 
 const router = Router();
 
@@ -177,7 +179,7 @@ router.get("/api/admin/subscriptions", async (req, res) => {
       const wasReactivated = wasCancelled && sub.startDate && 
         new Date(sub.startDate) > new Date((subWithType as any).cancelledAt);
       
-      if (sub.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+      if (isSubscriptionStatusSuspended(sub.status)) {
         status = SUSPENDED_SUBSCRIPTION_STATUS;
         remainingDays = calculateFrozenRemainingDays(Number(subWithType.remainingDurationMs));
       }
@@ -252,7 +254,11 @@ router.post("/api/admin/subscriptions/:id/suspend", async (req, res) => {
     });
   } catch (error) {
     if (error instanceof SubscriptionLifecycleError) {
-      return res.status(lifecycleErrorStatus(error)).json({ error: error.message });
+      return res.status(lifecycleErrorStatus(error)).json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      });
     }
     console.error("Error suspending subscription:", error);
     return res.status(500).json({ error: "فشل إيقاف الاشتراك مؤقتاً." });
@@ -274,7 +280,11 @@ router.post("/api/admin/subscriptions/:id/resume", async (req, res) => {
     });
   } catch (error) {
     if (error instanceof SubscriptionLifecycleError) {
-      return res.status(lifecycleErrorStatus(error)).json({ error: error.message });
+      return res.status(lifecycleErrorStatus(error)).json({
+        success: false,
+        code: error.code,
+        error: error.message,
+      });
     }
     console.error("Error resuming subscription:", error);
     return res.status(500).json({ error: "فشل استئناف الاشتراك." });
@@ -337,7 +347,7 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
       });
     }
 
-    if (currentSubscription.status === SUSPENDED_SUBSCRIPTION_STATUS) {
+    if (isSubscriptionStatusSuspended(currentSubscription.status)) {
       return res.status(409).json({
         error: "استأنف الاشتراك قبل تعديل بياناته حتى لا تضيع المدة المحفوظة.",
         nextAction: "استخدم زر استئناف الاشتراك أولاً.",
@@ -525,6 +535,23 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
       return res.status(400).json({ error: "propertyNumber, packageId, startDate, endDate مطلوبين" });
     }
 
+    if (await isPropertySuspended(propertyNumber)) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error:
+          "الاشتراك موقوف مؤقتاً من الإدارة. استأنف الاشتراك أولاً قبل التفعيل اليدوي.",
+      });
+    }
+    if (linkedProperty && await isPropertySuspended(linkedProperty)) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error:
+          "اشتراك العقار المرتبط موقوف مؤقتاً من الإدارة ولا يمكن تفعيله ضمن هذه المجموعة.",
+      });
+    }
+
     if (!isValidDateInput(startDate) || !isValidDateInput(endDate)) {
       return res.status(400).json({ error: "صيغة التاريخ غير صحيحة." });
     }
@@ -544,6 +571,68 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
     }
 
     const isPremium = isPremiumSubscriptionType(pkg.type) || pkg.price > 0;
+
+    // Resolve and validate the complete linked group before the first write.
+    // Otherwise a suspended child discovered after activating the main property
+    // would leave a partially activated group.
+    const linkedPropsToSync: string[] = [];
+    const addLinkedProperty = (candidate: unknown) => {
+      const normalized = String(candidate || "").trim();
+      if (
+        normalized &&
+        normalized !== String(propertyNumber).trim() &&
+        !linkedPropsToSync.includes(normalized)
+      ) {
+        linkedPropsToSync.push(normalized);
+      }
+    };
+
+    addLinkedProperty(linkedProperty);
+
+    const currentSub = await firebaseService.getSubscriptionByPropertyNumber(
+      propertyNumber,
+    );
+    for (const linked of currentSub?.linkedProperties || []) {
+      addLinkedProperty(linked);
+    }
+    if (currentSub?.linkedProperty) {
+      addLinkedProperty(currentSub.linkedProperty);
+      const mainSub = await firebaseService.getSubscriptionByPropertyNumber(
+        currentSub.linkedProperty,
+      );
+      for (const linked of mainSub?.linkedProperties || []) {
+        addLinkedProperty(linked);
+      }
+    }
+
+    if (linkedPropsToSync.length === 0) {
+      const multiSubs = await firebaseService.getMultiPropertySubscriptions();
+      const activeGroup = multiSubs.find(
+        (multiSubscription) =>
+          isSubscriptionStatusActive(multiSubscription.status) &&
+          (multiSubscription.propertyNumber1 === propertyNumber ||
+            multiSubscription.propertyNumber2 === propertyNumber ||
+            multiSubscription.additionalProperties?.includes(propertyNumber)),
+      );
+      if (activeGroup) {
+        addLinkedProperty(activeGroup.propertyNumber1);
+        addLinkedProperty(activeGroup.propertyNumber2);
+        for (const linked of activeGroup.additionalProperties || []) {
+          addLinkedProperty(linked);
+        }
+      }
+    }
+
+    for (const linkedPropertyNumber of linkedPropsToSync) {
+      if (await isPropertySuspended(linkedPropertyNumber)) {
+        return res.status(423).json({
+          success: false,
+          code: "PROPERTY_SUSPENDED",
+          error:
+            `اشتراك العقار المرتبط ${linkedPropertyNumber} موقوف مؤقتاً من الإدارة ولا يمكن تفعيل المجموعة.`,
+        });
+      }
+    }
 
     const subscriptionData = {
       packageId: pkg.id,
@@ -565,63 +654,6 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
 
     // تحديث حالة التحقق
     await propertyService.approve(propertyNumber);
-
-    // تفعيل العقارات المرتبطة بنفس التواريخ
-    const linkedPropsToSync: string[] = [];
-    
-    // Check if linkedProperty was explicitly provided
-    if (linkedProperty) {
-      linkedPropsToSync.push(linkedProperty);
-    }
-    
-    // Also look up existing linked properties from current subscription and multi-property groups
-    const currentSub = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
-    if (currentSub?.linkedProperties && currentSub.linkedProperties.length > 0) {
-      for (const lp of currentSub.linkedProperties) {
-        if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
-          linkedPropsToSync.push(lp);
-        }
-      }
-    }
-    if (currentSub?.linkedProperty && !linkedPropsToSync.includes(currentSub.linkedProperty)) {
-      linkedPropsToSync.push(currentSub.linkedProperty);
-      // Get other linked properties from the main property
-      const mainSub = await firebaseService.getSubscriptionByPropertyNumber(currentSub.linkedProperty);
-      if (mainSub?.linkedProperties) {
-        for (const lp of mainSub.linkedProperties) {
-          if (lp !== propertyNumber && !linkedPropsToSync.includes(lp)) {
-            linkedPropsToSync.push(lp);
-          }
-        }
-      }
-    }
-
-    // Check multi_property_subscriptions collection
-    if (linkedPropsToSync.length === 0) {
-      const multiSubs = await firebaseService.getMultiPropertySubscriptions();
-      const activeGroup = multiSubs.find(
-        ms => ms.status === "نشط" && (
-          ms.propertyNumber1 === propertyNumber ||
-          ms.propertyNumber2 === propertyNumber ||
-          (ms.additionalProperties && ms.additionalProperties.includes(propertyNumber))
-        )
-      );
-      if (activeGroup) {
-        if (activeGroup.propertyNumber1 !== propertyNumber && !linkedPropsToSync.includes(activeGroup.propertyNumber1)) {
-          linkedPropsToSync.push(activeGroup.propertyNumber1);
-        }
-        if (activeGroup.propertyNumber2 && activeGroup.propertyNumber2 !== propertyNumber && !linkedPropsToSync.includes(activeGroup.propertyNumber2)) {
-          linkedPropsToSync.push(activeGroup.propertyNumber2);
-        }
-        if (activeGroup.additionalProperties) {
-          for (const ap of activeGroup.additionalProperties) {
-            if (ap !== propertyNumber && !linkedPropsToSync.includes(ap)) {
-              linkedPropsToSync.push(ap);
-            }
-          }
-        }
-      }
-    }
 
     // Apply same subscription to all linked properties
     for (const linkedPropNum of linkedPropsToSync) {
@@ -650,6 +682,17 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
       linkedPropertiesActivated: linkedPropsToSync,
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "PROPERTY_SUSPENDED"
+    ) {
+      return res.status(423).json({
+        success: false,
+        code: "PROPERTY_SUSPENDED",
+        error: error.message,
+      });
+    }
     console.error("Error manual activating subscription:", error);
     res.status(500).json({ error: "فشل في تفعيل الاشتراك" });
   }

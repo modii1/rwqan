@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { Subscription } from "../../shared/schema";
 import { firebaseService } from "../firebaseService";
 import { SubscriptionService } from "./SubscriptionService";
+import { SubscriptionLifecycleError } from "./subscriptionLifecycle";
 
 test("suspend and resume preserve a linked group's remaining duration", async () => {
   const subscriptions: Subscription[] = [
@@ -65,5 +66,39 @@ test("suspend and resume preserve a linked group's remaining duration", async ()
   } finally {
     (firebaseService as any).getSubscriptions = originalGetSubscriptions;
     (firebaseService as any).updateSubscriptionLifecycleGroup = originalUpdateGroup;
+  }
+});
+
+test("an expired subscription cannot be moved into temporary suspension", async () => {
+  const originalGetSubscriptions = firebaseService.getSubscriptions;
+  const originalUpdateGroup = firebaseService.updateSubscriptionLifecycleGroup;
+  let writes = 0;
+  (firebaseService as any).getSubscriptions = async () => [{
+    id: "SUB-EXPIRED",
+    propertyNumber: "EXPIRED",
+    packageId: "pkg-premium",
+    startDate: "2026-07-01T00:00:00.000Z",
+    endDate: "2026-07-10T00:00:00.000Z",
+    status: "ساري",
+    subscriptionType: "مميز",
+  }];
+  (firebaseService as any).updateSubscriptionLifecycleGroup = async () => {
+    writes += 1;
+  };
+
+  try {
+    const service = new SubscriptionService();
+    await assert.rejects(
+      () => service.suspend("SUB-EXPIRED", new Date("2026-07-11T00:00:00.000Z")),
+      (error: unknown) => {
+        assert.ok(error instanceof SubscriptionLifecycleError);
+        assert.equal(error.code, "NOT_ACTIVE");
+        return true;
+      },
+    );
+    assert.equal(writes, 0);
+  } finally {
+    firebaseService.getSubscriptions = originalGetSubscriptions;
+    firebaseService.updateSubscriptionLifecycleGroup = originalUpdateGroup;
   }
 });

@@ -62,6 +62,10 @@ export function isSubscriptionStatusActive(status?: string | null, isExpired?: b
   return normalizedStatus === "ساري" || normalizedStatus === "ينتهي قريباً" || normalizedStatus === "نشط مجاني";
 }
 
+export function isSubscriptionStatusSuspended(status?: string | null): boolean {
+  return normalizeSubscriptionStatus(status) === "موقوف مؤقتاً";
+}
+
 export function isActivePremiumSubscription(params: {
   subscriptionType?: string | null;
   packageType?: string | null;

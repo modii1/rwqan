@@ -20,6 +20,7 @@ export type AdminApprovalErrorCode =
   | "PAYMENT_FULFILLMENT_IN_PROGRESS"
   | "PAYMENT_ACTION_IN_PROGRESS"
   | "PAYMENT_ACTION_NO_LONGER_ELIGIBLE"
+  | "PROPERTY_SUSPENDED"
   | "VERIFICATION_UPDATE_FAILED"
   | "PROPERTY_REJECTION_FAILED"
   | "PAYMENT_REJECTION_FAILED"
@@ -66,6 +67,22 @@ export class PartialMutationError extends Error {
 
 export function mapKnownApprovalError(error: unknown): AdminApprovalError | null {
   if (error instanceof AdminApprovalError) return error;
+
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "PROPERTY_SUSPENDED"
+  ) {
+    const status =
+      "status" in error && typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : 423;
+    return new AdminApprovalError({
+      status,
+      code: "PROPERTY_SUSPENDED",
+      message: error.message,
+    });
+  }
 
   if (
     error instanceof Error &&

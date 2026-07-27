@@ -10,10 +10,26 @@ import {
 
 function createFakeTab() {
   const navigations: string[] = [];
+  const documentWrites: string[] = [];
   let closeCount = 0;
+  let documentOpenCount = 0;
+  let documentCloseCount = 0;
+  const fakeDocument = {
+    open() {
+      documentOpenCount += 1;
+      return fakeDocument as unknown as Document;
+    },
+    write(...content: string[]) {
+      documentWrites.push(content.join(""));
+    },
+    close() {
+      documentCloseCount += 1;
+    },
+  };
   const tab: ReservedWhatsAppTab = {
     closed: false,
     opener: { unsafe: true },
+    document: fakeDocument,
     location: {
       replace(url: string) {
         navigations.push(url);
@@ -23,10 +39,17 @@ function createFakeTab() {
       closeCount += 1;
     },
   };
-  return { tab, navigations, get closeCount() { return closeCount; } };
+  return {
+    tab,
+    navigations,
+    documentWrites,
+    get closeCount() { return closeCount; },
+    get documentOpenCount() { return documentOpenCount; },
+    get documentCloseCount() { return documentCloseCount; },
+  };
 }
 
-test("reserves an isolated blank tab before asynchronous contact work", () => {
+test("reserves an isolated tab and immediately paints an accessible Arabic handoff", () => {
   const fake = createFakeTab();
   const calls: Array<[string, string]> = [];
   const reserved = reserveWhatsAppTab((url, target) => {
@@ -37,6 +60,14 @@ test("reserves an isolated blank tab before asynchronous contact work", () => {
   assert.equal(reserved, fake.tab);
   assert.deepEqual(calls, [["about:blank", "_blank"]]);
   assert.equal(fake.tab.opener, null);
+  assert.equal(fake.documentOpenCount, 1);
+  assert.equal(fake.documentCloseCount, 1);
+  assert.equal(fake.documentWrites.length, 1);
+  assert.match(fake.documentWrites[0], /<html lang="ar" dir="rtl">/);
+  assert.match(fake.documentWrites[0], /role="status"/);
+  assert.match(fake.documentWrites[0], /aria-live="polite"/);
+  assert.match(fake.documentWrites[0], /جارٍ فتح واتساب/);
+  assert.equal(fake.documentWrites[0].includes("📱"), false);
 });
 
 test("navigates only the reserved tab to an encoded universal WhatsApp URL", () => {
@@ -69,6 +100,13 @@ test("blocked, closed, and failed tabs are handled without changing the current 
   });
   assert.equal(reserveWhatsAppTab(() => unsafe.tab), null);
   assert.equal(unsafe.closeCount, 1);
+
+  const unpaintable = createFakeTab();
+  unpaintable.tab.document.write = () => {
+    throw new Error("document unavailable");
+  };
+  assert.equal(reserveWhatsAppTab(() => unpaintable.tab), null);
+  assert.equal(unpaintable.closeCount, 1);
 
   const closedTab = createFakeTab().tab;
   Object.defineProperty(closedTab, "closed", { value: true });

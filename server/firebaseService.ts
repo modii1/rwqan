@@ -54,7 +54,9 @@ import {
     isActivePremiumSubscription,
     isPremiumSubscriptionType,
     isSubscriptionStatusActive,
+    isSubscriptionStatusSuspended,
 } from "../shared/subscriptionType";
+import { selectCurrentSubscriptionForProperty } from "./utils/subscriptionSelection";
 import {
     isPurchasableSubscriptionPackage,
     isSubscriptionPackageDurationAllowed,
@@ -124,6 +126,18 @@ export class PaymentRetryNotAllowedError extends Error {
     }
 }
 
+export class SuspendedSubscriptionWriteError extends Error {
+    readonly status = 423;
+    readonly code = "PROPERTY_SUSPENDED";
+
+    constructor(propertyNumber: string) {
+        super(
+            `اشتراك العقار ${propertyNumber} موقوف مؤقتاً من الإدارة. يجب استئنافه قبل أي تفعيل أو مزامنة.`,
+        );
+        this.name = "SuspendedSubscriptionWriteError";
+    }
+}
+
 export class LinkedPropertyMutationError extends Error {
     constructor(
         message: string,
@@ -174,6 +188,34 @@ export class FirebaseService {
             return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1_000_000);
         }
         return 0;
+    }
+
+    private getCurrentSubscriptionDocument<
+        T extends { id: string; data(): FirebaseFirestore.DocumentData | undefined },
+    >(documents: T[], propertyNumber: string): T | undefined {
+        const canonicalId = `SUB-${propertyNumber}`;
+        return documents.find((document) => document.id === canonicalId) ||
+            [...documents].sort((left, right) => {
+                const leftData = left.data();
+                const rightData = right.data();
+                return this.getDateMillis(
+                    rightData?.updatedAt || rightData?.endDate,
+                ) - this.getDateMillis(
+                    leftData?.updatedAt || leftData?.endDate,
+                );
+            })[0];
+    }
+
+    private assertCurrentSubscriptionNotSuspended<
+        T extends { id: string; data(): FirebaseFirestore.DocumentData | undefined },
+    >(documents: T[], propertyNumber: string): void {
+        const current = this.getCurrentSubscriptionDocument(
+            documents,
+            propertyNumber,
+        );
+        if (current && isSubscriptionStatusSuspended(current.data()?.status)) {
+            throw new SuspendedSubscriptionWriteError(propertyNumber);
+        }
     }
 
     private isActionableSubscriptionPayment(
@@ -275,6 +317,8 @@ export class FirebaseService {
         action: "new" | "extend" | "upgrade",
         subscription?: Subscription | null,
     ): boolean {
+        if (isSubscriptionStatusSuspended(subscription?.status)) return false;
+
         const remainingDays = calculateRemainingDays(subscription?.endDate || null);
         const isActive = Boolean(
             subscription?.endDate &&
@@ -608,7 +652,31 @@ export class FirebaseService {
             updatedAt: now,
         };
 
-        await ref.update(updatedData);
+        const guardedVerificationWrite =
+            updates.verificationStatus === "pending" ||
+            updates.verificationStatus === "approved" ||
+            updates.verificationStatus === "verified";
+
+        if (guardedVerificationWrite) {
+            await this.db.runTransaction(async (transaction) => {
+                const subscriptionSnapshot = await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where("propertyNumber", "==", propertyNumber),
+                );
+                const propertySnapshot = await transaction.get(ref);
+                this.assertCurrentSubscriptionNotSuspended(
+                    subscriptionSnapshot.docs,
+                    propertyNumber,
+                );
+                if (!propertySnapshot.exists) {
+                    throw new Error(`Property not found: ${propertyNumber}`);
+                }
+                transaction.update(ref, updatedData);
+            });
+        } else {
+            await ref.update(updatedData);
+        }
         const doc = await ref.get();
         return doc.data() as Property;
     }
@@ -655,18 +723,18 @@ export class FirebaseService {
             return null;
         }
 
-        // Sort in JS to avoid composite index requirement
+        // Select in JS to avoid an index requirement and to handle duplicate
+        // legacy documents consistently with lifecycle/admin reads.
         const docs = snapshot.docs.map((doc) =>
             ({ ...doc.data(), id: doc.data().id || doc.id } as Subscription)
         );
-        docs.sort((a, b) => {
-            const dateA = a.endDate ? new Date(a.endDate).getTime() : 0;
-            const dateB = b.endDate ? new Date(b.endDate).getTime() : 0;
-            return dateB - dateA;
-        });
-        
-        console.log(`[FIREBASE] Subscription found for ${propertyNumber}:`, docs[0]);
-        return docs[0];
+        const selected = selectCurrentSubscriptionForProperty(
+            docs,
+            propertyNumber,
+        ) || null;
+
+        console.log(`[FIREBASE] Subscription found for ${propertyNumber}:`, selected);
+        return selected;
     }
 
     async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
@@ -677,22 +745,58 @@ export class FirebaseService {
             ...normalizedSubscription,
         } as Subscription;
 
-        await this.db.collection("subscriptions").doc(id).set(newSubscription);
-
-        // Update property status
+        const subscriptionRef = this.db.collection("subscriptions").doc(id);
+        const propertyRef = this.db
+            .collection("properties")
+            .doc(subscription.propertyNumber);
         const planType = subscription.subscriptionType || subscription.packageType ||
             (subscription.packageId?.includes("premium") || subscription.packageId === "pkg-trusted"
                 ? "مميز"
                 : "عادي");
-        const hasValidEndDate = calculateRemainingDays(subscription.endDate) >= 0;
+        const hasValidEndDate = calculateRemainingDays(normalizedSubscription.endDate) >= 0;
         const isPremium = hasValidEndDate &&
             isPremiumSubscriptionType(planType) &&
-            isSubscriptionStatusActive(subscription.status);
-
-        await this.updateProperty(subscription.propertyNumber, {
+            isSubscriptionStatusActive(normalizedSubscription.status);
+        const propertyUpdates = {
             subscriptionType: isPremium ? "مميز" : "عادي",
             lastUpdate: toRiyadhISO(getNowInRiyadh()).split("T")[0],
-            subscriptionDate: subscription.startDate.split("T")[0],
+            subscriptionDate: normalizedSubscription.startDate.split("T")[0],
+            updatedAt: new Date().toISOString(),
+        };
+
+        await this.db.runTransaction(async (transaction) => {
+            const existingSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", subscription.propertyNumber),
+            );
+            const parentSnapshot = subscription.linkedProperty
+                ? await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where(
+                            "propertyNumber",
+                            "==",
+                            subscription.linkedProperty,
+                        ),
+                )
+                : null;
+            const propertySnapshot = await transaction.get(propertyRef);
+            this.assertCurrentSubscriptionNotSuspended(
+                existingSnapshot.docs,
+                subscription.propertyNumber,
+            );
+            if (parentSnapshot && subscription.linkedProperty) {
+                this.assertCurrentSubscriptionNotSuspended(
+                    parentSnapshot.docs,
+                    subscription.linkedProperty,
+                );
+            }
+            if (!propertySnapshot.exists) {
+                throw new Error(`Property not found: ${subscription.propertyNumber}`);
+            }
+            transaction.set(subscriptionRef, newSubscription);
+            transaction.update(propertyRef, propertyUpdates);
         });
 
         return newSubscription;
@@ -725,17 +829,8 @@ export class FirebaseService {
             propertyCount: subscriptionData.propertyCount || 1,
         };
 
-        // Clear cancellation fields when reactivating
         const docRef = this.db.collection("subscriptions").doc(id);
-        const existingDoc = await docRef.get();
-        if (existingDoc.exists && (existingDoc.data()?.cancelledAt || existingDoc.data()?.cancelReason)) {
-            // Use set with merge to overwrite and delete old cancellation fields
-            await docRef.set({ ...subscription, cancelledAt: null, cancelReason: null });
-        } else {
-            await docRef.set(subscription);
-        }
-
-        // Sync with property - use the subscriptionType from the passed data
+        const propertyRef = this.db.collection("properties").doc(propertyNumber);
         const propertyUpdates: any = {
             subscriptionType:
                 status !== "منتهي" && isPremiumSubscriptionType(subscriptionData.subscriptionType)
@@ -743,14 +838,56 @@ export class FirebaseService {
                     : "عادي",
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
+            updatedAt: new Date().toISOString(),
         };
 
-        // Also sync linkedProperty to the property document
         if (subscriptionData.linkedProperty) {
             propertyUpdates.linkedProperty = subscriptionData.linkedProperty;
         }
 
-        await this.updateProperty(propertyNumber, propertyUpdates);
+        await this.db.runTransaction(async (transaction) => {
+            const existingSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", propertyNumber),
+            );
+            const parentSnapshot = subscriptionData.linkedProperty
+                ? await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where(
+                            "propertyNumber",
+                            "==",
+                            subscriptionData.linkedProperty,
+                        ),
+                )
+                : null;
+            const propertySnapshot = await transaction.get(propertyRef);
+            this.assertCurrentSubscriptionNotSuspended(
+                existingSnapshot.docs,
+                propertyNumber,
+            );
+            if (parentSnapshot && subscriptionData.linkedProperty) {
+                this.assertCurrentSubscriptionNotSuspended(
+                    parentSnapshot.docs,
+                    subscriptionData.linkedProperty,
+                );
+            }
+            if (!propertySnapshot.exists) {
+                throw new Error(`Property not found: ${propertyNumber}`);
+            }
+
+            // Activation is intentionally a full replacement. Resume is the
+            // only lifecycle operation allowed to carry suspension metadata.
+            transaction.set(docRef, {
+                ...subscription,
+                cancelledAt: null,
+                cancelReason: null,
+                suspendedAt: null,
+                remainingDurationMs: null,
+            });
+            transaction.update(propertyRef, propertyUpdates);
+        });
     }
 
     async cancelSubscription(propertyNumber: string, reason?: string): Promise<void> {
@@ -1119,6 +1256,13 @@ export class FirebaseService {
                     mainSubscriptionDoc.data()?.id ||
                     mainSubscriptionDoc.id,
             } as Subscription;
+            if (isSubscriptionStatusSuspended(mainSubscription.status)) {
+                throw new LinkedPropertyMutationError(
+                    "لا يمكن تعديل العقارات المرتبطة لأن اشتراك العقار الرئيسي موقوف مؤقتاً من الإدارة",
+                    423,
+                    "PROPERTY_SUSPENDED",
+                );
+            }
             const mainIsActive = Boolean(
                 mainSubscription.endDate &&
                 isSubscriptionStatusActive(mainSubscription.status) &&
@@ -1337,6 +1481,13 @@ export class FirebaseService {
                     propertyNumber,
                 );
                 if (!childSubscription) continue;
+                if (isSubscriptionStatusSuspended(childSubscription.status)) {
+                    throw new LinkedPropertyMutationError(
+                        `العقار ${propertyNumber} موقوف مؤقتاً من الإدارة ولا يمكن ربطه أو تفعيله`,
+                        423,
+                        "PROPERTY_SUSPENDED",
+                    );
+                }
                 const linkedParent = String(
                     childSubscription.linkedProperty || "",
                 ).trim();
@@ -1574,7 +1725,9 @@ export class FirebaseService {
     ): Promise<void> {
         const childSubId = `SUB-${linkedPropNum}`;
         const childSubRef = this.db.collection("subscriptions").doc(childSubId);
-        const childSubDoc = await childSubRef.get();
+        const childPropertyRef = this.db
+            .collection("properties")
+            .doc(linkedPropNum);
         const cappedEndDate = capAtMaxDays(new Date(data.endDate));
         const effectiveStatus = data.status || "نشط";
         const propertySubscriptionType = isActivePremiumSubscription({
@@ -1599,26 +1752,52 @@ export class FirebaseService {
         if (data.paymentId) subUpdates.paymentId = data.paymentId;
         if (data.packageId) subUpdates.packageId = data.packageId;
 
-        if (childSubDoc.exists) {
-            await childSubRef.update(subUpdates);
-        } else {
-            await childSubRef.set({
-                id: childSubId,
-                propertyNumber: linkedPropNum,
-                ...subUpdates,
-                createdAt: new Date().toISOString(),
-            });
-        }
+        await this.db.runTransaction(async (transaction) => {
+            const childSubscriptionSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", linkedPropNum),
+            );
+            const mainSubscriptionSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", mainPropertyNumber),
+            );
+            const childPropertySnapshot = await transaction.get(childPropertyRef);
+            this.assertCurrentSubscriptionNotSuspended(
+                childSubscriptionSnapshot.docs,
+                linkedPropNum,
+            );
+            this.assertCurrentSubscriptionNotSuspended(
+                mainSubscriptionSnapshot.docs,
+                mainPropertyNumber,
+            );
+            if (!childPropertySnapshot.exists) {
+                throw new Error(`Property not found: ${linkedPropNum}`);
+            }
 
-        // Mirror onto the property document — this is the part that was missing and caused
-        // the "main active but linked inactive" bug.
-        await this.updateProperty(linkedPropNum, {
-            subscriptionType: propertySubscriptionType,
-            verificationStatus: "approved",
-            linkedProperty: mainPropertyNumber,
-            pendingApprovalFrom: null as any,
-            subscriptionDate: data.startDate.split("T")[0],
-            lastUpdate: new Date().toISOString().split("T")[0],
+            const childSubDoc = childSubscriptionSnapshot.docs.find(
+                (document) => document.id === childSubId,
+            );
+            if (childSubDoc) {
+                transaction.update(childSubRef, subUpdates);
+            } else {
+                transaction.set(childSubRef, {
+                    id: childSubId,
+                    propertyNumber: linkedPropNum,
+                    ...subUpdates,
+                    createdAt: new Date().toISOString(),
+                });
+            }
+            transaction.update(childPropertyRef, {
+                subscriptionType: propertySubscriptionType,
+                verificationStatus: "approved",
+                linkedProperty: mainPropertyNumber,
+                pendingApprovalFrom: null as any,
+                subscriptionDate: data.startDate.split("T")[0],
+                lastUpdate: new Date().toISOString().split("T")[0],
+                updatedAt: new Date().toISOString(),
+            });
         });
     }
 
@@ -1753,9 +1932,6 @@ export class FirebaseService {
         
         const id = `SUB-${propertyNumber}`;
         const ref = this.db.collection("subscriptions").doc(id);
-        const doc = await ref.get();
-        
-        console.log(`[FIREBASE] activateSubscription - doc exists: ${doc.exists} for: ${propertyNumber}`);
         
         const updates: any = {
             status: data.status,
@@ -1796,20 +1972,60 @@ export class FirebaseService {
         const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
         
         console.log(`[FIREBASE] activateSubscription - updates to apply:`, normalizedUpdates);
-        
-        if (doc.exists) {
-            await ref.update(normalizedUpdates);
-            console.log(`✅ [FIREBASE] Subscription activated for property ${propertyNumber}`);
-        } else {
-            // Create new subscription if doesn't exist
-            await ref.set({
-                id,
+
+        let canonicalDocumentExists = false;
+        await this.db.runTransaction(async (transaction) => {
+            const subscriptionSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", propertyNumber),
+            );
+            const currentDocument = this.getCurrentSubscriptionDocument(
+                subscriptionSnapshot.docs,
                 propertyNumber,
-                ...normalizedUpdates,
-                createdAt: new Date().toISOString(),
-            });
-            console.log(`✅ [FIREBASE] New subscription created and activated for property ${propertyNumber}`);
-        }
+            );
+            const parentPropertyNumber = String(
+                data.linkedProperty || currentDocument?.data()?.linkedProperty || "",
+            ).trim();
+            const parentSnapshot = parentPropertyNumber
+                ? await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where("propertyNumber", "==", parentPropertyNumber),
+                )
+                : null;
+
+            this.assertCurrentSubscriptionNotSuspended(
+                subscriptionSnapshot.docs,
+                propertyNumber,
+            );
+            if (parentSnapshot && parentPropertyNumber) {
+                this.assertCurrentSubscriptionNotSuspended(
+                    parentSnapshot.docs,
+                    parentPropertyNumber,
+                );
+            }
+
+            canonicalDocumentExists = subscriptionSnapshot.docs.some(
+                (document) => document.id === id,
+            );
+            if (canonicalDocumentExists) {
+                transaction.update(ref, normalizedUpdates);
+            } else {
+                transaction.set(ref, {
+                    id,
+                    propertyNumber,
+                    ...normalizedUpdates,
+                    createdAt: new Date().toISOString(),
+                });
+            }
+        });
+
+        console.log(
+            canonicalDocumentExists
+                ? `✅ [FIREBASE] Subscription activated for property ${propertyNumber}`
+                : `✅ [FIREBASE] New subscription created and activated for property ${propertyNumber}`,
+        );
     }
 
     async getSubscriptionsByProperty(propertyNumber: string): Promise<Subscription[]> {
@@ -2124,6 +2340,15 @@ export class FirebaseService {
                 const subscription = context.subscription;
                 if (
                     options.purpose !== "reject" &&
+                    isSubscriptionStatusSuspended(subscription?.status)
+                ) {
+                    return {
+                        status: "action_ineligible" as const,
+                        action: this.getSubscriptionPaymentAction(payment),
+                    };
+                }
+                if (
+                    options.purpose !== "reject" &&
                     context.hasForeignRequestedMember
                 ) {
                     return {
@@ -2397,6 +2622,11 @@ export class FirebaseService {
                         transaction,
                         newPayment,
                     );
+                if (isSubscriptionStatusSuspended(subscription?.status)) {
+                    throw new SuspendedSubscriptionWriteError(
+                        newPayment.propertyNumber,
+                    );
+                }
                 if (hasForeignRequestedMember) {
                     throw new PaymentActionEligibilityError(
                         this.getSubscriptionPaymentAction(newPayment),
@@ -3027,6 +3257,11 @@ export class FirebaseService {
                 hasForeignRequestedMember,
             } =
                 await this.resolvePaymentActionLockContext(transaction, payment);
+            if (isSubscriptionStatusSuspended(subscription?.status)) {
+                throw new SuspendedSubscriptionWriteError(
+                    payment.propertyNumber,
+                );
+            }
             if (hasForeignRequestedMember) {
                 throw new PaymentActionEligibilityError(
                     this.getSubscriptionPaymentAction(payment),
@@ -4412,9 +4647,25 @@ export class FirebaseService {
 
     async updateSubscription(id: string, updates: Partial<Subscription>): Promise<void> {
         const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
-        await this.db.collection("subscriptions").doc(id).update({
-            ...normalizedUpdates,
-            updatedAt: new Date().toISOString()
+        const subscriptionRef = this.db.collection("subscriptions").doc(id);
+        await this.db.runTransaction(async (transaction) => {
+            const subscriptionSnapshot = await transaction.get(subscriptionRef);
+            if (!subscriptionSnapshot.exists) {
+                throw new Error(`Subscription not found: ${id}`);
+            }
+            const propertyNumber = String(
+                subscriptionSnapshot.data()?.propertyNumber || "",
+            ).trim();
+            if (
+                propertyNumber &&
+                isSubscriptionStatusSuspended(subscriptionSnapshot.data()?.status)
+            ) {
+                throw new SuspendedSubscriptionWriteError(propertyNumber);
+            }
+            transaction.update(subscriptionRef, {
+                ...normalizedUpdates,
+                updatedAt: new Date().toISOString(),
+            });
         });
     }
 
@@ -4431,42 +4682,138 @@ export class FirebaseService {
             throw new Error("Subscription lifecycle group exceeds the Firestore batch limit");
         }
 
-        const propertyRefs = updates.map(({ propertyNumber }) =>
-            this.db.collection("properties").doc(propertyNumber)
+        const requestedUpdates = new Map(
+            updates.map((update) => [update.propertyNumber, update] as const),
         );
-        const propertyDocs = await this.db.getAll(...propertyRefs);
-        const existingProperties = new Set(
-            propertyDocs.filter((doc) => doc.exists).map((doc) => doc.id),
-        );
-        const batch = this.db.batch();
-        const updatedAt = new Date().toISOString();
-        const lastUpdate = updatedAt.split("T")[0];
+        const templateUpdate = updates[0];
 
-        for (const update of updates) {
-            const subscriptionRef = this.db
-                .collection("subscriptions")
-                .doc(update.subscriptionId);
-            const normalizedSubscriptionUpdates = this.enforceSubscriptionDurationLimit(
-                update.subscriptionUpdates,
-            );
-            batch.update(subscriptionRef, {
-                ...normalizedSubscriptionUpdates,
-                updatedAt,
-            });
+        await this.db.runTransaction(async (transaction) => {
+            const propertyNumbers = new Set(requestedUpdates.keys());
+            const subscriptionSnapshots = new Map<
+                string,
+                FirebaseFirestore.QuerySnapshot
+            >();
+            const pendingPropertyNumbers = [...propertyNumbers];
 
-            if (existingProperties.has(update.propertyNumber)) {
+            // Resolve current membership inside the transaction. If an activation
+            // adds a child while suspension is starting, Firestore retries this
+            // query and the newly linked child joins the same lifecycle write.
+            while (pendingPropertyNumbers.length > 0) {
+                const propertyNumber = pendingPropertyNumbers.shift()!;
+                if (subscriptionSnapshots.has(propertyNumber)) continue;
+
+                const snapshot = await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where("propertyNumber", "==", propertyNumber),
+                );
+                subscriptionSnapshots.set(propertyNumber, snapshot);
+
+                const current = this.getCurrentSubscriptionDocument(
+                    snapshot.docs,
+                    propertyNumber,
+                )?.data();
+                const linkedNumbers = [
+                    current?.linkedProperty,
+                    ...(Array.isArray(current?.linkedProperties)
+                        ? current.linkedProperties
+                        : []),
+                ];
+                for (const linkedNumber of linkedNumbers) {
+                    const normalized = String(linkedNumber || "").trim();
+                    if (!normalized || propertyNumbers.has(normalized)) continue;
+                    propertyNumbers.add(normalized);
+                    pendingPropertyNumbers.push(normalized);
+                }
+
+                if (propertyNumbers.size > 250) {
+                    throw new Error(
+                        "Subscription lifecycle group exceeds the Firestore batch limit",
+                    );
+                }
+            }
+
+            const propertySnapshots = new Map<
+                string,
+                FirebaseFirestore.DocumentSnapshot
+            >();
+            for (const propertyNumber of propertyNumbers) {
                 const propertyRef = this.db
                     .collection("properties")
-                    .doc(update.propertyNumber);
-                batch.update(propertyRef, {
-                    subscriptionType: update.propertySubscriptionType,
-                    lastUpdate,
-                    updatedAt,
-                });
+                    .doc(propertyNumber);
+                propertySnapshots.set(
+                    propertyNumber,
+                    await transaction.get(propertyRef),
+                );
             }
-        }
 
-        await batch.commit();
+            const subscriptionWriteCount = Array.from(
+                subscriptionSnapshots.values(),
+            ).reduce((count, snapshot) => count + snapshot.docs.length, 0);
+            const propertyWriteCount = Array.from(
+                propertySnapshots.values(),
+            ).filter((snapshot) => snapshot.exists).length;
+            if (subscriptionWriteCount + propertyWriteCount > 500) {
+                throw new Error(
+                    "Subscription lifecycle group exceeds the Firestore batch limit",
+                );
+            }
+
+            const updatedAt = new Date().toISOString();
+            const lastUpdate = updatedAt.split("T")[0];
+            for (const propertyNumber of propertyNumbers) {
+                const subscriptionSnapshot = subscriptionSnapshots.get(
+                    propertyNumber,
+                )!;
+                if (
+                    requestedUpdates.has(propertyNumber) &&
+                    subscriptionSnapshot.empty
+                ) {
+                    throw new Error(
+                        `Subscription not found for property ${propertyNumber}`,
+                    );
+                }
+
+                const currentSubscription = this.getCurrentSubscriptionDocument(
+                    subscriptionSnapshot.docs,
+                    propertyNumber,
+                )?.data();
+                const requestedUpdate = requestedUpdates.get(propertyNumber);
+                const propertySubscriptionType = requestedUpdate
+                    ?.propertySubscriptionType ||
+                    (isSubscriptionStatusSuspended(
+                        templateUpdate.subscriptionUpdates.status,
+                    )
+                        ? "عادي"
+                        : isPremiumSubscriptionType(
+                            currentSubscription?.subscriptionType ||
+                                currentSubscription?.packageType,
+                        )
+                            ? "مميز"
+                            : "عادي");
+                const normalizedSubscriptionUpdates =
+                    this.enforceSubscriptionDurationLimit(
+                        requestedUpdate?.subscriptionUpdates ||
+                            templateUpdate.subscriptionUpdates,
+                    );
+
+                for (const subscriptionDocument of subscriptionSnapshot.docs) {
+                    transaction.update(subscriptionDocument.ref, {
+                        ...normalizedSubscriptionUpdates,
+                        updatedAt,
+                    });
+                }
+
+                const propertySnapshot = propertySnapshots.get(propertyNumber)!;
+                if (propertySnapshot.exists) {
+                    transaction.update(propertySnapshot.ref, {
+                        subscriptionType: propertySubscriptionType,
+                        lastUpdate,
+                        updatedAt,
+                    });
+                }
+            }
+        });
     }
 
     // Async wrappers (no-arg) for FinanceService compatibility

@@ -13,8 +13,8 @@ import { useSessionQuery } from "@/hooks/use-session";
 import {
     CONTACT_IDENTITY_QUERY_KEY,
     EMPTY_CONTACT_IDENTITY,
+    commitContactIdentityCache,
     useContactIdentityQuery,
-    useSaveContactIdentity,
 } from "@/hooks/use-contact-identity";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -149,7 +149,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const { toast } = useToast();
     const { data: ownerSession } = useSessionQuery();
     const contactIdentityQuery = useContactIdentityQuery();
-    const saveContactIdentity = useSaveContactIdentity();
     const contactButtonRef = useRef<HTMLButtonElement>(null);
     const isSendingRef = useRef(false);
     const contactFlowActiveRef = useRef(false);
@@ -213,69 +212,11 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     }
                 }
             } catch {
-                // تجاهل - سنجرب Google Apps Script
+                throw new Error("تعذر جلب بيانات العقار من الخادم");
             }
 
-            // الرجوع إلى Google Apps Script
-            const res = await fetch(
-                "https://script.google.com/macros/s/AKfycbzKX7i9qZ9UPPQOEjC44d_WR70nwMFal4zC_LRKcM09S_lg68AMvWs7J2PVIgZn_aBJ/exec?action=getData",
-            );
-            if (!res.ok) {
-                throw new Error("فشل في جلب البيانات");
-            }
-
-            const raw = await res.json();
-            if (!Array.isArray(raw)) return null;
-
-            const item = raw.find((p: any) => String(p["رقم العقار"]) === propertyId);
-            if (!item) return null;
-
-            const name = item["اسم العقار"] || "";
-            let facilities: string[] = [];
-            const rawFacilities = item["المرافق"] || "";
-            if (typeof rawFacilities === "string") {
-                const trimmed = rawFacilities.trim();
-                if (trimmed.startsWith("[")) {
-                    try {
-                        const parsed = JSON.parse(trimmed);
-                        if (Array.isArray(parsed)) {
-                            facilities = parsed.map((f) => String(f).trim());
-                        }
-                    } catch {
-                        facilities = trimmed
-                            .split(",")
-                            .map((f: string) => f.replace(/"/g, "").trim())
-                            .filter(Boolean);
-                    }
-                } else {
-                    facilities = trimmed
-                        .split(",")
-                        .map((f: string) => f.replace(/"/g, "").trim())
-                        .filter(Boolean);
-                }
-            }
-
-            return {
-                propertyNumber: String(item["رقم العقار"] || ""),
-                name,
-                city: item["المنطقة"] || "",
-                direction: item["الاتجاه"] || "",
-                location: item["الموقع"] || "",
-                type: item["النوع"] || "",
-                facilities,
-                prices: {
-                    weekday: item["سعر وسط الأسبوع"]
-                        ? String(item["سعر وسط الأسبوع"])
-                        : "",
-                    weekend: item["سعر نهاية الأسبوع"]
-                        ? String(item["سعر نهاية الأسبوع"])
-                        : "",
-                    overnight: item["سعر المبيت"] ? String(item["سعر المبيت"]) : "",
-                    holidays: item["سعر الإجازات"] ? String(item["سعر الإجازات"]) : "",
-                },
-                subscriptionType: getEffectiveSubscriptionType({ subscriptionType: name ? "مميز" : "عادي" }),
-                imageCount: 0,
-            } as PropertyDetails;
+            // Never download the legacy full-property dataset in a public browser.
+            return null;
         },
         staleTime: 1000 * 60 * 5, // 5 دقائق
         retry: 1,
@@ -558,7 +499,30 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 throw new ContactRequestError(errorMessage, "general");
             }
 
-            const requestCode = typeof result.requestCode === "string" ? result.requestCode : "";
+            const requestCode = typeof result.requestCode === "string"
+                ? result.requestCode.trim()
+                : "";
+            if (result.ok !== true || !requestCode) {
+                throw new ContactRequestError(
+                    "تعذر تأكيد تسجيل طلب التواصل. حاول مرة أخرى.",
+                    "general",
+                );
+            }
+
+            const returnedIdentity = result.contactIdentity;
+            if (
+                returnedIdentity &&
+                typeof returnedIdentity === "object" &&
+                (returnedIdentity as Record<string, unknown>).kind === "client" &&
+                typeof (returnedIdentity as Record<string, unknown>).maskedPhone === "string"
+            ) {
+                await commitContactIdentityCache(queryClient, {
+                    kind: "client",
+                    maskedPhone: (returnedIdentity as Record<string, unknown>).maskedPhone as string,
+                });
+                router.refresh();
+            }
+
             const requestTime = typeof result.requestTime === "string" ? result.requestTime : "";
             const whatsappNumber = normalizeWhatsAppNumber(
                 typeof result.whatsappNumber === "string" ? result.whatsappNumber : undefined,
@@ -662,11 +626,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 );
             }
 
-            const isAdminContact = contactIdentityQuery.data?.kind === "admin";
             try {
-                if (!isAdminContact) {
-                    await saveContactIdentity.mutateAsync(phone);
-                }
                 await sendWhatsAppRequest(phone, whatsappTab);
             } catch (error) {
                 closeReservedWhatsAppTab(whatsappTab);
@@ -739,7 +699,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 open={isContactDialogOpen}
                 onOpenChange={setIsContactDialogOpen}
                 onSubmit={handleContactPhoneSubmit}
-                isSubmitting={isSending || saveContactIdentity.isPending}
+                isSubmitting={isSending}
                 mode="contact"
                 returnFocusRef={contactButtonRef}
             />
@@ -968,7 +928,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     onClick={() => void handleContactClick()}
                                     disabled={
                                         isSending ||
-                                        saveContactIdentity.isPending ||
                                         contactIdentityQuery.isPending
                                     }
                                     className={`h-12 w-full whitespace-normal rounded-lg px-3 text-center text-sm font-semibold text-white sm:text-base ${

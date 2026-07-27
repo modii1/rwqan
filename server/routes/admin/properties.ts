@@ -28,6 +28,8 @@ import {
   runAdminApprovalStage,
   sendAdminApprovalError,
 } from "../../errors/AdminApprovalError";
+import { assertPropertyNotSuspended } from "../../services/propertySuspension";
+import { selectCurrentSubscriptionForProperty } from "../../utils/subscriptionSelection";
 
 const router = Router();
 
@@ -89,7 +91,10 @@ router.get("/api/admin/properties", async (_req, res) => {
     }
     
     const itemsWithSubscriptionStatus = items.map(property => {
-      const sub = subscriptions.find(s => s.propertyNumber === property.propertyNumber);
+      const sub = selectCurrentSubscriptionForProperty(
+        subscriptions,
+        property.propertyNumber,
+      );
       const isExpired = !sub || calculateRemainingDays(sub.endDate) < 0;
       const effectiveSubscriptionType = sub
         ? getEffectiveSubscriptionType({
@@ -138,7 +143,10 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     }
     
     // Source 2: Current property's subscription linkedProperties array
-    const currentSub = subscriptions.find(s => s.propertyNumber === propertyNumber);
+    const currentSub = selectCurrentSubscriptionForProperty(
+      subscriptions,
+      propertyNumber,
+    );
     if (currentSub?.linkedProperties) {
       for (const lp of currentSub.linkedProperties) {
         if (lp !== propertyNumber) linkedPropertyNumbers.add(lp);
@@ -392,6 +400,8 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     const { propertyNumber } = req.params;
     console.log(`[APPROVE] Starting approval for property: ${propertyNumber}`);
 
+    await assertPropertyNotSuspended(propertyNumber);
+
     // Validate the property and live R2 image count before any approval or
     // payment-fulfillment mutation. This also returns structured 404/422/503
     // errors for the admin UI.
@@ -510,8 +520,13 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
       // Persist the authoritative approval state before finalizing the payment
       // record, so any later partial failure cannot leave acceptance ambiguous.
       updated = await runAdminApprovalStage(
-        () =>
-          firebaseService.updateVerificationStatus(propertyNumber, "approved"),
+        async () => {
+          await assertPropertyNotSuspended(propertyNumber);
+          return firebaseService.updateVerificationStatus(
+            propertyNumber,
+            "approved",
+          );
+        },
         {
           status: 500,
           code: "APPROVAL_PARTIALLY_COMPLETED",
@@ -554,8 +569,13 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     // approval write here.
     if (!pendingPayment) {
       updated = await runAdminApprovalStage(
-        () =>
-          firebaseService.updateVerificationStatus(propertyNumber, "approved"),
+        async () => {
+          await assertPropertyNotSuspended(propertyNumber);
+          return firebaseService.updateVerificationStatus(
+            propertyNumber,
+            "approved",
+          );
+        },
         {
           status: 500,
           code: "VERIFICATION_UPDATE_FAILED",
@@ -738,6 +758,8 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
   try {
     const { propertyNumber } = req.params;
 
+    await assertPropertyNotSuspended(propertyNumber);
+
     // Resolve and validate the complete linked pair before the first write.
     // requireCompleteProperty uses the live R2 count, so an unavailable image
     // store is never mistaken for a property with zero images.
@@ -752,6 +774,8 @@ router.put("/api/admin/properties/:propertyNumber/approve-additional", async (re
         message: "لا يوجد طلب إضافة معلّق لهذا العقار، وقد تكون حالته تغيّرت بالفعل.",
       });
     }
+
+    await assertPropertyNotSuspended(mainPropertyNumber);
 
     const { property: mainProperty } =
       await adminApprovalService.requireCompleteProperty(mainPropertyNumber);

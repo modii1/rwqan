@@ -9,12 +9,14 @@ import { storage } from "./storage";
 import { 
   notifySubscriptionExpired, 
   notifyOwnerSubscriptionExpired,
-  notifyOwnerSubscriptionExpiringSoon,
-  sendOwnerWhatsApp
+  notifyOwnerSubscriptionExpiringSoon
 } from "./integrations/whatsapp";
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
-import { isPremiumSubscriptionType } from "../shared/subscriptionType";
+import {
+  isPremiumSubscriptionType,
+  isSubscriptionStatusSuspended,
+} from "../shared/subscriptionType";
 
 
 
@@ -86,7 +88,7 @@ async function updateRemainingDaysInSheet() {
     const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
     
     for (const sub of subscriptions) {
-      if (sub.status === "موقوف مؤقتاً") continue;
+      if (isSubscriptionStatusSuspended(sub.status)) continue;
       if (!sub.endDate || !sub.propertyNumber) continue;
       
       try {
@@ -378,7 +380,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
 
     for (const sub of subscriptions) {
       if (processed.has(sub.propertyNumber)) continue;
-      if (sub.status === "موقوف مؤقتاً") continue;
+      if (isSubscriptionStatusSuspended(sub.status)) continue;
 
       const isPremiumType = isPremiumSubscriptionType(sub.subscriptionType);
       if (!isPremiumType) continue;

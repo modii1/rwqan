@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 
 import webhooksRouter from "./webhooks";
-import { addOnService, paymentService } from "../services";
+import { addOnService, paymentService, propertyService } from "../services";
 import { firebaseService } from "../firebaseService";
 import {
   calculatePaymobWebhookHmac,
@@ -110,6 +110,10 @@ test("Paymob callback route rejects forgery and mutates only an exact signed fin
     accept: firebaseService.acceptSuccessfulPaymentIntention,
     settleAddon: firebaseService.settleAddOnPaymentCallback,
     finalize: firebaseService.finalizeFailedPaymentIntention,
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    updateVerificationStatus: firebaseService.updateVerificationStatus,
+    getPropertyByNumber: propertyService.getByNumber,
     logAddonHistory: addOnService.logHistory,
     inquiry: paymobService.inquiryByOrderId,
     hmacSecret: process.env.PAYMOB_HMAC_SECRET,
@@ -157,6 +161,8 @@ test("Paymob callback route rejects forgery and mutates only an exact signed fin
   let addonSettlementMode: "already" | "rejected" = "already";
   let paymentReads = 0;
   let changeAttemptBeforeAcceptance = false;
+  let propertySuspended = false;
+  let verificationWrites = 0;
 
   process.env.PAYMOB_HMAC_SECRET = TEST_HMAC_SECRET;
   (paymentService as any).getAll = async () => {
@@ -165,6 +171,27 @@ test("Paymob callback route rejects forgery and mutates only an exact signed fin
   };
   (paymentService as any).update = async (id: string, updatesValue: any) => {
     updates.push({ id, updates: updatesValue });
+  };
+  (propertyService as any).getByNumber = async (propertyNumber: string) => ({
+    propertyNumber,
+    name: "Suspended property",
+    whatsappNumber: "966500000000",
+  });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async (
+    propertyNumber: string,
+  ) => propertySuspended
+    ? {
+        id: `SUB-${propertyNumber}`,
+        propertyNumber,
+        status: "موقوف مؤقتاً",
+        startDate: "2026-07-01T00:00:00.000Z",
+        endDate: "2026-08-01T00:00:00.000Z",
+        suspendedAt: "2026-07-20T00:00:00.000Z",
+        remainingDurationMs: 12 * 24 * 60 * 60 * 1000,
+      }
+    : null;
+  (firebaseService as any).updateVerificationStatus = async () => {
+    verificationWrites += 1;
   };
   (firebaseService as any).acceptSuccessfulPaymentIntention = async (
     id: string,
@@ -445,6 +472,28 @@ test("Paymob callback route rejects forgery and mutates only an exact signed fin
     assert.deepEqual(updates, []);
     payments[0].merchantAttemptKey = "ATTEMPT-1";
 
+    propertySuspended = true;
+    const suspendedSuccess = await signedPost(baseUrl, transactionWebhook({
+      specialReference: "ATTEMPT-1",
+      paymentId: "PAY-1",
+      merchantAttemptKey: "ATTEMPT-1",
+      success: true,
+      transactionId: "TX-SUSPENDED-SUCCESS",
+    }));
+    const suspendedPayload = await suspendedSuccess.json();
+    assert.equal(suspendedSuccess.status, 200);
+    assert.equal(suspendedPayload.status, "property_suspended");
+    assert.equal(suspendedPayload.paymentId, "PAY-1");
+    assert.equal(updates.length, 1);
+    const heldUpdate = (
+      updates as unknown as Array<{ id: string; updates: any }>
+    )[0];
+    assert.equal(heldUpdate.id, "PAY-1");
+    assert.equal(heldUpdate.updates.status, "نجح - قيد التحقق");
+    assert.match(heldUpdate.updates.notes, /موقوف مؤقتاً/);
+    assert.equal(verificationWrites, 0);
+    propertySuspended = false;
+
     // A final signed success following a pending event is accepted. Marking the
     // fixture complete exercises the idempotent success return without invoking
     // unrelated notification integrations in this route-level security test.
@@ -457,13 +506,18 @@ test("Paymob callback route rejects forgery and mutates only an exact signed fin
       transactionId: "TX-ATTEMPT-2-SUCCESS",
     }));
     assert.equal(finalSuccess.status, 200);
-    assert.deepEqual(updates, []);
+    assert.equal(updates.length, 1);
   } finally {
     (paymentService as any).getAll = originals.getAll;
     (paymentService as any).update = originals.update;
     (firebaseService as any).acceptSuccessfulPaymentIntention = originals.accept;
     (firebaseService as any).settleAddOnPaymentCallback = originals.settleAddon;
     (firebaseService as any).finalizeFailedPaymentIntention = originals.finalize;
+    (firebaseService as any).getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    (firebaseService as any).updateVerificationStatus =
+      originals.updateVerificationStatus;
+    (propertyService as any).getByNumber = originals.getPropertyByNumber;
     (addOnService as any).logHistory = originals.logAddonHistory;
     (paymobService as any).inquiryByOrderId = originals.inquiry;
     if (originals.hmacSecret === undefined) delete process.env.PAYMOB_HMAC_SECRET;

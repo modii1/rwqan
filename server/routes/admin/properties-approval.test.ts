@@ -55,6 +55,7 @@ test("property approval preflight prevents mutations and returns safe errors", a
     return { propertyNumber, ...updates };
   };
   (firebaseService as any).getMultiPropertySubscriptions = async () => [];
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
 
   const app = express();
   app.use(express.json());
@@ -84,6 +85,36 @@ test("property approval preflight prevents mutations and returns safe errors", a
   };
 
   try {
+    await t.test("a suspended subscription is rejected before property validation or writes", async () => {
+      resetCounters();
+      let validationReads = 0;
+      (firebaseService as any).getSubscriptionByPropertyNumber = async () => ({
+        id: "SUB-PROP-1",
+        propertyNumber: "PROP-1",
+        status: "موقوف مؤقتاً",
+        startDate: "2026-07-01T00:00:00.000Z",
+        endDate: "2026-08-01T00:00:00.000Z",
+        suspendedAt: "2026-07-20T00:00:00.000Z",
+        remainingDurationMs: 12 * 24 * 60 * 60 * 1000,
+      });
+      (adminApprovalService as any).requireCompleteProperty = async () => {
+        validationReads += 1;
+        throw new Error("validation must not run while suspended");
+      };
+
+      const response = await approve();
+      const payload = await response.json();
+
+      assert.equal(response.status, 423);
+      assert.equal(payload.code, "PROPERTY_SUSPENDED");
+      assert.equal(validationReads, 0);
+      assert.equal(paymentReads, 0);
+      assert.equal(verificationWrites, 0);
+      assert.equal(propertyWrites, 0);
+
+      (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
+    });
+
     await t.test("incomplete property details are returned before any approval work", async () => {
       resetCounters();
       (adminApprovalService as any).requireCompleteProperty = async () => {

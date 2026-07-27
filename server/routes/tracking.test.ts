@@ -13,6 +13,7 @@ import {
   CONTACT_IDENTITY_COOKIE_NAME,
   ContactIdentityRateLimitError,
   contactIdentityService,
+  maskContactPhone,
 } from "../services/ContactIdentityService";
 
 const TEST_CONTACT_TOKEN = "t".repeat(43);
@@ -140,6 +141,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
 
       assert.equal(first.status, 200);
       assert.equal(second.status, 200);
+      const firstPayload = await first.json() as Record<string, unknown>;
+      const secondPayload = await second.json() as Record<string, unknown>;
       const firstRequest = acceptedCalls.at(-2)?.[3];
       const secondRequest = acceptedCalls.at(-1)?.[3];
       const firstEvent = acceptedCalls.at(-2)?.[5];
@@ -152,6 +155,11 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(acceptedCalls.at(-1)?.[6]?.windowMs, 30 * 60 * 1000);
       assert.equal(acceptedCalls.at(-1)?.[6]?.maxAcceptedRequests, 10);
       assert.match(acceptedCalls.at(-1)?.[6]?.key || "", /^[a-f0-9]{64}$/);
+      assert.deepEqual(firstPayload.contactIdentity, {
+        kind: "client",
+        maskedPhone: maskContactPhone("598765432"),
+      });
+      assert.deepEqual(secondPayload.contactIdentity, firstPayload.contactIdentity);
     });
 
     await t.test("an owner always uses the live phone of their own property", async () => {
@@ -170,11 +178,13 @@ test("smart contact requests resolve remembered and owner phones on the server",
       });
 
       assert.equal(response.status, 200);
+      const payload = await response.json() as Record<string, unknown>;
       const request = acceptedCalls.at(-1)?.[3];
       const event = acceptedCalls.at(-1)?.[5];
       assert.equal(request.clientPhone, "512345678");
       assert.equal(event.clientPhone, "512345678");
       assert.equal(event.actorType, "owner");
+      assert.equal("contactIdentity" in payload, false);
     });
 
     await t.test("an owner with no valid live property phone never falls back to client input", async () => {
@@ -209,8 +219,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       });
 
       assert.equal(response.status, 200);
+      const payload = await response.json() as Record<string, unknown>;
       assert.equal(acceptedCalls.at(-1)?.[3]?.clientPhone, "598765432");
       assert.equal(acceptedCalls.at(-1)?.[5]?.actorType, "admin");
+      assert.equal("contactIdentity" in payload, false);
     });
 
     await t.test("a first valid client phone issues the remembered cookie", async () => {
@@ -223,9 +235,17 @@ test("smart contact requests resolve remembered and owner phones on the server",
       });
 
       assert.equal(response.status, 200);
+      const responseBody = await response.text();
+      const payload = JSON.parse(responseBody) as Record<string, unknown>;
       assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
       assert.equal(acceptedCalls.at(-1)?.[3]?.clientPhone, "512345678");
       assert.match(String(issueArguments.at(-1)?.[2] || ""), /^[a-f0-9]{64}$/);
+      assert.deepEqual(payload.contactIdentity, {
+        kind: "client",
+        maskedPhone: maskContactPhone("512345678"),
+      });
+      assert.equal(responseBody.includes("512345678"), false);
+      assert.equal(responseBody.includes(TEST_CONTACT_TOKEN), false);
     });
 
     await t.test("identity persistence failures are generic server errors, not invalid-phone errors", async () => {

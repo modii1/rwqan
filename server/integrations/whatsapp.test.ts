@@ -3,7 +3,149 @@ import test from "node:test";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { firebaseService } from "../firebaseService";
-import whatsappRouter from "./whatsapp";
+import whatsappRouter, {
+  createPropertyOwnerWhatsAppSender,
+  notifyOwnerSubscriptionActivated,
+  notifyOwnerSubscriptionExpired,
+  notifyOwnerSubscriptionExpiringSoon,
+} from "./whatsapp";
+
+test("property owner sender rechecks suspension immediately before every retry", async () => {
+  const suspensionStates = [false, true];
+  let suspensionChecks = 0;
+  let sends = 0;
+  const delays: number[] = [];
+  const send = createPropertyOwnerWhatsAppSender({
+    isSuspended: async () =>
+      suspensionStates[suspensionChecks++] ?? true,
+    send: async (_phone, _message, retries) => {
+      assert.equal(retries, 0, "the guarded sender must own the retry boundary");
+      sends += 1;
+      return { success: false, error: "temporary transport failure" };
+    },
+    delay: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+
+  const result = await send({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    message: "test",
+    retries: 2,
+  });
+
+  assert.deepEqual(result, {
+    success: false,
+    suppressed: true,
+    code: "PROPERTY_SUSPENDED",
+    error: "العقار موقوف مؤقتاً ولن تصله إشعارات حتى إعادة التفعيل",
+  });
+  assert.equal(suspensionChecks, 2);
+  assert.equal(sends, 1);
+  assert.deepEqual(delays, [5000]);
+});
+
+test("property owner sender fails closed when suspension lookup fails", async () => {
+  const lookupError = new Error("firebase unavailable");
+  let sends = 0;
+  const send = createPropertyOwnerWhatsAppSender({
+    isSuspended: async () => {
+      throw lookupError;
+    },
+    send: async () => {
+      sends += 1;
+      return { success: true };
+    },
+    delay: async () => undefined,
+  });
+
+  const result = await send({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    message: "test",
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.suppressed, true);
+  assert.equal(result.code, "SUSPENSION_LOOKUP_FAILED");
+  assert.equal(sends, 0);
+});
+
+test("property owner sender can succeed after a guarded retry", async () => {
+  let suspensionChecks = 0;
+  let sends = 0;
+  const delays: number[] = [];
+  const send = createPropertyOwnerWhatsAppSender({
+    isSuspended: async () => {
+      suspensionChecks += 1;
+      return false;
+    },
+    send: async () => {
+      sends += 1;
+      return sends === 2
+        ? { success: true }
+        : { success: false, error: "temporary transport failure" };
+    },
+    delay: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+
+  const result = await send({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    message: "test",
+    retries: 2,
+  });
+
+  assert.deepEqual(result, { success: true });
+  assert.equal(suspensionChecks, 2);
+  assert.equal(sends, 2);
+  assert.deepEqual(delays, [5000]);
+});
+
+test("every subscription-owner notification wrapper uses the suspension guard", async () => {
+  const originalGetSubscriptionByPropertyNumber =
+    firebaseService.getSubscriptionByPropertyNumber;
+  let suspensionChecks = 0;
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => {
+    suspensionChecks += 1;
+    return { status: "suspended" };
+  };
+
+  try {
+    const results = await Promise.all([
+      notifyOwnerSubscriptionActivated({
+        ownerPhone: "0500000000",
+        propertyNumber: "10001",
+        propertyName: "Test property",
+        endDate: "2026-08-01",
+      }),
+      notifyOwnerSubscriptionExpiringSoon({
+        ownerPhone: "0500000000",
+        propertyNumber: "10001",
+        propertyName: "Test property",
+        daysLeft: 3,
+      }),
+      notifyOwnerSubscriptionExpired({
+        ownerPhone: "0500000000",
+        propertyNumber: "10001",
+        propertyName: "Test property",
+      }),
+    ]);
+
+    assert.equal(suspensionChecks, 3);
+    for (const result of results) {
+      assert.equal(result.success, false);
+      assert.equal(result.suppressed, true);
+      assert.equal(result.code, "PROPERTY_SUSPENDED");
+    }
+  } finally {
+    firebaseService.getSubscriptionByPropertyNumber =
+      originalGetSubscriptionByPropertyNumber;
+  }
+});
 
 test("WhatsApp HTTP routes require same-origin admin access without intercepting unrelated routes", async () => {
   const originalGetRequests = firebaseService.getRequests;
