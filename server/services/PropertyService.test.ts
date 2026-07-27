@@ -42,3 +42,35 @@ test("ordinary property edits do not replay an existing verification status", as
     firebaseService.updateProperty = originalUpdateProperty;
   }
 });
+
+test("property writes remove contradictory no-pool data when a pool is selected", async () => {
+  const originalGetProperty = firebaseService.getPropertyByNumber;
+  const originalUpdateProperty = firebaseService.updateProperty;
+  let persistedFacilities: unknown;
+
+  (firebaseService as any).getPropertyByNumber = async () => ({
+    propertyNumber: "P-POOL",
+    facilities: [],
+  });
+  (firebaseService as any).updateProperty = async (
+    propertyNumber: string,
+    updates: Record<string, unknown>,
+  ) => {
+    persistedFacilities = updates.facilities;
+    return { propertyNumber, ...updates };
+  };
+
+  try {
+    const indoorPool = "\u0645\u0633\u0628\u062d \u062f\u0627\u062e\u0644\u064a";
+    const noPool = "\u0628\u062f\u0648\u0646 \u0645\u0633\u0628\u062d";
+    await new PropertyService().update(
+      "P-POOL",
+      { facilities: [indoorPool, noPool] },
+      { skipVerification: true },
+    );
+    assert.deepEqual(persistedFacilities, [indoorPool]);
+  } finally {
+    firebaseService.getPropertyByNumber = originalGetProperty;
+    firebaseService.updateProperty = originalUpdateProperty;
+  }
+});

@@ -8,6 +8,8 @@ interface PublicSubscriptionState {
 }
 
 interface PublicPropertySubscriptionState {
+  propertyNumber?: string | null;
+  name?: string | null;
   subscriptionType?: string | null;
   subscriptionStatus?: string | null;
   subscriptionEndDate?: string | null;
@@ -69,4 +71,21 @@ export function isPublicPropertyPremium(
     endDate: property.subscriptionEndDate,
     isExpired: property.isSubscriptionExpired,
   }, now);
+}
+
+export function getPublicPropertyDisplayName(
+  property: PublicPropertySubscriptionState,
+  now = new Date(),
+): string {
+  if (!isPublicPropertyPremium(property, now)) return "";
+  return String(property.name || "").trim();
+}
+
+export function getPublicPropertyLabel(
+  property: PublicPropertySubscriptionState,
+  now = new Date(),
+): string {
+  const premiumName = getPublicPropertyDisplayName(property, now);
+  if (premiumName) return premiumName;
+  return `عقار رقم ${String(property.propertyNumber || "").trim()}`.trim();
 }

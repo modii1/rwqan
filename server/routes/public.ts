@@ -1,10 +1,12 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import fs from "fs";
 import path from "path";
-import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { propertyService, subscriptionService, discountService, notificationService, contentService, occasionService } from "../services";
 import { firebaseService } from "../firebaseService";
-import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../utils/r2";
+import {
+  R2ImageStorageUnavailableError,
+  listR2PropertyImagesStrict,
+} from "../utils/r2";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
 
@@ -223,48 +225,31 @@ router.get("/api/public/property-images", (_req, res) => {
   res.json({ images: [] });
 });
 
-router.get("/api/public/property-images/:propertyNumber", async (req, res) => {
-  try {
-    const propertyNumber = req.params.propertyNumber;
-
-    if (!r2) {
-      console.warn(`[R2 IMAGES] r2 client is null for property ${propertyNumber} — env vars not set`);
-      return res.json({ images: [] });
+export function createPublicPropertyImagesHandler(
+  listImages: (propertyNumber: string) => Promise<string[]> =
+    listR2PropertyImagesStrict,
+): RequestHandler {
+  return async (req, res) => {
+    try {
+      const images = await listImages(req.params.propertyNumber);
+      res.json({ images });
+    } catch (err) {
+      console.error(`[R2 IMAGES] ERROR for property ${req.params.propertyNumber}:`, err);
+      if (err instanceof R2ImageStorageUnavailableError) {
+        return res.status(503).json({
+          code: "IMAGE_STORAGE_UNAVAILABLE",
+          error: "تعذر تحميل صور العقار مؤقتاً",
+        });
+      }
+      res.status(500).json({ error: "تعذر تحميل صور العقار" });
     }
-    if (!R2_BUCKET) {
-      console.warn(`[R2 IMAGES] R2_BUCKET_NAME env var not set for property ${propertyNumber}`);
-      return res.json({ images: [] });
-    }
+  };
+}
 
-    console.log(`[R2 IMAGES] Listing bucket=${R2_BUCKET} prefix=${propertyNumber}/`);
-    const list = await r2.send(
-      new ListObjectsV2Command({
-        Bucket: R2_BUCKET,
-        Prefix: `${propertyNumber}/`,
-      })
-    );
-
-    const allKeys = list.Contents?.map(o => o.Key) || [];
-    console.log(`[R2 IMAGES] property=${propertyNumber} total objects=${allKeys.length} keys=${JSON.stringify(allKeys.slice(0, 10))}`);
-
-    // فلترة الصور فقط (jpg, png, webp) وترتيبها
-    const images = (list.Contents || [])
-      .filter((obj) => obj.Key && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key))
-      .sort((a, b) => {
-        // ترتيب حسب اسم الملف (1.jpg, 2.jpg, etc.)
-        const numA = parseInt(a.Key?.match(/(\d+)\./)?.[1] || "0");
-        const numB = parseInt(b.Key?.match(/(\d+)\./)?.[1] || "0");
-        return numA - numB;
-      })
-      .map((obj) => `${R2_PUBLIC_URL}/${obj.Key}`);
-
-    console.log(`[R2 IMAGES] property=${propertyNumber} returning ${images.length} image URLs: ${JSON.stringify(images.slice(0, 3))}`);
-    res.json({ images });
-  } catch (err) {
-    console.error(`[R2 IMAGES] ERROR for property ${req.params.propertyNumber}:`, err);
-    res.json({ images: [] }); // Return empty array on error
-  }
-});
+router.get(
+  "/api/public/property-images/:propertyNumber",
+  createPublicPropertyImagesHandler(),
+);
 
 // ======================
 // 💳 PAYMENT CALCULATION

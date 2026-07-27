@@ -7,6 +7,14 @@ import { firebaseService } from "../firebaseService";
 import { googleDriveService } from "../integrations/googleDrive";
 import type { InsertProperty } from "../../shared/schema";
 import { normalizeArabicText } from "../../src/lib/arabicSearch";
+import {
+  normalizePropertyFacilitySelection,
+  propertyMatchesAllFacilityFilters,
+} from "../../shared/propertyFacilityFilter";
+import {
+  getMaximumPrimaryPropertyPrice,
+  getPrimaryPropertyPrice,
+} from "../../shared/propertyPrice";
 import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
 import { requireAdmin, requireSameOrigin } from "./middleware";
@@ -19,7 +27,10 @@ function toPublicProperty(property: any) {
     whatsappNumber: _whatsappNumber,
     ...publicProperty
   } = property;
-  return publicProperty;
+  return {
+    ...publicProperty,
+    facilities: normalizePropertyFacilitySelection(publicProperty.facilities),
+  };
 }
 
 function isExpiredSubscription(subscription: any): boolean {
@@ -53,6 +64,23 @@ function getPublicSubscriptionFields(subscription: any, isSubscriptionExpired: b
   };
 }
 
+function toPublicPropertyWithSubscription(property: any, subscription: any) {
+  const isSubscriptionExpired = isExpiredSubscription(subscription);
+  const subscriptionFields = getPublicSubscriptionFields(
+    subscription,
+    isSubscriptionExpired,
+  );
+  const publicProperty = toPublicProperty(property);
+
+  return {
+    ...publicProperty,
+    // Property names are a premium public benefit. Once a subscription is
+    // expired, suspended, or otherwise inactive, expose only its number.
+    name: subscriptionFields.isPremiumActive ? publicProperty.name || "" : "",
+    ...subscriptionFields,
+  };
+}
+
 // GET all properties (public - only approved)
 router.get("/api/properties", async (_req, res) => {
   try {
@@ -60,12 +88,7 @@ router.get("/api/properties", async (_req, res) => {
     const withSubscriptionStatus = await Promise.all(
       items.map(async (p) => {
         const subscription = await subscriptionService.getByProperty(p.propertyNumber);
-        const isSubscriptionExpired = isExpiredSubscription(subscription);
-        
-        return {
-          ...toPublicProperty(p),
-          ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
-        };
+        return toPublicPropertyWithSubscription(p, subscription);
       })
     );
 
@@ -101,12 +124,7 @@ router.get("/api/properties/:id", async (req, res) => {
     // Check subscription status
     const subscription = await subscriptionService.getByProperty(req.params.id);
     
-    const isSubscriptionExpired = isExpiredSubscription(subscription);
-
-    const response = {
-      ...toPublicProperty(p),
-      ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
-    };
+    const response = toPublicPropertyWithSubscription(p, subscription);
 
     return res.json(response);
   } catch (err) {
@@ -251,16 +269,14 @@ router.get("/api/search", async (req, res) => {
     // Apply subscription status
     items = await Promise.all(items.map(async (p) => {
       const subscription = await subscriptionService.getByProperty(p.propertyNumber);
-      const isSubscriptionExpired = isExpiredSubscription(subscription);
-      return {
-        ...toPublicProperty(p),
-        ...getPublicSubscriptionFields(subscription, isSubscriptionExpired),
-      };
+      return toPublicPropertyWithSubscription(p, subscription);
     }));
+    const globalPriceCeiling = getMaximumPrimaryPropertyPrice(items);
 
     // Filter by city
     if (city && city !== "all" && city !== "") {
-      items = items.filter(p => p.city === city);
+      const normalizedCity = normalizeArabicText(String(city));
+      items = items.filter(p => normalizeArabicText(p.city) === normalizedCity);
     }
 
     // Filter by direction
@@ -279,48 +295,46 @@ router.get("/api/search", async (req, res) => {
         .flatMap((value) => String(value).split(","))
         .map((value) => value.trim())
         .filter(Boolean);
-      items = items.filter(p => {
-        const propFacilities: string[] = Array.isArray(p.facilities) ? p.facilities : [];
-        return facilityList.every((f: string) => {
-          // مبيت: تطابق العقارات التي لها سعر مبيت أو "مبيت" في المرافق
-          if (f === "مبيت") {
-            const hasInFacilities = propFacilities.some((pf: string) => pf.includes("مبيت") || "مبيت".includes(pf));
-            const hasOvernightPrice = !!(p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "");
-            return hasInFacilities || hasOvernightPrice;
-          }
-          return propFacilities.some((pf: string) => pf.includes(f) || f.includes(pf));
-        });
-      });
+      items = items.filter((property) =>
+        propertyMatchesAllFacilityFilters(property, facilityList)
+      );
     }
 
-    // Filter by max price (weekend price)
-    if (maxPrice && !isNaN(Number(maxPrice))) {
+    // Filter by the same primary price displayed on public cards.
+    if (maxPrice && !isNaN(Number(maxPrice)) && Number(maxPrice) >= 0) {
       const price = Number(maxPrice);
-      items = items.filter(p => {
-        const propPrice = parseFloat(p.prices?.weekend || p.prices?.weekday || "0");
-        return propPrice <= price;
-      });
+      // A cap at or above the live slider ceiling is the UI's "all" state.
+      // Only a lower cap is an active filter, and unpriced properties do not
+      // satisfy an active price limit.
+      if (price < globalPriceCeiling) {
+        items = items.filter(p => {
+          const primaryPrice = getPrimaryPropertyPrice(p.prices);
+          return primaryPrice > 0 && primaryPrice <= price;
+        });
+      }
     }
 
     // Apply text search
     if (search && typeof search === "string" && search.trim()) {
       const normalizedSearch = normalizeArabicText(search);
       items = items.filter(p => {
+        const premiumSearchFields = (p as any).isPremiumActive === true
+          ? [
+              p.name,
+              (p as any).description,
+              (p as any).seoDescription,
+            ]
+          : [];
         const parts: (string | null | undefined)[] = [
           p.propertyNumber,
-          p.name,
           p.city,
           p.direction,
           p.type,
-          p.lastChanges,
           // المرافق
           ...(Array.isArray(p.facilities) ? p.facilities : []),
           // إضافة "مبيت" كلمة مفتاحية إذا كان سعر المبيت محددًا
           (p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "") ? "مبيت" : null,
-          // أي حقول نصية إضافية قد تكون موجودة في Firestore
-          (p as any).description,
-          (p as any).notes,
-          (p as any).seoDescription,
+          ...premiumSearchFields,
         ];
         const normalizedQuery = normalizeArabicText(parts.filter(Boolean).join(" "));
         return normalizedQuery.includes(normalizedSearch);

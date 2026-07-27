@@ -67,7 +67,10 @@ export function FilterModal({
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">الاتجاه</label>
-                            <Select value={selectedDirection} onValueChange={setSelectedDirection}>
+                            <Select
+                                value={selectedDirection || "all"}
+                                onValueChange={(value) => setSelectedDirection(value === "all" ? "" : value)}
+                            >
                                 <SelectTrigger className="h-10 rounded-lg text-sm">
                                     <SelectValue placeholder="الاتجاه" />
                                 </SelectTrigger>
@@ -80,7 +83,10 @@ export function FilterModal({
 
                         <div>
                             <label className="text-xs font-semibold text-[#6b6b6b] mb-2 block">النوع</label>
-                            <Select value={selectedType} onValueChange={setSelectedType}>
+                            <Select
+                                value={selectedType || "all"}
+                                onValueChange={(value) => setSelectedType(value === "all" ? "" : value)}
+                            >
                                 <SelectTrigger className="h-10 rounded-lg text-sm">
                                     <SelectValue placeholder="النوع" />
                                 </SelectTrigger>

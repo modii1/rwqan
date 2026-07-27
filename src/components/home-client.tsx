@@ -20,9 +20,35 @@ import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import type { ActiveOccasion } from "@/lib/server-fetch";
-import { isPublicPropertyPremium } from "@/lib/public-subscription";
+import {
+    getPublicPropertyDisplayName,
+    getPublicPropertyLabel,
+    isPublicPropertyPremium,
+} from "@/lib/public-subscription";
+import {
+    getCachedPropertyImage,
+    getPropertyImageSetKey,
+    hasCachedPropertyImages,
+    fetchPropertyImageUrls,
+    PROPERTY_IMAGE_PLACEHOLDER,
+} from "@/lib/property-images";
+import {
+    buildPropertySearchQueryString,
+    normalizePropertyFacilityFilters,
+    normalizePropertyFilterChoice,
+    parseStoredPropertyFilters,
+} from "@/lib/property-search";
+import {
+    propertyMatchesAllFacilityFilters,
+    togglePropertyFacilitySelection,
+} from "@shared/propertyFacilityFilter";
+import {
+    getMaximumPrimaryPropertyPrice,
+    getPrimaryPropertyPrice,
+    getPrimaryPropertyPriceDisplay,
+} from "@shared/propertyPrice";
 
-const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الاسياح", "رياض الخبراء", "عيون الجواء"];
+const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 
@@ -33,7 +59,7 @@ const CITY_IMAGES: Record<string, string> = {
     "البكيرية": "/images/cities/البكيرية.jpeg",
     "المذنب": "/images/cities/المذنب.jpeg",
     "البدائع": "/images/cities/البدائع.jpeg",
-    "الاسياح": "/images/cities/الاسياح.jpeg",
+    "الأسياح": "/images/cities/الاسياح.jpeg",
     "رياض الخبراء": "/images/cities/رياض_الخبراء.jpeg",
     "عيون الجواء": "/images/cities/عيون_الجواء.jpeg"
 };
@@ -42,14 +68,6 @@ const FACILITIES = [
     "مسبح", "بدون مسبح", "مبيت", "ألعاب مائية", "ملعب",
     "مناسبات", "شتاء", "صيف", "مكيف", "واي فاي",
 ];
-
-const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
-
-function getPropertyImage(propertyNumber: string, index: number = 0, imagesMap?: Map<string, string[]>) {
-    const cached = imagesMap?.get(propertyNumber);
-    if (cached && cached.length > index) return cached[index];
-    return `${R2_BASE}/${propertyNumber}/${index + 1}.jpg`;
-}
 
 interface HomeClientProps {
     initialProperties?: Property[];
@@ -64,16 +82,22 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
     const citiesScrollRef = useRef<HTMLDivElement>(null);
 
     const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
-    const [selectedCity, setSelectedCity] = useState(searchParams.get("city") || "");
-    const [selectedDirection, setSelectedDirection] = useState(searchParams.get("direction") || "");
-    const [selectedType, setSelectedType] = useState(searchParams.get("type") || "");
+    const [selectedCity, setSelectedCity] = useState(
+        normalizePropertyFilterChoice(searchParams.get("city")),
+    );
+    const [selectedDirection, setSelectedDirection] = useState(
+        normalizePropertyFilterChoice(searchParams.get("direction")),
+    );
+    const [selectedType, setSelectedType] = useState(
+        normalizePropertyFilterChoice(searchParams.get("type")),
+    );
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
-        searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
+        normalizePropertyFacilityFilters(searchParams.get("facilities")?.split(",")),
     );
     const maxPriceParam = searchParams.get("maxPrice");
-    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam))
+    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam)) && Number(maxPriceParam) >= 0
         ? Number(maxPriceParam)
-        : 99999;
+        : getMaximumPrimaryPropertyPrice(initialProperties);
     const [maxPrice, setMaxPrice] = useState<number>(initialMaxPrice);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [showFilters, setShowFilters] = useState(false);
@@ -101,13 +125,10 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
     const [selectedDay, setSelectedDay] = useState<string>("");
     const occasionScrollRef = useRef<HTMLDivElement>(null);
 
-    const maxPriceValue = useMemo(() => {
-        const prices = allProperties.flatMap(p => [
-            parseFloat(p.prices?.weekday || "0"),
-            parseFloat(p.prices?.weekend || "0"),
-        ]).filter(p => p > 0);
-        return prices.length > 0 ? Math.ceil(Math.max(...prices)) : 500;
-    }, [allProperties]);
+    const maxPriceValue = useMemo(
+        () => getMaximumPrimaryPropertyPrice(allProperties),
+        [allProperties],
+    );
 
     const initializedRef = useRef(false);
     useEffect(() => {
@@ -126,13 +147,18 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
         const hasScrollPosition = sessionStorage.getItem("homeScrollY");
         const saved = sessionStorage.getItem("homeFilters");
         if (saved && hasScrollPosition) {
-            const f = JSON.parse(saved);
-            setSearchQuery(f.searchQuery || "");
-            setSelectedCity(f.selectedCity || "");
-            setSelectedDirection(f.selectedDirection || "");
-            setSelectedType(f.selectedType || "");
-            setSelectedFacilities(f.selectedFacilities || []);
-            if (f.maxPrice) setMaxPrice(f.maxPrice);
+            const f = parseStoredPropertyFilters(saved);
+            const hasUrlParams = searchParams.get("search") || searchParams.get("city")
+                || searchParams.get("direction") || searchParams.get("type")
+                || searchParams.get("facilities") || searchParams.get("maxPrice");
+            if (f && !hasUrlParams) {
+                setSearchQuery(f.searchQuery);
+                setSelectedCity(f.selectedCity);
+                setSelectedDirection(f.selectedDirection);
+                setSelectedType(f.selectedType);
+                setSelectedFacilities(f.selectedFacilities);
+                if (f.maxPrice !== undefined) setMaxPrice(f.maxPrice);
+            }
         }
         sessionStorage.removeItem("homeFilters");
     }, []);
@@ -143,13 +169,21 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
         if (searchQuery.trim()) {
         const q = normalizeArabicText(searchQuery);
             results = results.filter(p => {
+                const premiumSearchFields = isPublicPropertyPremium(p)
+                    ? [
+                        getPublicPropertyDisplayName(p),
+                        (p as any).description,
+                        (p as any).seoDescription,
+                    ]
+                    : [];
                 const parts: (string | null | undefined)[] = [
-                    p.propertyNumber, p.name, p.city, p.direction, p.type,
-                    p.lastChanges,
+                    p.propertyNumber,
+                    p.city,
+                    p.direction,
+                    p.type,
                     ...(Array.isArray(p.facilities) ? p.facilities : []),
                     (p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "") ? "مبيت" : null,
-                    (p as any).description,
-                    (p as any).seoDescription,
+                    ...premiumSearchFields,
                 ];
                 const searchable = normalizeArabicText(parts.filter(Boolean).join(" "));
                 return searchable.includes(q);
@@ -158,7 +192,7 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
 
         return results.filter(p => {
             if (selectedCity && selectedCity !== "all") {
-                if (p.city !== selectedCity) return false;
+                if (normalizeArabicText(p.city) !== normalizeArabicText(selectedCity)) return false;
             }
             if (selectedDirection && selectedDirection !== "all") {
                 if (p.direction !== selectedDirection) return false;
@@ -167,20 +201,11 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                 if (p.type !== selectedType) return false;
             }
             if (selectedFacilities.length > 0) {
-                const pf = Array.isArray(p.facilities) ? p.facilities : [];
-                const hasAll = selectedFacilities.every(f => {
-                    if (f === "مبيت") {
-                        const inFacilities = pf.some(pf2 => pf2.includes("مبيت") || "مبيت".includes(pf2));
-                        const hasOvernightPrice = !!(p.prices?.overnight && p.prices.overnight !== "0" && p.prices.overnight !== "");
-                        return inFacilities || hasOvernightPrice;
-                    }
-                    return pf.some(pf2 => pf2.includes(f) || f.includes(pf2));
-                });
-                if (!hasAll) return false;
+                if (!propertyMatchesAllFacilityFilters(p, selectedFacilities)) return false;
             }
             if (maxPrice < maxPriceValue) {
-                const price = parseFloat(p.prices?.weekend || p.prices?.weekday || "0");
-                if (price > maxPrice) return false;
+                const price = getPrimaryPropertyPrice(p.prices);
+                if (price <= 0 || price > maxPrice) return false;
             }
             return true;
         }).sort((a, b) => {
@@ -211,33 +236,35 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
     const cities = useMemo(() => {
         const counts: Record<string, number> = {};
         allProperties.forEach(p => {
-            if (p.city) counts[p.city] = (counts[p.city] || 0) + 1;
+            const normalizedCity = normalizeArabicText(p.city || "");
+            if (normalizedCity) counts[normalizedCity] = (counts[normalizedCity] || 0) + 1;
         });
         return CITIES.map(city => ({
             name: city,
-            count: counts[city] || 0,
-            image: getPropertyImage(
-                allProperties.find(p => p.city === city)?.propertyNumber || "0",
+            count: counts[normalizeArabicText(city)] || 0,
+            image: getCachedPropertyImage(
+                allProperties.find(
+                    p => normalizeArabicText(p.city || "") === normalizeArabicText(city),
+                )?.propertyNumber || "0",
                 0
             ),
         })).filter(c => c.count > 0);
     }, [allProperties]);
 
     const buildQueryString = () => {
-        const params = new URLSearchParams();
-        if (searchQuery) params.set("search", searchQuery);
-        if (selectedCity) params.set("city", selectedCity);
-        if (selectedDirection) params.set("direction", selectedDirection);
-        if (selectedType) params.set("type", selectedType);
-        if (selectedFacilities.length > 0) params.set("facilities", selectedFacilities.join(","));
-        if (maxPrice < maxPriceValue) params.set("maxPrice", String(maxPrice));
-        return params.toString();
+        return buildPropertySearchQueryString({
+            searchQuery,
+            selectedCity,
+            selectedDirection,
+            selectedType,
+            selectedFacilities,
+            maxPrice,
+            maxPriceCeiling: maxPriceValue,
+        });
     };
 
     const toggleFacility = (f: string) => {
-        setSelectedFacilities(prev =>
-            prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]
-        );
+        setSelectedFacilities(prev => togglePropertyFacilitySelection(prev, f));
     };
 
     const clearFilters = () => {
@@ -289,7 +316,7 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
         });
     };
 
-    const hasActiveFilters = !!(searchQuery || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
+    const hasActiveFilters = !!(searchQuery.trim() || selectedCity || selectedDirection || selectedType || selectedFacilities.length > 0 || maxPrice < maxPriceValue);
 
     const scrollContainer = (ref: React.RefObject<HTMLDivElement | null>, dir: "left" | "right") => {
         if (ref.current) {
@@ -318,24 +345,19 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
     }, [featuredProperties.length]);
 
     const fetchPropertyImages = async (propertyNumber: string) => {
-        if (propertyImages.has(propertyNumber) || loadingImages.has(propertyNumber)) return;
+        if (hasCachedPropertyImages(propertyImages, propertyNumber) || loadingImages.has(propertyNumber)) return;
         setLoadingImages(prev => new Set(prev).add(propertyNumber));
         try {
-            const response = await fetch(`/api/public/property-images/${propertyNumber}`);
-            const data = await response.json();
+            const images = await fetchPropertyImageUrls(propertyNumber);
             setPropertyImages(prev => {
                 const newMap = new Map(prev);
-                newMap.set(propertyNumber, data.images || []);
+                newMap.set(propertyNumber, images);
                 return newMap;
             });
         } catch {
             setPropertyImages(prev => {
                 const newMap = new Map(prev);
-                newMap.set(propertyNumber, [
-                    `${R2_BASE}/${propertyNumber}/1.jpg`,
-                    `${R2_BASE}/${propertyNumber}/2.jpg`,
-                    `${R2_BASE}/${propertyNumber}/3.jpg`,
-                ]);
+                newMap.set(propertyNumber, []);
                 return newMap;
             });
         } finally {
@@ -347,17 +369,22 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
         }
     };
 
+    const neededImagePropertyNumbers = [
+        ...new Set([
+            ...latestProperties.map(p => p.propertyNumber),
+            ...(activeOccasion
+                ? activeOccasion.properties.map(op => op.propertyNumber)
+                : []),
+        ]),
+    ];
+    const neededPropertyImageKey = getPropertyImageSetKey(
+        neededImagePropertyNumbers,
+    );
+
     useEffect(() => {
         if (isLoading || allProperties.length === 0) return;
-        const occasionPropNumbers = activeOccasion
-            ? activeOccasion.properties.map(op => op.propertyNumber)
-            : [];
-        const allNeeded = new Set([
-            ...latestProperties.map(p => p.propertyNumber),
-            ...occasionPropNumbers,
-        ]);
-        allNeeded.forEach(pn => fetchPropertyImages(pn));
-    }, [latestProperties.length, activeOccasion, isLoading]);
+        neededImagePropertyNumbers.forEach(pn => fetchPropertyImages(pn));
+    }, [neededPropertyImageKey, isLoading]);
 
     const handleSearch = () => {
         const qs = buildQueryString();
@@ -423,7 +450,10 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                     </div>
 
                     <div className="flex flex-row gap-3 mb-4">
-                        <Select value={selectedType} onValueChange={setSelectedType}>
+                        <Select
+                            value={selectedType || "all"}
+                            onValueChange={(value) => setSelectedType(value === "all" ? "" : value)}
+                        >
                             <SelectTrigger className="h-11 flex-1 rounded-xl border-gray-200 bg-[#f9fafb] text-sm">
                                 <SelectValue placeholder="النوع" />
                             </SelectTrigger>
@@ -433,7 +463,10 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                             </SelectContent>
                         </Select>
 
-                        <Select value={selectedDirection} onValueChange={setSelectedDirection}>
+                        <Select
+                            value={selectedDirection || "all"}
+                            onValueChange={(value) => setSelectedDirection(value === "all" ? "" : value)}
+                        >
                             <SelectTrigger className="h-11 flex-1 rounded-xl border-gray-200 bg-[#f9fafb] text-sm">
                                 <SelectValue placeholder="الاتجاه" />
                             </SelectTrigger>
@@ -576,6 +609,7 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                                 {filteredProperties.map((op, idx) => {
                                     const property = allProperties.find(p => p.propertyNumber === op.propertyNumber);
                                     if (!property) return null;
+                                    const publicLabel = getPublicPropertyLabel(property);
 
                                     return (
                                         <div
@@ -585,11 +619,11 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                                         >
                                             <div className="relative h-40 overflow-hidden">
                                                 <img
-                                                    src={getPropertyImage(op.propertyNumber, 0, propertyImages)}
-                                                    alt={property.name}
+                                                    src={getCachedPropertyImage(op.propertyNumber, 0, propertyImages)}
+                                                    alt={publicLabel}
                                                     className="w-full h-full object-cover"
                                                     onError={(e) => {
-                                                        (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo,sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
+                                                        (e.target as HTMLImageElement).src = PROPERTY_IMAGE_PLACEHOLDER;
                                                     }}
                                                 />
                                                 <div className="absolute top-2 right-2">
@@ -601,7 +635,7 @@ export default function HomeClient({ initialProperties, initialOccasion, initial
                                             </div>
                                             <div className="p-3">
                                                 <div className="flex items-center justify-between mb-2">
-                                                    <h3 className="font-bold text-sm text-[#1a1a1a] truncate">{property.name}</h3>
+                                                    <h3 className="font-bold text-sm text-[#1a1a1a] truncate">{publicLabel}</h3>
                                                     <span className="text-xs text-[#6b6b6b]">{property.city}</span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mb-2">
@@ -812,8 +846,9 @@ interface PropertyCardProps {
 }
 
 function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, onClick, propertyImages }: PropertyCardProps) {
-    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx, propertyImages);
-    const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
+    const imageUrl = getCachedPropertyImage(property.propertyNumber, imgIdx, propertyImages);
+    const mainPrice = getPrimaryPropertyPriceDisplay(property.prices);
+    const publicLabel = getPublicPropertyLabel(property);
 
     return (
         <Card
@@ -823,10 +858,10 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, onClick, pr
             <div className="relative">
                 <img
                     src={imageUrl}
-                    alt={property.name || property.propertyNumber}
+                    alt={publicLabel}
                     className="w-full h-40 md:h-48 object-cover"
                     onError={(e) => {
-                        (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo,sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
+                        (e.target as HTMLImageElement).src = PROPERTY_IMAGE_PLACEHOLDER;
                     }}
                 />
 
@@ -858,7 +893,7 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, onClick, pr
             <div className="p-3">
                 {isPremium && (
                     <h3 className="font-bold text-[#1a1a1a] text-sm mb-1 line-clamp-1">
-                        {property.name || property.type || "عقار"}
+                        {publicLabel}
                     </h3>
                 )}
 

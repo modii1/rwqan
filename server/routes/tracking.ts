@@ -103,6 +103,7 @@ async function recordContactEvent(
 router.post("/api/requests/smart", async (req, res) => {
   let contactEventBase: ContactEventBase | null = null;
   let acceptedEventRecorded = false;
+  let responseContactIdentity: { kind: "client"; maskedPhone: string } | undefined;
   try {
     if (!isSameOriginRequest(req)) {
       return res.status(403).json({ code: "CROSS_ORIGIN_REQUEST", error: "الطلب غير مسموح" });
@@ -238,6 +239,14 @@ router.post("/api/requests/smart", async (req, res) => {
       }
     }
 
+    const resolvedClientPhone = clientPhone;
+    if (actor === "anonymous" && resolvedClientPhone) {
+      const maskedPhone = maskContactPhone(resolvedClientPhone);
+      if (maskedPhone) {
+        responseContactIdentity = { kind: "client", maskedPhone };
+      }
+    }
+
     if (contactVisitorId) {
       contactEventBase.visitorKey = createRememberedVisitorKey(contactVisitorId);
     }
@@ -325,6 +334,9 @@ router.post("/api/requests/smart", async (req, res) => {
         error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
         remainingSeconds,
         remainingTimeFormatted: timeDisplay,
+        ...(responseContactIdentity
+          ? { contactIdentity: responseContactIdentity }
+          : {}),
       });
     }
 
@@ -342,23 +354,14 @@ router.post("/api/requests/smart", async (req, res) => {
       ip: ipAddress,
     }).catch(err => console.error("WhatsApp notify error:", err));
 
-    const maskedContactPhone = actor === "anonymous"
-      ? maskContactPhone(clientPhone)
-      : null;
-
     res.json({
       ok: true,
       message: "تم تسجيل طلبك بنجاح ✅",
       requestCode,
       requestTime: riyadhTimeDisplay,
       whatsappNumber: property?.whatsappNumber || "",
-      ...(maskedContactPhone
-        ? {
-            contactIdentity: {
-              kind: "client" as const,
-              maskedPhone: maskedContactPhone,
-            },
-          }
+      ...(responseContactIdentity
+        ? { contactIdentity: responseContactIdentity }
         : {}),
     });
   } catch (err: any) {
@@ -366,7 +369,12 @@ router.post("/api/requests/smart", async (req, res) => {
     if (contactEventBase && !acceptedEventRecorded) {
       await recordContactEvent(contactEventBase, "error");
     }
-    res.status(500).json({ error: "خطأ في معالجة الطلب" });
+    res.status(500).json({
+      error: "خطأ في معالجة الطلب",
+      ...(responseContactIdentity
+        ? { contactIdentity: responseContactIdentity }
+        : {}),
+    });
   }
 });
 

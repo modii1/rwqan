@@ -120,7 +120,11 @@ async function getPropertyImages(id: string): Promise<string[]> {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { id } = await params;
-    const property = await getPropertyFromApi(id) ?? await getPropertyFromScript(id);
+    const [apiProperty, images] = await Promise.all([
+        getPropertyFromApi(id),
+        getPropertyImages(id),
+    ]);
+    const property = apiProperty ?? await getPropertyFromScript(id);
 
     if (!property) {
         return {
@@ -137,7 +141,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         ? `${property.name} في ${property.city}${property.direction ? ` - ${property.direction}` : ""}. ${property.type || "عقار"} للإيجار. احجز الآن في روقان.`
         : `عقار رقم ${property.propertyNumber} للإيجار في ${property.city || "القصيم"} | روقان`;
 
-    const ogImage = `https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev/${property.propertyNumber}/1.jpg`;
+    const socialImages = images[0] ? [images[0]] : undefined;
 
     return {
         title,
@@ -146,13 +150,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
             title,
             description,
             type: "website",
-            images: [ogImage],
+            images: socialImages,
         },
         twitter: {
             card: "summary_large_image",
             title,
             description,
-            images: [ogImage],
+            images: socialImages,
         },
     };
 }

@@ -30,19 +30,34 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PriceDisplay } from "@/components/price-display";
 import { FilterModal } from "@/components/filter-modal";
 import type { ActiveOccasion } from "@/lib/server-fetch";
-import { isPublicPropertyPremium } from "@/lib/public-subscription";
+import {
+    getPublicPropertyLabel,
+    isPublicPropertyPremium,
+} from "@/lib/public-subscription";
+import {
+    getCachedPropertyImage,
+    getPropertyImageSetKey,
+    hasCachedPropertyImages,
+    fetchPropertyImageUrls,
+    PROPERTY_IMAGE_PLACEHOLDER,
+} from "@/lib/property-images";
+import {
+    arePropertySearchQueryKeysEqual,
+    buildPropertySearchQueryKey,
+    buildPropertySearchQueryString,
+    normalizePropertyFacilityFilters,
+    normalizePropertyFilterChoice,
+    parseStoredPropertyFilters,
+} from "@/lib/property-search";
+import { togglePropertyFacilitySelection } from "@shared/propertyFacilityFilter";
+import {
+    getMaximumPrimaryPropertyPrice,
+    getPrimaryPropertyPriceDisplay,
+} from "@shared/propertyPrice";
 
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
 const FACILITIES = ["مسبح", "بدون مسبح", "مبيت", "ألعاب مائية", "ملعب", "مناسبات", "شتاء", "صيف", "مكيف", "واي فاي"];
-
-const R2_BASE = "https://pub-e2fc1c0a598f4f0e91e47af63219848e.r2.dev";
-
-function getPropertyImage(propertyNumber: string, index: number = 0, imagesMap?: Map<string, string[]>) {
-    const cached = imagesMap?.get(propertyNumber);
-    if (cached && cached.length > index) return cached[index];
-    return `${R2_BASE}/${propertyNumber}/${index + 1}.jpg`;
-}
 
 interface PropertiesClientProps {
     initialAllProperties?: Property[];
@@ -55,28 +70,45 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
-    const [selectedCity, setSelectedCity] = useState(searchParams.get("city") || "");
-    const [selectedDirection, setSelectedDirection] = useState(searchParams.get("direction") || "");
-    const [selectedType, setSelectedType] = useState(searchParams.get("type") || "");
+    const initialSearchQuery = searchParams.get("search") || "";
+    const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialSearchQuery);
+    const [selectedCity, setSelectedCity] = useState(
+        normalizePropertyFilterChoice(searchParams.get("city")),
+    );
+    const [selectedDirection, setSelectedDirection] = useState(
+        normalizePropertyFilterChoice(searchParams.get("direction")),
+    );
+    const [selectedType, setSelectedType] = useState(
+        normalizePropertyFilterChoice(searchParams.get("type")),
+    );
     const [selectedFacilities, setSelectedFacilities] = useState<string[]>(
-        searchParams.get("facilities") ? searchParams.get("facilities")!.split(",").filter(Boolean) : []
+        normalizePropertyFacilityFilters(searchParams.get("facilities")?.split(",")),
     );
     const maxPriceParam = searchParams.get("maxPrice");
-    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam))
+    const initialMaxPrice = maxPriceParam && Number.isFinite(Number(maxPriceParam)) && Number(maxPriceParam) >= 0
         ? Number(maxPriceParam)
-        : 99999;
+        : getMaximumPrimaryPropertyPrice(initialAllProperties);
     const [maxPrice, setMaxPrice] = useState<number>(initialMaxPrice);
     const [showFilters, setShowFilters] = useState(false);
     const [currentImageIndex, setCurrentImageIndex] = useState<Map<string, number>>(new Map());
     const [visibleCount, setVisibleCount] = useState(30);
     const [showScrollTop, setShowScrollTop] = useState(false);
-    const [occasionFilter, setOccasionFilter] = useState(searchParams.get("occasion") || "");
-    const [selectedDay, setSelectedDay] = useState(searchParams.get("day") || "");
+    const [occasionFilter, setOccasionFilter] = useState(
+        normalizePropertyFilterChoice(searchParams.get("occasion")),
+    );
+    const [selectedDay, setSelectedDay] = useState(
+        normalizePropertyFilterChoice(searchParams.get("day")),
+    );
     const [propertyImages, setPropertyImages] = useState<Map<string, string[]>>(
         () => new Map(Object.entries(initialImages || {}))
     );
     const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+        return () => window.clearTimeout(timer);
+    }, [searchQuery]);
 
 
     useEffect(() => {
@@ -95,35 +127,73 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         initialData: initialOccasion,
     });
 
-    const buildQueryString = () => {
-        const params = new URLSearchParams();
-        if (searchQuery) params.set("search", searchQuery);
-        if (selectedCity) params.set("city", selectedCity);
-        if (selectedDirection) params.set("direction", selectedDirection);
-        if (selectedType) params.set("type", selectedType);
-        if (selectedFacilities.length > 0) params.set("facilities", selectedFacilities.join(","));
-        if (maxPrice < 99999) params.set("maxPrice", String(maxPrice));
-        return params.toString();
+    const maxPriceValue = useMemo(
+        () => getMaximumPrimaryPropertyPrice(allProperties),
+        [allProperties],
+    );
+    const isOccasionFilterActive = Boolean(
+        activeOccasion && occasionFilter === activeOccasion.occasion.slug,
+    );
+    const effectiveSelectedDay = isOccasionFilterActive
+        && activeOccasion?.occasion.days?.some((day) => day.key === selectedDay)
+        ? selectedDay
+        : "";
+
+    useEffect(() => {
+        if (!occasionFilter) {
+            if (selectedDay) setSelectedDay("");
+            return;
+        }
+        if (activeOccasion === undefined) return;
+        if (!activeOccasion || occasionFilter !== activeOccasion.occasion.slug) {
+            setOccasionFilter("");
+            setSelectedDay("");
+            return;
+        }
+        if (selectedDay && !activeOccasion.occasion.days?.some(
+            (day) => day.key === selectedDay,
+        )) {
+            setSelectedDay("");
+        }
+    }, [activeOccasion, occasionFilter, selectedDay]);
+
+    const searchFilterState = {
+        searchQuery: debouncedSearchQuery,
+        selectedCity,
+        selectedDirection,
+        selectedType,
+        selectedFacilities,
+        maxPrice,
+        maxPriceCeiling: maxPriceValue,
     };
+    const searchQueryKey = buildPropertySearchQueryKey(searchFilterState);
+    const initialSearchQueryKeyRef = useRef(searchQueryKey);
+    const initialSearchDataRef = useRef(initialSearchResults);
+
+    useEffect(() => {
+        // SSR data is a one-time hydration seed. If this query was already in
+        // the client cache, prevent the old snapshot from being reused after GC.
+        initialSearchDataRef.current = undefined;
+    }, []);
 
     const { data: properties = [], isLoading } = useQuery<Property[]>({
-        queryKey: ["/api/search", searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities.join(","), maxPrice],
-        queryFn: async () => {
-            const qs = buildQueryString();
-            const res = await fetch(`/api/search${qs ? `?${qs}` : ""}`);
+        queryKey: searchQueryKey,
+        queryFn: async ({ signal }) => {
+            const qs = buildPropertySearchQueryString(searchFilterState);
+            const res = await fetch(`/api/search${qs ? `?${qs}` : ""}`, { signal });
             if (!res.ok) throw new Error("Failed to fetch");
             return res.json();
         },
-        initialData: initialSearchResults,
+        initialData: () => {
+            if (!arePropertySearchQueryKeysEqual(
+                searchQueryKey,
+                initialSearchQueryKeyRef.current,
+            )) return undefined;
+            const initialData = initialSearchDataRef.current;
+            initialSearchDataRef.current = undefined;
+            return initialData;
+        },
     });
-
-    const maxPriceValue = useMemo(() => {
-        const prices = allProperties.flatMap(p => [
-            parseFloat(p.prices?.weekday || "0"),
-            parseFloat(p.prices?.weekend || "0"),
-        ]).filter(p => p > 0);
-        return prices.length > 0 ? Math.ceil(Math.max(...prices)) : 500;
-    }, [allProperties]);
 
     const initializedRef = useRef(false);
     useEffect(() => {
@@ -142,34 +212,33 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
         const hasScrollPosition = sessionStorage.getItem("propsScrollY");
         const saved = sessionStorage.getItem("propsPageFilters");
         if (saved && hasScrollPosition) {
-            const f = JSON.parse(saved);
+            const f = parseStoredPropertyFilters(saved);
             const hasUrlParams = searchParams.get("search") || searchParams.get("city") ||
                 searchParams.get("direction") || searchParams.get("type") || searchParams.get("facilities") ||
                 searchParams.get("maxPrice") || searchParams.get("occasion") || searchParams.get("day");
             
-            if (!hasUrlParams) {
-                setSearchQuery(f.searchQuery || "");
-                setSelectedCity(f.selectedCity || "");
-                setSelectedDirection(f.selectedDirection || "");
-                setSelectedType(f.selectedType || "");
-                setSelectedFacilities(f.selectedFacilities || []);
-                if (f.maxPrice && f.maxPrice < 99999) setMaxPrice(f.maxPrice);
-                setOccasionFilter(f.occasionFilter || "");
-                setSelectedDay(f.selectedDay || "");
+            if (f && !hasUrlParams) {
+                setSearchQuery(f.searchQuery);
+                setSelectedCity(f.selectedCity);
+                setSelectedDirection(f.selectedDirection);
+                setSelectedType(f.selectedType);
+                setSelectedFacilities(f.selectedFacilities);
+                if (f.maxPrice !== undefined) setMaxPrice(f.maxPrice);
+                setOccasionFilter(f.occasionFilter);
+                setSelectedDay(f.selectedDay);
             }
-            if (f.visibleCount && f.visibleCount >= 30) setVisibleCount(f.visibleCount);
+            if (f?.visibleCount !== undefined) setVisibleCount(f.visibleCount);
         }
         sessionStorage.removeItem("propsPageFilters");
     }, []);
 
     const toggleFacility = (f: string) => {
-        setSelectedFacilities(prev =>
-            prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]
-        );
+        setSelectedFacilities(prev => togglePropertyFacilitySelection(prev, f));
     };
 
     const clearFilters = () => {
         setSearchQuery("");
+        setDebouncedSearchQuery("");
         setSelectedCity("");
         setSelectedDirection("");
         setSelectedType("");
@@ -181,20 +250,49 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     };
 
     const hasActiveFilters = !!(
-        searchQuery ||
+        searchQuery.trim() ||
         selectedCity ||
         selectedDirection ||
         selectedType ||
         selectedFacilities.length > 0 ||
         maxPrice < maxPriceValue ||
-        occasionFilter ||
-        selectedDay
+        isOccasionFilterActive
     );
 
     useEffect(() => {
         const filters = { searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount, occasionFilter, selectedDay };
         sessionStorage.setItem("propsPageFilters", JSON.stringify(filters));
     }, [searchQuery, selectedCity, selectedDirection, selectedType, selectedFacilities, maxPrice, visibleCount, occasionFilter, selectedDay]);
+
+    useEffect(() => {
+        if (!initializedRef.current) return;
+        const params = new URLSearchParams(
+            buildPropertySearchQueryString(searchFilterState),
+        );
+        if (isOccasionFilterActive && activeOccasion) {
+            params.set("occasion", activeOccasion.occasion.slug);
+            if (effectiveSelectedDay) params.set("day", effectiveSelectedDay);
+        }
+        const query = params.toString();
+        const nextUrl = `/properties${query ? `?${query}` : ""}`;
+        const currentUrl = `${window.location.pathname}${window.location.search}`;
+        if (currentUrl !== nextUrl) {
+            window.history.replaceState(window.history.state, "", nextUrl);
+        }
+    }, [
+        debouncedSearchQuery,
+        selectedCity,
+        selectedDirection,
+        selectedType,
+        selectedFacilities,
+        maxPrice,
+        maxPriceValue,
+        occasionFilter,
+        selectedDay,
+        isOccasionFilterActive,
+        effectiveSelectedDay,
+        activeOccasion,
+    ]);
 
     useEffect(() => {
         const savedScroll = sessionStorage.getItem("propsScrollY");
@@ -244,24 +342,19 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     };
 
     const fetchPropertyImages = async (propertyNumber: string) => {
-        if (propertyImages.has(propertyNumber) || loadingImages.has(propertyNumber)) return;
+        if (hasCachedPropertyImages(propertyImages, propertyNumber) || loadingImages.has(propertyNumber)) return;
         setLoadingImages(prev => new Set(prev).add(propertyNumber));
         try {
-            const response = await fetch(`/api/public/property-images/${propertyNumber}`);
-            const data = await response.json();
+            const images = await fetchPropertyImageUrls(propertyNumber);
             setPropertyImages(prev => {
                 const newMap = new Map(prev);
-                newMap.set(propertyNumber, data.images || []);
+                newMap.set(propertyNumber, images);
                 return newMap;
             });
         } catch {
             setPropertyImages(prev => {
                 const newMap = new Map(prev);
-                newMap.set(propertyNumber, [
-                    `${R2_BASE}/${propertyNumber}/1.jpg`,
-                    `${R2_BASE}/${propertyNumber}/2.jpg`,
-                    `${R2_BASE}/${propertyNumber}/3.jpg`,
-                ]);
+                newMap.set(propertyNumber, []);
                 return newMap;
             });
         } finally {
@@ -276,12 +369,12 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
     const sortedProperties = useMemo(() => {
         let result = [...properties];
 
-        if (occasionFilter && activeOccasion) {
+        if (isOccasionFilterActive && activeOccasion) {
             const occasionPropertyNumbers = new Set(
                 activeOccasion.properties
                     .filter(op => {
-                        if (!selectedDay) return true;
-                        return op.availability[selectedDay] === true;
+                        if (!effectiveSelectedDay) return true;
+                        return op.availability[effectiveSelectedDay] === true;
                     })
                     .map(op => op.propertyNumber)
             );
@@ -293,14 +386,17 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
             const bIsPremium = isPublicPropertyPremium(b) ? 1 : 0;
             return bIsPremium - aIsPremium;
         });
-    }, [properties, occasionFilter, activeOccasion, selectedDay]);
+    }, [properties, isOccasionFilterActive, activeOccasion, effectiveSelectedDay]);
 
     const visibleProperties = sortedProperties.slice(0, visibleCount);
+    const visiblePropertyImageKey = getPropertyImageSetKey(
+        visibleProperties.map((property) => property.propertyNumber),
+    );
 
     useEffect(() => {
         if (isLoading || properties.length === 0) return;
         visibleProperties.forEach(p => fetchPropertyImages(p.propertyNumber));
-    }, [visibleProperties.length, isLoading]);
+    }, [visiblePropertyImageKey, isLoading]);
 
     return (
         <>
@@ -368,7 +464,7 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                             <button
                                 onClick={() => { setOccasionFilter(""); setSelectedDay(""); }}
                                 className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                                    !occasionFilter
+                                    !isOccasionFilterActive
                                         ? "bg-[#1a472a] text-[#d4af37]"
                                         : "bg-[#f0fdf4] text-[#2d6b45] hover:bg-[#dcfce7]"
                                 }`}
@@ -376,16 +472,21 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                                 الكل
                             </button>
                             <button
-                                onClick={() => setOccasionFilter(occasionFilter ? "" : activeOccasion.occasion.slug)}
+                                onClick={() => {
+                                    setOccasionFilter(
+                                        isOccasionFilterActive ? "" : activeOccasion.occasion.slug,
+                                    );
+                                    setSelectedDay("");
+                                }}
                                 className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                                    occasionFilter
+                                    isOccasionFilterActive
                                         ? "bg-[#1a472a] text-[#d4af37]"
                                         : "bg-[#f0fdf4] text-[#2d6b45] hover:bg-[#dcfce7]"
                                 }`}
                             >
                                 عروض المناسبة فقط
                             </button>
-                            {occasionFilter && activeOccasion.occasion.days?.map(day => (
+                            {isOccasionFilterActive && activeOccasion.occasion.days?.map(day => (
                                 <button
                                     key={day.key}
                                     onClick={() => setSelectedDay(selectedDay === day.key ? "" : day.key)}
@@ -473,11 +574,11 @@ export default function PropertiesClient({ initialAllProperties, initialSearchRe
                                         router.push(`/property/${p.propertyNumber}`);
                                     }}
                                     occasionData={occasionProp ? {
-                                        name: selectedDay
-                                            ? (activeOccasion!.occasion.days?.find(d => d.key === selectedDay)?.label || activeOccasion!.occasion.name)
+                                        name: effectiveSelectedDay
+                                            ? (activeOccasion!.occasion.days?.find(d => d.key === effectiveSelectedDay)?.label || activeOccasion!.occasion.name)
                                             : activeOccasion!.occasion.name,
-                                        price: selectedDay
-                                            ? (occasionProp.prices[selectedDay] || "")
+                                        price: effectiveSelectedDay
+                                            ? (occasionProp.prices[effectiveSelectedDay] || "")
                                             : (Object.values(occasionProp.prices).find(p => p) || "")
                                     } : undefined}
                                     propertyImages={propertyImages}
@@ -556,8 +657,9 @@ interface PropertyCardProps {
 }
 
 function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, occasionData, propertyImages }: PropertyCardProps) {
-    const imageUrl = getPropertyImage(property.propertyNumber, imgIdx, propertyImages);
-    const mainPrice = property.prices?.weekday || property.prices?.weekend || "0";
+    const imageUrl = getCachedPropertyImage(property.propertyNumber, imgIdx, propertyImages);
+    const mainPrice = getPrimaryPropertyPriceDisplay(property.prices);
+    const publicLabel = getPublicPropertyLabel(property);
 
     return (
         <Card
@@ -567,11 +669,11 @@ function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, oc
             <div className="relative">
                 <img
                     src={imageUrl}
-                    alt={property.name || property.propertyNumber}
+                    alt={publicLabel}
                     className="w-full h-36 sm:h-40 md:h-44 object-cover"
                     loading="lazy"
                     onError={(e) => {
-                        (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'%3E%3Crect fill='%23f3f4f6' width='400' height='300'/%3E%3Ctext x='50%25' y='50%25' font-family='Cairo,sans-serif' font-size='18' fill='%239ca3af' text-anchor='middle' dy='.3em'%3Eلا توجد صور%3C/text%3E%3C/svg%3E";
+                        (e.target as HTMLImageElement).src = PROPERTY_IMAGE_PLACEHOLDER;
                     }}
                 />
 
@@ -602,7 +704,7 @@ function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, oc
 
             <div className="p-2.5 sm:p-3">
                 <h3 className="font-bold text-[#1a1a1a] text-xs sm:text-sm mb-1 line-clamp-1">
-                    {property.name || property.type || "عقار"}
+                    {publicLabel}
                 </h3>
 
                 <div className="flex items-center gap-1 text-[#6b6b6b] mb-2">

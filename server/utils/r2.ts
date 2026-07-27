@@ -46,7 +46,7 @@ if (invalidR2Vars.length > 0) {
 if (missingR2Vars.length > 0 || invalidR2Vars.length > 0) {
   console.warn(
     `[R2] Client NOT initialized - missing env vars: ${missingR2Vars.join(", ") || "none"}; invalid env vars: ${invalidR2Vars.join(", ") || "none"}\n` +
-    `    Image endpoints will return empty arrays until these are set.\n` +
+    `    Image storage endpoints will remain unavailable until these are set.\n` +
     `    Required env vars:\n` +
     `      R2_REGION           = auto  (or your bucket region)\n` +
     `      R2_ENDPOINT         = https://<ACCOUNT_ID>.r2.cloudflarestorage.com\n` +
@@ -83,6 +83,10 @@ export type R2ImageCountClient = {
 export type R2ImageCountDependencies = {
   client: R2ImageCountClient | null;
   bucket: string | undefined;
+};
+
+export type R2PropertyImageListDependencies = R2ImageCountDependencies & {
+  publicUrl: string | undefined;
 };
 
 export class R2ImageStorageUnavailableError extends Error {
@@ -124,5 +128,41 @@ export async function countR2Images(propertyNumber: string): Promise<number> {
     return await countR2ImagesStrict(propertyNumber);
   } catch {
     return 0;
+  }
+}
+
+export async function listR2PropertyImagesStrict(
+  propertyNumber: string,
+  dependencies: R2PropertyImageListDependencies = {
+    client: r2,
+    bucket: R2_BUCKET,
+    publicUrl: R2_PUBLIC_URL,
+  },
+): Promise<string[]> {
+  const { client, bucket } = dependencies;
+  const publicUrl = normalizeHttpUrl(dependencies.publicUrl);
+  if (!client || !bucket || !publicUrl) {
+    throw new R2ImageStorageUnavailableError();
+  }
+
+  try {
+    const list = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: `${propertyNumber}/`,
+      }),
+    );
+
+    return (list.Contents || [])
+      .filter((object) => object.Key && /\.(jpg|jpeg|png|webp)$/i.test(object.Key))
+      .sort((left, right) => {
+        const leftIndex = Number.parseInt(left.Key?.match(/(\d+)\./)?.[1] || "0", 10);
+        const rightIndex = Number.parseInt(right.Key?.match(/(\d+)\./)?.[1] || "0", 10);
+        return leftIndex - rightIndex || (left.Key || "").localeCompare(right.Key || "");
+      })
+      .map((object) => `${publicUrl}/${object.Key}`);
+  } catch (error) {
+    if (error instanceof R2ImageStorageUnavailableError) throw error;
+    throw new R2ImageStorageUnavailableError();
   }
 }

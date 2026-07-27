@@ -22,6 +22,10 @@ import Link from "next/link";
 import { validateTextInput, validateNumericInput, validateWhatsAppInput } from "@/lib/validation";
 import { isPremiumSubscriptionType } from "@shared/subscriptionType";
 import {
+    normalizePropertyFacilitySelection,
+    togglePropertyFacilitySelection,
+} from "@shared/propertyFacilityFilter";
+import {
     OwnerLoadingState,
     OwnerMobileNavigation,
     OwnerPageHeader,
@@ -33,20 +37,6 @@ import {
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
-/** Parse facilities from any stored format to string[] */
-function parseFacilities(raw: unknown): string[] {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    if (typeof raw === "string") {
-        try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return parsed;
-        } catch { /* ignore */ }
-        return raw.split(",").map(s => s.trim()).filter(Boolean);
-    }
-    return [];
-}
-
 export default function UpdatePropertyPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -117,7 +107,7 @@ export default function UpdatePropertyPage() {
                     holidays: property.prices?.holidays || "",
                 },
             });
-            setSelectedFacilities(parseFacilities(property.facilities));
+            setSelectedFacilities(normalizePropertyFacilitySelection(property.facilities));
         }
     }, [property]);
 
@@ -136,9 +126,7 @@ export default function UpdatePropertyPage() {
     }, [facilitySearch]);
 
     const toggleFacility = (facility: string) => {
-        setSelectedFacilities(prev =>
-            prev.includes(facility) ? prev.filter(f => f !== facility) : [...prev, facility]
-        );
+        setSelectedFacilities(prev => togglePropertyFacilitySelection(prev, facility));
     };
 
     // Property update mutation

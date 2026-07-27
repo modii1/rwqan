@@ -2,6 +2,10 @@ import { Suspense } from "react";
 import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
 import { Property } from "@shared/schema";
 import PropertiesClient from "@/components/properties-client";
+import {
+    buildPropertySearchQueryString,
+    normalizePropertyFacilityFilters,
+} from "@/lib/property-search";
 
 interface Props {
     searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -9,21 +13,31 @@ interface Props {
 
 export default async function AllPropertiesPage({ searchParams }: Props) {
     const params = await searchParams;
+    const first = (value: string | string[] | undefined) =>
+        Array.isArray(value) ? value[0] || "" : value || "";
+    const rawMaxPriceParam = first(params.maxPrice).trim();
+    const rawMaxPrice = Number(rawMaxPriceParam);
+    const hasValidMaxPrice = rawMaxPriceParam !== ""
+        && Number.isFinite(rawMaxPrice)
+        && rawMaxPrice >= 0;
+    const qs = buildPropertySearchQueryString({
+        searchQuery: first(params.search),
+        selectedCity: first(params.city),
+        selectedDirection: first(params.direction),
+        selectedType: first(params.type),
+        selectedFacilities: normalizePropertyFacilityFilters(
+            first(params.facilities).split(","),
+        ),
+        maxPrice: hasValidMaxPrice ? rawMaxPrice : Number.POSITIVE_INFINITY,
+        maxPriceCeiling: Number.POSITIVE_INFINITY,
+    });
 
-    const qs = new URLSearchParams();
-    if (params.search) qs.set("search", params.search as string);
-    if (params.city) qs.set("city", params.city as string);
-    if (params.direction) qs.set("direction", params.direction as string);
-    if (params.type) qs.set("type", params.type as string);
-    if (params.facilities) qs.set("facilities", params.facilities as string);
-    if (params.maxPrice) qs.set("maxPrice", params.maxPrice as string);
-
-    const hasParams = qs.toString().length > 0;
+    const hasParams = qs.length > 0;
 
     const [allProperties, occasion, searchResults] = await Promise.all([
         serverFetch<Property[]>("/api/properties"),
         serverFetch<ActiveOccasion | null>("/api/occasions/active"),
-        hasParams ? serverFetch<Property[]>(`/api/search?${qs.toString()}`) : Promise.resolve(null),
+        hasParams ? serverFetch<Property[]>(`/api/search?${qs}`) : Promise.resolve(null),
     ]);
 
     const displayProperties = hasParams

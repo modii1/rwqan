@@ -13,6 +13,7 @@ import {
 import { calculateRemainingDays, toRiyadhISO, getNowInRiyadh } from "../utils/dateUtils";
 import { countR2Images } from "../utils/r2";
 import { isActivePremiumSubscription, isPremiumSubscriptionType } from "../../shared/subscriptionType";
+import { normalizePropertyFacilitySelection } from "../../shared/propertyFacilityFilter";
 
 export class PropertyService {
   // ─── Read ───────────────────────────────────────────────────────────────────
@@ -29,7 +30,11 @@ export class PropertyService {
 
   async create(data: InsertProperty): Promise<Property> {
     // Premium is granted by an activated subscription, never by property creation alone.
-    return firebaseService.createProperty({ ...data, subscriptionType: "عادي" });
+    return firebaseService.createProperty({
+      ...data,
+      facilities: normalizePropertyFacilitySelection(data.facilities),
+      subscriptionType: "عادي",
+    });
   }
 
   // ─── Update ─────────────────────────────────────────────────────────────────
@@ -62,6 +67,9 @@ export class PropertyService {
     }
 
     const persistedUpdates: Partial<Property> = { ...updates };
+    if (updates.facilities !== undefined) {
+      persistedUpdates.facilities = normalizePropertyFacilitySelection(updates.facilities);
+    }
 
     if (!options.skipVerification) {
       const hasSensitiveChange = detectSensitiveChanges(current, updates);

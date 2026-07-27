@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   R2ImageStorageUnavailableError,
   countR2ImagesStrict,
+  listR2PropertyImagesStrict,
 } from "./r2";
 
 test("strict R2 image counting reports missing client or bucket configuration", async () => {
@@ -78,4 +79,58 @@ test("strict R2 image counting filters object keys to supported image extensions
     Prefix: "property-42/",
     MaxKeys: 200,
   });
+});
+
+test("strict R2 image listing returns real object keys in image order", async () => {
+  let requestInput: Record<string, unknown> | undefined;
+  const images = await listR2PropertyImagesStrict("14006", {
+    client: {
+      send: async (command) => {
+        requestInput = (command as unknown as { input: Record<string, unknown> }).input;
+        return {
+          Contents: [
+            { Key: "14006/1779584631700-10.jpg" },
+            { Key: "14006/receipt.pdf" },
+            { Key: "14006/1779584631700-0.jpg" },
+            { Key: "14006/1779584631700-2.WEBP" },
+          ],
+        };
+      },
+    },
+    bucket: "configured-bucket",
+    publicUrl: "https://images.example/",
+  });
+
+  assert.deepEqual(images, [
+    "https://images.example/14006/1779584631700-0.jpg",
+    "https://images.example/14006/1779584631700-2.WEBP",
+    "https://images.example/14006/1779584631700-10.jpg",
+  ]);
+  assert.deepEqual(requestInput, {
+    Bucket: "configured-bucket",
+    Prefix: "14006/",
+  });
+});
+
+test("strict R2 image listing distinguishes no images from storage failure", async () => {
+  const noImages = await listR2PropertyImagesStrict("14006", {
+    client: { send: async () => ({ Contents: [] }) },
+    bucket: "configured-bucket",
+    publicUrl: "https://images.example",
+  });
+  assert.deepEqual(noImages, []);
+
+  await assert.rejects(
+    () =>
+      listR2PropertyImagesStrict("14006", {
+        client: {
+          send: async () => {
+            throw new Error("temporary storage error");
+          },
+        },
+        bucket: "configured-bucket",
+        publicUrl: "https://images.example",
+      }),
+    R2ImageStorageUnavailableError,
+  );
 });

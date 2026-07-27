@@ -38,6 +38,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
   let attemptLimitMode: "allowed" | "blocked" = "allowed";
   const attemptLimitCalls: any[][] = [];
   let forceCooldown = false;
+  let forceContactWriteFailure = false;
   const acceptedCalls: any[][] = [];
   const standaloneEvents: any[] = [];
 
@@ -79,6 +80,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
   };
   (firebaseService as any).createContactRequestWithCooldown = async (...args: any[]) => {
     acceptedCalls.push(args);
+    if (forceContactWriteFailure) throw new Error("simulated contact write failure");
     if (forceCooldown) return { accepted: false, remainingMs: 60_000 };
     return { accepted: true, remainingMs: 0, request: args[3], event: args[5] };
   };
@@ -292,6 +294,44 @@ test("smart contact requests resolve remembered and owner phones on the server",
 
       assert.equal(response.status, 429);
       assert.equal(standaloneEvents.length, eventCountBefore);
+    });
+
+    await t.test("a first phone remains authenticated when the contact hits cooldown", async () => {
+      identityMode = "none";
+      issueMode = "success";
+      forceCooldown = true;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-COOLDOWN", clientPhone: "0512345678" }),
+      });
+      forceCooldown = false;
+
+      assert.equal(response.status, 429);
+      assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
+      assert.deepEqual((await response.json()).contactIdentity, {
+        kind: "client",
+        maskedPhone: maskContactPhone("512345678"),
+      });
+    });
+
+    await t.test("a first phone remains authenticated after a later contact write error", async () => {
+      identityMode = "none";
+      issueMode = "success";
+      forceContactWriteFailure = true;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-ERROR", clientPhone: "0512345678" }),
+      });
+      forceContactWriteFailure = false;
+
+      assert.equal(response.status, 500);
+      assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
+      assert.deepEqual((await response.json()).contactIdentity, {
+        kind: "client",
+        maskedPhone: maskContactPhone("512345678"),
+      });
     });
 
     await t.test("attempt throttling applies without Origin and stops before any tracking write", async () => {

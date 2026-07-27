@@ -24,7 +24,9 @@ export function normalizeArabicText(text: string | null | undefined): string {
     .replace(/[\u064B-\u0652\u0670\u06D6-\u06ED]/g, "")
     // إزالة التشكيل اللاتيني
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    // NFD also decomposes Arabic hamza forms (أ -> ا + ◌ٔ), so remove
+    // Arabic combining marks after normalization as well.
+    .replace(/[\u0300-\u036f\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
     // إزالة المد (التطويل)
     .replace(/\u0640/g, "")
     // توحيد الحروف الفارسية/غير الأصيلة إلى عربية (مثال: ڤ → ف)

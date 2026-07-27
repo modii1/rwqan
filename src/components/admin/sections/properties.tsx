@@ -16,6 +16,10 @@ import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
 import {
+  normalizePropertyFacilitySelection,
+  togglePropertyFacilitySelection,
+} from "@shared/propertyFacilityFilter";
+import {
   AdminActionError,
   getAdminActionErrorMessage,
   readAdminActionResponse,
@@ -417,7 +421,7 @@ export default function PropertiesSection() {
         }
       }
     }
-    setSelectedFacilities(facs);
+    setSelectedFacilities(normalizePropertyFacilitySelection(facs));
 
     setPrices({
       weekday: p.prices?.weekday || "",
@@ -446,9 +450,7 @@ export default function PropertiesSection() {
   };
 
   const toggleFacility = (facility: string) => {
-    setSelectedFacilities(prev =>
-      prev.includes(facility) ? prev.filter(f => f !== facility) : [...prev, facility]
-    );
+    setSelectedFacilities(prev => togglePropertyFacilitySelection(prev, facility));
   };
 
   const items = (data || []).filter((p) => {

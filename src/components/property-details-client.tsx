@@ -24,8 +24,9 @@ import { isPublicPropertyPremium } from "@/lib/public-subscription";
 import {
     buildWhatsAppUrl,
     closeReservedWhatsAppTab,
-    navigateReservedWhatsAppTab,
-    reserveWhatsAppTab,
+    getCleanWhatsAppReturnUrl,
+    navigatePropertyWhatsAppTab,
+    reservePropertyWhatsAppTab,
     type ReservedWhatsAppTab,
 } from "@/lib/whatsapp-navigation";
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
@@ -262,6 +263,12 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     useEffect(() => {
         if (!propertyId) return;
 
+        const cleanReturnUrl = getCleanWhatsAppReturnUrl(window.location.href);
+        if (cleanReturnUrl) {
+            window.history.replaceState(window.history.state, "", cleanReturnUrl);
+            return;
+        }
+
         const trackView = async () => {
             try {
                 const deviceType = detectDeviceType();
@@ -479,6 +486,20 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             });
 
             const result = await response.json().catch(() => ({})) as Record<string, unknown>;
+
+            const returnedIdentity = result.contactIdentity;
+            if (
+                returnedIdentity &&
+                typeof returnedIdentity === "object" &&
+                (returnedIdentity as Record<string, unknown>).kind === "client" &&
+                typeof (returnedIdentity as Record<string, unknown>).maskedPhone === "string"
+            ) {
+                await commitContactIdentityCache(queryClient, {
+                    kind: "client",
+                    maskedPhone: (returnedIdentity as Record<string, unknown>).maskedPhone as string,
+                });
+            }
+
             if (!response.ok) {
                 const errorMessage = typeof result.error === "string"
                     ? result.error
@@ -509,20 +530,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 );
             }
 
-            const returnedIdentity = result.contactIdentity;
-            if (
-                returnedIdentity &&
-                typeof returnedIdentity === "object" &&
-                (returnedIdentity as Record<string, unknown>).kind === "client" &&
-                typeof (returnedIdentity as Record<string, unknown>).maskedPhone === "string"
-            ) {
-                await commitContactIdentityCache(queryClient, {
-                    kind: "client",
-                    maskedPhone: (returnedIdentity as Record<string, unknown>).maskedPhone as string,
-                });
-                router.refresh();
-            }
-
             const requestTime = typeof result.requestTime === "string" ? result.requestTime : "";
             const whatsappNumber = normalizeWhatsAppNumber(
                 typeof result.whatsappNumber === "string" ? result.whatsappNumber : undefined,
@@ -532,7 +539,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
             const url = buildWhatsAppUrl(whatsappNumber, message);
 
-            if (!navigateReservedWhatsAppTab(whatsappTab, url)) {
+            if (!await navigatePropertyWhatsAppTab(whatsappTab, url)) {
                 setIsContactDialogOpen(false);
                 setWhatsAppFallbackUrl(url);
                 throw new ContactRequestError(
@@ -576,7 +583,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 return;
             }
 
-            const whatsappTab = reserveWhatsAppTab();
+            const whatsappTab = reservePropertyWhatsAppTab(property.propertyNumber);
             if (!whatsappTab) {
                 showContactRequestError(
                     new ContactRequestError(
@@ -619,7 +626,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
         contactFlowActiveRef.current = true;
         try {
-            const whatsappTab = reserveWhatsAppTab();
+            const whatsappTab = reservePropertyWhatsAppTab(property.propertyNumber);
             if (!whatsappTab) {
                 throw new Error(
                     "المتصفح منع فتح واتساب في علامة جديدة. اسمح بالنوافذ المنبثقة ثم حاول مجدداً.",

@@ -2,11 +2,12 @@ export interface ReservedWhatsAppTab {
   readonly closed: boolean;
   opener: unknown;
   document: {
-    open(): void;
-    write(content: string): void;
+    readonly readyState: DocumentReadyState;
+    open(): unknown;
+    write(...content: string[]): void;
     close(): void;
   };
-  location: Pick<Location, "replace">;
+  location: Pick<Location, "assign" | "replace">;
   close(): void;
 }
 
@@ -15,9 +16,27 @@ export type WhatsAppTabOpener = (
   target: string,
 ) => ReservedWhatsAppTab | null;
 
+interface WhatsAppNavigationOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  now?: () => number;
+  wait?: (milliseconds: number) => Promise<void>;
+}
+
 export function buildWhatsAppUrl(phone: string, message: string): string {
   const digits = phone.replace(/\D/g, "");
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+export function buildWhatsAppReturnUrl(propertyNumber: string): string {
+  return `/property/${encodeURIComponent(propertyNumber)}?contactReturn=1`;
+}
+
+export function getCleanWhatsAppReturnUrl(href: string): string | null {
+  const url = new URL(href);
+  if (url.searchParams.get("contactReturn") !== "1") return null;
+  url.searchParams.delete("contactReturn");
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 const WHATSAPP_INTERSTITIAL_HTML = `<!doctype html>
@@ -73,17 +92,17 @@ const WHATSAPP_INTERSTITIAL_HTML = `<!doctype html>
 </body>
 </html>`;
 
-function paintWhatsAppInterstitial(tab: ReservedWhatsAppTab): boolean {
+function isolateTab(tab: ReservedWhatsAppTab): boolean {
   try {
-    tab.document.open();
-    tab.document.write(WHATSAPP_INTERSTITIAL_HTML);
-    tab.document.close();
+    tab.opener = null;
     return true;
   } catch {
+    closeReservedWhatsAppTab(tab);
     return false;
   }
 }
 
+/** Generic reservation retained for admin actions that do not have a property return page. */
 export function reserveWhatsAppTab(
   openTab: WhatsAppTabOpener = (url, target) => window.open(url, target),
 ): ReservedWhatsAppTab | null {
@@ -93,16 +112,13 @@ export function reserveWhatsAppTab(
   } catch {
     return null;
   }
-  if (!tab) return null;
+  if (!tab || !isolateTab(tab)) return null;
 
   try {
-    tab.opener = null;
+    tab.document.open();
+    tab.document.write(WHATSAPP_INTERSTITIAL_HTML);
+    tab.document.close();
   } catch {
-    closeReservedWhatsAppTab(tab);
-    return null;
-  }
-
-  if (!paintWhatsAppInterstitial(tab)) {
     closeReservedWhatsAppTab(tab);
     return null;
   }
@@ -116,6 +132,63 @@ export function navigateReservedWhatsAppTab(
   if (tab.closed) return false;
   try {
     tab.location.replace(url);
+    return true;
+  } catch {
+    closeReservedWhatsAppTab(tab);
+    return false;
+  }
+}
+
+/**
+ * Opens the actual property page as the history entry behind WhatsApp. This is
+ * used only by the public contact flow so Back never lands on a blank/loader.
+ */
+export function reservePropertyWhatsAppTab(
+  propertyNumber: string,
+  openTab: WhatsAppTabOpener = (url, target) => window.open(url, target),
+): ReservedWhatsAppTab | null {
+  let tab: ReservedWhatsAppTab | null;
+  try {
+    tab = openTab(buildWhatsAppReturnUrl(propertyNumber), "_blank");
+  } catch {
+    return null;
+  }
+  if (!tab || !isolateTab(tab)) return null;
+  return tab;
+}
+
+export async function navigatePropertyWhatsAppTab(
+  tab: ReservedWhatsAppTab,
+  url: string,
+  options: WhatsAppNavigationOptions = {},
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? 3_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 25;
+  const now = options.now ?? Date.now;
+  const wait = options.wait ?? ((milliseconds) =>
+    new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)));
+  const deadline = now() + timeoutMs;
+  let returnPageReady = false;
+
+  while (!tab.closed && now() < deadline) {
+    try {
+      if (tab.document.readyState === "interactive" || tab.document.readyState === "complete") {
+        returnPageReady = true;
+        break;
+      }
+    } catch {
+      closeReservedWhatsAppTab(tab);
+      return false;
+    }
+    await wait(pollIntervalMs);
+  }
+
+  if (tab.closed || !returnPageReady) {
+    closeReservedWhatsAppTab(tab);
+    return false;
+  }
+  try {
+    tab.location.assign(url);
     return true;
   } catch {
     closeReservedWhatsAppTab(tab);
