@@ -189,6 +189,10 @@ function futureDate(days = 5): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+function pastDate(days = 5): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function activeSubscription(
   propertyNumber: string,
   overrides: FakeData = {},
@@ -268,6 +272,79 @@ test("an expired requested child that is still linked to a foreign parent is rej
   assert.equal(database.get("payments", "PAY-A-B"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
+});
+
+test("guarded expiry does not overwrite a newly active future subscription", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-RACE-EXPIRY");
+  database.update("properties", "PROP-RACE-EXPIRY", {
+    subscriptionType: "مميز",
+  });
+  database.set(
+    "subscriptions",
+    "SUB-PROP-RACE-EXPIRY",
+    activeSubscription("PROP-RACE-EXPIRY", {
+      status: "منتهي",
+      endDate: pastDate(),
+    }),
+  );
+  const service = createService(database);
+
+  const outcomes = await Promise.all([
+    service.expireSubscriptionIfNeeded("SUB-PROP-RACE-EXPIRY"),
+    service.addSubscriptionToSheet(
+      "PROP-RACE-EXPIRY",
+      {
+        packageId: "PKG-GROUP",
+        subscriptionType: "مميز",
+        startDate: new Date().toISOString(),
+        endDate: futureDate(20),
+        paymentId: "PAY-NEW-ACTIVATION",
+      },
+      { propertyNumber: "PROP-RACE-EXPIRY" },
+    ),
+  ]);
+
+  assert.equal(outcomes[0], true);
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-RACE-EXPIRY")?.status,
+    "نشط",
+  );
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-RACE-EXPIRY")?.paymentId,
+    "PAY-NEW-ACTIVATION",
+  );
+  assert.equal(
+    database.get("properties", "PROP-RACE-EXPIRY")?.subscriptionType,
+    "مميز",
+  );
+});
+
+test("guarded expiry ignores a future end date without cancellation metadata", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-FUTURE");
+  database.update("properties", "PROP-FUTURE", {
+    subscriptionType: "مميز",
+  });
+  database.set(
+    "subscriptions",
+    "SUB-PROP-FUTURE",
+    activeSubscription("PROP-FUTURE", {
+      status: "منتهي",
+      endDate: futureDate(20),
+      cancelledAt: null,
+    }),
+  );
+
+  const expired = await createService(database).expireSubscriptionIfNeeded(
+    "SUB-PROP-FUTURE",
+  );
+
+  assert.equal(expired, false);
+  assert.equal(
+    database.get("properties", "PROP-FUTURE")?.subscriptionType,
+    "مميز",
+  );
 });
 
 test("concurrent additions cannot overflow package capacity or lose the winner", async () => {

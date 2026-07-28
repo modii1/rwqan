@@ -121,3 +121,100 @@ test("manual activation preflights the full linked group before any write", asyn
     });
   }
 });
+
+test("admin subscriptions derives future status and hides uncorroborated legacy links", async () => {
+  const originals = {
+    getSubscriptions: subscriptionService.getAll,
+    getPackages: subscriptionService.getPackages,
+    getProperties: propertyService.getAll,
+    getMultiPropertySubscriptions:
+      firebaseService.getMultiPropertySubscriptions,
+  };
+  const futureEndDate = new Date(
+    Date.now() + 20 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  (subscriptionService as any).getAll = async () => [
+    {
+      id: "SUB-MAIN",
+      propertyNumber: "MAIN",
+      packageId: "PKG-1",
+      status: "ساري",
+      subscriptionType: "مميز",
+      startDate: new Date().toISOString(),
+      endDate: futureEndDate,
+      linkedProperties: [],
+    },
+    {
+      id: "SUB-STALE",
+      propertyNumber: "STALE",
+      packageId: "PKG-1",
+      status: "منتهي",
+      subscriptionType: "مميز",
+      startDate: new Date().toISOString(),
+      endDate: futureEndDate,
+      linkedProperty: "MAIN",
+      cancelledAt: null,
+    },
+    {
+      id: "SUB-CANCELLED",
+      propertyNumber: "CANCELLED",
+      packageId: "PKG-1",
+      status: "منتهي",
+      subscriptionType: "مميز",
+      startDate: new Date(Date.now() - 1000).toISOString(),
+      endDate: futureEndDate,
+      cancelledAt: new Date().toISOString(),
+    },
+  ];
+  (subscriptionService as any).getPackages = async () => [];
+  (propertyService as any).getAll = async () => [
+    { propertyNumber: "MAIN", name: "Main" },
+    { propertyNumber: "STALE", name: "Stale" },
+    { propertyNumber: "CANCELLED", name: "Cancelled" },
+  ];
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = { isAdmin: true };
+    next();
+  });
+  app.use(subscriptionsRouter);
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/admin/subscriptions`,
+    );
+    const payload = await response.json();
+    const stale = payload.find((subscription: any) =>
+      subscription.propertyNumber === "STALE"
+    );
+    const cancelled = payload.find((subscription: any) =>
+      subscription.propertyNumber === "CANCELLED"
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(stale.status, "ساري");
+    assert.equal(stale.linkedProperty, null);
+    assert.equal(stale.isLinkedChild, false);
+    assert.equal(cancelled.status, "منتهي");
+  } finally {
+    subscriptionService.getAll = originals.getSubscriptions;
+    subscriptionService.getPackages = originals.getPackages;
+    propertyService.getAll = originals.getProperties;
+    firebaseService.getMultiPropertySubscriptions =
+      originals.getMultiPropertySubscriptions;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});

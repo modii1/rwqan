@@ -157,9 +157,39 @@ router.post("/api/multi-property-subscription", requireAdmin, async (req, res) =
 // ======================
 router.get("/api/admin/subscriptions", async (req, res) => {
   try {
-    const subscriptions = await subscriptionService.getAll();
-    const packages = await subscriptionService.getPackages();
-    const properties = await propertyService.getAll();
+    const [subscriptions, packages, properties, multiSubscriptions] = await Promise.all([
+      subscriptionService.getAll(),
+      subscriptionService.getPackages(),
+      propertyService.getAll(),
+      firebaseService.getMultiPropertySubscriptions(),
+    ]);
+
+    // A child-side linkedProperty can survive in legacy rows after the
+    // canonical group has already removed it. Only display a link corroborated
+    // by the parent subscription or the multi-property group record.
+    const canonicalParents = new Map<string, string>();
+    for (const subscription of subscriptions) {
+      for (const child of subscription.linkedProperties || []) {
+        const childNumber = String(child || "").trim();
+        if (childNumber && childNumber !== subscription.propertyNumber) {
+          canonicalParents.set(childNumber, subscription.propertyNumber);
+        }
+      }
+    }
+    for (const multiSubscription of multiSubscriptions) {
+      const parent = String(multiSubscription.propertyNumber1 || "").trim();
+      if (!parent) continue;
+      const children = new Set<string>();
+      if (multiSubscription.propertyNumber2) {
+        children.add(String(multiSubscription.propertyNumber2));
+      }
+      for (const child of multiSubscription.additionalProperties || []) {
+        children.add(String(child));
+      }
+      for (const child of children) {
+        if (child && child !== parent) canonicalParents.set(child, parent);
+      }
+    }
 
     // تحويل الاشتراكات لتضمين معلومات إضافية
     const enrichedSubscriptions = subscriptions.map(sub => {
@@ -183,7 +213,7 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         status = SUSPENDED_SUBSCRIPTION_STATUS;
         remainingDays = calculateFrozenRemainingDays(Number(subWithType.remainingDurationMs));
       }
-      else if (sub.status === "منتهي" || (wasCancelled && !wasReactivated)) {
+      else if (wasCancelled && !wasReactivated) {
         status = "منتهي";
         remainingDays = -1;
       }
@@ -208,6 +238,11 @@ router.get("/api/admin/subscriptions", async (req, res) => {
 
       // اسم العقار من الشيت مباشرة (العمود 1) أو من جدول العقارات
       const propertyName = subWithType.propertyName || property?.name || "غير معروف";
+      const storedLinkedProperty = String(subWithType.linkedProperty || "").trim();
+      const linkedProperty = storedLinkedProperty &&
+        canonicalParents.get(sub.propertyNumber) === storedLinkedProperty
+          ? storedLinkedProperty
+          : null;
 
       return {
         id: sub.id || `${sub.propertyNumber}-${sub.packageId}`,
@@ -222,12 +257,12 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         suspendedAt: subWithType.suspendedAt || null,
         remainingDurationMs: subWithType.remainingDurationMs ?? null,
         // Linked-group awareness for the admin dashboard
-        linkedProperty: subWithType.linkedProperty || null,
+        linkedProperty,
         linkedProperties: subWithType.linkedProperties || [],
         propertyCount: subWithType.propertyCount || 1,
-        isLinkedChild: !!subWithType.linkedProperty,
-        linkedGroupName: subWithType.linkedProperty
-          ? (properties.find(p => p.propertyNumber === subWithType.linkedProperty)?.name || subWithType.linkedProperty)
+        isLinkedChild: !!linkedProperty,
+        linkedGroupName: linkedProperty
+          ? (properties.find(p => p.propertyNumber === linkedProperty)?.name || linkedProperty)
           : null,
       };
     });
@@ -405,6 +440,9 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
     if (storedStatus === "ساري" || storedStatus === "نشط مجاني") {
       baseUpdates.cancelledAt = null;
       baseUpdates.cancelReason = null;
+    } else if (storedStatus === "منتهي") {
+      baseUpdates.cancelledAt = currentSubscription.cancelledAt || new Date().toISOString();
+      baseUpdates.cancelReason = currentSubscription.cancelReason || "admin";
     }
 
     const mainPropertyNumber = currentSubscription.linkedProperty || currentSubscription.propertyNumber;

@@ -5538,6 +5538,56 @@ export class FirebaseService {
         });
     }
 
+    /**
+     * Expire a subscription only when its current Firestore state is still
+     * cancelled or past its end date. The scheduler may be working from an old
+     * list snapshot while a payment activation replaces the same document, so
+     * the decision and both mirror writes must happen in one transaction.
+     */
+    async expireSubscriptionIfNeeded(id: string): Promise<boolean> {
+        const subscriptionRef = this.db.collection("subscriptions").doc(id);
+
+        return this.db.runTransaction(async (transaction) => {
+            const subscriptionSnapshot = await transaction.get(subscriptionRef);
+            if (!subscriptionSnapshot.exists) return false;
+
+            const subscription = subscriptionSnapshot.data() as Subscription;
+            if (isSubscriptionStatusSuspended(subscription.status)) return false;
+
+            const cancelledAt = this.getDateMillis(
+                (subscription as Subscription & { cancelledAt?: string | null }).cancelledAt,
+            );
+            const startDate = this.getDateMillis(subscription.startDate);
+            const isStillCancelled = cancelledAt > 0 && startDate <= cancelledAt;
+            const isStillDateExpired = calculateRemainingDays(subscription.endDate) < 0;
+
+            if (!isStillCancelled && !isStillDateExpired) return false;
+
+            const propertyNumber = String(subscription.propertyNumber || "").trim();
+            const propertyRef = propertyNumber
+                ? this.db.collection("properties").doc(propertyNumber)
+                : null;
+            const propertySnapshot = propertyRef
+                ? await transaction.get(propertyRef)
+                : null;
+            const updatedAt = new Date().toISOString();
+
+            transaction.update(subscriptionRef, {
+                status: "منتهي",
+                updatedAt,
+            });
+            if (propertyRef && propertySnapshot?.exists) {
+                transaction.update(propertyRef, {
+                    subscriptionType: "عادي",
+                    lastUpdate: updatedAt.split("T")[0],
+                    updatedAt,
+                });
+            }
+
+            return true;
+        });
+    }
+
     async updateSubscriptionLifecycleGroup(
         updates: Array<{
             subscriptionId: string;

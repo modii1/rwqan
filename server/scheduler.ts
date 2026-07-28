@@ -18,6 +18,7 @@ import {
   isPremiumSubscriptionType,
   isSubscriptionStatusSuspended,
 } from "../shared/subscriptionType";
+import { calculateRemainingDays } from "./utils/dateUtils";
 
 
 
@@ -543,52 +544,24 @@ export function startScheduler() {
 async function downgradeExpiredSubscriptions(): Promise<number> {
   try {
     const subscriptions = await firebaseService.getSubscriptions();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     let downgraded = 0;
-    const processed = new Set<string>();
 
     for (const sub of subscriptions) {
-      if (processed.has(sub.propertyNumber)) continue;
       if (isSubscriptionStatusSuspended(sub.status)) continue;
 
       const isPremiumType = isPremiumSubscriptionType(sub.subscriptionType);
       if (!isPremiumType) continue;
 
-      // Case 1: Subscription was manually cancelled
-      const isCancelled = sub.status === "منتهي" || (sub as any).cancelledAt;
-
-      // Case 2: End date has passed
-      let isDateExpired = false;
-      if (sub.endDate) {
-        const endDate = new Date(sub.endDate);
-        endDate.setHours(0, 0, 0, 0);
-        isDateExpired = endDate < today;
-      }
+      // A stored `منتهي` value without cancellation metadata is not enough:
+      // an activation may have replaced the dates after this list was read.
+      const isCancelled = Boolean((sub as any).cancelledAt);
+      const isDateExpired = calculateRemainingDays(sub.endDate) < 0;
 
       if (isCancelled || isDateExpired) {
-        await firebaseService.updateSubscription(sub.id, { status: "منتهي" });
-        await firebaseService.updateProperty(sub.propertyNumber, { subscriptionType: "عادي" });
-        console.log(`⬇️ [Scheduler] تم تحديث حالة اشتراك ${sub.propertyNumber} إلى منتهي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
-        downgraded++;
-        processed.add(sub.propertyNumber);
-
-        // Cascade to ALL linked properties — they share the main's endDate and must
-        // expire together so the group stays consistent.
-        const linkedProps: string[] = sub.linkedProperties || [];
-        for (const childNum of linkedProps) {
-          if (childNum === sub.propertyNumber || processed.has(childNum)) continue;
-          const childSub = await firebaseService.getSubscriptionByPropertyNumber(childNum);
-          if (childSub && isPremiumSubscriptionType(childSub.subscriptionType)) {
-            await firebaseService.updateSubscription(childSub.id, {
-              status: "منتهي",
-              endDate: sub.endDate,
-            });
-            await firebaseService.updateProperty(childNum, { subscriptionType: "عادي" });
-            console.log(`⬇️ [Scheduler] تم تحديث حالة العقار المرتبط ${childNum} إلى منتهي تبعاً للعقار الرئيسي ${sub.propertyNumber}`);
-            downgraded++;
-          }
-          processed.add(childNum);
+        const expired = await firebaseService.expireSubscriptionIfNeeded(sub.id);
+        if (expired) {
+          console.log(`⬇️ [Scheduler] تم تحديث حالة اشتراك ${sub.propertyNumber} إلى منتهي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
+          downgraded++;
         }
       }
     }
