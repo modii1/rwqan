@@ -6,8 +6,9 @@ import type { AddressInfo } from "node:net";
 import trackingRouter, {
   CONTACT_REQUEST_ATTEMPT_WINDOW_MS,
   CONTACT_REQUEST_MAX_ATTEMPTS_PER_WINDOW,
+  FREE_PROPERTY_DAILY_CONTACT_LIMIT,
 } from "./tracking";
-import { analyticsService, notificationService, propertyService } from "../services";
+import { analyticsService, notificationService, propertyService, subscriptionService } from "../services";
 import { firebaseService } from "../firebaseService";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
@@ -21,6 +22,7 @@ const TEST_CONTACT_TOKEN = "t".repeat(43);
 test("smart contact requests resolve remembered and owner phones on the server", async (t) => {
   const originals = {
     getByNumber: propertyService.getByNumber,
+    getSubscriptionByProperty: subscriptionService.getByProperty,
     createContactRequestWithCooldown: firebaseService.createContactRequestWithCooldown,
     consumeContactRequestAttemptLimit: firebaseService.consumeContactRequestAttemptLimit,
     getOwnerPhone: firebaseService.getOwnerPhone,
@@ -38,7 +40,9 @@ test("smart contact requests resolve remembered and owner phones on the server",
   let attemptLimitMode: "allowed" | "blocked" = "allowed";
   const attemptLimitCalls: any[][] = [];
   let forceCooldown = false;
+  let forceDailyLimit = false;
   let forceContactWriteFailure = false;
+  const premiumPropertyNumbers = new Set<string>();
   const acceptedCalls: any[][] = [];
   const standaloneEvents: any[] = [];
 
@@ -54,6 +58,16 @@ test("smart contact requests resolve remembered and owner phones on the server",
     };
   };
   (firebaseService as any).getOwnerPhone = async () => "0599999999";
+  (subscriptionService as any).getByProperty = async (propertyNumber: string) =>
+    premiumPropertyNumbers.has(propertyNumber)
+      ? {
+          propertyNumber,
+          subscriptionType: "مميز",
+          packageType: "مميز",
+          status: "ساري",
+          endDate: "2026-12-31T23:59:59.999Z",
+        }
+      : null;
   (contactIdentityService as any).resolve = async () => {
     if (identityMode === "must-not-run") throw new Error("owner resolution read the client cookie");
     if (identityMode === "remembered") {
@@ -81,7 +95,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
   (firebaseService as any).createContactRequestWithCooldown = async (...args: any[]) => {
     acceptedCalls.push(args);
     if (forceContactWriteFailure) throw new Error("simulated contact write failure");
-    if (forceCooldown) return { accepted: false, remainingMs: 60_000 };
+    if (forceDailyLimit) {
+      return { accepted: false, remainingMs: 60_000, reason: "daily_property_limit" };
+    }
+    if (forceCooldown) return { accepted: false, remainingMs: 60_000, reason: "cooldown" };
     return { accepted: true, remainingMs: 0, request: args[3], event: args[5] };
   };
   (firebaseService as any).consumeContactRequestAttemptLimit = async (...args: any[]) => {
@@ -157,6 +174,15 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(acceptedCalls.at(-1)?.[6]?.windowMs, 30 * 60 * 1000);
       assert.equal(acceptedCalls.at(-1)?.[6]?.maxAcceptedRequests, 10);
       assert.match(acceptedCalls.at(-1)?.[6]?.key || "", /^[a-f0-9]{64}$/);
+      assert.equal(
+        acceptedCalls.at(-1)?.[7]?.maxAcceptedRequests,
+        FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+      );
+      assert.equal(
+        acceptedCalls.at(-1)?.[7]?.windowEndsAt - acceptedCalls.at(-1)?.[7]?.windowStartedAt,
+        24 * 60 * 60 * 1000,
+      );
+      assert.match(acceptedCalls.at(-1)?.[7]?.key || "", /^[a-f0-9]{64}$/);
       assert.deepEqual(firstPayload.contactIdentity, {
         kind: "client",
         maskedPhone: maskContactPhone("598765432"),
@@ -296,6 +322,38 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(standaloneEvents.length, eventCountBefore);
     });
 
+    await t.test("a free property reports its three-contact daily limit", async () => {
+      identityMode = "remembered";
+      forceDailyLimit = true;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FREE-DAILY-LIMIT" }),
+      });
+      forceDailyLimit = false;
+
+      assert.equal(response.status, 429);
+      const payload = await response.json() as Record<string, unknown>;
+      assert.equal(payload.code, "FREE_PROPERTY_DAILY_CONTACT_LIMIT");
+      assert.match(String(payload.error), /الثلاث/);
+    });
+
+    await t.test("a premium property has no client contact quota or cooldown", async () => {
+      identityMode = "remembered";
+      premiumPropertyNumbers.add("TARGET-PREMIUM");
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-PREMIUM" }),
+      });
+      premiumPropertyNumbers.delete("TARGET-PREMIUM");
+
+      assert.equal(response.status, 200);
+      assert.equal(acceptedCalls.at(-1)?.[2], 0);
+      assert.equal(acceptedCalls.at(-1)?.[6], undefined);
+      assert.equal(acceptedCalls.at(-1)?.[7], undefined);
+    });
+
     await t.test("a first phone remains authenticated when the contact hits cooldown", async () => {
       identityMode = "none";
       issueMode = "success";
@@ -402,6 +460,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     });
   } finally {
     propertyService.getByNumber = originals.getByNumber;
+    subscriptionService.getByProperty = originals.getSubscriptionByProperty;
     firebaseService.createContactRequestWithCooldown = originals.createContactRequestWithCooldown;
     firebaseService.consumeContactRequestAttemptLimit = originals.consumeContactRequestAttemptLimit;
     firebaseService.getOwnerPhone = originals.getOwnerPhone;

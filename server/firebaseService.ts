@@ -190,6 +190,74 @@ type LinkedPropertyGroupMutationResult = {
     mainSubscription: Subscription;
 };
 
+type LinkedPropertyFieldSnapshot = {
+    exists: boolean;
+    value?: unknown;
+};
+
+type LinkedPropertyRestoreState = {
+    mainPropertyNumber: string;
+    capturedAt: string;
+    subscriptionDocumentId: string;
+    subscriptionExisted: boolean;
+    subscription: Record<string, LinkedPropertyFieldSnapshot>;
+    property: Record<string, LinkedPropertyFieldSnapshot>;
+};
+
+const LINKED_SUBSCRIPTION_MIRROR_FIELDS = [
+    "packageId",
+    "subscriptionType",
+    "packageType",
+    "startDate",
+    "endDate",
+    "status",
+    "paymentId",
+    "linkedProperty",
+    "linkedProperties",
+    "propertyCount",
+    "cancelledAt",
+    "cancelReason",
+    "suspendedAt",
+    "remainingDurationMs",
+    "createdAt",
+    "updatedAt",
+] as const;
+
+const LINKED_PROPERTY_MIRROR_FIELDS = [
+    "subscriptionType",
+    "subscriptionDate",
+    "lastUpdate",
+    "verificationStatus",
+    "updatedAt",
+] as const;
+
+function captureLinkedPropertyFields(
+    source: Record<string, unknown> | undefined,
+    fields: readonly string[],
+): Record<string, LinkedPropertyFieldSnapshot> {
+    return Object.fromEntries(fields.map((field) => [
+        field,
+        Object.prototype.hasOwnProperty.call(source || {}, field)
+            ? { exists: true, value: source?.[field] }
+            : { exists: false },
+    ]));
+}
+
+function restoreLinkedPropertyFields(
+    current: Record<string, unknown>,
+    snapshot: Record<string, LinkedPropertyFieldSnapshot>,
+): Record<string, unknown> {
+    const restored = { ...current };
+    for (const [field, state] of Object.entries(snapshot || {})) {
+        if (state?.exists) {
+            restored[field] = state.value;
+        } else {
+            delete restored[field];
+        }
+    }
+    return restored;
+}
+
 export class FirebaseService {
     private get db() {
         if (!db) throw new Error("Firebase not initialized");
@@ -618,7 +686,9 @@ export class FirebaseService {
      * string.  This helper ensures downstream code always gets string[].
      */
     private normaliseProperty(raw: FirebaseFirestore.DocumentData): Property {
-        const p = raw as Property;
+        // Internal rollback metadata must never leak through property APIs.
+        const { linkedPropertyRestoreState: _restoreState, ...publicProperty } = raw;
+        const p = publicProperty as Property;
         if (p.facilities) {
             if (typeof p.facilities === 'string') {
                 const trimmed = (p.facilities as string).trim();
@@ -781,7 +851,7 @@ export class FirebaseService {
         const isPremium = hasValidEndDate &&
             isPremiumSubscriptionType(planType) &&
             isSubscriptionStatusActive(normalizedSubscription.status);
-        const propertyUpdates = {
+        const propertyUpdates: Record<string, unknown> = {
             subscriptionType: isPremium ? "مميز" : "عادي",
             lastUpdate: toRiyadhISO(getNowInRiyadh()).split("T")[0],
             subscriptionDate: normalizedSubscription.startDate.split("T")[0],
@@ -818,6 +888,37 @@ export class FirebaseService {
             }
             if (!propertySnapshot.exists) {
                 throw new Error(`Property not found: ${subscription.propertyNumber}`);
+            }
+            if (subscription.linkedProperty) {
+                const mainPropertyNumber = String(subscription.linkedProperty).trim();
+                const existingDocument = existingSnapshot.docs.find(
+                    (document) => document.id === id,
+                );
+                const existingSubscription = existingDocument?.data();
+                const propertyData = propertySnapshot.data() || {};
+                const existingRestoreState = propertyData
+                    .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
+                const alreadyLinkedToMain =
+                    String(propertyData.linkedProperty || "").trim() === mainPropertyNumber ||
+                    String(existingSubscription?.linkedProperty || "").trim() === mainPropertyNumber;
+                if (existingRestoreState?.mainPropertyNumber === mainPropertyNumber) {
+                    propertyUpdates.linkedPropertyRestoreState = existingRestoreState;
+                } else if (!alreadyLinkedToMain) {
+                    propertyUpdates.linkedPropertyRestoreState = {
+                        mainPropertyNumber,
+                        capturedAt: new Date().toISOString(),
+                        subscriptionDocumentId: id,
+                        subscriptionExisted: Boolean(existingDocument),
+                        subscription: captureLinkedPropertyFields(
+                            existingSubscription,
+                            LINKED_SUBSCRIPTION_MIRROR_FIELDS,
+                        ),
+                        property: captureLinkedPropertyFields(
+                            propertyData,
+                            LINKED_PROPERTY_MIRROR_FIELDS,
+                        ),
+                    } satisfies LinkedPropertyRestoreState;
+                }
             }
             transaction.set(subscriptionRef, newSubscription);
             transaction.update(propertyRef, propertyUpdates);
@@ -899,6 +1000,38 @@ export class FirebaseService {
             }
             if (!propertySnapshot.exists) {
                 throw new Error(`Property not found: ${propertyNumber}`);
+            }
+
+            if (subscriptionData.linkedProperty) {
+                const mainPropertyNumber = String(subscriptionData.linkedProperty).trim();
+                const existingDocument = existingSnapshot.docs.find(
+                    (document) => document.id === id,
+                );
+                const existingSubscription = existingDocument?.data();
+                const propertyData = propertySnapshot.data() || {};
+                const existingRestoreState = propertyData
+                    .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
+                const alreadyLinkedToMain =
+                    String(propertyData.linkedProperty || "").trim() === mainPropertyNumber ||
+                    String(existingSubscription?.linkedProperty || "").trim() === mainPropertyNumber;
+                if (existingRestoreState?.mainPropertyNumber === mainPropertyNumber) {
+                    propertyUpdates.linkedPropertyRestoreState = existingRestoreState;
+                } else if (!alreadyLinkedToMain) {
+                    propertyUpdates.linkedPropertyRestoreState = {
+                        mainPropertyNumber,
+                        capturedAt: new Date().toISOString(),
+                        subscriptionDocumentId: id,
+                        subscriptionExisted: Boolean(existingDocument),
+                        subscription: captureLinkedPropertyFields(
+                            existingSubscription,
+                            LINKED_SUBSCRIPTION_MIRROR_FIELDS,
+                        ),
+                        property: captureLinkedPropertyFields(
+                            propertyData,
+                            LINKED_PROPERTY_MIRROR_FIELDS,
+                        ),
+                    } satisfies LinkedPropertyRestoreState;
+                }
             }
 
             // Activation is intentionally a full replacement. Resume is the
@@ -1568,6 +1701,25 @@ export class FirebaseService {
                 const existingDocument = latestChildDocuments.get(propertyNumber);
                 const childRef = existingDocument?.ref ||
                     subscriptionCollection.doc(`SUB-${propertyNumber}`);
+                const isNewlyAdded = addedProperties.includes(propertyNumber);
+                const propertyDocument = propertyDocuments.get(propertyNumber)!;
+                const restoreState: LinkedPropertyRestoreState | undefined =
+                    isNewlyAdded
+                        ? {
+                            mainPropertyNumber,
+                            capturedAt: nowIso,
+                            subscriptionDocumentId: childRef.id,
+                            subscriptionExisted: Boolean(existingDocument),
+                            subscription: captureLinkedPropertyFields(
+                                existingDocument?.data(),
+                                LINKED_SUBSCRIPTION_MIRROR_FIELDS,
+                            ),
+                            property: captureLinkedPropertyFields(
+                                propertyDocument.data(),
+                                LINKED_PROPERTY_MIRROR_FIELDS,
+                            ),
+                        }
+                        : undefined;
                 const childRecord = {
                     id: existingDocument?.data()?.id || `SUB-${propertyNumber}`,
                     propertyNumber,
@@ -1605,8 +1757,11 @@ export class FirebaseService {
                 if (params.approveAddedProperties) {
                     propertyUpdates.verificationStatus = "approved";
                 }
+                if (restoreState) {
+                    propertyUpdates.linkedPropertyRestoreState = restoreState;
+                }
                 transaction.update(
-                    propertyDocuments.get(propertyNumber)!.ref,
+                    propertyDocument.ref,
                     propertyUpdates,
                 );
             }
@@ -1727,6 +1882,235 @@ export class FirebaseService {
     }
 
     /**
+     * Detach linked properties without applying activation, package, suspension,
+     * or payment eligibility rules. Unlinking removes membership only: the main
+     * subscription keeps all of its lifecycle fields, while each child is
+     * restored to the state captured immediately before it joined the group.
+     */
+    async unlinkLinkedPropertiesAtomically(params: {
+        mainPropertyNumber: string;
+        propertyNumbers: string[];
+    }): Promise<{ mainPropertyNumber: string; linkedProperties: string[]; removedProperties: string[] }> {
+        const mainPropertyNumber = String(params.mainPropertyNumber || "").trim();
+        const propertyNumbers = Array.from(new Set(
+            (params.propertyNumbers || [])
+                .map((value) => String(value || "").trim())
+                .filter((value) => value && value !== mainPropertyNumber),
+        )).sort((left, right) => left.localeCompare(right));
+
+        if (!mainPropertyNumber) {
+            throw new LinkedPropertyMutationError(
+                "رقم العقار الرئيسي مطلوب",
+                400,
+                "MAIN_PROPERTY_REQUIRED",
+            );
+        }
+        if (propertyNumbers.length === 0) {
+            throw new LinkedPropertyMutationError(
+                "لم يتم تحديد عقار مرتبط لفصله",
+                400,
+                "LINKED_PROPERTY_MUTATION_EMPTY",
+            );
+        }
+
+        return this.db.runTransaction(async (transaction) => {
+            const subscriptionCollection = this.db.collection("subscriptions");
+            const mainSubscriptionSnapshot = await transaction.get(
+                subscriptionCollection.where("propertyNumber", "==", mainPropertyNumber),
+            );
+            const linkedChildSnapshot = await transaction.get(
+                subscriptionCollection.where("linkedProperty", "==", mainPropertyNumber),
+            );
+            const multiSnapshot = await transaction.get(
+                this.db
+                    .collection("multi_property_subscriptions")
+                    .where("propertyNumber1", "==", mainPropertyNumber),
+            );
+
+            const childSnapshots = new Map<string, FirebaseFirestore.QuerySnapshot>();
+            const propertyDocuments = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+            for (const propertyNumber of propertyNumbers) {
+                childSnapshots.set(
+                    propertyNumber,
+                    await transaction.get(
+                        subscriptionCollection.where("propertyNumber", "==", propertyNumber),
+                    ),
+                );
+                propertyDocuments.set(
+                    propertyNumber,
+                    await transaction.get(
+                        this.db.collection("properties").doc(propertyNumber),
+                    ),
+                );
+            }
+
+            const mainSubscriptionDoc = [...mainSubscriptionSnapshot.docs].sort(
+                (left, right) =>
+                    this.getDateMillis(right.data()?.endDate) -
+                    this.getDateMillis(left.data()?.endDate),
+            )[0];
+            const mainSubscription = mainSubscriptionDoc?.data() as Subscription | undefined;
+            const currentMembers = new Set<string>(
+                this.parsePropertyNumberList(mainSubscription?.linkedProperties)
+                    .map((value) => String(value).trim())
+                    .filter((value) => value && value !== mainPropertyNumber),
+            );
+
+            for (const document of linkedChildSnapshot.docs) {
+                const propertyNumber = String(document.data()?.propertyNumber || "").trim();
+                if (propertyNumber && propertyNumber !== mainPropertyNumber) {
+                    currentMembers.add(propertyNumber);
+                }
+            }
+            for (const document of multiSnapshot.docs) {
+                const data = document.data() as MultiPropertySubscription;
+                const members = new Set<string>([
+                    data.propertyNumber1,
+                    ...(data.propertyNumber2 ? [data.propertyNumber2] : []),
+                    ...(data.additionalProperties || []),
+                    ...this.parsePropertyNumberList(data.linkedProperties),
+                ]);
+                for (const propertyNumber of members) {
+                    if (propertyNumber && propertyNumber !== mainPropertyNumber) {
+                        currentMembers.add(propertyNumber);
+                    }
+                }
+            }
+
+            for (const propertyNumber of propertyNumbers) {
+                if (!currentMembers.has(propertyNumber)) {
+                    throw new LinkedPropertyMutationError(
+                        `العقار ${propertyNumber} غير مرتبط بالعقار الرئيسي`,
+                        409,
+                        "LINKED_PROPERTY_NOT_IN_GROUP",
+                    );
+                }
+            }
+
+            const removedSet = new Set(propertyNumbers);
+            const linkedProperties = Array.from(currentMembers)
+                .filter((propertyNumber) => !removedSet.has(propertyNumber))
+                .sort((left, right) => left.localeCompare(right));
+            const nowIso = new Date().toISOString();
+
+            if (mainSubscriptionDoc) {
+                transaction.update(mainSubscriptionDoc.ref, {
+                    linkedProperties,
+                    propertyCount: linkedProperties.length + 1,
+                });
+            }
+
+            for (const propertyNumber of propertyNumbers) {
+                const snapshot = childSnapshots.get(propertyNumber)!;
+                const orderedDocuments = [...snapshot.docs].sort(
+                    (left, right) =>
+                        this.getDateMillis(right.data()?.endDate) -
+                        this.getDateMillis(left.data()?.endDate),
+                );
+                const latestDocument = orderedDocuments[0];
+                const latestBelongsToMain =
+                    String(latestDocument?.data()?.linkedProperty || "").trim() === mainPropertyNumber;
+                const propertyDocument = propertyDocuments.get(propertyNumber);
+                const propertyData = propertyDocument?.data() || {};
+                const restoreState = propertyData
+                    .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
+                const hasRestoreState =
+                    restoreState?.mainPropertyNumber === mainPropertyNumber;
+                const restoreTarget = hasRestoreState
+                    ? snapshot.docs.find(
+                        (document) => document.id === restoreState.subscriptionDocumentId,
+                    )
+                    : undefined;
+                const canRestoreTarget = Boolean(
+                    restoreTarget &&
+                    String(restoreTarget.data()?.linkedProperty || "").trim() === mainPropertyNumber,
+                );
+
+                for (const childDocument of snapshot.docs) {
+                    if (String(childDocument.data()?.linkedProperty || "").trim() !== mainPropertyNumber) {
+                        continue;
+                    }
+                    if (hasRestoreState && childDocument.id === restoreState.subscriptionDocumentId) {
+                        if (!restoreState.subscriptionExisted) {
+                            transaction.delete(childDocument.ref);
+                        } else if (canRestoreTarget) {
+                            const restoredSubscription = restoreLinkedPropertyFields(
+                                childDocument.data() || {},
+                                restoreState.subscription,
+                            );
+                            transaction.set(childDocument.ref, restoredSubscription);
+                        }
+                        continue;
+                    }
+
+                    const detachedSubscription: Record<string, unknown> = {
+                        ...(childDocument.data() || {}),
+                        linkedProperty: "",
+                        linkedProperties: [],
+                        propertyCount: 1,
+                        updatedAt: nowIso,
+                    };
+                    if (!hasRestoreState || childDocument.id !== restoreState.subscriptionDocumentId) {
+                        detachedSubscription.status = "منتهي";
+                        detachedSubscription.endDate = nowIso;
+                        detachedSubscription.cancelledAt = nowIso;
+                        detachedSubscription.cancelReason = "تم فصل العقار من المجموعة";
+                    }
+                    transaction.set(childDocument.ref, detachedSubscription);
+                }
+
+                if (propertyDocument?.exists) {
+                    let restoredProperty: Record<string, unknown> = { ...propertyData };
+                    if (hasRestoreState && latestBelongsToMain) {
+                        restoredProperty = restoreLinkedPropertyFields(
+                            restoredProperty,
+                            restoreState.property,
+                        );
+                    } else if (!hasRestoreState && latestBelongsToMain) {
+                        restoredProperty.subscriptionType = "عادي";
+                    }
+                    delete restoredProperty.linkedPropertyRestoreState;
+                    restoredProperty.linkedProperty = "";
+                    restoredProperty.pendingApprovalFrom = "";
+                    transaction.set(propertyDocument.ref, restoredProperty);
+                }
+            }
+
+            for (const document of multiSnapshot.docs) {
+                const data = document.data() as MultiPropertySubscription;
+                const groupMembers = Array.from(new Set<string>([
+                    ...(data.propertyNumber2 ? [data.propertyNumber2] : []),
+                    ...(data.additionalProperties || []),
+                    ...this.parsePropertyNumberList(data.linkedProperties),
+                ]))
+                    .filter(
+                        (propertyNumber) =>
+                            propertyNumber &&
+                            propertyNumber !== mainPropertyNumber &&
+                            !removedSet.has(propertyNumber),
+                    )
+                    .sort((left, right) => left.localeCompare(right));
+                if (groupMembers.length === 0) {
+                    transaction.delete(document.ref);
+                } else {
+                    transaction.update(document.ref, {
+                        propertyNumber2: groupMembers[0],
+                        additionalProperties: groupMembers.slice(1),
+                        linkedProperties: [mainPropertyNumber, ...groupMembers],
+                        propertyCount: groupMembers.length + 1,
+                    });
+                }
+            }
+
+            return {
+                mainPropertyNumber,
+                linkedProperties,
+                removedProperties: propertyNumbers,
+            };
+        });
+    }
+
+    /**
      * Sync a single linked (child) property so its subscription doc AND property doc
      * always match the main property's state. This is the single source of truth for
      * keeping parent + child consistent — use it on every activation/renewal path.
@@ -1803,6 +2187,32 @@ export class FirebaseService {
             const childSubDoc = childSubscriptionSnapshot.docs.find(
                 (document) => document.id === childSubId,
             );
+            const childPropertyData = childPropertySnapshot.data() || {};
+            const childSubscriptionData = childSubDoc?.data();
+            const alreadyLinkedToMain =
+                String(childPropertyData.linkedProperty || "").trim() === mainPropertyNumber ||
+                String(childSubscriptionData?.linkedProperty || "").trim() === mainPropertyNumber;
+            const existingRestoreState = childPropertyData
+                .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
+            const restoreState =
+                existingRestoreState?.mainPropertyNumber === mainPropertyNumber
+                    ? existingRestoreState
+                    : (!alreadyLinkedToMain
+                        ? {
+                            mainPropertyNumber,
+                            capturedAt: new Date().toISOString(),
+                            subscriptionDocumentId: childSubId,
+                            subscriptionExisted: Boolean(childSubDoc),
+                            subscription: captureLinkedPropertyFields(
+                                childSubscriptionData,
+                                LINKED_SUBSCRIPTION_MIRROR_FIELDS,
+                            ),
+                            property: captureLinkedPropertyFields(
+                                childPropertyData,
+                                LINKED_PROPERTY_MIRROR_FIELDS,
+                            ),
+                        }
+                        : undefined);
             if (childSubDoc) {
                 transaction.update(childSubRef, subUpdates);
             } else {
@@ -1821,6 +2231,7 @@ export class FirebaseService {
                 subscriptionDate: data.startDate.split("T")[0],
                 lastUpdate: new Date().toISOString().split("T")[0],
                 updatedAt: new Date().toISOString(),
+                ...(restoreState ? { linkedPropertyRestoreState: restoreState } : {}),
             });
         });
     }
@@ -2018,6 +2429,10 @@ export class FirebaseService {
                         .where("propertyNumber", "==", parentPropertyNumber),
                 )
                 : null;
+            const propertyRef = this.db.collection("properties").doc(propertyNumber);
+            const propertySnapshot = data.linkedProperty
+                ? await transaction.get(propertyRef)
+                : null;
 
             this.assertCurrentSubscriptionNotSuspended(
                 subscriptionSnapshot.docs,
@@ -2033,6 +2448,41 @@ export class FirebaseService {
             canonicalDocumentExists = subscriptionSnapshot.docs.some(
                 (document) => document.id === id,
             );
+            if (data.linkedProperty && propertySnapshot?.exists) {
+                const mainPropertyNumber = String(data.linkedProperty).trim();
+                const canonicalDocument = subscriptionSnapshot.docs.find(
+                    (document) => document.id === id,
+                );
+                const canonicalSubscription = canonicalDocument?.data();
+                const propertyData = propertySnapshot.data() || {};
+                const existingRestoreState = propertyData
+                    .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
+                const alreadyLinkedToMain =
+                    String(propertyData.linkedProperty || "").trim() === mainPropertyNumber ||
+                    String(canonicalSubscription?.linkedProperty || "").trim() === mainPropertyNumber;
+                const propertyUpdates: Record<string, unknown> = {
+                    linkedProperty: mainPropertyNumber,
+                };
+                if (existingRestoreState?.mainPropertyNumber === mainPropertyNumber) {
+                    propertyUpdates.linkedPropertyRestoreState = existingRestoreState;
+                } else if (!alreadyLinkedToMain) {
+                    propertyUpdates.linkedPropertyRestoreState = {
+                        mainPropertyNumber,
+                        capturedAt: new Date().toISOString(),
+                        subscriptionDocumentId: id,
+                        subscriptionExisted: Boolean(canonicalDocument),
+                        subscription: captureLinkedPropertyFields(
+                            canonicalSubscription,
+                            LINKED_SUBSCRIPTION_MIRROR_FIELDS,
+                        ),
+                        property: captureLinkedPropertyFields(
+                            propertyData,
+                            LINKED_PROPERTY_MIRROR_FIELDS,
+                        ),
+                    } satisfies LinkedPropertyRestoreState;
+                }
+                transaction.update(propertyRef, propertyUpdates);
+            }
             if (canonicalDocumentExists) {
                 transaction.update(ref, normalizedUpdates);
             } else {
@@ -3854,8 +4304,18 @@ export class FirebaseService {
             windowMs: number;
             maxAcceptedRequests: number;
         },
+        dailyPropertyLimit?: {
+            key: string;
+            windowStartedAt: number;
+            windowEndsAt: number;
+            maxAcceptedRequests: number;
+        },
     ): Promise<
-        | { accepted: false; remainingMs: number }
+        | {
+            accepted: false;
+            remainingMs: number;
+            reason: "cooldown" | "ip_limit" | "daily_property_limit";
+        }
         | { accepted: true; remainingMs: 0; request: Request; event: ContactEvent }
     > {
         const cooldownRef = this.db.collection("contact_cooldowns").doc(key);
@@ -3868,6 +4328,9 @@ export class FirebaseService {
         const ipLimitRef = ipAbuseLimit
             ? this.db.collection("contact_ip_rate_limits").doc(ipAbuseLimit.key)
             : null;
+        const dailyPropertyLimitRef = dailyPropertyLimit
+            ? this.db.collection("contact_property_daily_limits").doc(dailyPropertyLimit.key)
+            : null;
 
         return this.db.runTransaction(async (transaction) => {
             const doc = await transaction.get(cooldownRef);
@@ -3879,6 +4342,7 @@ export class FirebaseService {
                 return {
                     accepted: false,
                     remainingMs: cooldownMs - elapsed,
+                    reason: "cooldown",
                 } as const;
             }
 
@@ -3900,6 +4364,26 @@ export class FirebaseService {
                             1,
                             ipAbuseLimit.windowMs - (now - ipWindowStartedAt),
                         ),
+                        reason: "ip_limit",
+                    } as const;
+                }
+            }
+
+            let dailyAcceptedCount = 0;
+            if (dailyPropertyLimitRef && dailyPropertyLimit) {
+                const dailyLimitDoc = await transaction.get(dailyPropertyLimitRef);
+                const dailyLimitData = dailyLimitDoc.data();
+                const storedWindowStart = Number(dailyLimitData?.windowStartedAt || 0);
+                const sameWindow = storedWindowStart === dailyPropertyLimit.windowStartedAt;
+                dailyAcceptedCount = sameWindow
+                    ? Number(dailyLimitData?.acceptedCount || 0)
+                    : 0;
+
+                if (dailyAcceptedCount >= dailyPropertyLimit.maxAcceptedRequests) {
+                    return {
+                        accepted: false,
+                        remainingMs: Math.max(1, dailyPropertyLimit.windowEndsAt - now),
+                        reason: "daily_property_limit",
                     } as const;
                 }
             }
@@ -3929,6 +4413,16 @@ export class FirebaseService {
                     acceptedCount: ipAcceptedCount + 1,
                     updatedAt: timestamp,
                     expiresAtTtl: new Date(ipWindowStartedAt + ipAbuseLimit.windowMs * 2),
+                });
+            }
+            if (dailyPropertyLimitRef && dailyPropertyLimit) {
+                transaction.set(dailyPropertyLimitRef, {
+                    propertyNumber,
+                    windowStartedAt: dailyPropertyLimit.windowStartedAt,
+                    windowEndsAt: dailyPropertyLimit.windowEndsAt,
+                    acceptedCount: dailyAcceptedCount + 1,
+                    updatedAt: timestamp,
+                    expiresAtTtl: new Date(dailyPropertyLimit.windowEndsAt + 24 * 60 * 60 * 1000),
                 });
             }
             transaction.set(requestRef, newRequest);

@@ -20,7 +20,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getEffectiveSubscriptionType } from "@shared/subscriptionType";
 import { normalizeWhatsAppDestination } from "@shared/phone";
-import { isPublicPropertyPremium } from "@/lib/public-subscription";
+import {
+    getPublicPropertyContactPolicyMessage,
+    isPublicPropertyPremium,
+} from "@/lib/public-subscription";
 import {
     buildWhatsAppUrl,
     closeReservedWhatsAppTab,
@@ -106,7 +109,7 @@ function normalizeWhatsAppNumber(value?: string) {
     return normalizeWhatsAppDestination(value) || DEFAULT_WHATSAPP;
 }
 
-type ContactRequestErrorKind = "phone_required" | "cooldown" | "general";
+type ContactRequestErrorKind = "phone_required" | "cooldown" | "daily_limit" | "general";
 
 class ContactRequestError extends Error {
     constructor(
@@ -442,6 +445,15 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const displayName = isVerified(property) ? property.name : "";
 
     const showContactRequestError = (error: unknown) => {
+        if (error instanceof ContactRequestError && error.kind === "daily_limit") {
+            toast({
+                title: "اكتمل الحد اليومي",
+                description: error.message,
+                variant: "destructive",
+            });
+            return;
+        }
+
         if (error instanceof ContactRequestError && error.kind === "cooldown") {
             toast({
                 title: "⏱️ انتظر",
@@ -508,6 +520,10 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
                 if (response.status === 428 || responseCode === "CONTACT_PHONE_REQUIRED") {
                     throw new ContactRequestError(errorMessage, "phone_required");
+                }
+
+                if (responseCode === "FREE_PROPERTY_DAILY_CONTACT_LIMIT") {
+                    throw new ContactRequestError(errorMessage, "daily_limit");
                 }
 
                 const remainingTimeFormatted = typeof result.remainingTimeFormatted === "string"
@@ -641,7 +657,10 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
                     throw new Error("تعذر استخدام رقم التواصل المحفوظ. حاول حفظه مرة أخرى.");
                 }
-                if (error instanceof ContactRequestError && error.kind === "cooldown") {
+                if (
+                    error instanceof ContactRequestError &&
+                    (error.kind === "cooldown" || error.kind === "daily_limit")
+                ) {
                     setIsContactDialogOpen(false);
                     showContactRequestError(error);
                     return;
@@ -922,6 +941,9 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                     <p className="text-xs font-semibold text-[#8b7140]">التواصل والحجز</p>
                                     <h3 className="mt-1 text-xl font-bold text-[#2f2a1f]">تواصل مع المعلن</h3>
                                     <p className="mt-2 text-sm leading-6 text-[#6f6249]">سيتم تسجيل طلبك قبل فتح واتساب</p>
+                                    <p className="mt-2 rounded-lg bg-[#fbf7ee] px-3 py-2 text-xs leading-5 text-[#6f6249]">
+                                        {getPublicPropertyContactPolicyMessage(property)}
+                                    </p>
                                 </div>
                                 <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-[#cfe5d6] bg-[#eef8f1] text-[#128c47]">
                                     <Phone className="h-5 w-5" />

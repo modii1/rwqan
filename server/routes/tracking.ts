@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { createHmac } from "node:crypto";
-import { analyticsService, propertyService, notificationService } from "../services";
+import { analyticsService, propertyService, notificationService, subscriptionService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { detectDeviceType, normalizePhoneNumber } from "../utils/helpers";
+import { calculateRemainingDays, getEndOfDayRiyadh, getStartOfDayRiyadh } from "../utils/dateUtils";
 import type { InsertContactEvent } from "../../shared/schema";
+import { isActivePremiumSubscription } from "../../shared/subscriptionType";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
   ContactIdentityRateLimitError,
@@ -23,6 +25,7 @@ const router = Router();
 
 export const CONTACT_REQUEST_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 export const CONTACT_REQUEST_MAX_ATTEMPTS_PER_WINDOW = 60;
+export const FREE_PROPERTY_DAILY_CONTACT_LIMIT = 3;
 
 // عدد الطلبات من كل IP لكل عقار (للتوافق مع حقل التحليلات القديم فقط).
 const ipPropertyCounter = new Map<string, Map<string, number>>();
@@ -79,6 +82,13 @@ function createContactAttemptLimitKey(ipAddress: string): string {
   const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
   return createHmac("sha256", secret)
     .update(`contact-attempt-limit:${ipAddress}`)
+    .digest("hex");
+}
+
+function createFreePropertyDailyLimitKey(propertyNumber: string): string {
+  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  return createHmac("sha256", secret)
+    .update(`free-property-daily-contact-limit:${propertyNumber}`)
     .digest("hex");
 }
 
@@ -142,6 +152,17 @@ router.post("/api/requests/smart", async (req, res) => {
     if (property.verificationStatus && property.verificationStatus !== "approved") {
       return res.status(403).json({ error: "هذا العقار غير متاح حالياً" });
     }
+
+    const subscription = await subscriptionService.getByProperty(propertyNumber);
+    const isPremiumProperty = Boolean(
+      subscription &&
+      isActivePremiumSubscription({
+        subscriptionType: subscription.subscriptionType,
+        packageType: subscription.packageType,
+        status: subscription.status,
+        isExpired: calculateRemainingDays(subscription.endDate) < 0,
+      }),
+    );
 
     const userAgent = req.headers["user-agent"] || "";
     const deviceType = detectDeviceType(userAgent);
@@ -252,11 +273,14 @@ router.post("/api/requests/smart", async (req, res) => {
     }
 
     const thirtyMinutes = 30 * 60 * 1000;
+    const hasUnlimitedClientContact = actor === "anonymous" && isPremiumProperty;
     const cooldownKey = createCooldownKey(contactEventBase!.visitorKey, propertyNumber);
 
     // CRITICAL: استخدام UTC فقط - الواجهة ستتولى التحويل
     const nowTimestamp = Date.now();
     const nowDate = new Date(nowTimestamp);
+    const riyadhDayStart = getStartOfDayRiyadh(nowDate).getTime();
+    const riyadhDayEnd = getEndOfDayRiyadh(nowDate).getTime() + 1;
 
     // للعرض في الـ response فقط - نستخدم تنسيق الرياض
     const riyadhFormatter = new Intl.DateTimeFormat('ar-SA', {
@@ -290,7 +314,7 @@ router.post("/api/requests/smart", async (req, res) => {
     const cooldown = await firebaseService.createContactRequestWithCooldown(
       cooldownKey,
       propertyNumber,
-      thirtyMinutes,
+      hasUnlimitedClientContact ? 0 : thirtyMinutes,
       {
         propertyNumber,
         requestCode,
@@ -308,20 +332,34 @@ router.post("/api/requests/smart", async (req, res) => {
         requestCode,
         clientPhone,
       },
-      {
-        key: createIpAbuseLimitKey(ipAddress, propertyNumber),
-        windowMs: thirtyMinutes,
-        maxAcceptedRequests: 10,
-      },
+      hasUnlimitedClientContact
+        ? undefined
+        : {
+            key: createIpAbuseLimitKey(ipAddress, propertyNumber),
+            windowMs: thirtyMinutes,
+            maxAcceptedRequests: 10,
+          },
+      actor === "anonymous" && !isPremiumProperty
+        ? {
+            key: createFreePropertyDailyLimitKey(propertyNumber),
+            windowStartedAt: riyadhDayStart,
+            windowEndsAt: riyadhDayEnd,
+            maxAcceptedRequests: FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+          }
+        : undefined,
     );
 
     // تحقق من التكرار في آخر 30 دقيقة
     if (!cooldown.accepted) {
       const remainingSeconds = Math.ceil(cooldown.remainingMs / 1000);
-      const minutes = Math.floor(remainingSeconds / 60);
+      const hours = Math.floor(remainingSeconds / 3600);
+      const minutes = Math.floor((remainingSeconds % 3600) / 60);
       const seconds = remainingSeconds % 60;
       let timeDisplay = "";
-      if (minutes > 0) {
+      if (hours > 0) {
+        timeDisplay = `${hours} ساعة`;
+        if (minutes > 0) timeDisplay += ` و${minutes} دقيقة`;
+      } else if (minutes > 0) {
         timeDisplay = `${minutes} دقيقة`;
         if (seconds > 0) timeDisplay += ` و${seconds} ثانية`;
       } else {
@@ -331,7 +369,12 @@ router.post("/api/requests/smart", async (req, res) => {
       console.log(`⏱️ Duplicate request blocked - IP: ${ipAddress}, Property: ${propertyNumber}, Remaining: ${timeDisplay}`);
 
       return res.status(429).json({
-        error: "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
+        code: cooldown.reason === "daily_property_limit"
+          ? "FREE_PROPERTY_DAILY_CONTACT_LIMIT"
+          : "CONTACT_COOLDOWN",
+        error: cooldown.reason === "daily_property_limit"
+          ? "اكتملت محاولات التواصل الثلاث المتاحة اليوم لهذا العقار المجاني. حاول مجدداً غداً."
+          : "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
         remainingSeconds,
         remainingTimeFormatted: timeDisplay,
         ...(responseContactIdentity

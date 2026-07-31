@@ -375,10 +375,9 @@ router.post("/api/admin/linked-properties/groups/:id/remove", async (req, res) =
       return res.status(400).json({ success: false, message: "لا يمكن إزالة العقار الرئيسي من المجموعة" });
     }
 
-    await firebaseService.mutateLinkedPropertyGroupAtomically({
+    await firebaseService.unlinkLinkedPropertiesAtomically({
       mainPropertyNumber: current.propertyNumber1,
-      removePropertyNumbers: [propertyNumber],
-      cancelRemovedSubscriptions: true,
+      propertyNumbers: [propertyNumber],
     });
 
     res.json({ success: true, message: `تم إزالة العقار ${propertyNumber} من المجموعة` });
@@ -453,18 +452,26 @@ const allProps = Array.from(uniqueProps2);
       }
     }
 
-    if (!foundGroup) {
+    const childSubscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
+    const childProperty = await firebaseService.getPropertyByNumber(propertyNumber);
+    const mainPropertyNumber = String(
+      foundGroup?.propertyNumber1 ||
+      childSubscription?.linkedProperty ||
+      childProperty?.linkedProperty ||
+      "",
+    ).trim();
+
+    if (!mainPropertyNumber) {
       return res.status(404).json({ success: false, message: "العقار غير مرتبط بأي مجموعة" });
     }
 
-    if (propertyNumber === foundGroup.propertyNumber1) {
+    if (propertyNumber === mainPropertyNumber) {
       return res.status(400).json({ success: false, message: "لا يمكن فك ارتباط العقار الرئيسي. احذف المجموعة كاملة." });
     }
 
-    await firebaseService.mutateLinkedPropertyGroupAtomically({
-      mainPropertyNumber: foundGroup.propertyNumber1,
-      removePropertyNumbers: [propertyNumber],
-      cancelRemovedSubscriptions: true,
+    await firebaseService.unlinkLinkedPropertiesAtomically({
+      mainPropertyNumber,
+      propertyNumbers: [propertyNumber],
     });
 
     res.json({ success: true, message: `تم فك ارتباط العقار ${propertyNumber} بنجاح` });
@@ -528,10 +535,9 @@ router.delete("/api/admin/linked-properties/:propertyNumber", async (req, res) =
           return res.status(400).json({ success: false, message: "لا يمكن حذف العقار الرئيسي. احذف المجموعة كاملة." });
         }
 
-        await firebaseService.mutateLinkedPropertyGroupAtomically({
+        await firebaseService.unlinkLinkedPropertiesAtomically({
           mainPropertyNumber: multiSub.propertyNumber1,
-          removePropertyNumbers: [propertyNumber],
-          cancelRemovedSubscriptions: true,
+          propertyNumbers: [propertyNumber],
         });
         break;
       }

@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   getPublicPropertyDisplayName,
+  getPublicPropertyContactPolicyMessage,
   getPublicPropertyLabel,
   hasValidPremiumSubscription,
   isPublicPropertyPremium,
@@ -78,5 +79,24 @@ test("active premium properties retain their public name", () => {
   assert.equal(
     getPublicPropertyLabel(premiumProperty, now),
     "Current premium name",
+  );
+});
+
+test("contact policy explains the free daily limit and premium unlimited access", () => {
+  assert.equal(
+    getPublicPropertyContactPolicyMessage({
+      subscriptionType: "عادي",
+      subscriptionStatus: "نشط مجاني",
+      subscriptionEndDate: "2026-07-11",
+    }, now),
+    "العقار المجاني يتيح 3 محاولات تواصل عبر واتساب يومياً.",
+  );
+  assert.equal(
+    getPublicPropertyContactPolicyMessage({
+      subscriptionType: "مميز",
+      subscriptionStatus: "ساري",
+      subscriptionEndDate: "2026-07-11",
+    }, now),
+    "العقار المميز يتيح للعملاء تواصلاً غير محدود عبر واتساب.",
   );
 });

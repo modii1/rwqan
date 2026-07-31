@@ -528,6 +528,232 @@ test("owner-style unlink consumes the inherited entitlement before its slot is r
   );
 });
 
+test("unconditional unlink restores the child snapshot and leaves main lifecycle fields unchanged", async () => {
+  const database = new FakeFirestore();
+  seedPackage(database, 2);
+  for (const propertyNumber of ["PROP-A", "PROP-B"]) {
+    seedProperty(database, propertyNumber);
+  }
+  const originalChildSubscription = activeSubscription("PROP-B", {
+    packageId: "PKG-OLD",
+    subscriptionType: "normal",
+    packageType: "normal",
+    status: "expired",
+    startDate: pastDate(30),
+    endDate: pastDate(2),
+    paymentId: "PAY-B-OLD",
+    cancelledAt: "2026-01-01T00:00:00.000Z",
+    cancelReason: "old reason",
+  });
+  database.set("subscriptions", "SUB-PROP-A", activeSubscription("PROP-A", {
+    linkedProperties: [],
+    propertyCount: 1,
+  }));
+  database.set("subscriptions", "SUB-PROP-B", originalChildSubscription);
+  database.update("properties", "PROP-B", {
+    subscriptionType: "normal",
+    verificationStatus: "pending",
+    subscriptionDate: "2026-01-01",
+    lastUpdate: "2026-01-02",
+  });
+  const service = createService(database);
+
+  await service.mutateLinkedPropertyGroupAtomically({
+    mainPropertyNumber: "PROP-A",
+    addPropertyNumbers: ["PROP-B"],
+    approveAddedProperties: true,
+  });
+
+  database.update("subscriptions", "SUB-PROP-A", {
+    status: "موقوف مؤقتاً",
+    endDate: pastDate(1),
+    suspendedAt: "2026-07-01T00:00:00.000Z",
+  });
+  database.set("payment_action_locks", "PROP-A", {
+    propertyNumber: "PROP-A",
+    paymentId: "PAY-PROCESSING",
+    action: "upgrade",
+    state: "processing",
+  });
+  const mainBeforeUnlink = { ...database.get("subscriptions", "SUB-PROP-A") };
+
+  await service.unlinkLinkedPropertiesAtomically({
+    mainPropertyNumber: "PROP-A",
+    propertyNumbers: ["PROP-B"],
+  });
+
+  const mainAfterUnlink = database.get("subscriptions", "SUB-PROP-A")!;
+  assert.deepEqual(mainAfterUnlink.linkedProperties, []);
+  assert.equal(mainAfterUnlink.propertyCount, 1);
+  for (const field of [
+    "packageId",
+    "startDate",
+    "endDate",
+    "status",
+    "paymentId",
+    "suspendedAt",
+  ]) {
+    assert.equal(mainAfterUnlink[field], mainBeforeUnlink[field]);
+  }
+
+  const restoredChild = database.get("subscriptions", "SUB-PROP-B")!;
+  for (const field of [
+    "packageId",
+    "subscriptionType",
+    "packageType",
+    "startDate",
+    "endDate",
+    "status",
+    "paymentId",
+    "cancelledAt",
+    "cancelReason",
+  ]) {
+    assert.equal(restoredChild[field], originalChildSubscription[field]);
+  }
+  assert.equal(restoredChild.linkedProperty, undefined);
+
+  const restoredProperty = database.get("properties", "PROP-B")!;
+  assert.equal(restoredProperty.subscriptionType, "normal");
+  assert.equal(restoredProperty.verificationStatus, "pending");
+  assert.equal(restoredProperty.subscriptionDate, "2026-01-01");
+  assert.equal(restoredProperty.lastUpdate, "2026-01-02");
+  assert.equal(restoredProperty.linkedProperty, "");
+  assert.equal(restoredProperty.pendingApprovalFrom, "");
+  assert.equal(restoredProperty.linkedPropertyRestoreState, undefined);
+});
+
+test("direct linked activation also captures the child's pre-link state", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-A");
+  seedProperty(database, "PROP-B");
+  database.set("subscriptions", "SUB-PROP-A", activeSubscription("PROP-A", {
+    linkedProperties: [],
+    propertyCount: 1,
+  }));
+  database.set("subscriptions", "SUB-PROP-B", activeSubscription("PROP-B", {
+    packageId: "PKG-BEFORE",
+    status: "expired",
+    subscriptionType: "normal",
+    endDate: pastDate(2),
+    paymentId: "PAY-BEFORE",
+  }));
+  database.update("properties", "PROP-B", {
+    subscriptionType: "normal",
+    verificationStatus: "pending",
+  });
+  const service = createService(database);
+
+  await service.addSubscriptionToSheet("PROP-B", {
+    packageId: "PKG-GROUP",
+    subscriptionType: "premium",
+    startDate: new Date().toISOString(),
+    endDate: futureDate(10),
+    paymentId: "PAY-GROUP",
+    linkedProperty: "PROP-A",
+  }, database.get("properties", "PROP-B"), "");
+
+  await service.unlinkLinkedPropertiesAtomically({
+    mainPropertyNumber: "PROP-A",
+    propertyNumbers: ["PROP-B"],
+  });
+
+  const restoredSubscription = database.get("subscriptions", "SUB-PROP-B")!;
+  assert.equal(restoredSubscription.packageId, "PKG-BEFORE");
+  assert.equal(restoredSubscription.status, "expired");
+  assert.equal(restoredSubscription.subscriptionType, "normal");
+  assert.equal(restoredSubscription.paymentId, "PAY-BEFORE");
+  assert.equal(database.get("properties", "PROP-B")?.subscriptionType, "normal");
+  assert.equal(database.get("properties", "PROP-B")?.verificationStatus, "pending");
+});
+
+test("unconditional unlink works from legacy membership without a main subscription", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-A");
+  seedProperty(database, "PROP-B");
+  database.set("subscriptions", "SUB-PROP-B", activeSubscription("PROP-B", {
+    linkedProperty: "PROP-A",
+  }));
+  database.update("properties", "PROP-B", {
+    linkedProperty: "PROP-A",
+    subscriptionType: "مميز",
+  });
+  database.set("multi_property_subscriptions", "MULTI-LEGACY", {
+    id: "MULTI-LEGACY",
+    packageId: "PKG-MISSING",
+    propertyNumber1: "PROP-A",
+    propertyNumber2: "PROP-B",
+    linkedProperties: ["PROP-A", "PROP-B"],
+    propertyCount: 2,
+    startDate: pastDate(30),
+    endDate: pastDate(1),
+    status: "منتهي",
+  });
+
+  await createService(database).unlinkLinkedPropertiesAtomically({
+    mainPropertyNumber: "PROP-A",
+    propertyNumbers: ["PROP-B"],
+  });
+
+  assert.equal(database.get("multi_property_subscriptions", "MULTI-LEGACY"), undefined);
+  assert.equal(database.get("subscriptions", "SUB-PROP-B")?.linkedProperty, "");
+  assert.equal(database.get("subscriptions", "SUB-PROP-B")?.status, "منتهي");
+  assert.equal(database.get("properties", "PROP-B")?.linkedProperty, "");
+  assert.equal(database.get("properties", "PROP-B")?.subscriptionType, "عادي");
+});
+
+test("free-property daily contact quota accepts only three requests atomically", async () => {
+  const database = new FakeFirestore();
+  const service = createService(database);
+  const now = Date.now();
+  const dailyLimit = {
+    key: "PROP-FREE-DAY",
+    windowStartedAt: now - 1_000,
+    windowEndsAt: now + 60_000,
+    maxAcceptedRequests: 3,
+  };
+
+  const outcomes = [];
+  for (let index = 0; index < 4; index += 1) {
+    outcomes.push(await service.createContactRequestWithCooldown(
+      `VISITOR-${index}`,
+      "PROP-FREE",
+      0,
+      {
+        propertyNumber: "PROP-FREE",
+        requestCode: `REQ-${index}`,
+        timestamp: String(now),
+        clientPhone: "512345678",
+        ipAddress: `192.0.2.${index + 1}`,
+        dayOfWeek: "الجمعة",
+        hourOfDay: 12,
+        deviceType: "mobile",
+      },
+      index + 1,
+      {
+        propertyNumber: "PROP-FREE",
+        visitorKey: `VISITOR-${index}`,
+        actorType: "anonymous",
+        deviceType: "mobile",
+        outcome: "accepted",
+        requestCode: `REQ-${index}`,
+      },
+      undefined,
+      dailyLimit,
+    ));
+  }
+
+  assert.deepEqual(outcomes.map((outcome) => outcome.accepted), [true, true, true, false]);
+  assert.equal(
+    outcomes[3].accepted ? undefined : outcomes[3].reason,
+    "daily_property_limit",
+  );
+  assert.equal(database.query("requests", "propertyNumber", "PROP-FREE").length, 3);
+  assert.equal(
+    database.get("contact_property_daily_limits", "PROP-FREE-DAY")?.acceptedCount,
+    3,
+  );
+});
+
 test("unlink clears stale parent history without cancelling a newer standalone entitlement", async () => {
   const database = new FakeFirestore();
   seedPackage(database, 2);

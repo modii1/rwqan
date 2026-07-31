@@ -89,3 +89,12 @@ export function getPublicPropertyLabel(
   if (premiumName) return premiumName;
   return `عقار رقم ${String(property.propertyNumber || "").trim()}`.trim();
 }
+
+export function getPublicPropertyContactPolicyMessage(
+  property: PublicPropertySubscriptionState,
+  now = new Date(),
+): string {
+  return isPublicPropertyPremium(property, now)
+    ? "العقار المميز يتيح للعملاء تواصلاً غير محدود عبر واتساب."
+    : "العقار المجاني يتيح 3 محاولات تواصل عبر واتساب يومياً.";
+}

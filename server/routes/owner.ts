@@ -2978,24 +2978,13 @@ router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requi
     const linkedPropertyNumber = req.params.propertyNumber;
 
     const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
-    if (!mainSubscription) {
-      return res.status(404).json({ success: false, message: "العقار الرئيسي ليس لديه اشتراك" });
-    }
-
-    const currentLinkedProperties = mainSubscription.linkedProperties || [];
-    
-    if (!currentLinkedProperties.includes(linkedPropertyNumber)) {
-      return res.status(400).json({ success: false, message: "العقار غير مرتبط بعقارك" });
-    }
-
-    await firebaseService.mutateLinkedPropertyGroupAtomically({
+    await firebaseService.unlinkLinkedPropertiesAtomically({
       mainPropertyNumber,
-      removePropertyNumbers: [linkedPropertyNumber],
-      cancelRemovedSubscriptions: true,
+      propertyNumbers: [linkedPropertyNumber],
     });
 
     // Log the unlink against the payment record for audit trail
-    if (mainSubscription.paymentId) {
+    if (mainSubscription?.paymentId) {
       try {
         const linkedPayment = await firebaseService.getPaymentById(mainSubscription.paymentId);
         if (linkedPayment) {

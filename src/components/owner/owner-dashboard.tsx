@@ -2147,7 +2147,7 @@ export default function OwnerDashboard() {
         {/* ===== سجل المدفوعات ===== */}
         <Card
           id="payments-section"
-          className={`hidden ${ownerPanelClass} p-4 md:p-6 ${
+          className={`${ownerPanelClass} p-4 md:p-6 ${
             highlightPayments
               ? "ring-2 ring-[#b88d2b]/40 ring-offset-2"
               : ""
