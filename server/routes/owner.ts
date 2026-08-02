@@ -2414,7 +2414,8 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
         );
       } else {
         // A timeout/5xx/malformed provider response can still have created an
-        // intention. Retain all action locks and fail closed until reconciled.
+        // intention. Preserve its identity for reconciliation without locking
+        // the property or its linked group.
         await paymentService.update(createdPaymentId, {
           intentionState: "unknown",
         }).catch((cleanupError) =>

@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   FirebaseService,
   LinkedPropertyMutationError,
-  PaymentActionEligibilityError,
   SuspendedSubscriptionWriteError,
 } from "./firebaseService";
 
@@ -250,7 +249,7 @@ function actionablePayment(
   };
 }
 
-test("an expired requested child that is still linked to a foreign parent is rejected", async () => {
+test("an expired historical child link does not lock a new payment", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "SUB-PROP-B", activeSubscription("PROP-B", {
     linkedProperty: "PROP-C",
@@ -258,18 +257,15 @@ test("an expired requested child that is still linked to a foreign parent is rej
     endDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   }));
 
-  await assert.rejects(
-    () => createService(database).createPayment(actionablePayment(
-      "PAY-A-B",
-      "PROP-A",
-      {
-        action: "new",
-        additionalProperties: ["PROP-B"],
-      },
-    ) as any),
-    PaymentActionEligibilityError,
-  );
-  assert.equal(database.get("payments", "PAY-A-B"), undefined);
+  const payment = await createService(database).createPayment(actionablePayment(
+    "PAY-A-B",
+    "PROP-A",
+    {
+      action: "new",
+      additionalProperties: ["PROP-B"],
+    },
+  ) as any);
+  assert.equal(payment.id, "PAY-A-B");
   assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
 });
@@ -387,7 +383,7 @@ test("concurrent additions cannot overflow package capacity or lose the winner",
   );
 });
 
-test("a processing payment lock blocks adding an affected child without partial writes", async () => {
+test("a legacy processing payment lock does not block adding an affected child", async () => {
   const database = new FakeFirestore();
   seedPackage(database, 3);
   for (const propertyNumber of ["PROP-A", "PROP-B"]) {
@@ -403,26 +399,20 @@ test("a processing payment lock blocks adding an affected child without partial 
     state: "processing",
   });
 
-  await assert.rejects(
-    () => createService(database).mutateLinkedPropertyGroupAtomically({
-      mainPropertyNumber: "PROP-A",
-      addPropertyNumbers: ["PROP-B"],
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof LinkedPropertyMutationError);
-      assert.equal(error.code, "PAYMENT_ACTION_IN_PROGRESS");
-      return true;
-    },
-  );
+  await createService(database).mutateLinkedPropertyGroupAtomically({
+    mainPropertyNumber: "PROP-A",
+    addPropertyNumbers: ["PROP-B"],
+  });
   assert.deepEqual(
     database.get("subscriptions", "SUB-PROP-A")?.linkedProperties,
-    [],
+    ["PROP-B"],
   );
-  assert.equal(database.get("subscriptions", "SUB-PROP-B"), undefined);
-  assert.equal(database.get("properties", "PROP-B")?.linkedProperty, undefined);
+  assert.equal(database.get("subscriptions", "SUB-PROP-B")?.linkedProperty, "PROP-A");
+  assert.equal(database.get("properties", "PROP-B")?.linkedProperty, "PROP-A");
+  assert.equal(database.get("payment_action_locks", "PROP-B")?.state, "processing");
 });
 
-test("atomic cancellation and unlink clears history so A and B reserve disjoint payments", async () => {
+test("atomic cancellation and unlink leaves A and B independently payable without locks", async () => {
   const database = new FakeFirestore();
   seedPackage(database, 2);
   for (const propertyNumber of ["PROP-A", "PROP-B"]) {
@@ -465,8 +455,8 @@ test("atomic cancellation and unlink clears history so A and B reserve disjoint 
     }) as any),
   ]);
   assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 2);
-  assert.equal(database.get("payment_action_locks", "PROP-A")?.paymentId, "PAY-A");
-  assert.equal(database.get("payment_action_locks", "PROP-B")?.paymentId, "PAY-B");
+  assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
+  assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
 });
 
 test("owner-style unlink consumes the inherited entitlement before its slot is reused", async () => {

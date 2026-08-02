@@ -102,25 +102,12 @@ export type AdminPropertyAddOnDecisionResult =
             | "unsafe_legacy_state";
     };
 
-type PaymentActionLock = {
-    propertyNumber: string;
-    paymentId: string;
-    action: "new" | "extend" | "upgrade";
-    state: "reserved" | "retrying" | "processing" | "fulfilled" | "released";
-    reservedAt: string;
-    claimedAt?: string;
-    claimToken?: string;
-    retryToken?: string;
-    completedAt?: string;
-    releasedAt?: string;
-};
-
 export class PaymentActionConflictError extends Error {
     readonly status = 409;
     readonly code = "PAYMENT_ACTION_IN_PROGRESS";
 
     constructor() {
-        super("يوجد طلب اشتراك آخر قيد التنفيذ لهذا العقار. أكمل الدفع الحالي أو ألغِه قبل بدء دفع جديد.");
+        super("توجد معالجة أخرى قيد التنفيذ لنفس الدفعة. انتظر قليلاً ثم حاول مرة أخرى.");
         this.name = "PaymentActionConflictError";
     }
 }
@@ -324,27 +311,6 @@ export class FirebaseService {
             : "new";
     }
 
-    private getPaymentActionLockRef(propertyNumber: string) {
-        return this.db
-            .collection("payment_action_locks")
-            .doc(encodeURIComponent(propertyNumber));
-    }
-
-    private isReleasableFailedPaymentStatus(status: unknown): boolean {
-        return new Set([
-            "مرفوض",
-            "فشل",
-            "ملغي",
-            "منتهي الصلاحية",
-            "ملغي - انتهت المهلة",
-            "failed",
-            "cancelled",
-            "canceled",
-            "rejected",
-            "expired",
-        ]).has(String(status || "").trim().toLowerCase());
-    }
-
     private isPaymentEligibleForNewIntention(payment: Payment): boolean {
         const retryableStatuses = new Set([
             "فشل",
@@ -363,46 +329,6 @@ export class FirebaseService {
             !payment.paymentReference &&
             (payment.intentionState === undefined || payment.intentionState === "failed")
         );
-    }
-
-    private hasUnresolvedProviderAttempt(payment: Payment): boolean {
-        const paymentMethod = String(payment.paymentMethod || "")
-            .trim()
-            .toLowerCase();
-        const isBankTransfer =
-            paymentMethod === "تحويل بنكي" ||
-            paymentMethod.includes("bank");
-        return (
-            payment.intentionState === "creating" ||
-            payment.intentionState === "created" ||
-            payment.intentionState === "unknown" ||
-            (
-                !isBankTransfer &&
-                (Boolean(payment.transactionId) || Boolean(payment.paymentReference))
-            )
-        );
-    }
-
-    private isActivePaymentActionLockState(
-        state: PaymentActionLock["state"],
-    ): boolean {
-        return state === "reserved" || state === "retrying" || state === "processing";
-    }
-
-    private isPaymentActionLockOwnerReleasable(
-        lock: PaymentActionLock,
-        ownerPayment: Payment | null,
-        now: number = Date.now(),
-    ): boolean {
-        if (!ownerPayment) return true;
-        if (!this.isReleasableFailedPaymentStatus(ownerPayment.status)) return false;
-        // A timeout/failure status is not proof that Paymob rejected the
-        // attempt. Never let another payment steal the lock while a provider
-        // intention exists or its outcome is ambiguous.
-        if (this.hasUnresolvedProviderAttempt(ownerPayment)) return false;
-        if (lock.state !== "retrying") return true;
-        const retryStartedAt = this.getDateMillis(ownerPayment.retryReservationAt);
-        return retryStartedAt <= 0 || now - retryStartedAt >= 10 * 60 * 1000;
     }
 
     private isActionablePaymentAllowedForSubscription(
@@ -456,183 +382,6 @@ export class FirebaseService {
             this.getDateMillis(right.endDate) - this.getDateMillis(left.endDate),
         );
         return subscriptions[0] || null;
-    }
-
-    private async resolvePaymentActionLockContext(
-        transaction: FirebaseFirestore.Transaction,
-        payment: Pick<
-            Payment,
-            | "propertyNumber"
-            | "secondPropertyNumber"
-            | "additionalProperties"
-            | "linkedProperties"
-            | "fulfillmentActionLockKey"
-            | "fulfillmentActionLockKeys"
-        >,
-    ): Promise<{
-        keys: string[];
-        subscription: Subscription | null;
-        hasForeignRequestedMember: boolean;
-    }> {
-        const subscriptionSnapshot = await transaction.get(
-            this.db
-                .collection("subscriptions")
-                .where("propertyNumber", "==", payment.propertyNumber),
-        );
-        const subscription = this.selectLatestSubscription(
-            subscriptionSnapshot.docs,
-        );
-        let parentSubscription: Subscription | null = null;
-        if (
-            subscription?.linkedProperty &&
-            subscription.linkedProperty !== payment.propertyNumber
-        ) {
-            const parentSnapshot = await transaction.get(
-                this.db
-                    .collection("subscriptions")
-                    .where("propertyNumber", "==", subscription.linkedProperty),
-            );
-            parentSubscription = this.selectLatestSubscription(parentSnapshot.docs);
-        }
-
-        const canonicalParent = String(
-            subscription?.linkedProperty || payment.propertyNumber,
-        ).trim();
-        const childSnapshot = await transaction.get(
-            this.db
-                .collection("subscriptions")
-                .where("linkedProperty", "==", canonicalParent),
-        );
-        const childCandidateNumbers = new Set<string>();
-        for (const value of [
-            subscription?.linkedProperties,
-            parentSubscription?.linkedProperties,
-        ]) {
-            for (const propertyNumber of this.parsePropertyNumberList(value)) {
-                if (propertyNumber !== canonicalParent) {
-                    childCandidateNumbers.add(propertyNumber);
-                }
-            }
-        }
-        for (const document of childSnapshot.docs) {
-            const propertyNumber = String(
-                (document.data() as Subscription).propertyNumber || "",
-            ).trim();
-            if (propertyNumber) childCandidateNumbers.add(propertyNumber);
-        }
-        const childSubscriptions: Subscription[] = [];
-        for (const childPropertyNumber of Array.from(childCandidateNumbers).sort(
-            (left, right) => left.localeCompare(right),
-        )) {
-            // Legacy duplicate rows can retain an obsolete linkedProperty.
-            // Resolve the latest row for each child before treating it as a
-            // current member of this group.
-            const latestChildSnapshot = await transaction.get(
-                this.db
-                    .collection("subscriptions")
-                    .where("propertyNumber", "==", childPropertyNumber),
-            );
-            const latestChild = this.selectLatestSubscription(
-                latestChildSnapshot.docs,
-            );
-            const latestChildIsActive = Boolean(
-                latestChild?.endDate &&
-                isSubscriptionStatusActive(latestChild.status) &&
-                calculateRemainingDays(latestChild.endDate) >= 0,
-            );
-            if (
-                latestChild?.linkedProperty === canonicalParent &&
-                latestChildIsActive
-            ) {
-                childSubscriptions.push(latestChild);
-            }
-        }
-
-        const explicitRequestedMembers = new Set<string>();
-        for (const value of [
-            payment.secondPropertyNumber,
-            payment.additionalProperties,
-            payment.linkedProperties,
-        ]) {
-            for (const propertyNumber of this.parsePropertyNumberList(value)) {
-                if (propertyNumber !== payment.propertyNumber) {
-                    explicitRequestedMembers.add(propertyNumber);
-                }
-            }
-        }
-        let hasForeignRequestedMember = false;
-        const requestedSubscriptions: Subscription[] = [];
-        for (const requestedPropertyNumber of Array.from(
-            explicitRequestedMembers,
-        ).sort((left, right) => left.localeCompare(right))) {
-            const requestedSnapshot = await transaction.get(
-                this.db
-                    .collection("subscriptions")
-                    .where("propertyNumber", "==", requestedPropertyNumber),
-            );
-            const requestedSubscription = this.selectLatestSubscription(
-                requestedSnapshot.docs,
-            );
-            if (!requestedSubscription) continue;
-            requestedSubscriptions.push(requestedSubscription);
-            const requestedIsActive = Boolean(
-                requestedSubscription.endDate &&
-                isSubscriptionStatusActive(requestedSubscription.status) &&
-                calculateRemainingDays(requestedSubscription.endDate) >= 0,
-            );
-            const requestedCanonicalParent = String(
-                requestedSubscription.linkedProperty ||
-                requestedSubscription.propertyNumber,
-            ).trim();
-            const hasForeignHistoricalLink = Boolean(
-                String(requestedSubscription.linkedProperty || "").trim() &&
-                requestedCanonicalParent !== canonicalParent,
-            );
-            const ownsAnotherGroup = this.parsePropertyNumberList(
-                requestedSubscription.linkedProperties,
-            ).some(
-                (member) =>
-                    member !== requestedPropertyNumber &&
-                    member !== canonicalParent,
-            );
-            if (
-                hasForeignHistoricalLink ||
-                ownsAnotherGroup ||
-                (requestedIsActive && requestedCanonicalParent !== canonicalParent)
-            ) {
-                hasForeignRequestedMember = true;
-            }
-        }
-
-        const keys = new Set<string>([
-            String(payment.propertyNumber).trim(),
-            canonicalParent,
-        ]);
-        for (const value of [
-            payment.fulfillmentActionLockKey,
-            payment.fulfillmentActionLockKeys,
-            payment.secondPropertyNumber,
-            payment.additionalProperties,
-            payment.linkedProperties,
-            subscription?.linkedProperty,
-            parentSubscription?.propertyNumber,
-            childSubscriptions.map((child) => child.propertyNumber),
-            childSubscriptions.flatMap((child) => child.linkedProperties || []),
-            requestedSubscriptions.map((requested) => requested.propertyNumber),
-            requestedSubscriptions.map((requested) => requested.linkedProperty),
-            requestedSubscriptions.flatMap(
-                (requested) => requested.linkedProperties || [],
-            ),
-        ]) {
-            for (const propertyNumber of this.parsePropertyNumberList(value)) {
-                keys.add(propertyNumber);
-            }
-        }
-        return {
-            keys: Array.from(keys).sort((left, right) => left.localeCompare(right)),
-            subscription,
-            hasForeignRequestedMember,
-        };
     }
 
     /**
@@ -1604,32 +1353,6 @@ export class FirebaseService {
                 }
                 if (propertyDoc.exists) {
                     propertyDocuments.set(propertyNumber, propertyDoc);
-                }
-            }
-
-            const lockKeys = Array.from(
-                new Set([
-                    mainPropertyNumber,
-                    ...currentMembers,
-                    ...linkedProperties,
-                    ...removedProperties,
-                ]),
-            ).sort((left, right) => left.localeCompare(right));
-            for (const propertyNumber of lockKeys) {
-                const lockDoc = await transaction.get(
-                    this.getPaymentActionLockRef(propertyNumber),
-                );
-                if (
-                    lockDoc.exists &&
-                    this.isActivePaymentActionLockState(
-                        (lockDoc.data() as PaymentActionLock).state,
-                    )
-                ) {
-                    throw new LinkedPropertyMutationError(
-                        "لا يمكن تعديل العقارات المرتبطة أثناء وجود عملية دفع قيد التنفيذ",
-                        409,
-                        "PAYMENT_ACTION_IN_PROGRESS",
-                    );
                 }
             }
 
@@ -2817,149 +2540,11 @@ export class FirebaseService {
                 return { status: "processing" as const };
             }
 
-            let actionLocks: Array<{
-                key: string;
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            let actionLockKey: string | null = null;
-            let actionLockKeys: string[] = [];
-            if (this.isActionableSubscriptionPayment(payment)) {
-                const context = await this.resolvePaymentActionLockContext(
-                    transaction,
-                    payment,
-                );
-                const subscription = context.subscription;
-                if (
-                    options.purpose !== "reject" &&
-                    isSubscriptionStatusSuspended(subscription?.status)
-                ) {
-                    return {
-                        status: "action_ineligible" as const,
-                        action: this.getSubscriptionPaymentAction(payment),
-                    };
-                }
-                if (
-                    options.purpose !== "reject" &&
-                    context.hasForeignRequestedMember
-                ) {
-                    return {
-                        status: "action_ineligible" as const,
-                        action: this.getSubscriptionPaymentAction(payment),
-                    };
-                }
-                actionLockKeys = context.keys;
-                actionLockKey =
-                    payment.fulfillmentActionLockKey ||
-                    subscription?.linkedProperty ||
-                    payment.propertyNumber;
-                for (const key of actionLockKeys) {
-                    const ref = this.getPaymentActionLockRef(key);
-                    const lockDoc = await transaction.get(ref);
-                    actionLocks.push({
-                        key,
-                        ref,
-                        lock: lockDoc.exists
-                            ? (lockDoc.data() as PaymentActionLock)
-                            : null,
-                    });
-                }
-
-                const ownedLocks = actionLocks.filter(
-                    ({ lock }) => lock?.paymentId === payment.id,
-                );
-                if (
-                    ownedLocks.length === actionLocks.length &&
-                    ownedLocks.length > 0 &&
-                    ownedLocks.every(({ lock }) => lock?.state === "fulfilled")
-                ) {
-                    return { status: "fulfilled" as const };
-                }
-
-                if (options.purpose !== "reject") {
-                    const ownerPayments = new Map<string, Payment | null>();
-                    for (const { lock } of actionLocks) {
-                        if (
-                            !lock ||
-                            lock.paymentId === payment.id ||
-                            ownerPayments.has(lock.paymentId) ||
-                            !this.isActivePaymentActionLockState(lock.state)
-                        ) continue;
-                        const ownerDoc = await transaction.get(
-                            this.db.collection("payments").doc(lock.paymentId),
-                        );
-                        ownerPayments.set(
-                            lock.paymentId,
-                            ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
-                        );
-                    }
-                    for (const { lock } of actionLocks) {
-                        if (!lock || lock.paymentId === payment.id) continue;
-                        const completedAt = this.getDateMillis(lock.completedAt);
-                        const paymentCreatedAt = this.getDateMillis(payment.createdAt);
-                        const predatesCompletedAction =
-                            lock.state === "fulfilled" &&
-                            (completedAt <= 0 || paymentCreatedAt <= 0 || paymentCreatedAt <= completedAt);
-                        const activeOtherPayment =
-                            this.isActivePaymentActionLockState(lock.state) &&
-                            !this.isPaymentActionLockOwnerReleasable(
-                                lock,
-                                ownerPayments.get(lock.paymentId) || null,
-                                now,
-                            );
-                        if (activeOtherPayment || predatesCompletedAction) {
-                            return {
-                                status: "action_conflict" as const,
-                                conflictingPaymentId: lock.paymentId,
-                            };
-                        }
-                    }
-                    if (
-                        actionLocks.some(({ lock }) => lock?.paymentId !== payment.id) &&
-                        !this.isActionablePaymentAllowedForSubscription(
-                            this.getSubscriptionPaymentAction(payment),
-                            subscription,
-                        )
-                    ) {
-                        return {
-                            status: "action_ineligible" as const,
-                            action: this.getSubscriptionPaymentAction(payment),
-                        };
-                    }
-                }
-            }
-
             transaction.update(ref, {
                 fulfillmentState: "processing",
                 fulfillmentClaimedAt: new Date(now).toISOString(),
                 fulfillmentClaimToken: token,
-                ...(actionLockKey
-                    ? {
-                        fulfillmentActionLockKey: actionLockKey,
-                        fulfillmentActionLockKeys: actionLockKeys,
-                    }
-                    : {}),
             });
-            if (actionLockKey && this.isActionableSubscriptionPayment(payment)) {
-                for (const { key, ref: actionLockRef, lock: actionLock } of actionLocks) {
-                    if (
-                        options.purpose === "reject" &&
-                        actionLock?.paymentId !== payment.id
-                    ) continue;
-                    transaction.set(actionLockRef, {
-                    propertyNumber: key,
-                    paymentId: payment.id,
-                    action: this.getSubscriptionPaymentAction(payment),
-                    state: "processing",
-                    reservedAt:
-                        actionLock?.paymentId === payment.id
-                            ? actionLock.reservedAt
-                            : new Date(now).toISOString(),
-                    claimedAt: new Date(now).toISOString(),
-                    claimToken: token,
-                } satisfies PaymentActionLock);
-                }
-            }
             return {
                 status: "claimed" as const,
                 token,
@@ -2997,29 +2582,6 @@ export class FirebaseService {
                 throw new Error("Payment fulfillment claim was lost");
             }
 
-            const actionLockRefs: Array<ReturnType<FirebaseService["getPaymentActionLockRef"]>> = [];
-            if (this.isActionableSubscriptionPayment(payment)) {
-                const actionLockKeys = payment.fulfillmentActionLockKeys?.length
-                    ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
-                    : [payment.fulfillmentActionLockKey || payment.propertyNumber];
-                for (const key of actionLockKeys) {
-                    const actionLockRef = this.getPaymentActionLockRef(key);
-                    const actionLockDoc = await transaction.get(actionLockRef);
-                    const actionLock = actionLockDoc.exists
-                        ? (actionLockDoc.data() as PaymentActionLock)
-                        : null;
-                    if (
-                        !actionLock ||
-                        actionLock.paymentId !== payment.id ||
-                        actionLock.state !== "processing" ||
-                        actionLock.claimToken !== token
-                    ) {
-                        throw new Error("Payment action claim was lost");
-                    }
-                    actionLockRefs.push(actionLockRef);
-                }
-            }
-
             const completedAt = new Date().toISOString();
             transaction.update(ref, {
                 fulfillmentState: "fulfilled",
@@ -3029,12 +2591,6 @@ export class FirebaseService {
                 completedAt,
                 pendingPropertyApproval: false,
             });
-            for (const actionLockRef of actionLockRefs) {
-                transaction.update(actionLockRef, {
-                    state: "fulfilled",
-                    completedAt,
-                });
-            }
         });
     }
 
@@ -3049,26 +2605,6 @@ export class FirebaseService {
                 payment.fulfillmentClaimToken !== token
             ) return;
 
-            const actionLocks: Array<{
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            if (this.isActionableSubscriptionPayment(payment)) {
-                const actionLockKeys = payment.fulfillmentActionLockKeys?.length
-                    ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
-                    : [payment.fulfillmentActionLockKey || payment.propertyNumber];
-                for (const key of actionLockKeys) {
-                    const actionLockRef = this.getPaymentActionLockRef(key);
-                    const actionLockDoc = await transaction.get(actionLockRef);
-                    actionLocks.push({
-                        ref: actionLockRef,
-                        lock: actionLockDoc.exists
-                            ? (actionLockDoc.data() as PaymentActionLock)
-                            : null,
-                    });
-                }
-            }
-
             const rejected = new Set(["مرفوض", "rejected"]).has(
                 String(payment.status || "").trim().toLowerCase(),
             );
@@ -3081,23 +2617,6 @@ export class FirebaseService {
                     }
                     : {}),
             });
-            for (const { ref: actionLockRef, lock: actionLock } of actionLocks) {
-                if (
-                    actionLock?.paymentId !== payment.id ||
-                    actionLock.claimToken !== token
-                ) continue;
-                transaction.update(actionLockRef, this.isPaymentActionLockOwnerReleasable(
-                    actionLock,
-                    payment,
-                )
-                    ? {
-                        state: "released",
-                        releasedAt: new Date().toISOString(),
-                    }
-                    : {
-                        state: "reserved",
-                    });
-            }
         });
     }
 
@@ -3113,71 +2632,20 @@ export class FirebaseService {
         console.log(`[DEBUG createPayment] Creating payment: id=${id}, propertyNumber="${payment.propertyNumber}", packageId="${payment.packageId}", status="${payment.status}"`);
 
         const paymentRef = this.db.collection("payments").doc(id);
-        let storedPayment = newPayment;
-        if (this.isActionableSubscriptionPayment(newPayment)) {
-            storedPayment = await this.db.runTransaction(async (transaction) => {
-                const {
-                    keys: actionLockKeys,
-                    subscription,
-                    hasForeignRequestedMember,
-                } =
-                    await this.resolvePaymentActionLockContext(
-                        transaction,
-                        newPayment,
-                    );
+        await this.db.runTransaction(async (transaction) => {
+            if (this.isActionableSubscriptionPayment(newPayment)) {
+                const subscriptionSnapshot = await transaction.get(
+                    this.db
+                        .collection("subscriptions")
+                        .where("propertyNumber", "==", newPayment.propertyNumber),
+                );
+                const subscription = this.selectLatestSubscription(
+                    subscriptionSnapshot.docs,
+                );
                 if (isSubscriptionStatusSuspended(subscription?.status)) {
                     throw new SuspendedSubscriptionWriteError(
                         newPayment.propertyNumber,
                     );
-                }
-                if (hasForeignRequestedMember) {
-                    throw new PaymentActionEligibilityError(
-                        this.getSubscriptionPaymentAction(newPayment),
-                    );
-                }
-                const actionLockKey =
-                    subscription?.linkedProperty || newPayment.propertyNumber;
-                const actionLocks: Array<{
-                    key: string;
-                    ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                    lock: PaymentActionLock | null;
-                }> = [];
-                for (const key of actionLockKeys) {
-                    const ref = this.getPaymentActionLockRef(key);
-                    const lockDoc = await transaction.get(ref);
-                    actionLocks.push({
-                        key,
-                        ref,
-                        lock: lockDoc.exists
-                            ? (lockDoc.data() as PaymentActionLock)
-                            : null,
-                    });
-                }
-                const ownerPayments = new Map<string, Payment | null>();
-                for (const { lock } of actionLocks) {
-                    if (
-                        !lock ||
-                        lock.paymentId === id ||
-                        ownerPayments.has(lock.paymentId) ||
-                        !this.isActivePaymentActionLockState(lock.state)
-                    ) continue;
-                    const ownerDoc = await transaction.get(
-                        this.db.collection("payments").doc(lock.paymentId),
-                    );
-                    ownerPayments.set(
-                        lock.paymentId,
-                        ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
-                    );
-                }
-                for (const { lock } of actionLocks) {
-                    if (!lock || lock.paymentId === id) continue;
-                    const blocked =
-                        this.isActivePaymentActionLockState(lock.state) &&
-                        !this.isPaymentActionLockOwnerReleasable(
-                            lock,
-                            ownerPayments.get(lock.paymentId) || null,
-                        );
-                    if (blocked) throw new PaymentActionConflictError();
                 }
                 if (!this.isActionablePaymentAllowedForSubscription(
                     this.getSubscriptionPaymentAction(newPayment),
@@ -3187,36 +2655,18 @@ export class FirebaseService {
                         this.getSubscriptionPaymentAction(newPayment),
                     );
                 }
-
-                const paymentWithActionLock = {
-                    ...newPayment,
-                    fulfillmentActionLockKey: actionLockKey,
-                    fulfillmentActionLockKeys: actionLockKeys,
-                };
-                transaction.set(paymentRef, paymentWithActionLock);
-                for (const { key, ref } of actionLocks) {
-                    transaction.set(ref, {
-                        propertyNumber: key,
-                        paymentId: id,
-                        action: this.getSubscriptionPaymentAction(newPayment),
-                        state: "reserved",
-                        reservedAt: newPayment.createdAt || new Date().toISOString(),
-                    } satisfies PaymentActionLock);
-                }
-                return paymentWithActionLock;
-            });
-        } else {
-            await paymentRef.set(newPayment);
-        }
+            }
+            transaction.set(paymentRef, newPayment);
+        });
         
         console.log(`[DEBUG createPayment] ✅ Payment created successfully: ${id} for property: ${payment.propertyNumber}`);
-        return storedPayment;
+        return newPayment;
     }
 
     /**
-     * Release only an unclaimed subscription-action reservation owned by this
-     * payment. This is used when card-intention creation fails before a usable
-     * checkout URL exists, so an abandoned local record cannot block retries.
+     * Finalize a payment whose provider intention failed before a usable
+     * checkout URL existed. The historical method name remains for callers;
+     * no property-level reservation is created or released.
      */
     async releasePaymentActionReservation(
         id: string,
@@ -3226,49 +2676,10 @@ export class FirebaseService {
         return this.db.runTransaction(async (transaction) => {
             const paymentDoc = await transaction.get(paymentRef);
             if (!paymentDoc.exists) return false;
-            const payment = paymentDoc.data() as Payment;
-            if (!this.isActionableSubscriptionPayment(payment)) return false;
-
-            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
-                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
-                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
-            const actionLocks: Array<{
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            for (const key of actionLockKeys) {
-                const ref = this.getPaymentActionLockRef(key);
-                const lockDoc = await transaction.get(ref);
-                actionLocks.push({
-                    ref,
-                    lock: lockDoc.exists
-                        ? (lockDoc.data() as PaymentActionLock)
-                        : null,
-                });
-            }
-            if (actionLocks.some(({ lock }) =>
-                !lock ||
-                lock.paymentId !== payment.id ||
-                (
-                    lock.state !== "reserved" &&
-                    !(
-                        lock.state === "retrying" &&
-                        Boolean(payment.retryReservationToken) &&
-                        lock.retryToken === payment.retryReservationToken
-                    )
-                )
-            )) return false;
             if (paymentUpdates) {
                 transaction.update(paymentRef, {
                     ...paymentUpdates,
                     retryReservationToken: "",
-                });
-            }
-            for (const { ref } of actionLocks) {
-                transaction.update(ref, {
-                    state: "released",
-                    releasedAt: new Date().toISOString(),
-                    retryToken: "",
                 });
             }
             return true;
@@ -3802,9 +3213,8 @@ export class FirebaseService {
     /**
      * Record a failed transaction callback without abandoning its Paymob
      * intention. A checkout can emit a failed transaction and later a
-     * successful transaction for the same intention, so provider identity and
-     * action locks must remain reserved until an exact success or an explicit
-     * abandonment flow settles the intention.
+     * successful transaction for the same intention, so provider identity is
+     * retained for exact reconciliation without locking any property.
      */
     async finalizeFailedPaymentIntention(
         id: string,
@@ -3989,20 +3399,17 @@ export class FirebaseService {
                 throw new PaymentActionConflictError();
             }
 
-            const {
-                keys: actionLockKeys,
-                subscription,
-                hasForeignRequestedMember,
-            } =
-                await this.resolvePaymentActionLockContext(transaction, payment);
+            const subscriptionSnapshot = await transaction.get(
+                this.db
+                    .collection("subscriptions")
+                    .where("propertyNumber", "==", payment.propertyNumber),
+            );
+            const subscription = this.selectLatestSubscription(
+                subscriptionSnapshot.docs,
+            );
             if (isSubscriptionStatusSuspended(subscription?.status)) {
                 throw new SuspendedSubscriptionWriteError(
                     payment.propertyNumber,
-                );
-            }
-            if (hasForeignRequestedMember) {
-                throw new PaymentActionEligibilityError(
-                    this.getSubscriptionPaymentAction(payment),
                 );
             }
             if (!this.isActionablePaymentAllowedForSubscription(
@@ -4013,81 +3420,16 @@ export class FirebaseService {
                     this.getSubscriptionPaymentAction(payment),
                 );
             }
-
-            const actionLockKey =
-                payment.fulfillmentActionLockKey ||
-                subscription?.linkedProperty ||
-                payment.propertyNumber;
-            const actionLocks: Array<{
-                key: string;
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            for (const key of actionLockKeys) {
-                const ref = this.getPaymentActionLockRef(key);
-                const lockDoc = await transaction.get(ref);
-                actionLocks.push({
-                    key,
-                    ref,
-                    lock: lockDoc.exists
-                        ? (lockDoc.data() as PaymentActionLock)
-                        : null,
-                });
-            }
-            const ownerPayments = new Map<string, Payment | null>();
-            for (const { lock } of actionLocks) {
-                if (
-                    !lock ||
-                    lock.paymentId === payment.id ||
-                    ownerPayments.has(lock.paymentId) ||
-                    !this.isActivePaymentActionLockState(lock.state)
-                ) continue;
-                const ownerDoc = await transaction.get(
-                    this.db.collection("payments").doc(lock.paymentId),
-                );
-                ownerPayments.set(
-                    lock.paymentId,
-                    ownerDoc.exists ? (ownerDoc.data() as Payment) : null,
-                );
-            }
-            for (const { lock } of actionLocks) {
-                if (!lock) continue;
-                if (lock.paymentId !== payment.id) {
-                    const predatesCompletedAction =
-                        lock.state === "fulfilled" &&
-                        (
-                            this.getDateMillis(lock.completedAt) <= 0 ||
-                            this.getDateMillis(payment.createdAt) <= 0 ||
-                            this.getDateMillis(payment.createdAt) <=
-                                this.getDateMillis(lock.completedAt)
-                        );
-                    const activeOtherPayment =
-                        this.isActivePaymentActionLockState(lock.state) &&
-                        !this.isPaymentActionLockOwnerReleasable(
-                            lock,
-                            ownerPayments.get(lock.paymentId) || null,
-                            now,
-                        );
-                    if (activeOtherPayment || predatesCompletedAction) {
-                        throw new PaymentActionConflictError();
-                    }
-                    continue;
-                }
-                if (lock.state === "fulfilled" || lock.state === "processing") {
-                    throw new PaymentActionConflictError();
-                }
-                if (
-                    lock.state === "retrying" &&
-                    this.getDateMillis(payment.retryReservationAt) > 0 &&
-                    now - this.getDateMillis(payment.retryReservationAt) < staleAfterMs
-                ) {
-                    throw new PaymentActionConflictError();
-                }
+            const retryReservedAt = this.getDateMillis(payment.retryReservationAt);
+            if (
+                payment.retryReservationToken &&
+                retryReservedAt > 0 &&
+                now - retryReservedAt < staleAfterMs
+            ) {
+                throw new PaymentActionConflictError();
             }
 
             transaction.update(paymentRef, {
-                fulfillmentActionLockKey: actionLockKey,
-                fulfillmentActionLockKeys: actionLockKeys,
                 retryReservationToken: token,
                 retryReservationAt: new Date(now).toISOString(),
                 merchantAttemptKey,
@@ -4101,19 +3443,6 @@ export class FirebaseService {
                 providerReconciliationStartedAt: "",
                 providerReconciliationClaimToken: "",
             });
-            for (const { key, ref, lock } of actionLocks) {
-                transaction.set(ref, {
-                    propertyNumber: key,
-                    paymentId: payment.id,
-                    action: this.getSubscriptionPaymentAction(payment),
-                    state: "retrying",
-                    reservedAt:
-                        lock?.paymentId === payment.id
-                            ? lock.reservedAt
-                            : new Date(now).toISOString(),
-                    retryToken: token,
-                } satisfies PaymentActionLock);
-            }
             return { token, subscription, merchantAttemptKey };
         });
     }
@@ -4131,40 +3460,11 @@ export class FirebaseService {
             if (payment.retryReservationToken !== token) {
                 throw new PaymentActionConflictError();
             }
-            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
-                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
-                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
-            const actionLocks: Array<{
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            for (const key of actionLockKeys) {
-                const ref = this.getPaymentActionLockRef(key);
-                const lockDoc = await transaction.get(ref);
-                const lock = lockDoc.exists
-                    ? (lockDoc.data() as PaymentActionLock)
-                    : null;
-                if (
-                    !lock ||
-                    lock.paymentId !== payment.id ||
-                    lock.state !== "retrying" ||
-                    lock.retryToken !== token
-                ) {
-                    throw new PaymentActionConflictError();
-                }
-                actionLocks.push({ ref, lock });
-            }
 
             transaction.update(paymentRef, {
                 ...updates,
                 retryReservationToken: "",
             });
-            for (const { ref } of actionLocks) {
-                transaction.update(ref, {
-                    state: "reserved",
-                    retryToken: "",
-                });
-            }
         });
     }
 
@@ -4179,41 +3479,10 @@ export class FirebaseService {
             if (!paymentDoc.exists) return false;
             const payment = paymentDoc.data() as Payment;
             if (payment.retryReservationToken !== token) return false;
-            const actionLockKeys = payment.fulfillmentActionLockKeys?.length
-                ? [...new Set(payment.fulfillmentActionLockKeys)].sort()
-                : [payment.fulfillmentActionLockKey || payment.propertyNumber];
-            const actionLocks: Array<{
-                ref: ReturnType<FirebaseService["getPaymentActionLockRef"]>;
-                lock: PaymentActionLock | null;
-            }> = [];
-            for (const key of actionLockKeys) {
-                const ref = this.getPaymentActionLockRef(key);
-                const lockDoc = await transaction.get(ref);
-                actionLocks.push({
-                    ref,
-                    lock: lockDoc.exists
-                        ? (lockDoc.data() as PaymentActionLock)
-                        : null,
-                });
-            }
-
-            if (actionLocks.some(({ lock }) =>
-                !lock ||
-                lock.paymentId !== payment.id ||
-                lock.state !== "retrying" ||
-                lock.retryToken !== token
-            )) return false;
             transaction.update(paymentRef, {
                 ...(paymentUpdates || {}),
                 retryReservationToken: "",
             });
-            for (const { ref } of actionLocks) {
-                transaction.update(ref, {
-                    state: "released",
-                    releasedAt: new Date().toISOString(),
-                    retryToken: "",
-                });
-            }
             return true;
         });
     }

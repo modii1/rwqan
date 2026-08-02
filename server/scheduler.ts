@@ -373,8 +373,8 @@ async function expireOldPendingPayments(): Promise<number> {
           ) {
             // paid=false is enough for the requested 30-minute display timeout,
             // but it is not treated as terminal abandonment. Provider identity
-            // and the action lock stay intact so a late signed success can
-            // still recover the exact attempt.
+            // stays intact so a late signed success can still be reconciled;
+            // properties remain independently editable.
             const expired = await firebaseService.expirePendingPaymentIfEligible(
               claim.payment,
               "card",

@@ -317,7 +317,7 @@ function actionablePayment(
   };
 }
 
-test("subscription-group reservation allows only one concurrent upgrade payment", async () => {
+test("linked properties can create independent payments without property locks", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "SUB-PROP-ROOT", activeSubscription("PROP-ROOT"));
   database.set(
@@ -332,16 +332,14 @@ test("subscription-group reservation allows only one concurrent upgrade payment"
     service.createPayment(actionablePayment("PAY-CHILD", "PROP-CHILD") as any),
   ]);
 
-  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
-  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
-  assert.ok(rejected && rejected.status === "rejected");
-  assert.ok(rejected.reason instanceof PaymentActionConflictError);
-  const lock = database.get("payment_action_locks", "PROP-ROOT");
-  assert.ok(lock?.paymentId === "PAY-ROOT" || lock?.paymentId === "PAY-CHILD");
-  assert.equal(lock?.state, "reserved");
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 2);
+  assert.equal(database.get("payments", "PAY-ROOT")?.propertyNumber, "PROP-ROOT");
+  assert.equal(database.get("payments", "PAY-CHILD")?.propertyNumber, "PROP-CHILD");
+  assert.equal(database.get("payment_action_locks", "PROP-ROOT"), undefined);
+  assert.equal(database.get("payment_action_locks", "PROP-CHILD"), undefined);
 });
 
-test("new-property reservation survives queue release and blocks a duplicate payment", async () => {
+test("a released new-property payment does not block another payment", async () => {
   const database = new FakeFirestore();
   const service = createService(database);
   await service.createPayment(
@@ -355,20 +353,14 @@ test("new-property reservation survives queue release and blocks a duplicate pay
   assert.ok(queueClaim.status === "claimed");
   await service.releasePaymentFulfillment("PAY-NEW-FIRST", queueClaim.token);
 
-  await assert.rejects(
-    () => service.createPayment(
-      actionablePayment("PAY-NEW-SECOND", "PROP-NEW", { action: "new" }) as any,
-    ),
-    PaymentActionConflictError,
+  const second = await service.createPayment(
+    actionablePayment("PAY-NEW-SECOND", "PROP-NEW", { action: "new" }) as any,
   );
-  assert.equal(database.get("payment_action_locks", "PROP-NEW")?.state, "reserved");
-  assert.equal(
-    database.get("payment_action_locks", "PROP-NEW")?.paymentId,
-    "PAY-NEW-FIRST",
-  );
+  assert.equal(second.id, "PAY-NEW-SECOND");
+  assert.equal(database.get("payment_action_locks", "PROP-NEW"), undefined);
 });
 
-test("transaction-time eligibility changes are not reported as another payment", async () => {
+test("payment eligibility remains enforced without creating a property lock", async () => {
   const database = new FakeFirestore();
   database.set(
     "subscriptions",
@@ -383,17 +375,13 @@ test("transaction-time eligibility changes are not reported as another payment",
     () => service.createPayment(
       actionablePayment("PAY-TOO-EARLY", "PROP-EARLY", { action: "extend" }) as any,
     ),
-    (error: unknown) => {
-      assert.ok(error instanceof PaymentActionEligibilityError);
-      assert.equal(error.code, "PAYMENT_ACTION_NO_LONGER_ELIGIBLE");
-      return true;
-    },
+    PaymentActionEligibilityError,
   );
   assert.equal(database.get("payment_action_locks", "PROP-EARLY"), undefined);
   assert.equal(database.get("payments", "PAY-TOO-EARLY"), undefined);
 });
 
-test("a legacy duplicate created before another fulfillment cannot also succeed", async () => {
+test("separate payment attempts are independent while each attempt stays idempotent", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "SUB-PROP-1", activeSubscription("PROP-1"));
   const createdAt = new Date(Date.now() - 60_000).toISOString();
@@ -419,7 +407,11 @@ test("a legacy duplicate created before another fulfillment cannot also succeed"
   );
 
   const secondClaim = await service.claimPaymentFulfillment("PAY-SECOND");
-  assert.equal(secondClaim.status, "action_conflict");
+  assert.equal(secondClaim.status, "claimed");
+  assert.deepEqual(
+    await service.claimPaymentFulfillment("PAY-FIRST"),
+    { status: "fulfilled" },
+  );
   assert.equal(database.get("payments", "PAY-FIRST")?.status, "مكتمل");
   assert.equal(database.get("payments", "PAY-SECOND")?.fulfilledAt, undefined);
 });
@@ -448,10 +440,7 @@ test("a stale processing fulfillment is reclaimed atomically and only the new to
   assert.ok(recoveryClaim.status === "claimed");
   assert.equal(recoveryClaim.previousState, "processing");
   assert.notEqual(recoveryClaim.token, firstClaim.token);
-  assert.equal(
-    database.get("payment_action_locks", "PROP-RECOVER")?.claimToken,
-    recoveryClaim.token,
-  );
+  assert.equal(database.get("payment_action_locks", "PROP-RECOVER"), undefined);
 
   await assert.rejects(
     () =>
@@ -471,13 +460,10 @@ test("a stale processing fulfillment is reclaimed atomically and only the new to
     database.get("payments", "PAY-RECOVER")?.fulfillmentState,
     "fulfilled",
   );
-  assert.equal(
-    database.get("payment_action_locks", "PROP-RECOVER")?.state,
-    "fulfilled",
-  );
+  assert.equal(database.get("payment_action_locks", "PROP-RECOVER"), undefined);
 });
 
-test("rejection can claim a legacy payment without stealing another payment's action lock", async () => {
+test("rejection is isolated to its own payment without creating property locks", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "SUB-PROP-1", activeSubscription("PROP-1"));
   const service = createService(database);
@@ -503,17 +489,12 @@ test("rejection can claim a legacy payment without stealing another payment's ac
     rejectionClaim.token,
   );
 
-  assert.equal(
-    database.get("payment_action_locks", "PROP-1")?.paymentId,
-    "PAY-ACTIVE",
-  );
-  assert.equal(
-    database.get("payment_action_locks", "PROP-1")?.state,
-    "reserved",
-  );
+  assert.equal(database.get("payments", "PAY-ACTIVE")?.status, "pending");
+  assert.equal(database.get("payments", "PAY-LEGACY-REJECT")?.fulfillmentState, "failed");
+  assert.equal(database.get("payment_action_locks", "PROP-1"), undefined);
 });
 
-test("rejection releases the action lock owned by the rejected payment", async () => {
+test("rejection completes without creating a property lock", async () => {
   const database = new FakeFirestore();
   const service = createService(database);
   await service.createPayment(
@@ -530,10 +511,8 @@ test("rejection releases the action lock owned by the rejected payment", async (
   database.update("payments", "PAY-REJECT-OWNED", { status: "مرفوض" });
   await service.releasePaymentFulfillment("PAY-REJECT-OWNED", claim.token);
 
-  assert.equal(
-    database.get("payment_action_locks", "PROP-NEW")?.state,
-    "released",
-  );
+  assert.equal(database.get("payments", "PAY-REJECT-OWNED")?.fulfillmentState, "failed");
+  assert.equal(database.get("payment_action_locks", "PROP-NEW"), undefined);
 });
 
 test("abandoned pre-intention reservation can be released for a retry", async () => {
@@ -551,7 +530,7 @@ test("abandoned pre-intention reservation can be released for a retry", async ()
   );
 
   assert.equal(retry.id, "PAY-RETRY");
-  assert.equal(database.get("payment_action_locks", "PROP-1")?.paymentId, "PAY-RETRY");
+  assert.equal(database.get("payment_action_locks", "PROP-1"), undefined);
 });
 
 test("fulfilled and applied payments atomically repair a stale pending status", async () => {
@@ -668,7 +647,7 @@ test("guarded cancellation uses arbitrary legacy document ids and expires duplic
   );
 });
 
-test("overlapping A+B and B payments reserve the full requested set once", async () => {
+test("overlapping linked and solo payment records do not reserve properties", async () => {
   const database = new FakeFirestore();
   const service = createService(database);
   const outcomes = await Promise.allSettled([
@@ -682,13 +661,14 @@ test("overlapping A+B and B payments reserve the full requested set once", async
     }) as any),
   ]);
 
-  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
-  assert.equal(database.get("payment_action_locks", "PROP-A")?.paymentId, "PAY-A-B");
-  assert.equal(database.get("payment_action_locks", "PROP-B")?.paymentId, "PAY-A-B");
-  assert.equal(database.get("payments", "PAY-B"), undefined);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 2);
+  assert.deepEqual(database.get("payments", "PAY-A-B")?.additionalProperties, ["PROP-B"]);
+  assert.equal(database.get("payments", "PAY-B")?.propertyNumber, "PROP-B");
+  assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
+  assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
 });
 
-test("a requested property in another active group is rejected before any write", async () => {
+test("payment persistence never locks a property that belongs to another group", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "LEGACY-B", activeSubscription("PROP-B", {
     id: "LEGACY-B",
@@ -700,19 +680,16 @@ test("a requested property in another active group is rejected before any write"
   }));
   const service = createService(database);
 
-  await assert.rejects(
-    () => service.createPayment(actionablePayment("PAY-A-B", "PROP-A", {
-      action: "new",
-      additionalProperties: ["PROP-B"],
-    }) as any),
-    PaymentActionEligibilityError,
-  );
-  assert.equal(database.get("payments", "PAY-A-B"), undefined);
+  const payment = await service.createPayment(actionablePayment("PAY-A-B", "PROP-A", {
+    action: "new",
+    additionalProperties: ["PROP-B"],
+  }) as any);
+  assert.equal(payment.id, "PAY-A-B");
   assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
 });
 
-test("stale legacy child rows do not expand the former parent's lock group", async () => {
+test("stale legacy child rows do not create any payment locks", async () => {
   const database = new FakeFirestore();
   database.set("subscriptions", "SUB-A", activeSubscription("PROP-A"));
   database.set("subscriptions", "OLD-B-A", activeSubscription("PROP-B", {
@@ -728,12 +705,12 @@ test("stale legacy child rows do not expand the former parent's lock group", asy
   const service = createService(database);
 
   await service.createPayment(actionablePayment("PAY-A", "PROP-A") as any);
-  assert.equal(database.get("payment_action_locks", "PROP-A")?.paymentId, "PAY-A");
+  assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
   assert.equal(database.get("payment_action_locks", "PROP-C"), undefined);
 });
 
-test("legacy payments without an action normalize to new and block duplicates", async () => {
+test("legacy payments without an action do not block a new payment", async () => {
   const database = new FakeFirestore();
   database.set("payments", "PAY-LEGACY", {
     ...actionablePayment("PAY-LEGACY", "PROP-LEGACY", { action: undefined }),
@@ -743,15 +720,14 @@ test("legacy payments without an action normalize to new and block duplicates", 
   const claim = await service.claimPaymentFulfillment("PAY-LEGACY", ["pending"]);
   assert.equal(claim.status, "claimed");
 
-  await assert.rejects(
-    () => service.createPayment(actionablePayment("PAY-NEW", "PROP-LEGACY", {
-      action: "new",
-    }) as any),
-    PaymentActionConflictError,
-  );
+  const payment = await service.createPayment(actionablePayment("PAY-NEW", "PROP-LEGACY", {
+    action: "new",
+  }) as any);
+  assert.equal(payment.id, "PAY-NEW");
+  assert.equal(database.get("payment_action_locks", "PROP-LEGACY"), undefined);
 });
 
-test("completed or provider-unknown lock owners cannot be taken over by status alone", async () => {
+test("completed and provider-unknown payments do not lock later property actions", async () => {
   for (const ownerUpdates of [
     { status: "مكتمل" },
     { status: "فشل", intentionState: "unknown" },
@@ -764,16 +740,11 @@ test("completed or provider-unknown lock owners cannot be taken over by status a
     }) as any);
     database.update("payments", "PAY-OWNER", ownerUpdates);
 
-    await assert.rejects(
-      () => service.createPayment(actionablePayment("PAY-TAKEOVER", "PROP-1", {
-        action: "new",
-      }) as any),
-      PaymentActionConflictError,
-    );
-    assert.equal(
-      database.get("payment_action_locks", "PROP-1")?.paymentId,
-      "PAY-OWNER",
-    );
+    const replacement = await service.createPayment(actionablePayment("PAY-TAKEOVER", "PROP-1", {
+      action: "new",
+    }) as any);
+    assert.equal(replacement.id, "PAY-TAKEOVER");
+    assert.equal(database.get("payment_action_locks", "PROP-1"), undefined);
   }
 });
 
@@ -803,12 +774,13 @@ test("only one concurrent retry reservation can create a provider attempt", asyn
         ),
     ),
   );
-  await assert.rejects(
-    () => service.createPayment(actionablePayment("PAY-OTHER", "PROP-1", {
-      action: "new",
-    }) as any),
-    PaymentActionConflictError,
-  );
+  const independentPayment = await service.createPayment(actionablePayment(
+    "PAY-OTHER",
+    "PROP-1",
+    { action: "new" },
+  ) as any);
+  assert.equal(independentPayment.id, "PAY-OTHER");
+  assert.equal(database.get("payment_action_locks", "PROP-1"), undefined);
 
   const reserved = outcomes.find(
     (outcome): outcome is PromiseFulfilledResult<Awaited<ReturnType<typeof service.reservePaymentActionForRetry>>> =>
@@ -823,12 +795,7 @@ test("only one concurrent retry reservation can create a provider attempt", asyn
     ),
     true,
   );
-  assert.equal(
-    (await service.createPayment(actionablePayment("PAY-OTHER", "PROP-1", {
-      action: "new",
-    }) as any)).id,
-    "PAY-OTHER",
-  );
+  assert.equal(database.get("payments", "PAY-OTHER")?.id, "PAY-OTHER");
 });
 
 test("retry reservation clears stale provider identity before creating a new attempt", async () => {
@@ -888,7 +855,7 @@ test("pending or provider-identified payments cannot reserve a new retry", async
   }
 });
 
-test("retry completion verifies every lock and token before writing provider ids", async () => {
+test("retry completion verifies its payment token without property locks", async () => {
   const database = new FakeFirestore();
   const service = createService(database);
   await service.createPayment(actionablePayment("PAY-RETRY", "PROP-A", {
@@ -900,22 +867,29 @@ test("retry completion verifies every lock and token before writing provider ids
     intentionState: "failed",
   });
   const retry = await service.reservePaymentActionForRetry("PAY-RETRY");
-  database.update("payment_action_locks", "PROP-B", { state: "reserved" });
 
   await assert.rejects(
     () => service.completePaymentActionRetryReservation(
       "PAY-RETRY",
-      retry.token,
+      "WRONG-TOKEN",
       { paymentReference: "INT-NEW", transactionId: "INT-NEW" },
     ),
     PaymentActionConflictError,
   );
   assert.equal(database.get("payments", "PAY-RETRY")?.paymentReference, "");
   assert.equal(database.get("payments", "PAY-RETRY")?.retryReservationToken, retry.token);
-  assert.equal(database.get("payment_action_locks", "PROP-A")?.state, "retrying");
+  await service.completePaymentActionRetryReservation(
+    "PAY-RETRY",
+    retry.token,
+    { paymentReference: "INT-NEW", transactionId: "INT-NEW" },
+  );
+  assert.equal(database.get("payments", "PAY-RETRY")?.paymentReference, "INT-NEW");
+  assert.equal(database.get("payments", "PAY-RETRY")?.retryReservationToken, "");
+  assert.equal(database.get("payment_action_locks", "PROP-A"), undefined);
+  assert.equal(database.get("payment_action_locks", "PROP-B"), undefined);
 });
 
-test("a failed bank reference does not make a stale action lock unreleasable", async () => {
+test("a failed bank payment never blocks a replacement payment", async () => {
   const database = new FakeFirestore();
   const service = createService(database);
   await service.createPayment(actionablePayment("PAY-BANK", "PROP-1", {
@@ -931,10 +905,7 @@ test("a failed bank reference does not make a stale action lock unreleasable", a
     { action: "new" },
   ) as any);
   assert.equal(replacement.id, "PAY-REPLACEMENT");
-  assert.equal(
-    database.get("payment_action_locks", "PROP-1")?.paymentId,
-    "PAY-REPLACEMENT",
-  );
+  assert.equal(database.get("payment_action_locks", "PROP-1"), undefined);
 });
 
 test("failed transaction preserves a legacy intention for a later checkout attempt", async () => {
