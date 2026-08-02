@@ -27,7 +27,6 @@ import {
   canExtendSubscription,
 } from "@/lib/subscription-utils";
 import {
-  getSubscriptionTypeLabel,
   isPremiumSubscriptionType,
   isSubscriptionStatusActive,
   isSubscriptionStatusSuspended,
@@ -39,6 +38,11 @@ import {
 } from "@/components/owner/owner-page";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
 import { getOwnerPendingPaymentRefetchInterval } from "@/lib/workflow-query-refresh";
+import {
+  calculateSubscriptionPrice,
+  getIncludedPropertyCount,
+  getMaximumPropertyCount,
+} from "@shared/subscriptionPricing";
 
 function getPaymentTime(value: any): number {
   if (!value) return 0;
@@ -102,20 +106,6 @@ export default function OwnerSubscriptionPage() {
   // Get current subscription for linked properties
   const { data: currentSubscription } = useQuery<any>({
     queryKey: ["/api/owner/current-subscription"],
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
-
-  // Get linked property subscription data
-  const { data: linkedPropertySubscription } = useQuery<any>({
-    queryKey: ["linked-property-subscription", currentSubscription?.linkedProperty],
-    queryFn: async () => {
-      if (!currentSubscription?.linkedProperty) return null;
-      const res = await fetch(`/api/owner/subscription/${currentSubscription.linkedProperty}`);
-      if (!res.ok) return null;
-      return res.json();
-    },
-    enabled: !!currentSubscription?.linkedProperty,
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -272,6 +262,41 @@ export default function OwnerSubscriptionPage() {
   };
 
   const selectedPackage = packages.find((p: any) => p.id === selectedPackageId);
+  const existingGroupPropertyNumbers: string[] = Array.from(new Set(
+    (currentSubscription?.linkedGroup?.propertyNumbers || [property?.propertyNumber])
+      .map((value: unknown) => String(value || "").trim())
+      .filter(Boolean),
+  ));
+  const existingGroupProperties: Array<{
+    propertyNumber: string;
+    name?: string;
+    isMain?: boolean;
+  }> = currentSubscription?.linkedGroup?.properties || existingGroupPropertyNumbers.map(
+    (propertyNumber) => ({ propertyNumber }),
+  );
+  const baseGroupPropertyCount = Math.max(1, existingGroupPropertyNumbers.length);
+  const verifiedAdditionalCount = additionalProperties.filter((item) => item.verified).length;
+  const plannedPropertyCount = baseGroupPropertyCount + verifiedAdditionalCount;
+  const selectedPackageMaxProperties = selectedPackage
+    ? getMaximumPropertyCount(selectedPackage)
+    : 1;
+  const selectedPackagePricing = selectedPackage
+    ? calculateSubscriptionPrice(
+        selectedPackage,
+        Math.min(plannedPropertyCount, selectedPackageMaxProperties),
+      )
+    : null;
+  const selectedPackageIncludedProperties = selectedPackage
+    ? getIncludedPropertyCount(selectedPackage)
+    : 1;
+  const missingIncludedProperties = Math.max(
+    0,
+    selectedPackageIncludedProperties - plannedPropertyCount,
+  );
+  const includedNewPropertySlots = Math.max(
+    0,
+    selectedPackageIncludedProperties - baseGroupPropertyCount,
+  );
 
   // Validate discount
   const validateDiscount = async () => {
@@ -289,9 +314,9 @@ export default function OwnerSubscriptionPage() {
 
   // Add a new additional property
   const addAdditionalProperty = () => {
-    const maxProps = (selectedPackage as any)?.maxProperties || 2;
-    if (additionalProperties.length >= maxProps - 1) {
-      toast({ title: "الحد الأقصى", description: `الحد الأقصى للعقارات الإضافية هو ${maxProps - 1}`, variant: "destructive" });
+    const occupiedCount = baseGroupPropertyCount + additionalProperties.length;
+    if (occupiedCount >= selectedPackageMaxProperties) {
+      toast({ title: "الحد الأقصى", description: `هذه الباقة تدعم ${selectedPackageMaxProperties} عقار كحد أقصى`, variant: "destructive" });
       return;
     }
     setAdditionalProperties([...additionalProperties, { number: "", verified: false, error: "", verifying: false }]);
@@ -326,6 +351,26 @@ export default function OwnerSubscriptionPage() {
     if (!prop.number || prop.number.length !== 5) {
       const updated = [...additionalProperties];
       updated[index] = { ...updated[index], error: "رقم العقار يجب أن يكون 5 أرقام" };
+      setAdditionalProperties(updated);
+      return;
+    }
+    if (existingGroupPropertyNumbers.includes(prop.number)) {
+      const updated = [...additionalProperties];
+      updated[index] = {
+        ...updated[index],
+        error: "هذا العقار مشمول بالفعل في الاشتراك الحالي",
+      };
+      setAdditionalProperties(updated);
+      return;
+    }
+    if (additionalProperties.some((item, itemIndex) =>
+      itemIndex !== index && item.number === prop.number
+    )) {
+      const updated = [...additionalProperties];
+      updated[index] = {
+        ...updated[index],
+        error: "تم إدخال هذا العقار مسبقاً",
+      };
       setAdditionalProperties(updated);
       return;
     }
@@ -369,12 +414,7 @@ export default function OwnerSubscriptionPage() {
   // Calculate total price based on additional properties
   // Formula: pkg-price + (addedPropertyCount * propertyPrice)
   const calculateTotalPrice = () => {
-    const verifiedCount = additionalProperties.filter(p => p.verified).length;
-    if (!selectedPackage) return 0;
-    const pkgPrice = (selectedPackage as any).price || 25;
-    const propertyPrice = pkgPrice || 25;
-    // First property = pkgPrice, each additional adds propertyPrice
-    return pkgPrice + (verifiedCount * propertyPrice);
+    return selectedPackagePricing?.total || 0;
   };
 
   // Initiate card payment
@@ -590,13 +630,15 @@ export default function OwnerSubscriptionPage() {
       selectedPackage.id === 'pkg-month-2properties'
     );
     
-    const verifiedAdditionalCount = additionalProperties.filter(p => p.verified).length;
-    
-    if (isMultiPropertyPackage && verifiedAdditionalCount === 0) {
+    if (
+      isMultiPropertyPackage &&
+      action !== "extend" &&
+      missingIncludedProperties > 0
+    ) {
       setShowAdditionalPropertyError(true);
       toast({ 
         title: "خطأ في البيانات", 
-        description: "يجب إضافة عقار إضافي واحد على الأقل للباقات المتعددة", 
+        description: `يجب إضافة ${missingIncludedProperties === 1 ? "عقار إضافي واحد" : `${missingIncludedProperties} عقارات إضافية`} لهذه الباقة`,
         variant: "destructive" 
       });
       return;
@@ -734,6 +776,15 @@ export default function OwnerSubscriptionPage() {
 
   // Current package price from subscription
   const currentPackageObj = packages.find((p: any) => p.id === subscription?.packageId);
+  const currentPackagePrice = currentPackageObj
+    ? calculateSubscriptionPrice(
+        currentPackageObj,
+        Math.min(
+          baseGroupPropertyCount,
+          getMaximumPropertyCount(currentPackageObj),
+        ),
+      ).total
+    : 0;
   const latestOwnerPayment = sortPaymentsNewestFirst(paymentsData || [])[0];
   const shouldShowRejectedPaymentNotice =
     pendingPayment &&
@@ -884,7 +935,7 @@ export default function OwnerSubscriptionPage() {
     return true;
   });
 
-  const currentPkgPrice = currentPackageObj?.price || 0;
+  const currentPkgPrice = currentPackagePrice;
 
   const getCategoryColor = (cat: string) => {
     switch (cat) {
@@ -1428,7 +1479,7 @@ export default function OwnerSubscriptionPage() {
                     <p className="text-xs font-semibold">رسوم الاشتراك</p>
                   </div>
                   <div className="mt-3">
-                    <PriceDisplay amount={currentPackageObj?.price || 0} size="lg" />
+                    <PriceDisplay amount={currentPackagePrice} size="lg" />
                   </div>
                 </div>
 
@@ -1623,7 +1674,7 @@ export default function OwnerSubscriptionPage() {
                 <Banknote className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-muted-foreground text-xs">رسوم الاشتراك</p>
-                  <PriceDisplay amount={currentPackageObj?.price || 0} size="lg" />
+                  <PriceDisplay amount={currentPackagePrice} size="lg" />
                 </div>
               </div>
               <div className="flex items-start gap-2">
@@ -1969,9 +2020,14 @@ export default function OwnerSubscriptionPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {availablePackages.map((pkg: any) => {
                 const isCurrentPkg = subscription?.packageId === pkg.id;
-                const isDowngrade = action === "upgrade" && pkg.price < currentPkgPrice;
+                const packageMaxProperties = getMaximumPropertyCount(pkg);
+                const packagePricing = calculateSubscriptionPrice(
+                  pkg,
+                  Math.min(baseGroupPropertyCount, packageMaxProperties),
+                );
+                const isDowngrade = action === "upgrade" && packagePricing.total < currentPkgPrice;
                 const isSelected = selectedPackageId === pkg.id;
-                const isMultiProperty = pkg.id?.includes("2propert") || pkg.id?.includes("2prop");
+                const isMultiProperty = packageMaxProperties > 1;
                 const isExpanded = expandedPackages.has(pkg.id);
                 const featuresToShow = isExpanded ? pkg.features : (pkg.features || []).slice(0, 4);
                 const hasMoreFeatures = (pkg.features?.length || 0) > 4;
@@ -2001,17 +2057,15 @@ export default function OwnerSubscriptionPage() {
 
                     {/* السعر */}
                     <div className="flex items-end gap-1 mb-2">
-                      <PriceDisplay amount={pkg.price} size="lg" />
-                      {isMultiProperty && (
-                        <span className="text-xs text-muted-foreground mb-1">/ عقار</span>
-                      )}
+                      <PriceDisplay amount={packagePricing.total} size="lg" />
                     </div>
 
                     {/* معلومات الباقة المتعددة */}
                     {isMultiProperty && (
                       <div className="text-xs space-y-1 mb-2">
-                        <div className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]"><PriceDisplay amount={pkg.price * 2} size="sm" /></span> للعقارين</div>
-                        <p className="text-muted-foreground">2 عقارات</p>
+                        <p className="text-muted-foreground">
+                          يشمل {packagePricing.includedPropertyCount} عقارات، ثم {packagePricing.additionalPropertyPrice} ريال لكل عقار إضافي
+                        </p>
                       </div>
                     )}
 
@@ -2098,48 +2152,59 @@ export default function OwnerSubscriptionPage() {
                     <p className="font-bold">{selectedPackage.name}</p>
                   </div>
                   <div className="text-left">
-                    <PriceDisplay amount={selectedPackage.price} size="lg" />
+                    <PriceDisplay amount={selectedPackagePricing?.total || selectedPackage.price} size="lg" />
                     <p className="text-xs text-muted-foreground">{selectedPackage.duration} يوم</p>
                   </div>
                 </div>
               )}
 
               {/* Additional Properties Input for Multi-Property Packages */}
-              {selectedPackage && ((selectedPackage as any).maxProperties > 1 || selectedPackage.propertyCount === 2 || selectedPackage.id === 'pkg-month-2properties') && (
+              {selectedPackage && selectedPackageMaxProperties > 1 && (
                 <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-3 flex items-center gap-2">
                     <Crown className="w-5 h-5" />
                     ربط عقارات إضافية
                   </h4>
                   
-                  {/* Show current linked property */}
-                  {currentSubscription?.linkedProperty && (
+                  {/* Existing members are automatically renewed and never re-entered. */}
+                  {existingGroupProperties.length > 0 && (
                     <div className="mb-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-700">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Home className="w-4 h-4 text-blue-600" />
-                          <span className="font-medium">العقار المربوط:</span>
-                          <span className="font-bold text-blue-600">{currentSubscription.linkedProperty}</span>
-                        </div>
-                        {linkedPropertySubscription?.found && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <Badge variant={linkedPropertySubscription.subscription.status === 'نشط' ? 'default' : 'secondary'}>
-                              {linkedPropertySubscription.subscription.status === 'نشط' ? 'نشط' : 
-                               linkedPropertySubscription.subscription.status === 'ساري' ? 'ساري' : 
-                               linkedPropertySubscription.subscription.status || '-'}
-                            </Badge>
-                            <span className="text-muted-foreground">
-                              {getSubscriptionTypeLabel(linkedPropertySubscription.subscription.subscriptionType)}
-                            </span>
+                      <p className="mb-2 text-sm font-semibold text-blue-800 dark:text-blue-200">
+                        العقارات المشمولة تلقائياً في التجديد
+                      </p>
+                      <div className="space-y-2">
+                        {existingGroupProperties.map((groupProperty) => (
+                          <div
+                            key={groupProperty.propertyNumber}
+                            className="flex items-center justify-between gap-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Home className="w-4 h-4 text-blue-600" />
+                              <span className="font-bold text-blue-600">
+                                {groupProperty.propertyNumber}
+                              </span>
+                              {groupProperty.name && groupProperty.name !== groupProperty.propertyNumber && (
+                                <span className="text-muted-foreground">{groupProperty.name}</span>
+                              )}
+                            </div>
+                            {groupProperty.isMain && (
+                              <Badge variant="outline" className="text-xs">رئيسي</Badge>
+                            )}
                           </div>
-                        )}
+                        ))}
                       </div>
                     </div>
                   )}
                   
-                  <p className={`text-sm mb-4 ${showAdditionalPropertyError ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-amber-700 dark:text-amber-300'}`}>
-                    ⚠️ يجب إضافة عقار إضافي واحد على الأقل لهذه الباقة
-                  </p>
+                  {action === "extend" || missingIncludedProperties === 0 ? (
+                    <p className="text-sm mb-4 text-blue-700 dark:text-blue-300">
+                      إضافة عقار جديد اختيارية، وسعر كل عقار إضافي {selectedPackagePricing?.additionalPropertyPrice || 0} ريال.
+                    </p>
+                  ) : (
+                    <p className={`text-sm mb-4 ${showAdditionalPropertyError ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-amber-700 dark:text-amber-300'}`}>
+                      ⚠️ يجب إضافة {missingIncludedProperties === 1 ? "عقار إضافي واحد" : `${missingIncludedProperties} عقارات إضافية`} لهذه الباقة
+                    </p>
+                  )}
                   
                   {/* Dynamic property list */}
                   {additionalProperties.map((prop, index) => (
@@ -2189,7 +2254,7 @@ export default function OwnerSubscriptionPage() {
                   ))}
 
                   {/* Add more properties button */}
-                  {additionalProperties.filter(p => p.verified).length < ((selectedPackage as any).maxProperties || 2) - 1 && (
+                  {baseGroupPropertyCount + additionalProperties.length < selectedPackageMaxProperties && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2202,17 +2267,23 @@ export default function OwnerSubscriptionPage() {
                   )}
 
                   {/* Price summary */}
-                  {additionalProperties.filter(p => p.verified).length > 0 && (
+                  {selectedPackagePricing && (
                     <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-blue-800 dark:text-blue-200">العقار الرئيسي</span>
-                          <span className="font-bold">{(selectedPackage as any)?.price || 25} ريال</span>
+                          <span className="text-blue-800 dark:text-blue-200">
+                            الباقة الأساسية ({selectedPackagePricing.includedPropertyCount} عقارات)
+                          </span>
+                          <span className="font-bold">{selectedPackagePricing.basePrice} ريال</span>
                         </div>
                         {additionalProperties.filter(p => p.verified).map((p, idx) => (
                           <div key={idx} className="flex justify-between items-center text-sm">
                             <span className="text-blue-800 dark:text-blue-200">عقار إضافي ({p.number})</span>
-                            <span className="font-bold">{(selectedPackage as any)?.price || 25} ريال</span>
+                            <span className="font-bold">
+                              {idx < includedNewPropertySlots
+                                ? "مشمول"
+                                : `${selectedPackagePricing.additionalPropertyPrice} ريال`}
+                            </span>
                           </div>
                         ))}
                         <div className="flex justify-between items-center pt-2 border-t border-blue-300">

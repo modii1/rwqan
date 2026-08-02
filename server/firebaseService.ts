@@ -580,6 +580,28 @@ export class FirebaseService {
         return selected;
     }
 
+    async getSubscriptionsLinkedToProperty(
+        mainPropertyNumber: string,
+    ): Promise<Subscription[]> {
+        const snapshot = await this.db
+            .collection("subscriptions")
+            .where("linkedProperty", "==", mainPropertyNumber)
+            .get();
+        const propertyNumbers = new Set(
+            snapshot.docs
+                .map((document) => String(document.data()?.propertyNumber || "").trim())
+                .filter(Boolean),
+        );
+        const subscriptions: Subscription[] = [];
+        for (const propertyNumber of propertyNumbers) {
+            const current = await this.getSubscriptionByPropertyNumber(propertyNumber);
+            if (current?.linkedProperty === mainPropertyNumber) {
+                subscriptions.push(current);
+            }
+        }
+        return subscriptions;
+    }
+
     async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
         const id = `SUB-${subscription.propertyNumber}`;
         const normalizedSubscription = this.enforceSubscriptionDurationLimit(subscription);

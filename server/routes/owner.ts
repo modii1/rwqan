@@ -51,6 +51,14 @@ import {
   assertPropertyNotSuspended,
   isPropertySuspended,
 } from "../services/propertySuspension";
+import {
+  OwnerSubscriptionGroupError,
+  resolveOwnerSubscriptionGroup,
+} from "../utils/ownerSubscriptionGroup";
+import {
+  createOwnerSubscriptionPaymentPlan,
+  OwnerSubscriptionPaymentPlanError,
+} from "../utils/ownerSubscriptionPayment";
 
 const router = Router();
 
@@ -248,6 +256,66 @@ async function validateRequestedLinkedProperties(params: {
       );
     }
   }
+}
+
+async function prepareOwnerSubscriptionPayment(params: {
+  requestedPropertyNumber: string;
+  action: unknown;
+  pkg: any;
+  paymentBody: {
+    additionalProperties?: unknown;
+    secondPropertyNumber?: unknown;
+    linkedProperties?: unknown;
+  };
+}) {
+  const group = await resolveOwnerSubscriptionGroup(
+    params.requestedPropertyNumber,
+  );
+  const submittedPropertyNumbers = normalizeLinkedPropertyNumbers(
+    params.paymentBody,
+    group.mainPropertyNumber,
+  );
+  const plan = createOwnerSubscriptionPaymentPlan({
+    action: params.action,
+    mainPropertyNumber: group.mainPropertyNumber,
+    existingLinkedPropertyNumbers: group.linkedPropertyNumbers,
+    requestedPropertyNumbers: submittedPropertyNumbers,
+    pkg: params.pkg,
+  });
+
+  if (plan.requestedPropertyNumbers.length > 0) {
+    await validateRequestedLinkedProperties({
+      mainProperty: group.mainProperty,
+      currentSubscription: group.mainSubscription,
+      requestedPropertyNumbers: plan.requestedPropertyNumbers,
+      pkg: params.pkg,
+    });
+  }
+
+  return { group, plan };
+}
+
+async function getOwnerGroupPayments(propertyNumber: string): Promise<Payment[]> {
+  const group = await resolveOwnerSubscriptionGroup(propertyNumber);
+  const lookupNumbers = Array.from(new Set([
+    propertyNumber,
+    group.mainPropertyNumber,
+  ]));
+  const paymentGroups = await Promise.all(
+    lookupNumbers.map((number) => paymentService.getByProperty(number)),
+  );
+  return Array.from(new Map(
+    paymentGroups.flat().map((payment) => [payment.id, payment]),
+  ).values());
+}
+
+async function ownerCanAccessPayment(
+  propertyNumber: string,
+  payment: Payment,
+): Promise<boolean> {
+  if (payment.propertyNumber === propertyNumber) return true;
+  const group = await resolveOwnerSubscriptionGroup(propertyNumber);
+  return payment.propertyNumber === group.mainPropertyNumber;
 }
 
 function getPaymentTime(value: any): number {
@@ -638,9 +706,32 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       };
     }
 
+    const group = await resolveOwnerSubscriptionGroup(propertyNumber);
+    const groupProperties = await Promise.all(
+      group.propertyNumbers.map(async (groupPropertyNumber) => {
+        const groupProperty = groupPropertyNumber === group.requestedPropertyNumber
+          ? group.requestedProperty
+          : groupPropertyNumber === group.mainPropertyNumber
+            ? group.mainProperty
+            : await firebaseService.getPropertyByNumber(groupPropertyNumber);
+        return {
+          propertyNumber: groupPropertyNumber,
+          name: groupProperty?.name || groupPropertyNumber,
+          isMain: groupPropertyNumber === group.mainPropertyNumber,
+        };
+      }),
+    );
+
     res.json({
       ...subscription,
-      linkedToMain
+      linkedToMain,
+      linkedGroup: {
+        mainPropertyNumber: group.mainPropertyNumber,
+        propertyNumbers: group.propertyNumbers,
+        linkedPropertyNumbers: group.linkedPropertyNumbers,
+        propertyCount: group.propertyNumbers.length,
+        properties: groupProperties,
+      },
     });
   } catch (err: any) {
     console.error("Get subscription error:", err?.message);
@@ -670,7 +761,7 @@ router.get("/api/owner/payments", requireOwner, async (req, res) => {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-    const payments = await paymentService.getByProperty(propertyNumber);
+    const payments = await getOwnerGroupPayments(propertyNumber);
 
     res.json(payments.map(toOwnerPaymentSummary));
   } catch (err: any) {
@@ -778,8 +869,10 @@ router.post("/api/owner/payment/:paymentId/rescan", requireSameOrigin, async (re
     // For owners, verify they own this payment
     let payment;
     if (!isAdmin && propertyNumber) {
-      const payments = await paymentService.getByProperty(propertyNumber);
-      payment = payments.find(p => p.id === paymentId);
+      const candidate = await paymentService.getById(paymentId);
+      payment = candidate && await ownerCanAccessPayment(propertyNumber, candidate)
+        ? candidate
+        : null;
     } else {
       // For admins, can scan any payment
       payment = await paymentService.getById(paymentId);
@@ -849,7 +942,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const payments = sortPaymentsNewestFirst(await paymentService.getByProperty(propertyNumber));
+    const payments = sortPaymentsNewestFirst(await getOwnerGroupPayments(propertyNumber));
     const latestPayment = payments[0];
 
     if (
@@ -938,13 +1031,20 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
   let uploadedReceiptKey: string | null = null;
   try {
-    const { propertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
+    const {
+      propertyNumber: requestedPropertyNumber,
+      packageId,
+      discountCode,
+      action,
+      secondPropertyNumber,
+      additionalProperties,
+    } = req.body;
     const isAddon = action === "addon";
 
-    if (!propertyNumber) {
+    if (!requestedPropertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
-    if (propertyNumber !== (req.session as any).propertyNumber) {
+    if (requestedPropertyNumber !== (req.session as any).propertyNumber) {
       return res.status(403).json({
         error: "لا يمكنك إنشاء دفعة لعقار آخر",
         code: "PROPERTY_SESSION_MISMATCH",
@@ -955,25 +1055,8 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
       return res.status(400).json({ error: "الإيصال مطلوب" });
     }
 
-    // Get package and property
     const pkg = await firebaseService.getPurchasablePackageById(packageId);
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
-
-    const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
-
-    const currentSubscriptionForAction = await subscriptionService.getByProperty(propertyNumber);
-    if (!isAddon) {
-      const actionValidation = validatePaymentSubscriptionAction(action, currentSubscriptionForAction);
-      if (!actionValidation.ok) {
-        return res.status(actionValidation.status).json({
-          error: actionValidation.error,
-          nextAction: actionValidation.nextAction,
-          nextUrl: actionValidation.nextUrl,
-          actionLabel: actionValidation.actionLabel,
-        });
-      }
-    }
 
     // Handle multiple additional properties
     let allAdditionalProps: string[] = [];
@@ -1002,36 +1085,41 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
       }
     }
     
-    allAdditionalProps = normalizeLinkedPropertyNumbers(
-      { additionalProperties: allAdditionalProps, secondPropertyNumber: parsedSecondPropertyNumber },
-      propertyNumber,
-    );
-    if (!isAddon && allAdditionalProps.length > 0) {
-      await validateRequestedLinkedProperties({
-        mainProperty: property,
-        currentSubscription: currentSubscriptionForAction,
-        requestedPropertyNumbers: allAdditionalProps,
-        pkg,
-      });
+    const submittedPaymentBody = {
+      additionalProperties: allAdditionalProps,
+      secondPropertyNumber: parsedSecondPropertyNumber,
+    };
+    const prepared = isAddon
+      ? null
+      : await prepareOwnerSubscriptionPayment({
+          requestedPropertyNumber,
+          action,
+          pkg,
+          paymentBody: submittedPaymentBody,
+        });
+    const propertyNumber = prepared?.group.mainPropertyNumber || requestedPropertyNumber;
+    const property = prepared?.group.mainProperty ||
+      await firebaseService.getPropertyByNumber(propertyNumber);
+    if (!property) return res.status(404).json({ error: "العقار غير موجود" });
+    const currentSubscriptionForAction = prepared?.group.mainSubscription ||
+      await subscriptionService.getByProperty(propertyNumber);
+    if (!isAddon) {
+      const actionValidation = validatePaymentSubscriptionAction(
+        action,
+        currentSubscriptionForAction,
+      );
+      if (!actionValidation.ok) {
+        return res.status(actionValidation.status).json({
+          error: actionValidation.error,
+          nextAction: actionValidation.nextAction,
+          nextUrl: actionValidation.nextUrl,
+          actionLabel: actionValidation.actionLabel,
+        });
+      }
     }
-    
-    // Calculate final price based on number of properties
-    // Pricing model: 50 SAR for main property + 25 SAR for each additional property
-    const basePrice = pkg.price || 0;
-    const additionalPropertyCount = allAdditionalProps.length;
-    
-    let finalAmount;
-    if (additionalPropertyCount > 0) {
-      // Formula: pkg-price + (addedPropertyCount * propertyPrice)
-      const propertyPrice = basePrice || 25;
-      finalAmount = basePrice + (additionalPropertyCount * propertyPrice);
-    } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
-      // For multi-property packages without additional props selected
-      finalAmount = pkg.pricePerProperty;
-    } else {
-      // Regular package price (just the first property)
-      finalAmount = basePrice;
-    }
+    allAdditionalProps = prepared?.plan.linkedPropertyNumbers || [];
+    parsedSecondPropertyNumber = allAdditionalProps[0];
+    let finalAmount = prepared?.plan.pricing.total ?? Number(pkg.price || 0);
     
     // Apply discount
     if (discountCode) {
@@ -1426,7 +1514,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
       err instanceof PaymentActionEligibilityError ||
       err instanceof SuspendedSubscriptionWriteError ||
       hasPropertySuspendedCode(err) ||
-      err instanceof LinkedPropertyRequestError
+      err instanceof LinkedPropertyRequestError ||
+      err instanceof OwnerSubscriptionGroupError ||
+      err instanceof OwnerSubscriptionPaymentPlanError
     ) {
       if (uploadedReceiptKey && r2 && R2_BUCKET) {
         await r2.send(new DeleteObjectCommand({
@@ -2184,21 +2274,16 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
   try {
     const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
     const sessionPropertyNumber = (req.session as any).propertyNumber;
-    const propertyNumber = bodyPropertyNumber || sessionPropertyNumber;
+    const requestedPropertyNumber = bodyPropertyNumber || sessionPropertyNumber;
 
-    if (!propertyNumber) {
+    if (!requestedPropertyNumber) {
       return res.status(400).json({ error: "رقم العقار مطلوب" });
     }
-    if (propertyNumber !== sessionPropertyNumber) {
+    if (requestedPropertyNumber !== sessionPropertyNumber) {
       return res.status(403).json({
         error: "لا يمكنك إنشاء دفعة لعقار آخر",
         code: "PROPERTY_SESSION_MISMATCH",
       });
-    }
-
-    const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (!property) {
-      return res.status(404).json({ error: "العقار غير موجود" });
     }
 
     const pkg = await firebaseService.getPurchasablePackageById(packageId);
@@ -2233,39 +2318,22 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
       }
     }
     
-    allAdditionalProps = normalizeLinkedPropertyNumbers(
-      { additionalProperties: allAdditionalProps, secondPropertyNumber: parsedSecondPropertyNumber },
-      propertyNumber,
-    );
-    
-    // Calculate final price based on number of properties
-    // Pricing model: 50 SAR for main property + 25 SAR for each additional property
-    const basePrice = pkg.price || 0;
-    const additionalPropertyCount = allAdditionalProps.length;
-    
-    let finalAmount;
-    if (additionalPropertyCount > 0) {
-      // Formula: pkg-price + (addedPropertyCount * propertyPrice)
-      const propertyPrice = basePrice || 25;
-      finalAmount = basePrice + (additionalPropertyCount * propertyPrice);
-    } else if (pkg.pricePerProperty && pkg.pricePerProperty > 0) {
-      // For multi-property packages without additional props selected
-      finalAmount = pkg.pricePerProperty;
-    } else {
-      // Regular package price (just the first property)
-      finalAmount = basePrice;
-    }
-
-    const currentSubscriptionForPaymentAction =
-      await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
-    if (allAdditionalProps.length > 0) {
-      await validateRequestedLinkedProperties({
-        mainProperty: property,
-        currentSubscription: currentSubscriptionForPaymentAction,
-        requestedPropertyNumbers: allAdditionalProps,
-        pkg,
-      });
-    }
+    const prepared = await prepareOwnerSubscriptionPayment({
+      requestedPropertyNumber,
+      action,
+      pkg,
+      paymentBody: {
+        additionalProperties: allAdditionalProps,
+        secondPropertyNumber: parsedSecondPropertyNumber,
+      },
+    });
+    const propertyNumber = prepared.group.mainPropertyNumber;
+    const property = prepared.group.mainProperty;
+    const currentSubscriptionForPaymentAction = prepared.group.mainSubscription;
+    allAdditionalProps = prepared.plan.linkedPropertyNumbers;
+    parsedSecondPropertyNumber = allAdditionalProps[0];
+    const amount = prepared.plan.pricing.total;
+    let finalAmount = amount;
     const actionValidation = validatePaymentSubscriptionAction(
       action,
       currentSubscriptionForPaymentAction,
@@ -2280,18 +2348,10 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
     }
 
     // Check if this is a package downgrade (for extend/upgrade actions)
-    let downgradeWarning = null;
-    let willAutoUnlink = 0;
-    if (action === 'upgrade' || action === 'extend') {
-      const currentLinkedCount = currentSubscriptionForPaymentAction?.linkedProperties?.length || 0;
-      const newPackageMaxProps = (pkg as any).maxProperties || 1;
-      const allowedLinkedCount = Math.max(0, newPackageMaxProps - 1);
-      
-      if (currentLinkedCount > allowedLinkedCount) {
-        willAutoUnlink = currentLinkedCount - allowedLinkedCount;
-        downgradeWarning = `سيتم فصل ${willAutoUnlink} عقار تلقائياً لأن الباقة الجديدة لا تدعم هذا العدد`;
-      }
-    }
+    const willAutoUnlink = prepared.plan.willAutoUnlink;
+    const downgradeWarning = willAutoUnlink > 0
+      ? `سيتم فصل ${willAutoUnlink} عقار تلقائياً لأن الباقة الجديدة لا تدعم هذا العدد`
+      : null;
 
     let discountAmount = 0;
 
@@ -2312,7 +2372,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
     const payment = await paymentService.create({
       propertyNumber,
       packageId,
-      amount: finalAmount,
+      amount,
       discountCode: discountCode || "",
       discountAmount,
       finalAmount,
@@ -2427,7 +2487,9 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
       err instanceof PaymentActionConflictError ||
       err instanceof PaymentActionEligibilityError ||
       err instanceof SuspendedSubscriptionWriteError ||
-      err instanceof LinkedPropertyRequestError
+      err instanceof LinkedPropertyRequestError ||
+      err instanceof OwnerSubscriptionGroupError ||
+      err instanceof OwnerSubscriptionPaymentPlanError
     ) {
       return res.status(err.status).json({
         error: err.message,
@@ -2464,7 +2526,7 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
     }
 
-    if (payment.propertyNumber !== propertyNumber) {
+    if (!propertyNumber || !await ownerCanAccessPayment(propertyNumber, payment)) {
       return res.status(403).json({ error: "غير مصرح" });
     }
 

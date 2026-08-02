@@ -219,8 +219,9 @@ export default function PackagesSection() {
                 <thead className="bg-muted/50">
                   <tr>
                     <Th>اسم الباقة</Th>
-                    <Th>السعر (ريال)</Th>
-                    <Th>سعر للعقار</Th>
+                    <Th>السعر الأساسي</Th>
+                    <Th>العقارات المشمولة</Th>
+                    <Th>سعر العقار الإضافي</Th>
                     <Th>مدة الاشتراك (يوم)</Th>
                     <Th>الحالة</Th>
                     <Th>الحد الأقصى</Th>
@@ -233,6 +234,7 @@ export default function PackagesSection() {
                     <tr key={pkg.id} className="border-t hover:bg-muted/40">
                       <Td>{pkg.name}</Td>
                       <Td>{pkg.price}</Td>
+                      <Td>{pkg.propertyCount || 1}</Td>
                       <Td>{pkg.pricePerProperty || "-"}</Td>
                       <Td>{pkg.durationDays}</Td>
                       <Td>
@@ -260,7 +262,7 @@ export default function PackagesSection() {
 
                   {(regularPackages || []).length === 0 && (
                     <tr>
-                      <Td colSpan={8}>
+                      <Td colSpan={9}>
                         <div className="p-4 text-center text-xs text-muted-foreground">
                           لا توجد باقات مسجلة حالياً.
                         </div>
@@ -374,7 +376,7 @@ export default function PackagesSection() {
 
               <div>
                 <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
-                  السعر (ريال)
+                  السعر الأساسي للباقة (ريال)
                 </label>
                 <Input
                   type="number"
@@ -386,7 +388,21 @@ export default function PackagesSection() {
 
               <div>
                 <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
-                  السعر لكل عقار (ريال)
+                  عدد العقارات المشمولة في السعر الأساسي
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={editingPackage.propertyCount || 1}
+                  onChange={(e) => setEditingPackage({ ...editingPackage, propertyCount: Math.max(1, Number(e.target.value || 1)) })}
+                  placeholder="1"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">مثال: باقة VIP تشمل عقارين بسعر أساسي 50 ريال</p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+                  سعر كل عقار إضافي بعد العدد المشمول (ريال)
                 </label>
                 <Input
                   type="number"
@@ -394,7 +410,7 @@ export default function PackagesSection() {
                   onChange={(e) => setEditingPackage({ ...editingPackage, pricePerProperty: Number(e.target.value || 0) || undefined })}
                   placeholder="25"
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">يُستخدم لحساب سعر باقات متعددة العقارات</p>
+                <p className="text-[10px] text-muted-foreground mt-1">مثال: 25 ريال للعقار الثالث وما بعده</p>
               </div>
 
               <div>

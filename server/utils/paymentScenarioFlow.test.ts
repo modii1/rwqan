@@ -8,6 +8,7 @@ import {
   isLegacyPaymentFulfillment,
   normalizeSubscriptionBoundaryEndDate,
   queueVerifiedNewPropertyForAdminApproval,
+  syncMultiPropertyRecord,
   validatePaymentSubscriptionAction,
   validateSubscriptionAction,
 } from "./paymentScenarioFlow";
@@ -68,6 +69,59 @@ test("new activation cannot replace an active subscription", () => {
     { ok: true },
   );
   assert.equal(validatePaymentSubscriptionAction("unknown", null).ok, false);
+});
+
+test("multi-property sync keeps one canonical group and removes overlapping legacy duplicates", async () => {
+  const originals = {
+    getMultiPropertySubscriptions: firebaseService.getMultiPropertySubscriptions,
+    updateMultiPropertySubscription: firebaseService.updateMultiPropertySubscription,
+    deleteMultiPropertySubscription: firebaseService.deleteMultiPropertySubscription,
+  };
+  const updates: string[] = [];
+  const deletions: string[] = [];
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [
+    {
+      id: "OLD-REVERSED",
+      propertyNumber1: "PROP-CHILD",
+      propertyNumber2: "PROP-MAIN",
+      additionalProperties: ["PROP-MAIN"],
+    },
+    {
+      id: "CANONICAL",
+      propertyNumber1: "PROP-MAIN",
+      propertyNumber2: "PROP-CHILD",
+      additionalProperties: ["PROP-CHILD"],
+    },
+    {
+      id: "UNRELATED",
+      propertyNumber1: "PROP-OTHER",
+      propertyNumber2: "PROP-SEPARATE",
+    },
+  ];
+  (firebaseService as any).updateMultiPropertySubscription = async (id: string) => {
+    updates.push(id);
+  };
+  (firebaseService as any).deleteMultiPropertySubscription = async (id: string) => {
+    deletions.push(id);
+  };
+
+  try {
+    await syncMultiPropertyRecord({
+      mainPropertyNumber: "PROP-MAIN",
+      linkedProperties: ["PROP-CHILD"],
+      packageId: "PKG-VIP",
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      paymentId: "PAY-1",
+    });
+
+    assert.deepEqual(updates, ["CANONICAL"]);
+    assert.deepEqual(deletions, ["OLD-REVERSED"]);
+  } finally {
+    firebaseService.getMultiPropertySubscriptions = originals.getMultiPropertySubscriptions;
+    firebaseService.updateMultiPropertySubscription = originals.updateMultiPropertySubscription;
+    firebaseService.deleteMultiPropertySubscription = originals.deleteMultiPropertySubscription;
+  }
 });
 
 test("legacy fulfillment detection never bypasses an existing claim state", () => {

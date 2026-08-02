@@ -23,6 +23,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     getPackage: firebaseService.getPurchasablePackageById,
     getFirebaseProperty: firebaseService.getPropertyByNumber,
     getSubscription: firebaseService.getSubscriptionByPropertyNumber,
+    getLinkedSubscriptions: firebaseService.getSubscriptionsLinkedToProperty,
     getOwnerSubscription: subscriptionService.getByProperty,
     getPaymentsByProperty: paymentService.getByProperty,
     paymentCreate: paymentService.create,
@@ -31,6 +32,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     releaseReservation: firebaseService.releasePaymentActionReservation,
   };
   const properties = new Map<string, any>();
+  const subscriptions = new Map<string, any>();
   const payments = new Map<string, any>();
   let paymentCreateCount = 0;
   let failRegistration = false;
@@ -47,20 +49,37 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     return data;
   };
   (notificationService as any).newProperty = async () => undefined;
-  (firebaseService as any).getPurchasablePackageById = async (packageId: string) => ({
-    id: "PKG-1",
-    name: "Package",
-    price: 100,
-    duration: 30,
-    type: "premium",
-    maxProperties: packageId === "PKG-2" ? 2 : 1,
-  });
+  (firebaseService as any).getPurchasablePackageById = async (packageId: string) =>
+    packageId === "pkg-month-2properties"
+      ? {
+          id: packageId,
+          name: "VIP",
+          price: 25,
+          duration: 30,
+          type: "premium",
+          maxProperties: 5,
+        }
+      : {
+          id: "PKG-1",
+          name: "Package",
+          price: 100,
+          duration: 30,
+          type: "premium",
+          maxProperties: packageId === "PKG-2" ? 2 : 1,
+        };
   (firebaseService as any).getPropertyByNumber = async (propertyNumber: string) =>
     properties.get(propertyNumber) || null;
-  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
+  (firebaseService as any).getSubscriptionByPropertyNumber = async (
+    propertyNumber: string,
+  ) => subscriptions.get(propertyNumber) || null;
+  (firebaseService as any).getSubscriptionsLinkedToProperty = async (
+    mainPropertyNumber: string,
+  ) => Array.from(subscriptions.values()).filter(
+    (subscription) => subscription.linkedProperty === mainPropertyNumber,
+  );
   (subscriptionService as any).getByProperty = async (propertyNumber: string) => {
     ownerSubscriptionLookups.push(propertyNumber);
-    return null;
+    return subscriptions.get(propertyNumber) || null;
   };
   (paymentService as any).getByProperty = async (propertyNumber: string) => {
     ownerPaymentLookups.push(propertyNumber);
@@ -137,6 +156,13 @@ test("public onboarding establishes an owner-bound payment session", async () =>
   });
   app.get("/test/session", (req, res) => {
     res.json({ propertyNumber: req.session.propertyNumber || null });
+  });
+  app.post("/test/session/:propertyNumber", (req, res) => {
+    req.session.propertyNumber = req.params.propertyNumber;
+    req.session.save((error) => {
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ propertyNumber: req.session.propertyNumber });
+    });
   });
   app.use(publicRouter);
   app.use(ownerRouter);
@@ -303,6 +329,74 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     assert.equal(releasedReservations[0].id, "PAY-3");
     assert.equal(releasedReservations[0].updates.intentionState, "failed");
 
+    intentionMode = "success";
+    properties.set("99655", {
+      ...properties.get("PROP-OWNER"),
+      propertyNumber: "99655",
+      name: "Main property",
+      pin: "1234",
+    });
+    properties.set("99651", {
+      ...properties.get("PROP-OWNER"),
+      propertyNumber: "99651",
+      name: "Linked child",
+      pin: "1234",
+      linkedProperty: "99655",
+    });
+    const expiringEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    subscriptions.set("99655", {
+      id: "SUB-99655",
+      propertyNumber: "99655",
+      packageId: "pkg-month-2properties",
+      status: "نشط",
+      startDate: new Date().toISOString(),
+      endDate: expiringEnd,
+      linkedProperties: ["99651"],
+      propertyCount: 2,
+    });
+    subscriptions.set("99651", {
+      id: "SUB-99651",
+      propertyNumber: "99651",
+      packageId: "pkg-month-2properties",
+      status: "نشط",
+      startDate: new Date().toISOString(),
+      endDate: expiringEnd,
+      linkedProperty: "99655",
+      propertyCount: 1,
+    });
+    const childSession = await fetch(`${baseUrl}/test/session/99651`, {
+      method: "POST",
+    });
+    const childCookie = childSession.headers.get("set-cookie")?.split(";")[0];
+    assert.ok(childCookie);
+
+    const childExtension = await fetch(`${baseUrl}/api/owner/payment/initiate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: childCookie },
+      body: JSON.stringify({
+        propertyNumber: "99651",
+        packageId: "pkg-month-2properties",
+        action: "extend",
+      }),
+    });
+    assert.equal(childExtension.status, 200);
+    const childExtensionBody = await childExtension.json();
+    assert.equal(childExtensionBody.finalAmount, 50);
+    const childPayment = payments.get("PAY-4");
+    assert.equal(childPayment.propertyNumber, "99655");
+    assert.equal(childPayment.amount, 50);
+    assert.deepEqual(childPayment.additionalProperties, ["99651"]);
+    assert.equal(childPayment.secondPropertyNumber, "99651");
+
+    const childHistoryResponse = await fetch(`${baseUrl}/api/owner/payments`, {
+      headers: { cookie: childCookie },
+    });
+    assert.equal(childHistoryResponse.status, 200);
+    assert.ok(
+      (await childHistoryResponse.json() as any[])
+        .some((payment) => payment.id === "PAY-4"),
+    );
+
     failRegistration = true;
     const failedRegistration = await fetch(`${baseUrl}/api/properties/register`, {
       method: "POST",
@@ -364,6 +458,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     (firebaseService as any).getPurchasablePackageById = originals.getPackage;
     (firebaseService as any).getPropertyByNumber = originals.getFirebaseProperty;
     (firebaseService as any).getSubscriptionByPropertyNumber = originals.getSubscription;
+    (firebaseService as any).getSubscriptionsLinkedToProperty = originals.getLinkedSubscriptions;
     (subscriptionService as any).getByProperty = originals.getOwnerSubscription;
     (paymentService as any).getByProperty = originals.getPaymentsByProperty;
     (paymentService as any).create = originals.paymentCreate;

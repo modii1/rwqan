@@ -331,34 +331,49 @@ export async function syncMultiPropertyRecord(params: {
   const { mainPropertyNumber, linkedProperties, packageId, startDate, endDate, paymentId } = params;
   const groupMembers = new Set([mainPropertyNumber, ...linkedProperties]);
   const multiSubscriptions = await firebaseService.getMultiPropertySubscriptions();
-  const existingGroup = multiSubscriptions.find((multiSub) => {
+  const existingGroups = multiSubscriptions.filter((multiSub) => {
     const members = new Set<string>();
     if (multiSub.propertyNumber1) members.add(multiSub.propertyNumber1);
     if (multiSub.propertyNumber2) members.add(multiSub.propertyNumber2);
     if (multiSub.additionalProperties) {
       for (const propNumber of multiSub.additionalProperties) members.add(propNumber);
     }
+    if (multiSub.linkedProperties) {
+      for (const propNumber of multiSub.linkedProperties) members.add(propNumber);
+    }
     return Array.from(groupMembers).some((propNumber) => members.has(propNumber));
   });
 
   if (linkedProperties.length === 0) {
-    if (existingGroup) {
-      await firebaseService.deleteMultiPropertySubscription(existingGroup.id);
-    }
+    await Promise.all(
+      existingGroups.map((group) =>
+        firebaseService.deleteMultiPropertySubscription(group.id),
+      ),
+    );
     return;
   }
 
+  const existingGroup = existingGroups.find(
+    (group) => group.propertyNumber1 === mainPropertyNumber,
+  ) || existingGroups[0];
   if (existingGroup) {
     await firebaseService.updateMultiPropertySubscription(existingGroup.id, {
       packageId,
       propertyNumber1: mainPropertyNumber,
       propertyNumber2: linkedProperties[0],
       additionalProperties: linkedProperties,
+      linkedProperties: [mainPropertyNumber, ...linkedProperties],
+      propertyCount: linkedProperties.length + 1,
       startDate,
       endDate,
       status: "نشط",
       paymentId,
     } as any);
+    await Promise.all(
+      existingGroups
+        .filter((group) => group.id !== existingGroup.id)
+        .map((group) => firebaseService.deleteMultiPropertySubscription(group.id)),
+    );
     return;
   }
 
