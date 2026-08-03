@@ -2025,6 +2025,10 @@ export default function OwnerSubscriptionPage() {
                   pkg,
                   Math.min(baseGroupPropertyCount, packageMaxProperties),
                 );
+                const packagePricePerIncludedProperty =
+                  packagePricing.includedPropertyCount > 0
+                    ? packagePricing.basePrice / packagePricing.includedPropertyCount
+                    : packagePricing.basePrice;
                 const isDowngrade = action === "upgrade" && packagePricing.total < currentPkgPrice;
                 const isSelected = selectedPackageId === pkg.id;
                 const isMultiProperty = packageMaxProperties > 1;
@@ -2057,15 +2061,17 @@ export default function OwnerSubscriptionPage() {
 
                     {/* السعر */}
                     <div className="flex items-end gap-1 mb-2">
-                      <PriceDisplay amount={packagePricing.total} size="lg" />
+                      <PriceDisplay amount={packagePricePerIncludedProperty} size="lg" />
+                      {isMultiProperty && (
+                        <span className="text-xs text-muted-foreground mb-1">/ عقار</span>
+                      )}
                     </div>
 
                     {/* معلومات الباقة المتعددة */}
                     {isMultiProperty && (
                       <div className="text-xs space-y-1 mb-2">
-                        <p className="text-muted-foreground">
-                          يشمل {packagePricing.includedPropertyCount} عقارات، ثم {packagePricing.additionalPropertyPrice} ريال لكل عقار إضافي
-                        </p>
+                        <div className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]"><PriceDisplay amount={packagePricing.basePrice} size="sm" /></span> للعقارين</div>
+                        <p className="text-muted-foreground">2 عقارات</p>
                       </div>
                     )}
 

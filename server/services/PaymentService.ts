@@ -21,6 +21,7 @@ import {
   normalizeSubscriptionBoundaryEndDate,
   normalizeLinkedPropertyNumbers,
   queueVerifiedNewPropertyForAdminApproval,
+  requiresInitialPropertyApproval,
   resolvePaymentPropertyPlan,
 } from "../utils/paymentScenarioFlow";
 import { assertPropertyNotSuspended } from "./propertySuspension";
@@ -218,7 +219,12 @@ export class PaymentService {
       payment.pendingPropertyApproval &&
       payment.status === "نجح - قيد التحقق"
     ) {
-      return { outcome: "queued", alreadyProcessed: true };
+      const queuedSubscription = await firebaseService.getSubscriptionByPropertyNumber(
+        payment.propertyNumber,
+      );
+      if (!hasPriorSubscription(queuedSubscription)) {
+        return { outcome: "queued", alreadyProcessed: true };
+      }
     }
 
     await assertPropertyNotSuspended(payment.propertyNumber);
@@ -300,7 +306,7 @@ export class PaymentService {
           "تعذر تجهيز مدة الاشتراك من بيانات الدفع والباقة. راجع الباقة وتواريخ الدفع قبل إعادة المحاولة.",
       },
     );
-    if (!hasPriorSubscription(currentSub)) {
+    if (requiresInitialPropertyApproval(mainPropertyForApproval, currentSub)) {
       const queued = await runAdminApprovalStage(
         () =>
           queueVerifiedNewPropertyForAdminApproval({

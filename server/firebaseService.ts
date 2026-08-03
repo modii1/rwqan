@@ -732,6 +732,7 @@ export class FirebaseService {
                 status !== "منتهي" && isPremiumSubscriptionType(subscriptionData.subscriptionType)
                     ? "مميز"
                     : "عادي",
+            pendingPaidSubscription: false,
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
             updatedAt: new Date().toISOString(),

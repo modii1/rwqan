@@ -35,6 +35,7 @@ import {
   normalizeLinkedPropertyNumbers,
   normalizeSubscriptionBoundaryEndDate,
   queueVerifiedNewPropertyForAdminApproval,
+  requiresInitialPropertyApproval,
   syncMultiPropertyRecord,
   validatePaymentSubscriptionAction,
   validateSubscriptionAction,
@@ -1281,7 +1282,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
             secondPropertyNumber: parsedSecondPropertyNumber || undefined,
           } as any;
 
-          if (!hasPriorSubscription(currentSubscription)) {
+          if (requiresInitialPropertyApproval(property, currentSubscription)) {
             const queued = await queueVerifiedNewPropertyForAdminApproval({
               payment: paymentForActivation,
               property,
@@ -1789,7 +1790,10 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     const pkg = await storage.getPackageById(pendingPayment.packageId);
     const paymentStatus = pendingPayment.status;
     const currentSubscriptionForActivation = await subscriptionService.getByProperty(propertyNumber);
-    const isNewPropertyForActivation = !hasPriorSubscription(currentSubscriptionForActivation);
+    const isNewPropertyForActivation = requiresInitialPropertyApproval(
+      property,
+      currentSubscriptionForActivation,
+    );
     const isPartialFulfillment =
       !pendingPayment.fulfilledAt &&
       currentSubscriptionForActivation?.paymentId === pendingPayment.id;

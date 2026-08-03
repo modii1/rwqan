@@ -8,6 +8,7 @@ import {
   isLegacyPaymentFulfillment,
   normalizeSubscriptionBoundaryEndDate,
   queueVerifiedNewPropertyForAdminApproval,
+  requiresInitialPropertyApproval,
   syncMultiPropertyRecord,
   validatePaymentSubscriptionAction,
   validateSubscriptionAction,
@@ -46,6 +47,49 @@ test("starts a new activation from today for a prior inactive subscription", () 
   assert.ok(dates.startDate.getTime() <= after);
   assert.ok(dates.startDate.getTime() >= before - 24 * 60 * 60 * 1000);
   assert.ok(dates.endDate.getTime() > dates.startDate.getTime());
+});
+
+test("recognizes cancelled subscription history even when its end date was cleared", () => {
+  const cancelledHistory = {
+    id: "SUB-12345",
+    propertyNumber: "12345",
+    packageId: "pkg-test",
+    paymentId: "PAY-OLD",
+    startDate: "2026-08-02",
+    endDate: "",
+    status: "منتهي",
+  } as any;
+
+  assert.equal(hasPriorSubscription(cancelledHistory), true);
+  assert.equal(hasPriorSubscription(null), false);
+  assert.equal(
+    hasPriorSubscription({ ...cancelledHistory, isPlaceholder: true }),
+    false,
+  );
+});
+
+test("does not request initial approval again for a previously approved property", () => {
+  assert.equal(
+    requiresInitialPropertyApproval(
+      { verificationStatus: "approved" } as any,
+      null,
+    ),
+    false,
+  );
+  assert.equal(
+    requiresInitialPropertyApproval(
+      { verificationStatus: "verified" } as any,
+      null,
+    ),
+    false,
+  );
+  assert.equal(
+    requiresInitialPropertyApproval(
+      { verificationStatus: "pending" } as any,
+      null,
+    ),
+    true,
+  );
 });
 
 test("keeps the ten-day extension window for active subscriptions", () => {

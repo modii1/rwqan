@@ -925,6 +925,7 @@ test("durably queued retries cannot duplicate queue side effects", async () => {
     requireCompleteProperty: adminApprovalService.requireCompleteProperty,
   };
   const unexpectedCalls: string[] = [];
+  let subscriptionReads = 0;
 
   (firebaseService as any).getPaymentById = async () => ({
     id: "PAY-SERVICE-DURABLY-QUEUED",
@@ -935,9 +936,12 @@ test("durably queued retries cannot duplicate queue side effects", async () => {
     pendingPropertyApproval: true,
     propertyApprovalQueuedAt: "2026-07-27T16:00:00.000Z",
   });
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => {
+    subscriptionReads += 1;
+    return null;
+  };
   for (const methodName of [
     "getPackageById",
-    "getSubscriptionByPropertyNumber",
     "claimPaymentFulfillment",
     "addVerificationLog",
   ] as const) {
@@ -968,6 +972,7 @@ test("durably queued retries cannot duplicate queue side effects", async () => {
       alreadyProcessed: true,
     });
     assert.deepEqual(unexpectedCalls, []);
+    assert.equal(subscriptionReads, 2);
   } finally {
     firebaseService.getPaymentById = originals.getPaymentById;
     firebaseService.getPackageById = originals.getPackageById;

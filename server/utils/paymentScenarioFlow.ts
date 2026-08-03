@@ -114,7 +114,17 @@ export function isActiveSubscription(subscription?: Subscription | null): boolea
 }
 
 export function hasPriorSubscription(subscription?: Subscription | null): boolean {
-  return !!subscription?.endDate;
+  return Boolean(subscription && !(subscription as Subscription & { isPlaceholder?: boolean }).isPlaceholder);
+}
+
+export function requiresInitialPropertyApproval(
+  property?: Pick<Property, "verificationStatus"> | null,
+  subscription?: Subscription | null,
+): boolean {
+  const verificationStatus = String(property?.verificationStatus || "").trim();
+  const wasApproved =
+    verificationStatus === "approved" || verificationStatus === "verified";
+  return !hasPriorSubscription(subscription) && !wasApproved;
 }
 
 export function isLegacyPaymentFulfillment(
@@ -577,9 +587,10 @@ export async function activateVerifiedPaymentSubscription(params: {
           isPremiumSubscriptionType(subscriptionType)
             ? "مميز"
             : "عادي",
+        pendingPaidSubscription: false,
         lastUpdate: new Date().toISOString().split("T")[0],
         subscriptionDate: startDate.split("T")[0],
-      });
+      } as any);
     }
     await firebaseService.updateVerificationStatus(mainPropertyNumber, "approved");
 
