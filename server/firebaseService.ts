@@ -5360,6 +5360,8 @@ export class FirebaseService {
 
             transaction.update(subscriptionRef, {
                 status: "منتهي",
+                subscriptionType: "عادي",
+                packageType: "عادي",
                 updatedAt,
             });
             if (propertyRef && propertySnapshot?.exists) {

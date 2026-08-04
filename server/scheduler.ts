@@ -537,8 +537,7 @@ export function startScheduler() {
   console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
 }
 
-// تحديث الاشتراكات المنتهية وإزالة الصفة المميزة من العقار.
-// يحتفظ سجل الاشتراك بنوع الباقة التاريخي، بينما لا يبقى العقار مميزاً إلا باشتراك ساري.
+// تحديث الاشتراكات المنتهية وإزالة الصفة المميزة من سجل الاشتراك والعقار.
 // Group-aware: when a main property's subscription expires/cancels, all linked properties
 // follow the same state (same endDate, same status) so parent + children never drift.
 async function downgradeExpiredSubscriptions(): Promise<number> {

@@ -233,8 +233,10 @@ router.get("/api/admin/subscriptions", async (req, res) => {
         }
       }
 
-      // نوع الاشتراك من الشيت مباشرة (العمود 4)
-      const displayType = subWithType.subscriptionType || "عادي";
+      // الاشتراك المنتهي يظهر عادياً حتى قبل أن يكمل المجدول مزامنة السجل.
+      const displayType = status === "منتهي"
+        ? "عادي"
+        : subWithType.subscriptionType || "عادي";
 
       // اسم العقار من الشيت مباشرة (العمود 1) أو من جدول العقارات
       const propertyName = subWithType.propertyName || property?.name || "غير معروف";

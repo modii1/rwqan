@@ -133,6 +133,9 @@ test("admin subscriptions derives future status and hides uncorroborated legacy 
   const futureEndDate = new Date(
     Date.now() + 20 * 24 * 60 * 60 * 1000,
   ).toISOString();
+  const expiredEndDate = new Date(
+    Date.now() - 2 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   (subscriptionService as any).getAll = async () => [
     {
@@ -166,12 +169,23 @@ test("admin subscriptions derives future status and hides uncorroborated legacy 
       endDate: futureEndDate,
       cancelledAt: new Date().toISOString(),
     },
+    {
+      id: "SUB-EXPIRED",
+      propertyNumber: "EXPIRED",
+      packageId: "PKG-1",
+      status: "ساري",
+      subscriptionType: "مميز",
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      endDate: expiredEndDate,
+      cancelledAt: null,
+    },
   ];
   (subscriptionService as any).getPackages = async () => [];
   (propertyService as any).getAll = async () => [
     { propertyNumber: "MAIN", name: "Main" },
     { propertyNumber: "STALE", name: "Stale" },
     { propertyNumber: "CANCELLED", name: "Cancelled" },
+    { propertyNumber: "EXPIRED", name: "Expired" },
   ];
   (firebaseService as any).getMultiPropertySubscriptions = async () => [];
 
@@ -201,12 +215,19 @@ test("admin subscriptions derives future status and hides uncorroborated legacy 
     const cancelled = payload.find((subscription: any) =>
       subscription.propertyNumber === "CANCELLED"
     );
+    const expired = payload.find((subscription: any) =>
+      subscription.propertyNumber === "EXPIRED"
+    );
 
     assert.equal(response.status, 200);
     assert.equal(stale.status, "ساري");
+    assert.equal(stale.subscriptionType, "مميز");
     assert.equal(stale.linkedProperty, null);
     assert.equal(stale.isLinkedChild, false);
     assert.equal(cancelled.status, "منتهي");
+    assert.equal(cancelled.subscriptionType, "عادي");
+    assert.equal(expired.status, "منتهي");
+    assert.equal(expired.subscriptionType, "عادي");
   } finally {
     subscriptionService.getAll = originals.getSubscriptions;
     subscriptionService.getPackages = originals.getPackages;

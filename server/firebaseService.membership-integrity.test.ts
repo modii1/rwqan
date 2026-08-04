@@ -343,6 +343,46 @@ test("guarded expiry ignores a future end date without cancellation metadata", a
   );
 });
 
+test("guarded expiry downgrades both subscription metadata and property", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-EXPIRED");
+  database.update("properties", "PROP-EXPIRED", {
+    subscriptionType: "مميز",
+  });
+  database.set(
+    "subscriptions",
+    "SUB-PROP-EXPIRED",
+    activeSubscription("PROP-EXPIRED", {
+      status: "ساري",
+      endDate: pastDate(),
+      subscriptionType: "مميز",
+      packageType: "مميز",
+    }),
+  );
+
+  const expired = await createService(database).expireSubscriptionIfNeeded(
+    "SUB-PROP-EXPIRED",
+  );
+
+  assert.equal(expired, true);
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-EXPIRED")?.status,
+    "منتهي",
+  );
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-EXPIRED")?.subscriptionType,
+    "عادي",
+  );
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-EXPIRED")?.packageType,
+    "عادي",
+  );
+  assert.equal(
+    database.get("properties", "PROP-EXPIRED")?.subscriptionType,
+    "عادي",
+  );
+});
+
 test("concurrent additions cannot overflow package capacity or lose the winner", async () => {
   const database = new FakeFirestore();
   seedPackage(database, 2);
