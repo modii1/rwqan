@@ -9,6 +9,11 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { firebaseService } from "../firebaseService";
+import {
+  canAutoActivateReceipt,
+  isReceiptAmountExact,
+  isReceiptDateToday,
+} from "../utils/receiptAutoActivation";
 
 /**
  * تحميل الملف من URL وتحويله إلى Base64
@@ -197,7 +202,7 @@ export async function scanReceiptWithAI(
     "referenceMatch": true أو false,
     "ibanMatch": true أو false,
     "beneficiaryMatch": true أو false,
-    "dateMatch": true إذا كان تاريخ الإيصال ضمن آخر 7 أيام,
+    "dateMatch": true فقط إذا كان تاريخ الإيصال مطابقاً تماماً لتاريخ اليوم,
     "matchScore": رقم من 0 إلى 100,
     "matchDetails": "تفاصيل المطابقة"
   },
@@ -206,7 +211,7 @@ export async function scanReceiptWithAI(
 }
 
 ملاحظات مهمة:
-- تقبل dateMatch إذا كان التاريخ ضمن آخر 7 أيام من اليوم
+- تقبل dateMatch فقط إذا كان التاريخ مطابقاً تماماً لتاريخ اليوم
 - referenceMatch و ibanMatch اختياريان ومؤشر إضافي فقط
 - ⚠️ المبلغ (amountMatch) شرط أساسي للتفعيل التلقائي`;
 
@@ -329,8 +334,19 @@ export async function scanReceiptWithAI(
       confidence: analysisData.confidence || 0,
     };
 
+    // لا نعتمد قرار النموذج للمبلغ أو التاريخ: المطابقة التلقائية تتطلب
+    // المبلغ المتوقع تماماً وتاريخ اليوم نفسه بتوقيت الرياض.
+    scanResult.matchAnalysis.amountMatch = isReceiptAmountExact(
+      scanResult.extractedData.amount,
+      expectedAmount,
+    );
+    scanResult.matchAnalysis.dateMatch = isReceiptDateToday(
+      scanResult.extractedData.date,
+      today,
+    );
+
     // 🎯 تطبيق معايير القبول الجديدة
-    // ⚠️ المبلغ شرط أساسي + (اسم المؤسسة أو التاريخ) + ثقة > 80% + جودة ممتازة أو جيدة
+    // ⚠️ المبلغ وتاريخ اليوم شرطان أساسيان + ثقة > 80% + جودة ممتازة أو جيدة
     const matchCriteria = {
       beneficiaryMatch: scanResult.matchAnalysis.beneficiaryMatch,
       amountMatch: scanResult.matchAnalysis.amountMatch, // ⚠️ شرط أساسي
@@ -339,11 +355,10 @@ export async function scanReceiptWithAI(
 
     // المبلغ شرط أساسي
     const amountOk = matchCriteria.amountMatch;
-    // واحد على الأقل من: اسم المؤسسة أو التاريخ
-    const secondaryMatch = matchCriteria.beneficiaryMatch || matchCriteria.dateMatch;
     const matchCount = Object.values(matchCriteria).filter(Boolean).length;
     const confidenceOk = scanResult.confidence >= 80;
     const qualityOk = scanResult.imageQuality.clarity === 'ممتازة' || scanResult.imageQuality.clarity === 'جيدة';
+    const dateOk = matchCriteria.dateMatch;
 
     console.log(`🔬 [AI Scanner] معايير القبول:`);
     console.log(`   - 💰 المبلغ (أساسي): ${matchCriteria.amountMatch ? '✅' : '❌'}`);
@@ -354,12 +369,21 @@ export async function scanReceiptWithAI(
     console.log(`   - جودة الصورة: ${scanResult.imageQuality.clarity} ${qualityOk ? '✅' : '❌'}`);
 
     // القرار النهائي - المبلغ شرط أساسي
-    if (amountOk && secondaryMatch && confidenceOk && qualityOk) {
+    if (canAutoActivateReceipt({
+      amountMatch: amountOk,
+      extractedDate: scanResult.extractedData.date,
+      confidence: scanResult.confidence,
+      clarity: scanResult.imageQuality.clarity,
+      referenceDate: today,
+    })) {
       scanResult.recommendation = 'تفعيل_تلقائي';
-      console.log(`🎉 [AI Scanner] ✅ تفعيل تلقائي - المبلغ مطابق + شرط ثانوي + جودة عالية`);
-    } else if (amountOk && (secondaryMatch || scanResult.confidence >= 60)) {
+      console.log(`🎉 [AI Scanner] ✅ تفعيل تلقائي - المبلغ مطابق + تاريخ اليوم + جودة عالية`);
+    } else if (amountOk && dateOk && (matchCriteria.beneficiaryMatch || scanResult.confidence >= 60)) {
       scanResult.recommendation = 'مراجعة_يدوية';
-      console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - المبلغ مطابق لكن لم يستوف باقي المعايير`);
+      console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - المبلغ والتاريخ مطابقان لكن لم يستوف باقي المعايير`);
+    } else if (!dateOk) {
+      scanResult.recommendation = 'مراجعة_يدوية';
+      console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - تاريخ الإيصال ليس تاريخ اليوم`);
     } else if (!amountOk) {
       scanResult.recommendation = 'مراجعة_يدوية';
       console.log(`⚠️ [AI Scanner] يحتاج مراجعة يدوية - المبلغ غير مطابق`);
