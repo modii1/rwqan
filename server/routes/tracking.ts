@@ -273,7 +273,9 @@ router.post("/api/requests/smart", async (req, res) => {
     }
 
     const thirtyMinutes = 30 * 60 * 1000;
-    const hasUnlimitedClientContact = actor === "anonymous" && isPremiumProperty;
+    // Contact entitlement belongs to the target property, not to the current
+    // browser, remembered phone, IP address, or authenticated actor.
+    const hasUnlimitedClientContact = isPremiumProperty;
     const cooldownKey = createCooldownKey(contactEventBase!.visitorKey, propertyNumber);
 
     // CRITICAL: استخدام UTC فقط - الواجهة ستتولى التحويل
@@ -339,7 +341,7 @@ router.post("/api/requests/smart", async (req, res) => {
             windowMs: thirtyMinutes,
             maxAcceptedRequests: 10,
           },
-      actor === "anonymous" && !isPremiumProperty
+      !isPremiumProperty
         ? {
             key: createFreePropertyDailyLimitKey(propertyNumber),
             windowStartedAt: riyadhDayStart,

@@ -212,6 +212,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(request.clientPhone, "512345678");
       assert.equal(event.clientPhone, "512345678");
       assert.equal(event.actorType, "owner");
+      assert.equal(
+        acceptedCalls.at(-1)?.[7]?.maxAcceptedRequests,
+        FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+      );
       assert.equal("contactIdentity" in payload, false);
     });
 
@@ -250,6 +254,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       const payload = await response.json() as Record<string, unknown>;
       assert.equal(acceptedCalls.at(-1)?.[3]?.clientPhone, "598765432");
       assert.equal(acceptedCalls.at(-1)?.[5]?.actorType, "admin");
+      assert.equal(
+        acceptedCalls.at(-1)?.[7]?.maxAcceptedRequests,
+        FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+      );
       assert.equal("contactIdentity" in payload, false);
     });
 
