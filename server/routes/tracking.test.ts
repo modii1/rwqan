@@ -30,6 +30,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     issueIdentity: contactIdentityService.issue,
     recordContactEvent: analyticsService.recordContactEvent,
     smartRequest: notificationService.smartRequest,
+    ownerFreeContactLimitReached: notificationService.ownerFreeContactLimitReached,
   };
 
   let identityMode: "none" | "remembered" | "must-not-run" = "none";
@@ -41,10 +42,12 @@ test("smart contact requests resolve remembered and owner phones on the server",
   const attemptLimitCalls: any[][] = [];
   let forceCooldown = false;
   let forceDailyLimit = false;
+  let markDailyLimitReached = false;
   let forceContactWriteFailure = false;
   const premiumPropertyNumbers = new Set<string>();
   const acceptedCalls: any[][] = [];
   const standaloneEvents: any[] = [];
+  const ownerLimitNotifications: any[] = [];
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
     if (propertyNumber === "OWNER-1") {
@@ -99,7 +102,13 @@ test("smart contact requests resolve remembered and owner phones on the server",
       return { accepted: false, remainingMs: 60_000, reason: "daily_property_limit" };
     }
     if (forceCooldown) return { accepted: false, remainingMs: 60_000, reason: "cooldown" };
-    return { accepted: true, remainingMs: 0, request: args[3], event: args[5] };
+    return {
+      accepted: true,
+      remainingMs: 0,
+      request: args[3],
+      event: args[5],
+      dailyPropertyLimitReached: markDailyLimitReached,
+    };
   };
   (firebaseService as any).consumeContactRequestAttemptLimit = async (...args: any[]) => {
     attemptLimitCalls.push(args);
@@ -112,6 +121,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
     return event;
   };
   (notificationService as any).smartRequest = async () => undefined;
+  (notificationService as any).ownerFreeContactLimitReached = async (data: any) => {
+    ownerLimitNotifications.push(data);
+    return { success: true };
+  };
 
   const app = express();
   app.set("trust proxy", 1);
@@ -333,6 +346,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     await t.test("a free property reports its three-contact daily limit", async () => {
       identityMode = "remembered";
       forceDailyLimit = true;
+      const notificationCountBefore = ownerLimitNotifications.length;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
@@ -344,6 +358,24 @@ test("smart contact requests resolve remembered and owner phones on the server",
       const payload = await response.json() as Record<string, unknown>;
       assert.equal(payload.code, "FREE_PROPERTY_DAILY_CONTACT_LIMIT");
       assert.match(String(payload.error), /الثلاث/);
+      assert.equal(ownerLimitNotifications.length, notificationCountBefore);
+    });
+
+    await t.test("the accepted request that reaches three contacts notifies the property owner", async () => {
+      identityMode = "remembered";
+      markDailyLimitReached = true;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-LIMIT-NOTIFY" }),
+      });
+      markDailyLimitReached = false;
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(ownerLimitNotifications.at(-1), {
+        ownerPhone: "0555555555",
+        propertyNumber: "TARGET-LIMIT-NOTIFY",
+      });
     });
 
     await t.test("a premium property has no client contact quota or cooldown", async () => {
@@ -476,6 +508,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
     contactIdentityService.issue = originals.issueIdentity;
     analyticsService.recordContactEvent = originals.recordContactEvent;
     notificationService.smartRequest = originals.smartRequest;
+    notificationService.ownerFreeContactLimitReached =
+      originals.ownerFreeContactLimitReached;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Home, Loader2, Lock, LogIn } from "lucide-react";
 import { cleanPropertyNumber } from "@/lib/validation";
+import { getSafeOwnerLoginDestination } from "@/lib/owner-login-redirect";
 
 export default function OwnerLogin() {
   const router = useRouter();
@@ -63,7 +64,7 @@ export default function OwnerLogin() {
         description: "مرحباً بك في لوحة التحكم",
       });
 
-      window.location.href = "/owner/dashboard";
+      window.location.href = getSafeOwnerLoginDestination(window.location.search);
     } catch (error) {
       console.error("Login error:", error);
       toast({

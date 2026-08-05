@@ -19,6 +19,7 @@ import {
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpiringSoon,
   notifyOwnerSubscriptionExpired,
+  notifyOwnerFreeContactLimitReached,
 } from "../integrations/whatsapp";
 
 export class NotificationService {
@@ -86,6 +87,10 @@ export class NotificationService {
 
   async ownerSubscriptionExpired(data: Parameters<typeof notifyOwnerSubscriptionExpired>[0]) {
     return notifyOwnerSubscriptionExpired(data);
+  }
+
+  async ownerFreeContactLimitReached(data: Parameters<typeof notifyOwnerFreeContactLimitReached>[0]) {
+    return notifyOwnerFreeContactLimitReached(data);
   }
 }
 

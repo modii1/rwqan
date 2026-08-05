@@ -773,6 +773,12 @@ test("free-property daily contact quota accepts only three requests atomically",
   }
 
   assert.deepEqual(outcomes.map((outcome) => outcome.accepted), [true, true, true, false]);
+  assert.deepEqual(
+    outcomes.map((outcome) =>
+      outcome.accepted ? outcome.dailyPropertyLimitReached : undefined
+    ),
+    [false, false, true, undefined],
+  );
   assert.equal(
     outcomes[3].accepted ? undefined : outcomes[3].reason,
     "daily_property_limit",

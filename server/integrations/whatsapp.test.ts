@@ -4,12 +4,24 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { firebaseService } from "../firebaseService";
 import whatsappRouter, {
+  buildOwnerFreeContactLimitReachedMessage,
   buildOwnerSubscriptionActivatedMessage,
   createPropertyOwnerWhatsAppSender,
+  notifyOwnerFreeContactLimitReached,
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
 } from "./whatsapp";
+
+test("free contact-limit message tells the owner to upgrade from the direct page", () => {
+  assert.equal(
+    buildOwnerFreeContactLimitReachedMessage({ propertyNumber: "10001" }),
+    `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (3 من 3).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://rwqan.sa/owner/subscription`,
+  );
+});
 
 test("subscription activation message displays an ISO end date as a Riyadh calendar date", () => {
   const message = buildOwnerSubscriptionActivatedMessage({
@@ -145,9 +157,13 @@ test("every subscription-owner notification wrapper uses the suspension guard", 
         propertyNumber: "10001",
         propertyName: "Test property",
       }),
+      notifyOwnerFreeContactLimitReached({
+        ownerPhone: "0500000000",
+        propertyNumber: "10001",
+      }),
     ]);
 
-    assert.equal(suspensionChecks, 3);
+    assert.equal(suspensionChecks, 4);
     for (const result of results) {
       assert.equal(result.success, false);
       assert.equal(result.suppressed, true);

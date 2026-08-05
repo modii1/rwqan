@@ -3608,7 +3608,13 @@ export class FirebaseService {
             remainingMs: number;
             reason: "cooldown" | "ip_limit" | "daily_property_limit";
         }
-        | { accepted: true; remainingMs: 0; request: Request; event: ContactEvent }
+        | {
+            accepted: true;
+            remainingMs: 0;
+            request: Request;
+            event: ContactEvent;
+            dailyPropertyLimitReached: boolean;
+        }
     > {
         const cooldownRef = this.db.collection("contact_cooldowns").doc(key);
         const now = Date.now();
@@ -3725,6 +3731,10 @@ export class FirebaseService {
                 remainingMs: 0,
                 request: newRequest,
                 event: newEvent,
+                dailyPropertyLimitReached: Boolean(
+                    dailyPropertyLimit &&
+                    dailyAcceptedCount + 1 === dailyPropertyLimit.maxAcceptedRequests
+                ),
             } as const;
         });
     }

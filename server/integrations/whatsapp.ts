@@ -713,6 +713,26 @@ export async function sendPropertyOwnerWhatsApp(options: {
   return sendPropertyOwnerWhatsAppWithDefaults(options);
 }
 
+export function buildOwnerFreeContactLimitReachedMessage(data: {
+  propertyNumber: string;
+}): string {
+  return `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم ${data.propertyNumber} ضمن الباقة المجانية (3 من 3).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://rwqan.sa/owner/subscription`;
+}
+
+export async function notifyOwnerFreeContactLimitReached(data: {
+  ownerPhone: string;
+  propertyNumber: string;
+}): Promise<PropertyOwnerWhatsAppResult> {
+  return sendPropertyOwnerWhatsApp({
+    ownerPhone: data.ownerPhone,
+    propertyNumber: data.propertyNumber,
+    message: buildOwnerFreeContactLimitReachedMessage(data),
+  });
+}
+
 export function buildOwnerSubscriptionActivatedMessage(data: {
   propertyNumber: string;
   propertyName: string;

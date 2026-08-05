@@ -388,6 +388,25 @@ router.post("/api/requests/smart", async (req, res) => {
     propertyMap.set(propertyNumber, newCount);
     acceptedEventRecorded = true;
 
+    if (cooldown.dailyPropertyLimitReached && property.whatsappNumber) {
+      notificationService.ownerFreeContactLimitReached({
+        ownerPhone: property.whatsappNumber,
+        propertyNumber,
+      }).then((result) => {
+        if (!result.success && !result.suppressed) {
+          console.error(
+            `Free-property daily-limit owner notification failed for ${propertyNumber}:`,
+            result.error,
+          );
+        }
+      }).catch((error) => {
+        console.error(
+          `Free-property daily-limit owner notification error for ${propertyNumber}:`,
+          error,
+        );
+      });
+    }
+
     // حدّث المتتبع
     console.log(`✅ Request tracked - IP: ${ipAddress}, Property: ${propertyNumber}, Count: ${newCount}`);
 

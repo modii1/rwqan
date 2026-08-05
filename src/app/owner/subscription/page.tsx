@@ -38,6 +38,7 @@ import {
 } from "@/components/owner/owner-page";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
 import { getOwnerPendingPaymentRefetchInterval } from "@/lib/workflow-query-refresh";
+import { getOwnerLoginUrl } from "@/lib/owner-login-redirect";
 import {
   calculateSubscriptionPrice,
   getIncludedPropertyCount,
@@ -151,9 +152,9 @@ export default function OwnerSubscriptionPage() {
     fetch("/api/owner/session", { credentials: "include" })
       .then((r) => r.json())
       .then((data) => {
-        if (!data.isLoggedIn) router.push("/owner/login");
+        if (!data.isLoggedIn) router.replace(getOwnerLoginUrl("/owner/subscription"));
       })
-      .catch(() => router.push("/owner/login"));
+      .catch(() => router.replace(getOwnerLoginUrl("/owner/subscription")));
   }, [router]);
 
   // Fetch current property
