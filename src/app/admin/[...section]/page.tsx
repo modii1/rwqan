@@ -16,6 +16,7 @@ const validSections: AdminSection[] = [
   "addons",
   "requests",
   "contact-analytics",
+  "booking-commissions",
   "payments",
   "analytics",
   "verification",

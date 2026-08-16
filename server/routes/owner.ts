@@ -3,6 +3,7 @@ import { requireOwner, requireSameOrigin } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import {
   firebaseService,
+  CommissionHoldOwnerChangeError,
   LinkedPropertyMutationError,
   PaymentActionConflictError,
   PaymentActionEligibilityError,
@@ -396,7 +397,23 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       return res.status(400).json({ error: "Property not found in session" });
     }
 
-    const updates = req.body;
+    // Persist only fields exposed by the owner edit form. Compliance,
+    // subscription, verification, identifiers, and dotted Firestore paths are
+    // server-owned and cannot be changed through this endpoint.
+    const rawUpdates = req.body && typeof req.body === "object" ? req.body : {};
+    const ownerEditableFields = new Set([
+      "name",
+      "location",
+      "city",
+      "direction",
+      "type",
+      "whatsappNumber",
+      "prices",
+      "facilities",
+    ]);
+    const updates: Record<string, any> = Object.fromEntries(
+      Object.entries(rawUpdates).filter(([key]) => ownerEditableFields.has(key)),
+    );
 
     // Log property name for debugging
     console.log(`[PROPERTY_UPDATE] Property: ${propertyNumber}, Name: "${updates.name}", Length: ${updates.name?.length || 0}`);
@@ -546,6 +563,9 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     res.json(updated);
   } catch (err: any) {
     console.error("Update property error:", err?.message);
+    if (err instanceof CommissionHoldOwnerChangeError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     res.status(500).json({ error: err?.message || "فشل في تحديث البيانات" });
   }
 });

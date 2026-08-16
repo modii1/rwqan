@@ -123,6 +123,7 @@ test("saving edits on a suspended property never starts automatic verification",
     getCurrentSubscription: subscriptionService.getByProperty,
   };
   let ownerUpdates = 0;
+  let ownerUpdatePayload: Record<string, unknown> | null = null;
   let verificationWork = 0;
 
   (firebaseService as any).getSubscriptionByPropertyNumber = async () => ({
@@ -137,8 +138,12 @@ test("saving edits on a suspended property never starts automatic verification",
     name: "Suspended property",
     verificationStatus: "pending",
   });
-  (propertyService as any).update = async () => {
+  (propertyService as any).update = async (
+    _propertyNumber: string,
+    updates: Record<string, unknown>,
+  ) => {
     ownerUpdates += 1;
+    ownerUpdatePayload = updates;
     return {
       propertyNumber: "PROP-SUSPENDED",
       name: "Suspended property",
@@ -187,12 +192,24 @@ test("saving edits on a suspended property never starts automatic verification",
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({
+          commissionHold: { active: false, obligationIds: [] },
+          "commissionHold.active": false,
+          "commissionHold.obligationIds": [],
+          verificationStatus: "approved",
+          "subscription.status": "active",
+          propertyNumber: "PROP-ATTACKER-CONTROLLED",
+        }),
       },
     );
     assert.equal(response.status, 200);
     assert.equal((await response.json()).propertyNumber, "PROP-SUSPENDED");
     assert.equal(ownerUpdates, 1, "ordinary edits remain available");
+    assert.deepEqual(
+      ownerUpdatePayload,
+      { lastChanges: "تحديث عام" },
+      "server-owned hold, identity, verification, subscription, and dotted fields are ignored",
+    );
     assert.equal(verificationWork, 0, "all verification work must be skipped");
   } finally {
     firebaseService.getSubscriptionByPropertyNumber =

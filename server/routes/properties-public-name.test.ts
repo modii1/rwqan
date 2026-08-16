@@ -40,6 +40,14 @@ test("only active, unexpired premium properties expose or match their name", asy
       verificationStatus: "approved",
       prices: { weekday: "70", weekend: "75" },
     },
+    {
+      propertyNumber: "HELD-1",
+      name: "Held Premium Name",
+      city: "بريدة",
+      verificationStatus: "approved",
+      commissionHold: { active: true, obligationIds: ["BOOK-HELD-1"] },
+      prices: { weekday: "90", weekend: "100" },
+    },
   ];
 
   (propertyService as any).getAll = async () => properties;
@@ -106,6 +114,20 @@ test("only active, unexpired premium properties expose or match their name", asy
         ?.isSubscriptionExpired,
       true,
     );
+    assert.equal(
+      list.some((property: any) => property.propertyNumber === "HELD-1"),
+      false,
+      "a held property must be removed before its private hold marker is stripped",
+    );
+
+    const heldDetailResponse = await fetch(`${baseUrl}/api/properties/HELD-1`);
+    assert.equal(heldDetailResponse.status, 423);
+
+    const heldSearchResponse = await fetch(
+      `${baseUrl}/api/search?search=${encodeURIComponent("Held Premium Name")}`,
+    );
+    assert.equal(heldSearchResponse.status, 200);
+    assert.deepEqual(await heldSearchResponse.json(), []);
 
     const detailResponse = await fetch(
       `${baseUrl}/api/properties/EXPIRED-STATUS`,

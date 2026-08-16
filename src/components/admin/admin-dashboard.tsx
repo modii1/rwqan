@@ -42,6 +42,7 @@ import {
   Link,
   MousePointerClick,
   PauseCircle,
+  ReceiptText,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -68,6 +69,7 @@ import AdminLinkedPropertiesSection from "./sections/linked-properties";
 import AdminOccasionsSection from "./sections/occasions";
 import ContactAnalyticsSection from "./sections/contact-analytics";
 import SuspendedSubscriptionsSection from "./sections/suspended-subscriptions";
+import BookingCommissionsSection from "./sections/booking-commissions";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -82,6 +84,7 @@ export type AdminSection =
   | "addons"
   | "requests"
   | "contact-analytics"
+  | "booking-commissions"
   | "payments"
   | "analytics"
   | "verification"
@@ -264,6 +267,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         />
 
         <SidebarButton
+          icon={<ReceiptText className="w-4 h-4 text-[#8b6b25]" />}
+          label="الحجوزات والعمولات"
+          active={activeSection === "booking-commissions"}
+          onClick={() => setActiveSection("booking-commissions")}
+        />
+
+        <SidebarButton
           icon={<BarChart3 className="w-4 h-4" />}
           label="إحصائيات"
           active={activeSection === "analytics"}
@@ -395,6 +405,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "addons" && <AdminAddonsSection />}
         {activeSection === "requests" && <RequestsSection />}
         {activeSection === "contact-analytics" && <ContactAnalyticsSection />}
+        {activeSection === "booking-commissions" && <BookingCommissionsSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
         {activeSection === "code-backup" && <AdminCodeBackup />}

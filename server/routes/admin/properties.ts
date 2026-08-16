@@ -3,6 +3,7 @@ import { requireAdmin } from "../middleware";
 import { propertyService, analyticsService, subscriptionService, paymentService } from "../../services";
 import {
   firebaseService,
+  CommissionHoldOwnerChangeError,
   LinkedPropertyMutationError,
 } from "../../firebaseService";
 import { googleDriveService } from "../../integrations/googleDrive";
@@ -39,15 +40,28 @@ function isLinkedSubscriptionActive(status?: string | null): boolean {
   return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
 }
 
+function withoutCommissionHoldUpdates(
+  value: unknown,
+): Record<string, any> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) =>
+      key !== "commissionHold" && !key.startsWith("commissionHold.")),
+  );
+}
+
 // 🔧 endpoint مؤقت لتحديث بيانات العقار (للاختبار)
 router.put("/api/admin/property/:propertyNumber", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
-    const updates = req.body;
+    const updates = withoutCommissionHoldUpdates(req.body);
     // skipVerification: admin edits should not push property back to 'pending'
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
     res.json({ success: true, property: updated });
   } catch (err: any) {
+    if (err instanceof CommissionHoldOwnerChangeError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     res.status(500).json({ error: err?.message });
   }
 });
@@ -202,7 +216,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
 router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
   const { propertyNumber } = req.params;
   try {
-    const body = req.body;
+    const body = withoutCommissionHoldUpdates(req.body);
 
     // Log property name for debugging
     console.log(`[ADMIN_PROPERTY_UPDATE] Property: ${propertyNumber}, Name: "${body.name}", Length: ${body.name?.length || 0}`);
@@ -318,6 +332,9 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
     res.json(updated);
   } catch (err: any) {
     console.error(`[ADMIN UPDATE] Error updating property ${propertyNumber}:`, err?.message);
+    if (err instanceof CommissionHoldOwnerChangeError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     res.status(500).json({ error: err?.message || "فشل في التحديث" });
   }
 });

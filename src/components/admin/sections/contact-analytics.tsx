@@ -71,6 +71,8 @@ type ContactAnalyticsData = {
     outcome: ContactOutcome;
     requestCode: string | null;
     actorType: "owner" | "admin" | "anonymous" | "legacy";
+    bookingFollowUpStatus: "scheduled" | "setup_failed" | null;
+    bookingFollowUpFailureCode: "flag_lookup_failed" | "owner_phone_invalid" | "workflow_setup_failed" | null;
   }>;
 };
 
@@ -80,6 +82,12 @@ const outcomeConfig: Record<ContactOutcome, { label: string; className: string; 
   auth_required: { label: "تحتاج دخول", className: "border-slate-200 bg-slate-50 text-slate-700", icon: LockKeyhole },
   error: { label: "فشلت", className: "border-red-200 bg-red-50 text-red-700", icon: AlertTriangle },
 };
+
+const bookingFollowUpFailureLabels = {
+  flag_lookup_failed: "تعذر التحقق من تشغيل المتابعة",
+  owner_phone_invalid: "رقم مالك العقار غير صالح",
+  workflow_setup_failed: "تعذر إنشاء سجل المتابعة",
+} as const;
 
 function formatDateTime(value: string): string {
   const date = new Date(value);
@@ -336,6 +344,25 @@ export default function ContactAnalyticsSection() {
                   <p className="mt-0.5 truncate text-right text-xs font-semibold text-[#5f543f]" dir={event.clientPhone ? "ltr" : "rtl"}>
                     {formatClientPhone(event.clientPhone)}
                   </p>
+                  {event.bookingFollowUpStatus && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={event.bookingFollowUpStatus === "scheduled"
+                          ? "border-blue-200 bg-blue-50 text-blue-700"
+                          : "border-red-200 bg-red-50 text-red-700"}
+                      >
+                        {event.bookingFollowUpStatus === "scheduled"
+                          ? "متابعة الحجز مجدولة"
+                          : "فشل إعداد متابعة الحجز"}
+                      </Badge>
+                      {event.bookingFollowUpFailureCode && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {bookingFollowUpFailureLabels[event.bookingFollowUpFailureCode]}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <Badge variant="outline" className={`flex-shrink-0 gap-1 ${config.className}`}>
                   <OutcomeIcon className="h-3 w-3" />

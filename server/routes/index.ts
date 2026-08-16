@@ -21,6 +21,7 @@ import publicRoutes from "./public";
 import trackingRoutes from "./tracking";
 import contactIdentityRoutes from "./contactIdentity";
 import webhookRoutes from "./webhooks";
+import bookingRoutes from "./bookings";
 import { requireAdmin, requireSameOrigin } from "./middleware";
 
 // Admin route modules
@@ -38,6 +39,7 @@ import adminPackagesRoutes from "./admin/packages";
 import adminTestingRoutes from "./admin/testing";
 import adminLinkedPropertiesRoutes from "./admin/linked-properties";
 import adminOccasionsRoutes from "./admin/occasions";
+import adminBookingsRoutes from "./admin/bookings";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for cookies
@@ -83,6 +85,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Tracking routes (smart requests, pageview)
   app.use(trackingRoutes);
 
+  // Token-scoped customer booking follow-up and commission collection.
+  app.use(bookingRoutes);
+
   // Owner routes (property management, images, payments, subscriptions, addons)
   app.use(ownerRoutes);
 
@@ -111,6 +116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(adminPackagesRoutes);
   app.use(adminTestingRoutes);
   app.use(adminOccasionsRoutes);
+  app.use(adminBookingsRoutes);
 
   return createServer(app);
 }

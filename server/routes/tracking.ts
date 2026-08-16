@@ -4,7 +4,11 @@ import { analyticsService, propertyService, notificationService, subscriptionSer
 import { firebaseService } from "../firebaseService";
 import { detectDeviceType, normalizePhoneNumber } from "../utils/helpers";
 import { calculateRemainingDays, getEndOfDayRiyadh, getStartOfDayRiyadh } from "../utils/dateUtils";
-import type { InsertContactEvent } from "../../shared/schema";
+import type {
+  BookingFollowUpFailureCode,
+  BookingFollowUpStatus,
+  InsertContactEvent,
+} from "../../shared/schema";
 import { isActivePremiumSubscription } from "../../shared/subscriptionType";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
@@ -20,6 +24,8 @@ import {
   getOwnerContactPhone,
 } from "../utils/contactIdentityRequest";
 import { isSameOriginRequest } from "../utils/requestOrigin";
+import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
+import { bookingCommissionService } from "../services/BookingCommissionService";
 
 const router = Router();
 
@@ -148,6 +154,9 @@ router.post("/api/requests/smart", async (req, res) => {
     const property = await propertyService.getByNumber(propertyNumber);
     if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
+    }
+    if (hasActiveCommissionHold(property)) {
+      return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
     }
     if (property.verificationStatus && property.verificationStatus !== "approved") {
       return res.status(403).json({ error: "هذا العقار غير متاح حالياً" });
@@ -304,6 +313,58 @@ router.post("/api/requests/smart", async (req, res) => {
     // أنشئ كود طلب فريد (باستخدام توقيت الرياض للكود)
     const requestCode = `REQ${riyadhDate.getFullYear()}${String(riyadhDate.getMonth() + 1).padStart(2, "0")}${String(riyadhDate.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
+    let bookingWorkflow: ReturnType<typeof bookingCommissionService.buildContactWorkflow> | undefined;
+    let bookingFollowUpStatus: BookingFollowUpStatus | undefined;
+    let bookingFollowUpFailureCode: BookingFollowUpFailureCode | undefined;
+    if (
+      actor === "anonymous" &&
+      contactVisitorId &&
+      resolvedClientPhone &&
+      !isPremiumProperty
+    ) {
+      let followUpEnabled = false;
+      try {
+        followUpEnabled = await bookingCommissionService.isFollowUpEnabled();
+      } catch (bookingSetupError) {
+        bookingFollowUpStatus = "setup_failed";
+        bookingFollowUpFailureCode = "flag_lookup_failed";
+        console.error("Booking follow-up flag lookup failed; contact request will continue:", bookingSetupError);
+      }
+
+      if (followUpEnabled) {
+        let ownerPhone = "";
+        try {
+          ownerPhone = normalizePhoneNumber(property.whatsappNumber);
+          if (!ownerPhone) {
+            throw new Error("Booking follow-up owner phone is missing");
+          }
+        } catch (bookingSetupError) {
+          bookingFollowUpStatus = "setup_failed";
+          bookingFollowUpFailureCode = "owner_phone_invalid";
+          console.error("Booking follow-up owner phone is invalid; contact request will continue:", bookingSetupError);
+        }
+
+        if (!bookingFollowUpFailureCode) {
+          try {
+            bookingWorkflow = bookingCommissionService.buildContactWorkflow({
+              requestCode,
+              propertyNumber,
+              propertyName: property.name || "",
+              ownerPhone,
+              customerPhone: resolvedClientPhone,
+              isFreeProperty: !isPremiumProperty,
+              now: nowDate,
+            });
+            bookingFollowUpStatus = "scheduled";
+          } catch (bookingSetupError) {
+            bookingFollowUpStatus = "setup_failed";
+            bookingFollowUpFailureCode = "workflow_setup_failed";
+            console.error("Booking follow-up setup failed; contact request will continue:", bookingSetupError);
+          }
+        }
+      }
+    }
+
     // احسب عدد الطلبات من هذا IP للعقار هذا
     if (!ipPropertyCounter.has(ipAddress)) {
       ipPropertyCounter.set(ipAddress, new Map());
@@ -333,6 +394,8 @@ router.post("/api/requests/smart", async (req, res) => {
         outcome: "accepted",
         requestCode,
         clientPhone,
+        ...(bookingFollowUpStatus ? { bookingFollowUpStatus } : {}),
+        ...(bookingFollowUpFailureCode ? { bookingFollowUpFailureCode } : {}),
       },
       hasUnlimitedClientContact
         ? undefined
@@ -349,10 +412,14 @@ router.post("/api/requests/smart", async (req, res) => {
             maxAcceptedRequests: FREE_PROPERTY_DAILY_CONTACT_LIMIT,
           }
         : undefined,
+      bookingWorkflow,
     );
 
     // تحقق من التكرار في آخر 30 دقيقة
     if (!cooldown.accepted) {
+      if (cooldown.reason === "property_unavailable") {
+        return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
+      }
       const remainingSeconds = Math.ceil(cooldown.remainingMs / 1000);
       const hours = Math.floor(remainingSeconds / 3600);
       const minutes = Math.floor((remainingSeconds % 3600) / 60);
@@ -387,6 +454,16 @@ router.post("/api/requests/smart", async (req, res) => {
 
     propertyMap.set(propertyNumber, newCount);
     acceptedEventRecorded = true;
+
+    if (
+      bookingFollowUpStatus === "setup_failed" &&
+      bookingFollowUpFailureCode
+    ) {
+      notificationService.sendAdmin(
+        `تعذر إعداد متابعة الحجز للطلب ${requestCode} للعقار ${propertyNumber}. رمز الخطأ: ${bookingFollowUpFailureCode}`,
+      ).catch((error) =>
+        console.error("Booking follow-up setup admin alert failed:", error));
+    }
 
     if (cooldown.dailyPropertyLimitReached && property.whatsappNumber) {
       notificationService.ownerFreeContactLimitReached({

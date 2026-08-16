@@ -110,3 +110,45 @@ test("contact analytics applies the selected date range and never returns visito
   assert.equal(JSON.stringify(result).includes("10.0.0.3"), false);
   assert.equal(result.recentEvents[0].clientPhone, null);
 });
+
+test("contact analytics exposes bounded booking follow-up setup outcomes on recent events", () => {
+  const result = buildContactAnalytics({
+    contactEvents: [
+      {
+        id: "event-scheduled",
+        propertyNumber: "14006",
+        timestamp: "2026-07-10T10:00:00.000Z",
+        visitorKey: "customer-scheduled",
+        actorType: "anonymous",
+        deviceType: "mobile",
+        outcome: "accepted",
+        requestCode: "REQ-SCHEDULED",
+        bookingFollowUpStatus: "scheduled",
+      },
+      {
+        id: "event-setup-failed",
+        propertyNumber: "15000",
+        timestamp: "2026-07-10T11:00:00.000Z",
+        visitorKey: "customer-setup-failed",
+        actorType: "anonymous",
+        deviceType: "desktop",
+        outcome: "accepted",
+        requestCode: "REQ-SETUP-FAILED",
+        bookingFollowUpStatus: "setup_failed",
+        bookingFollowUpFailureCode: "workflow_setup_failed",
+      },
+    ],
+    requests: [],
+    properties: [
+      { propertyNumber: "14006", name: "درة الجوهرة" },
+      { propertyNumber: "15000", name: "منتجع الاختبار" },
+    ],
+    days: 7,
+    now,
+  });
+
+  assert.equal(result.recentEvents[0].bookingFollowUpStatus, "setup_failed");
+  assert.equal(result.recentEvents[0].bookingFollowUpFailureCode, "workflow_setup_failed");
+  assert.equal(result.recentEvents[1].bookingFollowUpStatus, "scheduled");
+  assert.equal(result.recentEvents[1].bookingFollowUpFailureCode, null);
+});

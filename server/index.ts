@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import MemoryStore from "memorystore";
 import { startSmartScheduler } from "./smartScheduler";
 import { startScheduler } from "./scheduler";
+import { startBookingCommissionWorker } from "./services/BookingNotificationWorker";
 import next from "next";
 import cookieParser from "cookie-parser";
 import { randomBytes } from "node:crypto";
@@ -119,6 +120,10 @@ const handle = nextApp.getRequestHandler();
 
       // Daily scheduler (noon: 3/3 cycle notifications, remaining days, payment expiry)
       startScheduler();
+
+      // Booking follow-ups/commission reminders use Firestore leases and can
+      // also be triggered by the authenticated external worker endpoint.
+      startBookingCommissionWorker();
 
       // Smart non-spam scheduler (twice weekly with staggered batches - safety net)
       startSmartScheduler();

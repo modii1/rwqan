@@ -15,6 +15,16 @@ function firstDefined(...values: unknown[]): unknown {
   return values.find((value) => value !== undefined && value !== null);
 }
 
+function firstProviderIdentifier(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+      return String(value);
+    }
+  }
+  return "";
+}
+
 function callbackBooleanValue(value: unknown): boolean {
   return value === true || value === "true";
 }
@@ -107,6 +117,17 @@ interface IntentionResponse {
   id: string;
   [key: string]: any;
 }
+
+export type BookingCommissionIntentionInput = {
+  amountCents: number;
+  bookingId: string;
+  attemptId: string;
+  merchantAttemptKey: string;
+  propertyNumber: string;
+  propertyName: string;
+  ownerPhone: string;
+  paymentMethod: 'cards' | 'applepay';
+};
 
 export type PaymobIntentionSnapshot = {
   intentionId: string;
@@ -265,6 +286,7 @@ export class PaymobService {
           callbackFalseValue(redirectData.error_occured) &&
           callbackFalseValue(redirectData.is_refunded) &&
           callbackFalseValue(redirectData.is_voided) &&
+          callbackFalseValue(redirectData.is_auth) &&
           (
             callbackBooleanValue(redirectData.is_standalone_payment) ||
             callbackBooleanValue(redirectData.is_capture)
@@ -392,6 +414,7 @@ export class PaymobService {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${SECRET_KEY}`,
         },
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify(payload),
       });
     } catch (error) {
@@ -454,6 +477,208 @@ export class PaymobService {
       checkoutUrl,
       ...(paymobOrderId ? { paymobOrderId } : {}),
     };
+  }
+
+  /**
+   * Create a Paymob intention for a booking commission that is already backed
+   * by stable local booking and attempt records. Commission amounts are
+   * accepted in halalas so the provider payload never depends on floating
+   * point currency conversion.
+   */
+  async createBookingCommissionIntention(
+    input: BookingCommissionIntentionInput,
+  ): Promise<{
+    checkoutUrl: string;
+    intentionId: string;
+    orderId: string;
+  }> {
+    const amountCents = input?.amountCents;
+    const bookingId = String(input?.bookingId || "").trim();
+    const attemptId = String(input?.attemptId || "").trim();
+    const merchantAttemptKey = String(
+      input?.merchantAttemptKey || "",
+    ).trim();
+    const propertyNumber = String(input?.propertyNumber || "").trim();
+    const propertyName = String(input?.propertyName || "").trim() || "بدون اسم";
+    const ownerPhone = String(input?.ownerPhone || "").trim();
+    const paymentMethod = input?.paymentMethod;
+
+    if (
+      !Number.isSafeInteger(amountCents) ||
+      amountCents <= 0 ||
+      !bookingId ||
+      !attemptId ||
+      !merchantAttemptKey ||
+      !propertyNumber ||
+      !propertyName ||
+      !ownerPhone ||
+      (paymentMethod !== 'cards' && paymentMethod !== 'applepay')
+    ) {
+      throw new PaymobIntentionError(
+        "Invalid local booking commission payment identity",
+        "rejected",
+      );
+    }
+
+    const integrationId = paymentMethod === 'applepay'
+      ? INTEGRATION_ID_APPLEPAY
+      : INTEGRATION_ID_CARDS;
+    let itemName = `عمولة حجز للعقار ${propertyName}`;
+    if (itemName.length > 50) itemName = itemName.slice(0, 50);
+
+    const payload = {
+      amount: amountCents,
+      currency: 'SAR',
+      notification_url: "https://rwqan.sa/api/paymob/webhook",
+      payment_methods: [integrationId],
+      items: [{
+        name: itemName,
+        amount: amountCents,
+        description: 'عمولة حجز',
+        quantity: 1,
+      }],
+      billing_data: {
+        first_name: propertyName,
+        last_name: 'N/A',
+        email: `${ownerPhone}@example.com`,
+        phone_number: ownerPhone,
+        country: 'KSA',
+        redirect_url: "https://rwqan.sa/api/paymob/webhook",
+      },
+      customer: {
+        first_name: propertyName,
+        last_name: 'N/A',
+        email: `${ownerPhone}@example.com`,
+      },
+      special_reference: merchantAttemptKey,
+      extras: {
+        creation_extras: {
+          type: "booking_commission",
+          bookingId,
+          attemptId,
+          propertyNumber,
+          merchantAttemptKey,
+        },
+      },
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(`${PAYMOB_API_URL}/v1/intention/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SECRET_KEY}`,
+        },
+        signal: AbortSignal.timeout(10_000),
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "Unable to confirm booking commission payment creation with provider",
+        "unknown",
+        { cause: error },
+      );
+    }
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new PaymobIntentionError(
+        message || "Provider rejected booking commission payment creation",
+        new Set([400, 401, 403, 404, 422]).has(response.status)
+          ? "rejected"
+          : "unknown",
+      );
+    }
+
+    let data: IntentionResponse;
+    try {
+      data = await response.json() as IntentionResponse;
+    } catch (error) {
+      throw new PaymobIntentionError(
+        "Provider returned an unverifiable booking commission payment response",
+        "unknown",
+        { cause: error },
+      );
+    }
+
+    const intentionId = firstProviderIdentifier(data?.id);
+    const clientSecret = typeof data?.client_secret === "string"
+      ? data.client_secret.trim()
+      : "";
+    if (!intentionId || !clientSecret) {
+      throw new PaymobIntentionError(
+        "Provider returned an incomplete booking commission payment identity",
+        "unknown",
+      );
+    }
+
+    const checkoutUrl =
+      `${PAYMOB_API_URL}/unifiedcheckout/?publicKey=${PUBLIC_KEY}&clientSecret=${clientSecret}`;
+    const directOrderId = firstProviderIdentifier(
+      data?.order_id,
+      data?.intention_order_id,
+      data?.order?.id,
+      typeof data?.order === "object" ? undefined : data?.order,
+    );
+    const createdIntention = {
+      intentionId,
+      checkoutUrl,
+      ...(directOrderId ? { paymobOrderId: directOrderId } : {}),
+    };
+
+    const responseReferenceValue = data?.special_reference;
+    const hasResponseReference =
+      responseReferenceValue !== undefined && responseReferenceValue !== null;
+    const responseAmountValue =
+      data?.intention_detail?.amount ?? data?.amount;
+    const hasResponseAmount =
+      responseAmountValue !== undefined && responseAmountValue !== null;
+    const responseCurrencyValue =
+      data?.intention_detail?.currency ?? data?.currency;
+    const hasResponseCurrency =
+      responseCurrencyValue !== undefined && responseCurrencyValue !== null;
+    const responseAmount = Number(responseAmountValue);
+
+    if (
+      (hasResponseReference &&
+        String(responseReferenceValue).trim() !== merchantAttemptKey) ||
+      (hasResponseAmount &&
+        (!Number.isSafeInteger(responseAmount) || responseAmount !== amountCents)) ||
+      (hasResponseCurrency &&
+        String(responseCurrencyValue).trim().toUpperCase() !== "SAR")
+    ) {
+      throw new PaymobIntentionError(
+        "Provider returned a conflicting booking commission payment identity",
+        "unknown",
+        { createdIntention },
+      );
+    }
+
+    let orderId = directOrderId;
+    if (!orderId) {
+      const lookup = await this.retrieveIntention(checkoutUrl);
+      if (
+        lookup.ok &&
+        lookup.snapshot.intentionId === intentionId &&
+        lookup.snapshot.specialReference === merchantAttemptKey &&
+        lookup.snapshot.amountCents === amountCents &&
+        lookup.snapshot.currency === "SAR" &&
+        lookup.snapshot.orderId
+      ) {
+        orderId = lookup.snapshot.orderId;
+      }
+    }
+
+    if (!orderId) {
+      throw new PaymobIntentionError(
+        "Unable to bind booking commission payment to its provider order",
+        "unknown",
+        { createdIntention },
+      );
+    }
+
+    return { checkoutUrl, intentionId, orderId };
   }
 
   initiatePayment(

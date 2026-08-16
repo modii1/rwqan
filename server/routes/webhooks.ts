@@ -1,14 +1,33 @@
 import { Router } from "express";
-import { propertyService, paymentService, addOnService } from "../services";
+import { propertyService, paymentService, addOnService, notificationService } from "../services";
 import { firebaseService } from "../firebaseService";
 import { paymobService } from "../integrations/paymob";
 import { sendWhatsAppNotification, notifyNewPayment, notifyOwnerSubscriptionActivated, sendPropertyOwnerWhatsApp } from "../integrations/whatsapp";
 import { getExactPaymobPaymentMethod } from "../utils/paymobPaymentMethod";
+import { bookingCommissionStore } from "../services/BookingCommissionStore";
+import { runBookingCommissionWorker } from "../services/BookingNotificationWorker";
 
 const router = Router();
 
 function callbackBoolean(value: unknown): boolean {
   return value === true || value === "true";
+}
+
+function bookingCommissionReversalReasonLabel(
+  reason: "refunded" | "voided" | "errored" | "authorization_only" | "other_nonpayable",
+): string {
+  switch (reason) {
+    case "refunded":
+      return "استرداد مالي";
+    case "voided":
+      return "إلغاء العملية";
+    case "errored":
+      return "خطأ في العملية";
+    case "authorization_only":
+      return "تفويض دفع فقط دون تحصيل";
+    case "other_nonpayable":
+      return "عملية غير قابلة للتحصيل";
+  }
 }
 
 function callbackMatchesPayment(
@@ -46,9 +65,13 @@ function callbackMatchesPayment(
         normalizedReference.startsWith("PAY-ADDON-") ||
         normalizedReference.startsWith("addon-");
     });
+    const isBookingCommission = callbackReferences.some((reference) =>
+      reference.trim().startsWith("RWQN-BCOM-"));
 
     return res.redirect(
-      isAddon
+      isBookingCommission
+        ? `/booking-commission/result?payment=${success ? "processing" : "failed"}`
+        : isAddon
         ? `/owner/dashboard?addon_payment=${success ? "processing" : "failed"}`
         : `/subscription?payment=${success ? "processing" : "failed"}`,
     );
@@ -90,6 +113,7 @@ function callbackMatchesPayment(
         !callbackBoolean(t.error_occured) &&
         !callbackBoolean(t.is_refunded) &&
         !callbackBoolean(t.is_voided) &&
+        !callbackBoolean(t.is_auth) &&
         (
           callbackBoolean(t.is_standalone_payment) ||
           callbackBoolean(t.is_capture)
@@ -100,6 +124,18 @@ function callbackMatchesPayment(
       );
       const amount = (t.amount_cents || 0) / 100;
       const creationExtras = t.order?.extras?.creation_extras || {};
+      const specialReference = String(
+        t.order?.special_reference || merchantOrderId || "",
+      );
+      const callbackAttemptKey = String(
+        creationExtras?.merchantAttemptKey ||
+        specialReference ||
+        merchantOrderId ||
+        "",
+      );
+      const isBookingCommissionPayment =
+        creationExtras?.type === "booking_commission" ||
+        specialReference.startsWith("RWQN-BCOM-");
 
       if (!transactionId) {
         return res.status(400).json({ ok: false, error: "Missing transaction id" });
@@ -116,6 +152,57 @@ function callbackMatchesPayment(
       // sale nor a declined checkout attempt: acknowledge them without
       // activating anything or changing the intention's failure state.
       if (reportsSuccess && !isSuccess) {
+        if (isBookingCommissionPayment) {
+          const reversalAmountCents = Number(t.amount_cents);
+          const reversalCurrency = String(t.currency || "").trim().toUpperCase();
+          if (
+            !paymobOrderId ||
+            !Number.isSafeInteger(reversalAmountCents) ||
+            reversalAmountCents <= 0 ||
+            reversalCurrency !== "SAR"
+          ) {
+            return res.status(422).json({
+              ok: false,
+              error: "Booking commission reversal amount or currency is invalid",
+            });
+          }
+          const reversalReason = callbackBoolean(t.is_refunded)
+            ? "refunded" as const
+            : callbackBoolean(t.is_voided)
+              ? "voided" as const
+              : callbackBoolean(t.error_occured)
+                ? "errored" as const
+                : callbackBoolean(t.is_auth)
+                  ? "authorization_only" as const
+                  : !callbackBoolean(t.is_standalone_payment) && !callbackBoolean(t.is_capture)
+                    ? "authorization_only" as const
+                    : "other_nonpayable" as const;
+          const reversal = await bookingCommissionStore.recordCommissionReversal({
+            paymobOrderId,
+            transactionId,
+            amountCents: reversalAmountCents,
+            currency: reversalCurrency,
+            reason: reversalReason,
+          });
+          if (reversal.status === "rejected") {
+            return res.status(reversal.reason === "order_not_found" ? 404 : 409).json({
+              ok: false,
+              error: "Booking commission reversal could not be recorded",
+              reason: reversal.reason,
+            });
+          }
+          if (
+            reversal.status === "recorded" &&
+            reversal.reviewRequired &&
+            reversalReason !== "authorization_only"
+          ) {
+            notificationService.sendAdmin(
+              `تم رصد ${bookingCommissionReversalReasonLabel(reversalReason)} لدفعة عمولة الحجز ${reversal.bookingId}. يلزم إجراء مراجعة مالية يدوية.`,
+            ).catch((error) =>
+              console.error("Commission reversal alert failed:", error));
+          }
+          return res.json({ ok: true, status: reversal.status });
+        }
         console.warn("Ignoring non-payable successful Paymob transaction", {
           transactionId,
           errorOccurred: callbackBoolean(t.error_occured),
@@ -134,15 +221,74 @@ function callbackMatchesPayment(
       // معالجة دفعات الإضافات - طريقة موحدة
       // البحث في السجلات المعلقة أو من extras
       // ===============================
-      const specialReference = String(
-        t.order?.special_reference || merchantOrderId || "",
-      );
-      const callbackAttemptKey = String(
-        creationExtras?.merchantAttemptKey ||
-        specialReference ||
-        merchantOrderId ||
-        "",
-      );
+      if (isBookingCommissionPayment) {
+        const amountCents = Number(t.amount_cents);
+        const currency = String(t.currency || "").trim().toUpperCase();
+        if (
+          !paymobOrderId ||
+          !Number.isSafeInteger(amountCents) ||
+          amountCents <= 0 ||
+          currency !== "SAR"
+        ) {
+          return res.status(422).json({
+            error: "Booking commission callback amount or currency is invalid",
+          });
+        }
+
+        const exactPaymentMethod = isSuccess
+          ? getExactPaymobPaymentMethod({
+              cardSubType: t.source_data?.sub_type,
+              paymentMethod: t.source_data?.type,
+            })
+          : undefined;
+        if (isSuccess && !exactPaymentMethod) {
+          return res.status(422).json({
+            error: "Booking commission callback requires an exact payment subtype",
+          });
+        }
+
+        const settlement = await bookingCommissionStore.settleCommissionCallback({
+          paymobOrderId,
+          transactionId,
+          amountCents,
+          currency,
+          success: isSuccess,
+          exactPaymentMethod: exactPaymentMethod || undefined,
+          providerCreatedAt: String(t.created_at || ""),
+          callbackAttemptId: creationExtras?.attemptId
+            ? String(creationExtras.attemptId)
+            : undefined,
+          callbackBookingId: creationExtras?.bookingId
+            ? String(creationExtras.bookingId)
+            : undefined,
+          callbackMerchantAttemptKey: creationExtras?.merchantAttemptKey
+            ? String(creationExtras.merchantAttemptKey)
+            : undefined,
+          callbackSpecialReference: specialReference || undefined,
+        });
+        if (settlement.status === "rejected") {
+          const status = settlement.reason === "order_not_found" ? 404 :
+            settlement.reason === "identity_mismatch" ? 422 : 409;
+          return res.status(status).json({
+            error: "Booking commission callback could not be accepted",
+            reason: settlement.reason,
+          });
+        }
+        if (settlement.status === "paid") {
+          setImmediate(() => {
+            runBookingCommissionWorker().catch((error) =>
+              console.error("Post-commission booking worker failed:", error));
+          });
+        }
+        if (settlement.status === "duplicate_paid") {
+          notificationService.sendAdmin(
+            `تم رصد دفعة عمولة مكررة للحجز ${settlement.bookingId} بالعملية ${transactionId}. يلزم مراجعة الاسترداد يدوياً.`,
+          ).catch((error) =>
+            console.error("Duplicate commission payment alert failed:", error));
+        }
+        return res.json({ ok: true, status: settlement.status });
+      }
+
       const callbackPayments = await paymentService.getAll();
       const signedOrderMatches = paymobOrderId
         ? callbackPayments.filter(

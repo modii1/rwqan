@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronDown, LogIn, LogOut, Pencil, UserRoundCheck } from "lucide-react";
+import { CalendarCheck2, ChevronDown, LogIn, LogOut, Pencil, UserRoundCheck } from "lucide-react";
 import Link from "next/link";
 import type { ContactIdentity } from "@/hooks/use-contact-identity";
 import {
@@ -84,6 +84,14 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {identity.kind === "client" && (
+            <DropdownMenuItem asChild>
+              <Link href="/profile">
+                <CalendarCheck2 className="h-4 w-4" />
+                حجوزاتي
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => setIsChangeDialogOpen(true)}>
             <Pencil className="h-4 w-4" />
             تغيير رقم التواصل

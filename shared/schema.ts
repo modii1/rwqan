@@ -29,6 +29,13 @@ export const propertySchema = z.object({
   pin: z.string().optional(), // رقم سري للدخول (للنظام القديم)
   verificationStatus: z.enum(['pending', 'approved', 'rejected', 'incomplete', 'verified']).optional(),
   muteExpiryNotification: z.boolean().optional(), // إيقاف إشعارات انتهاء الاشتراك
+  commissionHold: z.object({
+    active: z.boolean(),
+    obligationIds: z.array(z.string()).default([]),
+    appliedAt: z.string().optional(),
+    updatedAt: z.string(),
+    releasedAt: z.string().optional(),
+  }).optional(),
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
   lastChanges: z.string().optional(), // آخر التغييرات
@@ -176,6 +183,16 @@ export type Request = z.infer<typeof requestSchema>;
 export const insertRequestSchema = requestSchema.omit({ id: true, createdAt: true });
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
 
+export const bookingFollowUpStatusSchema = z.enum(["scheduled", "setup_failed"]);
+export type BookingFollowUpStatus = z.infer<typeof bookingFollowUpStatusSchema>;
+
+export const bookingFollowUpFailureCodeSchema = z.enum([
+  "flag_lookup_failed",
+  "owner_phone_invalid",
+  "workflow_setup_failed",
+]);
+export type BookingFollowUpFailureCode = z.infer<typeof bookingFollowUpFailureCodeSchema>;
+
 export const contactEventSchema = z.object({
   id: z.string(),
   propertyNumber: z.string(),
@@ -186,6 +203,8 @@ export const contactEventSchema = z.object({
   deviceType: z.enum(["mobile", "desktop", "tablet"]).default("desktop"),
   outcome: z.enum(["accepted", "cooldown", "auth_required", "error"]),
   requestCode: z.string().optional(),
+  bookingFollowUpStatus: bookingFollowUpStatusSchema.optional(),
+  bookingFollowUpFailureCode: bookingFollowUpFailureCodeSchema.optional(),
 });
 
 export type ContactEvent = z.infer<typeof contactEventSchema>;
@@ -737,6 +756,20 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlag[] = [
     key: "FEATURE_TIMEOUTS",
     description: "إلغاء الدفعات المعلقة تلقائياً",
     isEnabled: true,
+  },
+  {
+    id: "flag-booking-followup",
+    name: "متابعة تأكيد الحجوزات",
+    key: "FEATURE_BOOKING_FOLLOWUP",
+    description: "إرسال متابعة للعميل بعد طلب التواصل وتسجيل نتيجة الحجز",
+    isEnabled: false,
+  },
+  {
+    id: "flag-booking-commission-enforcement",
+    name: "تحصيل عمولة الحجوزات",
+    key: "FEATURE_BOOKING_COMMISSION_ENFORCEMENT",
+    description: "تشغيل تذكيرات العمولة وإيقاف العقار عند تجاوز المهلة",
+    isEnabled: false,
   },
 ];
 

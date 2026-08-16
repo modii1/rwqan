@@ -1,4 +1,36 @@
 {
-  "indexes": [],
-  "fieldOverrides": []
+  "indexes": [
+    {
+      "collectionGroup": "booking_notification_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "booking_notification_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "leaseExpiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "booking_followups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "commissionStatus", "order": "ASCENDING" },
+        { "fieldPath": "commissionDueAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "booking_notification_quotas",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    }
+  ]
 }

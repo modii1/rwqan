@@ -18,6 +18,7 @@ import {
 import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
 import { requireAdmin, requireSameOrigin } from "./middleware";
+import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
 
 const router = Router();
 
@@ -25,6 +26,7 @@ function toPublicProperty(property: any) {
   const {
     pin: _pin,
     whatsappNumber: _whatsappNumber,
+    commissionHold: _commissionHold,
     ...publicProperty
   } = property;
   return {
@@ -85,17 +87,21 @@ function toPublicPropertyWithSubscription(property: any, subscription: any) {
 router.get("/api/properties", async (_req, res) => {
   try {
     const items = await propertyService.getAll();
+    const availableItems = items.filter((property) => {
+      if (hasActiveCommissionHold(property)) return false;
+      if (property.verificationStatus) {
+        return property.verificationStatus === "approved";
+      }
+      return true;
+    });
     const withSubscriptionStatus = await Promise.all(
-      items.map(async (p) => {
+      availableItems.map(async (p) => {
         const subscription = await subscriptionService.getByProperty(p.propertyNumber);
         return toPublicPropertyWithSubscription(p, subscription);
       })
     );
 
-    const filtered = withSubscriptionStatus.filter((p) => {
-      if (p.verificationStatus) return p.verificationStatus === "approved";
-      return true;
-    });
+    const filtered = withSubscriptionStatus;
 
     // Sort: premium properties first
     filtered.sort((a, b) => {
@@ -116,6 +122,10 @@ router.get("/api/properties/:id", async (req, res) => {
   try {
     const p = await propertyService.getByNumber(req.params.id);
     if (!p) return res.status(404).json({ error: "العقار غير موجود" });
+
+    if (hasActiveCommissionHold(p)) {
+      return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
+    }
 
     if (p.verificationStatus && p.verificationStatus !== "approved") {
       return res.status(403).json({ error: "هذا العقار غير متاح حالياً", status: p.verificationStatus });
@@ -262,6 +272,7 @@ router.get("/api/search", async (req, res) => {
     const { search, city, direction, type, facilities, maxPrice } = req.query;
     let items = await propertyService.getAll();
     items = items.filter((p) => {
+      if (hasActiveCommissionHold(p)) return false;
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });
@@ -363,6 +374,7 @@ router.get("/api/cities", async (_req, res) => {
 
     // Only approved properties
     const approved = items.filter((p) => {
+      if (hasActiveCommissionHold(p)) return false;
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });

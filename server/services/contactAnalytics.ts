@@ -17,6 +17,8 @@ type NormalizedContactEvent = {
   deviceType: ContactEvent["deviceType"];
   outcome: ContactEvent["outcome"];
   requestCode?: string;
+  bookingFollowUpStatus?: ContactEvent["bookingFollowUpStatus"];
+  bookingFollowUpFailureCode?: ContactEvent["bookingFollowUpFailureCode"];
 };
 
 function parseTimestamp(value?: string | null): number {
@@ -173,6 +175,8 @@ export function buildContactAnalytics({
       outcome: event.outcome,
       requestCode: event.requestCode || null,
       actorType: event.actorType,
+      bookingFollowUpStatus: event.bookingFollowUpStatus || null,
+      bookingFollowUpFailureCode: event.bookingFollowUpFailureCode || null,
     };
   });
 

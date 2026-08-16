@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CommissionHoldOwnerChangeError,
   FirebaseService,
   LinkedPropertyMutationError,
   SuspendedSubscriptionWriteError,
@@ -127,6 +128,10 @@ class FakeDocumentReference {
     readonly collectionName: string,
     readonly id: string,
   ) {}
+
+  async get(): Promise<FakeSnapshot> {
+    return new FakeSnapshot(this.database, this);
+  }
 }
 
 class FakeSnapshot {
@@ -171,6 +176,13 @@ class FakeTransaction {
     options?: { merge?: boolean },
   ): void {
     this.database.set(ref.collectionName, ref.id, data, options?.merge === true);
+  }
+
+  create(ref: FakeDocumentReference, data: FakeData): void {
+    if (this.database.get(ref.collectionName, ref.id) !== undefined) {
+      throw new Error(`Fake document already exists ${ref.collectionName}/${ref.id}`);
+    }
+    this.database.set(ref.collectionName, ref.id, data);
   }
 
   delete(ref: FakeDocumentReference): void {
@@ -733,6 +745,7 @@ test("unconditional unlink works from legacy membership without a main subscript
 
 test("free-property daily contact quota accepts only three requests atomically", async () => {
   const database = new FakeFirestore();
+  seedProperty(database, "PROP-FREE");
   const service = createService(database);
   const now = Date.now();
   const dailyLimit = {
@@ -788,6 +801,183 @@ test("free-property daily contact quota accepts only three requests atomically",
     database.get("contact_property_daily_limits", "PROP-FREE-DAY")?.acceptedCount,
     3,
   );
+});
+
+test("contact acceptance writes booking follow-up only when the transactional subscription is free", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-FREE-FOLLOWUP");
+  seedProperty(database, "PROP-PREMIUM-FOLLOWUP");
+  database.set(
+    "subscriptions",
+    "SUB-PROP-PREMIUM-FOLLOWUP",
+    activeSubscription("PROP-PREMIUM-FOLLOWUP"),
+  );
+  database.set("subscriptions", "SUB-HISTORICAL-PROP-PREMIUM-FOLLOWUP", {
+    ...activeSubscription("PROP-PREMIUM-FOLLOWUP"),
+    id: "SUB-HISTORICAL-PROP-PREMIUM-FOLLOWUP",
+    status: "expired",
+    endDate: pastDate(),
+    updatedAt: futureDate(30),
+  });
+  const service = createService(database);
+
+  const acceptContact = (propertyNumber: string, bookingId: string) =>
+    service.createContactRequestWithCooldown(
+      `VISITOR-${propertyNumber}`,
+      propertyNumber,
+      0,
+      {
+        propertyNumber,
+        requestCode: `REQ-${propertyNumber}`,
+        timestamp: String(Date.now()),
+        clientPhone: "512345678",
+        ipAddress: "192.0.2.20",
+        dayOfWeek: "الجمعة",
+        hourOfDay: 12,
+        deviceType: "mobile",
+      },
+      1,
+      {
+        propertyNumber,
+        visitorKey: `VISITOR-${propertyNumber}`,
+        actorType: "anonymous",
+        deviceType: "mobile",
+        outcome: "accepted",
+        requestCode: `REQ-${propertyNumber}`,
+        bookingFollowUpStatus: "scheduled",
+      },
+      undefined,
+      undefined,
+      {
+        followUp: {
+          id: bookingId,
+          propertyNumber,
+          isFreeProperty: true,
+        },
+        customerNotification: {
+          id: `${bookingId}--customer_followup`,
+          bookingId,
+        },
+      },
+    );
+
+  const freeOutcome = await acceptContact(
+    "PROP-FREE-FOLLOWUP",
+    "BOOK-FREE-FOLLOWUP",
+  );
+  const premiumOutcome = await acceptContact(
+    "PROP-PREMIUM-FOLLOWUP",
+    "BOOK-PREMIUM-FOLLOWUP",
+  );
+
+  assert.equal(freeOutcome.accepted, true);
+  assert.equal(premiumOutcome.accepted, true);
+  assert.ok(database.get("booking_followups", "BOOK-FREE-FOLLOWUP"));
+  assert.ok(
+    database.get(
+      "booking_notification_outbox",
+      "BOOK-FREE-FOLLOWUP--customer_followup",
+    ),
+  );
+  assert.equal(database.get("booking_followups", "BOOK-PREMIUM-FOLLOWUP"), undefined);
+  assert.equal(
+    database.get(
+      "booking_notification_outbox",
+      "BOOK-PREMIUM-FOLLOWUP--customer_followup",
+    ),
+    undefined,
+  );
+  assert.equal(
+    database.query("requests", "propertyNumber", "PROP-PREMIUM-FOLLOWUP").length,
+    1,
+  );
+  assert.equal(
+    database.query("contact_events", "propertyNumber", "PROP-PREMIUM-FOLLOWUP").length,
+    1,
+  );
+  assert.equal(
+    database.query("contact_events", "propertyNumber", "PROP-PREMIUM-FOLLOWUP")[0]
+      ?.data()?.bookingFollowUpStatus,
+    undefined,
+  );
+});
+
+test("contact acceptance atomically rejects a property with a commission hold", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-HELD");
+  database.update("properties", "PROP-HELD", {
+    commissionHold: { active: true, obligationIds: ["BOOK-1"] },
+  });
+  const service = createService(database);
+
+  const outcome = await service.createContactRequestWithCooldown(
+    "VISITOR-HELD",
+    "PROP-HELD",
+    0,
+    {
+      propertyNumber: "PROP-HELD",
+      requestCode: "REQ-HELD",
+      timestamp: String(Date.now()),
+      clientPhone: "512345678",
+      ipAddress: "192.0.2.10",
+      dayOfWeek: "الجمعة",
+      hourOfDay: 12,
+      deviceType: "mobile",
+    },
+    1,
+    {
+      propertyNumber: "PROP-HELD",
+      visitorKey: "VISITOR-HELD",
+      actorType: "anonymous",
+      deviceType: "mobile",
+      outcome: "accepted",
+      requestCode: "REQ-HELD",
+    },
+  );
+
+  assert.deepEqual(outcome, {
+    accepted: false,
+    remainingMs: 0,
+    reason: "property_unavailable",
+  });
+  assert.equal(database.query("requests", "propertyNumber", "PROP-HELD").length, 0);
+});
+
+test("property phone transfer is atomically blocked by a commission hold but canonical formatting is allowed", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-HELD-PHONE");
+  database.update("properties", "PROP-HELD-PHONE", {
+    whatsappNumber: "0501234567",
+    commissionHold: { active: true, obligationIds: ["BOOK-1"] },
+  });
+  const service = createService(database);
+
+  const sameOwner = await service.updateProperty("PROP-HELD-PHONE", {
+    whatsappNumber: "+966 50 123 4567",
+  });
+  assert.equal(sameOwner.whatsappNumber, "+966 50 123 4567");
+
+  await assert.rejects(
+    () => service.updateProperty("PROP-HELD-PHONE", {
+      whatsappNumber: "0501234599",
+    }),
+    (error: unknown) =>
+      error instanceof CommissionHoldOwnerChangeError &&
+      error.status === 423 &&
+      error.code === "COMMISSION_HOLD_ACTIVE",
+  );
+  assert.equal(
+    database.get("properties", "PROP-HELD-PHONE")?.whatsappNumber,
+    "+966 50 123 4567",
+  );
+
+  database.update("properties", "PROP-HELD-PHONE", {
+    commissionHold: { active: false, obligationIds: [] },
+  });
+  const transferred = await service.updateProperty("PROP-HELD-PHONE", {
+    whatsappNumber: "0501234599",
+  });
+  assert.equal(transferred.whatsappNumber, "0501234599");
 });
 
 test("unlink clears stale parent history without cancelling a newer standalone entitlement", async () => {

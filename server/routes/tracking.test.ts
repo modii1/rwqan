@@ -16,6 +16,7 @@ import {
   contactIdentityService,
   maskContactPhone,
 } from "../services/ContactIdentityService";
+import { bookingCommissionService } from "../services/BookingCommissionService";
 
 const TEST_CONTACT_TOKEN = "t".repeat(43);
 
@@ -30,7 +31,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
     issueIdentity: contactIdentityService.issue,
     recordContactEvent: analyticsService.recordContactEvent,
     smartRequest: notificationService.smartRequest,
+    sendAdmin: notificationService.sendAdmin,
     ownerFreeContactLimitReached: notificationService.ownerFreeContactLimitReached,
+    isFollowUpEnabled: bookingCommissionService.isFollowUpEnabled,
+    buildContactWorkflow: bookingCommissionService.buildContactWorkflow,
   };
 
   let identityMode: "none" | "remembered" | "must-not-run" = "none";
@@ -42,12 +46,17 @@ test("smart contact requests resolve remembered and owner phones on the server",
   const attemptLimitCalls: any[][] = [];
   let forceCooldown = false;
   let forceDailyLimit = false;
+  let forcePropertyUnavailable = false;
   let markDailyLimitReached = false;
   let forceContactWriteFailure = false;
   const premiumPropertyNumbers = new Set<string>();
   const acceptedCalls: any[][] = [];
   const standaloneEvents: any[] = [];
   const ownerLimitNotifications: any[] = [];
+  const smartRequestNotifications: any[] = [];
+  const adminNotifications: string[] = [];
+  const workflowBuildOptions: any[] = [];
+  let followUpMode: "off" | "scheduled" | "flag_failure" | "workflow_failure" = "off";
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
     if (propertyNumber === "OWNER-1") {
@@ -101,6 +110,9 @@ test("smart contact requests resolve remembered and owner phones on the server",
     if (forceDailyLimit) {
       return { accepted: false, remainingMs: 60_000, reason: "daily_property_limit" };
     }
+    if (forcePropertyUnavailable) {
+      return { accepted: false, remainingMs: 0, reason: "property_unavailable" };
+    }
     if (forceCooldown) return { accepted: false, remainingMs: 60_000, reason: "cooldown" };
     return {
       accepted: true,
@@ -120,10 +132,31 @@ test("smart contact requests resolve remembered and owner phones on the server",
     standaloneEvents.push(event);
     return event;
   };
-  (notificationService as any).smartRequest = async () => undefined;
+  (notificationService as any).smartRequest = async (data: any) => {
+    smartRequestNotifications.push(data);
+  };
+  (notificationService as any).sendAdmin = async (message: string) => {
+    adminNotifications.push(message);
+  };
   (notificationService as any).ownerFreeContactLimitReached = async (data: any) => {
     ownerLimitNotifications.push(data);
     return { success: true };
+  };
+  (bookingCommissionService as any).isFollowUpEnabled = async () => {
+    if (followUpMode === "flag_failure") {
+      throw new Error("sensitive feature flag lookup details");
+    }
+    return followUpMode !== "off";
+  };
+  (bookingCommissionService as any).buildContactWorkflow = (options: any) => {
+    workflowBuildOptions.push(options);
+    if (followUpMode === "workflow_failure") {
+      throw new Error("sensitive workflow setup details");
+    }
+    return {
+      followUp: { id: `BOOK-${options.requestCode}` },
+      customerNotification: { id: `BOOK-${options.requestCode}--customer_followup` },
+    };
   };
 
   const app = express();
@@ -184,6 +217,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(firstEvent.visitorKey, secondEvent.visitorKey);
       assert.notEqual(firstEvent.visitorKey, "v".repeat(43));
       assert.equal(firstEvent.actorType, "anonymous");
+      assert.equal("bookingFollowUpStatus" in firstEvent, false);
+      assert.equal("bookingFollowUpFailureCode" in firstEvent, false);
       assert.equal(acceptedCalls.at(-1)?.[6]?.windowMs, 30 * 60 * 1000);
       assert.equal(acceptedCalls.at(-1)?.[6]?.maxAcceptedRequests, 10);
       assert.match(acceptedCalls.at(-1)?.[6]?.key || "", /^[a-f0-9]{64}$/);
@@ -201,6 +236,65 @@ test("smart contact requests resolve remembered and owner phones on the server",
         maskedPhone: maskContactPhone("598765432"),
       });
       assert.deepEqual(secondPayload.contactIdentity, firstPayload.contactIdentity);
+    });
+
+    await t.test("an enabled follow-up is marked scheduled on the atomically accepted contact event", async () => {
+      identityMode = "remembered";
+      followUpMode = "scheduled";
+      const alertCountBefore = adminNotifications.length;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FOLLOWUP-SCHEDULED" }),
+      });
+      followUpMode = "off";
+
+      assert.equal(response.status, 200);
+      const acceptedEvent = acceptedCalls.at(-1)?.[5];
+      assert.equal(acceptedEvent.bookingFollowUpStatus, "scheduled");
+      assert.equal("bookingFollowUpFailureCode" in acceptedEvent, false);
+      assert.equal(acceptedCalls.at(-1)?.[8]?.followUp?.id, `BOOK-${acceptedEvent.requestCode}`);
+      assert.equal(adminNotifications.length, alertCountBefore);
+    });
+
+    await t.test("a setup failure is persisted as a non-sensitive code and alerts admin only after acceptance", async () => {
+      identityMode = "remembered";
+      followUpMode = "workflow_failure";
+      const alertCountBefore = adminNotifications.length;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FOLLOWUP-FAILED" }),
+      });
+      followUpMode = "off";
+
+      assert.equal(response.status, 200);
+      const acceptedEvent = acceptedCalls.at(-1)?.[5];
+      assert.equal(acceptedEvent.bookingFollowUpStatus, "setup_failed");
+      assert.equal(acceptedEvent.bookingFollowUpFailureCode, "workflow_setup_failed");
+      assert.equal(acceptedCalls.at(-1)?.[8], undefined);
+      assert.equal(adminNotifications.length, alertCountBefore + 1);
+      assert.match(adminNotifications.at(-1) || "", /TARGET-FOLLOWUP-FAILED/);
+      assert.match(adminNotifications.at(-1) || "", /workflow_setup_failed/);
+      assert.equal((adminNotifications.at(-1) || "").includes("sensitive workflow"), false);
+    });
+
+    await t.test("a rejected contact never sends the follow-up setup failure alert", async () => {
+      identityMode = "remembered";
+      followUpMode = "flag_failure";
+      forceCooldown = true;
+      const alertCountBefore = adminNotifications.length;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-FOLLOWUP-REJECTED" }),
+      });
+      forceCooldown = false;
+      followUpMode = "off";
+
+      assert.equal(response.status, 429);
+      assert.equal(acceptedCalls.at(-1)?.[5]?.bookingFollowUpFailureCode, "flag_lookup_failed");
+      assert.equal(adminNotifications.length, alertCountBefore);
     });
 
     await t.test("an owner always uses the live phone of their own property", async () => {
@@ -343,6 +437,22 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(standaloneEvents.length, eventCountBefore);
     });
 
+    await t.test("a property paused during contact setup is rejected before notification", async () => {
+      identityMode = "remembered";
+      forcePropertyUnavailable = true;
+      const notificationCountBefore = smartRequestNotifications.length;
+      const response = await fetch(`${baseUrl}/api/requests/smart`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: baseUrl },
+        body: JSON.stringify({ propertyNumber: "TARGET-PAUSED-RACE" }),
+      });
+      forcePropertyUnavailable = false;
+
+      assert.equal(response.status, 423);
+      assert.deepEqual(await response.json(), { error: "هذا العقار غير متاح حالياً" });
+      assert.equal(smartRequestNotifications.length, notificationCountBefore);
+    });
+
     await t.test("a free property reports its three-contact daily limit", async () => {
       identityMode = "remembered";
       forceDailyLimit = true;
@@ -378,8 +488,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       });
     });
 
-    await t.test("a premium property has no client contact quota or cooldown", async () => {
+    await t.test("a premium property has no client contact quota, cooldown, or booking follow-up", async () => {
       identityMode = "remembered";
+      followUpMode = "scheduled";
+      const workflowBuildCountBefore = workflowBuildOptions.length;
       premiumPropertyNumbers.add("TARGET-PREMIUM");
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
@@ -387,11 +499,16 @@ test("smart contact requests resolve remembered and owner phones on the server",
         body: JSON.stringify({ propertyNumber: "TARGET-PREMIUM" }),
       });
       premiumPropertyNumbers.delete("TARGET-PREMIUM");
+      followUpMode = "off";
 
       assert.equal(response.status, 200);
       assert.equal(acceptedCalls.at(-1)?.[2], 0);
       assert.equal(acceptedCalls.at(-1)?.[6], undefined);
       assert.equal(acceptedCalls.at(-1)?.[7], undefined);
+      assert.equal(acceptedCalls.at(-1)?.[8], undefined);
+      assert.equal(workflowBuildOptions.length, workflowBuildCountBefore);
+      assert.equal("bookingFollowUpStatus" in acceptedCalls.at(-1)?.[5], false);
+      assert.equal("bookingFollowUpFailureCode" in acceptedCalls.at(-1)?.[5], false);
     });
 
     await t.test("a first phone remains authenticated when the contact hits cooldown", async () => {
@@ -508,8 +625,11 @@ test("smart contact requests resolve remembered and owner phones on the server",
     contactIdentityService.issue = originals.issueIdentity;
     analyticsService.recordContactEvent = originals.recordContactEvent;
     notificationService.smartRequest = originals.smartRequest;
+    notificationService.sendAdmin = originals.sendAdmin;
     notificationService.ownerFreeContactLimitReached =
       originals.ownerFreeContactLimitReached;
+    bookingCommissionService.isFollowUpEnabled = originals.isFollowUpEnabled;
+    bookingCommissionService.buildContactWorkflow = originals.buildContactWorkflow;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

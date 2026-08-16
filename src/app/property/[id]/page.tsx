@@ -10,15 +10,20 @@ interface PageProps {
     }>;
 }
 
-async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
+type PropertyApiLookup = {
+    property: PropertyDetails | null;
+    status: number | null;
+};
+
+async function getPropertyApiLookup(id: string): Promise<PropertyApiLookup> {
     try {
         const res = await fetch(buildServerUrl(`/api/properties/${id}`), {
-            next: { revalidate: 300 },
+            cache: "no-store",
         });
-        if (!res.ok) return null;
+        if (!res.ok) return { property: null, status: res.status };
         const data = await res.json();
-        if (!data || data.error) return null;
-        return {
+        if (!data || data.error) return { property: null, status: res.status };
+        return { property: {
             propertyNumber: data.propertyNumber || id,
             name: data.name || "",
             city: data.city || "",
@@ -36,10 +41,14 @@ async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
             subscriptionEndDate: data.subscriptionEndDate,
             isSubscriptionExpired: data.isSubscriptionExpired,
             imageCount: 0,
-        } as PropertyDetails;
+        } as PropertyDetails, status: res.status };
     } catch {
-        return null;
+        return { property: null, status: null };
     }
+}
+
+async function getPropertyFromApi(id: string): Promise<PropertyDetails | null> {
+    return (await getPropertyApiLookup(id)).property;
 }
 
 async function getPropertyFromScript(id: string): Promise<PropertyDetails | null> {
@@ -108,7 +117,7 @@ async function getPropertyFromScript(id: string): Promise<PropertyDetails | null
 async function getPropertyImages(id: string): Promise<string[]> {
     try {
         const res = await fetch(buildServerUrl(`/api/public/property-images/${id}`), {
-            next: { revalidate: 300 },
+            cache: "no-store",
         });
         if (!res.ok) return [];
         const data = await res.json();
@@ -120,11 +129,15 @@ async function getPropertyImages(id: string): Promise<string[]> {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { id } = await params;
-    const [apiProperty, images] = await Promise.all([
-        getPropertyFromApi(id),
+    const [apiLookup, images] = await Promise.all([
+        getPropertyApiLookup(id),
         getPropertyImages(id),
     ]);
-    const property = apiProperty ?? await getPropertyFromScript(id);
+    const property = apiLookup.property ?? (
+        apiLookup.status === 403 || apiLookup.status === 423
+            ? null
+            : await getPropertyFromScript(id)
+    );
 
     if (!property) {
         return {

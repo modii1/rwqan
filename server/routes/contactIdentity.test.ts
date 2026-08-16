@@ -10,6 +10,7 @@ import {
   ContactIdentityRateLimitError,
   contactIdentityService,
 } from "../services/ContactIdentityService";
+import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
 
 const EXISTING_TOKEN = "x".repeat(43);
 const NEW_TOKEN = "y".repeat(43);
@@ -107,11 +108,12 @@ test("contact identity API returns only masked state and manages its own protect
       assert.match(setCookie, /HttpOnly/i);
       assert.match(setCookie, /SameSite=Lax/i);
       assert.match(setCookie, /Max-Age=7776000/i);
+      assert.match(setCookie, new RegExp(`${BOOKING_CUSTOMER_SESSION_COOKIE}=;`));
       assert.equal(JSON.stringify(payload).includes(NEW_TOKEN), false);
       assert.match(String(issueLimitKeys.at(-1) || ""), /^[a-f0-9]{64}$/);
     });
 
-    await t.test("forgetting the number revokes only the contact cookie", async () => {
+    await t.test("forgetting the number revokes customer identity cookies but preserves app login", async () => {
       const response = await fetch(`${baseUrl}/api/contact-identity`, {
         method: "DELETE",
         headers: {
@@ -124,6 +126,7 @@ test("contact identity API returns only masked state and manages its own protect
       assert.equal(response.status, 200);
       assert.deepEqual(revoked, [EXISTING_TOKEN]);
       assert.match(setCookie, new RegExp(`${CONTACT_IDENTITY_COOKIE_NAME}=;`));
+      assert.match(setCookie, new RegExp(`${BOOKING_CUSTOMER_SESSION_COOKIE}=;`));
       assert.equal(setCookie.includes("connect.sid"), false);
     });
 

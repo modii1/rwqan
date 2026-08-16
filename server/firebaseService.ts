@@ -1,4 +1,5 @@
 import { db } from "./config/firebase";
+import { DEFAULT_FEATURE_FLAGS } from "../shared/schema";
 import type {
     Property,
     InsertProperty,
@@ -63,6 +64,11 @@ import {
     normalizeSubscriptionPackageDuration,
 } from "../shared/subscriptionPackagePolicy";
 import { getExactPaymobPaymentMethod } from "./utils/paymobPaymentMethod";
+import { hasActiveCommissionHold } from "../shared/propertyAvailability";
+import {
+    normalizePhoneDigits,
+    normalizeSaudiMobilePhone,
+} from "../shared/phone";
 
 type PaymentFulfillmentClaimResult =
     | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
@@ -146,6 +152,18 @@ export class SuspendedSubscriptionWriteError extends Error {
             `اشتراك العقار ${propertyNumber} موقوف مؤقتاً من الإدارة. يجب استئنافه قبل أي تفعيل أو مزامنة.`,
         );
         this.name = "SuspendedSubscriptionWriteError";
+    }
+}
+
+export class CommissionHoldOwnerChangeError extends Error {
+    readonly status = 423;
+    readonly code = "COMMISSION_HOLD_ACTIVE";
+
+    constructor() {
+        super(
+            "لا يمكن تغيير رقم واتساب بينما العقار موقوف بسبب عمولة حجز. يجب حل العمولة وإلغاء الإيقاف أولاً.",
+        );
+        this.name = "CommissionHoldOwnerChangeError";
     }
 }
 
@@ -499,21 +517,44 @@ export class FirebaseService {
             updates.verificationStatus === "pending" ||
             updates.verificationStatus === "approved" ||
             updates.verificationStatus === "verified";
+        const guardedOwnerPhoneWrite = Object.prototype.hasOwnProperty.call(
+            updates,
+            "whatsappNumber",
+        );
 
-        if (guardedVerificationWrite) {
+        if (guardedVerificationWrite || guardedOwnerPhoneWrite) {
             await this.db.runTransaction(async (transaction) => {
-                const subscriptionSnapshot = await transaction.get(
-                    this.db
-                        .collection("subscriptions")
-                        .where("propertyNumber", "==", propertyNumber),
-                );
+                const subscriptionSnapshot = guardedVerificationWrite
+                    ? await transaction.get(
+                        this.db
+                            .collection("subscriptions")
+                            .where("propertyNumber", "==", propertyNumber),
+                    )
+                    : null;
                 const propertySnapshot = await transaction.get(ref);
-                this.assertCurrentSubscriptionNotSuspended(
-                    subscriptionSnapshot.docs,
-                    propertyNumber,
-                );
+                if (subscriptionSnapshot) {
+                    this.assertCurrentSubscriptionNotSuspended(
+                        subscriptionSnapshot.docs,
+                        propertyNumber,
+                    );
+                }
                 if (!propertySnapshot.exists) {
                     throw new Error(`Property not found: ${propertyNumber}`);
+                }
+                if (guardedOwnerPhoneWrite) {
+                    const property = propertySnapshot.data() as Property;
+                    const currentPhone = normalizeSaudiMobilePhone(
+                        property.whatsappNumber,
+                    ) || normalizePhoneDigits(property.whatsappNumber);
+                    const requestedPhone = normalizeSaudiMobilePhone(
+                        updates.whatsappNumber,
+                    ) || normalizePhoneDigits(updates.whatsappNumber);
+                    if (
+                        currentPhone !== requestedPhone &&
+                        hasActiveCommissionHold(property)
+                    ) {
+                        throw new CommissionHoldOwnerChangeError();
+                    }
                 }
                 transaction.update(ref, updatedData);
             });
@@ -3602,11 +3643,15 @@ export class FirebaseService {
             windowEndsAt: number;
             maxAcceptedRequests: number;
         },
+        bookingWorkflow?: {
+            followUp: Record<string, unknown> & { id: string };
+            customerNotification: Record<string, unknown> & { id: string };
+        },
     ): Promise<
         | {
             accepted: false;
             remainingMs: number;
-            reason: "cooldown" | "ip_limit" | "daily_property_limit";
+            reason: "cooldown" | "ip_limit" | "daily_property_limit" | "property_unavailable";
         }
         | {
             accepted: true;
@@ -3617,6 +3662,7 @@ export class FirebaseService {
         }
     > {
         const cooldownRef = this.db.collection("contact_cooldowns").doc(key);
+        const propertyRef = this.db.collection("properties").doc(propertyNumber);
         const now = Date.now();
         const timestamp = new Date(now).toISOString();
         const requestId = `REQ-${now}-${Math.random().toString(36).slice(2, 8)}`;
@@ -3629,9 +3675,39 @@ export class FirebaseService {
         const dailyPropertyLimitRef = dailyPropertyLimit
             ? this.db.collection("contact_property_daily_limits").doc(dailyPropertyLimit.key)
             : null;
+        const bookingFollowUpRef = bookingWorkflow
+            ? this.db.collection("booking_followups").doc(bookingWorkflow.followUp.id)
+            : null;
+        const bookingNotificationRef = bookingWorkflow
+            ? this.db.collection("booking_notification_outbox").doc(bookingWorkflow.customerNotification.id)
+            : null;
+        const subscriptionQuery = bookingWorkflow
+            ? this.db.collection("subscriptions").where("propertyNumber", "==", propertyNumber)
+            : null;
 
         return this.db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(cooldownRef);
+            const [doc, propertySnapshot, subscriptionSnapshot] = await Promise.all([
+                transaction.get(cooldownRef),
+                transaction.get(propertyRef),
+                subscriptionQuery
+                    ? transaction.get(subscriptionQuery)
+                    : Promise.resolve(null),
+            ]);
+            const currentProperty = propertySnapshot.data();
+            if (
+                !propertySnapshot.exists ||
+                hasActiveCommissionHold(currentProperty) ||
+                (
+                    currentProperty?.verificationStatus &&
+                    currentProperty.verificationStatus !== "approved"
+                )
+            ) {
+                return {
+                    accepted: false,
+                    remainingMs: 0,
+                    reason: "property_unavailable",
+                } as const;
+            }
             const lastAcceptedAt = doc.exists
                 ? this.getDateMillis(doc.data()?.lastAcceptedAt)
                 : 0;
@@ -3692,9 +3768,35 @@ export class FirebaseService {
                 requestCountFromIP,
                 timestamp,
             } as Request;
+            const currentSubscriptionDocument = subscriptionSnapshot
+                ? this.getCurrentSubscriptionDocument(
+                    subscriptionSnapshot.docs,
+                    propertyNumber,
+                )
+                : undefined;
+            const currentSubscription = currentSubscriptionDocument?.data();
+            const hasActivePremiumSubscription = Boolean(
+                currentSubscription &&
+                isActivePremiumSubscription({
+                    subscriptionType: currentSubscription.subscriptionType,
+                    packageType: currentSubscription.packageType,
+                    status: currentSubscription.status,
+                    isExpired: calculateRemainingDays(currentSubscription.endDate) < 0,
+                }),
+            );
+            const shouldCreateBookingWorkflow = Boolean(
+                bookingWorkflow &&
+                bookingWorkflow.followUp.isFreeProperty === true &&
+                !hasActivePremiumSubscription
+            );
+            const persistedEvent: InsertContactEvent = { ...event };
+            if (bookingWorkflow && hasActivePremiumSubscription) {
+                delete persistedEvent.bookingFollowUpStatus;
+                delete persistedEvent.bookingFollowUpFailureCode;
+            }
             const newEvent: ContactEvent = {
                 id: eventId,
-                ...event,
+                ...persistedEvent,
                 timestamp,
             };
 
@@ -3725,6 +3827,18 @@ export class FirebaseService {
             }
             transaction.set(requestRef, newRequest);
             transaction.set(eventRef, newEvent);
+            if (
+                shouldCreateBookingWorkflow &&
+                bookingWorkflow &&
+                bookingFollowUpRef &&
+                bookingNotificationRef
+            ) {
+                transaction.create(bookingFollowUpRef, {
+                    ...bookingWorkflow.followUp,
+                    contactRequestId: requestId,
+                });
+                transaction.create(bookingNotificationRef, bookingWorkflow.customerNotification);
+            }
 
             return {
                 accepted: true,
@@ -4563,8 +4677,21 @@ export class FirebaseService {
     }
 
     async initializeFeatureFlags(): Promise<void> {
-        // No-op for Firebase - flags are created on first update
-        return;
+        const collection = this.db.collection("feature_flags");
+        await Promise.all(DEFAULT_FEATURE_FLAGS.map((flag) =>
+            this.db.runTransaction(async (transaction) => {
+                const existing = await transaction.get(
+                    collection.where("key", "==", flag.key).limit(1),
+                );
+                if (!existing.empty) return;
+                const timestamp = new Date().toISOString();
+                transaction.create(collection.doc(flag.id), {
+                    ...flag,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                });
+            })
+        ));
     }
 
     // ================== أرباح الشريك (Partner Profits) ==================
@@ -5289,7 +5416,7 @@ export class FirebaseService {
 
     // ================== Parity Dummy Methods ==================
     async initializeSheets(): Promise<void> {
-        return;
+        await this.initializeFeatureFlags();
     }
 
     async updateAnalyticsRow(): Promise<void> {

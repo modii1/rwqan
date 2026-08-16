@@ -9,6 +9,7 @@ import {
 } from "../utils/r2";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
+import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
 
 const router = Router();
 
@@ -39,7 +40,10 @@ router.get("/sitemap.xml", async (_req, res) => {
 
     // جلب العقارات النشطة
     const properties = await propertyService.getAll();
-    const activeProperties = properties.filter((p: any) => p.verificationStatus === "approved" || p.verificationStatus === "verified");
+    const activeProperties = properties.filter((p: any) =>
+      !hasActiveCommissionHold(p) &&
+      (p.verificationStatus === "approved" || p.verificationStatus === "verified")
+    );
 
     // جلب المقالات
     let blogPosts: any[] = [];
@@ -248,6 +252,18 @@ export function createPublicPropertyImagesHandler(
 
 router.get(
   "/api/public/property-images/:propertyNumber",
+  async (req, res, next) => {
+    try {
+      const property = await propertyService.getByNumber(req.params.propertyNumber);
+      if (hasActiveCommissionHold(property)) {
+        return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
+      }
+      next();
+    } catch (error) {
+      console.error("Public property image availability check failed:", error);
+      return res.status(503).json({ error: "تعذر تحميل صور العقار مؤقتاً" });
+    }
+  },
   createPublicPropertyImagesHandler(),
 );
 
@@ -370,7 +386,12 @@ router.get("/api/occasions/active", async (_req, res) => {
     if (!result) {
       return res.json(null);
     }
-    res.json(result);
+    const visibleProperties = [];
+    for (const occasionProperty of result.properties) {
+      const property = await propertyService.getByNumber(occasionProperty.propertyNumber);
+      if (!hasActiveCommissionHold(property)) visibleProperties.push(occasionProperty);
+    }
+    res.json({ ...result, properties: visibleProperties });
   } catch (err: any) {
     console.error("Get active occasion error:", err?.message);
     res.status(500).json({ error: "Failed to load occasion" });
@@ -386,7 +407,12 @@ router.get("/api/occasions/:slug", async (req, res) => {
       return res.status(404).json({ error: "المناسبة غير موجودة" });
     }
     const properties = await occasionService.getOccasionProperties(occasion.id);
-    const approved = properties.filter(p => p.approvedByAdmin);
+    const approved = [];
+    for (const occasionProperty of properties) {
+      if (!occasionProperty.approvedByAdmin) continue;
+      const property = await propertyService.getByNumber(occasionProperty.propertyNumber);
+      if (!hasActiveCommissionHold(property)) approved.push(occasionProperty);
+    }
     res.json({ occasion, properties: approved });
   } catch (err: any) {
     console.error("Get occasion by slug error:", err?.message);

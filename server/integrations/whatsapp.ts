@@ -592,6 +592,7 @@ export async function sendOwnerWhatsApp(phone: string, message: string, retries 
           "Authorization": `Bearer ${ENJAZATIK_TOKEN}`,
           "Content-Type": "application/json"
         },
+        signal: AbortSignal.timeout(15_000),
         body: JSON.stringify({
           number: cleanPhone,
           message: message

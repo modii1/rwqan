@@ -401,7 +401,7 @@ test("Paymob intention lookup fails closed for foreign URLs, outages, and incomp
   }
 });
 
-test("Paymob intention lookup never exposes refunded, voided, or errored redirects as payable evidence", async () => {
+test("Paymob intention lookup never exposes non-payable redirects as payable evidence", async () => {
   const originalFetch = globalThis.fetch;
   const previousHmacSecret = process.env.PAYMOB_HMAC_SECRET;
   const baseRedirectData = {
@@ -430,7 +430,7 @@ test("Paymob intention lookup never exposes refunded, voided, or errored redirec
 
   try {
     process.env.PAYMOB_HMAC_SECRET = "lookup-test-hmac-secret";
-    for (const unsafeFlag of ["error_occured", "is_refunded", "is_voided"] as const) {
+    for (const unsafeFlag of ["error_occured", "is_refunded", "is_voided", "is_auth"] as const) {
       const redirectData = { ...baseRedirectData, [unsafeFlag]: "true" };
       const redirectUrl = new URL("https://rwqan.sa/api/paymob/webhook");
       for (const [key, value] of Object.entries(redirectData)) {

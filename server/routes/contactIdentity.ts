@@ -13,11 +13,21 @@ import {
   getOwnerContactPhone,
 } from "../utils/contactIdentityRequest";
 import { isSameOriginRequest } from "../utils/requestOrigin";
+import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
 
 const router = Router();
 
 function setNoStore(res: Response): void {
   res.set("Cache-Control", "no-store, private");
+}
+
+function clearCustomerBookingSession(res: Response): void {
+  res.clearCookie(BOOKING_CUSTOMER_SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
 }
 
 function rejectCrossOriginMutation(req: Request, res: Response): boolean {
@@ -88,6 +98,7 @@ router.post("/api/contact-identity", async (req, res) => {
       getContactIdentityIssueLimitKeyForRequest(req),
     );
     res.cookie(CONTACT_IDENTITY_COOKIE_NAME, issued.token, getContactIdentityCookieOptions());
+    clearCustomerBookingSession(res);
     return res.json({
       kind: "client",
       maskedPhone: maskContactPhone(issued.clientPhone),
@@ -116,6 +127,7 @@ router.delete("/api/contact-identity", async (req, res) => {
 
   try {
     res.clearCookie(CONTACT_IDENTITY_COOKIE_NAME, getContactIdentityClearCookieOptions());
+    clearCustomerBookingSession(res);
     try {
       await contactIdentityService.revoke(getContactIdentityCookieToken(req));
     } catch (error) {
