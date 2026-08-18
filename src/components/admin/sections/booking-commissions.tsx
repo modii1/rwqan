@@ -66,6 +66,7 @@ import {
   getBookingReversalReviewState,
   type BookingReversalReviewState,
 } from "@/components/booking/booking-reversal-state";
+import BookingCommissionSettingsCard from "./booking-commission-settings";
 
 interface BookingCommissionSummary {
   total: number;
@@ -369,6 +370,8 @@ export default function BookingCommissionsSection() {
           تحديث البيانات
         </Button>
       </div>
+
+      <BookingCommissionSettingsCard />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
         <KpiCard label="الإجمالي" value={summary.total} icon={<ClipboardCheck className="h-4 w-4" />} tone="slate" />

@@ -2,6 +2,8 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
   bookingConfirmationFactsSchema,
+  bookingFreeWorkflowSettingsUpdateSchema,
+  normalizeBookingListedPriceOptionsHalalas,
   type BookingConfirmationFacts,
 } from "../../shared/booking";
 import { maskContactPhone } from "./ContactIdentityService";
@@ -151,7 +153,8 @@ function publicRow(
     id: booking.id,
     requestCode: booking.requestCode,
     propertyNumber: booking.propertyNumber,
-    propertyName: booking.isFreeProperty ? "" : booking.propertyName,
+    propertyName: booking.propertyName,
+    listedPriceOptionsHalalas: booking.listedPriceOptionsHalalas || [],
     contactAt: booking.createdAt,
     bookingStatus: responseExpired
       ? "expired"
@@ -263,10 +266,14 @@ export class BookingCommissionService {
     ownerPhone: string;
     customerPhone: string;
     isFreeProperty: boolean;
+    propertyPrices?: unknown;
     now?: Date;
   }): InitialBookingWorkflow {
+    const { propertyPrices, ...workflowOptions } = options;
     return buildInitialBookingWorkflow({
-      ...options,
+      ...workflowOptions,
+      listedPriceOptionsHalalas:
+        normalizeBookingListedPriceOptionsHalalas(propertyPrices),
       customerSubject: this.createCustomerSubject(options.customerPhone),
     });
   }
@@ -302,7 +309,8 @@ export class BookingCommissionService {
     return {
       id: booking.id,
       propertyNumber: booking.propertyNumber,
-      propertyName: booking.isFreeProperty ? "" : booking.propertyName,
+      propertyName: booking.propertyName,
+      listedPriceOptionsHalalas: booking.listedPriceOptionsHalalas || [],
       bookingStatus: booking.bookingDecision === "yes" && booking.bookingStatus === "awaiting_response"
         ? "questionnaire_pending"
         : booking.bookingStatus,
@@ -319,7 +327,8 @@ export class BookingCommissionService {
     return {
       id: booking.id,
       propertyNumber: booking.propertyNumber,
-      propertyName: booking.isFreeProperty ? "" : booking.propertyName,
+      propertyName: booking.propertyName,
+      listedPriceOptionsHalalas: booking.listedPriceOptionsHalalas || [],
       bookingStatus: booked && booking.bookingStatus === "awaiting_response"
         ? "questionnaire_pending"
         : booking.bookingStatus,
@@ -366,7 +375,8 @@ export class BookingCommissionService {
     return {
       id: booking.id,
       propertyNumber: booking.propertyNumber,
-      propertyName: booking.isFreeProperty ? "" : booking.propertyName,
+      propertyName: booking.propertyName,
+      listedPriceOptionsHalalas: booking.listedPriceOptionsHalalas || [],
       bookingStatus: booking.bookingStatus,
       questionnaire: questionnaire(booking),
       answeredAt: booking.confirmedAt,
@@ -474,6 +484,25 @@ export class BookingCommissionService {
       complianceStatus: result.booking.complianceStatus,
       collectionNoticeScheduled: result.resolution === "resume_collection",
       resolvedAt: result.attempt.reversalResolvedAt || null,
+    };
+  }
+
+  async getFreeWorkflowSettings() {
+    return bookingCommissionStore.getFreeWorkflowSettings();
+  }
+
+  async getAdminFreeWorkflowSettings() {
+    return {
+      settings: await this.getFreeWorkflowSettings(),
+    };
+  }
+
+  async updateAdminFreeWorkflowSettings(rawInput: unknown) {
+    const input = bookingFreeWorkflowSettingsUpdateSchema.parse(rawInput);
+    return {
+      settings: await bookingCommissionStore.updateFreeWorkflowSettings(
+        input.settings,
+      ),
     };
   }
 

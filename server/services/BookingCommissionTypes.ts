@@ -46,6 +46,8 @@ export type BookingEvent = {
 export type BookingFollowUpDocument = BookingFollowUpRecord & {
   schemaVersion: 1;
   propertyName: string;
+  /** Contact-time property price choices. Older records may predate this snapshot. */
+  listedPriceOptionsHalalas?: number[];
   ownerPhone: string;
   customerPhone: string;
   isFreeProperty: boolean;
@@ -188,6 +190,7 @@ export type BookingPublicRow = {
   requestCode: string;
   propertyNumber: string;
   propertyName: string;
+  listedPriceOptionsHalalas: number[];
   contactAt: string;
   bookingStatus: BookingFollowUpDocument["bookingStatus"] | "questionnaire_pending" | "expired";
   questionnaire: null | {

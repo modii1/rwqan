@@ -34,6 +34,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     sendAdmin: notificationService.sendAdmin,
     ownerFreeContactLimitReached: notificationService.ownerFreeContactLimitReached,
     isFollowUpEnabled: bookingCommissionService.isFollowUpEnabled,
+    getFreeWorkflowSettings: bookingCommissionService.getFreeWorkflowSettings,
     buildContactWorkflow: bookingCommissionService.buildContactWorkflow,
   };
 
@@ -57,6 +58,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
   const adminNotifications: string[] = [];
   const workflowBuildOptions: any[] = [];
   let followUpMode: "off" | "scheduled" | "flag_failure" | "workflow_failure" = "off";
+  let configuredFreePropertyContactDailyLimit = FREE_PROPERTY_DAILY_CONTACT_LIMIT;
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
     if (propertyNumber === "OWNER-1") {
@@ -67,6 +69,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       name: "Target property",
       whatsappNumber: "0555555555",
       verificationStatus: "approved",
+      prices: { weekday: "750", weekend: "١٬٢٥٠٫٥٠" },
     };
   };
   (firebaseService as any).getOwnerPhone = async () => "0599999999";
@@ -148,6 +151,14 @@ test("smart contact requests resolve remembered and owner phones on the server",
     }
     return followUpMode !== "off";
   };
+  (bookingCommissionService as any).getFreeWorkflowSettings = async () => ({
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: configuredFreePropertyContactDailyLimit,
+    updatedAt: "2026-08-18T10:00:00.000Z",
+    updatedBy: "admin",
+    source: "firestore",
+  });
   (bookingCommissionService as any).buildContactWorkflow = (options: any) => {
     workflowBuildOptions.push(options);
     if (followUpMode === "workflow_failure") {
@@ -254,6 +265,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(acceptedEvent.bookingFollowUpStatus, "scheduled");
       assert.equal("bookingFollowUpFailureCode" in acceptedEvent, false);
       assert.equal(acceptedCalls.at(-1)?.[8]?.followUp?.id, `BOOK-${acceptedEvent.requestCode}`);
+      assert.deepEqual(workflowBuildOptions.at(-1)?.propertyPrices, {
+        weekday: "750",
+        weekend: "١٬٢٥٠٫٥٠",
+      });
       assert.equal(adminNotifications.length, alertCountBefore);
     });
 
@@ -467,8 +482,33 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(response.status, 429);
       const payload = await response.json() as Record<string, unknown>;
       assert.equal(payload.code, "FREE_PROPERTY_DAILY_CONTACT_LIMIT");
+      assert.equal(payload.dailyLimit, FREE_PROPERTY_DAILY_CONTACT_LIMIT);
       assert.match(String(payload.error), /الثلاث/);
       assert.equal(ownerLimitNotifications.length, notificationCountBefore);
+    });
+
+    await t.test("a configured non-default free-property contact limit reaches the atomic write and response", async () => {
+      identityMode = "remembered";
+      forceDailyLimit = true;
+      configuredFreePropertyContactDailyLimit = 7;
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/api/requests/smart`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: baseUrl },
+          body: JSON.stringify({ propertyNumber: "TARGET-CONFIGURED-DAILY-LIMIT" }),
+        });
+      } finally {
+        forceDailyLimit = false;
+        configuredFreePropertyContactDailyLimit = FREE_PROPERTY_DAILY_CONTACT_LIMIT;
+      }
+
+      assert.equal(response.status, 429);
+      assert.equal(acceptedCalls.at(-1)?.[7]?.maxAcceptedRequests, 7);
+      const payload = await response.json() as Record<string, unknown>;
+      assert.equal(payload.code, "FREE_PROPERTY_DAILY_CONTACT_LIMIT");
+      assert.equal(payload.dailyLimit, 7);
+      assert.match(String(payload.error), /\(7\)/);
     });
 
     await t.test("the accepted request that reaches three contacts notifies the property owner", async () => {
@@ -485,6 +525,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.deepEqual(ownerLimitNotifications.at(-1), {
         ownerPhone: "0555555555",
         propertyNumber: "TARGET-LIMIT-NOTIFY",
+        dailyLimit: FREE_PROPERTY_DAILY_CONTACT_LIMIT,
       });
     });
 
@@ -629,6 +670,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     notificationService.ownerFreeContactLimitReached =
       originals.ownerFreeContactLimitReached;
     bookingCommissionService.isFollowUpEnabled = originals.isFollowUpEnabled;
+    bookingCommissionService.getFreeWorkflowSettings = originals.getFreeWorkflowSettings;
     bookingCommissionService.buildContactWorkflow = originals.buildContactWorkflow;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));

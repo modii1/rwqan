@@ -716,7 +716,15 @@ export async function sendPropertyOwnerWhatsApp(options: {
 
 export function buildOwnerFreeContactLimitReachedMessage(data: {
   propertyNumber: string;
+  dailyLimit?: number;
 }): string {
+  if (data.dailyLimit !== undefined && data.dailyLimit !== 3) {
+    return `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم ${data.propertyNumber} ضمن الباقة المجانية (${data.dailyLimit} من ${data.dailyLimit}).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://rwqan.sa/owner/subscription`;
+  }
+
   return `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم ${data.propertyNumber} ضمن الباقة المجانية (3 من 3).
 
 قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
@@ -726,6 +734,7 @@ https://rwqan.sa/owner/subscription`;
 export async function notifyOwnerFreeContactLimitReached(data: {
   ownerPhone: string;
   propertyNumber: string;
+  dailyLimit?: number;
 }): Promise<PropertyOwnerWhatsAppResult> {
   return sendPropertyOwnerWhatsApp({
     ownerPhone: data.ownerPhone,

@@ -15,6 +15,30 @@ router.get("/api/admin/booking-commissions", async (_req, res) => {
   }
 });
 
+router.get("/api/admin/booking-commissions/settings", async (_req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  try {
+    return res.json(
+      await bookingCommissionService.getAdminFreeWorkflowSettings(),
+    );
+  } catch (error) {
+    const response = bookingRouteError(error);
+    return res.status(response.status).json(response.body);
+  }
+});
+
+router.put("/api/admin/booking-commissions/settings", async (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  try {
+    return res.json(
+      await bookingCommissionService.updateAdminFreeWorkflowSettings(req.body),
+    );
+  } catch (error) {
+    const response = bookingRouteError(error);
+    return res.status(response.status).json(response.body);
+  }
+});
+
 router.post("/api/admin/booking-commissions/run-worker", async (_req, res) => {
   res.set("Cache-Control", "no-store, private");
   try {

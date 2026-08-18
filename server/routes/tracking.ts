@@ -353,6 +353,7 @@ router.post("/api/requests/smart", async (req, res) => {
               ownerPhone,
               customerPhone: resolvedClientPhone,
               isFreeProperty: !isPremiumProperty,
+              propertyPrices: property.prices,
               now: nowDate,
             });
             bookingFollowUpStatus = "scheduled";
@@ -364,6 +365,11 @@ router.post("/api/requests/smart", async (req, res) => {
         }
       }
     }
+
+    const freePropertyContactDailyLimit = !isPremiumProperty
+      ? (await bookingCommissionService.getFreeWorkflowSettings())
+          .freePropertyContactDailyLimit
+      : FREE_PROPERTY_DAILY_CONTACT_LIMIT;
 
     // احسب عدد الطلبات من هذا IP للعقار هذا
     if (!ipPropertyCounter.has(ipAddress)) {
@@ -409,7 +415,7 @@ router.post("/api/requests/smart", async (req, res) => {
             key: createFreePropertyDailyLimitKey(propertyNumber),
             windowStartedAt: riyadhDayStart,
             windowEndsAt: riyadhDayEnd,
-            maxAcceptedRequests: FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+            maxAcceptedRequests: freePropertyContactDailyLimit,
           }
         : undefined,
       bookingWorkflow,
@@ -442,10 +448,15 @@ router.post("/api/requests/smart", async (req, res) => {
           ? "FREE_PROPERTY_DAILY_CONTACT_LIMIT"
           : "CONTACT_COOLDOWN",
         error: cooldown.reason === "daily_property_limit"
-          ? "اكتملت محاولات التواصل الثلاث المتاحة اليوم لهذا العقار المجاني. حاول مجدداً غداً."
+          ? freePropertyContactDailyLimit === 3
+            ? "اكتملت محاولات التواصل الثلاث المتاحة اليوم لهذا العقار المجاني. حاول مجدداً غداً."
+            : `اكتمل الحد اليومي لمحاولات التواصل مع هذا العقار المجاني (${freePropertyContactDailyLimit}). حاول مجدداً غداً.`
           : "انتظر قليلاً قبل إرسال طلب آخر لنفس العقار",
         remainingSeconds,
         remainingTimeFormatted: timeDisplay,
+        ...(cooldown.reason === "daily_property_limit"
+          ? { dailyLimit: freePropertyContactDailyLimit }
+          : {}),
         ...(responseContactIdentity
           ? { contactIdentity: responseContactIdentity }
           : {}),
@@ -469,6 +480,7 @@ router.post("/api/requests/smart", async (req, res) => {
       notificationService.ownerFreeContactLimitReached({
         ownerPhone: property.whatsappNumber,
         propertyNumber,
+        dailyLimit: freePropertyContactDailyLimit,
       }).then((result) => {
         if (!result.success && !result.suppressed) {
           console.error(

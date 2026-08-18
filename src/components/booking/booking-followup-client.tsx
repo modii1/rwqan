@@ -21,8 +21,14 @@ import {
   type BookingDatePrecision,
   type BookingQuestionnaire,
   type BookingTiming,
+  formatSarFromHalalas,
 } from "./booking-display";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
+import {
+  buildBookingQuestionnairePayload,
+  normalizeListedPriceOptionsHalalas,
+  sarInputFromHalalas,
+} from "./booking-price-options";
 
 interface FollowupBooking {
   id: string;
@@ -31,6 +37,7 @@ interface FollowupBooking {
   bookingStatus?: string | null;
   questionnaire?: BookingQuestionnaire | null;
   answeredAt?: string | null;
+  listedPriceOptionsHalalas?: number[] | null;
 }
 
 interface FollowupPayload {
@@ -80,6 +87,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
   const [bookingDatePrecision, setBookingDatePrecision] = useState<BookingDatePrecision>("day");
   const [bookingDate, setBookingDate] = useState("");
   const [pricePaidSar, setPricePaidSar] = useState("");
+  const [priceChoice, setPriceChoice] = useState("");
   const [actionError, setActionError] = useState("");
   const [pendingAction, setPendingAction] = useState<"yes" | "no" | "confirm" | null>(null);
 
@@ -101,6 +109,11 @@ export default function BookingFollowupClient({ token }: { token: string }) {
   );
   const declined = declinedLocally || isDeclinedStatus(booking?.bookingStatus);
   const showQuestions = bookedLocally || isQuestionnairePendingStatus(booking?.bookingStatus);
+  const listedPriceOptionsHalalas = useMemo(
+    () => normalizeListedPriceOptionsHalalas(booking?.listedPriceOptionsHalalas),
+    [booking?.listedPriceOptionsHalalas],
+  );
+  const customPriceSelected = priceChoice === "custom" || listedPriceOptionsHalalas.length === 0;
 
   const amountIsValid = useMemo(() => {
     const normalized = pricePaidSar.replace(/,/g, "").trim();
@@ -160,12 +173,12 @@ export default function BookingFollowupClient({ token }: { token: string }) {
     }
 
     setPendingAction("confirm");
-    const submittedQuestionnaire: BookingQuestionnaire = {
+    const submittedQuestionnaire: BookingQuestionnaire = buildBookingQuestionnairePayload({
       timing,
       bookingDate,
       bookingDatePrecision,
       pricePaidSar,
-    };
+    });
     try {
       const response = await bookingApiRequest<Partial<FollowupPayload>>(
         `/api/booking-followups/${encodeURIComponent(token)}/confirm`,
@@ -386,26 +399,65 @@ export default function BookingFollowupClient({ token }: { token: string }) {
             </fieldset>
 
             <fieldset>
-              <legend className="text-base font-bold text-[#34332f]">
+              <legend id="booking-price-question" className="text-base font-bold text-[#34332f]">
                 <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">٣</span>
                 كم كان المبلغ المدفوع؟
               </legend>
-              <div className="relative mt-3">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  value={pricePaidSar}
-                  onChange={(event) => setPricePaidSar(normalizePriceInput(event.target.value))}
-                  placeholder="مثال: 750"
-                  required
-                  aria-label="المبلغ المدفوع بالريال السعودي"
-                  className="h-11 w-full rounded-lg border border-input bg-background px-3 pl-16 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  dir="ltr"
-                  data-testid="input-booking-price"
-                />
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">ر.س</span>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-labelledby="booking-price-question">
+                {listedPriceOptionsHalalas.map((option) => {
+                  const choiceValue = String(option);
+                  return (
+                    <label key={option} className={`cursor-pointer rounded-lg border p-3 text-center text-sm font-semibold transition focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${priceChoice === choiceValue ? "border-[#b88d2b] bg-[#fff8e7] text-[#76571b]" : "border-border hover:bg-muted/40"}`}>
+                      <input
+                        type="radio"
+                        name="price-choice"
+                        value={choiceValue}
+                        checked={priceChoice === choiceValue}
+                        onChange={() => {
+                          setPriceChoice(choiceValue);
+                          setPricePaidSar(sarInputFromHalalas(option));
+                        }}
+                        className="sr-only"
+                        data-testid={`booking-price-option-${option}`}
+                      />
+                      {formatSarFromHalalas(option)}
+                    </label>
+                  );
+                })}
+                <label className={`cursor-pointer rounded-lg border p-3 text-center text-sm font-semibold transition focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${customPriceSelected ? "border-[#b88d2b] bg-[#fff8e7] text-[#76571b]" : "border-border hover:bg-muted/40"}`}>
+                  <input
+                    type="radio"
+                    name="price-choice"
+                    value="custom"
+                    checked={customPriceSelected}
+                    onChange={() => {
+                      setPriceChoice("custom");
+                      setPricePaidSar("");
+                    }}
+                    className="sr-only"
+                    data-testid="booking-price-option-custom"
+                  />
+                  إدخال مبلغ آخر
+                </label>
               </div>
+              {customPriceSelected && (
+                <div className="relative mt-3">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={pricePaidSar}
+                    onChange={(event) => setPricePaidSar(normalizePriceInput(event.target.value))}
+                    placeholder="مثال: 750"
+                    required
+                    aria-label="المبلغ المدفوع بالريال السعودي"
+                    className="h-11 w-full rounded-lg border border-input bg-background px-3 pl-16 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    dir="ltr"
+                    data-testid="input-booking-price"
+                  />
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">ر.س</span>
+                </div>
+              )}
             </fieldset>
 
             {actionError && <p className="rounded-lg bg-red-50 p-3 text-sm font-medium text-destructive" role="alert">{actionError}</p>}

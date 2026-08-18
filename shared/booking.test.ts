@@ -14,6 +14,7 @@ import {
   calculateCommissionReminderSchedule,
   commissionStatusSchema,
   complianceStatusSchema,
+  normalizeBookingListedPriceOptionsHalalas,
   toBookingAdminDto,
   toBookingPublicDto,
   type BookingConfirmationFacts,
@@ -103,6 +104,21 @@ test("confirmed price facts stay between 1 and 1,000,000 SAR inclusive", () => {
       pricePaidHalalas,
     }).success, false);
   }
+});
+
+test("listed property prices normalize to unique sorted halala options", () => {
+  assert.deepEqual(normalizeBookingListedPriceOptionsHalalas({
+    weekday: "750",
+    weekend: "١٬٢٥٠٫٥٠",
+    overnight: "750.00",
+    holidays: "1000000",
+    special: "0.99",
+    display: "not-a-price",
+    ignored: "500",
+  }), [75_000, 125_050, 100_000_000]);
+
+  assert.deepEqual(normalizeBookingListedPriceOptionsHalalas(null), []);
+  assert.deepEqual(normalizeBookingListedPriceOptionsHalalas([]), []);
 });
 
 test("booking dates validate the declared day or month precision", () => {

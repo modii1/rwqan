@@ -22,6 +22,7 @@ function awaitingBookingFixture(options: {
   requestCode: string;
   createdAt: Date;
   customerSubject?: string;
+  listedPriceOptionsHalalas?: number[];
 }): AwaitingBookingDocument {
   const { followUp } = buildInitialBookingWorkflow({
     requestCode: options.requestCode,
@@ -31,6 +32,7 @@ function awaitingBookingFixture(options: {
     customerPhone: "+966500000002",
     customerSubject: options.customerSubject || "customer-subject-hmac",
     isFreeProperty: true,
+    listedPriceOptionsHalalas: options.listedPriceOptionsHalalas || [75_000, 125_050],
     now: options.createdAt,
   });
   if (
@@ -103,6 +105,78 @@ test("admin payment details prioritize an attempt requiring financial review", (
   ] as any);
 
   assert.equal(selected?.id, "ATT-DUPLICATE");
+});
+
+test("admin free-workflow settings preserve the strict service response contract", async () => {
+  const store = bookingCommissionStore as any;
+  const originals = {
+    getSettings: store.getFreeWorkflowSettings,
+    updateSettings: store.updateFreeWorkflowSettings,
+  };
+  const persisted = {
+    customerDailyLimit: 4,
+    freeOwnerDailyLimit: 5,
+    freePropertyContactDailyLimit: 6,
+    updatedAt: "2026-08-18T10:00:00.000Z",
+    updatedBy: "admin" as const,
+    source: "firestore" as const,
+  };
+  const updates: unknown[] = [];
+
+  try {
+    store.getFreeWorkflowSettings = async () => persisted;
+    store.updateFreeWorkflowSettings = async (settings: unknown) => {
+      updates.push(settings);
+      return persisted;
+    };
+
+    const service = new BookingCommissionService();
+    assert.deepEqual(await service.getAdminFreeWorkflowSettings(), {
+      settings: persisted,
+    });
+    assert.deepEqual(await service.updateAdminFreeWorkflowSettings({
+      settings: {
+        customerDailyLimit: 4,
+        freeOwnerDailyLimit: 5,
+        freePropertyContactDailyLimit: 6,
+      },
+    }), { settings: persisted });
+    assert.deepEqual(updates, [{
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+    }]);
+
+    for (const input of [
+      {},
+      { settings: { customerDailyLimit: 4, freeOwnerDailyLimit: 5 } },
+      { settings: { customerDailyLimit: -1, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 } },
+      { settings: { customerDailyLimit: 4.5, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 } },
+      { settings: { customerDailyLimit: 4, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 1_001 } },
+      {
+        settings: {
+          customerDailyLimit: 4,
+          freeOwnerDailyLimit: 5,
+          freePropertyContactDailyLimit: 6,
+          extra: true,
+        },
+      },
+      {
+        settings: {
+          customerDailyLimit: 4,
+          freeOwnerDailyLimit: 5,
+          freePropertyContactDailyLimit: 6,
+        },
+        extra: true,
+      },
+    ]) {
+      await assert.rejects(() => service.updateAdminFreeWorkflowSettings(input));
+    }
+    assert.equal(updates.length, 1, "invalid bodies never reach persistence");
+  } finally {
+    store.getFreeWorkflowSettings = originals.getSettings;
+    store.updateFreeWorkflowSettings = originals.updateSettings;
+  }
 });
 
 test("seven-day expiry is derived for admin and customer views without persisting a mutation", async () => {
@@ -195,6 +269,8 @@ test("seven-day expiry is derived for admin and customer views without persistin
     assert.ok(freshProfileRow);
     assert.equal(expiredProfileRow.bookingStatus, "expired");
     assert.equal(freshProfileRow.bookingStatus, "awaiting_response");
+    assert.equal(expiredProfileRow.propertyName, "شاليه الريف المائي");
+    assert.deepEqual(expiredProfileRow.listedPriceOptionsHalalas, [75_000, 125_050]);
     assert.equal(customerAnchorReads, 1);
     assert.equal(customerListReads, 1);
     assert.equal(markOpenedCalls, 0);

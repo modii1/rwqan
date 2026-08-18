@@ -806,6 +806,9 @@ test("free-property daily contact quota accepts only three requests atomically",
 test("contact acceptance writes booking follow-up only when the transactional subscription is free", async () => {
   const database = new FakeFirestore();
   seedProperty(database, "PROP-FREE-FOLLOWUP");
+  database.update("properties", "PROP-FREE-FOLLOWUP", {
+    prices: { weekday: "750", weekend: "١٬٢٥٠٫٥٠" },
+  });
   seedProperty(database, "PROP-PREMIUM-FOLLOWUP");
   database.set(
     "subscriptions",
@@ -853,6 +856,7 @@ test("contact acceptance writes booking follow-up only when the transactional su
           id: bookingId,
           propertyNumber,
           isFreeProperty: true,
+          listedPriceOptionsHalalas: [100],
         },
         customerNotification: {
           id: `${bookingId}--customer_followup`,
@@ -873,6 +877,12 @@ test("contact acceptance writes booking follow-up only when the transactional su
   assert.equal(freeOutcome.accepted, true);
   assert.equal(premiumOutcome.accepted, true);
   assert.ok(database.get("booking_followups", "BOOK-FREE-FOLLOWUP"));
+  assert.deepEqual(
+    database.get("booking_followups", "BOOK-FREE-FOLLOWUP")
+      ?.listedPriceOptionsHalalas,
+    [75_000, 125_050],
+    "the transaction replaces any prebuilt snapshot with the live property prices",
+  );
   assert.ok(
     database.get(
       "booking_notification_outbox",

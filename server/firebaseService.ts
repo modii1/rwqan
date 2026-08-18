@@ -69,6 +69,7 @@ import {
     normalizePhoneDigits,
     normalizeSaudiMobilePhone,
 } from "../shared/phone";
+import { normalizeBookingListedPriceOptionsHalalas } from "../shared/booking";
 
 type PaymentFulfillmentClaimResult =
     | { status: "claimed"; token: string; previousState?: Payment["fulfillmentState"] }
@@ -3835,6 +3836,10 @@ export class FirebaseService {
             ) {
                 transaction.create(bookingFollowUpRef, {
                     ...bookingWorkflow.followUp,
+                    listedPriceOptionsHalalas:
+                        normalizeBookingListedPriceOptionsHalalas(
+                            currentProperty?.prices,
+                        ),
                     contactRequestId: requestId,
                 });
                 transaction.create(bookingNotificationRef, bookingWorkflow.customerNotification);

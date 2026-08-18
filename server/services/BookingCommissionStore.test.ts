@@ -44,6 +44,11 @@ class FakeFirestore {
     return value ? { ...value } : undefined;
   }
 
+  entries(collection: string): Array<[string, FakeData]> {
+    return [...(this.collections.get(collection)?.entries() || [])]
+      .map(([id, value]) => [id, { ...value }]);
+  }
+
   update(collection: string, id: string, updates: FakeData): void {
     const current = this.read(collection, id);
     if (!current) throw new Error(`Missing fake document ${collection}/${id}`);
@@ -103,6 +108,10 @@ class FakeDocumentReference {
     readonly collectionName: string,
     readonly id: string,
   ) {}
+
+  async get(): Promise<FakeSnapshot> {
+    return new FakeSnapshot(this);
+  }
 }
 
 class FakeSnapshot {
@@ -150,6 +159,7 @@ function buildWorkflow(isFreeProperty = true) {
     customerPhone: "+966500000002",
     customerSubject: "customer-subject-hmac",
     isFreeProperty,
+    listedPriceOptionsHalalas: [75_000, 125_050],
     now,
   });
 }
@@ -162,6 +172,7 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
   assert.equal(followUp.createdAt, now.toISOString());
   assert.equal(followUp.updatedAt, now.toISOString());
   assert.equal(followUp.followUpDueAt, expectedDueAt);
+  assert.deepEqual(followUp.listedPriceOptionsHalalas, [75_000, 125_050]);
   assert.equal(Date.parse(followUp.followUpDueAt) - now.getTime(), 24 * 60 * 60 * 1_000);
   assert.deepEqual(followUp.events, [
     { type: "contact_accepted", at: now.toISOString() },
@@ -239,6 +250,177 @@ test("initial workflow has no booking, commission, dispute, or enforcement outco
     commissionPaidAt: followUp.commissionPaidAt,
     commissionReminderOffsetsSent: followUp.commissionReminderOffsetsSent,
   }).success, true);
+});
+
+test("free-workflow settings fall back to env and persist idempotently with one audit event", async () => {
+  const envNames = [
+    "CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT",
+    "FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT",
+    "FREE_PROPERTY_DAILY_CONTACT_LIMIT",
+  ] as const;
+  const previousEnvironment = Object.fromEntries(
+    envNames.map((name) => [name, process.env[name]]),
+  );
+  const database = new FakeFirestore();
+  const store = new BookingCommissionStore(database as any);
+  const updatedAt = new Date("2026-08-18T10:00:00.000Z");
+
+  try {
+    process.env.CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT = "7";
+    process.env.FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT = "8";
+    process.env.FREE_PROPERTY_DAILY_CONTACT_LIMIT = "9";
+
+    assert.deepEqual(await store.getFreeWorkflowSettings(), {
+      customerDailyLimit: 7,
+      freeOwnerDailyLimit: 8,
+      freePropertyContactDailyLimit: 9,
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+
+    const expected = {
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+      updatedAt: updatedAt.toISOString(),
+      updatedBy: "admin" as const,
+      source: "firestore" as const,
+    };
+    assert.deepEqual(await store.updateFreeWorkflowSettings({
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+    }, updatedAt), expected);
+    assert.deepEqual(await store.getFreeWorkflowSettings(), expected);
+    assert.deepEqual(database.read("settings", "booking_free_workflow_limits"), {
+      schemaVersion: 1,
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+      updatedAt: updatedAt.toISOString(),
+      updatedBy: "admin",
+    });
+
+    const auditEntries = database.entries("booking_free_workflow_limits_audit");
+    assert.equal(auditEntries.length, 1);
+    assert.match(auditEntries[0][0], /^BOOKING-LIMITS-\d+-[a-f0-9]{12}$/);
+    assert.deepEqual(auditEntries[0][1], {
+      id: auditEntries[0][0],
+      type: "booking_free_workflow_limits_updated",
+      previous: {
+        customerDailyLimit: 7,
+        freeOwnerDailyLimit: 8,
+        freePropertyContactDailyLimit: 9,
+        updatedAt: null,
+        updatedBy: "environment",
+        source: "environment",
+      },
+      next: {
+        customerDailyLimit: 4,
+        freeOwnerDailyLimit: 5,
+        freePropertyContactDailyLimit: 6,
+      },
+      updatedAt: updatedAt.toISOString(),
+      updatedBy: "admin",
+    });
+
+    assert.deepEqual(await store.updateFreeWorkflowSettings({
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+    }, new Date("2026-08-18T11:00:00.000Z")), expected);
+    assert.equal(
+      database.entries("booking_free_workflow_limits_audit").length,
+      1,
+      "an unchanged full replacement does not create another audit record",
+    );
+
+    for (const limits of [
+      { customerDailyLimit: -1, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 },
+      { customerDailyLimit: 4.5, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 },
+      { customerDailyLimit: 4, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 1_001 },
+      { customerDailyLimit: 4, freeOwnerDailyLimit: 5 } as any,
+    ]) {
+      await assert.rejects(() => store.updateFreeWorkflowSettings(limits as any, updatedAt));
+    }
+    await assert.rejects(() => store.updateFreeWorkflowSettings({
+      customerDailyLimit: 4,
+      freeOwnerDailyLimit: 5,
+      freePropertyContactDailyLimit: 6,
+    }, new Date("invalid")), RangeError);
+    assert.equal(database.entries("booking_free_workflow_limits_audit").length, 1);
+  } finally {
+    for (const name of envNames) {
+      const value = previousEnvironment[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("notification claims use persisted customer and free-owner quota limits", async () => {
+  const database = new FakeFirestore();
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 1,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 0,
+    freePropertyContactDailyLimit: 6,
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+
+  const customerWorkflow = buildWorkflow();
+  const claimAt = new Date(Date.parse(customerWorkflow.customerNotification.scheduledAt));
+  database.seed("booking_followups", customerWorkflow.followUp.id, {
+    ...customerWorkflow.followUp,
+    contactRequestId: "CONTACT-QUOTA-CUSTOMER",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    customerWorkflow.customerNotification.id,
+    customerWorkflow.customerNotification,
+  );
+
+  const ownerBookingId = "BOOK-REQ-13383-OWNER-QUOTA";
+  const ownerJobId = `${ownerBookingId}--owner_booking_confirmed`;
+  database.seed("booking_followups", ownerBookingId, {
+    ...customerWorkflow.followUp,
+    id: ownerBookingId,
+    requestCode: "REQ-13383-OWNER-QUOTA",
+    contactRequestId: "CONTACT-QUOTA-OWNER",
+  });
+  database.seed("properties", "13383", {
+    propertyNumber: "13383",
+    whatsappNumber: "0500000001",
+  });
+  database.seed("booking_notification_outbox", ownerJobId, {
+    ...customerWorkflow.customerNotification,
+    id: ownerJobId,
+    bookingId: ownerBookingId,
+    recipientRole: "owner",
+    recipientPhone: customerWorkflow.followUp.ownerPhone,
+    recipientQuotaKey: "500000001",
+    kind: "owner_booking_confirmed",
+    quotaCategory: "free_owner_booking",
+  });
+
+  const store = new BookingCommissionStore(database as any);
+  assert.deepEqual(await store.claimDueNotificationJobs(claimAt, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  }), []);
+
+  for (const [jobId, eventType] of [
+    [customerWorkflow.customerNotification.id, "customer_followup_suppressed"],
+    [ownerJobId, "owner_notification_suppressed"],
+  ] as const) {
+    const job = database.read("booking_notification_outbox", jobId);
+    assert.equal(job?.status, "suppressed_quota");
+    assert.equal(job?.providerError, "daily_notification_quota");
+    const booking = database.read("booking_followups", job?.bookingId);
+    assert.equal(booking?.events.at(-1)?.type, eventType);
+  }
 });
 
 test("initial workflow rejects a non-free property origin", () => {

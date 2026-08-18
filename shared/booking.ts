@@ -4,6 +4,29 @@ export const BOOKING_COMMISSION_BASIS_POINTS = 1_000 as const;
 export const BASIS_POINTS_DENOMINATOR = 10_000 as const;
 export const COMMISSION_PAYMENT_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
 export const COMMISSION_REMINDER_OFFSET_DAYS = [3, 4, 5] as const;
+export const BOOKING_FREE_WORKFLOW_LIMIT_MAX = 1_000 as const;
+
+const bookingFreeWorkflowLimitSchema = z.number()
+  .int()
+  .min(0)
+  .max(BOOKING_FREE_WORKFLOW_LIMIT_MAX);
+
+export const bookingFreeWorkflowLimitsSchema = z.object({
+  customerDailyLimit: bookingFreeWorkflowLimitSchema,
+  freeOwnerDailyLimit: bookingFreeWorkflowLimitSchema,
+  freePropertyContactDailyLimit: bookingFreeWorkflowLimitSchema,
+}).strict();
+export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimitsSchema>;
+
+export const bookingFreeWorkflowSettingsUpdateSchema = z.object({
+  settings: bookingFreeWorkflowLimitsSchema,
+}).strict();
+
+export type BookingFreeWorkflowSettings = BookingFreeWorkflowLimits & {
+  updatedAt: string | null;
+  updatedBy: "admin" | "environment";
+  source: "firestore" | "environment";
+};
 
 export const bookingStatusSchema = z.enum([
   "awaiting_response",
@@ -102,6 +125,39 @@ export const pricePaidHalalasSchema = z.number()
   .int()
   .min(100)
   .max(100_000_000);
+
+const bookingListedPriceKeys = [
+  "weekday",
+  "weekend",
+  "overnight",
+  "holidays",
+  "special",
+  "display",
+] as const;
+
+function listedPriceToHalalas(value: unknown): number | null {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/٫/g, ".")
+    .replace(/[٬,]/g, "");
+  if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [whole, fraction = ""] = normalized.split(".");
+  const halalas = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  return pricePaidHalalasSchema.safeParse(halalas).success ? halalas : null;
+}
+
+/** Stable, deduplicated SAR price choices captured from a property's listed prices. */
+export function normalizeBookingListedPriceOptionsHalalas(prices: unknown): number[] {
+  if (!prices || typeof prices !== "object" || Array.isArray(prices)) return [];
+  const priceRecord = prices as Record<string, unknown>;
+  return Array.from(new Set(
+    bookingListedPriceKeys
+      .map((key) => listedPriceToHalalas(priceRecord[key]))
+      .filter((value): value is number => value !== null),
+  )).sort((left, right) => left - right);
+}
 
 const commissionCalculationInputSchema = z.number()
   .int()

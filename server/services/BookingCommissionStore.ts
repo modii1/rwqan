@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
+  bookingFreeWorkflowLimitsSchema,
   bookingConfirmationFactsSchema,
   bookingFollowUpRecordSchema,
   buildConfirmedBookingFinancials,
@@ -9,6 +10,8 @@ import {
   calculateCommissionReminderSchedule,
   COMMISSION_PAYMENT_WINDOW_MS,
   type BookingConfirmationFacts,
+  type BookingFreeWorkflowLimits,
+  type BookingFreeWorkflowSettings,
   type BookingFollowUpRecord,
 } from "../../shared/booking";
 import type { Subscription } from "../../shared/schema";
@@ -36,6 +39,10 @@ const ORDER_BINDINGS_COLLECTION = "booking_commission_order_bindings";
 const TRANSACTION_BINDINGS_COLLECTION = "booking_commission_transaction_bindings";
 const REVERSAL_BINDINGS_COLLECTION = "booking_commission_reversal_bindings";
 const QUOTAS_COLLECTION = "booking_notification_quotas";
+const SETTINGS_COLLECTION = "settings";
+const FREE_WORKFLOW_SETTINGS_DOCUMENT = "booking_free_workflow_limits";
+const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
+  "booking_free_workflow_limits_audit";
 
 export const BOOKING_FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
 export const BOOKING_CUSTOMER_RESPONSE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -71,6 +78,63 @@ export type InitialBookingWorkflow = {
   followUp: Omit<BookingFollowUpDocument, "contactRequestId">;
   customerNotification: BookingNotificationJob;
 };
+
+const DEFAULT_FREE_WORKFLOW_LIMIT = 3;
+
+function environmentLimit(name: string): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return DEFAULT_FREE_WORKFLOW_LIMIT;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 1_000
+    ? parsed
+    : DEFAULT_FREE_WORKFLOW_LIMIT;
+}
+
+export function getEnvironmentFreeWorkflowLimits(): BookingFreeWorkflowLimits {
+  return {
+    customerDailyLimit: environmentLimit(
+      "CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT",
+    ),
+    freeOwnerDailyLimit: environmentLimit(
+      "FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT",
+    ),
+    freePropertyContactDailyLimit: environmentLimit(
+      "FREE_PROPERTY_DAILY_CONTACT_LIMIT",
+    ),
+  };
+}
+
+function storedFreeWorkflowLimits(
+  value: unknown,
+): BookingFreeWorkflowLimits | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+  const parsed = bookingFreeWorkflowLimitsSchema.safeParse({
+    customerDailyLimit: data.customerDailyLimit,
+    freeOwnerDailyLimit: data.freeOwnerDailyLimit,
+    freePropertyContactDailyLimit: data.freePropertyContactDailyLimit,
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+function resolvedFreeWorkflowSettings(value: unknown): BookingFreeWorkflowSettings {
+  const stored = storedFreeWorkflowLimits(value);
+  if (!stored) {
+    return {
+      ...getEnvironmentFreeWorkflowLimits(),
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    };
+  }
+  const data = value as Record<string, unknown>;
+  return {
+    ...stored,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : null,
+    updatedBy: data.updatedBy === "admin" ? "admin" : "environment",
+    source: "firestore",
+  };
+}
 
 export type ClaimedBookingNotification = BookingNotificationJob & {
   leaseToken: string;
@@ -256,6 +320,7 @@ export function buildInitialBookingWorkflow(options: {
   customerPhone: string;
   customerSubject: string;
   isFreeProperty: boolean;
+  listedPriceOptionsHalalas?: number[];
   now?: Date;
 }): InitialBookingWorkflow {
   if (options.isFreeProperty !== true) {
@@ -271,6 +336,7 @@ export function buildInitialBookingWorkflow(options: {
     requestCode: options.requestCode,
     propertyNumber: options.propertyNumber,
     propertyName: String(options.propertyName || "").trim() || "بدون اسم",
+    listedPriceOptionsHalalas: options.listedPriceOptionsHalalas || [],
     ownerPhone: options.ownerPhone,
     customerPhone: options.customerPhone,
     customerSubject: options.customerSubject,
@@ -316,15 +382,14 @@ export function buildInitialBookingWorkflow(options: {
   return { followUp, customerNotification };
 }
 
-function quotaLimitFor(job: BookingNotificationJob): number | null {
+function quotaLimitFor(
+  job: BookingNotificationJob,
+  limits: BookingFreeWorkflowLimits,
+): number | null {
   if (job.quotaCategory === "transactional") return null;
-  const raw = job.quotaCategory === "customer_followup"
-    ? process.env.CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT
-    : process.env.FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT;
-  const fallback = 3;
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  return job.quotaCategory === "customer_followup"
+    ? limits.customerDailyLimit
+    : limits.freeOwnerDailyLimit;
 }
 
 function quotaDocumentId(job: BookingNotificationJob, windowStart: number): string {
@@ -338,6 +403,72 @@ export class BookingCommissionStore {
   }
 
   constructor(private readonly database?: Firestore | null) {}
+
+  async getFreeWorkflowSettings(): Promise<BookingFreeWorkflowSettings> {
+    try {
+      const snapshot = await this.db.collection(SETTINGS_COLLECTION)
+        .doc(FREE_WORKFLOW_SETTINGS_DOCUMENT)
+        .get();
+      return resolvedFreeWorkflowSettings(snapshot.exists ? snapshot.data() : null);
+    } catch (error) {
+      console.error(
+        "Booking free-workflow settings lookup failed; using environment defaults:",
+        error,
+      );
+      return resolvedFreeWorkflowSettings(null);
+    }
+  }
+
+  async updateFreeWorkflowSettings(
+    rawLimits: BookingFreeWorkflowLimits,
+    now = new Date(),
+  ): Promise<BookingFreeWorkflowSettings> {
+    const limits = bookingFreeWorkflowLimitsSchema.parse(rawLimits);
+    if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid settings time");
+    const settingsRef = this.db.collection(SETTINGS_COLLECTION)
+      .doc(FREE_WORKFLOW_SETTINGS_DOCUMENT);
+    const auditId = `BOOKING-LIMITS-${now.getTime()}-${randomBytes(6).toString("hex")}`;
+    const auditRef = this.db.collection(FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION)
+      .doc(auditId);
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(settingsRef);
+      const currentData = snapshot.exists ? snapshot.data() : null;
+      const currentStored = storedFreeWorkflowLimits(currentData);
+      if (
+        currentStored &&
+        currentStored.customerDailyLimit === limits.customerDailyLimit &&
+        currentStored.freeOwnerDailyLimit === limits.freeOwnerDailyLimit &&
+        currentStored.freePropertyContactDailyLimit ===
+          limits.freePropertyContactDailyLimit
+      ) {
+        return resolvedFreeWorkflowSettings(currentData);
+      }
+
+      const updatedAt = now.toISOString();
+      const storedSettings = {
+        schemaVersion: 1,
+        ...limits,
+        updatedAt,
+        updatedBy: "admin" as const,
+      };
+      const previous = resolvedFreeWorkflowSettings(currentData);
+      transaction.set(settingsRef, storedSettings);
+      transaction.create(auditRef, {
+        id: auditId,
+        type: "booking_free_workflow_limits_updated",
+        previous,
+        next: limits,
+        updatedAt,
+        updatedBy: "admin",
+      });
+      return {
+        ...limits,
+        updatedAt,
+        updatedBy: "admin",
+        source: "firestore",
+      };
+    });
+  }
 
   private currentSubscriptionQuery(propertyNumber: string) {
     return this.db.collection("subscriptions")
@@ -2075,6 +2206,7 @@ export class BookingCommissionStore {
     } = {},
   ): Promise<ClaimedBookingNotification[]> {
     const nowIso = now.toISOString();
+    const freeWorkflowLimits = await this.getFreeWorkflowSettings();
     const dueSnapshot = await this.db.collection(NOTIFICATIONS_COLLECTION)
       .where("status", "==", "pending")
       .where("scheduledAt", "<=", nowIso)
@@ -2229,7 +2361,7 @@ export class BookingCommissionStore {
           }
         }
 
-        const quotaLimit = quotaLimitFor(job);
+        const quotaLimit = quotaLimitFor(job, freeWorkflowLimits);
         if (quotaLimit !== null) {
           const windowStart = getStartOfDayRiyadh(now).getTime();
           const windowEnd = getEndOfDayRiyadh(now).getTime() + 1;

@@ -23,6 +23,19 @@ https://rwqan.sa/owner/subscription`,
   );
 });
 
+test("free contact-limit message reflects a configured non-default limit", () => {
+  assert.equal(
+    buildOwnerFreeContactLimitReachedMessage({
+      propertyNumber: "10001",
+      dailyLimit: 7,
+    }),
+    `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (7 من 7).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://rwqan.sa/owner/subscription`,
+  );
+});
+
 test("subscription activation message displays an ISO end date as a Riyadh calendar date", () => {
   const message = buildOwnerSubscriptionActivatedMessage({
     propertyNumber: "66077",
