@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { BookingTokenService } from "./BookingTokenService";
+import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../shared/booking";
 import type {
   BookingFollowUpDocument,
   BookingNotificationJob,
@@ -9,9 +10,14 @@ import type {
 
 const previousSecret = process.env.SESSION_SECRET;
 const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+const previousEnjazatikUrl = process.env.ENJAZATIK_URL;
+const previousEnjazatikToken = process.env.ENJAZATIK_TOKEN;
 const TOKEN_SECRET = "booking-message-test-secret-value-1234567890";
 
 let buildBookingNotificationMessage: typeof import("./BookingNotificationWorker")["buildBookingNotificationMessage"];
+let dispatchDueBookingNotifications: typeof import("./BookingNotificationWorker")["dispatchDueBookingNotifications"];
+let bookingCommissionStore: typeof import("./BookingCommissionStore")["bookingCommissionStore"];
+let bookingCommissionService: typeof import("./BookingCommissionService")["bookingCommissionService"];
 type ConfirmedBookingDocument = Exclude<
   Extract<BookingFollowUpDocument, { bookingStatus: "confirmed" }>,
   { commissionStatus: "not_applicable" }
@@ -20,7 +26,14 @@ type ConfirmedBookingDocument = Exclude<
 before(async () => {
   process.env.SESSION_SECRET = TOKEN_SECRET;
   process.env.PUBLIC_BASE_URL = "https://booking.example/path-is-discarded";
-  ({ buildBookingNotificationMessage } = await import("./BookingNotificationWorker"));
+  process.env.ENJAZATIK_URL = "https://provider.example/send";
+  process.env.ENJAZATIK_TOKEN = "provider-test-token";
+  ({ bookingCommissionStore } = await import("./BookingCommissionStore"));
+  ({ bookingCommissionService } = await import("./BookingCommissionService"));
+  ({
+    buildBookingNotificationMessage,
+    dispatchDueBookingNotifications,
+  } = await import("./BookingNotificationWorker"));
 });
 
 after(() => {
@@ -28,6 +41,10 @@ after(() => {
   else process.env.SESSION_SECRET = previousSecret;
   if (previousPublicBaseUrl === undefined) delete process.env.PUBLIC_BASE_URL;
   else process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
+  if (previousEnjazatikUrl === undefined) delete process.env.ENJAZATIK_URL;
+  else process.env.ENJAZATIK_URL = previousEnjazatikUrl;
+  if (previousEnjazatikToken === undefined) delete process.env.ENJAZATIK_TOKEN;
+  else process.env.ENJAZATIK_TOKEN = previousEnjazatikToken;
 });
 
 function confirmedBooking(
@@ -242,4 +259,125 @@ test("pause and release messages describe the matching property outcome", () => 
   );
   assert.equal(waivedMessage.includes("تم استلام"), false);
   assert.equal(waivedMessage.includes("رابط الدفع"), false);
+});
+
+test("worker message construction uses a validated non-default admin template", () => {
+  const templates = {
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    property_released_paid:
+      "released {{propertyNumber}} / {{propertyName}}",
+  };
+  assert.equal(
+    buildBookingNotificationMessage(
+      notificationJob("property_released"),
+      confirmedBooking({ commissionStatus: "paid", complianceStatus: "released" }),
+      templates,
+    ),
+    "released 13383 / شاليه الريف المائي",
+  );
+});
+
+test("dispatch fetches the persisted template, sends its rendered body once, and finalizes the job", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = observeOnlyBooking();
+  const claimed = {
+    ...notificationJob("owner_booking_confirmed", {
+      status: "claimed",
+      leaseToken: "dispatch-lease",
+    }),
+    leaseToken: "dispatch-lease",
+  };
+  const customTemplates = {
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    owner_booking_facts:
+      "CUSTOM {{propertyNumber}} | {{propertyName}} | {{timing}} | {{bookingDate}} | {{pricePaidSar}}",
+  };
+  const providerRequests: Array<{ url: string; body: unknown }> = [];
+  const finalizations: unknown[] = [];
+  let claimCalls = 0;
+  let settingsReads = 0;
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () =>
+      claimCalls++ === 0 ? [claimed] : [];
+    store.prepareNotificationForSend = async () => ({
+      status: "ready",
+      booking,
+    });
+    store.getFreeWorkflowSettings = async () => {
+      settingsReads += 1;
+      return {
+        customerDailyLimit: 3,
+        freeOwnerDailyLimit: 3,
+        freePropertyContactDailyLimit: 3,
+        whatsappTemplates: customTemplates,
+        optionalCommissionReminderDays: [3, 4],
+        updatedAt: "2099-08-15T00:00:00.000Z",
+        updatedBy: "admin",
+        source: "firestore",
+      };
+    };
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async (url, init) => {
+      providerRequests.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body)),
+      });
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(new Date("2099-08-15T12:00:00.000Z")),
+      { claimed: 1, sent: 1 },
+    );
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(new Date("2099-08-15T12:01:00.000Z")),
+      { claimed: 0, sent: 0 },
+    );
+    assert.equal(settingsReads, 1);
+    assert.equal(providerRequests.length, 1);
+    assert.equal(providerRequests[0].url, "https://provider.example/send");
+    const bookingDate = new Date("2099-09-01T12:00:00.000Z")
+      .toLocaleDateString("ar-SA", {
+        timeZone: "Asia/Riyadh",
+        year: "numeric",
+        month: "long",
+      });
+    assert.deepEqual(providerRequests[0].body, {
+      number: "966500000001",
+      message:
+        `CUSTOM 13383 | شاليه الريف المائي | نهاية الأسبوع | ${bookingDate} | 1255.55`,
+    });
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: "dispatch-lease",
+      success: true,
+      error: undefined,
+    }]);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
 });

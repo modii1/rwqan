@@ -566,59 +566,89 @@ export async function notifyPropertyVerification(data: {
 const ENJAZATIK_URL = process.env.ENJAZATIK_URL || "";
 const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN || "";
 
+interface EnjazatikWhatsAppDependencies {
+  url: string;
+  token: string;
+  request: (url: string, init: RequestInit) => Promise<Response>;
+  delay: (milliseconds: number) => Promise<void>;
+}
+
 /**
  * دالة أساسية لإرسال رسالة WhatsApp للمالك عبر Enjazatik
  * مع إعادة المحاولة في حال الفشل
  */
-export async function sendOwnerWhatsApp(phone: string, message: string, retries = 2): Promise<{ success: boolean; error?: string }> {
-  if (!ENJAZATIK_URL || !ENJAZATIK_TOKEN) {
-    console.error("❌ Missing Enjazatik credentials");
-    return { success: false, error: "إعدادات الإرسال غير مكتملة" };
-  }
+export function createEnjazatikWhatsAppSender(
+  dependencies: EnjazatikWhatsAppDependencies,
+) {
+  return async function sendEnjazatikWhatsApp(
+    phone: string,
+    message: string,
+    retries = 2,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!dependencies.url || !dependencies.token) {
+      console.error("❌ Missing Enjazatik credentials");
+      return { success: false, error: "إعدادات الإرسال غير مكتملة" };
+    }
 
-  // تنظيف وتنسيق رقم الهاتف
-  let cleanPhone = phone.replace(/[^0-9]/g, "");
-  if (cleanPhone.startsWith("0")) {
-    cleanPhone = "966" + cleanPhone.substring(1);
-  } else if (!cleanPhone.startsWith("966")) {
-    cleanPhone = "966" + cleanPhone;
-  }
+    // تنظيف وتنسيق رقم الهاتف
+    let cleanPhone = phone.replace(/[^0-9]/g, "");
+    if (cleanPhone.startsWith("0")) {
+      cleanPhone = "966" + cleanPhone.substring(1);
+    } else if (!cleanPhone.startsWith("966")) {
+      cleanPhone = "966" + cleanPhone;
+    }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await fetch(ENJAZATIK_URL, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${ENJAZATIK_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        signal: AbortSignal.timeout(15_000),
-        body: JSON.stringify({
-          number: cleanPhone,
-          message: message
-        })
-      });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await dependencies.request(dependencies.url, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${dependencies.token}`,
+            "Content-Type": "application/json"
+          },
+          signal: AbortSignal.timeout(15_000),
+          body: JSON.stringify({
+            number: cleanPhone,
+            message: message
+          })
+        });
 
-      if (response.ok) {
-        console.log(`✅ Owner notification sent to ${cleanPhone.substring(0, 6)}**** (attempt ${attempt + 1})`);
-        return { success: true };
-      }
+        if (response.ok) {
+          console.log(`✅ Owner notification sent to ${cleanPhone.substring(0, 6)}**** (attempt ${attempt + 1})`);
+          return { success: true };
+        }
 
-      console.error(`❌ Enjazatik send failed (attempt ${attempt + 1}/${retries + 1}):`, response.status);
-      if (attempt < retries) {
-        const backoff = 5000 * (attempt + 1); // 5s, 10s
-        await new Promise(r => setTimeout(r, backoff));
-      }
-    } catch (error) {
-      console.error(`❌ Enjazatik error (attempt ${attempt + 1}/${retries + 1}):`, error);
-      if (attempt < retries) {
-        const backoff = 5000 * (attempt + 1);
-        await new Promise(r => setTimeout(r, backoff));
+        console.error(`❌ Enjazatik send failed (attempt ${attempt + 1}/${retries + 1}):`, response.status);
+        if (attempt < retries) {
+          const backoff = 5000 * (attempt + 1); // 5s, 10s
+          await dependencies.delay(backoff);
+        }
+      } catch (error) {
+        console.error(`❌ Enjazatik error (attempt ${attempt + 1}/${retries + 1}):`, error);
+        if (attempt < retries) {
+          const backoff = 5000 * (attempt + 1);
+          await dependencies.delay(backoff);
+        }
       }
     }
-  }
 
-  return { success: false, error: "فشل في إرسال الرسالة بعد عدة محاولات" };
+    return { success: false, error: "فشل في إرسال الرسالة بعد عدة محاولات" };
+  };
+}
+
+const sendOwnerWhatsAppWithDefaults = createEnjazatikWhatsAppSender({
+  url: ENJAZATIK_URL,
+  token: ENJAZATIK_TOKEN,
+  request: (url, init) => fetch(url, init),
+  delay: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+});
+
+export async function sendOwnerWhatsApp(
+  phone: string,
+  message: string,
+  retries = 2,
+): Promise<{ success: boolean; error?: string }> {
+  return sendOwnerWhatsAppWithDefaults(phone, message, retries);
 }
 
 export interface PropertyOwnerWhatsAppResult {

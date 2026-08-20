@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { parseBookingCommissionSettingsDraft } from "./booking-commission-settings";
 
@@ -30,4 +31,18 @@ test("booking settings reject decimals, negatives, and values above the bound", 
     freeOwnerDailyLimit: "3",
     freePropertyContactDailyLimit: "1001",
   }), null);
+});
+
+test("admin reminder controls explain forward-only scheduling semantics", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-settings.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /تُطبّق خيارات اليوم الثالث والرابع على الحجوزات التي تُؤكد أو تُعاد دورة تحصيلها بعد الحفظ\./,
+  );
+  assert.match(source, /تبقى التذكيرات المجدولة سابقاً كما هي\./);
+  assert.match(source, /mandatoryCommissionReminderDays/);
+  assert.match(source, /allowedOptionalCommissionReminderDays/);
 });

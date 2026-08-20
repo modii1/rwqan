@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   COMMISSION_PAYMENT_WINDOW_MS,
   COMMISSION_REMINDER_OFFSET_DAYS,
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingConfirmationFactsSchema,
   bookingDateSchema,
+  bookingFreeWorkflowConfigurationSchema,
   bookingFollowUpRecordSchema,
+  bookingOptionalCommissionReminderDaysSchema,
   bookingResponseInputSchema,
   bookingStatusSchema,
+  bookingWhatsAppTemplatesSchema,
   buildConfirmedBookingFinancials,
   calculateBookingCommissionHalalas,
   calculateCommissionDueAt,
@@ -15,10 +20,158 @@ import {
   commissionStatusSchema,
   complianceStatusSchema,
   normalizeBookingListedPriceOptionsHalalas,
+  renderBookingWhatsAppTemplate,
   toBookingAdminDto,
   toBookingPublicDto,
   type BookingConfirmationFacts,
 } from "./booking";
+
+test("default booking WhatsApp templates render the existing messages byte-for-byte", () => {
+  assert.deepEqual(
+    bookingWhatsAppTemplatesSchema.parse(DEFAULT_BOOKING_WHATSAPP_TEMPLATES),
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  );
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "customer_followup",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_followup,
+    {
+      propertyLabel: "العقار رقم 13383",
+      followUpLink: "https://rwqan.sa/booking/customer-token",
+    },
+  ), `هل تم الحجز بعد تواصلك مع العقار رقم 13383؟
+
+أكد النتيجة من الرابط التالي:
+https://rwqan.sa/booking/customer-token`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "owner_booking_facts",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.owner_booking_facts,
+    {
+      propertyName: "الريف المائي",
+      propertyNumber: "13383",
+      timing: "نهاية الأسبوع",
+      bookingDate: "20 أغسطس 2026",
+      pricePaidSar: "1000",
+    },
+  ), `تم تسجيل حجز للعقار الريف المائي رقم 13383
+
+وقت الحجز: نهاية الأسبوع
+تاريخ الحجز: 20 أغسطس 2026
+المبلغ المدفوع: 1000 ريال`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "owner_booking_commission",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.owner_booking_commission,
+    {
+      propertyName: "الريف المائي",
+      propertyNumber: "13383",
+      timing: "نهاية الأسبوع",
+      bookingDate: "20 أغسطس 2026",
+      pricePaidSar: "1000",
+      commissionPercent: 10,
+      commissionAmountSar: "100",
+      paymentWindowDays: 5,
+      paymentLink: "https://rwqan.sa/booking-commission/owner-token",
+    },
+  ), `تم تسجيل حجز للعقار الريف المائي رقم 13383
+
+وقت الحجز: نهاية الأسبوع
+تاريخ الحجز: 20 أغسطس 2026
+المبلغ المدفوع: 1000 ريال
+
+عمولة روقان (10%): 100 ريال
+مهلة السداد: 5 أيام من وقت إرسال هذه الرسالة
+
+رابط الدفع:
+https://rwqan.sa/booking-commission/owner-token`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "commission_reminder",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.commission_reminder,
+    {
+      reminderDay: 3,
+      propertyName: "الريف المائي",
+      propertyNumber: "13383",
+      commissionAmountSar: "100",
+      commissionDueAt: "25 أغسطس 2026",
+      paymentLink: "https://rwqan.sa/booking-commission/owner-token",
+    },
+  ), `تذكير اليوم 3: عمولة حجز العقار الريف المائي رقم 13383 لم تُسدد بعد.
+
+المبلغ المستحق: 100 ريال
+آخر موعد للسداد: 25 أغسطس 2026
+
+رابط الدفع:
+https://rwqan.sa/booking-commission/owner-token`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "property_paused",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.property_paused,
+    {
+      propertyName: "الريف المائي",
+      propertyNumber: "13383",
+      commissionAmountSar: "100",
+      paymentLink: "https://rwqan.sa/booking-commission/owner-token",
+    },
+  ), `انتهت مهلة سداد عمولة الحجز للعقار الريف المائي رقم 13383.
+
+سيتم إيقاف ظهور العقار إلى أن يتم سداد مبلغ 100 ريال.
+
+رابط الدفع:
+https://rwqan.sa/booking-commission/owner-token`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "property_released_paid",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.property_released_paid,
+    { propertyName: "الريف المائي", propertyNumber: "13383" },
+  ), "تم استلام عمولة حجز العقار الريف المائي رقم 13383 وإعادة إتاحة العقار.");
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "property_released_waived",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.property_released_waived,
+    { propertyName: "الريف المائي", propertyNumber: "13383" },
+  ), "تم قبول الاعتراض على عمولة حجز العقار الريف المائي رقم 13383 وإعادة إتاحة العقار.");
+});
+
+test("booking WhatsApp templates require each safe placeholder exactly once", () => {
+  for (const customerFollowup of [
+    "{{propertyLabel}}",
+    "{{propertyLabel}} {{followUpLink}} {{unknown}}",
+    "{{propertyLabel}} {{followUpLink}} {{followUpLink}}",
+    "{{propertyLabel}} {{follow-up-link}}",
+    `{{propertyLabel}} {{followUpLink}} ${"x".repeat(BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH)}`,
+  ]) {
+    assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+      ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      customer_followup: customerFollowup,
+    }).success, false, customerFollowup.slice(0, 80));
+  }
+
+  assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    extra_template: "unexpected",
+  }).success, false);
+});
+
+test("only optional commission reminders on days three and four are configurable", () => {
+  assert.deepEqual(bookingOptionalCommissionReminderDaysSchema.parse([4, 3]), [3, 4]);
+  assert.deepEqual(bookingOptionalCommissionReminderDaysSchema.parse([]), []);
+  for (const invalid of [[3, 3], [5], [2], [3, 4, 5]]) {
+    assert.equal(
+      bookingOptionalCommissionReminderDaysSchema.safeParse(invalid).success,
+      false,
+    );
+  }
+
+  assert.equal(bookingFreeWorkflowConfigurationSchema.safeParse({
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+  }).success, true);
+});
 
 const confirmedAt = "2026-08-15T12:30:00.000Z";
 const facts: BookingConfirmationFacts = {

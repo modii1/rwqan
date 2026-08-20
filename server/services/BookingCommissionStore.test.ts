@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bookingFollowUpRecordSchema } from "../../shared/booking";
+import {
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  bookingFollowUpRecordSchema,
+} from "../../shared/booking";
 import {
   BOOKING_FOLLOW_UP_DELAY_MS,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
@@ -17,6 +20,12 @@ type FakeData = Record<string, any>;
 
 class FakeFirestore {
   private readonly collections = new Map<string, Map<string, FakeData>>();
+  readonly queryLog: Array<{
+    collection: string;
+    filters: Array<{ field: string; operator: string; value: unknown }>;
+    orderBy: Array<{ field: string; direction: string }>;
+    limit: number;
+  }> = [];
 
   collection(name: string) {
     return {
@@ -28,6 +37,27 @@ class FakeFirestore {
 
   async runTransaction<T>(operation: (transaction: FakeTransaction) => Promise<T>): Promise<T> {
     return operation(new FakeTransaction(this));
+  }
+
+  batch() {
+    const updates: Array<{
+      ref: FakeDocumentReference;
+      data: FakeData;
+    }> = [];
+    return {
+      update: (ref: FakeDocumentReference, data: FakeData) => {
+        updates.push({ ref, data });
+      },
+      commit: async () => {
+        for (const update of updates) {
+          this.update(
+            update.ref.collectionName,
+            update.ref.id,
+            update.data,
+          );
+        }
+      },
+    };
   }
 
   seed(collection: string, id: string, data: FakeData): void {
@@ -59,6 +89,8 @@ class FakeFirestore {
 class FakeQuery {
   private readonly filters: Array<{ field: string; operator: string; value: unknown }> = [];
   private max = Number.POSITIVE_INFINITY;
+  private readonly ordering: Array<{ field: string; direction: string }> = [];
+  private cursorId: string | null = null;
 
   constructor(
     private readonly database: FakeFirestore,
@@ -70,7 +102,8 @@ class FakeQuery {
     return this;
   }
 
-  orderBy(): FakeQuery {
+  orderBy(field: string, direction = "asc"): FakeQuery {
+    this.ordering.push({ field, direction });
     return this;
   }
 
@@ -79,11 +112,22 @@ class FakeQuery {
     return this;
   }
 
+  startAfter(snapshot: FakeSnapshot): FakeQuery {
+    this.cursorId = snapshot.ref.id;
+    return this;
+  }
+
   async get() {
+    this.database.queryLog.push({
+      collection: this.collectionName,
+      filters: [...this.filters],
+      orderBy: [...this.ordering],
+      limit: this.max,
+    });
     const documents = (this.database as any).collections.get(this.collectionName) as
       | Map<string, FakeData>
       | undefined;
-    const docs = [...(documents?.keys() || [])]
+    const orderedDocs = [...(documents?.keys() || [])]
       .map((id) => new FakeSnapshot(
         new FakeDocumentReference(this.database, this.collectionName, id),
       ))
@@ -97,6 +141,19 @@ class FakeQuery {
         }
         throw new Error(`Unsupported fake query operator ${operator}`);
       }))
+      .sort((left, right) => {
+        for (const { field, direction } of this.ordering) {
+          const comparison = String(left.data()?.[field] ?? "")
+            .localeCompare(String(right.data()?.[field] ?? ""));
+          if (comparison !== 0) return direction === "desc" ? -comparison : comparison;
+        }
+        return left.ref.id.localeCompare(right.ref.id);
+      });
+    const cursorIndex = this.cursorId
+      ? orderedDocs.findIndex((snapshot) => snapshot.ref.id === this.cursorId)
+      : -1;
+    const docs = orderedDocs
+      .slice(cursorIndex + 1)
       .slice(0, this.max);
     return { docs, empty: docs.length === 0, size: docs.length };
   }
@@ -205,6 +262,123 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
   });
 });
 
+test("worker scans use single-field time indexes and retain exact status gates", async () => {
+  const database = new FakeFirestore();
+  const store = new BookingCommissionStore(database as any);
+  const workflow = buildWorkflow();
+  const expiredLease = new Date(now.getTime() - 60_000).toISOString();
+
+  database.seed("booking_notification_outbox", "CLAIMED-EXPIRED", {
+    ...workflow.customerNotification,
+    id: "CLAIMED-EXPIRED",
+    status: "claimed",
+    leaseToken: "lease-expired",
+    leaseExpiresAt: expiredLease,
+  });
+  database.seed("booking_notification_outbox", "SENT-WITH-OLD-LEASE", {
+    ...workflow.customerNotification,
+    id: "SENT-WITH-OLD-LEASE",
+    status: "sent",
+    leaseToken: null,
+    leaseExpiresAt: expiredLease,
+  });
+
+  assert.equal(await store.recoverExpiredNotificationClaims(now), 1);
+  assert.equal(database.read("booking_notification_outbox", "CLAIMED-EXPIRED")?.status, "pending");
+  assert.equal(database.read("booking_notification_outbox", "SENT-WITH-OLD-LEASE")?.status, "sent");
+  const recoveryQuery = database.queryLog.find((query) =>
+    query.collection === "booking_notification_outbox" &&
+    query.filters.some((filter) => filter.field === "leaseExpiresAt"));
+  assert.deepEqual(recoveryQuery?.filters.map(({ field, operator }) => ({ field, operator })), [
+    { field: "leaseExpiresAt", operator: "<=" },
+  ]);
+  assert.deepEqual(recoveryQuery?.orderBy, [
+    { field: "leaseExpiresAt", direction: "asc" },
+  ]);
+
+  database.seed("booking_notification_outbox", "TERMINAL-DUE", {
+    ...workflow.customerNotification,
+    id: "TERMINAL-DUE",
+    status: "sent",
+    scheduledAt: new Date(now.getTime() - 120_000).toISOString(),
+  });
+  for (let index = 0; index < 105; index++) {
+    database.seed("booking_notification_outbox", `TERMINAL-DUE-${index}`, {
+      ...workflow.customerNotification,
+      id: `TERMINAL-DUE-${index}`,
+      status: "sent",
+      scheduledAt: new Date(now.getTime() - 10_000_000 + index).toISOString(),
+    });
+  }
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-QUERY-SHAPE",
+  });
+  database.seed("booking_notification_outbox", workflow.customerNotification.id, {
+    ...workflow.customerNotification,
+    scheduledAt: new Date(now.getTime() - 60_000).toISOString(),
+  });
+
+  const claims = await store.claimDueNotificationJobs(now, 1, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].id, workflow.customerNotification.id);
+  assert.equal(database.read("booking_notification_outbox", "TERMINAL-DUE")?.status, "sent");
+  const dueQuery = database.queryLog.findLast((query) =>
+    query.collection === "booking_notification_outbox" &&
+    query.filters.some((filter) => filter.field === "scheduledAt"));
+  assert.deepEqual(dueQuery?.filters.map(({ field, operator }) => ({ field, operator })), [
+    { field: "scheduledAt", operator: "<=" },
+  ]);
+  assert.deepEqual(dueQuery?.orderBy, [
+    { field: "scheduledAt", direction: "asc" },
+  ]);
+  assert.ok(
+    database.queryLog.filter((query) =>
+      query.collection === "booking_notification_outbox" &&
+      query.filters.some((filter) => filter.field === "scheduledAt")).length >= 2,
+    "terminal jobs filling the first page must not starve a later pending job",
+  );
+
+  for (let index = 0; index < 205; index++) {
+    database.seed("booking_followups", `COMMISSION-CLOSED-${index}`, {
+      ...workflow.followUp,
+      id: `COMMISSION-CLOSED-${index}`,
+      bookingStatus: "confirmed",
+      commissionStatus: "paid",
+      commissionDueAt: new Date(now.getTime() - 20_000_000 + index).toISOString(),
+    });
+  }
+  database.seed("booking_followups", "COMMISSION-PENDING", {
+    ...workflow.followUp,
+    id: "COMMISSION-PENDING",
+    bookingStatus: "confirmed",
+    commissionStatus: "pending",
+    disputeStatus: "none",
+    commissionDueAt: new Date(now.getTime() - 60_000).toISOString(),
+    enforcementDeferredUntil: null,
+  });
+  const candidates = await store.listCommissionEnforcementCandidates(now, 1);
+  assert.deepEqual(candidates.map((candidate) => candidate.id), ["COMMISSION-PENDING"]);
+  const commissionQuery = database.queryLog.findLast((query) =>
+    query.collection === "booking_followups" &&
+    query.filters.some((filter) => filter.field === "commissionDueAt"));
+  assert.deepEqual(commissionQuery?.filters.map(({ field, operator }) => ({ field, operator })), [
+    { field: "commissionDueAt", operator: "<=" },
+  ]);
+  assert.deepEqual(commissionQuery?.orderBy, [
+    { field: "commissionDueAt", direction: "asc" },
+  ]);
+  assert.ok(
+    database.queryLog.filter((query) =>
+      query.collection === "booking_followups" &&
+      query.filters.some((filter) => filter.field === "commissionDueAt")).length >= 2,
+    "closed commissions filling the first page must not starve a later pending commission",
+  );
+});
+
 test("initial workflow has no booking, commission, dispute, or enforcement outcome yet", () => {
   const { followUp } = buildWorkflow();
 
@@ -270,34 +444,43 @@ test("free-workflow settings fall back to env and persist idempotently with one 
     process.env.FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT = "8";
     process.env.FREE_PROPERTY_DAILY_CONTACT_LIMIT = "9";
 
-    assert.deepEqual(await store.getFreeWorkflowSettings(), {
+    const environmentSettings = {
       customerDailyLimit: 7,
       freeOwnerDailyLimit: 8,
       freePropertyContactDailyLimit: 9,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
       updatedAt: null,
-      updatedBy: "environment",
-      source: "environment",
-    });
+      updatedBy: "environment" as const,
+      source: "environment" as const,
+    };
+    assert.deepEqual(await store.getFreeWorkflowSettings(), environmentSettings);
 
-    const expected = {
+    const configuration = {
       customerDailyLimit: 4,
       freeOwnerDailyLimit: 5,
       freePropertyContactDailyLimit: 6,
+      whatsappTemplates: {
+        ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+        property_released_paid:
+          "{{propertyName}} ({{propertyNumber}}): paid and released",
+      },
+      optionalCommissionReminderDays: [3] as Array<3 | 4>,
+    };
+    const expected = {
+      ...configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin" as const,
       source: "firestore" as const,
     };
-    assert.deepEqual(await store.updateFreeWorkflowSettings({
-      customerDailyLimit: 4,
-      freeOwnerDailyLimit: 5,
-      freePropertyContactDailyLimit: 6,
-    }, updatedAt), expected);
+    assert.deepEqual(
+      await store.updateFreeWorkflowSettings(configuration, updatedAt),
+      expected,
+    );
     assert.deepEqual(await store.getFreeWorkflowSettings(), expected);
     assert.deepEqual(database.read("settings", "booking_free_workflow_limits"), {
-      schemaVersion: 1,
-      customerDailyLimit: 4,
-      freeOwnerDailyLimit: 5,
-      freePropertyContactDailyLimit: 6,
+      schemaVersion: 2,
+      ...configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin",
     });
@@ -307,48 +490,41 @@ test("free-workflow settings fall back to env and persist idempotently with one 
     assert.match(auditEntries[0][0], /^BOOKING-LIMITS-\d+-[a-f0-9]{12}$/);
     assert.deepEqual(auditEntries[0][1], {
       id: auditEntries[0][0],
-      type: "booking_free_workflow_limits_updated",
-      previous: {
-        customerDailyLimit: 7,
-        freeOwnerDailyLimit: 8,
-        freePropertyContactDailyLimit: 9,
-        updatedAt: null,
-        updatedBy: "environment",
-        source: "environment",
-      },
-      next: {
-        customerDailyLimit: 4,
-        freeOwnerDailyLimit: 5,
-        freePropertyContactDailyLimit: 6,
-      },
+      type: "booking_free_workflow_settings_updated",
+      previous: environmentSettings,
+      next: configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin",
     });
 
-    assert.deepEqual(await store.updateFreeWorkflowSettings({
-      customerDailyLimit: 4,
-      freeOwnerDailyLimit: 5,
-      freePropertyContactDailyLimit: 6,
-    }, new Date("2026-08-18T11:00:00.000Z")), expected);
+    assert.deepEqual(
+      await store.updateFreeWorkflowSettings(
+        configuration,
+        new Date("2026-08-18T11:00:00.000Z"),
+      ),
+      expected,
+    );
     assert.equal(
       database.entries("booking_free_workflow_limits_audit").length,
       1,
       "an unchanged full replacement does not create another audit record",
     );
 
-    for (const limits of [
-      { customerDailyLimit: -1, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 },
-      { customerDailyLimit: 4.5, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 },
-      { customerDailyLimit: 4, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 1_001 },
-      { customerDailyLimit: 4, freeOwnerDailyLimit: 5 } as any,
+    for (const invalid of [
+      { ...configuration, customerDailyLimit: -1 },
+      { ...configuration, customerDailyLimit: 4.5 },
+      { ...configuration, freePropertyContactDailyLimit: 1_001 },
+      { ...configuration, whatsappTemplates: {} },
+      { ...configuration, optionalCommissionReminderDays: [5] },
     ]) {
-      await assert.rejects(() => store.updateFreeWorkflowSettings(limits as any, updatedAt));
+      await assert.rejects(() =>
+        store.updateFreeWorkflowSettings(invalid as any, updatedAt));
     }
-    await assert.rejects(() => store.updateFreeWorkflowSettings({
-      customerDailyLimit: 4,
-      freeOwnerDailyLimit: 5,
-      freePropertyContactDailyLimit: 6,
-    }, new Date("invalid")), RangeError);
+    await assert.rejects(() =>
+      store.updateFreeWorkflowSettings(
+        configuration,
+        new Date("invalid"),
+      ), RangeError);
     assert.equal(database.entries("booking_free_workflow_limits_audit").length, 1);
   } finally {
     for (const name of envNames) {
@@ -357,6 +533,41 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       else process.env[name] = value;
     }
   }
+});
+
+test("legacy limit-only settings migrate in memory without writing during GET", async () => {
+  const database = new FakeFirestore();
+  const legacy = {
+    schemaVersion: 1,
+    customerDailyLimit: 11,
+    freeOwnerDailyLimit: 12,
+    freePropertyContactDailyLimit: 13,
+    updatedAt: "2026-08-18T09:00:00.000Z",
+    updatedBy: "admin",
+  };
+  database.seed("settings", "booking_free_workflow_limits", legacy);
+
+  assert.deepEqual(
+    await new BookingCommissionStore(database as any).getFreeWorkflowSettings(),
+    {
+      customerDailyLimit: 11,
+      freeOwnerDailyLimit: 12,
+      freePropertyContactDailyLimit: 13,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: legacy.updatedAt,
+      updatedBy: "admin",
+      source: "firestore",
+    },
+  );
+  assert.deepEqual(
+    database.read("settings", "booking_free_workflow_limits"),
+    legacy,
+  );
+  assert.equal(
+    database.entries("booking_free_workflow_limits_audit").length,
+    0,
+  );
 });
 
 test("notification claims use persisted customer and free-owner quota limits", async () => {
@@ -697,6 +908,59 @@ test("confirmation creates debt only while the current property owner identity s
       assert.equal(JSON.stringify(confirmed.events).includes("050000"), false);
     }
   }
+});
+
+test("confirmation schedules configured optional reminders and always schedules day five", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildWorkflow();
+  const bookingId = workflow.followUp.id;
+  database.seed("booking_followups", bookingId, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-CONFIGURED-REMINDERS",
+    bookingDecision: "yes",
+    questionnaireStartedAt: now.toISOString(),
+  });
+  database.seed("properties", "13383", {
+    propertyNumber: "13383",
+    whatsappNumber: "0500000001",
+  });
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 2,
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+
+  await new BookingCommissionStore(database as any).confirmBooking(
+    bookingId,
+    {
+      timing: "weekend",
+      bookingDate: { value: "2026-08-15", precision: "day" },
+      pricePaidHalalas: 100_000,
+    },
+    new Date(now.getTime() + 1_000),
+    true,
+  );
+
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      `${bookingId}--commission_reminder_3`,
+    ),
+    undefined,
+  );
+  assert.ok(database.read(
+    "booking_notification_outbox",
+    `${bookingId}--commission_reminder_4`,
+  ));
+  assert.ok(database.read(
+    "booking_notification_outbox",
+    `${bookingId}--commission_reminder_5`,
+  ));
 });
 
 test("a stale owner link cannot read, dispute, or reserve checkout, while its signed provider callback remains valid", async () => {

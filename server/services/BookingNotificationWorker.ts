@@ -11,6 +11,14 @@ import type {
   BookingFollowUpDocument,
   BookingNotificationJob,
 } from "./BookingCommissionTypes";
+import {
+  BASIS_POINTS_DENOMINATOR,
+  BOOKING_COMMISSION_BASIS_POINTS,
+  COMMISSION_PAYMENT_WINDOW_MS,
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  renderBookingWhatsAppTemplate,
+  type BookingWhatsAppTemplates,
+} from "../../shared/booking";
 
 const ENFORCEMENT_RETRY_MS = 30 * 60 * 1000;
 
@@ -83,6 +91,7 @@ function bookingDateLabel(booking: BookingFollowUpDocument): string {
 export function buildBookingNotificationMessage(
   job: BookingNotificationJob,
   booking: BookingFollowUpDocument,
+  templates: BookingWhatsAppTemplates = DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
 ): string {
   const propertyName = String(booking.propertyName || "").trim() || "بدون اسم";
   if (job.kind === "customer_followup") {
@@ -90,10 +99,14 @@ export function buildBookingNotificationMessage(
     const propertyLabel = booking.isFreeProperty || !booking.propertyName
       ? `العقار رقم ${booking.propertyNumber}`
       : `${propertyName} رقم ${booking.propertyNumber}`;
-    return `هل تم الحجز بعد تواصلك مع ${propertyLabel}؟
-
-أكد النتيجة من الرابط التالي:
-${baseUrl()}/booking/${encodeURIComponent(token)}`;
+    return renderBookingWhatsAppTemplate(
+      "customer_followup",
+      templates.customer_followup,
+      {
+        propertyLabel,
+        followUpLink: `${baseUrl()}/booking/${encodeURIComponent(token)}`,
+      },
+    );
   }
 
   const facts = booking.confirmationFacts;
@@ -103,25 +116,37 @@ ${baseUrl()}/booking/${encodeURIComponent(token)}`;
       booking.commissionAmountHalalas === null ||
       !booking.commissionDueAt
     ) {
-      return `تم تسجيل حجز للعقار ${propertyName} رقم ${booking.propertyNumber}
-
-وقت الحجز: ${timingLabel(facts?.timing || "other")}
-تاريخ الحجز: ${bookingDateLabel(booking)}
-المبلغ المدفوع: ${formatSar(facts?.pricePaidHalalas || 0)} ريال`;
+      return renderBookingWhatsAppTemplate(
+        "owner_booking_facts",
+        templates.owner_booking_facts,
+        {
+          propertyName,
+          propertyNumber: booking.propertyNumber,
+          timing: timingLabel(facts?.timing || "other"),
+          bookingDate: bookingDateLabel(booking),
+          pricePaidSar: formatSar(facts?.pricePaidHalalas || 0),
+        },
+      );
     }
     const paymentToken = bookingCommissionService.issueOwnerPaymentToken(booking);
     const paymentLink = `${baseUrl()}/booking-commission/${encodeURIComponent(paymentToken)}`;
-    return `تم تسجيل حجز للعقار ${propertyName} رقم ${booking.propertyNumber}
-
-وقت الحجز: ${timingLabel(facts?.timing || "other")}
-تاريخ الحجز: ${bookingDateLabel(booking)}
-المبلغ المدفوع: ${formatSar(facts?.pricePaidHalalas || 0)} ريال
-
-عمولة روقان (10%): ${formatSar(booking.commissionAmountHalalas)} ريال
-مهلة السداد: 5 أيام من وقت إرسال هذه الرسالة
-
-رابط الدفع:
-${paymentLink}`;
+    return renderBookingWhatsAppTemplate(
+      "owner_booking_commission",
+      templates.owner_booking_commission,
+      {
+        propertyName,
+        propertyNumber: booking.propertyNumber,
+        timing: timingLabel(facts?.timing || "other"),
+        bookingDate: bookingDateLabel(booking),
+        pricePaidSar: formatSar(facts?.pricePaidHalalas || 0),
+        commissionPercent:
+          BOOKING_COMMISSION_BASIS_POINTS / (BASIS_POINTS_DENOMINATOR / 100),
+        commissionAmountSar: formatSar(booking.commissionAmountHalalas),
+        paymentWindowDays:
+          COMMISSION_PAYMENT_WINDOW_MS / (24 * 60 * 60 * 1_000),
+        paymentLink,
+      },
+    );
   }
 
   const paymentToken = bookingCommissionService.issueOwnerPaymentToken(booking);
@@ -129,29 +154,46 @@ ${paymentLink}`;
 
   if (job.kind.startsWith("commission_reminder_")) {
     const day = job.reminderOffsetDays || Number(job.kind.slice(-1));
-    return `تذكير اليوم ${day}: عمولة حجز العقار ${propertyName} رقم ${booking.propertyNumber} لم تُسدد بعد.
-
-المبلغ المستحق: ${formatSar(booking.commissionAmountHalalas)} ريال
-آخر موعد للسداد: ${formatDate(booking.commissionDueAt)}
-
-رابط الدفع:
-${paymentLink}`;
+    return renderBookingWhatsAppTemplate(
+      "commission_reminder",
+      templates.commission_reminder,
+      {
+        reminderDay: day,
+        propertyName,
+        propertyNumber: booking.propertyNumber,
+        commissionAmountSar: formatSar(booking.commissionAmountHalalas),
+        commissionDueAt: formatDate(booking.commissionDueAt),
+        paymentLink,
+      },
+    );
   }
 
   if (job.kind === "property_paused") {
-    return `انتهت مهلة سداد عمولة الحجز للعقار ${propertyName} رقم ${booking.propertyNumber}.
-
-سيتم إيقاف ظهور العقار إلى أن يتم سداد مبلغ ${formatSar(booking.commissionAmountHalalas)} ريال.
-
-رابط الدفع:
-${paymentLink}`;
+    return renderBookingWhatsAppTemplate(
+      "property_paused",
+      templates.property_paused,
+      {
+        propertyName,
+        propertyNumber: booking.propertyNumber,
+        commissionAmountSar: formatSar(booking.commissionAmountHalalas),
+        paymentLink,
+      },
+    );
   }
 
   if (booking.commissionStatus === "waived") {
-    return `تم قبول الاعتراض على عمولة حجز العقار ${propertyName} رقم ${booking.propertyNumber} وإعادة إتاحة العقار.`;
+    return renderBookingWhatsAppTemplate(
+      "property_released_waived",
+      templates.property_released_waived,
+      { propertyName, propertyNumber: booking.propertyNumber },
+    );
   }
 
-  return `تم استلام عمولة حجز العقار ${propertyName} رقم ${booking.propertyNumber} وإعادة إتاحة العقار.`;
+  return renderBookingWhatsAppTemplate(
+    "property_released_paid",
+    templates.property_released_paid,
+    { propertyName, propertyNumber: booking.propertyNumber },
+  );
 }
 
 async function dispatchClaim(job: ClaimedBookingNotification): Promise<boolean> {
@@ -171,7 +213,12 @@ async function dispatchClaim(job: ClaimedBookingNotification): Promise<boolean> 
 
   let message: string;
   try {
-    message = buildBookingNotificationMessage(job, booking);
+    const settings = await bookingCommissionStore.getFreeWorkflowSettings();
+    message = buildBookingNotificationMessage(
+      job,
+      booking,
+      settings.whatsappTemplates,
+    );
   } catch (error) {
     await bookingCommissionStore.finishNotificationJob({
       jobId: job.id,

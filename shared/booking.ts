@@ -5,6 +5,10 @@ export const BASIS_POINTS_DENOMINATOR = 10_000 as const;
 export const COMMISSION_PAYMENT_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
 export const COMMISSION_REMINDER_OFFSET_DAYS = [3, 4, 5] as const;
 export const BOOKING_FREE_WORKFLOW_LIMIT_MAX = 1_000 as const;
+export const BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH = 2_000 as const;
+export const BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION = 1 as const;
+export const BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS = [3, 4] as const;
+export const BOOKING_MANDATORY_COMMISSION_REMINDER_DAYS = [5] as const;
 
 const bookingFreeWorkflowLimitSchema = z.number()
   .int()
@@ -18,15 +22,224 @@ export const bookingFreeWorkflowLimitsSchema = z.object({
 }).strict();
 export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimitsSchema>;
 
-export const bookingFreeWorkflowSettingsUpdateSchema = z.object({
-  settings: bookingFreeWorkflowLimitsSchema,
+export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
+  customer_followup: ["propertyLabel", "followUpLink"],
+  owner_booking_facts: [
+    "propertyName",
+    "propertyNumber",
+    "timing",
+    "bookingDate",
+    "pricePaidSar",
+  ],
+  owner_booking_commission: [
+    "propertyName",
+    "propertyNumber",
+    "timing",
+    "bookingDate",
+    "pricePaidSar",
+    "commissionPercent",
+    "commissionAmountSar",
+    "paymentWindowDays",
+    "paymentLink",
+  ],
+  commission_reminder: [
+    "reminderDay",
+    "propertyName",
+    "propertyNumber",
+    "commissionAmountSar",
+    "commissionDueAt",
+    "paymentLink",
+  ],
+  property_paused: [
+    "propertyName",
+    "propertyNumber",
+    "commissionAmountSar",
+    "paymentLink",
+  ],
+  property_released_paid: ["propertyName", "propertyNumber"],
+  property_released_waived: ["propertyName", "propertyNumber"],
+} as const;
+
+export type BookingWhatsAppTemplateKey =
+  keyof typeof BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS;
+
+export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
+  customer_followup: `هل تم الحجز بعد تواصلك مع {{propertyLabel}}؟
+
+أكد النتيجة من الرابط التالي:
+{{followUpLink}}`,
+  owner_booking_facts: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
+
+وقت الحجز: {{timing}}
+تاريخ الحجز: {{bookingDate}}
+المبلغ المدفوع: {{pricePaidSar}} ريال`,
+  owner_booking_commission: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
+
+وقت الحجز: {{timing}}
+تاريخ الحجز: {{bookingDate}}
+المبلغ المدفوع: {{pricePaidSar}} ريال
+
+عمولة روقان ({{commissionPercent}}%): {{commissionAmountSar}} ريال
+مهلة السداد: {{paymentWindowDays}} أيام من وقت إرسال هذه الرسالة
+
+رابط الدفع:
+{{paymentLink}}`,
+  commission_reminder: `تذكير اليوم {{reminderDay}}: عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} لم تُسدد بعد.
+
+المبلغ المستحق: {{commissionAmountSar}} ريال
+آخر موعد للسداد: {{commissionDueAt}}
+
+رابط الدفع:
+{{paymentLink}}`,
+  property_paused: `انتهت مهلة سداد عمولة الحجز للعقار {{propertyName}} رقم {{propertyNumber}}.
+
+سيتم إيقاف ظهور العقار إلى أن يتم سداد مبلغ {{commissionAmountSar}} ريال.
+
+رابط الدفع:
+{{paymentLink}}`,
+  property_released_paid:
+    "تم استلام عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} وإعادة إتاحة العقار.",
+  property_released_waived:
+    "تم قبول الاعتراض على عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} وإعادة إتاحة العقار.",
+} as const;
+
+const bookingWhatsAppPlaceholderPattern = /\{\{([a-z][A-Za-z0-9]*)\}\}/g;
+const disallowedBookingWhatsAppControlPattern =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
+function bookingWhatsAppTemplateSchemaFor(
+  key: BookingWhatsAppTemplateKey,
+) {
+  const required = BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS[key] as readonly string[];
+  const allowed = new Set(required);
+  return z.string()
+    .min(1)
+    .max(BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH)
+    .superRefine((template, context) => {
+      if (!template.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "WhatsApp template cannot be blank",
+        });
+      }
+      if (disallowedBookingWhatsAppControlPattern.test(template)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "WhatsApp template contains unsupported control characters",
+        });
+      }
+      const placeholders = Array.from(
+        template.matchAll(bookingWhatsAppPlaceholderPattern),
+        (match) => match[1],
+      );
+      if (/[{}]/.test(template.replace(bookingWhatsAppPlaceholderPattern, ""))) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "WhatsApp template contains malformed placeholder syntax",
+        });
+      }
+      for (const placeholder of placeholders) {
+        if (!allowed.has(placeholder)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Placeholder {{${placeholder}}} is not allowed for ${key}`,
+          });
+        }
+      }
+      for (const placeholder of required) {
+        const occurrences = placeholders.filter((value) => value === placeholder).length;
+        if (occurrences !== 1) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Placeholder {{${placeholder}}} must appear exactly once for ${key}`,
+          });
+        }
+      }
+    });
+}
+
+export const bookingWhatsAppTemplatesSchema = z.object({
+  customer_followup: bookingWhatsAppTemplateSchemaFor("customer_followup"),
+  owner_booking_facts: bookingWhatsAppTemplateSchemaFor("owner_booking_facts"),
+  owner_booking_commission: bookingWhatsAppTemplateSchemaFor(
+    "owner_booking_commission",
+  ),
+  commission_reminder: bookingWhatsAppTemplateSchemaFor("commission_reminder"),
+  property_paused: bookingWhatsAppTemplateSchemaFor("property_paused"),
+  property_released_paid: bookingWhatsAppTemplateSchemaFor(
+    "property_released_paid",
+  ),
+  property_released_waived: bookingWhatsAppTemplateSchemaFor(
+    "property_released_waived",
+  ),
 }).strict();
 
-export type BookingFreeWorkflowSettings = BookingFreeWorkflowLimits & {
+export type BookingWhatsAppTemplates = z.infer<
+  typeof bookingWhatsAppTemplatesSchema
+>;
+
+export const bookingOptionalCommissionReminderDaysSchema = z.array(
+  z.union([z.literal(3), z.literal(4)]),
+)
+  .max(BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS.length)
+  .superRefine((days, context) => {
+    if (new Set(days).size !== days.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Optional commission reminder days must be unique",
+      });
+    }
+  })
+  .transform((days) => [...days].sort((left, right) => left - right));
+
+export type BookingOptionalCommissionReminderDay =
+  typeof BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS[number];
+
+export const bookingFreeWorkflowConfigurationSchema =
+  bookingFreeWorkflowLimitsSchema.extend({
+    whatsappTemplates: bookingWhatsAppTemplatesSchema,
+    optionalCommissionReminderDays:
+      bookingOptionalCommissionReminderDaysSchema,
+  }).strict();
+
+export type BookingFreeWorkflowConfiguration = z.infer<
+  typeof bookingFreeWorkflowConfigurationSchema
+>;
+
+export const bookingFreeWorkflowSettingsUpdateSchema = z.object({
+  settings: bookingFreeWorkflowConfigurationSchema,
+}).strict();
+
+export type BookingFreeWorkflowSettings = BookingFreeWorkflowConfiguration & {
   updatedAt: string | null;
   updatedBy: "admin" | "environment";
   source: "firestore" | "environment";
 };
+
+type BookingWhatsAppTemplateValues = {
+  [Key in BookingWhatsAppTemplateKey]: Record<
+    typeof BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS[Key][number],
+    string | number
+  >;
+};
+
+/** Plain-text replacement only: templates are never evaluated as code or HTML. */
+export function renderBookingWhatsAppTemplate<Key extends BookingWhatsAppTemplateKey>(
+  key: Key,
+  rawTemplate: string,
+  values: BookingWhatsAppTemplateValues[Key],
+): string {
+  const template = bookingWhatsAppTemplatesSchema.shape[key].parse(rawTemplate);
+  return template.replace(
+    bookingWhatsAppPlaceholderPattern,
+    (_placeholder, name: string) => {
+      if (!Object.prototype.hasOwnProperty.call(values, name)) {
+        throw new RangeError(`Missing WhatsApp template value: ${name}`);
+      }
+      return String((values as Record<string, string | number>)[name]);
+    },
+  );
+}
 
 export const bookingStatusSchema = z.enum([
   "awaiting_response",

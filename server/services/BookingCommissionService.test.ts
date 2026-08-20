@@ -13,6 +13,7 @@ import {
 } from "./BookingCommissionStore";
 import type { BookingFollowUpDocument } from "./BookingCommissionTypes";
 import { paymobService } from "../integrations/paymob";
+import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../shared/booking";
 
 type AwaitingBookingDocument = Extract<
   BookingFollowUpDocument,
@@ -165,17 +166,39 @@ test("admin free-workflow settings preserve the strict service response contract
     getSettings: store.getFreeWorkflowSettings,
     updateSettings: store.updateFreeWorkflowSettings,
   };
-  const persisted = {
+  const configuration = {
     customerDailyLimit: 4,
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
+    whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
+    optionalCommissionReminderDays: [3] as Array<3 | 4>,
+  };
+  const persisted = {
+    ...configuration,
     updatedAt: "2026-08-18T10:00:00.000Z",
     updatedBy: "admin" as const,
     source: "firestore" as const,
   };
   const updates: unknown[] = [];
+  const environmentNames = [
+    "ENJAZATIK_URL",
+    "ENJAZATIK_TOKEN",
+    "BOOKING_WORKER_SECRET",
+    "PUBLIC_BASE_URL",
+    "NEXT_PUBLIC_BASE_URL",
+    "NODE_ENV",
+  ] as const;
+  const previousEnvironment = Object.fromEntries(
+    environmentNames.map((name) => [name, process.env[name]]),
+  );
+  const mutableEnvironment = process.env as Record<string, string | undefined>;
 
   try {
+    process.env.ENJAZATIK_URL = "https://provider.example/send";
+    process.env.ENJAZATIK_TOKEN = "provider-token";
+    process.env.BOOKING_WORKER_SECRET = "w".repeat(32);
+    process.env.PUBLIC_BASE_URL = "https://booking.example/path";
+    mutableEnvironment.NODE_ENV = "production";
     store.getFreeWorkflowSettings = async () => persisted;
     store.updateFreeWorkflowSettings = async (settings: unknown) => {
       updates.push(settings);
@@ -183,41 +206,68 @@ test("admin free-workflow settings preserve the strict service response contract
     };
 
     const service = new BookingCommissionService();
-    assert.deepEqual(await service.getAdminFreeWorkflowSettings(), {
+    const expectedResponse = {
       settings: persisted,
-    });
-    assert.deepEqual(await service.updateAdminFreeWorkflowSettings({
-      settings: {
-        customerDailyLimit: 4,
-        freeOwnerDailyLimit: 5,
-        freePropertyContactDailyLimit: 6,
+      fixedPolicy: {
+        customerFollowUpDelayHours: 24,
+        commissionPaymentWindowDays: 5,
+        mandatoryCommissionReminderDays: [5],
+        allowedOptionalCommissionReminderDays: [3, 4],
+        templateSyntaxVersion: 1,
+        templateMaxLength: 2_000,
       },
-    }), { settings: persisted });
-    assert.deepEqual(updates, [{
-      customerDailyLimit: 4,
-      freeOwnerDailyLimit: 5,
-      freePropertyContactDailyLimit: 6,
-    }]);
+      operationalHealth: {
+        whatsappProviderConfigured: true,
+        workerSecretConfigured: true,
+        publicBaseUrlConfigured: true,
+        publicBaseUrlValid: true,
+      },
+    };
+    assert.deepEqual(
+      await service.getAdminFreeWorkflowSettings(),
+      expectedResponse,
+    );
+    assert.deepEqual(await service.updateAdminFreeWorkflowSettings({
+      settings: configuration,
+    }), expectedResponse);
+    assert.deepEqual(updates, [configuration]);
+
+    delete process.env.ENJAZATIK_TOKEN;
+    process.env.BOOKING_WORKER_SECRET = "w".repeat(31);
+    process.env.PUBLIC_BASE_URL = "http://127.0.0.1:3000/path";
+    mutableEnvironment.NODE_ENV = "development";
+    assert.deepEqual(
+      (await service.getAdminFreeWorkflowSettings()).operationalHealth,
+      {
+        whatsappProviderConfigured: false,
+        workerSecretConfigured: false,
+        publicBaseUrlConfigured: true,
+        publicBaseUrlValid: true,
+      },
+    );
+    mutableEnvironment.NODE_ENV = "production";
+    assert.equal(
+      (await service.getAdminFreeWorkflowSettings()).operationalHealth
+        .publicBaseUrlValid,
+      false,
+    );
 
     for (const input of [
       {},
-      { settings: { customerDailyLimit: 4, freeOwnerDailyLimit: 5 } },
-      { settings: { customerDailyLimit: -1, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 } },
-      { settings: { customerDailyLimit: 4.5, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 6 } },
-      { settings: { customerDailyLimit: 4, freeOwnerDailyLimit: 5, freePropertyContactDailyLimit: 1_001 } },
+      { settings: { ...configuration, customerDailyLimit: -1 } },
+      { settings: { ...configuration, customerDailyLimit: 4.5 } },
+      { settings: { ...configuration, freePropertyContactDailyLimit: 1_001 } },
+      { settings: { ...configuration, whatsappTemplates: {} } },
+      { settings: { ...configuration, optionalCommissionReminderDays: [5] } },
       {
         settings: {
-          customerDailyLimit: 4,
-          freeOwnerDailyLimit: 5,
-          freePropertyContactDailyLimit: 6,
+          ...configuration,
           extra: true,
         },
       },
       {
         settings: {
-          customerDailyLimit: 4,
-          freeOwnerDailyLimit: 5,
-          freePropertyContactDailyLimit: 6,
+          ...configuration,
         },
         extra: true,
       },
@@ -228,6 +278,11 @@ test("admin free-workflow settings preserve the strict service response contract
   } finally {
     store.getFreeWorkflowSettings = originals.getSettings;
     store.updateFreeWorkflowSettings = originals.updateSettings;
+    for (const name of environmentNames) {
+      const value = previousEnvironment[name];
+      if (value === undefined) delete mutableEnvironment[name];
+      else mutableEnvironment[name] = value;
+    }
   }
 });
 

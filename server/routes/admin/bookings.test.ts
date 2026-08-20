@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { bookingCommissionStore } from "../../services/BookingCommissionStore";
 import { BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE } from "../../services/BookingCommissionService";
+import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../../shared/booking";
 import bookingsRouter from "./bookings";
 
 async function withBookingsServer(
@@ -35,17 +36,38 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
     getSettings: store.getFreeWorkflowSettings,
     updateSettings: store.updateFreeWorkflowSettings,
   };
-  const persisted = {
+  const configuration = {
     customerDailyLimit: 4,
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
+    whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
+    optionalCommissionReminderDays: [3] as Array<3 | 4>,
+  };
+  const persisted = {
+    ...configuration,
     updatedAt: "2026-08-18T10:00:00.000Z",
     updatedBy: "admin" as const,
     source: "firestore" as const,
   };
   const updates: unknown[] = [];
+  const environmentNames = [
+    "ENJAZATIK_URL",
+    "ENJAZATIK_TOKEN",
+    "BOOKING_WORKER_SECRET",
+    "PUBLIC_BASE_URL",
+    "NODE_ENV",
+  ] as const;
+  const previousEnvironment = Object.fromEntries(
+    environmentNames.map((name) => [name, process.env[name]]),
+  );
+  const mutableEnvironment = process.env as Record<string, string | undefined>;
 
   try {
+    process.env.ENJAZATIK_URL = "https://provider.example/send";
+    process.env.ENJAZATIK_TOKEN = "provider-token";
+    process.env.BOOKING_WORKER_SECRET = "w".repeat(32);
+    process.env.PUBLIC_BASE_URL = "https://booking.example";
+    mutableEnvironment.NODE_ENV = "production";
     store.getFreeWorkflowSettings = async () => persisted;
     store.updateFreeWorkflowSettings = async (settings: unknown) => {
       updates.push(settings);
@@ -58,7 +80,24 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
       );
       assert.equal(getResponse.status, 200);
       assert.equal(getResponse.headers.get("cache-control"), "no-store, private");
-      assert.deepEqual(await getResponse.json(), { settings: persisted });
+      const expectedResponse = {
+        settings: persisted,
+        fixedPolicy: {
+          customerFollowUpDelayHours: 24,
+          commissionPaymentWindowDays: 5,
+          mandatoryCommissionReminderDays: [5],
+          allowedOptionalCommissionReminderDays: [3, 4],
+          templateSyntaxVersion: 1,
+          templateMaxLength: 2_000,
+        },
+        operationalHealth: {
+          whatsappProviderConfigured: true,
+          workerSecretConfigured: true,
+          publicBaseUrlConfigured: true,
+          publicBaseUrlValid: true,
+        },
+      };
+      assert.deepEqual(await getResponse.json(), expectedResponse);
 
       const putResponse = await fetch(
         `${baseUrl}/api/admin/booking-commissions/settings`,
@@ -66,40 +105,30 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            settings: {
-              customerDailyLimit: 4,
-              freeOwnerDailyLimit: 5,
-              freePropertyContactDailyLimit: 6,
-            },
+            settings: configuration,
           }),
         },
       );
       assert.equal(putResponse.status, 200);
       assert.equal(putResponse.headers.get("cache-control"), "no-store, private");
-      assert.deepEqual(await putResponse.json(), { settings: persisted });
-      assert.deepEqual(updates, [{
-        customerDailyLimit: 4,
-        freeOwnerDailyLimit: 5,
-        freePropertyContactDailyLimit: 6,
-      }]);
+      assert.deepEqual(await putResponse.json(), expectedResponse);
+      assert.deepEqual(updates, [configuration]);
 
       for (const body of [
         {
           settings: {
-            customerDailyLimit: 4,
-            freeOwnerDailyLimit: 5,
+            ...configuration,
             freePropertyContactDailyLimit: 1_001,
           },
         },
         {
           settings: {
-            customerDailyLimit: 4,
-            freeOwnerDailyLimit: 5,
-            freePropertyContactDailyLimit: 6,
+            ...configuration,
             extra: true,
           },
         },
-        { settings: { customerDailyLimit: 4, freeOwnerDailyLimit: 5 } },
+        { settings: { ...configuration, whatsappTemplates: {} } },
+        { settings: { ...configuration, optionalCommissionReminderDays: [5] } },
       ]) {
         const invalidResponse = await fetch(
           `${baseUrl}/api/admin/booking-commissions/settings`,
@@ -120,6 +149,11 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
   } finally {
     store.getFreeWorkflowSettings = originals.getSettings;
     store.updateFreeWorkflowSettings = originals.updateSettings;
+    for (const name of environmentNames) {
+      const value = previousEnvironment[name];
+      if (value === undefined) delete mutableEnvironment[name];
+      else mutableEnvironment[name] = value;
+    }
   }
 });
 

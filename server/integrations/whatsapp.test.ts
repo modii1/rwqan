@@ -6,12 +6,44 @@ import { firebaseService } from "../firebaseService";
 import whatsappRouter, {
   buildOwnerFreeContactLimitReachedMessage,
   buildOwnerSubscriptionActivatedMessage,
+  createEnjazatikWhatsAppSender,
   createPropertyOwnerWhatsAppSender,
   notifyOwnerFreeContactLimitReached,
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
 } from "./whatsapp";
+
+test("Enjazatik sender makes exactly one provider request after immediate acceptance", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const sender = createEnjazatikWhatsAppSender({
+    url: "https://provider.example/api/v1/send-message",
+    token: "provider-test-token",
+    request: async (url, init) => {
+      requests.push({ url, init });
+      return new Response(JSON.stringify({ status: true }), { status: 200 });
+    },
+    delay: async () => {
+      throw new Error("an accepted provider request must not retry");
+    },
+  });
+
+  assert.deepEqual(
+    await sender("050 123 4567", "follow-up test", 2),
+    { success: true },
+  );
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://provider.example/api/v1/send-message");
+  assert.equal(requests[0].init.method, "POST");
+  assert.deepEqual(requests[0].init.headers, {
+    Authorization: "Bearer provider-test-token",
+    "Content-Type": "application/json",
+  });
+  assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+    number: "966501234567",
+    message: "follow-up test",
+  });
+});
 
 test("free contact-limit message tells the owner to upgrade from the direct page", () => {
   assert.equal(

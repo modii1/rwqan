@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
+  BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  bookingFreeWorkflowConfigurationSchema,
   bookingFreeWorkflowLimitsSchema,
+  bookingOptionalCommissionReminderDaysSchema,
+  bookingWhatsAppTemplatesSchema,
   bookingConfirmationFactsSchema,
   bookingFollowUpRecordSchema,
   buildConfirmedBookingFinancials,
@@ -10,6 +15,7 @@ import {
   calculateCommissionReminderSchedule,
   COMMISSION_PAYMENT_WINDOW_MS,
   type BookingConfirmationFacts,
+  type BookingFreeWorkflowConfiguration,
   type BookingFreeWorkflowLimits,
   type BookingFreeWorkflowSettings,
   type BookingFollowUpRecord,
@@ -104,6 +110,16 @@ export function getEnvironmentFreeWorkflowLimits(): BookingFreeWorkflowLimits {
   };
 }
 
+export function getDefaultFreeWorkflowConfiguration(): BookingFreeWorkflowConfiguration {
+  return {
+    ...getEnvironmentFreeWorkflowLimits(),
+    whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
+    optionalCommissionReminderDays: [
+      ...BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
+    ],
+  };
+}
+
 function storedFreeWorkflowLimits(
   value: unknown,
 ): BookingFreeWorkflowLimits | null {
@@ -117,11 +133,35 @@ function storedFreeWorkflowLimits(
   return parsed.success ? parsed.data : null;
 }
 
+function storedFreeWorkflowConfiguration(
+  value: unknown,
+): BookingFreeWorkflowConfiguration | null {
+  const limits = storedFreeWorkflowLimits(value);
+  if (!limits || !value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+  const templates = bookingWhatsAppTemplatesSchema.safeParse(
+    data.whatsappTemplates,
+  );
+  const optionalDays = bookingOptionalCommissionReminderDaysSchema.safeParse(
+    data.optionalCommissionReminderDays,
+  );
+  const defaults = getDefaultFreeWorkflowConfiguration();
+  return bookingFreeWorkflowConfigurationSchema.parse({
+    ...limits,
+    whatsappTemplates: templates.success
+      ? templates.data
+      : defaults.whatsappTemplates,
+    optionalCommissionReminderDays: optionalDays.success
+      ? optionalDays.data
+      : defaults.optionalCommissionReminderDays,
+  });
+}
+
 function resolvedFreeWorkflowSettings(value: unknown): BookingFreeWorkflowSettings {
-  const stored = storedFreeWorkflowLimits(value);
+  const stored = storedFreeWorkflowConfiguration(value);
   if (!stored) {
     return {
-      ...getEnvironmentFreeWorkflowLimits(),
+      ...getDefaultFreeWorkflowConfiguration(),
       updatedAt: null,
       updatedBy: "environment",
       source: "environment",
@@ -420,10 +460,10 @@ export class BookingCommissionStore {
   }
 
   async updateFreeWorkflowSettings(
-    rawLimits: BookingFreeWorkflowLimits,
+    rawSettings: BookingFreeWorkflowConfiguration,
     now = new Date(),
   ): Promise<BookingFreeWorkflowSettings> {
-    const limits = bookingFreeWorkflowLimitsSchema.parse(rawLimits);
+    const settings = bookingFreeWorkflowConfigurationSchema.parse(rawSettings);
     if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid settings time");
     const settingsRef = this.db.collection(SETTINGS_COLLECTION)
       .doc(FREE_WORKFLOW_SETTINGS_DOCUMENT);
@@ -433,21 +473,15 @@ export class BookingCommissionStore {
     return this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(settingsRef);
       const currentData = snapshot.exists ? snapshot.data() : null;
-      const currentStored = storedFreeWorkflowLimits(currentData);
-      if (
-        currentStored &&
-        currentStored.customerDailyLimit === limits.customerDailyLimit &&
-        currentStored.freeOwnerDailyLimit === limits.freeOwnerDailyLimit &&
-        currentStored.freePropertyContactDailyLimit ===
-          limits.freePropertyContactDailyLimit
-      ) {
+      const currentStored = storedFreeWorkflowConfiguration(currentData);
+      if (currentStored && JSON.stringify(currentStored) === JSON.stringify(settings)) {
         return resolvedFreeWorkflowSettings(currentData);
       }
 
       const updatedAt = now.toISOString();
       const storedSettings = {
-        schemaVersion: 1,
-        ...limits,
+        schemaVersion: 2,
+        ...settings,
         updatedAt,
         updatedBy: "admin" as const,
       };
@@ -455,14 +489,14 @@ export class BookingCommissionStore {
       transaction.set(settingsRef, storedSettings);
       transaction.create(auditRef, {
         id: auditId,
-        type: "booking_free_workflow_limits_updated",
+        type: "booking_free_workflow_settings_updated",
         previous,
-        next: limits,
+        next: settings,
         updatedAt,
         updatedBy: "admin",
       });
       return {
-        ...limits,
+        ...settings,
         updatedAt,
         updatedBy: "admin",
         source: "firestore",
@@ -809,6 +843,15 @@ export class BookingCommissionStore {
     commissionEnabled = false,
   ): Promise<BookingFollowUpDocument> {
     const facts = bookingConfirmationFactsSchema.parse(rawFacts);
+    const configuredReminderDays = new Set<number>(
+      commissionEnabled
+        ? [
+            ...(await this.getFreeWorkflowSettings())
+              .optionalCommissionReminderDays,
+            5,
+          ]
+        : [],
+    );
     const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
     const result = await this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
@@ -887,7 +930,10 @@ export class BookingCommissionStore {
           now: confirmedAt,
         }),
         ...(commissionEnabled
-          ? financials.commissionReminderSchedule.map((reminder) =>
+          ? financials.commissionReminderSchedule
+            .filter((reminder) =>
+              configuredReminderDays.has(reminder.offsetDays))
+            .map((reminder) =>
               buildNotificationJob({
                 booking: confirmedBooking,
                 kind: `commission_reminder_${reminder.offsetDays}` as BookingNotificationKind,
@@ -968,6 +1014,15 @@ export class BookingCommissionStore {
     resolution: "resume_collection" | "cancel_commission",
     now = new Date(),
   ): Promise<{ booking: BookingFollowUpDocument; propertyReleased: boolean }> {
+    const configuredReminderDays = new Set<number>(
+      resolution === "resume_collection"
+        ? [
+            ...(await this.getFreeWorkflowSettings())
+              .optionalCommissionReminderDays,
+            5,
+          ]
+        : [],
+    );
     const bookingRef = this.db.collection(BOOKINGS_COLLECTION).doc(id);
     const reminderKinds = [3, 4, 5] as const;
     const reminderRefs = reminderKinds.map((offset) =>
@@ -1065,7 +1120,8 @@ export class BookingCommissionStore {
           );
           const resettable = reminderSnapshots
             .map((snapshot, index) => ({ snapshot, index }))
-            .filter(({ snapshot }) =>
+            .filter(({ snapshot, index }) =>
+              configuredReminderDays.has(reminderKinds[index]) &&
               snapshot.exists &&
               (snapshot.data() as BookingNotificationJob).status === "cancelled" &&
               (
@@ -1930,6 +1986,15 @@ export class BookingCommissionStore {
     attempt: BookingCommissionPaymentAttempt;
     resolution: "resume_collection" | "keep_paid";
   }> {
+    const configuredReminderDays = new Set<number>(
+      options.resolution === "resume_collection"
+        ? [
+            ...(await this.getFreeWorkflowSettings())
+              .optionalCommissionReminderDays,
+            5,
+          ]
+        : [],
+    );
     const bookingRef = this.db.collection(BOOKINGS_COLLECTION).doc(options.bookingId);
     const attemptRef = this.db.collection(ATTEMPTS_COLLECTION).doc(options.attemptId);
     const reversalRef = this.db.collection(REVERSAL_BINDINGS_COLLECTION)
@@ -2118,6 +2183,7 @@ export class BookingCommissionStore {
         now: timestamp,
       }));
       for (let index = 0; index < reminderRefs.length; index++) {
+        if (!configuredReminderDays.has(reminderKinds[index])) continue;
         resetJob(
           reminderRefs[index],
           reminderSnapshots[index],
@@ -2178,23 +2244,40 @@ export class BookingCommissionStore {
 
   async recoverExpiredNotificationClaims(now = new Date()): Promise<number> {
     const nowIso = now.toISOString();
-    const snapshot = await this.db.collection(NOTIFICATIONS_COLLECTION)
-      .where("status", "==", "claimed")
-      .where("leaseExpiresAt", "<=", nowIso)
-      .limit(100)
-      .get();
-    if (snapshot.empty) return 0;
     const batch = this.db.batch();
-    for (const document of snapshot.docs) {
-      batch.update(document.ref, {
-        status: "pending",
-        leaseToken: null,
-        leaseExpiresAt: null,
-        updatedAt: nowIso,
-      });
+    let recovered = 0;
+    let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+    while (recovered < 100) {
+      let query = this.db.collection(NOTIFICATIONS_COLLECTION)
+        .where("leaseExpiresAt", "<=", nowIso)
+        .orderBy("leaseExpiresAt", "asc")
+        .limit(100);
+      if (cursor) query = query.startAfter(cursor);
+      const snapshot = await query.get();
+      if (snapshot.empty) break;
+      for (const document of snapshot.docs) {
+        const job = document.data() as BookingNotificationJob;
+        const leaseExpiresAt = Date.parse(job.leaseExpiresAt || "");
+        if (
+          job.status !== "claimed" ||
+          !Number.isFinite(leaseExpiresAt) ||
+          leaseExpiresAt > now.getTime()
+        ) continue;
+        batch.update(document.ref, {
+          status: "pending",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          updatedAt: nowIso,
+        });
+        recovered++;
+        if (recovered >= 100) break;
+      }
+      cursor = snapshot.docs.at(-1);
+      if (snapshot.size < 100) break;
     }
+    if (recovered === 0) return 0;
     await batch.commit();
-    return snapshot.size;
+    return recovered;
   }
 
   async claimDueNotificationJobs(
@@ -2207,16 +2290,20 @@ export class BookingCommissionStore {
   ): Promise<ClaimedBookingNotification[]> {
     const nowIso = now.toISOString();
     const freeWorkflowLimits = await this.getFreeWorkflowSettings();
-    const dueSnapshot = await this.db.collection(NOTIFICATIONS_COLLECTION)
-      .where("status", "==", "pending")
-      .where("scheduledAt", "<=", nowIso)
-      .orderBy("scheduledAt", "asc")
-      .limit(Math.min(Math.max(1, maxJobs), 100))
-      .get();
     const claims: ClaimedBookingNotification[] = [];
-
-    for (const candidate of dueSnapshot.docs) {
-      const claimed = await this.db.runTransaction(async (transaction) => {
+    const claimLimit = Math.min(Math.max(1, maxJobs), 100);
+    let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+    while (claims.length < claimLimit) {
+      let query = this.db.collection(NOTIFICATIONS_COLLECTION)
+        .where("scheduledAt", "<=", nowIso)
+        .orderBy("scheduledAt", "asc")
+        .limit(100);
+      if (cursor) query = query.startAfter(cursor);
+      const dueSnapshot = await query.get();
+      if (dueSnapshot.empty) break;
+      for (const candidate of dueSnapshot.docs) {
+        if (claims.length >= claimLimit) break;
+        const claimed = await this.db.runTransaction(async (transaction) => {
         const jobSnapshot = await transaction.get(candidate.ref);
         if (!jobSnapshot.exists) return null;
         const job = jobSnapshot.data() as BookingNotificationJob;
@@ -2411,8 +2498,11 @@ export class BookingCommissionStore {
         };
         transaction.update(candidate.ref, claimedJob);
         return claimedJob;
-      });
-      if (claimed) claims.push(claimed);
+        });
+        if (claimed) claims.push(claimed);
+      }
+      cursor = dueSnapshot.docs.at(-1);
+      if (dueSnapshot.size < 100) break;
     }
     return claims;
   }
@@ -2652,19 +2742,38 @@ export class BookingCommissionStore {
     now = new Date(),
     limit = 100,
   ): Promise<BookingFollowUpDocument[]> {
-    const snapshot = await this.db.collection(BOOKINGS_COLLECTION)
-      .where("commissionStatus", "==", "pending")
-      .where("commissionDueAt", "<=", now.toISOString())
-      .limit(Math.min(Math.max(1, limit), 200))
-      .get();
-    return snapshot.docs
-      .map((document) => document.data() as BookingFollowUpDocument)
-      .filter((booking) =>
-        booking.isFreeProperty === true &&
-        !booking.freeEligibilityRevokedAt &&
-        booking.bookingStatus === "confirmed" &&
-        booking.disputeStatus !== "pending" &&
-        (!booking.enforcementDeferredUntil || Date.parse(booking.enforcementDeferredUntil) <= now.getTime()));
+    const candidateLimit = Math.min(Math.max(1, limit), 200);
+    const candidates: BookingFollowUpDocument[] = [];
+    let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+    while (candidates.length < candidateLimit) {
+      let query = this.db.collection(BOOKINGS_COLLECTION)
+        .where("commissionDueAt", "<=", now.toISOString())
+        .orderBy("commissionDueAt", "asc")
+        .limit(200);
+      if (cursor) query = query.startAfter(cursor);
+      const snapshot = await query.get();
+      if (snapshot.empty) break;
+      for (const document of snapshot.docs) {
+        const booking = document.data() as BookingFollowUpDocument;
+        if (
+          booking.isFreeProperty === true &&
+          !booking.freeEligibilityRevokedAt &&
+          booking.bookingStatus === "confirmed" &&
+          booking.commissionStatus === "pending" &&
+          booking.disputeStatus !== "pending" &&
+          (
+            !booking.enforcementDeferredUntil ||
+            Date.parse(booking.enforcementDeferredUntil) <= now.getTime()
+          )
+        ) {
+          candidates.push(booking);
+          if (candidates.length >= candidateLimit) break;
+        }
+      }
+      cursor = snapshot.docs.at(-1);
+      if (snapshot.size < 200) break;
+    }
+    return candidates;
   }
 
   async claimCommissionEnforcement(

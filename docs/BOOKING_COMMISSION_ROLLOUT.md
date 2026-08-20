@@ -14,7 +14,7 @@
 - The confirmed facts are sent to the property owner. When commission enforcement is enabled, the same message includes the exact 10% commission and a signed Paymob payment link.
 - For accepted anonymous contacts evaluated while the feature is available, Contact Analytics records whether the follow-up was scheduled or failed during setup. Setup failures store only a bounded reason code and alert admin after the contact transaction succeeds.
 - Before confirmation, every owner-message send, and any property hold, the current property record must still exist and its canonical WhatsApp owner phone must match the owner identity captured at contact time. A mismatch is never retargeted automatically: collection stops, no new debt is created at confirmation, and an admin-visible review event is recorded without storing either phone in the event.
-- The five-day payment window starts only after the WhatsApp provider accepts that owner message for sending. Reminders are scheduled for days 3, 4, and 5.
+- The five-day payment window starts only after the WhatsApp provider accepts that owner message for sending. Day 5 is mandatory; admins may enable or disable the optional day-3 and day-4 reminders for newly confirmed or restarted collection workflows.
 - If the commission remains unpaid, the WhatsApp provider must accept the day-5 reminder and the pause warning before the booked property receives a commission hold. The hold hides and blocks contact with only that property; it does not alter subscription dates or linked properties.
 - A verified Paymob settlement releases the exact commission obligation. If no other obligations hold the property, it becomes visible and contactable again.
 - If the property's current canonical owner phone no longer matches the contact-time owner identity, confirmation stays observe-only or an existing debt enters admin review. Facts, billing notices, and holds fail closed rather than being retargeted automatically.
@@ -25,12 +25,13 @@
 
 - Customer booking follow-ups: 3 per normalized customer phone per Riyadh day by default.
 - Confirmed-booking fact messages for free-property owners: 3 per normalized owner phone per Riyadh day by default, across all of that phone’s free properties.
-- Required billing messages (the initial payment notice, days 3/4/5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
-- Configure the defaults with `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT` and `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT`.
+- Billing messages (the initial payment notice, enabled day-3/day-4 reminders, mandatory day 5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
+- Admins can configure all three limits in the booking-commission dashboard. Environment values remain fallbacks through `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT`, `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT`, and `FREE_PROPERTY_DAILY_CONTACT_LIMIT`.
+- The same admin settings screen can edit the seven free-workflow WhatsApp templates. Required placeholders are validated and the 24-hour follow-up, five-day payment window, and mandatory day-5 warning cannot be changed.
 
 ## Before deployment
 
-1. Deploy the Firestore indexes and the `booking_notification_quotas.expiresAtTtl` TTL override in `firestore.indexes.json`, then wait until the indexes are ready.
+1. Enable the `booking_notification_quotas.expiresAtTtl` TTL override in `firestore.indexes.json` for quota cleanup. The staging worker uses single-field time scans and does not require the three composite booking indexes; reassess the indexed query strategy before high-volume production rollout.
 2. Configure `PUBLIC_BASE_URL` with the production HTTPS origin.
 3. Configure `BOOKING_WORKER_SECRET` as a separate random secret of at least 32 bytes. Do not reuse it in URLs or client code.
 4. Confirm `SESSION_SECRET` is at least 32 bytes because it signs purpose-bound customer and owner links.
@@ -80,7 +81,7 @@ For each first-cohort booking, verify:
 
 Keep the first unpaid controlled obligation through the full lifecycle and verify:
 
-- day-3, day-4, and day-5 reminders;
+- each enabled optional day-3/day-4 reminder and the mandatory day-5 reminder;
 - provider-send retries and admin-visible failures;
 - provider acceptance of the pause warning before enforcement;
 - property removal from list, search, occasions, sitemap, detail, images, and contact;

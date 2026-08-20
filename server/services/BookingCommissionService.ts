@@ -1,10 +1,16 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  BOOKING_MANDATORY_COMMISSION_REMINDER_DAYS,
+  BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
+  BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
+  BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION,
+  COMMISSION_PAYMENT_WINDOW_MS,
   bookingConfirmationFactsSchema,
   bookingFreeWorkflowSettingsUpdateSchema,
   normalizeBookingListedPriceOptionsHalalas,
   type BookingConfirmationFacts,
+  type BookingFreeWorkflowSettings,
 } from "../../shared/booking";
 import { maskContactPhone } from "./ContactIdentityService";
 import {
@@ -14,6 +20,7 @@ import {
 import {
   bookingCommissionStore,
   buildInitialBookingWorkflow,
+  BOOKING_FOLLOW_UP_DELAY_MS,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
   BookingWorkflowError,
   type InitialBookingWorkflow,
@@ -127,6 +134,68 @@ function summarizeNotifications(jobs: BookingNotificationJob[]) {
     else if (job.status !== "cancelled") summary.pending++;
     return summary;
   }, { sent: 0, failed: 0, pending: 0, suppressed: 0 });
+}
+
+function publicBaseUrlHealth(): {
+  publicBaseUrlConfigured: boolean;
+  publicBaseUrlValid: boolean;
+} {
+  const configured = String(
+    process.env.PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || "",
+  ).trim();
+  if (!configured) {
+    return { publicBaseUrlConfigured: false, publicBaseUrlValid: false };
+  }
+  try {
+    const parsed = new URL(configured);
+    return {
+      publicBaseUrlConfigured: true,
+      publicBaseUrlValid:
+        (
+          parsed.protocol === "https:" ||
+          (process.env.NODE_ENV !== "production" && parsed.protocol === "http:")
+        ) &&
+        Boolean(parsed.hostname) &&
+        !parsed.username &&
+        !parsed.password,
+    };
+  } catch {
+    return { publicBaseUrlConfigured: true, publicBaseUrlValid: false };
+  }
+}
+
+function adminFreeWorkflowSettingsResponse(
+  settings: BookingFreeWorkflowSettings,
+) {
+  const publicUrlHealth = publicBaseUrlHealth();
+  return {
+    settings,
+    fixedPolicy: {
+      customerFollowUpDelayHours:
+        BOOKING_FOLLOW_UP_DELAY_MS / (60 * 60 * 1_000),
+      commissionPaymentWindowDays:
+        COMMISSION_PAYMENT_WINDOW_MS / (24 * 60 * 60 * 1_000),
+      mandatoryCommissionReminderDays: [
+        ...BOOKING_MANDATORY_COMMISSION_REMINDER_DAYS,
+      ],
+      allowedOptionalCommissionReminderDays: [
+        ...BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
+      ],
+      templateSyntaxVersion: BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION,
+      templateMaxLength: BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
+    },
+    operationalHealth: {
+      whatsappProviderConfigured:
+        Boolean(String(process.env.ENJAZATIK_URL || "").trim()) &&
+        Boolean(String(process.env.ENJAZATIK_TOKEN || "").trim()),
+      workerSecretConfigured:
+        Buffer.byteLength(
+          String(process.env.BOOKING_WORKER_SECRET || ""),
+          "utf8",
+        ) >= 32,
+      ...publicUrlHealth,
+    },
+  };
 }
 
 function adminNotificationJob(
@@ -495,18 +564,16 @@ export class BookingCommissionService {
   }
 
   async getAdminFreeWorkflowSettings() {
-    return {
-      settings: await this.getFreeWorkflowSettings(),
-    };
+    return adminFreeWorkflowSettingsResponse(
+      await this.getFreeWorkflowSettings(),
+    );
   }
 
   async updateAdminFreeWorkflowSettings(rawInput: unknown) {
     const input = bookingFreeWorkflowSettingsUpdateSchema.parse(rawInput);
-    return {
-      settings: await bookingCommissionStore.updateFreeWorkflowSettings(
-        input.settings,
-      ),
-    };
+    return adminFreeWorkflowSettingsResponse(
+      await bookingCommissionStore.updateFreeWorkflowSettings(input.settings),
+    );
   }
 
   async getAdminCustomerWhatsAppUrl(bookingId: string): Promise<string> {
