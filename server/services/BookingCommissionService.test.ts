@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
   BookingCommissionService,
   selectAdminPaymentAttempt,
 } from "./BookingCommissionService";
@@ -105,6 +106,57 @@ test("admin payment details prioritize an attempt requiring financial review", (
   ] as any);
 
   assert.equal(selected?.id, "ATT-DUPLICATE");
+});
+
+test("admin customer WhatsApp handoff uses only a normalized snapshotted phone", async () => {
+  const originalGetBooking = bookingCommissionStore.getBooking;
+  const booking = awaitingBookingFixture({
+    requestCode: "ADMIN-CUSTOMER-WHATSAPP",
+    createdAt: new Date(),
+  });
+  const service = new BookingCommissionService();
+
+  try {
+    (bookingCommissionStore as any).getBooking = async (id: string) =>
+      id === booking.id
+        ? { ...booking, customerPhone: "+966 (50) 000-0002" }
+        : null;
+
+    const redirectUrl = await service.getAdminCustomerWhatsAppUrl(booking.id);
+    const parsed = new URL(redirectUrl);
+    assert.equal(parsed.origin, "https://wa.me");
+    assert.equal(parsed.pathname, "/966500000002");
+    assert.equal(
+      parsed.searchParams.get("text"),
+      "مرحباً، معك الفريق التقني لمنصة روقان.",
+    );
+    assert.equal(
+      parsed.searchParams.get("text"),
+      BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
+    );
+
+    await assert.rejects(
+      () => service.getAdminCustomerWhatsAppUrl("BOOK-MISSING"),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "BOOKING_NOT_FOUND" &&
+        error.status === 404,
+    );
+
+    (bookingCommissionStore as any).getBooking = async () => ({
+      ...booking,
+      customerPhone: "not-a-phone",
+    });
+    await assert.rejects(
+      () => service.getAdminCustomerWhatsAppUrl(booking.id),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "INVALID_CUSTOMER_PHONE" &&
+        error.status === 400,
+    );
+  } finally {
+    (bookingCommissionStore as any).getBooking = originalGetBooking;
+  }
 });
 
 test("admin free-workflow settings preserve the strict service response contract", async () => {
@@ -366,6 +418,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
     assert.equal("recipientPhone" in row.notificationJobs[0], false);
     assert.equal("recipientQuotaKey" in row.notificationJobs[0], false);
     assert.equal("leaseToken" in row.notificationJobs[0], false);
+    assert.equal("customerPhone" in row, false);
     assert.equal("checkoutUrl" in row.paymentAttempt!, false);
     assert.equal(
       row.paymentAttempts.some((attempt) => "checkoutUrl" in attempt),
@@ -378,6 +431,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
       "SECRET-LEASE-0",
       "SECRET-CHECKOUT-LATEST",
       "SECRET-CHECKOUT-REVIEW",
+      anchor.customerPhone,
     ]) {
       assert.equal(serialized.includes(secret), false, secret);
     }

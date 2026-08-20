@@ -28,6 +28,7 @@ import type {
   BookingPublicRow,
 } from "./BookingCommissionTypes";
 import { firebaseService } from "../firebaseService";
+import { normalizeWhatsAppDestination } from "../../shared/phone";
 import { notificationService } from "./NotificationService";
 import {
   PaymobIntentionError,
@@ -37,6 +38,8 @@ import {
 export const BOOKING_CUSTOMER_SESSION_COOKIE = "rwqan_booking_customer_session";
 export const BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 export const BOOKING_OWNER_TOKEN_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE =
+  "مرحباً، معك الفريق التقني لمنصة روقان.";
 
 export const bookingDecisionSchema = z.object({
   booked: z.boolean(),
@@ -504,6 +507,26 @@ export class BookingCommissionService {
         input.settings,
       ),
     };
+  }
+
+  async getAdminCustomerWhatsAppUrl(bookingId: string): Promise<string> {
+    const booking = await bookingCommissionStore.getBooking(bookingId);
+    if (!booking) {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    const destination = normalizeWhatsAppDestination(booking.customerPhone);
+    if (!destination) {
+      throw new BookingWorkflowError(
+        "INVALID_CUSTOMER_PHONE",
+        "Invalid customer phone",
+        400,
+      );
+    }
+    return `https://wa.me/${destination}?text=${encodeURIComponent(BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE)}`;
   }
 
   async createCheckout(token: string, rawInput: unknown) {

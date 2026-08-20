@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { FaWhatsapp } from "react-icons/fa";
 import {
   AlertTriangle,
   BellOff,
@@ -67,6 +68,7 @@ import {
   type BookingReversalReviewState,
 } from "@/components/booking/booking-reversal-state";
 import BookingCommissionSettingsCard from "./booking-commission-settings";
+import { getAdminCustomerWhatsAppHref } from "./booking-customer-whatsapp";
 
 interface BookingCommissionSummary {
   total: number;
@@ -443,10 +445,11 @@ export default function BookingCommissionsSection() {
         <>
           <Card className="hidden min-w-0 overflow-hidden md:block">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-sm">
+              <table className="w-full min-w-[1120px] text-sm">
                 <thead className="border-b bg-muted/40 text-right text-xs text-muted-foreground">
                   <tr>
                     <th className="p-3 font-semibold">العقار والطلب</th>
+                    <th className="p-3 font-semibold">العميل</th>
                     <th className="p-3 font-semibold">نتيجة الحجز</th>
                     <th className="p-3 font-semibold">العمولة</th>
                     <th className="p-3 font-semibold">المهلة</th>
@@ -543,6 +546,12 @@ function BookingTableRow({ row, selected, onSelect, selectionDisabled }: { row: 
         <p className="max-w-52 truncate font-bold text-[#34332f]">{getPropertyLabel(row)}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{row.propertyNumber}{row.requestCode ? ` · ${row.requestCode}` : ""}</p>
       </td>
+      <td className="p-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground" dir="ltr">{row.customerPhoneMasked || "—"}</span>
+          <CustomerWhatsAppLink bookingId={row.id} />
+        </div>
+      </td>
       <td className="p-3"><StatusBadge label={booking.label} tone={booking.tone} /></td>
       <td className="p-3">
         <StatusBadge label={commission.label} tone={commission.tone} />
@@ -584,28 +593,34 @@ function BookingMobileRow({ row, selected, onSelect, selectionDisabled }: { row:
     || hasBookingEvent(row, "owner_identity_changed");
   return (
     <Card className={selected ? "border-[#cdb46e] bg-[#fffdf6]" : ""}>
-      <button type="button" onClick={onSelect} disabled={selectionDisabled} aria-expanded={selected} className="w-full p-4 text-right disabled:cursor-not-allowed disabled:opacity-60">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate font-bold text-[#34332f]">{getPropertyLabel(row)}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{row.propertyNumber}{row.requestCode ? ` · ${row.requestCode}` : ""}</p>
+      <div className="p-4">
+        <button type="button" onClick={onSelect} disabled={selectionDisabled} aria-expanded={selected} className="w-full text-right disabled:cursor-not-allowed disabled:opacity-60">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-bold text-[#34332f]">{getPropertyLabel(row)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{row.propertyNumber}{row.requestCode ? ` · ${row.requestCode}` : ""}</p>
+            </div>
+            <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${selected ? "rotate-180" : ""}`} aria-hidden="true" />
           </div>
-          <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${selected ? "rotate-180" : ""}`} aria-hidden="true" />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <StatusBadge label={booking.label} tone={booking.tone} />
+            <StatusBadge label={commission.label} tone={commission.tone} />
+            {disputed && !ownerIdentityChanged && <StatusBadge label="اعتراض معلق" tone="violet" />}
+            {ownerIdentityChanged && <StatusBadge label="تغيرت هوية المالك" tone="violet" />}
+            {responseExpired && normalize(row.bookingStatus) !== "expired" && <StatusBadge label="انتهت مهلة الرد" tone="red" />}
+            {authorizationReported && <StatusBadge label="تفويض دفع" tone="blue" />}
+            {duplicatePayment && <StatusBadge label="دفعة مكررة" tone="red" />}
+            {reversalState === "unresolved" && <StatusBadge label="عكس دفعة يحتاج مراجعة" tone="red" />}
+            {reversalState === "kept_paid" && <StatusBadge label="تمت مراجعة العكس" tone="green" />}
+            {reversalState === "collection_resumed" && <StatusBadge label="استؤنف التحصيل" tone="blue" />}
+          </div>
+          {Number(row.commissionAmountHalalas) > 0 && <p className="mt-3 text-sm font-bold text-[#34332f]">{formatSarFromHalalas(row.commissionAmountHalalas)}</p>}
+        </button>
+        <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+          <span className="text-xs text-muted-foreground"><span>رقم العميل: </span><span dir="ltr">{row.customerPhoneMasked || "—"}</span></span>
+          <CustomerWhatsAppLink bookingId={row.id} />
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <StatusBadge label={booking.label} tone={booking.tone} />
-          <StatusBadge label={commission.label} tone={commission.tone} />
-          {disputed && !ownerIdentityChanged && <StatusBadge label="اعتراض معلق" tone="violet" />}
-          {ownerIdentityChanged && <StatusBadge label="تغيرت هوية المالك" tone="violet" />}
-          {responseExpired && normalize(row.bookingStatus) !== "expired" && <StatusBadge label="انتهت مهلة الرد" tone="red" />}
-          {authorizationReported && <StatusBadge label="تفويض دفع" tone="blue" />}
-          {duplicatePayment && <StatusBadge label="دفعة مكررة" tone="red" />}
-          {reversalState === "unresolved" && <StatusBadge label="عكس دفعة يحتاج مراجعة" tone="red" />}
-          {reversalState === "kept_paid" && <StatusBadge label="تمت مراجعة العكس" tone="green" />}
-          {reversalState === "collection_resumed" && <StatusBadge label="استؤنف التحصيل" tone="blue" />}
-        </div>
-        {Number(row.commissionAmountHalalas) > 0 && <p className="mt-3 text-sm font-bold text-[#34332f]">{formatSarFromHalalas(row.commissionAmountHalalas)}</p>}
-      </button>
+      </div>
     </Card>
   );
 }
@@ -721,7 +736,13 @@ function BookingAdminDetails({
             </div>
           </section>
           <section className="grid gap-3 sm:grid-cols-2">
-            <AdminFact label="رقم العميل" value={row.customerPhoneMasked || "—"} />
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">رقم العميل</p>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <p className="break-words text-sm font-bold text-[#34332f]" dir="ltr">{row.customerPhoneMasked || "—"}</p>
+                <CustomerWhatsAppLink bookingId={row.id} />
+              </div>
+            </div>
             <AdminFact label="نوع العقار" value={row.isFreeProperty ? "عقار مجاني" : "عقار باشتراك"} />
           </section>
           <section>
@@ -1182,5 +1203,21 @@ function AdminFact({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 break-words text-sm font-bold text-[#34332f]">{value}</p>
     </div>
+  );
+}
+
+function CustomerWhatsAppLink({ bookingId }: { bookingId: string }) {
+  return (
+    <a
+      href={getAdminCustomerWhatsAppHref(bookingId)}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="فتح محادثة واتساب مع العميل"
+      title="فتح محادثة واتساب مع العميل"
+      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+      data-testid={`link-customer-whatsapp-${bookingId}`}
+    >
+      <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
+    </a>
   );
 }

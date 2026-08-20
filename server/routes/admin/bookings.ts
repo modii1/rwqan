@@ -39,6 +39,20 @@ router.put("/api/admin/booking-commissions/settings", async (req, res) => {
   }
 });
 
+router.get("/api/admin/booking-commissions/:id/customer-whatsapp", async (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  res.set("Referrer-Policy", "no-referrer");
+  try {
+    const redirectUrl = await bookingCommissionService.getAdminCustomerWhatsAppUrl(
+      req.params.id,
+    );
+    return res.redirect(302, redirectUrl);
+  } catch (error) {
+    const response = bookingRouteError(error);
+    return res.status(response.status).json(response.body);
+  }
+});
+
 router.post("/api/admin/booking-commissions/run-worker", async (_req, res) => {
   res.set("Cache-Control", "no-store, private");
   try {

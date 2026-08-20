@@ -39,6 +39,15 @@ test("central admin boundary protects modular routes without hiding auth or publ
     assert.equal(bookingSettings.status, 401);
     assert.deepEqual(await bookingSettings.json(), { error: "Admin Login Required" });
 
+    const customerWhatsApp = await fetch(
+      `${baseUrl}/api/admin/booking-commissions/BOOK-PRIVATE/customer-whatsapp`,
+      { redirect: "manual" },
+    );
+    assert.equal(customerWhatsApp.status, 401);
+    assert.deepEqual(await customerWhatsApp.json(), {
+      error: "Admin Login Required",
+    });
+
     const crossOriginAdmin = await fetch(`${baseUrl}/api/admin/properties`, {
       headers: { origin: "https://evil.example", "x-admin": "1" },
     });
@@ -66,6 +75,19 @@ test("central admin boundary protects modular routes without hiding auth or publ
     assert.equal(crossOriginBookingSettings.status, 403);
     assert.equal(
       (await crossOriginBookingSettings.json()).code,
+      "CROSS_ORIGIN_REQUEST",
+    );
+
+    const crossOriginCustomerWhatsApp = await fetch(
+      `${baseUrl}/api/admin/booking-commissions/BOOK-PRIVATE/customer-whatsapp`,
+      {
+        redirect: "manual",
+        headers: { origin: "https://evil.example", "x-admin": "1" },
+      },
+    );
+    assert.equal(crossOriginCustomerWhatsApp.status, 403);
+    assert.equal(
+      (await crossOriginCustomerWhatsApp.json()).code,
       "CROSS_ORIGIN_REQUEST",
     );
 
