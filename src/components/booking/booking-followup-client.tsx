@@ -333,7 +333,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
           <form onSubmit={submitQuestionnaire} className="space-y-7" noValidate>
             <fieldset>
               <legend className="text-base font-bold text-[#34332f]">
-                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">١</span>
+                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">1</span>
                 متى كان الحجز؟
               </legend>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -359,7 +359,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
 
             <fieldset>
               <legend className="text-base font-bold text-[#34332f]">
-                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">٢</span>
+                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">2</span>
                 ما تاريخ الحجز؟
               </legend>
               <div className="mt-3 grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
@@ -392,7 +392,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
 
             <fieldset>
               <legend id="booking-price-question" className="text-base font-bold text-[#34332f]">
-                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">٣</span>
+                <span className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#f2e8cd] text-sm text-[#7b5d1f]">3</span>
                 كم كان المبلغ المدفوع؟
               </legend>
               <div className="mt-3 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-labelledby="booking-price-question">

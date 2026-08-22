@@ -54,6 +54,10 @@ test("questionnaire UI keeps three questions and offers listed or custom prices"
   assert.match(source, /listedPriceOptionsHalalas\.map/);
   assert.match(source, /data-testid="booking-price-option-custom"/);
   assert.match(source, /data-testid="input-booking-price"/);
+  assert.match(source, />1<\/span>/);
+  assert.match(source, />2<\/span>/);
+  assert.match(source, />3<\/span>/);
+  assert.doesNotMatch(source, />[١٢٣]<\/span>/);
 });
 
 test("customer profile renders the property name supplied by its booking snapshot DTO", () => {

@@ -17,15 +17,24 @@ test("the same canonical day can be displayed in Gregorian or Hijri", () => {
   const gregorian = formatCanonicalBookingDate(canonical, "day", "gregorian");
   const hijri = formatCanonicalBookingDate(canonical, "day", "hijri");
 
-  assert.match(gregorian, /2026|٢٠٢٦/);
-  assert.match(hijri, /1448|١٤٤٨/);
+  assert.equal(gregorian, "August 22, 2026");
+  assert.match(hijri, /1448/);
+  assert.doesNotMatch(gregorian, /[٠-٩۰-۹]/);
+  assert.doesNotMatch(hijri, /[٠-٩۰-۹]/);
   assert.notEqual(gregorian, hijri);
   assert.equal(canonical, "2026-08-22");
 });
 
+test("Gregorian month-only dates use a written English month and Western digits", () => {
+  assert.equal(
+    formatCanonicalBookingDate("2026-01", "month", "gregorian"),
+    "January 2026",
+  );
+});
+
 test("a Gregorian month is shown as its exact Hijri boundary range", () => {
   const formatHijriDay = new Intl.DateTimeFormat(
-    "ar-SA-u-ca-islamic-umalqura",
+    "ar-SA-u-ca-islamic-umalqura-nu-latn",
     {
       timeZone: "UTC",
       year: "numeric",
@@ -45,4 +54,6 @@ test("a Gregorian month is shown as its exact Hijri boundary range", () => {
     formatCanonicalBookingDate("2026-08", "month", "hijri"),
     `${expectedStart} – ${expectedEnd}`,
   );
+  assert.doesNotMatch(expectedStart, /[٠-٩۰-۹]/);
+  assert.doesNotMatch(expectedEnd, /[٠-٩۰-۹]/);
 });

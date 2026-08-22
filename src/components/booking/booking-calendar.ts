@@ -20,8 +20,8 @@ function formatter(
 ): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(
     calendar === "hijri"
-      ? "ar-SA-u-ca-islamic-umalqura"
-      : "ar-SA-u-ca-gregory",
+      ? "ar-SA-u-ca-islamic-umalqura-nu-latn"
+      : "en-US-u-ca-gregory-nu-latn",
     {
       timeZone: "UTC",
       year: "numeric",

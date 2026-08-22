@@ -92,18 +92,23 @@ const bookingFollowUpFailureLabels = {
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("ar-SA", {
+  return date.toLocaleString("en-US-u-ca-gregory-nu-latn", {
     timeZone: "Asia/Riyadh",
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
 }
 function formatChartDate(value: string): string {
-  const [, month, day] = value.split("-");
-  return `${day}/${month}`;
+  const date = new Date(`${value}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function formatClientPhone(value: string | null): string {

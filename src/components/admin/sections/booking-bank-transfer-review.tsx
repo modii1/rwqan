@@ -54,8 +54,9 @@ function formatDateTime(value: unknown): string {
   const date = new Date(String(value || ""));
   return Number.isNaN(date.getTime())
     ? "—"
-    : new Intl.DateTimeFormat("ar-SA", {
-        dateStyle: "medium",
+    : new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+        timeZone: "Asia/Riyadh",
+        dateStyle: "long",
         timeStyle: "short",
       }).format(date);
 }

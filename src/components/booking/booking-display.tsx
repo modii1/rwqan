@@ -262,7 +262,7 @@ export function formatSarFromHalalas(value: unknown): string {
   if (value === null || value === undefined || String(value).trim() === "") return "—";
   const halalas = Number(value);
   if (!Number.isFinite(halalas)) return "—";
-  return new Intl.NumberFormat("ar-SA", {
+  return new Intl.NumberFormat("ar-SA-u-nu-latn", {
     style: "currency",
     currency: "SAR",
     minimumFractionDigits: halalas % 100 === 0 ? 0 : 2,
@@ -274,7 +274,7 @@ export function formatSar(value: unknown): string {
   if (value === null || value === undefined || String(value).trim() === "") return "—";
   const amount = Number(String(value ?? "").replace(/,/g, ""));
   if (!Number.isFinite(amount)) return "—";
-  return new Intl.NumberFormat("ar-SA", {
+  return new Intl.NumberFormat("ar-SA-u-nu-latn", {
     style: "currency",
     currency: "SAR",
     maximumFractionDigits: 2,
@@ -286,12 +286,12 @@ export function formatDateTime(value: unknown): string {
   if (!raw) return "—";
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return date.toLocaleString("ar-SA", {
+  return date.toLocaleString("en-US-u-ca-gregory-nu-latn", {
     timeZone: "Asia/Riyadh",
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
 }
@@ -319,8 +319,8 @@ export function formatBookingDate(questionnaire?: BookingQuestionnaire | null): 
     ? new Date(`${value.slice(0, 7)}-01T12:00:00.000Z`)
     : new Date(`${value.slice(0, 10)}T12:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("ar-SA", {
-    timeZone: "Asia/Riyadh",
+  return date.toLocaleDateString("en-US-u-ca-gregory-nu-latn", {
+    timeZone: "UTC",
     year: "numeric",
     month: "long",
     ...(precision === "month" ? {} : { day: "numeric" }),

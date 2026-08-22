@@ -47,6 +47,8 @@ export function BookingDateInput({
 
       <input
         type={precision === "month" ? "month" : "date"}
+        lang="en-US"
+        dir="ltr"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required
