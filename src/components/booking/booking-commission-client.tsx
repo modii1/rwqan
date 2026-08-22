@@ -11,7 +11,6 @@ import {
   PauseCircle,
   RefreshCw,
   ShieldAlert,
-  Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,7 +27,10 @@ import {
   type BookingQuestionnaire,
 } from "./booking-display";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
-import { getOwnerCommissionViewState } from "./booking-commission-state";
+import {
+  getBookingCommissionElectronicPaymentMethod,
+  getOwnerCommissionViewState,
+} from "./booking-commission-state";
 import BookingCommissionBankTransfer, {
   type BookingCommissionOwnerPaymentAttempt,
 } from "./booking-commission-bank-transfer";
@@ -70,6 +72,7 @@ function safeCheckoutUrl(value: unknown): string | null {
 
 export default function BookingCommissionClient({ token }: { token: string }) {
   const [pendingMethod, setPendingMethod] = useState<"cards" | "applepay" | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"online" | "bank" | null>(null);
   const [showDispute, setShowDispute] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputePending, setDisputePending] = useState(false);
@@ -110,6 +113,13 @@ export default function BookingCommissionClient({ token }: { token: string }) {
   const activeElectronicProcessing =
     ["cards", "applepay"].includes(activeAttemptMethod) &&
     ["creating", "unknown"].includes(activeAttemptStatus);
+  const selectedPaymentMethod = activeElectronicCreated
+    ? "online"
+    : paymentMethod;
+  const electronicCheckoutMethod = getBookingCommissionElectronicPaymentMethod({
+    activeAttemptMethod,
+    activeAttemptStatus,
+  });
 
   const startCheckout = async (paymentMethod: "cards" | "applepay") => {
     setActionError("");
@@ -340,33 +350,54 @@ export default function BookingCommissionClient({ token }: { token: string }) {
                   <h3 id="payment-method-title" className="text-sm font-bold text-[#34332f]">
                     {activeElectronicCreated ? "متابعة محاولة الدفع" : "اختر طريقة الدفع"}
                   </h3>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {(!activeElectronicCreated || activeAttemptMethod === "cards") && (
-                      <Button
-                        type="button"
-                        onClick={() => void startCheckout("cards")}
-                        disabled={pendingMethod !== null || disputePending}
-                        className="h-12 gap-2"
-                        data-testid="button-commission-pay-cards"
-                      >
-                        {pendingMethod === "cards" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                        {activeElectronicCreated ? "ادفع الآن" : "الدفع بالبطاقة"}
-                      </Button>
-                    )}
-                    {(!activeElectronicCreated || activeAttemptMethod === "applepay") && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void startCheckout("applepay")}
-                        disabled={pendingMethod !== null || disputePending}
-                        className="h-12 gap-2 border-slate-300"
-                        data-testid="button-commission-pay-applepay"
-                      >
-                        {pendingMethod === "applepay" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
-                        {activeElectronicCreated ? "متابعة الدفع عبر Apple Pay" : "Apple Pay"}
-                      </Button>
-                    )}
+                  <div className="mt-3 space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionError("");
+                        setPaymentMethod("online");
+                      }}
+                      disabled={pendingMethod !== null || disputePending}
+                      aria-pressed={selectedPaymentMethod === "online"}
+                      className={`w-full cursor-pointer rounded-lg border-2 p-4 text-right transition ${selectedPaymentMethod === "online" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                      data-testid="button-commission-select-online"
+                    >
+                      <span className="flex items-center gap-2 font-semibold">
+                        <CreditCard className="h-5 w-5 text-[#434040]" />
+                        الدفع الإلكتروني
+                      </span>
+                      <span className="block text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay — تفعيل فوري</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionError("");
+                        setPaymentMethod("bank");
+                      }}
+                      disabled={activeElectronicCreated || pendingMethod !== null || disputePending}
+                      aria-pressed={selectedPaymentMethod === "bank"}
+                      className={`w-full cursor-pointer rounded-lg border-2 p-4 text-right transition disabled:cursor-not-allowed disabled:opacity-50 ${selectedPaymentMethod === "bank" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                      data-testid="button-commission-select-bank"
+                    >
+                      <span className="block font-semibold">تحويل بنكي</span>
+                      <span className="block text-sm text-muted-foreground">مع تحميل إيصال التحويل — خلال 24 ساعة</span>
+                    </button>
                   </div>
+
+                  {selectedPaymentMethod === "online" && (
+                    <Button
+                      type="button"
+                      onClick={() => void startCheckout(electronicCheckoutMethod)}
+                      disabled={pendingMethod !== null || disputePending}
+                      className="mt-3 h-12 w-full gap-2"
+                      data-testid="button-commission-pay-online"
+                    >
+                      {pendingMethod === electronicCheckoutMethod
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <CreditCard className="h-4 w-4" />}
+                      ادفع الآن
+                    </Button>
+                  )}
                   <BookingCommissionBankTransfer
                     token={token}
                     checkoutAvailable={
@@ -375,6 +406,9 @@ export default function BookingCommissionClient({ token }: { token: string }) {
                     }
                     attempt={commission.paymentAttempt}
                     disabled={pendingMethod !== null || disputePending}
+                    expanded={selectedPaymentMethod === "bank"}
+                    onExpandedChange={(expanded) => setPaymentMethod(expanded ? "bank" : null)}
+                    showTrigger={false}
                     onChanged={() => query.refetch().then(() => undefined)}
                     onError={setActionError}
                   />

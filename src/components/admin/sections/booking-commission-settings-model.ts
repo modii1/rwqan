@@ -200,7 +200,7 @@ const PREVIEW_VALUES: Record<string, string> = {
   commissionPercent: "10",
   commissionAmountSar: "100",
   paymentWindowDays: "5",
-  paymentLink: "https://rwqan.sa/booking-commission/example",
+  paymentLink: "https://rwqan.sa/p/RwqanPay01",
   reminderDay: "3",
   commissionDueAt: "25 أغسطس 2026، 03:00 م",
 };

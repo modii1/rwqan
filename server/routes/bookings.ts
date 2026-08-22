@@ -130,7 +130,46 @@ export function createBookingShortLinkHandler(
   };
 }
 
+export function createOwnerPaymentShortLinkHandler(
+  resolve: (code: string) => Promise<{ token: string; expiresAt: string }> =
+    (code) => getBookingShortLinkService().resolveOwnerPayment(code),
+): RequestHandler {
+  return async (req, res) => {
+    setShortLinkPrivacyHeaders(res);
+    try {
+      const resolved = await resolve(req.params.code);
+      const verified = bookingCommissionService.verifyOwnerToken(resolved.token);
+      if (verified.expiresAt !== resolved.expiresAt) {
+        throw new BookingShortLinkError(
+          "SHORT_LINK_INVALID",
+          "Booking short-link expiry mismatch",
+        );
+      }
+      return res.redirect(
+        302,
+        `/booking-commission/${encodeURIComponent(resolved.token)}`,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof BookingShortLinkError) &&
+        !(error instanceof BookingTokenError)
+      ) {
+        console.error(
+          "Booking short-link resolution failed:",
+          error instanceof Error ? error.name : "UnknownError",
+        );
+      }
+      const status = error instanceof BookingShortLinkError &&
+          error.code === "SHORT_LINK_EXPIRED"
+        ? 410
+        : 404;
+      return res.status(status).type("text/plain; charset=utf-8").send("الرابط غير متاح");
+    }
+  };
+}
+
 router.get("/b/:code", createBookingShortLinkHandler());
+router.get("/p/:code", createOwnerPaymentShortLinkHandler());
 
 router.get("/api/booking-followups/:token", async (req, res) => {
   setNoStore(res);

@@ -6,6 +6,8 @@ import { firebaseService } from "../firebaseService";
 import whatsappRouter, {
   buildOwnerFreeContactLimitReachedMessage,
   buildOwnerSubscriptionActivatedMessage,
+  buildOwnerSubscriptionExpiredMessage,
+  buildOwnerSubscriptionExpiringSoonMessage,
   createEnjazatikWhatsAppSender,
   createPropertyOwnerWhatsAppSender,
   notifyOwnerFreeContactLimitReached,
@@ -13,6 +15,46 @@ import whatsappRouter, {
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
 } from "./whatsapp";
+
+function withOwnerMessageEnvironment<T>(
+  values: {
+    publicBaseUrl?: string;
+    nextPublicBaseUrl?: string;
+    nodeEnv?: string;
+  },
+  run: () => T,
+): T {
+  const environment = process.env as Record<string, string | undefined>;
+  const previous = {
+    publicBaseUrl: environment.PUBLIC_BASE_URL,
+    nextPublicBaseUrl: environment.NEXT_PUBLIC_BASE_URL,
+    nodeEnv: environment.NODE_ENV,
+  };
+  const configured = {
+    PUBLIC_BASE_URL: values.publicBaseUrl,
+    NEXT_PUBLIC_BASE_URL: values.nextPublicBaseUrl,
+    NODE_ENV: values.nodeEnv,
+  };
+
+  for (const [key, value] of Object.entries(configured)) {
+    if (value === undefined) delete environment[key];
+    else environment[key] = value;
+  }
+
+  try {
+    return run();
+  } finally {
+    const restored = {
+      PUBLIC_BASE_URL: previous.publicBaseUrl,
+      NEXT_PUBLIC_BASE_URL: previous.nextPublicBaseUrl,
+      NODE_ENV: previous.nodeEnv,
+    };
+    for (const [key, value] of Object.entries(restored)) {
+      if (value === undefined) delete environment[key];
+      else environment[key] = value;
+    }
+  }
+}
 
 test("Enjazatik sender makes exactly one provider request after immediate acceptance", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
@@ -45,27 +87,102 @@ test("Enjazatik sender makes exactly one provider request after immediate accept
   });
 });
 
-test("free contact-limit message tells the owner to upgrade from the direct page", () => {
-  assert.equal(
-    buildOwnerFreeContactLimitReachedMessage({ propertyNumber: "10001" }),
-    `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (3 من 3).
+test("free contact-limit message tells the owner to upgrade through the short route", () => {
+  withOwnerMessageEnvironment({ nodeEnv: "production" }, () => {
+    assert.equal(
+      buildOwnerFreeContactLimitReachedMessage({ propertyNumber: "10001" }),
+      `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (3 من 3).
 
 قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
-https://rwqan.sa/owner/subscription`,
-  );
+https://rwqan.sa/r`,
+    );
+  });
 });
 
 test("free contact-limit message reflects a configured non-default limit", () => {
-  assert.equal(
-    buildOwnerFreeContactLimitReachedMessage({
-      propertyNumber: "10001",
-      dailyLimit: 7,
-    }),
-    `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (7 من 7).
+  withOwnerMessageEnvironment({ nodeEnv: "production" }, () => {
+    assert.equal(
+      buildOwnerFreeContactLimitReachedMessage({
+        propertyNumber: "10001",
+        dailyLimit: 7,
+      }),
+      `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (7 من 7).
 
 قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
-https://rwqan.sa/owner/subscription`,
-  );
+https://rwqan.sa/r`,
+    );
+  });
+});
+
+test("owner renewal messages use the configured staging origin without its path", () => {
+  withOwnerMessageEnvironment({
+    publicBaseUrl: "https://staging.rwqan.test/deployment/path",
+    nodeEnv: "production",
+  }, () => {
+    const messages = [
+      buildOwnerFreeContactLimitReachedMessage({ propertyNumber: "10001" }),
+      buildOwnerSubscriptionExpiringSoonMessage({
+        propertyNumber: "10001",
+        propertyName: "Test property",
+        daysLeft: 3,
+      }),
+      buildOwnerSubscriptionExpiredMessage({
+        propertyNumber: "10001",
+        propertyName: "Test property",
+      }),
+    ];
+
+    assert.equal(
+      messages[1],
+      `مرحبا بك في نظام روقـان للعقارات
+
+اشتراك عقارك Test property رقم 10001 ينتهي خلال 3 ايام
+
+جدد الان للحفاظ على ظهورك المميز
+https://staging.rwqan.test/r`,
+    );
+    assert.equal(
+      messages[2],
+      `مرحبا بك في نظام روقـان للعقارات
+
+انتهى اشتراك عقارك Test property رقم 10001
+
+تم تحويله للعرض العادي
+
+جدد الان لاستعادة المميزات
+https://staging.rwqan.test/r`,
+    );
+    for (const message of messages) {
+      assert.match(message, /https:\/\/staging\.rwqan\.test\/r$/);
+      assert.doesNotMatch(message, /\/owner\/(?:login|subscription)/);
+      assert.doesNotMatch(message, /deployment\/path/);
+    }
+  });
+});
+
+test("owner renewal messages fall back to the production origin for an unsafe production URL", () => {
+  withOwnerMessageEnvironment({
+    publicBaseUrl: "http://staging.rwqan.test/unsafe",
+    nodeEnv: "production",
+  }, () => {
+    const messages = [
+      buildOwnerFreeContactLimitReachedMessage({ propertyNumber: "10001" }),
+      buildOwnerSubscriptionExpiringSoonMessage({
+        propertyNumber: "10001",
+        propertyName: "Test property",
+        daysLeft: 3,
+      }),
+      buildOwnerSubscriptionExpiredMessage({
+        propertyNumber: "10001",
+        propertyName: "Test property",
+      }),
+    ];
+
+    for (const message of messages) {
+      assert.match(message, /https:\/\/rwqan\.sa\/r$/);
+      assert.doesNotMatch(message, /http:\/\/staging\.rwqan\.test/);
+    }
+  });
 });
 
 test("subscription activation message displays an ISO end date as a Riyadh calendar date", () => {

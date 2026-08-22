@@ -13,6 +13,15 @@ import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
 
 const router = Router();
 
+// Permanent first-party alias used in owner renewal and upgrade messages.
+router.get("/r", (_req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  res.set("Referrer-Policy", "no-referrer");
+  res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  res.set("X-Content-Type-Options", "nosniff");
+  return res.redirect(302, "/owner/subscription");
+});
+
 // ======================
 // Developer Guide HTML
 // ======================

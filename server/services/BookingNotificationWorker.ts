@@ -13,6 +13,7 @@ import {
 } from "./BookingCommissionService";
 import {
   createCustomerBookingShortCode,
+  createOwnerPaymentShortCode,
   getBookingShortLinkService,
   type BookingShortLinkService,
 } from "./BookingShortLinkService";
@@ -102,6 +103,25 @@ function bookingDateLabel(booking: BookingFollowUpDocument): string {
     : date.value;
 }
 
+function ownerPaymentLink(booking: BookingFollowUpDocument): string {
+  const token = bookingCommissionService.issueOwnerPaymentToken(booking);
+  return `${baseUrl()}/p/${createOwnerPaymentShortCode(token)}`;
+}
+
+function notificationIncludesOwnerPaymentLink(
+  job: BookingNotificationJob,
+  booking: BookingFollowUpDocument,
+): boolean {
+  if (job.kind === "owner_booking_confirmed") {
+    return booking.commissionStatus !== "not_applicable" &&
+      booking.commissionAmountHalalas !== null &&
+      Boolean(booking.commissionDueAt);
+  }
+  return job.kind === "commission_dispute_rejected" ||
+    job.kind.startsWith("commission_reminder_") ||
+    job.kind === "property_paused";
+}
+
 export function buildBookingNotificationMessage(
   job: BookingNotificationJob,
   booking: BookingFollowUpDocument,
@@ -144,8 +164,7 @@ export function buildBookingNotificationMessage(
         },
       );
     }
-    const paymentToken = bookingCommissionService.issueOwnerPaymentToken(booking);
-    const paymentLink = `${baseUrl()}/booking-commission/${encodeURIComponent(paymentToken)}`;
+    const paymentLink = ownerPaymentLink(booking);
     return renderBookingWhatsAppTemplate(
       "owner_booking_commission",
       templates.owner_booking_commission,
@@ -167,10 +186,8 @@ export function buildBookingNotificationMessage(
     );
   }
 
-  const paymentToken = bookingCommissionService.issueOwnerPaymentToken(booking);
-  const paymentLink = `${baseUrl()}/booking-commission/${encodeURIComponent(paymentToken)}`;
-
   if (job.kind === "commission_dispute_rejected") {
+    const paymentLink = ownerPaymentLink(booking);
     return renderBookingWhatsAppTemplate(
       "commission_dispute_rejected",
       templates.commission_dispute_rejected,
@@ -185,6 +202,7 @@ export function buildBookingNotificationMessage(
   }
 
   if (job.kind.startsWith("commission_reminder_")) {
+    const paymentLink = ownerPaymentLink(booking);
     const day = job.reminderOffsetDays || Number(job.kind.slice(-1));
     return renderBookingWhatsAppTemplate(
       "commission_reminder",
@@ -201,6 +219,7 @@ export function buildBookingNotificationMessage(
   }
 
   if (job.kind === "property_paused") {
+    const paymentLink = ownerPaymentLink(booking);
     return renderBookingWhatsAppTemplate(
       "property_paused",
       templates.property_paused,
@@ -232,7 +251,7 @@ async function dispatchClaim(
   job: ClaimedBookingNotification,
   shortLinkService?: Pick<
     BookingShortLinkService,
-    "ensureCustomerResponseLink"
+    "ensureCustomerResponseLink" | "ensureOwnerPaymentLink"
   >,
 ): Promise<boolean> {
   const prepared = await bookingCommissionStore.prepareNotificationForSend(
@@ -247,29 +266,32 @@ async function dispatchClaim(
     }
     return false;
   }
-  const initialBooking = prepared.booking;
-
   let message: string;
   try {
-    if (job.kind === "customer_followup") {
-      const token = bookingCommissionService.issueCustomerResponseToken(initialBooking);
-      await (shortLinkService || getBookingShortLinkService())
-        .ensureCustomerResponseLink({
-          bookingId: initialBooking.id,
-          token,
-          expiresAt:
-            Date.parse(initialBooking.createdAt) + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
-        });
-    }
     const settings = await bookingCommissionStore.getFreeWorkflowSettings();
     const sendPrepared = await bookingCommissionStore.prepareNotificationForSend(
       job.id,
       job.leaseToken,
     );
     if (sendPrepared.status === "blocked") return false;
+    const sendBooking = sendPrepared.booking;
+    if (job.kind === "customer_followup") {
+      const links = shortLinkService || getBookingShortLinkService();
+      const token = bookingCommissionService.issueCustomerResponseToken(sendBooking);
+      await links.ensureCustomerResponseLink({
+        bookingId: sendBooking.id,
+        token,
+        expiresAt:
+          Date.parse(sendBooking.createdAt) + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
+      });
+    } else if (notificationIncludesOwnerPaymentLink(job, sendBooking)) {
+      const links = shortLinkService || getBookingShortLinkService();
+      const token = bookingCommissionService.issueOwnerPaymentToken(sendBooking);
+      await links.ensureOwnerPaymentLink({ token });
+    }
     message = buildBookingNotificationMessage(
       job,
-      sendPrepared.booking,
+      sendBooking,
       settings.whatsappTemplates,
     );
   } catch (error) {
@@ -297,7 +319,7 @@ export async function dispatchDueBookingNotifications(
   options: {
     shortLinkService?: Pick<
       BookingShortLinkService,
-      "ensureCustomerResponseLink"
+      "ensureCustomerResponseLink" | "ensureOwnerPaymentLink"
     >;
   } = {},
 ): Promise<{ claimed: number; sent: number }> {

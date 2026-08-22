@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { getOwnerCommissionViewState } from "./booking-commission-state";
+import {
+  getBookingCommissionElectronicPaymentMethod,
+  getOwnerCommissionViewState,
+} from "./booking-commission-state";
 
 test("paid commission takes precedence over a stale pending dispute", () => {
   assert.equal(getOwnerCommissionViewState({
@@ -37,11 +40,53 @@ test("only an unresolved dispute hides payment controls", () => {
   }), "payable");
 });
 
-test("an existing electronic checkout uses the requested short payment action", () => {
+test("new electronic selections use cards while an existing Apple Pay checkout resumes safely", () => {
+  assert.equal(getBookingCommissionElectronicPaymentMethod({
+    activeAttemptMethod: null,
+    activeAttemptStatus: null,
+  }), "cards");
+  assert.equal(getBookingCommissionElectronicPaymentMethod({
+    activeAttemptMethod: "cards",
+    activeAttemptStatus: "created",
+  }), "cards");
+  assert.equal(getBookingCommissionElectronicPaymentMethod({
+    activeAttemptMethod: "applepay",
+    activeAttemptStatus: "created",
+  }), "applepay");
+  assert.equal(getBookingCommissionElectronicPaymentMethod({
+    activeAttemptMethod: "applepay",
+    activeAttemptStatus: "rejected",
+  }), "cards");
+});
+
+test("commission payment presents only online and bank choices with the short payment action", () => {
   const source = readFileSync(
     new URL("./booking-commission-client.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /activeElectronicCreated \? "ادفع الآن"/);
+  assert.deepEqual(
+    source.match(/data-testid="button-commission-select-(?:online|bank)"/g),
+    [
+      'data-testid="button-commission-select-online"',
+      'data-testid="button-commission-select-bank"',
+    ],
+  );
+  assert.match(source, /startCheckout\(electronicCheckoutMethod\)/);
+  assert.match(source, /ادفع الآن/);
+  assert.doesNotMatch(source, /button-commission-pay-applepay/);
   assert.doesNotMatch(source, /متابعة الدفع بالبطاقة/);
+  assert.doesNotMatch(source, /\/api\/owner\/payment\//);
+});
+
+test("commission bank presentation stays on its token-scoped receipt endpoint", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-bank-transfer.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /\/api\/booking-commissions\/\$\{encodeURIComponent\(token\)\}\/bank-transfer/,
+  );
+  assert.doesNotMatch(source, /\/api\/owner\/payment\//);
+  assert.match(source, /showTrigger= true|showTrigger = true/);
 });

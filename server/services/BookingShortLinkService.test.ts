@@ -6,6 +6,7 @@ import {
   BookingShortLinkError,
   BookingShortLinkService,
   createCustomerBookingShortCode,
+  createOwnerPaymentShortCode,
 } from "./BookingShortLinkService";
 
 type FakeData = Record<string, unknown>;
@@ -119,6 +120,14 @@ function customerToken(): string {
   });
 }
 
+function ownerPaymentToken(expiresAt = EXPIRES_AT): string {
+  return new BookingTokenService({ secret: SECRET, now: () => INITIAL_NOW }).issue({
+    bookingId: BOOKING_ID,
+    purpose: "owner_payment",
+    expiresAt,
+  });
+}
+
 test("customer aliases are compact, deterministic, opaque, and purpose-bound", () => {
   const code = createCustomerBookingShortCode(BOOKING_ID, SECRET);
   assert.match(code, /^[A-Za-z0-9_-]{10}$/);
@@ -127,6 +136,20 @@ test("customer aliases are compact, deterministic, opaque, and purpose-bound", (
   assert.notEqual(
     code,
     createCustomerBookingShortCode("BOOK-REQ-13383-002", SECRET),
+  );
+  assert.equal(code.includes("13383"), false);
+  assert.equal(code.includes("BOOK"), false);
+});
+
+test("owner payment aliases are compact, deterministic, opaque, and token-bound", () => {
+  const token = ownerPaymentToken();
+  const code = createOwnerPaymentShortCode(token, SECRET);
+  assert.match(code, /^[A-Za-z0-9_-]{10}$/);
+  assert.equal(code, createOwnerPaymentShortCode(token, SECRET));
+  assert.notEqual(code, createCustomerBookingShortCode(BOOKING_ID, SECRET));
+  assert.notEqual(
+    code,
+    createOwnerPaymentShortCode(ownerPaymentToken(EXPIRES_AT + 1_000), SECRET),
   );
   assert.equal(code.includes("13383"), false);
   assert.equal(code.includes("BOOK"), false);
@@ -170,6 +193,107 @@ test("lazy alias creation is atomic and idempotent without storing raw identifie
     token,
     expiresAt: new Date(EXPIRES_AT).toISOString(),
   });
+});
+
+test("owner payment alias creation is atomic, idempotent, and resolvable", async () => {
+  const database = new FakeFirestore();
+  const service = new BookingShortLinkService({
+    database: database as never,
+    secret: SECRET,
+    now: () => INITIAL_NOW,
+  });
+  const token = ownerPaymentToken();
+
+  const [first, second] = await Promise.all([
+    service.ensureOwnerPaymentLink({ token }),
+    service.ensureOwnerPaymentLink({ token }),
+  ]);
+
+  assert.equal(first, second);
+  assert.match(first, /^[A-Za-z0-9_-]{10}$/);
+  assert.equal(database.transactionCalls, 2);
+  assert.equal(database.createCalls, 1);
+  const stored = database.read("booking_short_links", first);
+  assert.ok(stored);
+  assert.equal(stored.purpose, "owner_payment");
+  assert.equal(stored.token, token);
+  assert.equal(stored.expiresAt, new Date(EXPIRES_AT).toISOString());
+  assert.deepEqual(stored.expiresAtTtl, new Date(EXPIRES_AT));
+  assert.equal(Object.hasOwn(stored, "bookingId"), false);
+  assert.equal(Object.hasOwn(stored, "ownerPhone"), false);
+
+  assert.deepEqual(await service.resolveOwnerPayment(first), {
+    token,
+    expiresAt: new Date(EXPIRES_AT).toISOString(),
+  });
+  await assert.rejects(
+    () => service.resolveCustomerResponse(first),
+    (error: unknown) =>
+      error instanceof BookingShortLinkError &&
+      error.code === "SHORT_LINK_INVALID",
+  );
+});
+
+test("owner payment aliases reject wrong-purpose, expired, and rebound targets", async () => {
+  const database = new FakeFirestore();
+  let now = INITIAL_NOW;
+  const service = new BookingShortLinkService({
+    database: database as never,
+    secret: SECRET,
+    now: () => now,
+  });
+
+  await assert.rejects(() => service.ensureOwnerPaymentLink({
+    token: customerToken(),
+  }));
+
+  const token = ownerPaymentToken();
+  const code = await service.ensureOwnerPaymentLink({ token });
+  now = EXPIRES_AT;
+  await assert.rejects(
+    () => service.resolveOwnerPayment(code),
+    (error: unknown) =>
+      error instanceof BookingShortLinkError &&
+      error.code === "SHORT_LINK_EXPIRED",
+  );
+
+  now = INITIAL_NOW;
+  const wrongCode = "D".repeat(10);
+  database.seed("booking_short_links", wrongCode, {
+    schemaVersion: 1,
+    purpose: "owner_payment",
+    token,
+    expiresAt: new Date(EXPIRES_AT).toISOString(),
+    expiresAtTtl: new Date(EXPIRES_AT),
+    createdAt: new Date(INITIAL_NOW).toISOString(),
+  });
+  await assert.rejects(
+    () => service.resolveOwnerPayment(wrongCode),
+    (error: unknown) =>
+      error instanceof BookingShortLinkError &&
+      error.code === "SHORT_LINK_INVALID",
+  );
+
+  const collisionDatabase = new FakeFirestore();
+  const collisionService = new BookingShortLinkService({
+    database: collisionDatabase as never,
+    secret: SECRET,
+    now: () => INITIAL_NOW,
+  });
+  collisionDatabase.seed("booking_short_links", code, {
+    schemaVersion: 1,
+    purpose: "customer_response",
+    token: customerToken(),
+    expiresAt: new Date(EXPIRES_AT).toISOString(),
+    expiresAtTtl: new Date(EXPIRES_AT),
+    createdAt: new Date(INITIAL_NOW).toISOString(),
+  });
+  await assert.rejects(
+    () => collisionService.ensureOwnerPaymentLink({ token }),
+    (error: unknown) =>
+      error instanceof BookingShortLinkError &&
+      error.code === "SHORT_LINK_INVALID",
+  );
 });
 
 test("aliases reject malformed, missing, expired, and corrupt targets", async () => {

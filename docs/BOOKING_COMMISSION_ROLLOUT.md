@@ -14,6 +14,7 @@
   2. Booking date: an exact day or a month-only value.
   3. Price paid in SAR.
 - The confirmed facts are sent to the property owner. When commission enforcement is enabled, the same message includes the exact 10% commission and a signed Paymob payment link.
+- Owner payment-bearing WhatsApp messages for free-property bookings use an internal `/p/<10-character-code>` alias. Previously issued direct `/booking-commission/<signed-token>` links remain valid.
 - Booking dates remain stored as canonical Gregorian values. The customer can switch the questionnaire and profile display between Gregorian and Umm al-Qura Hijri without changing the stored date.
 - Commission payment supports the existing electronic Paymob methods or a bank transfer with a JPEG, PNG, WebP, or PDF receipt. A pending bank review parks payment reminders and enforcement; approval settles the obligation, while rejection preserves the evidence and resumes collection safely.
 - Rejecting an owner dispute schedules the dedicated configurable rejection template once. Accepting a dispute cancels collection and releases only that booking's hold obligation.

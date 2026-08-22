@@ -5,6 +5,8 @@ export type OwnerCommissionViewState =
   | "dispute_rejected"
   | "payable";
 
+export type BookingCommissionElectronicPaymentMethod = "cards" | "applepay";
+
 function normalize(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
@@ -34,4 +36,14 @@ export function getOwnerCommissionViewState(options: {
     return "dispute_pending";
   }
   return "payable";
+}
+
+export function getBookingCommissionElectronicPaymentMethod(options: {
+  activeAttemptMethod: unknown;
+  activeAttemptStatus: unknown;
+}): BookingCommissionElectronicPaymentMethod {
+  return normalize(options.activeAttemptMethod) === "applepay"
+    && normalize(options.activeAttemptStatus) === "created"
+    ? "applepay"
+    : "cards";
 }

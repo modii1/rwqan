@@ -1186,18 +1186,66 @@ export class BookingCommissionStore {
           "Only completed notification records can be resent",
         );
       }
+      let earlierReminderSnapshots: FirebaseFirestore.DocumentSnapshot[] = [];
+      let laterReminderSnapshots: FirebaseFirestore.DocumentSnapshot[] = [];
+      if (sourceJob.reminderOffsetDays) {
+        const siblingReminderSnapshots = await Promise.all(
+          ([3, 4, 5] as const)
+            .filter((offset) => offset !== sourceJob.reminderOffsetDays)
+            .map(async (offset) => ({
+              offset,
+              snapshot: await transaction.get(
+                this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+                  notificationId(booking.id, `commission_reminder_${offset}`),
+                ),
+              ),
+            })),
+        );
+        if (sourceJob.status === "pending") {
+          earlierReminderSnapshots = siblingReminderSnapshots
+            .filter(({ offset }) => offset < sourceJob.reminderOffsetDays!)
+            .map(({ snapshot }) => snapshot);
+        }
+        laterReminderSnapshots = siblingReminderSnapshots
+          .filter(({ offset }) => offset > sourceJob.reminderOffsetDays!)
+          .map(({ snapshot }) => snapshot);
+      }
       if (sourceJob.reminderOffsetDays) {
         const latestDueOffset = latestCommissionReminderOffsetDue(booking, now);
-        if (latestDueOffset && sourceJob.reminderOffsetDays < latestDueOffset) {
+        const laterReminderDeliveredOrSending =
+          (booking.commissionReminderOffsetsSent || [])
+            .some((offset) => offset > sourceJob.reminderOffsetDays!) ||
+          laterReminderSnapshots.some((snapshot) => {
+            if (!snapshot.exists) return false;
+            return ["claimed", "sent"].includes(
+              (snapshot.data() as BookingNotificationJob).status,
+            );
+          });
+        if (
+          laterReminderDeliveredOrSending ||
+          (latestDueOffset && sourceJob.reminderOffsetDays < latestDueOffset)
+        ) {
           throw new BookingWorkflowError(
             "NOTIFICATION_REMINDER_SUPERSEDED",
             "A newer commission reminder is already due",
           );
         }
-        if (latestDueOffset !== sourceJob.reminderOffsetDays) {
+        if (
+          sourceJob.status !== "pending" &&
+          latestDueOffset !== sourceJob.reminderOffsetDays
+        ) {
           throw new BookingWorkflowError(
             "NOTIFICATION_STATE_CHANGED",
             "Notification no longer matches the booking state",
+          );
+        }
+        if (earlierReminderSnapshots.some((snapshot) =>
+          snapshot.exists &&
+          (snapshot.data() as BookingNotificationJob).status === "claimed"
+        )) {
+          throw new BookingWorkflowError(
+            "NOTIFICATION_SEND_IN_PROGRESS",
+            "Notification is currently being sent",
           );
         }
       }
@@ -1294,6 +1342,16 @@ export class BookingCommissionStore {
           providerError: null,
           updatedAt: timestamp,
         });
+        for (const snapshot of earlierReminderSnapshots) {
+          if (!snapshot.exists) continue;
+          const earlierJob = snapshot.data() as BookingNotificationJob;
+          if (earlierJob.status !== "pending") continue;
+          transaction.update(snapshot.ref, {
+            status: "cancelled",
+            providerError: "superseded_reminder",
+            updatedAt: timestamp,
+          });
+        }
       } else {
         transaction.create(resendJobRef, resendJob);
       }
@@ -1737,14 +1795,38 @@ export class BookingCommissionStore {
         throw new BookingWorkflowError("COMMISSION_NOT_APPLICABLE", "Commission is not applicable");
       }
       if (booking.disputeStatus !== "pending") {
-        if (
-          (resolution === "resume_collection" && booking.disputeStatus === "rejected") ||
-          (resolution === "cancel_commission" && booking.disputeStatus === "accepted")
-        ) {
+        if (resolution === "resume_collection" && booking.disputeStatus === "rejected") {
           return {
             booking,
             propertyReleased: false,
             ownerNotificationScheduled: false,
+          };
+        }
+        if (resolution === "cancel_commission" && booking.disputeStatus === "accepted") {
+          const [releaseJobSnapshot, currentPropertySnapshot] = await Promise.all([
+            transaction.get(releaseJobRef),
+            transaction.get(
+              this.db.collection("properties").doc(booking.propertyNumber),
+            ),
+          ]);
+          const ownerNotificationScheduled =
+            booking.isFreeProperty === true &&
+            !booking.freeEligibilityRevokedAt &&
+            currentPropertySnapshot.exists &&
+            currentPropertySnapshot.data()?.commissionHold?.active !== true &&
+            !releaseJobSnapshot.exists;
+          if (ownerNotificationScheduled) {
+            transaction.create(releaseJobRef, buildNotificationJob({
+              booking,
+              kind: "property_released",
+              scheduledAt: now.toISOString(),
+              now: now.toISOString(),
+            }));
+          }
+          return {
+            booking,
+            propertyReleased: false,
+            ownerNotificationScheduled,
           };
         }
         throw new BookingWorkflowError(
@@ -1979,21 +2061,30 @@ export class BookingCommissionStore {
           updatedAt: timestamp,
         });
       }
-      if (propertyReleased && !releaseJobSnapshot.exists) {
+      const resolvedBooking = { ...booking, ...updates } as BookingFollowUpDocument;
+      const ownerNotificationScheduled =
+        booking.isFreeProperty === true &&
+        !booking.freeEligibilityRevokedAt &&
+        propertySnapshot.exists &&
+        !releaseJobSnapshot.exists &&
+        (
+          propertyReleased ||
+          property.commissionHold?.active !== true
+        );
+      if (ownerNotificationScheduled) {
         transaction.create(releaseJobRef, buildNotificationJob({
-          booking,
+          booking: resolvedBooking,
           kind: "property_released",
           scheduledAt: timestamp,
           now: timestamp,
         }));
       }
       transaction.update(bookingRef, updates);
-      const resolvedBooking = { ...booking, ...updates } as BookingFollowUpDocument;
       coreBookingRecord(resolvedBooking);
       return {
         booking: resolvedBooking,
         propertyReleased,
-        ownerNotificationScheduled: false,
+        ownerNotificationScheduled,
       };
     });
     if (!result) {

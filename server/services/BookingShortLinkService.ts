@@ -11,7 +11,7 @@ const LEGACY_SHORT_CODE_LENGTH = 22;
 const MINIMUM_SECRET_BYTES = 32;
 const SHORT_CODE_PATTERN = /^(?:[A-Za-z0-9_-]{10}|[A-Za-z0-9_-]{22})$/;
 
-type BookingShortLinkPurpose = "customer_response";
+type BookingShortLinkPurpose = "customer_response" | "owner_payment";
 
 interface BookingShortLinkDocument {
   schemaVersion: 1;
@@ -48,6 +48,10 @@ export interface EnsureCustomerShortLinkOptions {
   expiresAt: Date | string | number;
 }
 
+export interface EnsureOwnerPaymentShortLinkOptions {
+  token: string;
+}
+
 function resolveSecret(secret?: string | Buffer): Buffer {
   const configuredSecret = secret ?? process.env.SESSION_SECRET;
   if (configuredSecret === undefined || configuredSecret.length === 0) {
@@ -77,6 +81,18 @@ function requireBookingId(value: string): string {
   return value;
 }
 
+function requireSignedToken(value: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 3 ||
+    value.length > 2_048 ||
+    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)
+  ) {
+    throw new RangeError("Invalid booking token");
+  }
+  return value;
+}
+
 function parseExpiry(value: Date | string | number): string {
   const timestamp = value instanceof Date
     ? value.getTime()
@@ -99,7 +115,8 @@ function parseDocument(value: unknown): BookingShortLinkDocument | null {
   const candidate = value as Record<string, unknown>;
   if (
     candidate.schemaVersion !== 1 ||
-    candidate.purpose !== "customer_response" ||
+    (candidate.purpose !== "customer_response" &&
+      candidate.purpose !== "owner_payment") ||
     typeof candidate.token !== "string" ||
     !candidate.token ||
     typeof candidate.expiresAt !== "string" ||
@@ -118,6 +135,18 @@ export function createCustomerBookingShortCode(
     .update(SHORT_LINK_DOMAIN, "utf8")
     .update("customer_response\0", "utf8")
     .update(requireBookingId(bookingId), "utf8")
+    .digest("base64url")
+    .slice(0, SHORT_CODE_LENGTH);
+}
+
+export function createOwnerPaymentShortCode(
+  token: string,
+  secret?: string | Buffer,
+): string {
+  return createHmac("sha256", resolveSecret(secret))
+    .update(SHORT_LINK_DOMAIN, "utf8")
+    .update("owner_payment\0", "utf8")
+    .update(requireSignedToken(token), "utf8")
     .digest("base64url")
     .slice(0, SHORT_CODE_LENGTH);
 }
@@ -150,6 +179,10 @@ export class BookingShortLinkService {
 
   customerCode(bookingId: string): string {
     return createCustomerBookingShortCode(bookingId, this.secret);
+  }
+
+  ownerPaymentCode(token: string): string {
+    return createOwnerPaymentShortCode(token, this.secret);
   }
 
   async ensureCustomerResponseLink(
@@ -206,10 +239,66 @@ export class BookingShortLinkService {
     return code;
   }
 
+  async ensureOwnerPaymentLink(
+    options: EnsureOwnerPaymentShortLinkOptions,
+  ): Promise<string> {
+    const token = requireSignedToken(options.token);
+    const verified = new BookingTokenService({
+      secret: this.secret,
+      now: this.now,
+    }).verify(token, "owner_payment");
+    const code = this.ownerPaymentCode(token);
+    const reference = this.database.collection(SHORT_LINKS_COLLECTION).doc(code);
+    const document: BookingShortLinkDocument = {
+      schemaVersion: 1,
+      purpose: "owner_payment",
+      token,
+      expiresAt: verified.expiresAt,
+      expiresAtTtl: new Date(verified.expiresAt),
+      createdAt: new Date(this.now()).toISOString(),
+    };
+
+    await this.database.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) {
+        transaction.create(reference, document);
+        return;
+      }
+      const current = parseDocument(snapshot.data());
+      if (
+        !current ||
+        current.purpose !== document.purpose ||
+        current.token !== document.token ||
+        current.expiresAt !== document.expiresAt
+      ) {
+        throw new BookingShortLinkError(
+          "SHORT_LINK_INVALID",
+          "Booking short-link collision or corrupt target",
+        );
+      }
+    });
+
+    return code;
+  }
+
   async resolveCustomerResponse(code: unknown): Promise<{
     token: string;
     expiresAt: string;
   }> {
+    return this.resolve(code, "customer_response");
+  }
+
+  async resolveOwnerPayment(code: unknown): Promise<{
+    token: string;
+    expiresAt: string;
+  }> {
+    return this.resolve(code, "owner_payment");
+  }
+
+  private async resolve(
+    code: unknown,
+    purpose: BookingShortLinkPurpose,
+  ): Promise<{ token: string; expiresAt: string }> {
     if (typeof code !== "string" || !SHORT_CODE_PATTERN.test(code)) {
       throw new BookingShortLinkError(
         "SHORT_LINK_MALFORMED",
@@ -227,7 +316,7 @@ export class BookingShortLinkService {
       );
     }
     const document = parseDocument(snapshot.data());
-    if (!document) {
+    if (!document || document.purpose !== purpose) {
       throw new BookingShortLinkError(
         "SHORT_LINK_INVALID",
         "Invalid booking short-link target",
@@ -244,16 +333,18 @@ export class BookingShortLinkService {
       verified = new BookingTokenService({
         secret: this.secret,
         now: this.now,
-      }).verify(document.token, "customer_response");
+      }).verify(document.token, purpose);
     } catch {
       throw new BookingShortLinkError(
         "SHORT_LINK_INVALID",
         "Invalid booking short-link target",
       );
     }
-    const expectedCode = code.length === LEGACY_SHORT_CODE_LENGTH
-      ? createLegacyCustomerBookingShortCode(verified.bookingId, this.secret)
-      : this.customerCode(verified.bookingId);
+    const expectedCode = purpose === "customer_response"
+      ? code.length === LEGACY_SHORT_CODE_LENGTH
+        ? createLegacyCustomerBookingShortCode(verified.bookingId, this.secret)
+        : this.customerCode(verified.bookingId)
+      : this.ownerPaymentCode(document.token);
     const suppliedCode = Buffer.from(code, "ascii");
     const expectedCodeBytes = Buffer.from(expectedCode, "ascii");
     const codeMatches = suppliedCode.length === expectedCodeBytes.length &&

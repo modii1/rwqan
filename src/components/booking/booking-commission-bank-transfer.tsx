@@ -58,6 +58,9 @@ export default function BookingCommissionBankTransfer({
   checkoutAvailable,
   attempt,
   disabled,
+  expanded: controlledExpanded,
+  onExpandedChange,
+  showTrigger = true,
   onChanged,
   onError,
 }: {
@@ -65,13 +68,21 @@ export default function BookingCommissionBankTransfer({
   checkoutAvailable: boolean;
   attempt?: BookingCommissionOwnerPaymentAttempt | null;
   disabled?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  showTrigger?: boolean;
   onChanged: () => void | Promise<void>;
   onError: (message: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [pending, setPending] = useState(false);
+  const expanded = controlledExpanded ?? internalExpanded;
+  const updateExpanded = (next: boolean) => {
+    if (controlledExpanded === undefined) setInternalExpanded(next);
+    onExpandedChange?.(next);
+  };
   const attemptMethod = normalized(attempt?.paymentMethod);
   const status = normalized(attempt?.status);
   const isBankAttempt = attemptMethod === "bank_transfer";
@@ -164,7 +175,7 @@ export default function BookingCommissionBankTransfer({
         method: "POST",
         body: formData,
       });
-      setExpanded(false);
+      updateExpanded(false);
       await onChanged();
     } catch (error) {
       onError(error instanceof Error
@@ -175,19 +186,26 @@ export default function BookingCommissionBankTransfer({
     }
   };
 
+  if (!showTrigger && !expanded) return null;
+
   return (
-    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/40 p-4">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => setExpanded((value) => !value)}
-        disabled={disabled || pending}
-        className="h-12 w-full gap-2 border-blue-300 text-blue-800 hover:bg-blue-50"
-        data-testid="button-commission-pay-bank-transfer"
-      >
-        <Banknote className="h-4 w-4" />
-        تحويل بنكي مع رفع الإيصال
-      </Button>
+    <div className={showTrigger
+      ? "mt-3 rounded-xl border border-blue-200 bg-blue-50/40 p-4"
+      : "mt-3 rounded-lg bg-muted/30 p-4"
+    }>
+      {showTrigger && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => updateExpanded(!expanded)}
+          disabled={disabled || pending}
+          className="h-12 w-full gap-2 border-blue-300 text-blue-800 hover:bg-blue-50"
+          data-testid="button-commission-pay-bank-transfer"
+        >
+          <Banknote className="h-4 w-4" />
+          تحويل بنكي مع رفع الإيصال
+        </Button>
+      )}
 
       {expanded && (
         <div className="mt-4 space-y-4">

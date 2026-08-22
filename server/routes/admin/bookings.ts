@@ -118,8 +118,8 @@ router.post("/api/admin/booking-commissions/:id/dispute", async (req, res) => {
       req.params.id,
       req.body,
     );
-    if (result.disputeStatus === "rejected") {
-      kickBookingWorker("Dispute rejection notification");
+    if (result.ownerNotificationScheduled) {
+      kickBookingWorker("Dispute resolution notification");
     }
     return res.json(result);
   } catch (error) {

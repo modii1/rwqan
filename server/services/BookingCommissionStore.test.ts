@@ -864,6 +864,121 @@ function ownerNotificationFixture(
   };
 }
 
+function pendingCommissionDisputeFixture(
+  overrides: Record<string, unknown> = {},
+) {
+  const booking = confirmedObserveOnlyFixture();
+  return {
+    ...booking,
+    commissionStatus: "pending" as const,
+    commissionAmountHalalas: 10_000,
+    commissionDueAt: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1_000)
+      .toISOString(),
+    commissionNoticeSentAt: now.toISOString(),
+    disputeStatus: "pending" as const,
+    disputedAt: now.toISOString(),
+    disputeReason: "test dispute",
+    complianceStatus: "clear" as const,
+    ...overrides,
+  };
+}
+
+test("accepting a pending dispute before any pause queues one owner acceptance notification", async () => {
+  const database = new FakeFirestore();
+  const booking = pendingCommissionDisputeFixture();
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: "0500000001",
+  });
+  const acceptedAt = new Date(now.getTime() + 1_000);
+
+  const result = await new BookingCommissionStore(database as any)
+    .resolveCommissionDispute(booking.id, "cancel_commission", acceptedAt);
+
+  assert.equal(result.booking.commissionStatus, "waived");
+  assert.equal(result.booking.disputeStatus, "accepted");
+  assert.equal(result.booking.complianceStatus, "clear");
+  assert.equal(result.propertyReleased, false);
+  assert.equal(result.ownerNotificationScheduled, true);
+  const jobs = database.entries("booking_notification_outbox");
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.[0], `${booking.id}--property_released`);
+  assert.equal(jobs[0]?.[1].kind, "property_released");
+  assert.equal(jobs[0]?.[1].recipientRole, "owner");
+  assert.equal(jobs[0]?.[1].status, "pending");
+  assert.equal(jobs[0]?.[1].scheduledAt, acceptedAt.toISOString());
+});
+
+test("repeating an accepted dispute decision repairs one missing notification without duplication", async () => {
+  const database = new FakeFirestore();
+  const booking = pendingCommissionDisputeFixture({
+    commissionStatus: "waived" as const,
+    disputeStatus: "accepted" as const,
+    updatedAt: new Date(now.getTime() + 1_000).toISOString(),
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: "0500000001",
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  const repaired = await store.resolveCommissionDispute(
+    booking.id,
+    "cancel_commission",
+    new Date(now.getTime() + 2_000),
+  );
+  const replayed = await store.resolveCommissionDispute(
+    booking.id,
+    "cancel_commission",
+    new Date(now.getTime() + 3_000),
+  );
+
+  assert.equal(repaired.propertyReleased, false);
+  assert.equal(repaired.ownerNotificationScheduled, true);
+  assert.equal(replayed.propertyReleased, false);
+  assert.equal(replayed.ownerNotificationScheduled, false);
+  const jobs = database.entries("booking_notification_outbox");
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.[0], `${booking.id}--property_released`);
+  assert.equal(jobs[0]?.[1].kind, "property_released");
+});
+
+test("accepting a dispute does not queue a released notification while another hold stays active", async () => {
+  const database = new FakeFirestore();
+  const booking = pendingCommissionDisputeFixture();
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: "0500000001",
+    commissionHold: {
+      active: true,
+      obligationIds: ["BOOK-OTHER-OBLIGATION"],
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+  });
+
+  const result = await new BookingCommissionStore(database as any)
+    .resolveCommissionDispute(
+      booking.id,
+      "cancel_commission",
+      new Date(now.getTime() + 1_000),
+    );
+
+  assert.equal(result.booking.commissionStatus, "waived");
+  assert.equal(result.booking.disputeStatus, "accepted");
+  assert.equal(result.propertyReleased, false);
+  assert.equal(result.ownerNotificationScheduled, false);
+  assert.equal(database.entries("booking_notification_outbox").length, 0);
+  assert.deepEqual(
+    database.read("properties", booking.propertyNumber)
+      ?.commissionHold?.obligationIds,
+    ["BOOK-OTHER-OBLIGATION"],
+  );
+});
+
 test("manual resend creates one separate audited job and replays the same idempotency key", async () => {
   const database = new FakeFirestore();
   const booking = confirmedObserveOnlyFixture();
@@ -1115,7 +1230,52 @@ test("manual send moves a queued notification to now without creating a duplicat
   );
 });
 
-test("manual resend rejects in-progress jobs, premature or superseded reminders, and release messages for held properties", async () => {
+test("manual resend never sends an older reminder after a later reminder was delivered", async () => {
+  const database = new FakeFirestore();
+  const booking = {
+    ...confirmedObserveOnlyFixture(),
+    commissionStatus: "pending" as const,
+    commissionAmountHalalas: 10_000,
+    commissionNoticeSentAt: new Date(
+      now.getTime() - 3 * 24 * 60 * 60 * 1_000,
+    ).toISOString(),
+    commissionDueAt: new Date(
+      now.getTime() + 2 * 24 * 60 * 60 * 1_000,
+    ).toISOString(),
+    commissionReminderOffsetsSent: [5],
+    disputeStatus: "none" as const,
+  };
+  const source = ownerNotificationFixture(booking as any, {
+    id: `${booking.id}--commission_reminder_3`,
+    kind: "commission_reminder_3",
+    reminderOffsetDays: 3,
+    quotaCategory: "transactional",
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("booking_notification_outbox", source.id, source);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: booking.ownerPhone,
+  });
+
+  await assert.rejects(
+    () => new BookingCommissionStore(database as any)
+      .scheduleManualNotificationResend({
+        bookingId: booking.id,
+        sourceJobId: source.id,
+        idempotencyKey: "admin-resend-after-later-sent-01",
+        now,
+      }),
+    (error: unknown) => error instanceof BookingWorkflowError &&
+      error.code === "NOTIFICATION_REMINDER_SUPERSEDED",
+  );
+  assert.equal(
+    database.entries("booking_notification_manual_resend_audit").length,
+    0,
+  );
+});
+
+test("manual resend accelerates pending reminders but rejects in-progress, superseded, or held-property messages", async () => {
   const activeDatabase = new FakeFirestore();
   const activeBooking = confirmedObserveOnlyFixture();
   const activeSource = ownerNotificationFixture(activeBooking, {
@@ -1168,23 +1328,88 @@ test("manual resend rejects in-progress jobs, premature or superseded reminders,
     propertyNumber: reminderEarlyBooking.propertyNumber,
     whatsappNumber: reminderEarlyBooking.ownerPhone,
   });
-  await assert.rejects(
-    () => new BookingCommissionStore(reminderEarlyDatabase as any)
-      .scheduleManualNotificationResend({
-        bookingId: reminderEarlyBooking.id,
-        sourceJobId: reminderEarlySource.id,
-        idempotencyKey: "admin-send-reminder-too-early-001",
-        now,
-      }),
-    (error: unknown) => error instanceof BookingWorkflowError &&
-      error.code === "NOTIFICATION_STATE_CHANGED",
-  );
+  const accelerated = await new BookingCommissionStore(reminderEarlyDatabase as any)
+    .scheduleManualNotificationResend({
+      bookingId: reminderEarlyBooking.id,
+      sourceJobId: reminderEarlySource.id,
+      idempotencyKey: "admin-send-reminder-too-early-001",
+      now,
+    });
+  assert.equal(accelerated.job.id, reminderEarlySource.id);
+  assert.equal(accelerated.job.status, "pending");
+  assert.equal(accelerated.job.scheduledAt, now.toISOString());
   assert.equal(
     reminderEarlyDatabase.read(
       "booking_notification_outbox",
       reminderEarlySource.id,
     )?.scheduledAt,
-    reminderEarlySource.scheduledAt,
+    now.toISOString(),
+  );
+
+  const advancedReminderDatabase = new FakeFirestore();
+  const advancedReminderBooking = {
+    ...reminderEarlyBooking,
+    id: `${reminderEarlyBooking.id}-ADVANCED`,
+    contactRequestId: `${reminderEarlyBooking.contactRequestId}-ADVANCED`,
+  };
+  const dayThreeSource = ownerNotificationFixture(advancedReminderBooking as any, {
+    id: `${advancedReminderBooking.id}--commission_reminder_3`,
+    bookingId: advancedReminderBooking.id,
+    kind: "commission_reminder_3",
+    reminderOffsetDays: 3,
+    status: "pending",
+    scheduledAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000).toISOString(),
+    quotaCategory: "transactional",
+  });
+  const dayFourSource = ownerNotificationFixture(advancedReminderBooking as any, {
+    id: `${advancedReminderBooking.id}--commission_reminder_4`,
+    bookingId: advancedReminderBooking.id,
+    kind: "commission_reminder_4",
+    reminderOffsetDays: 4,
+    status: "pending",
+    scheduledAt: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1_000).toISOString(),
+    quotaCategory: "transactional",
+  });
+  advancedReminderDatabase.seed(
+    "booking_followups",
+    advancedReminderBooking.id,
+    advancedReminderBooking,
+  );
+  advancedReminderDatabase.seed(
+    "booking_notification_outbox",
+    dayThreeSource.id,
+    dayThreeSource,
+  );
+  advancedReminderDatabase.seed(
+    "booking_notification_outbox",
+    dayFourSource.id,
+    dayFourSource,
+  );
+  advancedReminderDatabase.seed(
+    "properties",
+    advancedReminderBooking.propertyNumber,
+    {
+      propertyNumber: advancedReminderBooking.propertyNumber,
+      whatsappNumber: advancedReminderBooking.ownerPhone,
+    },
+  );
+  const advanced = await new BookingCommissionStore(advancedReminderDatabase as any)
+    .scheduleManualNotificationResend({
+      bookingId: advancedReminderBooking.id,
+      sourceJobId: dayFourSource.id,
+      idempotencyKey: "admin-send-day-four-early-0001",
+      now,
+    });
+  assert.equal(advanced.job.scheduledAt, now.toISOString());
+  assert.equal(
+    advancedReminderDatabase.read("booking_notification_outbox", dayThreeSource.id)
+      ?.status,
+    "cancelled",
+  );
+  assert.equal(
+    advancedReminderDatabase.read("booking_notification_outbox", dayThreeSource.id)
+      ?.providerError,
+    "superseded_reminder",
   );
 
   const reminderDatabase = new FakeFirestore();

@@ -744,6 +744,32 @@ export async function sendPropertyOwnerWhatsApp(options: {
   return sendPropertyOwnerWhatsAppWithDefaults(options);
 }
 
+function ownerRenewalShortLink(): string {
+  const configured = String(
+    process.env.PUBLIC_BASE_URL ||
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      "https://rwqan.sa",
+  ).trim();
+
+  try {
+    const parsed = new URL(configured);
+    const protocolAllowed =
+      parsed.protocol === "https:" ||
+      (process.env.NODE_ENV !== "production" && parsed.protocol === "http:");
+    if (
+      !protocolAllowed ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return "https://rwqan.sa/r";
+    }
+    return `${parsed.origin}/r`;
+  } catch {
+    return "https://rwqan.sa/r";
+  }
+}
+
 export function buildOwnerFreeContactLimitReachedMessage(data: {
   propertyNumber: string;
   dailyLimit?: number;
@@ -752,13 +778,13 @@ export function buildOwnerFreeContactLimitReachedMessage(data: {
     return `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم ${data.propertyNumber} ضمن الباقة المجانية (${data.dailyLimit} من ${data.dailyLimit}).
 
 قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
-https://rwqan.sa/owner/subscription`;
+${ownerRenewalShortLink()}`;
   }
 
   return `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم ${data.propertyNumber} ضمن الباقة المجانية (3 من 3).
 
 قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
-https://rwqan.sa/owner/subscription`;
+${ownerRenewalShortLink()}`;
 }
 
 export async function notifyOwnerFreeContactLimitReached(data: {
@@ -816,18 +842,26 @@ export async function notifyOwnerSubscriptionActivated(data: {
 /**
  * إشعار تنبيه قبل انتهاء الاشتراك (3 أيام)
  */
+export function buildOwnerSubscriptionExpiringSoonMessage(data: {
+  propertyNumber: string;
+  propertyName: string;
+  daysLeft: number;
+}): string {
+  return `مرحبا بك في نظام روقـان للعقارات
+
+اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber} ينتهي خلال ${data.daysLeft} ايام
+
+جدد الان للحفاظ على ظهورك المميز
+${ownerRenewalShortLink()}`;
+}
+
 export async function notifyOwnerSubscriptionExpiringSoon(data: {
   ownerPhone: string;
   propertyNumber: string;
   propertyName: string;
   daysLeft: number;
 }) {
-  const message = `مرحبا بك في نظام روقـان للعقارات
-
-اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber} ينتهي خلال ${data.daysLeft} ايام
-
-جدد الان للحفاظ على ظهورك المميز
-https://rwqan.sa/owner/login`;
+  const message = buildOwnerSubscriptionExpiringSoonMessage(data);
 
   return sendPropertyOwnerWhatsApp({
     ownerPhone: data.ownerPhone,
@@ -839,19 +873,26 @@ https://rwqan.sa/owner/login`;
 /**
  * إشعار انتهاء الاشتراك للمالك
  */
-export async function notifyOwnerSubscriptionExpired(data: {
-  ownerPhone: string;
+export function buildOwnerSubscriptionExpiredMessage(data: {
   propertyNumber: string;
   propertyName: string;
-}) {
-  const message = `مرحبا بك في نظام روقـان للعقارات
+}): string {
+  return `مرحبا بك في نظام روقـان للعقارات
 
 انتهى اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber}
 
 تم تحويله للعرض العادي
 
 جدد الان لاستعادة المميزات
-https://rwqan.sa/owner/login`;
+${ownerRenewalShortLink()}`;
+}
+
+export async function notifyOwnerSubscriptionExpired(data: {
+  ownerPhone: string;
+  propertyNumber: string;
+  propertyName: string;
+}) {
+  const message = buildOwnerSubscriptionExpiredMessage(data);
 
   return sendPropertyOwnerWhatsApp({
     ownerPhone: data.ownerPhone,

@@ -195,4 +195,7 @@ test("template preview substitutes sample commission percentage only once", () =
   const preview = previewBookingTemplate("عمولة روقان ({{commissionPercent}}%): {{commissionAmountSar}} ريال");
   assert.equal(preview, "عمولة روقان (10%): 100 ريال");
   assert.doesNotMatch(preview, /%%/);
+
+  const paymentPreview = previewBookingTemplate("رابط الدفع: {{paymentLink}}");
+  assert.equal(paymentPreview, "رابط الدفع: https://rwqan.sa/p/RwqanPay01");
 });

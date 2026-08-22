@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { BookingTokenService } from "./BookingTokenService";
 import {
   createCustomerBookingShortCode,
+  createOwnerPaymentShortCode,
 } from "./BookingShortLinkService";
 import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../shared/booking";
 import type {
@@ -152,17 +153,30 @@ function notificationJob(
   };
 }
 
-function tokenFromMessage(message: string, route: "booking" | "booking-commission"): string {
-  const match = new RegExp(`https://booking\\.example/${route}/([^\\s]+)`).exec(message);
-  assert.ok(match, `expected ${route} link in message`);
-  return decodeURIComponent(match[1]);
-}
-
 function customerShortCodeFromMessage(message: string): string {
   const match = /https:\/\/booking\.example\/b\/([A-Za-z0-9_-]{10})(?:\s|$)/
     .exec(message);
   assert.ok(match, "expected compact customer booking link in message");
   return match[1];
+}
+
+function ownerPaymentShortCodeFromMessage(message: string): string {
+  const match = /https:\/\/booking\.example\/p\/([A-Za-z0-9_-]{10})(?:\s|$)/
+    .exec(message);
+  assert.ok(match, "expected compact owner payment link in message");
+  return match[1];
+}
+
+function assertOwnerPaymentShortLink(
+  message: string,
+  booking: BookingFollowUpDocument,
+): void {
+  const token = bookingCommissionService.issueOwnerPaymentToken(booking);
+  assert.equal(
+    ownerPaymentShortCodeFromMessage(message),
+    createOwnerPaymentShortCode(token, TOKEN_SECRET),
+  );
+  assert.equal(message.includes("/booking-commission/"), false);
 }
 
 test("customer follow-up exposes only the intended property label and a purpose-bound link", () => {
@@ -183,6 +197,7 @@ test("customer follow-up exposes only the intended property label and a purpose-
   );
   assert.equal(paidMessage.includes(paidBooking.id), false);
   assert.equal(paidMessage.includes("/booking/"), false);
+  assert.equal(paidMessage.includes("/p/"), false);
 
   const freeMessage = buildBookingNotificationMessage(
     notificationJob("customer_followup", { isFreeProperty: true }),
@@ -207,10 +222,7 @@ test("owner confirmation states the three customer facts, price, 10% fee, deadli
   assert.ok(message.includes("عمولة روقان (10%): 125.56 ريال"));
   assert.ok(message.includes("مهلة السداد: 5 أيام من وقت إرسال هذه الرسالة"));
 
-  const tokenService = new BookingTokenService({ secret: TOKEN_SECRET });
-  const token = tokenFromMessage(message, "booking-commission");
-  assert.equal(tokenService.verify(token, "owner_payment").bookingId, booking.id);
-  assert.throws(() => tokenService.verify(token, "customer_response"));
+  assertOwnerPaymentShortLink(message, booking);
 });
 
 test("observe-only owner confirmation states booking facts without a fee or payment link", () => {
@@ -230,6 +242,7 @@ test("observe-only owner confirmation states booking facts without a fee or paym
   assert.equal(message.includes("مهلة السداد"), false);
   assert.equal(message.includes("رابط الدفع"), false);
   assert.equal(message.includes("/booking-commission/"), false);
+  assert.equal(message.includes("/p/"), false);
 });
 
 test("legacy bookings with a blank property name use a safe display fallback", () => {
@@ -249,7 +262,7 @@ test("day 3, 4, and 5 reminders preserve their offset and transactional payment 
     assert.ok(message.startsWith(`تذكير اليوم ${day}:`));
     assert.ok(message.includes("المبلغ المستحق: 125.56 ريال"));
     assert.match(message, /آخر موعد للسداد: .+/);
-    tokenFromMessage(message, "booking-commission");
+    assertOwnerPaymentShortLink(message, confirmedBooking());
   }
 });
 
@@ -262,7 +275,7 @@ test("rejected dispute message states collection facts and links back to payment
   assert.ok(message.startsWith("تم رفض الاعتراض على عمولة حجز العقار"));
   assert.ok(message.includes("المبلغ المستحق: 125.56 ريال"));
   assert.match(message, /آخر موعد للسداد: .+/);
-  tokenFromMessage(message, "booking-commission");
+  assertOwnerPaymentShortLink(message, confirmedBooking({ disputeStatus: "rejected" }));
 });
 
 test("pause and release messages describe the matching property outcome", () => {
@@ -273,7 +286,7 @@ test("pause and release messages describe the matching property outcome", () => 
   );
   assert.ok(pauseMessage.startsWith("انتهت مهلة سداد عمولة الحجز"));
   assert.ok(pauseMessage.includes("سيتم إيقاف ظهور العقار إلى أن يتم سداد مبلغ 125.56 ريال."));
-  tokenFromMessage(pauseMessage, "booking-commission");
+  assertOwnerPaymentShortLink(pauseMessage, booking);
 
   const releaseMessage = buildBookingNotificationMessage(
     notificationJob("property_released"),
@@ -391,6 +404,9 @@ test("an existing pending customer job lazily creates its compact alias before s
               aliasInputs.push(input);
               return createCustomerBookingShortCode(input.bookingId, TOKEN_SECRET);
             },
+            ensureOwnerPaymentLink: async () => {
+              throw new Error("owner payment alias must not be provisioned");
+            },
           },
         },
       ),
@@ -419,6 +435,208 @@ test("an existing pending customer job lazily creates its compact alias before s
       leaseToken: claimed.leaseToken,
       success: true,
       error: undefined,
+    }]);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
+test("a manual owner payment resend provisions its compact alias before provider delivery", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = confirmedBooking();
+  const claimed = {
+    ...notificationJob("commission_reminder_3", {
+      id: "BOOK-REQ-13383-001--commission_reminder_3--manual-1",
+      status: "claimed",
+      leaseToken: "owner-short-link-lease",
+      manualResendOfJobId: "BOOK-REQ-13383-001--commission_reminder_3",
+      manualResendRequestedAt: "2099-08-18T12:00:00.000Z",
+    }),
+    leaseToken: "owner-short-link-lease",
+  };
+  const sequence: string[] = [];
+  const aliasTokens: string[] = [];
+  const providerBodies: unknown[] = [];
+  const finalizations: unknown[] = [];
+  let claimCalls = 0;
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () =>
+      claimCalls++ === 0 ? [claimed] : [];
+    store.prepareNotificationForSend = async () => {
+      sequence.push("prepare");
+      return { status: "ready", booking };
+    };
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayMinutes: 1_440,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async (_url, init) => {
+      sequence.push("provider");
+      providerBodies.push(JSON.parse(String(init?.body)));
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(
+        new Date("2099-08-18T12:00:00.000Z"),
+        {
+          shortLinkService: {
+            ensureCustomerResponseLink: async () => {
+              throw new Error("customer alias must not be provisioned");
+            },
+            ensureOwnerPaymentLink: async ({ token }) => {
+              sequence.push("alias");
+              aliasTokens.push(token);
+              return createOwnerPaymentShortCode(token, TOKEN_SECRET);
+            },
+          },
+        },
+      ),
+      { claimed: 1, sent: 1 },
+    );
+
+    assert.deepEqual(sequence, ["prepare", "prepare", "alias", "provider"]);
+    assert.equal(aliasTokens.length, 1);
+    const verified = new BookingTokenService({ secret: TOKEN_SECRET })
+      .verify(aliasTokens[0], "owner_payment");
+    assert.equal(verified.bookingId, booking.id);
+    assert.equal(providerBodies.length, 1);
+    const providerMessage = String(
+      (providerBodies[0] as { message?: unknown }).message || "",
+    );
+    assert.equal(
+      ownerPaymentShortCodeFromMessage(providerMessage),
+      createOwnerPaymentShortCode(aliasTokens[0], TOKEN_SECRET),
+    );
+    assert.equal(providerMessage.includes("/booking-commission/"), false);
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: claimed.leaseToken,
+      success: true,
+      error: undefined,
+    }]);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
+test("owner payment alias provisioning failure prevents provider delivery", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = confirmedBooking();
+  const claimed = {
+    ...notificationJob("owner_booking_confirmed", {
+      status: "claimed",
+      leaseToken: "owner-alias-failure-lease",
+    }),
+    leaseToken: "owner-alias-failure-lease",
+  };
+  const sequence: string[] = [];
+  const finalizations: unknown[] = [];
+  let providerCalls = 0;
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () => [claimed];
+    store.prepareNotificationForSend = async () => {
+      sequence.push("prepare");
+      return { status: "ready", booking };
+    };
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayMinutes: 1_440,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async () => {
+      providerCalls += 1;
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(
+        new Date("2099-08-18T12:00:00.000Z"),
+        {
+          shortLinkService: {
+            ensureCustomerResponseLink: async () => {
+              throw new Error("customer alias must not be provisioned");
+            },
+            ensureOwnerPaymentLink: async () => {
+              sequence.push("alias");
+              throw new Error("owner alias provisioning failed");
+            },
+          },
+        },
+      ),
+      { claimed: 1, sent: 0 },
+    );
+
+    assert.deepEqual(sequence, ["prepare", "prepare", "alias"]);
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: claimed.leaseToken,
+      success: false,
+      error: "owner alias provisioning failed",
     }]);
   } finally {
     store.recoverExpiredNotificationClaims = originals.recover;
