@@ -27,6 +27,7 @@ export type BookingWhatsAppTemplates = Record<
 >;
 
 export interface BookingCommissionSettings {
+  customerFollowUpDelayHours: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
@@ -38,7 +39,8 @@ export interface BookingCommissionSettings {
 }
 
 export interface BookingCommissionFixedPolicy {
-  customerFollowUpDelayHours: 24;
+  customerFollowUpDelayMinHours: number;
+  customerFollowUpDelayMaxHours: number;
   commissionPaymentWindowDays: 5;
   mandatoryCommissionReminderDays: [5] | readonly [5];
   allowedOptionalCommissionReminderDays: Array<3 | 4> | readonly (3 | 4)[];
@@ -60,12 +62,14 @@ export interface BookingCommissionSettingsPayload {
 }
 
 export interface BookingCommissionSettingsDraft {
+  customerFollowUpDelayHours: string;
   limits: Record<BookingSettingsLimitKey, string>;
   whatsappTemplates: BookingWhatsAppTemplates;
   optionalCommissionReminderDays: Array<3 | 4>;
 }
 
 export interface BookingCommissionSettingsUpdate {
+  customerFollowUpDelayHours: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
@@ -84,7 +88,7 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
   {
     key: "customer_followup",
     label: "متابعة العميل",
-    description: "تُرسل مرة واحدة بعد 24 ساعة من قبول طلب التواصل.",
+    description: "تُرسل مرة واحدة بعد المدة المحددة لطلب التواصل مع العقار المجاني.",
     placeholders: ["propertyLabel", "followUpLink"],
   },
   {
@@ -179,7 +183,7 @@ const UNSUPPORTED_CONTROL_CHARACTER_PATTERN =
 
 const PREVIEW_VALUES: Record<string, string> = {
   propertyLabel: "العقار الريف المائي رقم 13383",
-  followUpLink: "https://rwqan.sa/b/RwqanExampleLink123456",
+  followUpLink: "https://rwqan.sa/b/RwqanEx123",
   propertyName: "الريف المائي",
   propertyNumber: "13383",
   requestCode: "REQ-13383-001",
@@ -195,16 +199,32 @@ const PREVIEW_VALUES: Record<string, string> = {
   commissionDueAt: "25 أغسطس 2026، 03:00 م",
 };
 
-export function parseBookingSettingsLimit(value: string): number | null {
+function parseBookingSettingsInteger(
+  value: string,
+  minimum: number,
+  maximum: number,
+): number | null {
   const normalized = value
     .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
     .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
     .trim();
   if (!/^\d+$/.test(normalized)) return null;
   const parsed = Number(normalized);
-  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 1_000
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
     ? parsed
     : null;
+}
+
+export function parseBookingSettingsLimit(value: string): number | null {
+  return parseBookingSettingsInteger(value, 0, 1_000);
+}
+
+export function parseCustomerFollowUpDelayHours(
+  value: string,
+  minimum = 1,
+  maximum = 120,
+): number | null {
+  return parseBookingSettingsInteger(value, minimum, maximum);
 }
 
 export function parseBookingSettingsLimits(
@@ -231,6 +251,9 @@ export function bookingSettingsToDraft(
   settings: BookingCommissionSettings,
 ): BookingCommissionSettingsDraft {
   return {
+    customerFollowUpDelayHours: String(
+      settings.customerFollowUpDelayHours ?? 24,
+    ),
     limits: {
       customerDailyLimit: String(settings.customerDailyLimit),
       freeOwnerDailyLimit: String(settings.freeOwnerDailyLimit),
@@ -288,12 +311,20 @@ export function validateBookingTemplate(
 export function validateBookingSettingsDraft(
   draft: BookingCommissionSettingsDraft,
   maxTemplateLength: number,
+  customerFollowUpDelayMinHours = 1,
+  customerFollowUpDelayMaxHours = 120,
 ): {
   update: BookingCommissionSettingsUpdate | null;
   templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>>;
   limitsValid: boolean;
+  customerFollowUpDelayValid: boolean;
 } {
   const parsedLimits = parseBookingSettingsLimits(draft.limits);
+  const customerFollowUpDelayHours = parseCustomerFollowUpDelayHours(
+    draft.customerFollowUpDelayHours,
+    customerFollowUpDelayMinHours,
+    customerFollowUpDelayMaxHours,
+  );
   const templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>> = {};
   for (const key of BOOKING_WHATSAPP_TEMPLATE_KEYS) {
     const error = validateBookingTemplate(
@@ -308,12 +339,16 @@ export function validateBookingSettingsDraft(
   ) && new Set(draft.optionalCommissionReminderDays).size ===
     draft.optionalCommissionReminderDays.length;
   const valid = Boolean(
-    parsedLimits && remindersValid && Object.keys(templateErrors).length === 0,
+    parsedLimits &&
+    customerFollowUpDelayHours !== null &&
+    remindersValid &&
+    Object.keys(templateErrors).length === 0,
   );
   return {
-    update: valid && parsedLimits
+    update: valid && parsedLimits && customerFollowUpDelayHours !== null
       ? {
           ...parsedLimits,
+          customerFollowUpDelayHours,
           whatsappTemplates: { ...draft.whatsappTemplates },
           optionalCommissionReminderDays: [...draft.optionalCommissionReminderDays]
             .sort((left, right) => left - right),
@@ -321,6 +356,7 @@ export function validateBookingSettingsDraft(
       : null,
     templateErrors,
     limitsValid: Boolean(parsedLimits),
+    customerFollowUpDelayValid: customerFollowUpDelayHours !== null,
   };
 }
 
@@ -328,7 +364,8 @@ export function bookingSettingsUpdateEquals(
   left: BookingCommissionSettingsUpdate,
   right: BookingCommissionSettings,
 ): boolean {
-  return BOOKING_SETTINGS_LIMIT_KEYS.every((key) => left[key] === right[key]) &&
+  return left.customerFollowUpDelayHours === right.customerFollowUpDelayHours &&
+    BOOKING_SETTINGS_LIMIT_KEYS.every((key) => left[key] === right[key]) &&
     BOOKING_WHATSAPP_TEMPLATE_KEYS.every(
       (key) => left.whatsappTemplates[key] === right.whatsappTemplates[key],
     ) &&

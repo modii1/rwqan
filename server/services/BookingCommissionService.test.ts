@@ -331,6 +331,7 @@ test("admin free-workflow settings preserve the strict service response contract
     customerDailyLimit: 4,
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayHours: 36,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [3] as Array<3 | 4>,
   };
@@ -370,7 +371,8 @@ test("admin free-workflow settings preserve the strict service response contract
     const expectedResponse = {
       settings: persisted,
       fixedPolicy: {
-        customerFollowUpDelayHours: 24,
+        customerFollowUpDelayMinHours: 1,
+        customerFollowUpDelayMaxHours: 120,
         commissionPaymentWindowDays: 5,
         mandatoryCommissionReminderDays: [5],
         allowedOptionalCommissionReminderDays: [3, 4],
@@ -418,6 +420,9 @@ test("admin free-workflow settings preserve the strict service response contract
       { settings: { ...configuration, customerDailyLimit: -1 } },
       { settings: { ...configuration, customerDailyLimit: 4.5 } },
       { settings: { ...configuration, freePropertyContactDailyLimit: 1_001 } },
+      { settings: { ...configuration, customerFollowUpDelayHours: 0 } },
+      { settings: { ...configuration, customerFollowUpDelayHours: 1.5 } },
+      { settings: { ...configuration, customerFollowUpDelayHours: 121 } },
       { settings: { ...configuration, whatsappTemplates: {} } },
       { settings: { ...configuration, optionalCommissionReminderDays: [5] } },
       {

@@ -4,8 +4,9 @@
 
 - Booking follow-up, owner notifications, commission collection, and commission holds apply only to properties without an active premium subscription. A workflow must originate while the property is free; a premium-origin workflow is never created and cannot become eligible after a later downgrade.
 - If a free property becomes actively premium, the workflow is durably closed: queued messages are cancelled, any unpaid booking commission is waived, and only that booking's property-hold obligation is released. Historical payment attempts and signed provider callbacks remain available for financial audit.
-- An accepted anonymous contact request schedules one customer WhatsApp follow-up after 24 hours.
-- The customer message uses an internal `/b/<opaque-code>` alias. Opening the alias, follow-up page, bookings profile, or admin dashboard never creates or resends the automatic job; an admin resend is a separate audited action.
+- An accepted anonymous contact request schedules one customer WhatsApp follow-up after the configured delay. The default is 24 hours, and admins may set an integer from 1 to 120 hours.
+- Changing the customer follow-up delay applies only to newly accepted contacts for free properties. Existing scheduled messages keep their original delivery time.
+- The customer message uses an internal `/b/<10-character-code>` alias. Previously issued 22-character aliases remain valid. Opening the alias, follow-up page, bookings profile, or admin dashboard never creates or resends the automatic job; an admin resend is a separate audited action.
 - An unanswered workflow expires seven days after the original contact. A verified customer profile session remains separate from that response deadline.
 - An unanswered follow-up can be answered for seven days from the accepted contact. The signed customer session remains usable for 90 days to view an already answered profile, but expired unanswered links and queued messages are cancelled.
 - The follow-up first asks whether a booking happened. A “No” answer closes the workflow. A “Yes” answer opens exactly three facts:
@@ -31,7 +32,7 @@
 - Confirmed-booking fact messages for free-property owners: 3 per normalized owner phone per Riyadh day by default, across all of that phone’s free properties.
 - Billing messages (the initial payment notice, enabled day-3/day-4 reminders, mandatory day 5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
 - Admins can configure all three limits in the booking-commission dashboard. Environment values remain fallbacks through `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT`, `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT`, and `FREE_PROPERTY_DAILY_CONTACT_LIMIT`.
-- The same admin settings screen can edit the eight free-workflow WhatsApp templates. Required placeholders are validated and the 24-hour follow-up, five-day payment window, and mandatory day-5 warning cannot be changed.
+- The same admin settings screen can edit the customer follow-up delay and the eight free-workflow WhatsApp templates. Required placeholders are validated; the five-day payment window and mandatory day-5 warning cannot be changed.
 
 ## Before deployment
 

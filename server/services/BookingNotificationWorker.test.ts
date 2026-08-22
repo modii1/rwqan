@@ -153,7 +153,7 @@ function tokenFromMessage(message: string, route: "booking" | "booking-commissio
 }
 
 function customerShortCodeFromMessage(message: string): string {
-  const match = /https:\/\/booking\.example\/b\/([A-Za-z0-9_-]{22})(?:\s|$)/
+  const match = /https:\/\/booking\.example\/b\/([A-Za-z0-9_-]{10})(?:\s|$)/
     .exec(message);
   assert.ok(match, "expected compact customer booking link in message");
   return match[1];
@@ -357,6 +357,7 @@ test("an existing pending customer job lazily creates its compact alias before s
       customerDailyLimit: 3,
       freeOwnerDailyLimit: 3,
       freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayHours: 24,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: null,
@@ -405,7 +406,7 @@ test("an existing pending customer job lazily creates its compact alias before s
       (providerBodies[0] as { message?: unknown }).message || "",
     );
     const code = customerShortCodeFromMessage(providerMessage);
-    assert.equal(code.length, 22);
+    assert.equal(code.length, 10);
     assert.equal(code, createCustomerBookingShortCode(booking.id, TOKEN_SECRET));
     assert.deepEqual(finalizations, [{
       jobId: claimed.id,
@@ -470,6 +471,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
         customerDailyLimit: 3,
         freeOwnerDailyLimit: 3,
         freePropertyContactDailyLimit: 3,
+        customerFollowUpDelayHours: 24,
         whatsappTemplates: customTemplates,
         optionalCommissionReminderDays: [3, 4],
         updatedAt: "2099-08-15T00:00:00.000Z",

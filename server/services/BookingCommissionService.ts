@@ -1,6 +1,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX,
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN,
   BOOKING_MANDATORY_COMMISSION_REMINDER_DAYS,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
@@ -20,7 +22,6 @@ import {
 import {
   bookingCommissionStore,
   buildInitialBookingWorkflow,
-  BOOKING_FOLLOW_UP_DELAY_MS,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
   BookingWorkflowError,
   type InitialBookingWorkflow,
@@ -216,8 +217,10 @@ function adminFreeWorkflowSettingsResponse(
   return {
     settings,
     fixedPolicy: {
-      customerFollowUpDelayHours:
-        BOOKING_FOLLOW_UP_DELAY_MS / (60 * 60 * 1_000),
+      customerFollowUpDelayMinHours:
+        BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN,
+      customerFollowUpDelayMaxHours:
+        BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX,
       commissionPaymentWindowDays:
         COMMISSION_PAYMENT_WINDOW_MS / (24 * 60 * 60 * 1_000),
       mandatoryCommissionReminderDays: [
@@ -390,6 +393,7 @@ export class BookingCommissionService {
     ownerPhone: string;
     customerPhone: string;
     isFreeProperty: boolean;
+    customerFollowUpDelayHours: number;
     propertyPrices?: unknown;
     now?: Date;
   }): InitialBookingWorkflow {

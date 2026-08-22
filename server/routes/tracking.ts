@@ -313,6 +313,10 @@ router.post("/api/requests/smart", async (req, res) => {
     // أنشئ كود طلب فريد (باستخدام توقيت الرياض للكود)
     const requestCode = `REQ${riyadhDate.getFullYear()}${String(riyadhDate.getMonth() + 1).padStart(2, "0")}${String(riyadhDate.getDate()).padStart(2, "0")}${String(hourOfDay).padStart(2, "0")}${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
 
+    const freeWorkflowSettings = !isPremiumProperty
+      ? await bookingCommissionService.getFreeWorkflowSettings()
+      : null;
+
     let bookingWorkflow: ReturnType<typeof bookingCommissionService.buildContactWorkflow> | undefined;
     let bookingFollowUpStatus: BookingFollowUpStatus | undefined;
     let bookingFollowUpFailureCode: BookingFollowUpFailureCode | undefined;
@@ -353,6 +357,8 @@ router.post("/api/requests/smart", async (req, res) => {
               ownerPhone,
               customerPhone: resolvedClientPhone,
               isFreeProperty: !isPremiumProperty,
+              customerFollowUpDelayHours:
+                freeWorkflowSettings!.customerFollowUpDelayHours,
               propertyPrices: property.prices,
               now: nowDate,
             });
@@ -367,8 +373,7 @@ router.post("/api/requests/smart", async (req, res) => {
     }
 
     const freePropertyContactDailyLimit = !isPremiumProperty
-      ? (await bookingCommissionService.getFreeWorkflowSettings())
-          .freePropertyContactDailyLimit
+      ? freeWorkflowSettings!.freePropertyContactDailyLimit
       : FREE_PROPERTY_DAILY_CONTACT_LIMIT;
 
     // احسب عدد الطلبات من هذا IP للعقار هذا

@@ -5,6 +5,10 @@ export const BASIS_POINTS_DENOMINATOR = 10_000 as const;
 export const COMMISSION_PAYMENT_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
 export const COMMISSION_REMINDER_OFFSET_DAYS = [3, 4, 5] as const;
 export const BOOKING_FREE_WORKFLOW_LIMIT_MAX = 1_000 as const;
+/** Whole-hour bounds keep follow-ups non-immediate while capping delay at five days. */
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN = 1 as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX = 120 as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT = 24 as const;
 export const BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH = 2_000 as const;
 export const BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION = 1 as const;
 export const BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS = [3, 4] as const;
@@ -21,6 +25,11 @@ export const bookingFreeWorkflowLimitsSchema = z.object({
   freePropertyContactDailyLimit: bookingFreeWorkflowLimitSchema,
 }).strict();
 export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimitsSchema>;
+
+export const bookingCustomerFollowUpDelayHoursSchema = z.number()
+  .int()
+  .min(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN)
+  .max(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX);
 
 export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   customer_followup: ["propertyLabel", "followUpLink"],
@@ -222,6 +231,7 @@ export type BookingOptionalCommissionReminderDay =
 
 export const bookingFreeWorkflowConfigurationSchema =
   bookingFreeWorkflowLimitsSchema.extend({
+    customerFollowUpDelayHours: bookingCustomerFollowUpDelayHoursSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
     optionalCommissionReminderDays:
       bookingOptionalCommissionReminderDaysSchema,

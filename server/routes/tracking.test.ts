@@ -59,6 +59,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
   const workflowBuildOptions: any[] = [];
   let followUpMode: "off" | "scheduled" | "flag_failure" | "workflow_failure" = "off";
   let configuredFreePropertyContactDailyLimit = FREE_PROPERTY_DAILY_CONTACT_LIMIT;
+  let configuredCustomerFollowUpDelayHours = 24;
+  let freeWorkflowSettingsLookups = 0;
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
     if (propertyNumber === "OWNER-1") {
@@ -152,14 +154,18 @@ test("smart contact requests resolve remembered and owner phones on the server",
     }
     return followUpMode !== "off";
   };
-  (bookingCommissionService as any).getFreeWorkflowSettings = async () => ({
-    customerDailyLimit: 3,
-    freeOwnerDailyLimit: 3,
-    freePropertyContactDailyLimit: configuredFreePropertyContactDailyLimit,
-    updatedAt: "2026-08-18T10:00:00.000Z",
-    updatedBy: "admin",
-    source: "firestore",
-  });
+  (bookingCommissionService as any).getFreeWorkflowSettings = async () => {
+    freeWorkflowSettingsLookups++;
+    return {
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: configuredFreePropertyContactDailyLimit,
+      customerFollowUpDelayHours: configuredCustomerFollowUpDelayHours,
+      updatedAt: "2026-08-18T10:00:00.000Z",
+      updatedBy: "admin",
+      source: "firestore",
+    };
+  };
   (bookingCommissionService as any).buildContactWorkflow = (options: any) => {
     workflowBuildOptions.push(options);
     if (followUpMode === "workflow_failure") {
@@ -253,13 +259,16 @@ test("smart contact requests resolve remembered and owner phones on the server",
     await t.test("an enabled follow-up is marked scheduled on the atomically accepted contact event", async () => {
       identityMode = "remembered";
       followUpMode = "scheduled";
+      configuredCustomerFollowUpDelayHours = 36;
       const alertCountBefore = adminNotifications.length;
+      const settingsLookupsBefore = freeWorkflowSettingsLookups;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
         body: JSON.stringify({ propertyNumber: "TARGET-FOLLOWUP-SCHEDULED" }),
       });
       followUpMode = "off";
+      configuredCustomerFollowUpDelayHours = 24;
 
       assert.equal(response.status, 200);
       const acceptedEvent = acceptedCalls.at(-1)?.[5];
@@ -274,6 +283,15 @@ test("smart contact requests resolve remembered and owner phones on the server",
         weekday: "750",
         weekend: "١٬٢٥٠٫٥٠",
       });
+      assert.equal(
+        workflowBuildOptions.at(-1)?.customerFollowUpDelayHours,
+        36,
+      );
+      assert.equal(
+        freeWorkflowSettingsLookups - settingsLookupsBefore,
+        1,
+        "the route uses one settings snapshot for scheduling and the daily limit",
+      );
       assert.equal(adminNotifications.length, alertCountBefore);
     });
 

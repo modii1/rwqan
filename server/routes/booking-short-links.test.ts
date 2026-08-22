@@ -43,7 +43,7 @@ test("short booking route redirects only to the local purpose-bound booking page
     await withShortLinkServer(
       async () => ({ token, expiresAt }),
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/b/${"A".repeat(22)}`, {
+        const response = await fetch(`${baseUrl}/b/${"A".repeat(10)}`, {
           redirect: "manual",
         });
         assert.equal(response.status, 302);
@@ -62,12 +62,29 @@ test("short booking route redirects only to the local purpose-bound booking page
     );
 
     await withShortLinkServer(
+      async (code) => {
+        assert.equal(code, "L".repeat(22));
+        return { token, expiresAt };
+      },
+      async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/b/${"L".repeat(22)}`, {
+          redirect: "manual",
+        });
+        assert.equal(response.status, 302);
+        assert.equal(
+          response.headers.get("location"),
+          `/booking/${encodeURIComponent(token)}`,
+        );
+      },
+    );
+
+    await withShortLinkServer(
       async () => ({
         token: "https://attacker.example/redirect",
         expiresAt,
       }),
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/b/${"B".repeat(22)}`, {
+        const response = await fetch(`${baseUrl}/b/${"B".repeat(10)}`, {
           redirect: "manual",
         });
         assert.equal(response.status, 404);
@@ -83,7 +100,7 @@ test("short booking route redirects only to the local purpose-bound booking page
     await withShortLinkServer(
       async () => ({ token: ownerToken, expiresAt }),
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/b/${"E".repeat(22)}`, {
+        const response = await fetch(`${baseUrl}/b/${"E".repeat(10)}`, {
           redirect: "manual",
         });
         assert.equal(response.status, 404);
@@ -107,7 +124,7 @@ test("short booking route returns bounded not-found and expired responses", asyn
       status: 404,
     },
     {
-      code: "C".repeat(22),
+      code: "C".repeat(10),
       error: new BookingShortLinkError(
         "SHORT_LINK_NOT_FOUND",
         "missing",
@@ -115,7 +132,7 @@ test("short booking route returns bounded not-found and expired responses", asyn
       status: 404,
     },
     {
-      code: "D".repeat(22),
+      code: "D".repeat(10),
       error: new BookingShortLinkError(
         "SHORT_LINK_EXPIRED",
         "expired",

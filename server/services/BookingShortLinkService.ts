@@ -5,9 +5,11 @@ import { BookingTokenService } from "./BookingTokenService";
 
 const SHORT_LINKS_COLLECTION = "booking_short_links";
 const SHORT_LINK_DOMAIN = "rwqan.booking-short-link.v1\0";
-const SHORT_LINK_BYTES = 16;
+const SHORT_CODE_LENGTH = 10;
+const LEGACY_SHORT_CODE_BYTES = 16;
+const LEGACY_SHORT_CODE_LENGTH = 22;
 const MINIMUM_SECRET_BYTES = 32;
-const SHORT_CODE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+const SHORT_CODE_PATTERN = /^(?:[A-Za-z0-9_-]{10}|[A-Za-z0-9_-]{22})$/;
 
 type BookingShortLinkPurpose = "customer_response";
 
@@ -116,8 +118,20 @@ export function createCustomerBookingShortCode(
     .update(SHORT_LINK_DOMAIN, "utf8")
     .update("customer_response\0", "utf8")
     .update(requireBookingId(bookingId), "utf8")
+    .digest("base64url")
+    .slice(0, SHORT_CODE_LENGTH);
+}
+
+function createLegacyCustomerBookingShortCode(
+  bookingId: string,
+  secret: string | Buffer,
+): string {
+  return createHmac("sha256", resolveSecret(secret))
+    .update(SHORT_LINK_DOMAIN, "utf8")
+    .update("customer_response\0", "utf8")
+    .update(requireBookingId(bookingId), "utf8")
     .digest()
-    .subarray(0, SHORT_LINK_BYTES)
+    .subarray(0, LEGACY_SHORT_CODE_BYTES)
     .toString("base64url");
 }
 
@@ -237,7 +251,9 @@ export class BookingShortLinkService {
         "Invalid booking short-link target",
       );
     }
-    const expectedCode = this.customerCode(verified.bookingId);
+    const expectedCode = code.length === LEGACY_SHORT_CODE_LENGTH
+      ? createLegacyCustomerBookingShortCode(verified.bookingId, this.secret)
+      : this.customerCode(verified.bookingId);
     const suppliedCode = Buffer.from(code, "ascii");
     const expectedCodeBytes = Buffer.from(expectedCode, "ascii");
     const codeMatches = suppliedCode.length === expectedCodeBytes.length &&

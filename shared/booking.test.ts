@@ -6,6 +6,7 @@ import {
   COMMISSION_REMINDER_OFFSET_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingConfirmationFactsSchema,
+  bookingCustomerFollowUpDelayHoursSchema,
   bookingDateSchema,
   bookingFreeWorkflowConfigurationSchema,
   bookingFollowUpRecordSchema,
@@ -194,9 +195,22 @@ test("only optional commission reminders on days three and four are configurable
     customerDailyLimit: 3,
     freeOwnerDailyLimit: 3,
     freePropertyContactDailyLimit: 3,
+    customerFollowUpDelayHours: 24,
     whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     optionalCommissionReminderDays: [3, 4],
   }).success, true);
+});
+
+test("customer follow-up delay accepts only whole hours from one through 120", () => {
+  for (const value of [1, 24, 120]) {
+    assert.equal(bookingCustomerFollowUpDelayHoursSchema.parse(value), value);
+  }
+  for (const value of [0, 1.5, 121, "24", null]) {
+    assert.equal(
+      bookingCustomerFollowUpDelayHoursSchema.safeParse(value).success,
+      false,
+    );
+  }
 });
 
 const confirmedAt = "2026-08-15T12:30:00.000Z";

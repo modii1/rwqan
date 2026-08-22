@@ -34,6 +34,7 @@ import {
   bookingSettingsUpdateEquals,
   parseBookingSettingsLimit,
   parseBookingSettingsLimits,
+  parseCustomerFollowUpDelayHours,
   previewBookingTemplate,
   validateBookingSettingsDraft,
   type BookingCommissionOperationalHealth,
@@ -55,6 +56,7 @@ const EMPTY_TEMPLATES = Object.fromEntries(
 ) as BookingCommissionSettingsDraft["whatsappTemplates"];
 
 const EMPTY_DRAFT: BookingCommissionSettingsDraft = {
+  customerFollowUpDelayHours: "24",
   limits: EMPTY_LIMITS,
   whatsappTemplates: EMPTY_TEMPLATES,
   optionalCommissionReminderDays: [],
@@ -113,8 +115,15 @@ export default function BookingCommissionSettingsCard() {
     () => validateBookingSettingsDraft(
       draft,
       query.data?.fixedPolicy.templateMaxLength || 2_000,
+      query.data?.fixedPolicy.customerFollowUpDelayMinHours || 1,
+      query.data?.fixedPolicy.customerFollowUpDelayMaxHours || 120,
     ),
-    [draft, query.data?.fixedPolicy.templateMaxLength],
+    [
+      draft,
+      query.data?.fixedPolicy.customerFollowUpDelayMaxHours,
+      query.data?.fixedPolicy.customerFollowUpDelayMinHours,
+      query.data?.fixedPolicy.templateMaxLength,
+    ],
   );
   const changed = Boolean(
     validation.update &&
@@ -136,9 +145,11 @@ export default function BookingCommissionSettingsCard() {
   const save = async () => {
     if (!validation.update) {
       setSaveError(
-        validation.limitsValid
-          ? "راجع قوالب الرسائل المطلوبة قبل الحفظ."
-          : "أدخل أعداداً صحيحة من 0 إلى 1000 لكل حد.",
+        !validation.customerFollowUpDelayValid
+          ? `أدخل مدة متابعة صحيحة من ${query.data?.fixedPolicy.customerFollowUpDelayMinHours || 1} إلى ${query.data?.fixedPolicy.customerFollowUpDelayMaxHours || 120} ساعة.`
+          : validation.limitsValid
+            ? "راجع قوالب الرسائل المطلوبة قبل الحفظ."
+            : "أدخل أعداداً صحيحة من 0 إلى 1000 لكل حد.",
       );
       setSaveNotice("");
       return;
@@ -159,7 +170,7 @@ export default function BookingCommissionSettingsCard() {
         result,
       );
       setDraft(bookingSettingsToDraft(result.settings));
-      setSaveNotice("تم حفظ حدود العقارات المجانية وتطبيقها على العمليات الجديدة.");
+      setSaveNotice("تم حفظ إعدادات متابعة العقارات المجانية.");
     } catch (error) {
       setSaveError(
         error instanceof Error
@@ -183,7 +194,7 @@ export default function BookingCommissionSettingsCard() {
             <h2 className="font-bold">إعدادات متابعة العقارات المجانية</h2>
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            تحكم في الحدود اليومية للرسائل وطلبات التواصل. القيمة 0 توقف الفئة المحددة.
+            تحكم في موعد متابعة العميل والحدود اليومية للرسائل وطلبات التواصل. القيمة 0 توقف الفئة المحددة.
           </p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             ويمكنك أيضاً تخصيص قوالب واتساب واختيار تذكيرات اليوم الثالث والرابع.
@@ -236,10 +247,6 @@ export default function BookingCommissionSettingsCard() {
                 <FixedRule label="مهلة الرد" value="7 أيام" />
                 <FixedRule label="مهلة السداد" value="5 أيام · تذكير 3، 4، 5" />
                 <FixedRule
-                  label="موعد إرسال المتابعة"
-                  value={`بعد ${query.data.fixedPolicy.customerFollowUpDelayHours} ساعة · ثابت`}
-                />
-                <FixedRule
                   label="نافذة الدفع الثابتة"
                   value={`${query.data.fixedPolicy.commissionPaymentWindowDays} أيام · ثابتة`}
                 />
@@ -249,8 +256,56 @@ export default function BookingCommissionSettingsCard() {
                 />
               </div>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                العمولة 10% من المبلغ الذي يبلّغ عنه العميل. لا يمكن تغيير مهلة 24 ساعة أو مهلة السداد من هذه الشاشة.
+                العمولة 10% من المبلغ الذي يبلّغ عنه العميل. إعداد تأخير المتابعة أدناه مستقل عن مهلة السداد الثابتة.
               </p>
+            </section>
+
+            <section aria-labelledby="booking-followup-delay-heading">
+              <h3 id="booking-followup-delay-heading" className="mb-3 text-sm font-bold">
+                موعد متابعة العميل
+              </h3>
+              <label
+                htmlFor="booking-setting-customerFollowUpDelayHours"
+                className="block rounded-xl border bg-muted/10 p-4"
+              >
+                <span className="text-sm font-bold text-[#34332f]">
+                  تأخير إرسال متابعة العميل (بالساعات)
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  القيمة الافتراضية 24 ساعة.
+                </span>
+                <Input
+                  id="booking-setting-customerFollowUpDelayHours"
+                  type="text"
+                  inputMode="numeric"
+                  value={draft.customerFollowUpDelayHours}
+                  onChange={(event) => {
+                    setDraft((current) => ({
+                      ...current,
+                      customerFollowUpDelayHours: event.target.value,
+                    }));
+                    clearMessages();
+                  }}
+                  aria-invalid={
+                    draft.customerFollowUpDelayHours !== "" &&
+                    parseCustomerFollowUpDelayHours(
+                      draft.customerFollowUpDelayHours,
+                      query.data.fixedPolicy.customerFollowUpDelayMinHours,
+                      query.data.fixedPolicy.customerFollowUpDelayMaxHours,
+                    ) === null
+                  }
+                  aria-describedby="booking-setting-help-customerFollowUpDelayHours"
+                  className="mt-3 max-w-48 text-center text-lg font-bold"
+                  dir="ltr"
+                  data-testid="input-customerFollowUpDelayHours"
+                />
+                <span
+                  id="booking-setting-help-customerFollowUpDelayHours"
+                  className="mt-2 block text-[11px] leading-5 text-muted-foreground"
+                >
+                  من {query.data.fixedPolicy.customerFollowUpDelayMinHours} إلى {query.data.fixedPolicy.customerFollowUpDelayMaxHours} ساعة. يُطبّق فقط على طلبات التواصل الجديدة المقبولة للعقارات المجانية. تبقى الرسائل المجدولة سابقاً كما هي.
+                </span>
+              </label>
             </section>
 
             <section aria-labelledby="booking-limits-heading">
@@ -431,7 +486,7 @@ export default function BookingCommissionSettingsCard() {
 
             <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs leading-5 text-muted-foreground">
-                <p>متابعة العميل تبدأ بعد 24 ساعة. يوم الحجز أو نوعه لا يغيّر نسبة العمولة.</p>
+                <p>موعد متابعة العميل المحدد لا يغيّر نسبة العمولة أو مهلة السداد.</p>
                 <p>إشعارات الدفع والتذكير والإيقاف وإعادة التفعيل إلزامية ولا تدخل ضمن حدود الرسائل أعلاه.</p>
                 <p>تُطبّق القوالب المحفوظة على كل رسالة لم تُرسل بعد، ولا تعيد إرسال الرسائل التي سبق إرسالها.</p>
                 <p className="mt-1">
@@ -463,7 +518,7 @@ export default function BookingCommissionSettingsCard() {
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  حفظ الحدود
+                  حفظ الإعدادات
                 </Button>
               </div>
             </div>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 import { BookingTokenService } from "./BookingTokenService";
 import {
@@ -100,6 +101,16 @@ const INITIAL_NOW = Date.parse("2026-08-22T12:00:00.000Z");
 const EXPIRES_AT = INITIAL_NOW + 90 * 24 * 60 * 60 * 1_000;
 const BOOKING_ID = "BOOK-REQ-13383-001";
 
+function legacyCustomerCode(bookingId: string): string {
+  return createHmac("sha256", SECRET)
+    .update("rwqan.booking-short-link.v1\0", "utf8")
+    .update("customer_response\0", "utf8")
+    .update(bookingId, "utf8")
+    .digest()
+    .subarray(0, 16)
+    .toString("base64url");
+}
+
 function customerToken(): string {
   return new BookingTokenService({ secret: SECRET, now: () => INITIAL_NOW }).issue({
     bookingId: BOOKING_ID,
@@ -110,7 +121,8 @@ function customerToken(): string {
 
 test("customer aliases are compact, deterministic, opaque, and purpose-bound", () => {
   const code = createCustomerBookingShortCode(BOOKING_ID, SECRET);
-  assert.match(code, /^[A-Za-z0-9_-]{22}$/);
+  assert.match(code, /^[A-Za-z0-9_-]{10}$/);
+  assert.equal(code, legacyCustomerCode(BOOKING_ID).slice(0, 10));
   assert.equal(code, createCustomerBookingShortCode(BOOKING_ID, SECRET));
   assert.notEqual(
     code,
@@ -170,13 +182,13 @@ test("aliases reject malformed, missing, expired, and corrupt targets", async ()
   });
 
   await assert.rejects(
-    () => service.resolveCustomerResponse("BOOK-13383"),
+    () => service.resolveCustomerResponse("invalid!"),
     (error: unknown) =>
       error instanceof BookingShortLinkError &&
       error.code === "SHORT_LINK_MALFORMED",
   );
   await assert.rejects(
-    () => service.resolveCustomerResponse("A".repeat(22)),
+    () => service.resolveCustomerResponse("A".repeat(10)),
     (error: unknown) =>
       error instanceof BookingShortLinkError &&
       error.code === "SHORT_LINK_NOT_FOUND",
@@ -195,7 +207,7 @@ test("aliases reject malformed, missing, expired, and corrupt targets", async ()
       error.code === "SHORT_LINK_EXPIRED",
   );
 
-  const corruptCode = "B".repeat(22);
+  const corruptCode = "B".repeat(10);
   database.seed("booking_short_links", corruptCode, {
     schemaVersion: 1,
     purpose: "owner_payment",
@@ -210,6 +222,31 @@ test("aliases reject malformed, missing, expired, and corrupt targets", async ()
       error instanceof BookingShortLinkError &&
       error.code === "SHORT_LINK_INVALID",
   );
+});
+
+test("previously issued 22-character aliases remain valid", async () => {
+  const database = new FakeFirestore();
+  const service = new BookingShortLinkService({
+    database: database as never,
+    secret: SECRET,
+    now: () => INITIAL_NOW,
+  });
+  const token = customerToken();
+  const code = legacyCustomerCode(BOOKING_ID);
+  assert.match(code, /^[A-Za-z0-9_-]{22}$/);
+  database.seed("booking_short_links", code, {
+    schemaVersion: 1,
+    purpose: "customer_response",
+    token,
+    expiresAt: new Date(EXPIRES_AT).toISOString(),
+    expiresAtTtl: new Date(EXPIRES_AT),
+    createdAt: new Date(INITIAL_NOW).toISOString(),
+  });
+
+  assert.deepEqual(await service.resolveCustomerResponse(code), {
+    token,
+    expiresAt: new Date(EXPIRES_AT).toISOString(),
+  });
 });
 
 test("an alias cannot be rebound to another signed target", async () => {
@@ -246,7 +283,7 @@ test("an alias cannot be rebound to another signed target", async () => {
       error.code === "SHORT_LINK_INVALID",
   );
 
-  const wrongCode = "C".repeat(22);
+  const wrongCode = "C".repeat(10);
   database.seed("booking_short_links", wrongCode, {
     schemaVersion: 1,
     purpose: "customer_response",

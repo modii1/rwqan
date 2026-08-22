@@ -46,3 +46,19 @@ test("admin reminder controls explain forward-only scheduling semantics", () => 
   assert.match(source, /mandatoryCommissionReminderDays/);
   assert.match(source, /allowedOptionalCommissionReminderDays/);
 });
+
+test("admin follow-up delay explains its free-only forward scheduling semantics", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-settings.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /تأخير إرسال متابعة العميل \(بالساعات\)/);
+  assert.match(
+    source,
+    /يُطبّق فقط على طلبات التواصل الجديدة المقبولة للعقارات المجانية\./,
+  );
+  assert.match(source, /تبقى الرسائل المجدولة سابقاً كما هي\./);
+  assert.match(source, /customerFollowUpDelayMinHours/);
+  assert.match(source, /customerFollowUpDelayMaxHours/);
+  assert.match(source, /input-customerFollowUpDelayHours/);
+});

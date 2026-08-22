@@ -2,8 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  bookingCustomerFollowUpDelayHoursSchema,
   bookingFreeWorkflowConfigurationSchema,
   bookingFreeWorkflowLimitsSchema,
   bookingOptionalCommissionReminderDaysSchema,
@@ -53,7 +55,8 @@ const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
 const MANUAL_RESEND_AUDIT_COLLECTION =
   "booking_notification_manual_resend_audit";
 
-export const BOOKING_FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
+export const BOOKING_FOLLOW_UP_DELAY_MS =
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT * 60 * 60 * 1000;
 export const BOOKING_CUSTOMER_RESPONSE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const BOOKING_NOTIFICATION_LEASE_MS = 2 * 60 * 1000;
 export const BOOKING_OWNER_NOTICE_RETRY_MS = 30 * 60 * 1000;
@@ -99,6 +102,18 @@ function environmentLimit(name: string): number {
     : DEFAULT_FREE_WORKFLOW_LIMIT;
 }
 
+function environmentCustomerFollowUpDelayHours(): number {
+  const raw = process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS;
+  if (raw === undefined || raw.trim() === "") {
+    return BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT;
+  }
+  const parsed = Number(raw);
+  const validated = bookingCustomerFollowUpDelayHoursSchema.safeParse(parsed);
+  return validated.success
+    ? validated.data
+    : BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT;
+}
+
 export function getEnvironmentFreeWorkflowLimits(): BookingFreeWorkflowLimits {
   return {
     customerDailyLimit: environmentLimit(
@@ -116,6 +131,7 @@ export function getEnvironmentFreeWorkflowLimits(): BookingFreeWorkflowLimits {
 export function getDefaultFreeWorkflowConfiguration(): BookingFreeWorkflowConfiguration {
   return {
     ...getEnvironmentFreeWorkflowLimits(),
+    customerFollowUpDelayHours: environmentCustomerFollowUpDelayHours(),
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [
       ...BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
@@ -151,6 +167,10 @@ function storedFreeWorkflowConfiguration(
     data.optionalCommissionReminderDays,
   );
   const defaults = getDefaultFreeWorkflowConfiguration();
+  const customerFollowUpDelayHours =
+    bookingCustomerFollowUpDelayHoursSchema.safeParse(
+      data.customerFollowUpDelayHours,
+    );
   const templates = Object.fromEntries(
     (Object.keys(defaults.whatsappTemplates) as BookingWhatsAppTemplateKey[])
       .map((key) => {
@@ -180,6 +200,9 @@ function storedFreeWorkflowConfiguration(
   );
   return bookingFreeWorkflowConfigurationSchema.parse({
     ...limits,
+    customerFollowUpDelayHours: customerFollowUpDelayHours.success
+      ? customerFollowUpDelayHours.data
+      : defaults.customerFollowUpDelayHours,
     whatsappTemplates: templates,
     optionalCommissionReminderDays: optionalDays.success
       ? optionalDays.data
@@ -390,6 +413,7 @@ export function buildInitialBookingWorkflow(options: {
   customerPhone: string;
   customerSubject: string;
   isFreeProperty: boolean;
+  customerFollowUpDelayHours?: number;
   listedPriceOptionsHalalas?: number[];
   now?: Date;
 }): InitialBookingWorkflow {
@@ -398,8 +422,15 @@ export function buildInitialBookingWorkflow(options: {
   }
   const now = options.now || new Date();
   if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid booking time");
+  const customerFollowUpDelayHours = bookingCustomerFollowUpDelayHoursSchema
+    .parse(
+      options.customerFollowUpDelayHours ??
+        BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT,
+    );
   const createdAt = now.toISOString();
-  const followUpDueAt = new Date(now.getTime() + BOOKING_FOLLOW_UP_DELAY_MS).toISOString();
+  const followUpDueAt = new Date(
+    now.getTime() + customerFollowUpDelayHours * 60 * 60 * 1_000,
+  ).toISOString();
   const id = `BOOK-${options.requestCode}`;
   const followUp: Omit<BookingFollowUpDocument, "contactRequestId"> = {
     id,
@@ -643,13 +674,27 @@ export class BookingCommissionStore {
       const snapshot = await transaction.get(settingsRef);
       const currentData = snapshot.exists ? snapshot.data() : null;
       const currentStored = storedFreeWorkflowConfiguration(currentData);
-      if (currentStored && JSON.stringify(currentStored) === JSON.stringify(settings)) {
+      const currentSchemaVersion = currentData && typeof currentData === "object"
+        ? Number((currentData as Record<string, unknown>).schemaVersion)
+        : null;
+      const currentDelayIsPersisted = currentData && typeof currentData === "object"
+        ? bookingCustomerFollowUpDelayHoursSchema.safeParse(
+            (currentData as Record<string, unknown>)
+              .customerFollowUpDelayHours,
+          ).success
+        : false;
+      if (
+        currentSchemaVersion === 4 &&
+        currentDelayIsPersisted &&
+        currentStored &&
+        JSON.stringify(currentStored) === JSON.stringify(settings)
+      ) {
         return resolvedFreeWorkflowSettings(currentData);
       }
 
       const updatedAt = now.toISOString();
       const storedSettings = {
-        schemaVersion: 3,
+        schemaVersion: 4,
         ...settings,
         updatedAt,
         updatedBy: "admin" as const,
