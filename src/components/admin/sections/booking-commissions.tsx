@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
 import {
@@ -69,7 +69,11 @@ import {
 } from "@/components/booking/booking-reversal-state";
 import BookingCommissionSettingsCard from "./booking-commission-settings";
 import BookingBankTransferReview from "./booking-bank-transfer-review";
-import { getAdminCustomerWhatsAppHref } from "./booking-customer-whatsapp";
+import {
+  ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+  getAdminCustomerWhatsAppHref,
+  getAdminCustomerWhatsAppRemainingMinutes,
+} from "./booking-customer-whatsapp";
 
 interface BookingCommissionSummary {
   total: number;
@@ -113,6 +117,10 @@ interface ReversalResolutionResponse {
   complianceStatus: string;
   collectionNoticeScheduled: boolean;
   resolvedAt: string | null;
+}
+
+interface AdminCustomerWhatsAppHandoffResponse {
+  handoffUrl: string;
 }
 
 function normalize(value: unknown): string {
@@ -479,18 +487,19 @@ export default function BookingCommissionsSection() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredBookings.map((row) => <BookingTableRow key={row.id} row={row} selected={selectedId === row.id} onSelect={() => selectBooking(row.id)} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
+                  {filteredBookings.map((row) => <BookingTableRow key={row.id} row={row} selected={selectedId === row.id} onSelect={() => selectBooking(row.id)} onCustomerWhatsAppChanged={() => void query.refetch()} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
                 </tbody>
               </table>
             </div>
           </Card>
 
           <div className="space-y-3 md:hidden">
-            {filteredBookings.map((row) => <BookingMobileRow key={row.id} row={row} selected={selectedId === row.id} onSelect={() => selectBooking(row.id)} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
+            {filteredBookings.map((row) => <BookingMobileRow key={row.id} row={row} selected={selectedId === row.id} onSelect={() => selectBooking(row.id)} onCustomerWhatsAppChanged={() => void query.refetch()} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
           </div>
 
           {selected && (
             <BookingAdminDetails
+              key={selected.id}
               row={selected}
               onClose={() => {
                 setSelectedId(null);
@@ -504,6 +513,7 @@ export default function BookingCommissionsSection() {
               onNotificationResent={async () => {
                 await query.refetch();
               }}
+              onCustomerWhatsAppChanged={() => void query.refetch()}
               resolutionPending={resolutionPending}
               resolutionError={resolutionError}
               resolutionNotice={resolutionNotice}
@@ -548,7 +558,7 @@ function MoneyCard({ label, value, note, success = false }: { label: string; val
   );
 }
 
-function BookingTableRow({ row, selected, onSelect, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: () => void; selectionDisabled: boolean }) {
+function BookingTableRow({ row, selected, onSelect, onCustomerWhatsAppChanged, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: () => void; onCustomerWhatsAppChanged: () => void; selectionDisabled: boolean }) {
   const booking = getBookingStatusMeta(row.bookingStatus);
   const commission = getCommissionStatusMeta(row.commissionStatus);
   const compliance = getComplianceStatusMeta(row.complianceStatus);
@@ -572,7 +582,11 @@ function BookingTableRow({ row, selected, onSelect, selectionDisabled }: { row: 
       <td className="p-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground" dir="ltr">{row.customerPhoneMasked || "—"}</span>
-          <CustomerWhatsAppLink bookingId={row.id} />
+          <CustomerWhatsAppLink
+            bookingId={row.id}
+            nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+            onChanged={onCustomerWhatsAppChanged}
+          />
         </div>
       </td>
       <td className="p-3"><StatusBadge label={booking.label} tone={booking.tone} /></td>
@@ -600,7 +614,7 @@ function BookingTableRow({ row, selected, onSelect, selectionDisabled }: { row: 
   );
 }
 
-function BookingMobileRow({ row, selected, onSelect, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: () => void; selectionDisabled: boolean }) {
+function BookingMobileRow({ row, selected, onSelect, onCustomerWhatsAppChanged, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: () => void; onCustomerWhatsAppChanged: () => void; selectionDisabled: boolean }) {
   const booking = getBookingStatusMeta(row.bookingStatus);
   const commission = getCommissionStatusMeta(row.commissionStatus);
   const disputed = normalize(row.disputeStatus) === "pending";
@@ -641,7 +655,11 @@ function BookingMobileRow({ row, selected, onSelect, selectionDisabled }: { row:
         </button>
         <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
           <span className="text-xs text-muted-foreground"><span>رقم العميل: </span><span dir="ltr">{row.customerPhoneMasked || "—"}</span></span>
-          <CustomerWhatsAppLink bookingId={row.id} />
+          <CustomerWhatsAppLink
+            bookingId={row.id}
+            nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+            onChanged={onCustomerWhatsAppChanged}
+          />
         </div>
       </div>
     </Card>
@@ -654,6 +672,7 @@ function BookingAdminDetails({
   onResolveDispute,
   onResolveReversal,
   onNotificationResent,
+  onCustomerWhatsAppChanged,
   resolutionPending,
   resolutionError,
   resolutionNotice,
@@ -671,6 +690,7 @@ function BookingAdminDetails({
     resolution: ReversalResolution,
   ) => Promise<void>;
   onNotificationResent: () => Promise<void>;
+  onCustomerWhatsAppChanged: () => void;
   resolutionPending: DisputeResolution | null;
   resolutionError: string;
   resolutionNotice: string;
@@ -765,7 +785,11 @@ function BookingAdminDetails({
               <p className="text-xs text-muted-foreground">رقم العميل</p>
               <div className="mt-1 flex items-center justify-between gap-2">
                 <p className="break-words text-sm font-bold text-[#34332f]" dir="ltr">{row.customerPhoneMasked || "—"}</p>
-                <CustomerWhatsAppLink bookingId={row.id} />
+                <CustomerWhatsAppLink
+                  bookingId={row.id}
+                  nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+                  onChanged={onCustomerWhatsAppChanged}
+                />
               </div>
             </div>
             <AdminFact label="نوع العقار" value={row.isFreeProperty ? "عقار مجاني" : "عقار باشتراك"} />
@@ -1365,18 +1389,107 @@ function AdminFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CustomerWhatsAppLink({ bookingId }: { bookingId: string }) {
+function CustomerWhatsAppLink({
+  bookingId,
+  nextAllowedAt,
+  onChanged,
+}: {
+  bookingId: string;
+  nextAllowedAt?: string | null;
+  onChanged: () => void;
+}) {
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const [localNextAllowedAt, setLocalNextAllowedAt] = useState<string | null>(
+    nextAllowedAt || null,
+  );
+
+  useEffect(() => {
+    setLocalNextAllowedAt(nextAllowedAt || null);
+    pendingRef.current = false;
+    setPending(false);
+  }, [bookingId, nextAllowedAt]);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const remainingMinutes = nowMs === null
+    ? (localNextAllowedAt ? 1 : 0)
+    : getAdminCustomerWhatsAppRemainingMinutes(localNextAllowedAt, nowMs);
+  const coolingDown = remainingMinutes > 0;
+  const className =
+    "inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2";
+
+  const openCustomerWhatsApp = async () => {
+    if (pendingRef.current) return;
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      window.alert("تعذر إكمال الطلب. حاول مرة أخرى.");
+      return;
+    }
+    popup.opener = null;
+    pendingRef.current = true;
+    setPending(true);
+    try {
+      const result = await bookingApiRequest<AdminCustomerWhatsAppHandoffResponse>(
+        getAdminCustomerWhatsAppHref(bookingId),
+        { method: "POST" },
+      );
+      const openedAt = Date.now();
+      setNowMs(openedAt);
+      setLocalNextAllowedAt(
+        new Date(openedAt + ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS).toISOString(),
+      );
+      popup.location.replace(result.handoffUrl);
+    } catch (error) {
+      popup.close();
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر إكمال الطلب. حاول مرة أخرى.",
+      );
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+      onChanged();
+    }
+  };
+
+  if (coolingDown) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled
+          aria-label="التواصل مع العميل متاح مرة واحدة كل 30 دقيقة"
+          title={`يمكن إعادة التواصل بعد ${remainingMinutes} دقيقة`}
+          className={`${className} cursor-not-allowed opacity-45`}
+          data-testid={`link-customer-whatsapp-${bookingId}`}
+        >
+          <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
+        </button>
+        <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+          بعد {remainingMinutes} د
+        </span>
+      </span>
+    );
+  }
+
   return (
-    <a
-      href={getAdminCustomerWhatsAppHref(bookingId)}
-      target="_blank"
-      rel="noopener noreferrer"
+    <button
+      type="button"
       aria-label="فتح محادثة واتساب مع العميل"
       title="فتح محادثة واتساب مع العميل"
-      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+      disabled={pending}
+      className={`${className} ${pending ? "cursor-wait opacity-60" : ""}`}
+      onClick={() => void openCustomerWhatsApp()}
       data-testid={`link-customer-whatsapp-${bookingId}`}
     >
       <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
-    </a>
+    </button>
   );
 }

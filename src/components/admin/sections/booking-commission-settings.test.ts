@@ -52,13 +52,14 @@ test("admin follow-up delay explains its free-only forward scheduling semantics"
     new URL("./booking-commission-settings.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /تأخير إرسال متابعة العميل \(بالساعات\)/);
+  assert.match(source, /تأخير إرسال متابعة العميل \(بالساعات والدقائق\)/);
   assert.match(
     source,
     /يُطبّق فقط على طلبات التواصل الجديدة المقبولة للعقارات المجانية\./,
   );
   assert.match(source, /تبقى الرسائل المجدولة سابقاً كما هي\./);
-  assert.match(source, /customerFollowUpDelayMinHours/);
-  assert.match(source, /customerFollowUpDelayMaxHours/);
+  assert.match(source, /customerFollowUpDelayMinMinutes/);
+  assert.match(source, /customerFollowUpDelayMaxMinutes/);
   assert.match(source, /input-customerFollowUpDelayHours/);
+  assert.match(source, /input-customerFollowUpDelayMinutes/);
 });

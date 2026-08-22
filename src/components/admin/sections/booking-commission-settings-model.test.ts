@@ -5,6 +5,8 @@ import {
   bookingSettingsToDraft,
   bookingSettingsUpdateEquals,
   parseCustomerFollowUpDelayHours,
+  parseCustomerFollowUpDelayMinutes,
+  parseCustomerFollowUpDelayMinutesPart,
   previewBookingTemplate,
   validateBookingSettingsDraft,
   validateBookingTemplate,
@@ -21,7 +23,7 @@ function validTemplates(): BookingWhatsAppTemplates {
 
 function settingsFixture(): BookingCommissionSettings {
   return {
-    customerFollowUpDelayHours: 24,
+    customerFollowUpDelayMinutes: 1_440,
     customerDailyLimit: 3,
     freeOwnerDailyLimit: 4,
     freePropertyContactDailyLimit: 5,
@@ -104,6 +106,7 @@ test("draft validation creates the strict full-replacement payload", () => {
   const draft = bookingSettingsToDraft(settings);
   draft.optionalCommissionReminderDays = [4, 3];
   draft.customerFollowUpDelayHours = "٣٦";
+  draft.customerFollowUpDelayMinutes = "١٥";
   draft.limits.customerDailyLimit = "٠";
 
   const validation = validateBookingSettingsDraft(draft, 2_000);
@@ -111,7 +114,7 @@ test("draft validation creates the strict full-replacement payload", () => {
   assert.deepEqual(validation.templateErrors, {});
   assert.equal(validation.customerFollowUpDelayValid, true);
   assert.deepEqual(validation.update, {
-    customerFollowUpDelayHours: 36,
+    customerFollowUpDelayMinutes: 2_175,
     customerDailyLimit: 0,
     freeOwnerDailyLimit: 4,
     freePropertyContactDailyLimit: 5,
@@ -121,17 +124,23 @@ test("draft validation creates the strict full-replacement payload", () => {
   assert.equal(bookingSettingsUpdateEquals(validation.update!, settings), false);
 });
 
-test("follow-up delay accepts integer Arabic digits only within policy bounds", () => {
-  assert.equal(parseCustomerFollowUpDelayHours("٢٤", 1, 120), 24);
-  assert.equal(parseCustomerFollowUpDelayHours("۱۲۰", 1, 120), 120);
-  assert.equal(parseCustomerFollowUpDelayHours("0", 1, 120), null);
-  assert.equal(parseCustomerFollowUpDelayHours("121", 1, 120), null);
-  assert.equal(parseCustomerFollowUpDelayHours("1.5", 1, 120), null);
+test("follow-up delay accepts Arabic-digit hour and minute components within policy bounds", () => {
+  assert.equal(parseCustomerFollowUpDelayHours("٢٤", 120), 24);
+  assert.equal(parseCustomerFollowUpDelayHours("۱۲۰", 120), 120);
+  assert.equal(parseCustomerFollowUpDelayHours("121", 120), null);
+  assert.equal(parseCustomerFollowUpDelayHours("1.5", 120), null);
+  assert.equal(parseCustomerFollowUpDelayMinutesPart("٥٩"), 59);
+  assert.equal(parseCustomerFollowUpDelayMinutesPart("60"), null);
+  assert.equal(parseCustomerFollowUpDelayMinutes("0", "30"), 30);
+  assert.equal(parseCustomerFollowUpDelayMinutes("٢٤", "١٥"), 1_455);
+  assert.equal(parseCustomerFollowUpDelayMinutes("120", "1"), null);
+  assert.equal(parseCustomerFollowUpDelayMinutes("0", "0"), null);
 
   const settings = settingsFixture();
   const draft = bookingSettingsToDraft(settings);
   draft.customerFollowUpDelayHours = "0";
-  const validation = validateBookingSettingsDraft(draft, 2_000, 1, 120);
+  draft.customerFollowUpDelayMinutes = "0";
+  const validation = validateBookingSettingsDraft(draft, 2_000, 1, 7_200);
   assert.equal(validation.customerFollowUpDelayValid, false);
   assert.equal(validation.update, null);
 });
@@ -142,17 +151,44 @@ test("settings equality includes the configurable follow-up delay", () => {
     bookingSettingsToDraft(settings),
     2_000,
     1,
-    120,
+    7_200,
   );
   assert.ok(validation.update);
   assert.equal(bookingSettingsUpdateEquals(validation.update!, settings), true);
   assert.equal(
     bookingSettingsUpdateEquals(
-      { ...validation.update!, customerFollowUpDelayHours: 25 },
+      { ...validation.update!, customerFollowUpDelayMinutes: 1_500 },
       settings,
     ),
     false,
   );
+});
+
+test("settings model reads schema-v4 hours and prefers canonical minutes during rollout", () => {
+  const current = settingsFixture();
+  const legacy: BookingCommissionSettings = {
+    ...current,
+    customerFollowUpDelayMinutes: undefined,
+    customerFollowUpDelayHours: 36,
+  };
+  const legacyDraft = bookingSettingsToDraft(legacy);
+  assert.equal(legacyDraft.customerFollowUpDelayHours, "36");
+  assert.equal(legacyDraft.customerFollowUpDelayMinutes, "0");
+  const legacyValidation = validateBookingSettingsDraft(legacyDraft, 2_000);
+  assert.ok(legacyValidation.update);
+  assert.equal(
+    bookingSettingsUpdateEquals(legacyValidation.update!, legacy),
+    true,
+  );
+
+  const transitional: BookingCommissionSettings = {
+    ...current,
+    customerFollowUpDelayMinutes: 90,
+    customerFollowUpDelayHours: 1.5,
+  };
+  const transitionalDraft = bookingSettingsToDraft(transitional);
+  assert.equal(transitionalDraft.customerFollowUpDelayHours, "1");
+  assert.equal(transitionalDraft.customerFollowUpDelayMinutes, "30");
 });
 
 test("template preview substitutes sample commission percentage only once", () => {

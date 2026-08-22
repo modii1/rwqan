@@ -4,7 +4,7 @@
 
 - Booking follow-up, owner notifications, commission collection, and commission holds apply only to properties without an active premium subscription. A workflow must originate while the property is free; a premium-origin workflow is never created and cannot become eligible after a later downgrade.
 - If a free property becomes actively premium, the workflow is durably closed: queued messages are cancelled, any unpaid booking commission is waived, and only that booking's property-hold obligation is released. Historical payment attempts and signed provider callbacks remain available for financial audit.
-- An accepted anonymous contact request schedules one customer WhatsApp follow-up after the configured delay. The default is 24 hours, and admins may set an integer from 1 to 120 hours.
+- An accepted anonymous contact request schedules one customer WhatsApp follow-up after the configured delay. The default is 24 hours, and admins may set any whole-minute delay from 1 minute through 120 hours.
 - Changing the customer follow-up delay applies only to newly accepted contacts for free properties. Existing scheduled messages keep their original delivery time.
 - The customer message uses an internal `/b/<10-character-code>` alias. Previously issued 22-character aliases remain valid. Opening the alias, follow-up page, bookings profile, or admin dashboard never creates or resends the automatic job; an admin resend is a separate audited action.
 - An unanswered workflow expires seven days after the original contact. A verified customer profile session remains separate from that response deadline.
@@ -25,6 +25,7 @@
 - If the property's current canonical owner phone no longer matches the contact-time owner identity, confirmation stays observe-only or an existing debt enters admin review. Facts, billing notices, and holds fail closed rather than being retargeted automatically.
 - While a property has an active commission hold, owner and general admin property edits cannot change its canonical WhatsApp owner phone. Resolve the obligation and release the hold through the booking-commission controls before transferring the property; equivalent formatting of the same canonical phone remains allowed.
 - Admin booking totals are calculated over the complete booking and notification collections. Each booking exposes a sanitized notification history and complete payment-attempt history without recipient phones, quota keys, checkout URLs, or lease tokens.
+- The admin customer-WhatsApp handoff is limited transactionally to once per customer every 30 minutes, including when the same customer has multiple booking rows. The raw phone remains server-side.
 
 ## Limits
 
@@ -32,15 +33,16 @@
 - Confirmed-booking fact messages for free-property owners: 3 per normalized owner phone per Riyadh day by default, across all of that phone’s free properties.
 - Billing messages (the initial payment notice, enabled day-3/day-4 reminders, mandatory day 5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
 - Admins can configure all three limits in the booking-commission dashboard. Environment values remain fallbacks through `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT`, `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT`, and `FREE_PROPERTY_DAILY_CONTACT_LIMIT`.
-- The same admin settings screen can edit the customer follow-up delay and the eight free-workflow WhatsApp templates. Required placeholders are validated; the five-day payment window and mandatory day-5 warning cannot be changed.
+- The same admin settings screen can edit the customer follow-up delay in hours and minutes and the eight free-workflow WhatsApp templates. Required placeholders are validated; the five-day payment window and mandatory day-5 warning cannot be changed. `CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES` is the environment fallback; the older whole-hour variable is still migrated when the minute setting is absent.
+- During the schema-v5 rollout, the admin API accepts the schema-v4 whole-hour PUT field and returns deprecated whole-hour policy aliases for cached admin tabs. A minute value that is not an exact number of hours is returned as a fractional legacy alias so the old integer-only form fails closed instead of overwriting it; reload the dashboard to edit that value.
 
 ## Before deployment
 
 1. Enable the `booking_notification_quotas.expiresAtTtl` TTL override in `firestore.indexes.json` for quota cleanup. The staging worker uses single-field time scans and does not require the three composite booking indexes; reassess the indexed query strategy before high-volume production rollout.
 2. Configure `PUBLIC_BASE_URL` with the production HTTPS origin.
 3. Configure `BOOKING_WORKER_SECRET` as a separate random secret of at least 32 bytes. Do not reuse it in URLs or client code.
-4. Confirm `SESSION_SECRET` is at least 32 bytes because it signs purpose-bound customer and owner links.
-5. Configure an authenticated Cloud Scheduler request every five minutes:
+4. Confirm `SESSION_SECRET` is at least 32 bytes because it signs purpose-bound customer, owner, and admin handoff links.
+5. Configure an authenticated Cloud Scheduler request every minute:
    - Method: `POST`
    - Path: `/api/internal/booking-worker`
    - Header: `Authorization: Bearer <BOOKING_WORKER_SECRET>`
@@ -50,7 +52,7 @@
    - `FEATURE_BOOKING_FOLLOWUP`
    - `FEATURE_BOOKING_COMMISSION_ENFORCEMENT`
 
-The in-process five-minute worker is a safety net. Cloud Scheduler is the authoritative trigger because Cloud Run may scale to zero or run multiple instances.
+The in-process one-minute worker is a safety net. Cloud Scheduler is the authoritative trigger because Cloud Run may scale to zero or run multiple instances.
 
 ## Staged activation
 

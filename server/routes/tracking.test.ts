@@ -59,7 +59,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
   const workflowBuildOptions: any[] = [];
   let followUpMode: "off" | "scheduled" | "flag_failure" | "workflow_failure" = "off";
   let configuredFreePropertyContactDailyLimit = FREE_PROPERTY_DAILY_CONTACT_LIMIT;
-  let configuredCustomerFollowUpDelayHours = 24;
+  let configuredCustomerFollowUpDelayMinutes = 1_440;
   let freeWorkflowSettingsLookups = 0;
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
@@ -160,7 +160,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       customerDailyLimit: 3,
       freeOwnerDailyLimit: 3,
       freePropertyContactDailyLimit: configuredFreePropertyContactDailyLimit,
-      customerFollowUpDelayHours: configuredCustomerFollowUpDelayHours,
+      customerFollowUpDelayMinutes: configuredCustomerFollowUpDelayMinutes,
       updatedAt: "2026-08-18T10:00:00.000Z",
       updatedBy: "admin",
       source: "firestore",
@@ -259,7 +259,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
     await t.test("an enabled follow-up is marked scheduled on the atomically accepted contact event", async () => {
       identityMode = "remembered";
       followUpMode = "scheduled";
-      configuredCustomerFollowUpDelayHours = 36;
+      configuredCustomerFollowUpDelayMinutes = 2_160;
       const alertCountBefore = adminNotifications.length;
       const settingsLookupsBefore = freeWorkflowSettingsLookups;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
@@ -268,7 +268,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
         body: JSON.stringify({ propertyNumber: "TARGET-FOLLOWUP-SCHEDULED" }),
       });
       followUpMode = "off";
-      configuredCustomerFollowUpDelayHours = 24;
+      configuredCustomerFollowUpDelayMinutes = 1_440;
 
       assert.equal(response.status, 200);
       const acceptedEvent = acceptedCalls.at(-1)?.[5];
@@ -284,8 +284,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
         weekend: "١٬٢٥٠٫٥٠",
       });
       assert.equal(
-        workflowBuildOptions.at(-1)?.customerFollowUpDelayHours,
-        36,
+        workflowBuildOptions.at(-1)?.customerFollowUpDelayMinutes,
+        2_160,
       );
       assert.equal(
         freeWorkflowSettingsLookups - settingsLookupsBefore,

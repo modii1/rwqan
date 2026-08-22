@@ -559,6 +559,7 @@ export async function runBookingCommissionWorker(now = new Date()) {
 }
 
 let workerStarted = false;
+export const BOOKING_WORKER_INTERVAL_MS = 60 * 1_000;
 
 /**
  * Best-effort in-process safety net. The authenticated worker endpoint is the
@@ -568,7 +569,6 @@ let workerStarted = false;
 export function startBookingCommissionWorker(): void {
   if (workerStarted) return;
   workerStarted = true;
-  const intervalMs = 5 * 60 * 1000;
   setTimeout(() => {
     runBookingCommissionWorker().catch((error) =>
       console.error("Initial booking commission worker failed:", error));
@@ -576,5 +576,5 @@ export function startBookingCommissionWorker(): void {
   setInterval(() => {
     runBookingCommissionWorker().catch((error) =>
       console.error("Scheduled booking commission worker failed:", error));
-  }, intervalMs);
+  }, BOOKING_WORKER_INTERVAL_MS);
 }

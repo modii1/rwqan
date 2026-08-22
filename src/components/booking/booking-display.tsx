@@ -137,6 +137,7 @@ export interface BookingDisplayRow {
   dueAt?: string | null;
   complianceStatus?: string | null;
   customerPhoneMasked?: string | null;
+  customerWhatsAppNextAllowedAt?: string | null;
   isFreeProperty?: boolean;
   disputeStatus?: string | null;
   disputedAt?: string | null;
@@ -417,6 +418,7 @@ export function getBookingEventLabel(value: unknown): string {
     customer_followup_suppressed: "تم تقييد متابعة العميل",
     customer_followup_expired: "انتهت مهلة رد العميل",
     customer_opened: "فتح العميل رابط المتابعة",
+    admin_customer_whatsapp_opened: "فتح المشرف محادثة واتساب مع العميل",
     customer_declined: "أكد العميل أن الحجز لم يتم",
     booking_confirmed: "أكد العميل بيانات الحجز",
     owner_notification_sent: "تم إرسال بيانات الحجز للمالك",

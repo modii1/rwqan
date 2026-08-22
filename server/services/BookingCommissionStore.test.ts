@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingFollowUpRecordSchema,
 } from "../../shared/booking";
@@ -271,7 +272,7 @@ test("initial workflow snapshots a validated configurable follow-up delay", () =
     customerPhone: "+966500000002",
     customerSubject: "customer-subject-hmac",
     isFreeProperty: true,
-    customerFollowUpDelayHours: 36,
+    customerFollowUpDelayMinutes: 2_160,
     now,
   });
   const expectedDueAt = new Date(
@@ -280,7 +281,7 @@ test("initial workflow snapshots a validated configurable follow-up delay", () =
   assert.equal(configured.followUp.followUpDueAt, expectedDueAt);
   assert.equal(configured.customerNotification.scheduledAt, expectedDueAt);
 
-  for (const customerFollowUpDelayHours of [0, 1.5, 121]) {
+  for (const customerFollowUpDelayMinutes of [0, 1.5, 7_201]) {
     assert.throws(() => buildInitialBookingWorkflow({
       requestCode: "REQ-13383-INVALID",
       propertyNumber: "13383",
@@ -289,7 +290,7 @@ test("initial workflow snapshots a validated configurable follow-up delay", () =
       customerPhone: "+966500000002",
       customerSubject: "customer-subject-hmac",
       isFreeProperty: true,
-      customerFollowUpDelayHours,
+      customerFollowUpDelayMinutes,
       now,
     }));
   }
@@ -462,6 +463,7 @@ test("initial workflow has no booking, commission, dispute, or enforcement outco
 test("free-workflow settings fall back to env and persist idempotently with one audit event", async () => {
   const envNames = [
     "CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT",
+    "CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES",
     "CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS",
     "FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT",
     "FREE_PROPERTY_DAILY_CONTACT_LIMIT",
@@ -481,6 +483,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
 
   try {
     process.env.CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT = "7";
+    delete process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES;
     process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS = "36";
     process.env.FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT = "8";
     process.env.FREE_PROPERTY_DAILY_CONTACT_LIMIT = "9";
@@ -489,7 +492,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       customerDailyLimit: 7,
       freeOwnerDailyLimit: 8,
       freePropertyContactDailyLimit: 9,
-      customerFollowUpDelayHours: 36,
+      customerFollowUpDelayMinutes: 2_160,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: null,
@@ -497,10 +500,22 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       source: "environment" as const,
     };
     assert.deepEqual(await store.getFreeWorkflowSettings(), environmentSettings);
+    process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES = "135";
+    assert.equal(
+      (await store.getFreeWorkflowSettings()).customerFollowUpDelayMinutes,
+      135,
+    );
+    delete process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES;
     process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS = "121";
     assert.equal(
-      (await store.getFreeWorkflowSettings()).customerFollowUpDelayHours,
-      24,
+      (await store.getFreeWorkflowSettings()).customerFollowUpDelayMinutes,
+      1_440,
+    );
+    process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS = "1.5";
+    assert.equal(
+      (await store.getFreeWorkflowSettings()).customerFollowUpDelayMinutes,
+      1_440,
+      "the legacy whole-hour variable must not gain fractional-hour semantics",
     );
     process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_HOURS = "36";
 
@@ -508,7 +523,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       customerDailyLimit: 4,
       freeOwnerDailyLimit: 5,
       freePropertyContactDailyLimit: 6,
-      customerFollowUpDelayHours: 48,
+      customerFollowUpDelayMinutes: 2_880,
       whatsappTemplates: {
         ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
         property_released_paid:
@@ -533,7 +548,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       "changing the configured delay does not reschedule an existing job",
     );
     assert.deepEqual(database.read("settings", "booking_free_workflow_limits"), {
-      schemaVersion: 4,
+      schemaVersion: 5,
       ...configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin",
@@ -568,9 +583,9 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       { ...configuration, customerDailyLimit: -1 },
       { ...configuration, customerDailyLimit: 4.5 },
       { ...configuration, freePropertyContactDailyLimit: 1_001 },
-      { ...configuration, customerFollowUpDelayHours: 0 },
-      { ...configuration, customerFollowUpDelayHours: 1.5 },
-      { ...configuration, customerFollowUpDelayHours: 121 },
+      { ...configuration, customerFollowUpDelayMinutes: 0 },
+      { ...configuration, customerFollowUpDelayMinutes: 1.5 },
+      { ...configuration, customerFollowUpDelayMinutes: 7_201 },
       { ...configuration, whatsappTemplates: {} },
       { ...configuration, optionalCommissionReminderDays: [5] },
     ]) {
@@ -610,7 +625,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       customerDailyLimit: 11,
       freeOwnerDailyLimit: 12,
       freePropertyContactDailyLimit: 13,
-      customerFollowUpDelayHours: 24,
+      customerFollowUpDelayMinutes: 1_440,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: legacy.updatedAt,
@@ -632,7 +647,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       customerDailyLimit: 11,
       freeOwnerDailyLimit: 12,
       freePropertyContactDailyLimit: 13,
-      customerFollowUpDelayHours: 24,
+      customerFollowUpDelayMinutes: 1_440,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
     },
@@ -641,18 +656,93 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
       ?.schemaVersion,
-    4,
+    5,
   );
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
-      ?.customerFollowUpDelayHours,
-    24,
+      ?.customerFollowUpDelayMinutes,
+    1_440,
   );
   assert.equal(
     database.entries("booking_free_workflow_limits_audit").length,
     1,
     "an explicit replacement persists and audits the migrated delay",
   );
+});
+
+test("schema-four whole-hour follow-up delay migrates to minutes on the next admin save", async () => {
+  const database = new FakeFirestore();
+  const legacy = {
+    schemaVersion: 4,
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    customerFollowUpDelayHours: 36,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: "2026-08-18T09:00:00.000Z",
+    updatedBy: "admin",
+  };
+  database.seed("settings", "booking_free_workflow_limits", legacy);
+  const store = new BookingCommissionStore(database as any);
+
+  const migrated = await store.getFreeWorkflowSettings();
+  assert.equal(migrated.customerFollowUpDelayMinutes, 2_160);
+  assert.deepEqual(
+    database.read("settings", "booking_free_workflow_limits"),
+    legacy,
+    "read-time migration remains non-mutating",
+  );
+
+  await store.updateFreeWorkflowSettings({
+    customerDailyLimit: migrated.customerDailyLimit,
+    freeOwnerDailyLimit: migrated.freeOwnerDailyLimit,
+    freePropertyContactDailyLimit: migrated.freePropertyContactDailyLimit,
+    customerFollowUpDelayMinutes: migrated.customerFollowUpDelayMinutes,
+    whatsappTemplates: migrated.whatsappTemplates,
+    optionalCommissionReminderDays: migrated.optionalCommissionReminderDays,
+  }, new Date("2026-08-18T10:00:00.000Z"));
+  const persisted = database.read("settings", "booking_free_workflow_limits");
+  assert.equal(persisted?.schemaVersion, 5);
+  assert.equal(persisted?.customerFollowUpDelayMinutes, 2_160);
+  assert.equal("customerFollowUpDelayHours" in (persisted || {}), false);
+  assert.equal(
+    database.entries("booking_free_workflow_limits_audit").length,
+    1,
+  );
+});
+
+test("malformed schema-four hour values do not become valid minute delays", async () => {
+  const previousMinutes = process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES;
+  process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES = "1440";
+  try {
+    for (const customerFollowUpDelayHours of [1.5, true]) {
+      const database = new FakeFirestore();
+      database.seed("settings", "booking_free_workflow_limits", {
+        schemaVersion: 4,
+        customerDailyLimit: 3,
+        freeOwnerDailyLimit: 3,
+        freePropertyContactDailyLimit: 3,
+        customerFollowUpDelayHours,
+        whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+        optionalCommissionReminderDays: [3, 4],
+        updatedAt: "2026-08-18T09:00:00.000Z",
+        updatedBy: "admin",
+      });
+
+      assert.equal(
+        (await new BookingCommissionStore(database as any)
+          .getFreeWorkflowSettings()).customerFollowUpDelayMinutes,
+        1_440,
+      );
+    }
+  } finally {
+    if (previousMinutes === undefined) {
+      delete process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES;
+    } else {
+      process.env.CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES = previousMinutes;
+    }
+  }
 });
 
 test("legacy seven-template settings migrate per template without losing unrelated custom copy", async () => {
@@ -691,7 +781,7 @@ test("legacy seven-template settings migrate per template without losing unrelat
     settings.whatsappTemplates.customer_followup,
     "CUSTOM {{propertyLabel}} {{followUpLink}}",
   );
-  assert.equal(settings.customerFollowUpDelayHours, 24);
+  assert.equal(settings.customerFollowUpDelayMinutes, 1_440);
   assert.equal(
     settings.whatsappTemplates.property_released_paid,
     "CUSTOM PAID {{propertyName}} {{propertyNumber}}",
@@ -1434,6 +1524,126 @@ test("confirmation schedules configured optional reminders and always schedules 
     "booking_notification_outbox",
     `${bookingId}--commission_reminder_5`,
   ));
+});
+
+test("admin customer WhatsApp contact is limited once per customer every 30 minutes", async () => {
+  const database = new FakeFirestore();
+  const store = new BookingCommissionStore(database as any);
+  const seedBooking = (
+    requestCode: string,
+    propertyNumber: string,
+    customerSubject: string,
+  ) => {
+    const workflow = buildInitialBookingWorkflow({
+      requestCode,
+      propertyNumber,
+      propertyName: `Property ${propertyNumber}`,
+      ownerPhone: "+966500000001",
+      customerPhone: "+966500000002",
+      customerSubject,
+      isFreeProperty: true,
+      now,
+    });
+    database.seed("booking_followups", workflow.followUp.id, {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-${requestCode}`,
+    });
+    database.seed("properties", propertyNumber, {
+      propertyNumber,
+      whatsappNumber: "0500000001",
+    });
+    return workflow.followUp.id;
+  };
+
+  const firstId = seedBooking("ADMIN-CONTACT-1", "ADMIN-PROP-1", "same-customer");
+  const secondId = seedBooking("ADMIN-CONTACT-2", "ADMIN-PROP-2", "same-customer");
+  const otherCustomerId = seedBooking(
+    "ADMIN-CONTACT-3",
+    "ADMIN-PROP-3",
+    "other-customer",
+  );
+
+  const first = await store.claimAdminCustomerWhatsAppContact(firstId, now);
+  assert.equal(first?.adminCustomerWhatsAppLastOpenedAt, now.toISOString());
+  assert.equal(first?.events.at(-1)?.type, "admin_customer_whatsapp_opened");
+
+  await assert.rejects(
+    () => store.claimAdminCustomerWhatsAppContact(
+      secondId,
+      new Date(now.getTime() + BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS - 60_000),
+    ),
+    (error: unknown) =>
+      error instanceof BookingWorkflowError &&
+      error.code === "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED" &&
+      error.status === 429 &&
+      error.retryAfterSeconds === 60,
+  );
+  assert.equal(
+    database.read("booking_followups", secondId)
+      ?.adminCustomerWhatsAppLastOpenedAt,
+    undefined,
+  );
+
+  const otherCustomer = await store.claimAdminCustomerWhatsAppContact(
+    otherCustomerId,
+    new Date(now.getTime() + 5 * 60_000),
+  );
+  assert.ok(otherCustomer?.adminCustomerWhatsAppLastOpenedAt);
+
+  const boundary = new Date(
+    now.getTime() + BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+  );
+  const second = await store.claimAdminCustomerWhatsAppContact(
+    secondId,
+    boundary,
+  );
+  assert.equal(second?.adminCustomerWhatsAppLastOpenedAt, boundary.toISOString());
+});
+
+test("rejected admin customer WhatsApp handoffs do not consume the cooldown", async () => {
+  const database = new FakeFirestore();
+  const store = new BookingCommissionStore(database as any);
+  const workflow = buildWorkflow();
+  const bookingId = workflow.followUp.id;
+  database.seed("booking_followups", bookingId, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-ADMIN-INVALID",
+    customerPhone: "invalid",
+  });
+  database.seed("properties", workflow.followUp.propertyNumber, {
+    propertyNumber: workflow.followUp.propertyNumber,
+    whatsappNumber: "0500000001",
+  });
+
+  await assert.rejects(
+    () => store.claimAdminCustomerWhatsAppContact(bookingId, now),
+    (error: unknown) =>
+      error instanceof BookingWorkflowError &&
+      error.code === "INVALID_CUSTOMER_PHONE",
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.adminCustomerWhatsAppLastOpenedAt,
+    undefined,
+  );
+
+  database.update("booking_followups", bookingId, {
+    customerPhone: "+966500000002",
+  });
+  database.update("properties", workflow.followUp.propertyNumber, {
+    whatsappNumber: "0500000099",
+  });
+  await assert.rejects(
+    () => store.claimAdminCustomerWhatsAppContact(bookingId, now),
+    (error: unknown) =>
+      error instanceof BookingWorkflowError &&
+      error.code === "OWNER_IDENTITY_CHANGED",
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.adminCustomerWhatsAppLastOpenedAt,
+    undefined,
+  );
 });
 
 test("a stale owner link is blocked and its later signed payment is retained for refund review", async () => {

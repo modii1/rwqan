@@ -2,6 +2,7 @@ import { Router } from "express";
 import { bookingCommissionService } from "../../services/BookingCommissionService";
 import { bookingRouteError } from "../../services/BookingCommissionService";
 import { runBookingCommissionWorker } from "../../services/BookingNotificationWorker";
+import { BookingWorkflowError } from "../../services/BookingCommissionStore";
 
 const router = Router();
 
@@ -46,13 +47,33 @@ router.put("/api/admin/booking-commissions/settings", async (req, res) => {
   }
 });
 
-router.get("/api/admin/booking-commissions/:id/customer-whatsapp", async (req, res) => {
+router.post("/api/admin/booking-commissions/:id/customer-whatsapp", async (req, res) => {
   res.set("Cache-Control", "no-store, private");
   res.set("Referrer-Policy", "no-referrer");
   try {
-    const redirectUrl = await bookingCommissionService.getAdminCustomerWhatsAppUrl(
+    const handoffUrl = await bookingCommissionService.issueAdminCustomerWhatsAppHandoff(
       req.params.id,
     );
+    return res.json({ handoffUrl });
+  } catch (error) {
+    if (
+      error instanceof BookingWorkflowError &&
+      error.code === "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED" &&
+      error.retryAfterSeconds
+    ) {
+      res.set("Retry-After", String(error.retryAfterSeconds));
+    }
+    const response = bookingRouteError(error);
+    return res.status(response.status).json(response.body);
+  }
+});
+
+router.get("/api/admin/booking-commissions/:id/customer-whatsapp/open", async (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  res.set("Referrer-Policy", "no-referrer");
+  try {
+    const redirectUrl = await bookingCommissionService
+      .resolveAdminCustomerWhatsAppHandoff(req.params.id, req.query.token);
     return res.redirect(302, redirectUrl);
   } catch (error) {
     const response = bookingRouteError(error);

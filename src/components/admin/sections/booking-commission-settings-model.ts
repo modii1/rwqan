@@ -27,7 +27,9 @@ export type BookingWhatsAppTemplates = Record<
 >;
 
 export interface BookingCommissionSettings {
-  customerFollowUpDelayHours: number;
+  customerFollowUpDelayMinutes?: number;
+  /** Deprecated schema-v4/API response field used during rolling deploys. */
+  customerFollowUpDelayHours?: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
@@ -39,8 +41,11 @@ export interface BookingCommissionSettings {
 }
 
 export interface BookingCommissionFixedPolicy {
-  customerFollowUpDelayMinHours: number;
-  customerFollowUpDelayMaxHours: number;
+  customerFollowUpDelayMinMinutes: number;
+  customerFollowUpDelayMaxMinutes: number;
+  /** Deprecated API response fields used by cached schema-v4 admin clients. */
+  customerFollowUpDelayMinHours?: number;
+  customerFollowUpDelayMaxHours?: number;
   commissionPaymentWindowDays: 5;
   mandatoryCommissionReminderDays: [5] | readonly [5];
   allowedOptionalCommissionReminderDays: Array<3 | 4> | readonly (3 | 4)[];
@@ -63,13 +68,14 @@ export interface BookingCommissionSettingsPayload {
 
 export interface BookingCommissionSettingsDraft {
   customerFollowUpDelayHours: string;
+  customerFollowUpDelayMinutes: string;
   limits: Record<BookingSettingsLimitKey, string>;
   whatsappTemplates: BookingWhatsAppTemplates;
   optionalCommissionReminderDays: Array<3 | 4>;
 }
 
 export interface BookingCommissionSettingsUpdate {
-  customerFollowUpDelayHours: number;
+  customerFollowUpDelayMinutes: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
@@ -221,10 +227,31 @@ export function parseBookingSettingsLimit(value: string): number | null {
 
 export function parseCustomerFollowUpDelayHours(
   value: string,
-  minimum = 1,
   maximum = 120,
 ): number | null {
-  return parseBookingSettingsInteger(value, minimum, maximum);
+  return parseBookingSettingsInteger(value, 0, maximum);
+}
+
+export function parseCustomerFollowUpDelayMinutesPart(
+  value: string,
+): number | null {
+  return parseBookingSettingsInteger(value, 0, 59);
+}
+
+export function parseCustomerFollowUpDelayMinutes(
+  hoursValue: string,
+  minutesValue: string,
+  minimum = 1,
+  maximum = 7_200,
+): number | null {
+  const hours = parseCustomerFollowUpDelayHours(
+    hoursValue,
+    Math.ceil(maximum / 60),
+  );
+  const minutes = parseCustomerFollowUpDelayMinutesPart(minutesValue);
+  if (hours === null || minutes === null) return null;
+  const total = hours * 60 + minutes;
+  return total >= minimum && total <= maximum ? total : null;
 }
 
 export function parseBookingSettingsLimits(
@@ -250,10 +277,20 @@ export function parseBookingSettingsLimits(
 export function bookingSettingsToDraft(
   settings: BookingCommissionSettings,
 ): BookingCommissionSettingsDraft {
+  const currentMinutes = settings.customerFollowUpDelayMinutes;
+  const legacyHours = settings.customerFollowUpDelayHours;
+  const totalDelayMinutes = typeof currentMinutes === "number" &&
+      Number.isSafeInteger(currentMinutes) &&
+      currentMinutes >= 1 && currentMinutes <= 7_200
+    ? currentMinutes
+    : typeof legacyHours === "number" &&
+        Number.isSafeInteger(legacyHours) &&
+        legacyHours >= 1 && legacyHours <= 120
+      ? legacyHours * 60
+      : 1_440;
   return {
-    customerFollowUpDelayHours: String(
-      settings.customerFollowUpDelayHours ?? 24,
-    ),
+    customerFollowUpDelayHours: String(Math.floor(totalDelayMinutes / 60)),
+    customerFollowUpDelayMinutes: String(totalDelayMinutes % 60),
     limits: {
       customerDailyLimit: String(settings.customerDailyLimit),
       freeOwnerDailyLimit: String(settings.freeOwnerDailyLimit),
@@ -311,8 +348,8 @@ export function validateBookingTemplate(
 export function validateBookingSettingsDraft(
   draft: BookingCommissionSettingsDraft,
   maxTemplateLength: number,
-  customerFollowUpDelayMinHours = 1,
-  customerFollowUpDelayMaxHours = 120,
+  customerFollowUpDelayMinMinutes = 1,
+  customerFollowUpDelayMaxMinutes = 7_200,
 ): {
   update: BookingCommissionSettingsUpdate | null;
   templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>>;
@@ -320,10 +357,11 @@ export function validateBookingSettingsDraft(
   customerFollowUpDelayValid: boolean;
 } {
   const parsedLimits = parseBookingSettingsLimits(draft.limits);
-  const customerFollowUpDelayHours = parseCustomerFollowUpDelayHours(
+  const customerFollowUpDelayMinutes = parseCustomerFollowUpDelayMinutes(
     draft.customerFollowUpDelayHours,
-    customerFollowUpDelayMinHours,
-    customerFollowUpDelayMaxHours,
+    draft.customerFollowUpDelayMinutes,
+    customerFollowUpDelayMinMinutes,
+    customerFollowUpDelayMaxMinutes,
   );
   const templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>> = {};
   for (const key of BOOKING_WHATSAPP_TEMPLATE_KEYS) {
@@ -340,15 +378,15 @@ export function validateBookingSettingsDraft(
     draft.optionalCommissionReminderDays.length;
   const valid = Boolean(
     parsedLimits &&
-    customerFollowUpDelayHours !== null &&
+    customerFollowUpDelayMinutes !== null &&
     remindersValid &&
     Object.keys(templateErrors).length === 0,
   );
   return {
-    update: valid && parsedLimits && customerFollowUpDelayHours !== null
+    update: valid && parsedLimits && customerFollowUpDelayMinutes !== null
       ? {
           ...parsedLimits,
-          customerFollowUpDelayHours,
+          customerFollowUpDelayMinutes,
           whatsappTemplates: { ...draft.whatsappTemplates },
           optionalCommissionReminderDays: [...draft.optionalCommissionReminderDays]
             .sort((left, right) => left - right),
@@ -356,7 +394,7 @@ export function validateBookingSettingsDraft(
       : null,
     templateErrors,
     limitsValid: Boolean(parsedLimits),
-    customerFollowUpDelayValid: customerFollowUpDelayHours !== null,
+    customerFollowUpDelayValid: customerFollowUpDelayMinutes !== null,
   };
 }
 
@@ -364,7 +402,12 @@ export function bookingSettingsUpdateEquals(
   left: BookingCommissionSettingsUpdate,
   right: BookingCommissionSettings,
 ): boolean {
-  return left.customerFollowUpDelayHours === right.customerFollowUpDelayHours &&
+  const rightDelay = bookingSettingsToDraft(right);
+  const rightDelayMinutes = parseCustomerFollowUpDelayMinutes(
+    rightDelay.customerFollowUpDelayHours,
+    rightDelay.customerFollowUpDelayMinutes,
+  );
+  return left.customerFollowUpDelayMinutes === rightDelayMinutes &&
     BOOKING_SETTINGS_LIMIT_KEYS.every((key) => left[key] === right[key]) &&
     BOOKING_WHATSAPP_TEMPLATE_KEYS.every(
       (key) => left.whatsappTemplates[key] === right.whatsappTemplates[key],

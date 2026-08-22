@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { getOwnerCommissionViewState } from "./booking-commission-state";
 
@@ -34,4 +35,13 @@ test("only an unresolved dispute hides payment controls", () => {
     commissionStatus: "pending",
     disputeStatus: "none",
   }), "payable");
+});
+
+test("an existing electronic checkout uses the requested short payment action", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-client.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /activeElectronicCreated \? "ادفع الآن"/);
+  assert.doesNotMatch(source, /متابعة الدفع بالبطاقة/);
 });

@@ -350,7 +350,7 @@ export default function BookingCommissionClient({ token }: { token: string }) {
                         data-testid="button-commission-pay-cards"
                       >
                         {pendingMethod === "cards" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                        {activeElectronicCreated ? "متابعة الدفع بالبطاقة" : "الدفع بالبطاقة"}
+                        {activeElectronicCreated ? "ادفع الآن" : "الدفع بالبطاقة"}
                       </Button>
                     )}
                     {(!activeElectronicCreated || activeAttemptMethod === "applepay") && (

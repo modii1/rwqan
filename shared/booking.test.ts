@@ -7,8 +7,10 @@ import {
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingConfirmationFactsSchema,
   bookingCustomerFollowUpDelayHoursSchema,
+  bookingCustomerFollowUpDelayMinutesSchema,
   bookingDateSchema,
   bookingFreeWorkflowConfigurationSchema,
+  bookingFreeWorkflowSettingsUpdateSchema,
   bookingFollowUpRecordSchema,
   bookingOptionalCommissionReminderDaysSchema,
   bookingResponseInputSchema,
@@ -195,19 +197,69 @@ test("only optional commission reminders on days three and four are configurable
     customerDailyLimit: 3,
     freeOwnerDailyLimit: 3,
     freePropertyContactDailyLimit: 3,
-    customerFollowUpDelayHours: 24,
+    customerFollowUpDelayMinutes: 1_440,
     whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     optionalCommissionReminderDays: [3, 4],
   }).success, true);
 });
 
-test("customer follow-up delay accepts only whole hours from one through 120", () => {
+test("customer follow-up delay accepts whole minutes from one through five days", () => {
+  for (const value of [1, 30, 1_440, 7_200]) {
+    assert.equal(bookingCustomerFollowUpDelayMinutesSchema.parse(value), value);
+  }
+  for (const value of [0, 1.5, 7_201, "1440", null]) {
+    assert.equal(
+      bookingCustomerFollowUpDelayMinutesSchema.safeParse(value).success,
+      false,
+    );
+  }
+});
+
+test("legacy whole-hour settings transform to canonical minutes without accepting fractions", () => {
   for (const value of [1, 24, 120]) {
     assert.equal(bookingCustomerFollowUpDelayHoursSchema.parse(value), value);
   }
-  for (const value of [0, 1.5, 121, "24", null]) {
+  for (const value of [0, 1.5, 121, true, "24", null]) {
     assert.equal(
       bookingCustomerFollowUpDelayHoursSchema.safeParse(value).success,
+      false,
+    );
+  }
+
+  const common = {
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+  };
+  assert.equal(
+    bookingFreeWorkflowSettingsUpdateSchema.parse({
+      settings: { ...common, customerFollowUpDelayHours: 36 },
+    }).settings.customerFollowUpDelayMinutes,
+    2_160,
+  );
+  assert.equal(
+    bookingFreeWorkflowSettingsUpdateSchema.parse({
+      settings: {
+        ...common,
+        customerFollowUpDelayHours: 36,
+        customerFollowUpDelayMinutes: 2_160,
+      },
+    }).settings.customerFollowUpDelayMinutes,
+    2_160,
+  );
+  for (const settings of [
+    { ...common },
+    { ...common, customerFollowUpDelayHours: 1.5 },
+    {
+      ...common,
+      customerFollowUpDelayHours: 36,
+      customerFollowUpDelayMinutes: 1_440,
+    },
+  ]) {
+    assert.equal(
+      bookingFreeWorkflowSettingsUpdateSchema.safeParse({ settings }).success,
       false,
     );
   }

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import express from "express";
-import { bookingCommissionStore } from "../../services/BookingCommissionStore";
+import {
+  BookingWorkflowError,
+  bookingCommissionStore,
+} from "../../services/BookingCommissionStore";
 import { BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE } from "../../services/BookingCommissionService";
 import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../../shared/booking";
 import bookingsRouter from "./bookings";
@@ -40,7 +43,7 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
     customerDailyLimit: 4,
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
-    customerFollowUpDelayHours: 36,
+    customerFollowUpDelayMinutes: 2_160,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [3] as Array<3 | 4>,
   };
@@ -82,8 +85,13 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
       assert.equal(getResponse.status, 200);
       assert.equal(getResponse.headers.get("cache-control"), "no-store, private");
       const expectedResponse = {
-        settings: persisted,
+        settings: {
+          ...persisted,
+          customerFollowUpDelayHours: 36,
+        },
         fixedPolicy: {
+          customerFollowUpDelayMinMinutes: 1,
+          customerFollowUpDelayMaxMinutes: 7_200,
           customerFollowUpDelayMinHours: 1,
           customerFollowUpDelayMaxHours: 120,
           commissionPaymentWindowDays: 5,
@@ -116,6 +124,27 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
       assert.deepEqual(await putResponse.json(), expectedResponse);
       assert.deepEqual(updates, [configuration]);
 
+      const {
+        customerFollowUpDelayMinutes: _canonicalDelay,
+        ...legacyConfiguration
+      } = configuration;
+      const legacyPutResponse = await fetch(
+        `${baseUrl}/api/admin/booking-commissions/settings`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            settings: {
+              ...legacyConfiguration,
+              customerFollowUpDelayHours: 36,
+            },
+          }),
+        },
+      );
+      assert.equal(legacyPutResponse.status, 200);
+      assert.deepEqual(await legacyPutResponse.json(), expectedResponse);
+      assert.deepEqual(updates, [configuration, configuration]);
+
       for (const body of [
         {
           settings: {
@@ -126,13 +155,25 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
         {
           settings: {
             ...configuration,
-            customerFollowUpDelayHours: 0,
+            customerFollowUpDelayMinutes: 0,
           },
         },
         {
           settings: {
             ...configuration,
-            customerFollowUpDelayHours: 121,
+            customerFollowUpDelayMinutes: 7_201,
+          },
+        },
+        {
+          settings: {
+            ...legacyConfiguration,
+            customerFollowUpDelayHours: 1.5,
+          },
+        },
+        {
+          settings: {
+            ...configuration,
+            customerFollowUpDelayHours: 24,
           },
         },
         {
@@ -158,7 +199,7 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
           error: "بيانات الحجز غير مكتملة أو غير صحيحة",
         });
       }
-      assert.equal(updates.length, 1, "invalid requests never reach persistence");
+      assert.equal(updates.length, 2, "invalid requests never reach persistence");
     });
   } finally {
     store.getFreeWorkflowSettings = originals.getSettings;
@@ -171,28 +212,62 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
   }
 });
 
-test("admin customer WhatsApp handoff redirects privately without returning the phone as JSON", async () => {
+test("admin customer WhatsApp handoff requires POST and keeps the phone behind an opaque redirect", async () => {
   const store = bookingCommissionStore as any;
-  const originalGetBooking = store.getBookingForCurrentOwner;
+  const originals = {
+    claim: store.claimAdminCustomerWhatsAppContact,
+    getCurrent: store.getBookingForCurrentOwner,
+  };
+  const previousSecret = process.env.SESSION_SECRET;
+  let claimCalls = 0;
 
   try {
-    store.getBookingForCurrentOwner = async (id: string) => {
+    process.env.SESSION_SECRET = "admin-whatsapp-route-test-secret-value-12345678";
+    store.claimAdminCustomerWhatsAppContact = async (id: string) => {
+      claimCalls += 1;
       if (id === "BOOK-MISSING") return null;
+      if (id === "BOOK-RATE-LIMITED") {
+        throw new BookingWorkflowError(
+          "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED",
+          "يمكن التواصل مع العميل مرة واحدة كل 30 دقيقة.",
+          429,
+          1_337,
+        );
+      }
       return {
         id,
         customerPhone: "٠٥٠ ٠٠٠ ٠٠٠٢",
       };
     };
+    store.getBookingForCurrentOwner = async (id: string) => ({
+      id,
+      customerPhone: "٠٥٠ ٠٠٠ ٠٠٠٢",
+    });
 
     await withBookingsServer(async (baseUrl) => {
       const response = await fetch(
         `${baseUrl}/api/admin/booking-commissions/BOOK-HANDOFF/customer-whatsapp`,
-        { redirect: "manual" },
+        { method: "POST" },
       );
-      assert.equal(response.status, 302);
+      assert.equal(response.status, 200);
       assert.equal(response.headers.get("cache-control"), "no-store, private");
       assert.equal(response.headers.get("referrer-policy"), "no-referrer");
-      const location = response.headers.get("location");
+      const payload = await response.json();
+      assert.deepEqual(Object.keys(payload), ["handoffUrl"]);
+      assert.match(
+        payload.handoffUrl,
+        /^\/api\/admin\/booking-commissions\/BOOK-HANDOFF\/customer-whatsapp\/open\?token=/,
+      );
+      assert.equal(payload.handoffUrl.includes("966500000002"), false);
+      assert.equal(payload.handoffUrl.includes("wa.me"), false);
+
+      const handoff = await fetch(`${baseUrl}${payload.handoffUrl}`, {
+        redirect: "manual",
+      });
+      assert.equal(handoff.status, 302);
+      assert.equal(handoff.headers.get("cache-control"), "no-store, private");
+      assert.equal(handoff.headers.get("referrer-policy"), "no-referrer");
+      const location = handoff.headers.get("location");
       assert.ok(location);
       const redirect = new URL(location);
       assert.equal(redirect.origin, "https://wa.me");
@@ -201,11 +276,18 @@ test("admin customer WhatsApp handoff redirects privately without returning the 
         redirect.searchParams.get("text"),
         BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
       );
-      assert.equal(response.headers.get("content-type")?.includes("json"), false);
+      assert.equal(claimCalls, 1, "opening the signed handoff does not claim again");
+
+      const safeGet = await fetch(
+        `${baseUrl}/api/admin/booking-commissions/BOOK-HANDOFF/customer-whatsapp`,
+        { redirect: "manual" },
+      );
+      assert.equal(safeGet.status, 404, "GET cannot consume the cooldown claim");
+      assert.equal(claimCalls, 1);
 
       const missing = await fetch(
         `${baseUrl}/api/admin/booking-commissions/BOOK-MISSING/customer-whatsapp`,
-        { redirect: "manual" },
+        { method: "POST" },
       );
       assert.equal(missing.status, 404);
       assert.equal(missing.headers.get("cache-control"), "no-store, private");
@@ -215,13 +297,24 @@ test("admin customer WhatsApp handoff redirects privately without returning the 
         error: "Booking not found",
       });
 
-      store.getBookingForCurrentOwner = async () => ({
+      const limited = await fetch(
+        `${baseUrl}/api/admin/booking-commissions/BOOK-RATE-LIMITED/customer-whatsapp`,
+        { method: "POST" },
+      );
+      assert.equal(limited.status, 429);
+      assert.equal(limited.headers.get("retry-after"), "1337");
+      assert.deepEqual(await limited.json(), {
+        code: "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED",
+        error: "يمكن التواصل مع العميل مرة واحدة كل 30 دقيقة.",
+      });
+
+      store.claimAdminCustomerWhatsAppContact = async () => ({
         id: "BOOK-INVALID",
         customerPhone: "invalid",
       });
       const invalid = await fetch(
         `${baseUrl}/api/admin/booking-commissions/BOOK-INVALID/customer-whatsapp`,
-        { redirect: "manual" },
+        { method: "POST" },
       );
       assert.equal(invalid.status, 400);
       assert.deepEqual(await invalid.json(), {
@@ -230,6 +323,9 @@ test("admin customer WhatsApp handoff redirects privately without returning the 
       });
     });
   } finally {
-    store.getBookingForCurrentOwner = originalGetBooking;
+    store.claimAdminCustomerWhatsAppContact = originals.claim;
+    store.getBookingForCurrentOwner = originals.getCurrent;
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
   }
 });

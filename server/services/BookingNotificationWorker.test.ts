@@ -19,6 +19,7 @@ const TOKEN_SECRET = "booking-message-test-secret-value-1234567890";
 
 let buildBookingNotificationMessage: typeof import("./BookingNotificationWorker")["buildBookingNotificationMessage"];
 let dispatchDueBookingNotifications: typeof import("./BookingNotificationWorker")["dispatchDueBookingNotifications"];
+let bookingWorkerIntervalMs: number;
 let bookingCommissionStore: typeof import("./BookingCommissionStore")["bookingCommissionStore"];
 let bookingCommissionService: typeof import("./BookingCommissionService")["bookingCommissionService"];
 type ConfirmedBookingDocument = Exclude<
@@ -34,6 +35,7 @@ before(async () => {
   ({ bookingCommissionStore } = await import("./BookingCommissionStore"));
   ({ bookingCommissionService } = await import("./BookingCommissionService"));
   ({
+    BOOKING_WORKER_INTERVAL_MS: bookingWorkerIntervalMs,
     buildBookingNotificationMessage,
     dispatchDueBookingNotifications,
   } = await import("./BookingNotificationWorker"));
@@ -48,6 +50,10 @@ after(() => {
   else process.env.ENJAZATIK_URL = previousEnjazatikUrl;
   if (previousEnjazatikToken === undefined) delete process.env.ENJAZATIK_TOKEN;
   else process.env.ENJAZATIK_TOKEN = previousEnjazatikToken;
+});
+
+test("booking worker polls every minute to honor minute-precision delays", () => {
+  assert.equal(bookingWorkerIntervalMs, 60 * 1_000);
 });
 
 function confirmedBooking(
@@ -357,7 +363,7 @@ test("an existing pending customer job lazily creates its compact alias before s
       customerDailyLimit: 3,
       freeOwnerDailyLimit: 3,
       freePropertyContactDailyLimit: 3,
-      customerFollowUpDelayHours: 24,
+      customerFollowUpDelayMinutes: 1_440,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: null,
@@ -471,7 +477,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
         customerDailyLimit: 3,
         freeOwnerDailyLimit: 3,
         freePropertyContactDailyLimit: 3,
-        customerFollowUpDelayHours: 24,
+        customerFollowUpDelayMinutes: 1_440,
         whatsappTemplates: customTemplates,
         optionalCommissionReminderDays: [3, 4],
         updatedAt: "2099-08-15T00:00:00.000Z",

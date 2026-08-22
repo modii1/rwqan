@@ -27,10 +27,14 @@ function independentlySign(encodedPayload: string): string {
     .digest("base64url");
 }
 
-test("issues a signed base64url token and verifies both supported purposes", () => {
+test("issues a signed base64url token and verifies every supported purpose", () => {
   const service = new BookingTokenService({ secret: SECRET, now: () => initialNow });
 
-  for (const purpose of ["customer_response", "owner_payment"] as const) {
+  for (const purpose of [
+    "customer_response",
+    "owner_payment",
+    "admin_customer_whatsapp",
+  ] as const) {
     const expiresAt = initialNow + 60_000;
     const token = service.issue({ bookingId: "BOOK-13383-1", purpose, expiresAt });
     const [encodedPayload, signature, extra] = token.split(".");

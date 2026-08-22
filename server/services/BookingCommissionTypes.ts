@@ -12,6 +12,7 @@ export type BookingEventType =
   | "customer_followup_suppressed"
   | "customer_followup_expired"
   | "customer_opened"
+  | "admin_customer_whatsapp_opened"
   | "customer_declined"
   | "booking_confirmed"
   | "owner_notification_sent"
@@ -69,6 +70,8 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
   enforcementLeaseToken?: string | null;
   enforcementLeaseExpiresAt?: string | null;
   events: BookingEvent[];
+  /** Last successful admin handoff to this customer's WhatsApp. */
+  adminCustomerWhatsAppLastOpenedAt?: string | null;
 };
 
 export type BookingNotificationKind =
@@ -198,12 +201,14 @@ export type BookingAdminRow = Omit<
   | "customerSubject"
   | "customerPhone"
   | "ownerPhone"
+  | "adminCustomerWhatsAppLastOpenedAt"
   | "bookingStatus"
   | "enforcementLeaseToken"
   | "enforcementLeaseExpiresAt"
 > & {
   bookingStatus: BookingFollowUpDocument["bookingStatus"] | "expired";
   customerPhoneMasked: string | null;
+  customerWhatsAppNextAllowedAt: string | null;
   notificationSummary: {
     sent: number;
     failed: number;

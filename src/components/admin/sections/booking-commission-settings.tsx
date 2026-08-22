@@ -34,7 +34,6 @@ import {
   bookingSettingsUpdateEquals,
   parseBookingSettingsLimit,
   parseBookingSettingsLimits,
-  parseCustomerFollowUpDelayHours,
   previewBookingTemplate,
   validateBookingSettingsDraft,
   type BookingCommissionOperationalHealth,
@@ -57,6 +56,7 @@ const EMPTY_TEMPLATES = Object.fromEntries(
 
 const EMPTY_DRAFT: BookingCommissionSettingsDraft = {
   customerFollowUpDelayHours: "24",
+  customerFollowUpDelayMinutes: "0",
   limits: EMPTY_LIMITS,
   whatsappTemplates: EMPTY_TEMPLATES,
   optionalCommissionReminderDays: [],
@@ -115,13 +115,13 @@ export default function BookingCommissionSettingsCard() {
     () => validateBookingSettingsDraft(
       draft,
       query.data?.fixedPolicy.templateMaxLength || 2_000,
-      query.data?.fixedPolicy.customerFollowUpDelayMinHours || 1,
-      query.data?.fixedPolicy.customerFollowUpDelayMaxHours || 120,
+      query.data?.fixedPolicy.customerFollowUpDelayMinMinutes || 1,
+      query.data?.fixedPolicy.customerFollowUpDelayMaxMinutes || 7_200,
     ),
     [
       draft,
-      query.data?.fixedPolicy.customerFollowUpDelayMaxHours,
-      query.data?.fixedPolicy.customerFollowUpDelayMinHours,
+      query.data?.fixedPolicy.customerFollowUpDelayMaxMinutes,
+      query.data?.fixedPolicy.customerFollowUpDelayMinMinutes,
       query.data?.fixedPolicy.templateMaxLength,
     ],
   );
@@ -146,7 +146,7 @@ export default function BookingCommissionSettingsCard() {
     if (!validation.update) {
       setSaveError(
         !validation.customerFollowUpDelayValid
-          ? `أدخل مدة متابعة صحيحة من ${query.data?.fixedPolicy.customerFollowUpDelayMinHours || 1} إلى ${query.data?.fixedPolicy.customerFollowUpDelayMaxHours || 120} ساعة.`
+          ? "أدخل مدة متابعة صحيحة من دقيقة واحدة إلى 120 ساعة."
           : validation.limitsValid
             ? "راجع قوالب الرسائل المطلوبة قبل الحفظ."
             : "أدخل أعداداً صحيحة من 0 إلى 1000 لكل حد.",
@@ -264,48 +264,72 @@ export default function BookingCommissionSettingsCard() {
               <h3 id="booking-followup-delay-heading" className="mb-3 text-sm font-bold">
                 موعد متابعة العميل
               </h3>
-              <label
-                htmlFor="booking-setting-customerFollowUpDelayHours"
-                className="block rounded-xl border bg-muted/10 p-4"
-              >
+              <div className="block rounded-xl border bg-muted/10 p-4">
                 <span className="text-sm font-bold text-[#34332f]">
-                  تأخير إرسال متابعة العميل (بالساعات)
+                  تأخير إرسال متابعة العميل (بالساعات والدقائق)
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   القيمة الافتراضية 24 ساعة.
                 </span>
-                <Input
-                  id="booking-setting-customerFollowUpDelayHours"
-                  type="text"
-                  inputMode="numeric"
-                  value={draft.customerFollowUpDelayHours}
-                  onChange={(event) => {
-                    setDraft((current) => ({
-                      ...current,
-                      customerFollowUpDelayHours: event.target.value,
-                    }));
-                    clearMessages();
-                  }}
-                  aria-invalid={
-                    draft.customerFollowUpDelayHours !== "" &&
-                    parseCustomerFollowUpDelayHours(
-                      draft.customerFollowUpDelayHours,
-                      query.data.fixedPolicy.customerFollowUpDelayMinHours,
-                      query.data.fixedPolicy.customerFollowUpDelayMaxHours,
-                    ) === null
-                  }
-                  aria-describedby="booking-setting-help-customerFollowUpDelayHours"
-                  className="mt-3 max-w-48 text-center text-lg font-bold"
-                  dir="ltr"
-                  data-testid="input-customerFollowUpDelayHours"
-                />
+                <div className="mt-3 grid max-w-sm grid-cols-2 gap-3">
+                  <label htmlFor="booking-setting-customerFollowUpDelayHours">
+                    <span className="block text-xs font-semibold text-muted-foreground">الساعات</span>
+                    <Input
+                      id="booking-setting-customerFollowUpDelayHours"
+                      type="text"
+                      inputMode="numeric"
+                      value={draft.customerFollowUpDelayHours}
+                      onChange={(event) => {
+                        setDraft((current) => ({
+                          ...current,
+                          customerFollowUpDelayHours: event.target.value,
+                        }));
+                        clearMessages();
+                      }}
+                      aria-invalid={
+                        draft.customerFollowUpDelayHours !== "" &&
+                        draft.customerFollowUpDelayMinutes !== "" &&
+                        !validation.customerFollowUpDelayValid
+                      }
+                      aria-describedby="booking-setting-help-customerFollowUpDelay"
+                      className="mt-1 text-center text-lg font-bold"
+                      dir="ltr"
+                      data-testid="input-customerFollowUpDelayHours"
+                    />
+                  </label>
+                  <label htmlFor="booking-setting-customerFollowUpDelayMinutes">
+                    <span className="block text-xs font-semibold text-muted-foreground">الدقائق</span>
+                    <Input
+                      id="booking-setting-customerFollowUpDelayMinutes"
+                      type="text"
+                      inputMode="numeric"
+                      value={draft.customerFollowUpDelayMinutes}
+                      onChange={(event) => {
+                        setDraft((current) => ({
+                          ...current,
+                          customerFollowUpDelayMinutes: event.target.value,
+                        }));
+                        clearMessages();
+                      }}
+                      aria-invalid={
+                        draft.customerFollowUpDelayMinutes !== "" &&
+                        draft.customerFollowUpDelayHours !== "" &&
+                        !validation.customerFollowUpDelayValid
+                      }
+                      aria-describedby="booking-setting-help-customerFollowUpDelay"
+                      className="mt-1 text-center text-lg font-bold"
+                      dir="ltr"
+                      data-testid="input-customerFollowUpDelayMinutes"
+                    />
+                  </label>
+                </div>
                 <span
-                  id="booking-setting-help-customerFollowUpDelayHours"
+                  id="booking-setting-help-customerFollowUpDelay"
                   className="mt-2 block text-[11px] leading-5 text-muted-foreground"
                 >
-                  من {query.data.fixedPolicy.customerFollowUpDelayMinHours} إلى {query.data.fixedPolicy.customerFollowUpDelayMaxHours} ساعة. يُطبّق فقط على طلبات التواصل الجديدة المقبولة للعقارات المجانية. تبقى الرسائل المجدولة سابقاً كما هي.
+                  من دقيقة واحدة إلى {query.data.fixedPolicy.customerFollowUpDelayMaxMinutes / 60} ساعة. يُطبّق فقط على طلبات التواصل الجديدة المقبولة للعقارات المجانية. تبقى الرسائل المجدولة سابقاً كما هي.
                 </span>
-              </label>
+              </div>
             </section>
 
             <section aria-labelledby="booking-limits-heading">

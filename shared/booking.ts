@@ -5,10 +5,15 @@ export const BASIS_POINTS_DENOMINATOR = 10_000 as const;
 export const COMMISSION_PAYMENT_WINDOW_MS = 5 * 24 * 60 * 60 * 1_000;
 export const COMMISSION_REMINDER_OFFSET_DAYS = [3, 4, 5] as const;
 export const BOOKING_FREE_WORKFLOW_LIMIT_MAX = 1_000 as const;
-/** Whole-hour bounds keep follow-ups non-immediate while capping delay at five days. */
+/** Minute precision keeps follow-ups non-immediate while capping delay at five days. */
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MIN = 1 as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MAX = 7_200 as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT = 1_440 as const;
+/** Deprecated compatibility bounds for schema-v4 settings and cached admin clients. */
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN = 1 as const;
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX = 120 as const;
-export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_DEFAULT = 24 as const;
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS =
+  30 * 60 * 1_000;
 export const BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH = 2_000 as const;
 export const BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION = 1 as const;
 export const BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS = [3, 4] as const;
@@ -26,6 +31,12 @@ export const bookingFreeWorkflowLimitsSchema = z.object({
 }).strict();
 export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimitsSchema>;
 
+export const bookingCustomerFollowUpDelayMinutesSchema = z.number()
+  .int()
+  .min(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MIN)
+  .max(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MAX);
+
+/** Deprecated input validator used only while migrating whole-hour settings. */
 export const bookingCustomerFollowUpDelayHoursSchema = z.number()
   .int()
   .min(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN)
@@ -231,7 +242,7 @@ export type BookingOptionalCommissionReminderDay =
 
 export const bookingFreeWorkflowConfigurationSchema =
   bookingFreeWorkflowLimitsSchema.extend({
-    customerFollowUpDelayHours: bookingCustomerFollowUpDelayHoursSchema,
+    customerFollowUpDelayMinutes: bookingCustomerFollowUpDelayMinutesSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
     optionalCommissionReminderDays:
       bookingOptionalCommissionReminderDaysSchema,
@@ -241,8 +252,54 @@ export type BookingFreeWorkflowConfiguration = z.infer<
   typeof bookingFreeWorkflowConfigurationSchema
 >;
 
+const bookingFreeWorkflowSettingsCompatibleUpdateSchema =
+  bookingFreeWorkflowLimitsSchema.extend({
+    customerFollowUpDelayMinutes:
+      bookingCustomerFollowUpDelayMinutesSchema.optional(),
+    customerFollowUpDelayHours:
+      bookingCustomerFollowUpDelayHoursSchema.optional(),
+    whatsappTemplates: bookingWhatsAppTemplatesSchema,
+    optionalCommissionReminderDays:
+      bookingOptionalCommissionReminderDaysSchema,
+  })
+    .strict()
+    .superRefine((settings, context) => {
+      const minutes = settings.customerFollowUpDelayMinutes;
+      const legacyHours = settings.customerFollowUpDelayHours;
+      if (minutes === undefined && legacyHours === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Customer follow-up delay is required",
+          path: ["customerFollowUpDelayMinutes"],
+        });
+      }
+      if (
+        minutes !== undefined &&
+        legacyHours !== undefined &&
+        minutes !== legacyHours * 60
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Customer follow-up delay fields conflict",
+          path: ["customerFollowUpDelayMinutes"],
+        });
+      }
+    })
+    .transform((settings): BookingFreeWorkflowConfiguration => {
+      const {
+        customerFollowUpDelayHours,
+        customerFollowUpDelayMinutes,
+        ...configuration
+      } = settings;
+      return {
+        ...configuration,
+        customerFollowUpDelayMinutes:
+          customerFollowUpDelayMinutes ?? customerFollowUpDelayHours! * 60,
+      };
+    });
+
 export const bookingFreeWorkflowSettingsUpdateSchema = z.object({
-  settings: bookingFreeWorkflowConfigurationSchema,
+  settings: bookingFreeWorkflowSettingsCompatibleUpdateSchema,
 }).strict();
 
 export type BookingFreeWorkflowSettings = BookingFreeWorkflowConfiguration & {
@@ -309,6 +366,7 @@ export type BookingTiming = z.infer<typeof bookingTimingSchema>;
 export const bookingTokenPurposeSchema = z.enum([
   "customer_response",
   "owner_payment",
+  "admin_customer_whatsapp",
 ]);
 export type BookingTokenPurpose = z.infer<typeof bookingTokenPurposeSchema>;
 

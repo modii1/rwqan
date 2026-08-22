@@ -1,8 +1,11 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN,
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MAX,
+  BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MIN,
   BOOKING_MANDATORY_COMMISSION_REMINDER_DAYS,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
@@ -52,6 +55,7 @@ import {
 export const BOOKING_CUSTOMER_SESSION_COOKIE = "rwqan_booking_customer_session";
 export const BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 export const BOOKING_OWNER_TOKEN_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_TOKEN_MAX_AGE_MS = 2 * 60 * 1000;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE =
   "مرحباً، معك الفريق التقني لمنصة روقان.";
 
@@ -215,8 +219,21 @@ function adminFreeWorkflowSettingsResponse(
 ) {
   const publicUrlHealth = publicBaseUrlHealth();
   return {
-    settings,
+    settings: {
+      ...settings,
+      /**
+       * Deprecated response alias for admin tabs loaded before schema v5.
+       * A fractional value intentionally fails the old whole-hour UI validator,
+       * preventing that cached UI from overwriting a minute-precision setting.
+       */
+      customerFollowUpDelayHours: settings.customerFollowUpDelayMinutes / 60,
+    },
     fixedPolicy: {
+      customerFollowUpDelayMinMinutes:
+        BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MIN,
+      customerFollowUpDelayMaxMinutes:
+        BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MAX,
+      /** Deprecated response aliases for admin tabs loaded before schema v5. */
       customerFollowUpDelayMinHours:
         BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN,
       customerFollowUpDelayMaxHours:
@@ -294,6 +311,7 @@ function adminRow(
   booking: BookingFollowUpDocument,
   jobs: BookingNotificationJob[],
   attempts: BookingCommissionPaymentAttempt[],
+  customerWhatsAppLastOpenedAt: string | null,
 ): BookingAdminRow & {
   questionnaire: ReturnType<typeof questionnaire>;
   dueAt: string | null;
@@ -304,6 +322,7 @@ function adminRow(
     customerSubject: _customerSubject,
     customerPhone: _customerPhone,
     ownerPhone: _ownerPhone,
+    adminCustomerWhatsAppLastOpenedAt: _adminCustomerWhatsAppLastOpenedAt,
     enforcementLeaseToken: _enforcementLeaseToken,
     enforcementLeaseExpiresAt: _enforcementLeaseExpiresAt,
     ...safeBooking
@@ -330,6 +349,12 @@ function adminRow(
     ...safeBooking,
     bookingStatus: responseExpired ? "expired" as const : safeBooking.bookingStatus,
     customerPhoneMasked: maskContactPhone(booking.customerPhone),
+    customerWhatsAppNextAllowedAt: customerWhatsAppLastOpenedAt
+      ? new Date(
+          Date.parse(customerWhatsAppLastOpenedAt) +
+            BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+        ).toISOString()
+      : null,
     questionnaire: questionnaire(booking),
     dueAt: booking.commissionDueAt,
     contactAt: booking.createdAt,
@@ -393,7 +418,7 @@ export class BookingCommissionService {
     ownerPhone: string;
     customerPhone: string;
     isFreeProperty: boolean;
-    customerFollowUpDelayHours: number;
+    customerFollowUpDelayMinutes: number;
     propertyPrices?: unknown;
     now?: Date;
   }): InitialBookingWorkflow {
@@ -682,9 +707,49 @@ export class BookingCommissionService {
     );
   }
 
-  async getAdminCustomerWhatsAppUrl(bookingId: string): Promise<string> {
-    const booking = await bookingCommissionStore.getBookingForCurrentOwner(
+  async issueAdminCustomerWhatsAppHandoff(bookingId: string): Promise<string> {
+    const handoffTokens = tokenService();
+    const booking = await bookingCommissionStore.claimAdminCustomerWhatsAppContact(
       bookingId,
+    );
+    if (!booking) {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    const destination = normalizeWhatsAppDestination(booking.customerPhone);
+    if (!destination) {
+      throw new BookingWorkflowError(
+        "INVALID_CUSTOMER_PHONE",
+        "Invalid customer phone",
+        400,
+      );
+    }
+    const token = handoffTokens.issue({
+      bookingId: booking.id,
+      purpose: "admin_customer_whatsapp",
+      expiresAt: Date.now() +
+        BOOKING_ADMIN_CUSTOMER_WHATSAPP_TOKEN_MAX_AGE_MS,
+    });
+    return `/api/admin/booking-commissions/${encodeURIComponent(booking.id)}/customer-whatsapp/open?token=${encodeURIComponent(token)}`;
+  }
+
+  async resolveAdminCustomerWhatsAppHandoff(
+    bookingId: string,
+    token: unknown,
+  ): Promise<string> {
+    const verified = tokenService().verify(token, "admin_customer_whatsapp");
+    if (verified.bookingId !== bookingId) {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    const booking = await bookingCommissionStore.getBookingForCurrentOwner(
+      verified.bookingId,
     );
     if (!booking) {
       throw new BookingWorkflowError(
@@ -928,6 +993,15 @@ export class BookingCommissionService {
       attemptsByBooking.set(attempt.bookingId, list);
     }
     const dashboardNow = Date.now();
+    const latestCustomerWhatsAppContact = new Map<string, string>();
+    for (const booking of bookings) {
+      const candidate = booking.adminCustomerWhatsAppLastOpenedAt;
+      if (!candidate || !Number.isFinite(Date.parse(candidate))) continue;
+      const current = latestCustomerWhatsAppContact.get(booking.customerSubject);
+      if (!current || Date.parse(candidate) > Date.parse(current)) {
+        latestCustomerWhatsAppContact.set(booking.customerSubject, candidate);
+      }
+    }
     const expired = bookings.filter((booking) =>
       isUnansweredBookingExpired(booking, dashboardNow));
     const rows = bookings.map((booking) =>
@@ -935,6 +1009,7 @@ export class BookingCommissionService {
         booking,
         jobsByBooking.get(booking.id) || [],
         attemptsByBooking.get(booking.id) || [],
+        latestCustomerWhatsAppContact.get(booking.customerSubject) || null,
       ));
     const confirmed = bookings.filter((booking) => booking.bookingStatus === "confirmed");
     return {
