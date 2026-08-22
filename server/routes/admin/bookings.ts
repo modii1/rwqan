@@ -5,6 +5,13 @@ import { runBookingCommissionWorker } from "../../services/BookingNotificationWo
 
 const router = Router();
 
+function kickBookingWorker(context: string): void {
+  setImmediate(() => {
+    runBookingCommissionWorker().catch((error) =>
+      console.error(`${context} booking worker failed:`, error));
+  });
+}
+
 router.get("/api/admin/booking-commissions", async (_req, res) => {
   res.set("Cache-Control", "no-store, private");
   try {
@@ -63,13 +70,32 @@ router.post("/api/admin/booking-commissions/run-worker", async (_req, res) => {
   }
 });
 
+router.post("/api/admin/booking-commissions/:id/notifications/resend", async (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  try {
+    const result = await bookingCommissionService.resendAdminNotification(
+      req.params.id,
+      req.body,
+    );
+    kickBookingWorker("Manual notification resend");
+    return res.json(result);
+  } catch (error) {
+    const response = bookingRouteError(error);
+    return res.status(response.status).json(response.body);
+  }
+});
+
 router.post("/api/admin/booking-commissions/:id/dispute", async (req, res) => {
   res.set("Cache-Control", "no-store, private");
   try {
-    return res.json(await bookingCommissionService.resolveAdminDispute(
+    const result = await bookingCommissionService.resolveAdminDispute(
       req.params.id,
       req.body,
-    ));
+    );
+    if (result.disputeStatus === "rejected") {
+      kickBookingWorker("Dispute rejection notification");
+    }
+    return res.json(result);
   } catch (error) {
     const response = bookingRouteError(error);
     return res.status(response.status).json(response.body);

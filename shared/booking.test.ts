@@ -26,7 +26,7 @@ import {
   type BookingConfirmationFacts,
 } from "./booking";
 
-test("default booking WhatsApp templates render the existing messages byte-for-byte", () => {
+test("default booking WhatsApp templates render the approved messages byte-for-byte", () => {
   assert.deepEqual(
     bookingWhatsAppTemplatesSchema.parse(DEFAULT_BOOKING_WHATSAPP_TEMPLATES),
     DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
@@ -50,12 +50,16 @@ https://rwqan.sa/booking/customer-token`);
     {
       propertyName: "الريف المائي",
       propertyNumber: "13383",
+      requestCode: "REQ-13383-001",
+      customerPhone: "+966500000002",
       timing: "نهاية الأسبوع",
       bookingDate: "20 أغسطس 2026",
       pricePaidSar: "1000",
     },
   ), `تم تسجيل حجز للعقار الريف المائي رقم 13383
 
+رقم الطلب: REQ-13383-001
+رقم العميل: +966500000002
 وقت الحجز: نهاية الأسبوع
 تاريخ الحجز: 20 أغسطس 2026
 المبلغ المدفوع: 1000 ريال`);
@@ -66,6 +70,8 @@ https://rwqan.sa/booking/customer-token`);
     {
       propertyName: "الريف المائي",
       propertyNumber: "13383",
+      requestCode: "REQ-13383-001",
+      customerPhone: "+966500000002",
       timing: "نهاية الأسبوع",
       bookingDate: "20 أغسطس 2026",
       pricePaidSar: "1000",
@@ -76,6 +82,8 @@ https://rwqan.sa/booking/customer-token`);
     },
   ), `تم تسجيل حجز للعقار الريف المائي رقم 13383
 
+رقم الطلب: REQ-13383-001
+رقم العميل: +966500000002
 وقت الحجز: نهاية الأسبوع
 تاريخ الحجز: 20 أغسطس 2026
 المبلغ المدفوع: 1000 ريال
@@ -132,6 +140,24 @@ https://rwqan.sa/booking-commission/owner-token`);
     DEFAULT_BOOKING_WHATSAPP_TEMPLATES.property_released_waived,
     { propertyName: "الريف المائي", propertyNumber: "13383" },
   ), "تم قبول الاعتراض على عمولة حجز العقار الريف المائي رقم 13383 وإعادة إتاحة العقار.");
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "commission_dispute_rejected",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.commission_dispute_rejected,
+    {
+      propertyName: "الريف المائي",
+      propertyNumber: "13383",
+      commissionAmountSar: "100",
+      commissionDueAt: "25 أغسطس 2026",
+      paymentLink: "https://rwqan.sa/booking-commission/owner-token",
+    },
+  ), `تم رفض الاعتراض على عمولة حجز العقار الريف المائي رقم 13383 واستئناف تحصيل العمولة.
+
+المبلغ المستحق: 100 ريال
+آخر موعد للسداد: 25 أغسطس 2026
+
+رابط الدفع:
+https://rwqan.sa/booking-commission/owner-token`);
 });
 
 test("booking WhatsApp templates require each safe placeholder exactly once", () => {

@@ -29,6 +29,9 @@ import {
 } from "./booking-display";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
 import { getOwnerCommissionViewState } from "./booking-commission-state";
+import BookingCommissionBankTransfer, {
+  type BookingCommissionOwnerPaymentAttempt,
+} from "./booking-commission-bank-transfer";
 
 interface CommissionDetails {
   id: string;
@@ -42,6 +45,7 @@ interface CommissionDetails {
   checkoutAvailable?: boolean;
   disputeStatus?: "none" | "pending" | "accepted" | "rejected" | null;
   disputedAt?: string | null;
+  paymentAttempt?: BookingCommissionOwnerPaymentAttempt | null;
 }
 
 interface CommissionPayload {
@@ -93,6 +97,19 @@ export default function BookingCommissionClient({ token }: { token: string }) {
   const disputeAccepted = viewState === "waived";
   const disputeRejected = viewState === "dispute_rejected";
   const paused = ["paused", "suspended", "property_paused", "موقوف"].includes(normalized(commission?.complianceStatus));
+  const activeAttemptMethod = normalized(commission?.paymentAttempt?.paymentMethod);
+  const activeAttemptStatus = normalized(commission?.paymentAttempt?.status);
+  const bankReceiptUnderReview =
+    activeAttemptMethod === "bank_transfer" &&
+    ["creating", "unknown", "pending_review", "review_required"].includes(
+      activeAttemptStatus,
+    );
+  const activeElectronicCreated =
+    ["cards", "applepay"].includes(activeAttemptMethod) &&
+    activeAttemptStatus === "created";
+  const activeElectronicProcessing =
+    ["cards", "applepay"].includes(activeAttemptMethod) &&
+    ["creating", "unknown"].includes(activeAttemptStatus);
 
   const startCheckout = async (paymentMethod: "cards" | "applepay") => {
     setActionError("");
@@ -320,38 +337,83 @@ export default function BookingCommissionClient({ token }: { token: string }) {
               )}
               {commission.checkoutAvailable ? (
                 <section aria-labelledby="payment-method-title">
-                  <h3 id="payment-method-title" className="text-sm font-bold text-[#34332f]">اختر طريقة الدفع</h3>
+                  <h3 id="payment-method-title" className="text-sm font-bold text-[#34332f]">
+                    {activeElectronicCreated ? "متابعة محاولة الدفع" : "اختر طريقة الدفع"}
+                  </h3>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <Button
-                      type="button"
-                      onClick={() => void startCheckout("cards")}
-                      disabled={pendingMethod !== null || disputePending}
-                      className="h-12 gap-2"
-                      data-testid="button-commission-pay-cards"
-                    >
-                      {pendingMethod === "cards" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                      الدفع بالبطاقة
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void startCheckout("applepay")}
-                      disabled={pendingMethod !== null || disputePending}
-                      className="h-12 gap-2 border-slate-300"
-                      data-testid="button-commission-pay-applepay"
-                    >
-                      {pendingMethod === "applepay" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
-                      Apple Pay
-                    </Button>
+                    {(!activeElectronicCreated || activeAttemptMethod === "cards") && (
+                      <Button
+                        type="button"
+                        onClick={() => void startCheckout("cards")}
+                        disabled={pendingMethod !== null || disputePending}
+                        className="h-12 gap-2"
+                        data-testid="button-commission-pay-cards"
+                      >
+                        {pendingMethod === "cards" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                        {activeElectronicCreated ? "متابعة الدفع بالبطاقة" : "الدفع بالبطاقة"}
+                      </Button>
+                    )}
+                    {(!activeElectronicCreated || activeAttemptMethod === "applepay") && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void startCheckout("applepay")}
+                        disabled={pendingMethod !== null || disputePending}
+                        className="h-12 gap-2 border-slate-300"
+                        data-testid="button-commission-pay-applepay"
+                      >
+                        {pendingMethod === "applepay" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
+                        {activeElectronicCreated ? "متابعة الدفع عبر Apple Pay" : "Apple Pay"}
+                      </Button>
+                    )}
                   </div>
+                  <BookingCommissionBankTransfer
+                    token={token}
+                    checkoutAvailable={
+                      commission.checkoutAvailable === true &&
+                      !activeElectronicCreated
+                    }
+                    attempt={commission.paymentAttempt}
+                    disabled={pendingMethod !== null || disputePending}
+                    onChanged={() => query.refetch().then(() => undefined)}
+                    onError={setActionError}
+                  />
                 </section>
               ) : (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  رابط الدفع غير متاح حالياً. حاول لاحقاً أو راجع حالة الطلب.
-                </div>
+                <>
+                  {activeElectronicProcessing && (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-800" role="status">
+                      <div className="flex items-start gap-3">
+                        <Loader2 className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin" aria-hidden="true" />
+                        <div>
+                          <p className="text-sm font-bold">محاولة الدفع قيد المعالجة</p>
+                          <p className="mt-1 text-xs leading-5">يجري التحقق من محاولة الدفع الحالية. لا تنشئ محاولة أخرى حتى تظهر حالتها النهائية.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <BookingCommissionBankTransfer
+                    token={token}
+                    checkoutAvailable={false}
+                    attempt={commission.paymentAttempt}
+                    disabled={pendingMethod !== null || disputePending}
+                    onChanged={() => query.refetch().then(() => undefined)}
+                    onError={setActionError}
+                  />
+                  {![
+                    "creating",
+                    "unknown",
+                    "pending_review",
+                    "review_required",
+                  ].includes(normalized(commission.paymentAttempt?.status)) && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                      رابط الدفع غير متاح حالياً. حاول لاحقاً أو راجع حالة الطلب.
+                    </div>
+                  )}
+                </>
               )}
 
-              {!disputeRejected && <div className="border-t pt-5">
+              {!disputeRejected && !bankReceiptUnderReview && <div className="border-t pt-5">
                 {!showDispute ? (
                   <Button type="button" variant="ghost" onClick={() => setShowDispute(true)} className="text-violet-700 hover:bg-violet-50 hover:text-violet-800">
                     الاعتراض على بيانات الحجز

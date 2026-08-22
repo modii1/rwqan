@@ -27,6 +27,8 @@ export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   owner_booking_facts: [
     "propertyName",
     "propertyNumber",
+    "requestCode",
+    "customerPhone",
     "timing",
     "bookingDate",
     "pricePaidSar",
@@ -34,6 +36,8 @@ export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   owner_booking_commission: [
     "propertyName",
     "propertyNumber",
+    "requestCode",
+    "customerPhone",
     "timing",
     "bookingDate",
     "pricePaidSar",
@@ -58,6 +62,13 @@ export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   ],
   property_released_paid: ["propertyName", "propertyNumber"],
   property_released_waived: ["propertyName", "propertyNumber"],
+  commission_dispute_rejected: [
+    "propertyName",
+    "propertyNumber",
+    "commissionAmountSar",
+    "commissionDueAt",
+    "paymentLink",
+  ],
 } as const;
 
 export type BookingWhatsAppTemplateKey =
@@ -70,11 +81,15 @@ export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
 {{followUpLink}}`,
   owner_booking_facts: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
 
+رقم الطلب: {{requestCode}}
+رقم العميل: {{customerPhone}}
 وقت الحجز: {{timing}}
 تاريخ الحجز: {{bookingDate}}
 المبلغ المدفوع: {{pricePaidSar}} ريال`,
   owner_booking_commission: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
 
+رقم الطلب: {{requestCode}}
+رقم العميل: {{customerPhone}}
 وقت الحجز: {{timing}}
 تاريخ الحجز: {{bookingDate}}
 المبلغ المدفوع: {{pricePaidSar}} ريال
@@ -101,6 +116,13 @@ export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
     "تم استلام عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} وإعادة إتاحة العقار.",
   property_released_waived:
     "تم قبول الاعتراض على عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} وإعادة إتاحة العقار.",
+  commission_dispute_rejected: `تم رفض الاعتراض على عمولة حجز العقار {{propertyName}} رقم {{propertyNumber}} واستئناف تحصيل العمولة.
+
+المبلغ المستحق: {{commissionAmountSar}} ريال
+آخر موعد للسداد: {{commissionDueAt}}
+
+رابط الدفع:
+{{paymentLink}}`,
 } as const;
 
 const bookingWhatsAppPlaceholderPattern = /\{\{([a-z][A-Za-z0-9]*)\}\}/g;
@@ -171,6 +193,9 @@ export const bookingWhatsAppTemplatesSchema = z.object({
   ),
   property_released_waived: bookingWhatsAppTemplateSchemaFor(
     "property_released_waived",
+  ),
+  commission_dispute_rejected: bookingWhatsAppTemplateSchemaFor(
+    "commission_dispute_rejected",
   ),
 }).strict();
 

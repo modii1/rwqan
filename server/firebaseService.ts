@@ -3660,6 +3660,7 @@ export class FirebaseService {
             request: Request;
             event: ContactEvent;
             dailyPropertyLimitReached: boolean;
+            bookingFollowUpCreated: boolean;
         }
     > {
         const cooldownRef = this.db.collection("contact_cooldowns").doc(key);
@@ -3682,7 +3683,7 @@ export class FirebaseService {
         const bookingNotificationRef = bookingWorkflow
             ? this.db.collection("booking_notification_outbox").doc(bookingWorkflow.customerNotification.id)
             : null;
-        const subscriptionQuery = bookingWorkflow
+        const subscriptionQuery = bookingWorkflow || dailyPropertyLimit
             ? this.db.collection("subscriptions").where("propertyNumber", "==", propertyNumber)
             : null;
 
@@ -3709,6 +3710,22 @@ export class FirebaseService {
                     reason: "property_unavailable",
                 } as const;
             }
+            const currentSubscriptionDocument = subscriptionSnapshot
+                ? this.getCurrentSubscriptionDocument(
+                    subscriptionSnapshot.docs,
+                    propertyNumber,
+                )
+                : undefined;
+            const currentSubscription = currentSubscriptionDocument?.data();
+            const hasActivePremiumSubscription = Boolean(
+                currentSubscription &&
+                isActivePremiumSubscription({
+                    subscriptionType: currentSubscription.subscriptionType,
+                    packageType: currentSubscription.packageType,
+                    status: currentSubscription.status,
+                    isExpired: calculateRemainingDays(currentSubscription.endDate) < 0,
+                }),
+            );
             const lastAcceptedAt = doc.exists
                 ? this.getDateMillis(doc.data()?.lastAcceptedAt)
                 : 0;
@@ -3745,7 +3762,11 @@ export class FirebaseService {
             }
 
             let dailyAcceptedCount = 0;
-            if (dailyPropertyLimitRef && dailyPropertyLimit) {
+            if (
+                dailyPropertyLimitRef &&
+                dailyPropertyLimit &&
+                !hasActivePremiumSubscription
+            ) {
                 const dailyLimitDoc = await transaction.get(dailyPropertyLimitRef);
                 const dailyLimitData = dailyLimitDoc.data();
                 const storedWindowStart = Number(dailyLimitData?.windowStartedAt || 0);
@@ -3769,29 +3790,13 @@ export class FirebaseService {
                 requestCountFromIP,
                 timestamp,
             } as Request;
-            const currentSubscriptionDocument = subscriptionSnapshot
-                ? this.getCurrentSubscriptionDocument(
-                    subscriptionSnapshot.docs,
-                    propertyNumber,
-                )
-                : undefined;
-            const currentSubscription = currentSubscriptionDocument?.data();
-            const hasActivePremiumSubscription = Boolean(
-                currentSubscription &&
-                isActivePremiumSubscription({
-                    subscriptionType: currentSubscription.subscriptionType,
-                    packageType: currentSubscription.packageType,
-                    status: currentSubscription.status,
-                    isExpired: calculateRemainingDays(currentSubscription.endDate) < 0,
-                }),
-            );
             const shouldCreateBookingWorkflow = Boolean(
                 bookingWorkflow &&
                 bookingWorkflow.followUp.isFreeProperty === true &&
                 !hasActivePremiumSubscription
             );
             const persistedEvent: InsertContactEvent = { ...event };
-            if (bookingWorkflow && hasActivePremiumSubscription) {
+            if (hasActivePremiumSubscription) {
                 delete persistedEvent.bookingFollowUpStatus;
                 delete persistedEvent.bookingFollowUpFailureCode;
             }
@@ -3816,7 +3821,11 @@ export class FirebaseService {
                     expiresAtTtl: new Date(ipWindowStartedAt + ipAbuseLimit.windowMs * 2),
                 });
             }
-            if (dailyPropertyLimitRef && dailyPropertyLimit) {
+            if (
+                dailyPropertyLimitRef &&
+                dailyPropertyLimit &&
+                !hasActivePremiumSubscription
+            ) {
                 transaction.set(dailyPropertyLimitRef, {
                     propertyNumber,
                     windowStartedAt: dailyPropertyLimit.windowStartedAt,
@@ -3851,9 +3860,11 @@ export class FirebaseService {
                 request: newRequest,
                 event: newEvent,
                 dailyPropertyLimitReached: Boolean(
+                    !hasActivePremiumSubscription &&
                     dailyPropertyLimit &&
                     dailyAcceptedCount + 1 === dailyPropertyLimit.maxAcceptedRequests
                 ),
+                bookingFollowUpCreated: shouldCreateBookingWorkflow,
             } as const;
         });
     }
@@ -4633,22 +4644,62 @@ export class FirebaseService {
     }
 
     async getDefaultBankAccount(): Promise<BankAccount | null> {
-        const snapshot = await this.db.collection("bank_accounts").where("isDefault", "==", true).limit(1).get();
-        if (!snapshot.empty) return snapshot.docs[0].data() as BankAccount;
-        const all = await this.getActiveBankAccounts();
-        return all[0] || null;
+        const activeAccounts = await this.getActiveBankAccounts();
+        activeAccounts.sort((left, right) => {
+            const defaultDifference = Number(Boolean(right.isDefault)) -
+                Number(Boolean(left.isDefault));
+            if (defaultDifference !== 0) return defaultDifference;
+            const rightTimestamp = Date.parse(
+                String((right as BankAccount & { updatedAt?: string }).updatedAt || right.createdAt || ""),
+            );
+            const leftTimestamp = Date.parse(
+                String((left as BankAccount & { updatedAt?: string }).updatedAt || left.createdAt || ""),
+            );
+            const timestampDifference =
+                (Number.isFinite(rightTimestamp) ? rightTimestamp : 0) -
+                (Number.isFinite(leftTimestamp) ? leftTimestamp : 0);
+            if (timestampDifference !== 0) return timestampDifference;
+            return String(left.id || "").localeCompare(String(right.id || ""));
+        });
+        return activeAccounts[0] || null;
     }
 
     async addBankAccount(data: Partial<BankAccount>): Promise<BankAccount> {
         const id = `BA-${Date.now()}`;
-        const account = { id, ...data, createdAt: new Date().toISOString() } as BankAccount;
-        await this.db.collection("bank_accounts").doc(id).set(account);
+        const timestamp = new Date().toISOString();
+        const account = { id, ...data, createdAt: timestamp, updatedAt: timestamp } as BankAccount;
+        const collection = this.db.collection("bank_accounts");
+        if (account.isDefault) {
+            const existingDefaults = await collection.where("isDefault", "==", true).get();
+            const batch = this.db.batch();
+            for (const document of existingDefaults.docs) {
+                batch.update(document.ref, { isDefault: false, updatedAt: timestamp });
+            }
+            batch.set(collection.doc(id), account);
+            await batch.commit();
+        } else {
+            await collection.doc(id).set(account);
+        }
         return account;
     }
 
     async updateBankAccount(id: string, updates: Partial<BankAccount>): Promise<BankAccount> {
-        const ref = this.db.collection("bank_accounts").doc(id);
-        await ref.update(updates);
+        const collection = this.db.collection("bank_accounts");
+        const ref = collection.doc(id);
+        const timestamp = new Date().toISOString();
+        if (updates.isDefault === true) {
+            const existingDefaults = await collection.where("isDefault", "==", true).get();
+            const batch = this.db.batch();
+            for (const document of existingDefaults.docs) {
+                if (document.id !== id) {
+                    batch.update(document.ref, { isDefault: false, updatedAt: timestamp });
+                }
+            }
+            batch.update(ref, { ...updates, updatedAt: timestamp });
+            await batch.commit();
+        } else {
+            await ref.update({ ...updates, updatedAt: timestamp });
+        }
         const doc = await ref.get();
         return doc.data() as BankAccount;
     }

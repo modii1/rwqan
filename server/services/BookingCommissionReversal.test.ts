@@ -55,6 +55,7 @@ class FakeDocumentReference {
     readonly collectionName: string,
     readonly id: string,
   ) {}
+  async get() { return new FakeDocumentSnapshot(this); }
 }
 
 class FakeDocumentSnapshot {
@@ -350,4 +351,44 @@ test("admin can waive a disputed commission after every provider-bound attempt i
   assert.equal(result.booking.commissionStatus, "waived");
   assert.equal(result.booking.disputeStatus, "accepted");
   assert.match(result.booking.events.at(-1)?.detail || "", new RegExp(attemptId));
+});
+
+test("rejecting an owner dispute schedules one dedicated owner notification idempotently", async () => {
+  const database = new FakeFirestore();
+  seedPayment(database, false);
+  database.update("booking_followups", bookingId, {
+    disputeStatus: "pending",
+    disputedAt: now.toISOString(),
+    disputeReason: "owner dispute",
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  const first = await store.resolveCommissionDispute(
+    bookingId,
+    "resume_collection",
+    now,
+  );
+  const jobId = `${bookingId}--commission_dispute_rejected`;
+  const job = database.read("booking_notification_outbox", jobId);
+
+  assert.equal(first.booking.disputeStatus, "rejected");
+  assert.equal(first.ownerNotificationScheduled, true);
+  assert.equal(job?.kind, "commission_dispute_rejected");
+  assert.equal(job?.recipientRole, "owner");
+  assert.equal(job?.recipientPhone, "+966500000001");
+  assert.equal(job?.status, "pending");
+  assert.equal(job?.scheduledAt, now.toISOString());
+
+  const replay = await store.resolveCommissionDispute(
+    bookingId,
+    "resume_collection",
+    new Date(now.getTime() + 1_000),
+  );
+  assert.equal(replay.ownerNotificationScheduled, false);
+  assert.equal(
+    database.documents("booking_notification_outbox")
+      .filter(([, value]) => value.kind === "commission_dispute_rejected")
+      .length,
+    1,
+  );
 });

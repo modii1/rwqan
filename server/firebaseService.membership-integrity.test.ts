@@ -792,6 +792,12 @@ test("free-property daily contact quota accepts only three requests atomically",
     ),
     [false, false, true, undefined],
   );
+  assert.deepEqual(
+    outcomes.map((outcome) =>
+      outcome.accepted ? outcome.bookingFollowUpCreated : undefined
+    ),
+    [false, false, false, undefined],
+  );
   assert.equal(
     outcomes[3].accepted ? undefined : outcomes[3].reason,
     "daily_property_limit",
@@ -799,6 +805,148 @@ test("free-property daily contact quota accepts only three requests atomically",
   assert.equal(database.query("requests", "propertyNumber", "PROP-FREE").length, 3);
   assert.equal(
     database.get("contact_property_daily_limits", "PROP-FREE-DAY")?.acceptedCount,
+    3,
+  );
+});
+
+test("an upgrade observed inside contact acceptance neither blocks nor consumes the free-property quota", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-UPGRADED-DURING-CONTACT");
+  database.set(
+    "subscriptions",
+    "SUB-PROP-UPGRADED-DURING-CONTACT",
+    activeSubscription("PROP-UPGRADED-DURING-CONTACT"),
+  );
+  database.set("contact_property_daily_limits", "PROP-UPGRADE-DAY", {
+    propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+    windowStartedAt: 1,
+    windowEndsAt: Date.now() + 60_000,
+    acceptedCount: 3,
+  });
+  const service = createService(database);
+  const outcome = await service.createContactRequestWithCooldown(
+    "VISITOR-UPGRADE-RACE",
+    "PROP-UPGRADED-DURING-CONTACT",
+    0,
+    {
+      propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+      requestCode: "REQ-UPGRADE-RACE",
+      timestamp: String(Date.now()),
+      clientPhone: "512345678",
+      ipAddress: "192.0.2.88",
+      dayOfWeek: "الجمعة",
+      hourOfDay: 12,
+      deviceType: "mobile",
+    },
+    1,
+    {
+      propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+      visitorKey: "VISITOR-UPGRADE-RACE",
+      actorType: "anonymous",
+      deviceType: "mobile",
+      outcome: "accepted",
+      requestCode: "REQ-UPGRADE-RACE",
+      bookingFollowUpStatus: "scheduled",
+    },
+    undefined,
+    {
+      key: "PROP-UPGRADE-DAY",
+      windowStartedAt: 1,
+      windowEndsAt: Date.now() + 60_000,
+      maxAcceptedRequests: 3,
+    },
+    {
+      followUp: {
+        id: "BOOK-UPGRADE-RACE",
+        propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+        isFreeProperty: true,
+      },
+      customerNotification: {
+        id: "BOOK-UPGRADE-RACE--customer_followup",
+        bookingId: "BOOK-UPGRADE-RACE",
+      },
+    },
+  );
+
+  assert.equal(outcome.accepted, true);
+  assert.equal(
+    outcome.accepted ? outcome.dailyPropertyLimitReached : undefined,
+    false,
+  );
+  assert.equal(
+    outcome.accepted ? outcome.bookingFollowUpCreated : undefined,
+    false,
+  );
+  assert.equal(
+    database.get("contact_property_daily_limits", "PROP-UPGRADE-DAY")
+      ?.acceptedCount,
+    3,
+  );
+  assert.equal(database.get("booking_followups", "BOOK-UPGRADE-RACE"), undefined);
+  assert.equal(
+    database.query(
+      "contact_events",
+      "propertyNumber",
+      "PROP-UPGRADED-DURING-CONTACT",
+    )[0]?.data()?.bookingFollowUpStatus,
+    undefined,
+  );
+
+  database.set("contact_property_daily_limits", "PROP-UPGRADE-NO-WORKFLOW-DAY", {
+    propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+    windowStartedAt: 2,
+    windowEndsAt: Date.now() + 60_000,
+    acceptedCount: 3,
+  });
+  const noWorkflowOutcome = await service.createContactRequestWithCooldown(
+    "VISITOR-UPGRADE-RACE-NO-WORKFLOW",
+    "PROP-UPGRADED-DURING-CONTACT",
+    0,
+    {
+      propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+      requestCode: "REQ-UPGRADE-RACE-NO-WORKFLOW",
+      timestamp: String(Date.now()),
+      clientPhone: "512345678",
+      ipAddress: "192.0.2.89",
+      dayOfWeek: "الجمعة",
+      hourOfDay: 12,
+      deviceType: "mobile",
+    },
+    1,
+    {
+      propertyNumber: "PROP-UPGRADED-DURING-CONTACT",
+      visitorKey: "VISITOR-UPGRADE-RACE-NO-WORKFLOW",
+      actorType: "anonymous",
+      deviceType: "mobile",
+      outcome: "accepted",
+      requestCode: "REQ-UPGRADE-RACE-NO-WORKFLOW",
+    },
+    undefined,
+    {
+      key: "PROP-UPGRADE-NO-WORKFLOW-DAY",
+      windowStartedAt: 2,
+      windowEndsAt: Date.now() + 60_000,
+      maxAcceptedRequests: 3,
+    },
+  );
+  assert.equal(noWorkflowOutcome.accepted, true);
+  assert.equal(
+    noWorkflowOutcome.accepted
+      ? noWorkflowOutcome.dailyPropertyLimitReached
+      : undefined,
+    false,
+  );
+  assert.equal(
+    noWorkflowOutcome.accepted
+      ? noWorkflowOutcome.bookingFollowUpCreated
+      : undefined,
+    false,
+  );
+  assert.equal(
+    database.get(
+      "contact_property_daily_limits",
+      "PROP-UPGRADE-NO-WORKFLOW-DAY",
+    )?.acceptedCount,
     3,
   );
 });

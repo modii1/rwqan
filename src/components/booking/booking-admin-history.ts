@@ -13,6 +13,7 @@ export function notificationKindLabel(value: unknown): string {
   const labels: Record<string, string> = {
     customer_followup: "متابعة نتيجة الحجز مع العميل",
     owner_booking_confirmed: "إشعار المالك بتأكيد الحجز والعمولة",
+    commission_dispute_rejected: "إشعار المالك برفض الاعتراض",
     commission_reminder_3: "تذكير العمولة لليوم الثالث",
     commission_reminder_4: "تذكير العمولة لليوم الرابع",
     commission_reminder_5: "تذكير العمولة لليوم الخامس",
@@ -56,6 +57,7 @@ export function notificationProviderErrorLabel(value: unknown): string {
     superseded_reminder: "استُبدل التذكير بتذكير أحدث مستحق.",
     daily_notification_quota: "مُنع الإرسال بسبب بلوغ الحد اليومي للرسائل.",
     send_failed: "فشل مزود الإرسال دون تفاصيل إضافية.",
+    notification_state_changed: "أُلغيت الرسالة لأن حالة الحجز أو العقار تغيرت.",
   };
   return labels[reason] || fallback(value);
 }

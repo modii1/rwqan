@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
@@ -19,6 +19,7 @@ import {
   type BookingFreeWorkflowLimits,
   type BookingFreeWorkflowSettings,
   type BookingFollowUpRecord,
+  type BookingWhatsAppTemplateKey,
 } from "../../shared/booking";
 import type { Subscription } from "../../shared/schema";
 import { isActivePremiumSubscription } from "../../shared/subscriptionType";
@@ -49,6 +50,8 @@ const SETTINGS_COLLECTION = "settings";
 const FREE_WORKFLOW_SETTINGS_DOCUMENT = "booking_free_workflow_limits";
 const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
   "booking_free_workflow_limits_audit";
+const MANUAL_RESEND_AUDIT_COLLECTION =
+  "booking_notification_manual_resend_audit";
 
 export const BOOKING_FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
 export const BOOKING_CUSTOMER_RESPONSE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -139,18 +142,45 @@ function storedFreeWorkflowConfiguration(
   const limits = storedFreeWorkflowLimits(value);
   if (!limits || !value || typeof value !== "object") return null;
   const data = value as Record<string, unknown>;
-  const templates = bookingWhatsAppTemplatesSchema.safeParse(
-    data.whatsappTemplates,
-  );
+  const storedTemplates = data.whatsappTemplates &&
+      typeof data.whatsappTemplates === "object" &&
+      !Array.isArray(data.whatsappTemplates)
+    ? data.whatsappTemplates as Record<string, unknown>
+    : {};
   const optionalDays = bookingOptionalCommissionReminderDaysSchema.safeParse(
     data.optionalCommissionReminderDays,
   );
   const defaults = getDefaultFreeWorkflowConfiguration();
+  const templates = Object.fromEntries(
+    (Object.keys(defaults.whatsappTemplates) as BookingWhatsAppTemplateKey[])
+      .map((key) => {
+        const storedTemplate = storedTemplates[key];
+        let candidate = typeof storedTemplate === "string"
+          ? storedTemplate
+          : defaults.whatsappTemplates[key];
+        if (key === "owner_booking_facts" || key === "owner_booking_commission") {
+          const missingFacts: string[] = [];
+          if (!candidate.includes("{{requestCode}}")) {
+            missingFacts.push("رقم الطلب: {{requestCode}}");
+          }
+          if (!candidate.includes("{{customerPhone}}")) {
+            missingFacts.push("رقم العميل: {{customerPhone}}");
+          }
+          if (missingFacts.length > 0) {
+            candidate = `${candidate}\n\n${missingFacts.join("\n")}`;
+          }
+        }
+        const parsed = bookingWhatsAppTemplatesSchema.shape[key]
+          .safeParse(candidate);
+        return [
+          key,
+          parsed.success ? parsed.data : defaults.whatsappTemplates[key],
+        ];
+      }),
+  );
   return bookingFreeWorkflowConfigurationSchema.parse({
     ...limits,
-    whatsappTemplates: templates.success
-      ? templates.data
-      : defaults.whatsappTemplates,
+    whatsappTemplates: templates,
     optionalCommissionReminderDays: optionalDays.success
       ? optionalDays.data
       : defaults.optionalCommissionReminderDays,
@@ -437,6 +467,145 @@ function quotaDocumentId(job: BookingNotificationJob, windowStart: number): stri
   return `${role}-${job.recipientQuotaKey}-${windowStart}`;
 }
 
+type NotificationStateCheck =
+  | { status: "valid" }
+  | { status: "invalid"; retryAt?: string };
+
+/**
+ * Booking-state gate shared by normal sends and manual resends. A job may be
+ * claimed before the booking changes, so this must also run immediately before
+ * the provider call rather than only while claiming the outbox record.
+ */
+function notificationMatchesCurrentState(
+  job: Pick<BookingNotificationJob, "kind">,
+  booking: BookingFollowUpDocument,
+  now: Date,
+): NotificationStateCheck {
+  if (job.kind === "customer_followup") {
+    return booking.bookingStatus === "awaiting_response" &&
+      !customerResponseExpired(booking, now)
+      ? { status: "valid" }
+      : { status: "invalid" };
+  }
+  if (booking.bookingStatus !== "confirmed") return { status: "invalid" };
+  if (job.kind === "property_released") {
+    return (
+      booking.commissionStatus === "paid" ||
+      booking.commissionStatus === "waived"
+    ) && (
+      booking.complianceStatus === "released" ||
+      booking.complianceStatus === "clear"
+    )
+      ? { status: "valid" }
+      : { status: "invalid" };
+  }
+  if (job.kind === "owner_booking_confirmed") {
+    return booking.commissionStatus === "not_applicable" ||
+      (
+        (booking.commissionStatus === "pending" ||
+          booking.commissionStatus === "overdue") &&
+        booking.disputeStatus !== "pending"
+      )
+      ? { status: "valid" }
+      : { status: "invalid" };
+  }
+  if (job.kind === "commission_dispute_rejected") {
+    return booking.disputeStatus === "rejected" &&
+      (booking.commissionStatus === "pending" ||
+        booking.commissionStatus === "overdue")
+      ? { status: "valid" }
+      : { status: "invalid" };
+  }
+  if (
+    job.kind.startsWith("commission_reminder_") ||
+    job.kind === "property_paused"
+  ) {
+    const payable = booking.disputeStatus !== "pending" &&
+      (booking.commissionStatus === "pending" ||
+        booking.commissionStatus === "overdue");
+    if (!payable) return { status: "invalid" };
+    if (!booking.commissionNoticeSentAt) {
+      return {
+        status: "invalid",
+        retryAt: new Date(
+          now.getTime() + BOOKING_OWNER_NOTICE_RETRY_MS,
+        ).toISOString(),
+      };
+    }
+    if (job.kind === "property_paused") {
+      const dueAt = Date.parse(booking.commissionDueAt || "");
+      if (!Number.isFinite(dueAt)) return { status: "invalid" };
+      if (dueAt > now.getTime()) {
+        return {
+          status: "invalid",
+          retryAt: new Date(dueAt).toISOString(),
+        };
+      }
+      if (
+        booking.complianceStatus !== "clear" &&
+        booking.complianceStatus !== "paused"
+      ) return { status: "invalid" };
+    }
+    return { status: "valid" };
+  }
+  return { status: "invalid" };
+}
+
+function notificationStateChangedError(
+  job: Pick<BookingNotificationJob, "kind">,
+  booking: BookingFollowUpDocument,
+): string {
+  if (job.kind === "commission_dispute_rejected") {
+    return "notification_state_changed";
+  }
+  const commissionControlled =
+    job.kind.startsWith("commission_reminder_") ||
+    job.kind === "property_paused" ||
+    (
+      job.kind === "owner_booking_confirmed" &&
+      booking.commissionStatus !== "not_applicable"
+    );
+  if (!commissionControlled) return "notification_state_changed";
+  if (booking.commissionStatus === "paid") return "commission_paid";
+  if (booking.commissionStatus === "waived") return "commission_waived";
+  if (booking.disputeStatus === "pending") return "commission_disputed";
+  return "notification_state_changed";
+}
+
+function isCommissionCollectionNotification(
+  job: Pick<BookingNotificationJob, "kind">,
+): boolean {
+  return job.kind.startsWith("commission_reminder_") ||
+    job.kind === "property_paused";
+}
+
+function isCommissionPaymentPromptNotification(
+  job: Pick<BookingNotificationJob, "kind">,
+  booking: BookingFollowUpDocument,
+): boolean {
+  return isCommissionCollectionNotification(job) ||
+    job.kind === "commission_dispute_rejected" ||
+    (
+      job.kind === "owner_booking_confirmed" &&
+      booking.commissionStatus !== "not_applicable"
+    );
+}
+
+function bankAttemptPausesCollection(
+  attempt: BookingCommissionPaymentAttempt | null,
+): boolean {
+  return Boolean(
+    attempt &&
+    attempt.paymentMethod === "bank_transfer" &&
+    [
+      "creating",
+      "unknown",
+      "pending_review",
+      "review_required",
+    ].includes(attempt.status),
+  );
+}
+
 export class BookingCommissionStore {
   private get db(): Firestore {
     return requireFirestore(this.database);
@@ -480,7 +649,7 @@ export class BookingCommissionStore {
 
       const updatedAt = now.toISOString();
       const storedSettings = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         ...settings,
         updatedAt,
         updatedBy: "admin" as const,
@@ -537,9 +706,13 @@ export class BookingCommissionStore {
     const propertyRef = this.db.collection("properties").doc(booking.propertyNumber);
     const jobsQuery = this.db.collection(NOTIFICATIONS_COLLECTION)
       .where("bookingId", "==", booking.id);
-    const [propertySnapshot, jobsSnapshot] = await Promise.all([
+    const activeAttemptRef = booking.activeAttemptId
+      ? this.db.collection(ATTEMPTS_COLLECTION).doc(booking.activeAttemptId)
+      : null;
+    const [propertySnapshot, jobsSnapshot, activeAttemptSnapshot] = await Promise.all([
       transaction.get(propertyRef),
       transaction.get(jobsQuery),
+      activeAttemptRef ? transaction.get(activeAttemptRef) : Promise.resolve(null),
     ]);
     const timestamp = now.toISOString();
     const property = propertySnapshot.data() || {};
@@ -571,6 +744,21 @@ export class BookingCommissionStore {
       updatedAt: timestamp,
     };
     transaction.update(bookingRef, updates);
+    if (activeAttemptRef && activeAttemptSnapshot?.exists) {
+      const activeAttempt = activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt;
+      if (
+        activeAttempt.paymentMethod === "bank_transfer" &&
+        (activeAttempt.status === "creating" || activeAttempt.status === "pending_review")
+      ) {
+        transaction.update(activeAttemptRef, {
+          status: "review_required",
+          bankReviewDecision: "refund_review",
+          bankReviewReason: "booking_free_eligibility_lost",
+          failureReason: "bank_transfer_refund_review_required",
+          updatedAt: timestamp,
+        });
+      }
+    }
     for (const jobSnapshot of jobsSnapshot.docs) {
       const job = jobSnapshot.data() as BookingNotificationJob;
       if (job.status !== "pending" && job.status !== "claimed") continue;
@@ -727,6 +915,218 @@ export class BookingCommissionStore {
     return snapshot.docs.map((document) => document.data() as BookingNotificationJob);
   }
 
+  async scheduleManualNotificationResend(options: {
+    bookingId: string;
+    sourceJobId: string;
+    idempotencyKey: string;
+    now?: Date;
+  }): Promise<{
+    job: BookingNotificationJob;
+    replayed: boolean;
+  }> {
+    const now = options.now || new Date();
+    if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid resend time");
+    const timestamp = now.toISOString();
+    const digest = createHash("sha256")
+      .update(`${options.bookingId}\0${options.sourceJobId}\0${options.idempotencyKey}`)
+      .digest("hex")
+      .slice(0, 32);
+    const auditId = `BOOKING-RESEND-${digest}`;
+    const bookingRef = this.db.collection(BOOKINGS_COLLECTION)
+      .doc(options.bookingId);
+    const sourceJobRef = this.db.collection(NOTIFICATIONS_COLLECTION)
+      .doc(options.sourceJobId);
+    const auditRef = this.db.collection(MANUAL_RESEND_AUDIT_COLLECTION)
+      .doc(auditId);
+
+    const result = await this.db.runTransaction(async (transaction) => {
+      const [bookingSnapshot, sourceJobSnapshot, auditSnapshot] =
+        await Promise.all([
+          transaction.get(bookingRef),
+          transaction.get(sourceJobRef),
+          transaction.get(auditRef),
+        ]);
+      if (!bookingSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "BOOKING_NOT_FOUND",
+          "Booking not found",
+          404,
+        );
+      }
+      if (!sourceJobSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_NOT_FOUND",
+          "Notification not found",
+          404,
+        );
+      }
+      const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+      const sourceJob = sourceJobSnapshot.data() as BookingNotificationJob;
+      if (sourceJob.bookingId !== booking.id) {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_NOT_FOUND",
+          "Notification not found",
+          404,
+        );
+      }
+
+      if (auditSnapshot.exists) {
+        const resendJobId = String(auditSnapshot.data()?.resendJobId || "");
+        const resendJobSnapshot = await transaction.get(
+          this.db.collection(NOTIFICATIONS_COLLECTION).doc(resendJobId),
+        );
+        if (!resendJobSnapshot.exists) {
+          throw new BookingWorkflowError(
+            "NOTIFICATION_RESEND_INCONSISTENT",
+            "Notification resend record is incomplete",
+          );
+        }
+        return {
+          status: "ready" as const,
+          job: resendJobSnapshot.data() as BookingNotificationJob,
+          replayed: true,
+        };
+      }
+
+      if (sourceJob.status === "claimed") {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_SEND_IN_PROGRESS",
+          "Notification is currently being sent",
+        );
+      }
+      if (![
+        "sent",
+        "failed",
+        "cancelled",
+        "suppressed_quota",
+      ].includes(sourceJob.status)) {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_NOT_RESENDABLE",
+          "Only completed notification records can be resent",
+        );
+      }
+      if (sourceJob.reminderOffsetDays) {
+        const latestDueOffset = latestCommissionReminderOffsetDue(booking, now);
+        if (
+          latestDueOffset &&
+          sourceJob.reminderOffsetDays < latestDueOffset
+        ) {
+          throw new BookingWorkflowError(
+            "NOTIFICATION_REMINDER_SUPERSEDED",
+            "A newer commission reminder is already due",
+          );
+        }
+      }
+      if (notificationMatchesCurrentState(sourceJob, booking, now).status !== "valid") {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_STATE_CHANGED",
+          "Notification no longer matches the booking state",
+        );
+      }
+
+      let propertySnapshot: FirebaseFirestore.DocumentSnapshot | null = null;
+      if (sourceJob.recipientRole === "owner") {
+        propertySnapshot = await transaction.get(
+          this.db.collection("properties").doc(booking.propertyNumber),
+        );
+      }
+      if (!await this.ensureFreeBookingEligibility(
+        transaction,
+        bookingRef,
+        booking,
+        now,
+      )) {
+        return { status: "ineligible" as const };
+      }
+      if (
+        isCommissionPaymentPromptNotification(sourceJob, booking) &&
+        booking.activeAttemptId
+      ) {
+        const activeAttemptSnapshot = await transaction.get(
+          this.db.collection(ATTEMPTS_COLLECTION).doc(
+            booking.activeAttemptId,
+          ),
+        );
+        const activeAttempt = activeAttemptSnapshot.exists
+          ? activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt
+          : null;
+        if (bankAttemptPausesCollection(activeAttempt)) {
+          throw new BookingWorkflowError(
+            "NOTIFICATION_STATE_CHANGED",
+            "Notification no longer matches the booking state",
+          );
+        }
+      }
+      if (
+        sourceJob.recipientRole === "owner" &&
+        (
+          !propertySnapshot?.exists ||
+          !ownerIdentityMatches(booking, propertySnapshot.data() || null)
+        )
+      ) {
+        throw new BookingWorkflowError(
+          "OWNER_IDENTITY_CHANGED",
+          "Property owner identity still differs from the booking owner",
+          423,
+        );
+      }
+      if (
+        sourceJob.kind === "property_released" &&
+        propertySnapshot?.data()?.commissionHold?.active === true
+      ) {
+        throw new BookingWorkflowError(
+          "NOTIFICATION_STATE_CHANGED",
+          "Notification no longer matches the property state",
+        );
+      }
+
+      const resendJobId = `${notificationId(booking.id, sourceJob.kind)}--manual-${digest}`;
+      const resendJobRef = this.db.collection(NOTIFICATIONS_COLLECTION)
+        .doc(resendJobId);
+      const resendJob: BookingNotificationJob = {
+        ...buildNotificationJob({
+          booking,
+          kind: sourceJob.kind,
+          scheduledAt: timestamp,
+          now: timestamp,
+        }),
+        id: resendJobId,
+        manualResendOfJobId: sourceJob.id,
+        manualResendRequestedAt: timestamp,
+      };
+      transaction.create(resendJobRef, resendJob);
+      transaction.create(auditRef, {
+        id: auditId,
+        schemaVersion: 1,
+        type: "booking_notification_manual_resend_requested",
+        bookingId: booking.id,
+        sourceJobId: sourceJob.id,
+        resendJobId,
+        notificationKind: sourceJob.kind,
+        requestedAt: timestamp,
+        requestedBy: "admin",
+      });
+      transaction.update(bookingRef, {
+        events: appendEvent(booking.events, {
+          type: "notification_manual_resend_scheduled",
+          at: timestamp,
+          detail: `${sourceJob.id}:${resendJobId}`,
+        }),
+        updatedAt: timestamp,
+      });
+      return { status: "ready" as const, job: resendJob, replayed: false };
+    });
+
+    if (result.status === "ineligible") {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    return { job: result.job, replayed: result.replayed };
+  }
+
   async listPaymentAttempts(): Promise<BookingCommissionPaymentAttempt[]> {
     const snapshot = await this.db.collection(ATTEMPTS_COLLECTION).get();
     return snapshot.docs.map((document) => document.data() as BookingCommissionPaymentAttempt);
@@ -803,6 +1203,9 @@ export class BookingCommissionStore {
 
   async declineBooking(id: string, now = new Date()): Promise<BookingFollowUpDocument> {
     const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
+    const customerJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+      notificationId(id, "customer_followup"),
+    );
     const result = await this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -820,6 +1223,7 @@ export class BookingCommissionStore {
           410,
         );
       }
+      const customerJobSnapshot = await transaction.get(customerJobRef);
       const at = now.toISOString();
       const updates = {
         bookingStatus: "declined" as const,
@@ -830,6 +1234,18 @@ export class BookingCommissionStore {
         events: appendEvent(booking.events, { type: "customer_declined", at }),
       };
       transaction.update(ref, updates);
+      if (customerJobSnapshot.exists) {
+        const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
+        if (customerJob.status === "pending" || customerJob.status === "claimed") {
+          transaction.update(customerJobRef, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: "notification_state_changed",
+            updatedAt: at,
+          });
+        }
+      }
       return { ...booking, ...updates } as BookingFollowUpDocument;
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -853,6 +1269,9 @@ export class BookingCommissionStore {
         : [],
     );
     const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
+    const customerJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+      notificationId(id, "customer_followup"),
+    );
     const result = await this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -878,7 +1297,10 @@ export class BookingCommissionStore {
       }
 
       const propertyRef = this.db.collection("properties").doc(booking.propertyNumber);
-      const propertySnapshot = await transaction.get(propertyRef);
+      const [propertySnapshot, customerJobSnapshot] = await Promise.all([
+        transaction.get(propertyRef),
+        transaction.get(customerJobRef),
+      ]);
       const confirmedAt = now.toISOString();
       const financials = buildConfirmedBookingFinancials(facts, now);
       if (
@@ -900,6 +1322,18 @@ export class BookingCommissionStore {
           ),
         };
         transaction.update(ref, updates);
+        if (customerJobSnapshot.exists) {
+          const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
+          if (customerJob.status === "pending" || customerJob.status === "claimed") {
+            transaction.update(customerJobRef, {
+              status: "cancelled",
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError: "notification_state_changed",
+              updatedAt: confirmedAt,
+            });
+          }
+        }
         return { ...booking, ...updates } as BookingFollowUpDocument;
       }
       const updates = {
@@ -944,6 +1378,18 @@ export class BookingCommissionStore {
       ];
 
       transaction.update(ref, updates);
+      if (customerJobSnapshot.exists) {
+        const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
+        if (customerJob.status === "pending" || customerJob.status === "claimed") {
+          transaction.update(customerJobRef, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: "notification_state_changed",
+            updatedAt: confirmedAt,
+          });
+        }
+      }
       for (const job of jobs) {
         transaction.create(this.db.collection(NOTIFICATIONS_COLLECTION).doc(job.id), job);
       }
@@ -968,9 +1414,16 @@ export class BookingCommissionStore {
       if (!snapshot.exists) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
       const booking = snapshot.data() as BookingFollowUpDocument;
       if (!await this.ensureFreeBookingEligibility(transaction, ref, booking, now)) return null;
-      const propertySnapshot = await transaction.get(
-        this.db.collection("properties").doc(booking.propertyNumber),
-      );
+      const [propertySnapshot, activeAttemptSnapshot] = await Promise.all([
+        transaction.get(
+          this.db.collection("properties").doc(booking.propertyNumber),
+        ),
+        booking.activeAttemptId
+          ? transaction.get(
+              this.db.collection(ATTEMPTS_COLLECTION).doc(booking.activeAttemptId),
+            )
+          : Promise.resolve(null),
+      ]);
       if (
         !propertySnapshot.exists ||
         !ownerIdentityMatches(booking, propertySnapshot.data() || null)
@@ -986,6 +1439,24 @@ export class BookingCommissionStore {
       }
       if (booking.commissionStatus === "paid" || booking.commissionStatus === "waived") {
         throw new BookingWorkflowError("COMMISSION_ALREADY_CLOSED", "Commission is already closed");
+      }
+      if (activeAttemptSnapshot?.exists) {
+        const activeAttempt = activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt;
+        if (
+          activeAttempt.paymentMethod === "bank_transfer" &&
+          [
+            "creating",
+            "pending_review",
+            "review_required",
+            "unknown",
+          ].includes(activeAttempt.status)
+        ) {
+          throw new BookingWorkflowError(
+            "COMMISSION_BANK_TRANSFER_UNDER_REVIEW",
+            "Bank transfer receipt is under review",
+            409,
+          );
+        }
       }
       if (booking.disputeStatus === "pending") return booking;
       if (booking.disputeStatus !== "none") {
@@ -1013,7 +1484,11 @@ export class BookingCommissionStore {
     id: string,
     resolution: "resume_collection" | "cancel_commission",
     now = new Date(),
-  ): Promise<{ booking: BookingFollowUpDocument; propertyReleased: boolean }> {
+  ): Promise<{
+    booking: BookingFollowUpDocument;
+    propertyReleased: boolean;
+    ownerNotificationScheduled: boolean;
+  }> {
     const configuredReminderDays = new Set<number>(
       resolution === "resume_collection"
         ? [
@@ -1038,6 +1513,8 @@ export class BookingCommissionStore {
     const releaseJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
       notificationId(id, "property_released"),
     );
+    const disputeRejectedJobRef = this.db.collection(NOTIFICATIONS_COLLECTION)
+      .doc(notificationId(id, "commission_dispute_rejected"));
 
     const result = await this.db.runTransaction(async (transaction) => {
       const bookingSnapshot = await transaction.get(bookingRef);
@@ -1062,7 +1539,11 @@ export class BookingCommissionStore {
           (resolution === "resume_collection" && booking.disputeStatus === "rejected") ||
           (resolution === "cancel_commission" && booking.disputeStatus === "accepted")
         ) {
-          return { booking, propertyReleased: false };
+          return {
+            booking,
+            propertyReleased: false,
+            ownerNotificationScheduled: false,
+          };
         }
         throw new BookingWorkflowError(
           "COMMISSION_DISPUTE_NOT_PENDING",
@@ -1079,6 +1560,7 @@ export class BookingCommissionStore {
         ownerNoticeSnapshot,
         pauseJobSnapshot,
         releaseJobSnapshot,
+        disputeRejectedJobSnapshot,
         ...reminderSnapshots
       ] = await Promise.all([
         transaction.get(propertyRef),
@@ -1086,6 +1568,7 @@ export class BookingCommissionStore {
         transaction.get(ownerNoticeRef),
         transaction.get(pauseJobRef),
         transaction.get(releaseJobRef),
+        transaction.get(disputeRejectedJobRef),
         ...reminderRefs.map((ref) => transaction.get(ref)),
       ]);
 
@@ -1200,18 +1683,32 @@ export class BookingCommissionStore {
           }
         }
 
+        const ownerNotificationScheduled =
+          !ownerIdentityRecovery && !disputeRejectedJobSnapshot.exists;
+        if (ownerNotificationScheduled) {
+          transaction.create(disputeRejectedJobRef, buildNotificationJob({
+            booking: { ...booking, ...updates },
+            kind: "commission_dispute_rejected",
+            scheduledAt: timestamp,
+            now: timestamp,
+          }));
+        }
+
         transaction.update(bookingRef, updates);
         return {
           booking: { ...booking, ...updates },
           propertyReleased: false,
+          ownerNotificationScheduled,
         };
       }
 
       const attempts = attemptsSnapshot.docs.map((document) =>
         document.data() as BookingCommissionPaymentAttempt);
       const financiallyUnresolvedAttempts = attempts.filter((attempt) =>
-        attempt.status !== "failed" ||
-        Boolean(attempt.reversalStatus && !attempt.reversalResolution));
+        (
+          attempt.status !== "failed" &&
+          attempt.bankReviewDecision !== "refund_review"
+        ) || Boolean(attempt.reversalStatus && !attempt.reversalResolution));
       if (financiallyUnresolvedAttempts.length > 0) {
         throw new BookingWorkflowError(
           "COMMISSION_PAYMENT_ATTEMPT_EXISTS",
@@ -1245,7 +1742,11 @@ export class BookingCommissionStore {
         }),
       };
 
-      for (const snapshot of [...reminderSnapshots, pauseJobSnapshot]) {
+      for (const snapshot of [
+        ...reminderSnapshots,
+        pauseJobSnapshot,
+        disputeRejectedJobSnapshot,
+      ]) {
         if (!snapshot.exists) continue;
         const job = snapshot.data() as BookingNotificationJob;
         if (job.status !== "pending" && job.status !== "claimed") continue;
@@ -1287,7 +1788,11 @@ export class BookingCommissionStore {
       transaction.update(bookingRef, updates);
       const resolvedBooking = { ...booking, ...updates } as BookingFollowUpDocument;
       coreBookingRecord(resolvedBooking);
-      return { booking: resolvedBooking, propertyReleased };
+      return {
+        booking: resolvedBooking,
+        propertyReleased,
+        ownerNotificationScheduled: false,
+      };
     });
     if (!result) {
       throw new BookingWorkflowError(
@@ -1302,7 +1807,7 @@ export class BookingCommissionStore {
     bookingId: string;
     attemptId: string;
     merchantAttemptKey: string;
-    paymentMethod: "cards" | "applepay";
+    paymentMethod: "cards" | "applepay" | "bank_transfer";
     now?: Date;
   }): Promise<
     | { status: "reserved"; booking: BookingFollowUpDocument; attempt: BookingCommissionPaymentAttempt }
@@ -1356,9 +1861,30 @@ export class BookingCommissionStore {
         }
       }
       if (activeAttempt?.status === "created") {
-        if (activeAttempt.checkoutUrl) {
+        if (
+          activeAttempt.paymentMethod === options.paymentMethod &&
+          activeAttempt.checkoutUrl
+        ) {
           return { status: "reused", booking, attempt: activeAttempt } as const;
         }
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_RECONCILIATION_REQUIRED",
+          "The active payment attempt requires reconciliation",
+        );
+      }
+      if (activeAttempt?.status === "pending_review") {
+        if (
+          activeAttempt.paymentMethod === "bank_transfer" &&
+          options.paymentMethod === "bank_transfer"
+        ) {
+          return { status: "reused", booking, attempt: activeAttempt } as const;
+        }
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_IN_PROGRESS",
+          "A commission payment attempt is already in progress",
+        );
+      }
+      if (activeAttempt?.status === "review_required") {
         throw new BookingWorkflowError(
           "PAYMENT_ATTEMPT_RECONCILIATION_REQUIRED",
           "The active payment attempt requires reconciliation",
@@ -1399,6 +1925,15 @@ export class BookingCommissionStore {
         providerCreatedAt: null,
         paidAt: null,
         failureReason: null,
+        receiptUrl: null,
+        receiptObjectKey: null,
+        receiptContentType: null,
+        receiptSizeBytes: null,
+        receiptSubmittedAt: null,
+        bankReviewDecision: null,
+        bankReviewReason: null,
+        bankReviewedAt: null,
+        bankReviewPropertyReleased: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -1434,22 +1969,26 @@ export class BookingCommissionStore {
   }): Promise<BookingCommissionPaymentAttempt> {
     const attemptRef = this.db.collection(ATTEMPTS_COLLECTION).doc(options.attemptId);
     const orderRef = this.db.collection(ORDER_BINDINGS_COLLECTION).doc(options.paymobOrderId);
-    return this.db.runTransaction(async (transaction) => {
+    const now = options.now || new Date();
+    const result = await this.db.runTransaction(async (transaction) => {
       const [attemptSnapshot, orderSnapshot] = await Promise.all([
         transaction.get(attemptRef),
         transaction.get(orderRef),
       ]);
       if (!attemptSnapshot.exists) throw new BookingWorkflowError("PAYMENT_ATTEMPT_NOT_FOUND", "Payment attempt not found", 404);
       const attempt = attemptSnapshot.data() as BookingCommissionPaymentAttempt;
-      if (attempt.status === "created") {
-        if (
-          attempt.intentionId === options.intentionId &&
-          attempt.paymobOrderId === options.paymobOrderId &&
-          attempt.checkoutUrl === options.checkoutUrl
-        ) return attempt;
+      const sameProviderIdentity =
+        attempt.intentionId === options.intentionId &&
+        attempt.paymobOrderId === options.paymobOrderId &&
+        attempt.checkoutUrl === options.checkoutUrl;
+      if (attempt.status === "created" && !sameProviderIdentity) {
         throw new BookingWorkflowError("PAYMENT_ATTEMPT_IDENTITY_CONFLICT", "Payment identity conflict");
       }
-      if (attempt.status !== "creating" && attempt.status !== "unknown") {
+      if (
+        attempt.status !== "creating" &&
+        attempt.status !== "unknown" &&
+        attempt.status !== "created"
+      ) {
         throw new BookingWorkflowError("PAYMENT_ATTEMPT_NOT_CREATABLE", "Payment attempt cannot be completed");
       }
       if (orderSnapshot.exists && orderSnapshot.data()?.attemptId !== attempt.id) {
@@ -1460,7 +1999,92 @@ export class BookingCommissionStore {
       if (!bookingSnapshot.exists) {
         throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
       }
-      const updatedAt = (options.now || new Date()).toISOString();
+      const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+      const updatedAt = now.toISOString();
+      const bindProviderIdentity = (
+        status: "created" | "unknown",
+        failureReason: string | null,
+      ) => {
+        const updates = {
+          status,
+          intentionId: options.intentionId,
+          paymobOrderId: options.paymobOrderId,
+          checkoutUrl: options.checkoutUrl,
+          failureReason,
+          updatedAt,
+        };
+        transaction.set(orderRef, {
+          paymobOrderId: options.paymobOrderId,
+          bookingId: attempt.bookingId,
+          attemptId: attempt.id,
+          merchantAttemptKey: attempt.merchantAttemptKey,
+          amountCents: attempt.amountCents,
+          currency: attempt.currency,
+          intentionId: options.intentionId,
+          createdAt: updatedAt,
+        });
+        transaction.update(attemptRef, updates);
+        return { ...attempt, ...updates };
+      };
+
+      if (!await this.ensureFreeBookingEligibility(
+        transaction,
+        bookingRef,
+        booking,
+        now,
+      )) {
+        return {
+          attempt: bindProviderIdentity(
+            "unknown",
+            "checkout_booking_free_eligibility_lost",
+          ),
+          reconciliationReason: "booking_free_eligibility_lost",
+        };
+      }
+
+      const propertySnapshot = await transaction.get(
+        this.db.collection("properties").doc(booking.propertyNumber),
+      );
+      const ownerStillCurrent = propertySnapshot.exists &&
+        ownerIdentityMatches(booking, propertySnapshot.data() || null);
+      const stateStillPayable =
+        booking.bookingStatus === "confirmed" &&
+        (booking.commissionStatus === "pending" ||
+          booking.commissionStatus === "overdue") &&
+        booking.commissionAmountHalalas === attempt.amountCents &&
+        booking.activeAttemptId === attempt.id &&
+        booking.disputeStatus !== "pending";
+      if (!ownerStillCurrent || !stateStillPayable) {
+        const reconciliationReason = !ownerStillCurrent
+          ? "owner_identity_changed"
+          : booking.disputeStatus === "pending"
+            ? "commission_disputed_during_checkout_creation"
+            : booking.activeAttemptId !== attempt.id
+              ? "payment_attempt_superseded"
+              : "commission_no_longer_payable";
+        const reconciledAttempt = bindProviderIdentity(
+          "unknown",
+          `checkout_${reconciliationReason}`,
+        );
+        transaction.update(bookingRef, {
+          enforcementLeaseToken: null,
+          enforcementLeaseExpiresAt: null,
+          updatedAt,
+          events: appendEvent(booking.events, {
+            type: "commission_checkout_failed",
+            at: updatedAt,
+            detail: reconciliationReason,
+          }),
+        });
+        return {
+          attempt: reconciledAttempt,
+          reconciliationReason,
+        };
+      }
+
+      if (attempt.status === "created" && sameProviderIdentity) {
+        return { attempt, reconciliationReason: null };
+      }
       const updates = {
         status: "created" as const,
         intentionId: options.intentionId,
@@ -1469,27 +2093,597 @@ export class BookingCommissionStore {
         failureReason: null,
         updatedAt,
       };
-      transaction.set(orderRef, {
-        paymobOrderId: options.paymobOrderId,
-        bookingId: attempt.bookingId,
-        attemptId: attempt.id,
-        merchantAttemptKey: attempt.merchantAttemptKey,
-        amountCents: attempt.amountCents,
-        currency: attempt.currency,
-        intentionId: options.intentionId,
-        createdAt: updatedAt,
+      const createdAttempt = bindProviderIdentity("created", null);
+      transaction.update(bookingRef, {
+        updatedAt,
+        events: appendEvent(
+          booking.events,
+          { type: "commission_checkout_created", at: updatedAt },
+        ),
       });
-      transaction.update(attemptRef, updates);
-      if (bookingSnapshot.exists) {
+      return {
+        attempt: { ...createdAttempt, ...updates },
+        reconciliationReason: null,
+      };
+    });
+    if (result.reconciliationReason) {
+      throw new BookingWorkflowError(
+        "PAYMENT_ATTEMPT_RECONCILIATION_REQUIRED",
+        "The payment attempt requires reconciliation",
+      );
+    }
+    return result.attempt;
+  }
+
+  async completeBankTransferAttempt(options: {
+    attemptId: string;
+    receiptUrl: string;
+    receiptObjectKey: string;
+    receiptContentType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    receiptSizeBytes: number;
+    now?: Date;
+  }): Promise<{
+    status: "pending_review" | "review_required";
+    attempt: BookingCommissionPaymentAttempt;
+  }> {
+    const now = options.now || new Date();
+    const timestamp = now.toISOString();
+    const attemptRef = this.db.collection(ATTEMPTS_COLLECTION)
+      .doc(options.attemptId);
+    return this.db.runTransaction(async (transaction) => {
+      const attemptSnapshot = await transaction.get(attemptRef);
+      if (!attemptSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_NOT_FOUND",
+          "Payment attempt not found",
+          404,
+        );
+      }
+      const attempt = attemptSnapshot.data() as BookingCommissionPaymentAttempt;
+      if (attempt.paymentMethod !== "bank_transfer") {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_IDENTITY_CONFLICT",
+          "Payment identity conflict",
+        );
+      }
+      const samePersistedReceipt =
+        attempt.receiptUrl === options.receiptUrl &&
+        attempt.receiptObjectKey === options.receiptObjectKey &&
+        attempt.receiptContentType === options.receiptContentType &&
+        attempt.receiptSizeBytes === options.receiptSizeBytes;
+      if (
+        samePersistedReceipt &&
+        (attempt.status === "pending_review" || attempt.status === "review_required")
+      ) {
+        return { status: attempt.status, attempt };
+      }
+      const receiptNotYetPersisted =
+        !attempt.receiptUrl &&
+        !attempt.receiptObjectKey &&
+        !attempt.receiptContentType &&
+        !attempt.receiptSizeBytes &&
+        !attempt.receiptSubmittedAt;
+      if (
+        attempt.status === "review_required" &&
+        attempt.bankReviewDecision === "refund_review" &&
+        receiptNotYetPersisted
+      ) {
+        const receiptUpdates = {
+          receiptUrl: options.receiptUrl,
+          receiptObjectKey: options.receiptObjectKey,
+          receiptContentType: options.receiptContentType,
+          receiptSizeBytes: options.receiptSizeBytes,
+          receiptSubmittedAt: timestamp,
+          updatedAt: timestamp,
+        };
+        transaction.update(attemptRef, receiptUpdates);
+        return {
+          status: "review_required" as const,
+          attempt: { ...attempt, ...receiptUpdates },
+        };
+      }
+      if (attempt.status !== "creating") {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_NOT_CREATABLE",
+          "Payment attempt cannot be completed",
+        );
+      }
+
+      const bookingRef = this.db.collection(BOOKINGS_COLLECTION)
+        .doc(attempt.bookingId);
+      const bookingSnapshot = await transaction.get(bookingRef);
+      if (!bookingSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "BOOKING_NOT_FOUND",
+          "Booking not found",
+          404,
+        );
+      }
+      const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+      const receiptFields = {
+        receiptUrl: options.receiptUrl,
+        receiptObjectKey: options.receiptObjectKey,
+        receiptContentType: options.receiptContentType,
+        receiptSizeBytes: options.receiptSizeBytes,
+        receiptSubmittedAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      if (!await this.ensureFreeBookingEligibility(
+        transaction,
+        bookingRef,
+        booking,
+        now,
+      )) {
+        const updates = {
+          ...receiptFields,
+          status: "review_required" as const,
+          bankReviewDecision: "refund_review" as const,
+          bankReviewReason: "booking_free_eligibility_lost",
+          failureReason: "bank_transfer_refund_review_required",
+        };
+        transaction.update(attemptRef, updates);
+        return { status: "review_required" as const, attempt: { ...attempt, ...updates } };
+      }
+
+      const collectionJobRefs = [
+        ...([3, 4, 5] as const).map((offset) =>
+          this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+            notificationId(booking.id, `commission_reminder_${offset}`),
+          )),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "property_paused"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "commission_dispute_rejected"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "owner_booking_confirmed"),
+        ),
+      ];
+      const [propertySnapshot, ...collectionJobSnapshots] = await Promise.all([
+        transaction.get(
+          this.db.collection("properties").doc(booking.propertyNumber),
+        ),
+        ...collectionJobRefs.map((ref) => transaction.get(ref)),
+      ]);
+      const ownerStillCurrent = propertySnapshot.exists &&
+        ownerIdentityMatches(booking, propertySnapshot.data() || null);
+      const stateStillPayable =
+        booking.bookingStatus === "confirmed" &&
+        (booking.commissionStatus === "pending" || booking.commissionStatus === "overdue") &&
+        booking.commissionAmountHalalas === attempt.amountCents &&
+        booking.activeAttemptId === attempt.id &&
+        booking.disputeStatus !== "pending";
+      if (!ownerStillCurrent || !stateStillPayable) {
+        const reason = !ownerStillCurrent
+          ? "owner_identity_changed"
+          : booking.disputeStatus === "pending"
+            ? "commission_disputed_during_receipt_upload"
+            : "commission_no_longer_payable";
+        const updates = {
+          ...receiptFields,
+          status: "review_required" as const,
+          bankReviewDecision: "refund_review" as const,
+          bankReviewReason: reason,
+          failureReason: "bank_transfer_refund_review_required",
+        };
+        transaction.update(attemptRef, updates);
         transaction.update(bookingRef, {
-          updatedAt,
-          events: appendEvent(
-            bookingSnapshot.data()?.events,
-            { type: "commission_checkout_created", at: updatedAt },
-          ),
+          enforcementLeaseToken: null,
+          enforcementLeaseExpiresAt: null,
+          events: appendEvent(booking.events, {
+            type: "commission_bank_receipt_refund_review",
+            at: timestamp,
+            detail: reason,
+          }),
+          updatedAt: timestamp,
+        });
+        return { status: "review_required" as const, attempt: { ...attempt, ...updates } };
+      }
+
+      const updates = {
+        ...receiptFields,
+        status: "pending_review" as const,
+        failureReason: null,
+        bankReviewDecision: null,
+        bankReviewReason: null,
+        bankReviewedAt: null,
+        bankReviewPropertyReleased: null,
+      };
+      transaction.update(attemptRef, updates);
+      transaction.update(bookingRef, {
+        enforcementLeaseToken: null,
+        enforcementLeaseExpiresAt: null,
+        events: appendEvent(booking.events, {
+          type: "commission_bank_receipt_submitted",
+          at: timestamp,
+          detail: attempt.id,
+        }),
+        updatedAt: timestamp,
+      });
+      for (const snapshot of collectionJobSnapshots) {
+        if (!snapshot.exists) continue;
+        const job = snapshot.data() as BookingNotificationJob;
+        if (job.status !== "pending" && job.status !== "claimed") continue;
+        transaction.update(snapshot.ref, {
+          status: "pending",
+          scheduledAt: new Date(
+            now.getTime() + BOOKING_OWNER_NOTICE_RETRY_MS,
+          ).toISOString(),
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: "bank_transfer_under_review",
+          updatedAt: timestamp,
         });
       }
-      return { ...attempt, ...updates };
+      return { status: "pending_review" as const, attempt: { ...attempt, ...updates } };
+    });
+  }
+
+  async resolveBankTransferAttempt(options: {
+    bookingId: string;
+    attemptId: string;
+    resolution: "approve" | "reject";
+    now?: Date;
+  }): Promise<{
+    status: "approved" | "rejected" | "review_required";
+    bookingId: string;
+    attemptId: string;
+    propertyReleased: boolean;
+    reviewReason: string | null;
+  }> {
+    const now = options.now || new Date();
+    const timestamp = now.toISOString();
+    const bookingRef = this.db.collection(BOOKINGS_COLLECTION)
+      .doc(options.bookingId);
+    const attemptRef = this.db.collection(ATTEMPTS_COLLECTION)
+      .doc(options.attemptId);
+    return this.db.runTransaction(async (transaction) => {
+      const [bookingSnapshot, attemptSnapshot] = await Promise.all([
+        transaction.get(bookingRef),
+        transaction.get(attemptRef),
+      ]);
+      if (!bookingSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "BOOKING_NOT_FOUND",
+          "Booking not found",
+          404,
+        );
+      }
+      if (!attemptSnapshot.exists) {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_NOT_FOUND",
+          "Payment attempt not found",
+          404,
+        );
+      }
+      const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+      const attempt = attemptSnapshot.data() as BookingCommissionPaymentAttempt;
+      if (
+        attempt.bookingId !== booking.id ||
+        attempt.paymentMethod !== "bank_transfer"
+      ) {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_IDENTITY_CONFLICT",
+          "Payment identity conflict",
+        );
+      }
+
+      if (
+        attempt.status === "paid" &&
+        attempt.bankReviewDecision === "approved" &&
+        booking.commissionStatus === "paid" &&
+        booking.paidAttemptId === attempt.id
+      ) {
+        if (options.resolution !== "approve") {
+          throw new BookingWorkflowError(
+            "BANK_TRANSFER_REVIEW_CONFLICT",
+            "Bank transfer was already approved",
+            409,
+          );
+        }
+        return {
+          status: "approved" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: attempt.bankReviewPropertyReleased === true,
+          reviewReason: null,
+        };
+      }
+      if (
+        attempt.status === "failed" &&
+        attempt.bankReviewDecision === "rejected"
+      ) {
+        if (options.resolution !== "reject") {
+          throw new BookingWorkflowError(
+            "BANK_TRANSFER_REVIEW_CONFLICT",
+            "Bank transfer was already rejected",
+            409,
+          );
+        }
+        return {
+          status: "rejected" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: false,
+          reviewReason: attempt.bankReviewReason || null,
+        };
+      }
+      if (
+        attempt.status === "review_required" ||
+        attempt.bankReviewDecision === "refund_review"
+      ) {
+        return {
+          status: "review_required" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: false,
+          reviewReason: attempt.bankReviewReason || "manual_refund_review_required",
+        };
+      }
+      if (
+        attempt.status !== "pending_review" ||
+        !attempt.receiptUrl ||
+        !attempt.receiptObjectKey ||
+        !attempt.receiptSubmittedAt
+      ) {
+        throw new BookingWorkflowError(
+          "PAYMENT_ATTEMPT_NOT_REVIEWABLE",
+          "Payment attempt is not ready for review",
+        );
+      }
+
+      if (!await this.ensureFreeBookingEligibility(
+        transaction,
+        bookingRef,
+        booking,
+        now,
+      )) {
+        transaction.update(attemptRef, {
+          status: "review_required",
+          bankReviewDecision: "refund_review",
+          bankReviewReason: "booking_free_eligibility_lost",
+          failureReason: "bank_transfer_refund_review_required",
+          updatedAt: timestamp,
+        });
+        return {
+          status: "review_required" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: false,
+          reviewReason: "booking_free_eligibility_lost",
+        };
+      }
+
+      const propertyRef = this.db.collection("properties")
+        .doc(booking.propertyNumber);
+      const releaseJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+        notificationId(booking.id, "property_released"),
+      );
+      const staleCollectionJobRefs = [
+        ...([3, 4, 5] as const).map((offset) =>
+          this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+            notificationId(booking.id, `commission_reminder_${offset}`),
+          )),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "property_paused"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "commission_dispute_rejected"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "owner_booking_confirmed"),
+        ),
+      ];
+      const [
+        propertySnapshot,
+        releaseJobSnapshot,
+        ...staleCollectionJobSnapshots
+      ] = await Promise.all([
+        transaction.get(propertyRef),
+        transaction.get(releaseJobRef),
+        ...staleCollectionJobRefs.map((ref) => transaction.get(ref)),
+      ]);
+      const ownerStillCurrent = propertySnapshot.exists &&
+        ownerIdentityMatches(booking, propertySnapshot.data() || null);
+      const stateStillPayable =
+        booking.bookingStatus === "confirmed" &&
+        (booking.commissionStatus === "pending" || booking.commissionStatus === "overdue") &&
+        booking.commissionAmountHalalas === attempt.amountCents &&
+        booking.activeAttemptId === attempt.id;
+      if (!ownerStillCurrent || !stateStillPayable) {
+        const reason = ownerStillCurrent
+          ? "commission_no_longer_payable"
+          : "owner_identity_changed";
+        transaction.update(attemptRef, {
+          status: "review_required",
+          bankReviewDecision: "refund_review",
+          bankReviewReason: reason,
+          bankReviewedAt: timestamp,
+          failureReason: "bank_transfer_refund_review_required",
+          updatedAt: timestamp,
+        });
+        transaction.update(bookingRef, {
+          events: appendEvent(booking.events, {
+            type: "commission_bank_receipt_refund_review",
+            at: timestamp,
+            detail: reason,
+          }),
+          updatedAt: timestamp,
+        });
+        return {
+          status: "review_required" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: false,
+          reviewReason: reason,
+        };
+      }
+      if (booking.disputeStatus === "pending") {
+        throw new BookingWorkflowError(
+          "COMMISSION_DISPUTED",
+          "Commission is under review",
+          423,
+        );
+      }
+
+      if (options.resolution === "reject") {
+        const noticeAnchor = booking.commissionNoticeSentAt;
+        const reminderSchedule = noticeAnchor
+          ? calculateCommissionReminderSchedule(noticeAnchor)
+          : null;
+        const fallbackRetryAt = new Date(
+          now.getTime() + BOOKING_OWNER_NOTICE_RETRY_MS,
+        ).toISOString();
+        for (let index = 0; index < staleCollectionJobSnapshots.length; index++) {
+          const snapshot = staleCollectionJobSnapshots[index];
+          if (!snapshot?.exists) continue;
+          const job = snapshot.data() as BookingNotificationJob;
+          if (job.status !== "pending" && job.status !== "claimed") continue;
+          const desiredAt = index < 3
+            ? reminderSchedule?.[index]?.scheduledAt || fallbackRetryAt
+            : index === 3
+              ? booking.commissionDueAt || fallbackRetryAt
+              : timestamp;
+          const desiredAtMs = Date.parse(desiredAt);
+          transaction.update(snapshot.ref, {
+            status: "pending",
+            scheduledAt: Number.isFinite(desiredAtMs) && desiredAtMs > now.getTime()
+              ? new Date(desiredAtMs).toISOString()
+              : timestamp,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            claimedAt: null,
+            providerError: !noticeAnchor && index < 4
+              ? "awaiting_owner_commission_notice"
+              : null,
+            updatedAt: timestamp,
+          });
+        }
+        transaction.update(attemptRef, {
+          status: "failed",
+          bankReviewDecision: "rejected",
+          bankReviewReason: "receipt_rejected_by_admin",
+          bankReviewedAt: timestamp,
+          bankReviewPropertyReleased: false,
+          failureReason: "bank_transfer_rejected",
+          updatedAt: timestamp,
+        });
+        transaction.update(bookingRef, {
+          activeAttemptId: null,
+          enforcementLeaseToken: null,
+          enforcementLeaseExpiresAt: null,
+          enforcementDeferredUntil: null,
+          enforcementLastError: null,
+          events: appendEvent(booking.events, {
+            type: "commission_bank_receipt_rejected",
+            at: timestamp,
+            detail: attempt.id,
+          }),
+          updatedAt: timestamp,
+        });
+        return {
+          status: "rejected" as const,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          propertyReleased: false,
+          reviewReason: "receipt_rejected_by_admin",
+        };
+      }
+
+      const property = propertySnapshot.data() || {};
+      const activeHoldIds = Array.isArray(property.commissionHold?.obligationIds)
+        ? property.commissionHold.obligationIds.map(String)
+        : [];
+      const remainingHoldIds = activeHoldIds.filter(
+        (value: string) => value !== booking.id,
+      );
+      const obligationReleased =
+        booking.complianceStatus === "paused" ||
+        activeHoldIds.includes(booking.id);
+      const propertyReleased =
+        propertySnapshot.exists &&
+        obligationReleased &&
+        remainingHoldIds.length === 0;
+      transaction.update(attemptRef, {
+        status: "paid",
+        transactionId: `BANK-${attempt.id}`,
+        exactPaymentMethod: "bank_transfer",
+        paidAt: timestamp,
+        bankReviewDecision: "approved",
+        bankReviewReason: null,
+        bankReviewedAt: timestamp,
+        bankReviewPropertyReleased: propertyReleased,
+        failureReason: null,
+        updatedAt: timestamp,
+      });
+      transaction.update(bookingRef, {
+        commissionStatus: "paid",
+        complianceStatus: obligationReleased ? "released" : "clear",
+        commissionPaidAt: timestamp,
+        paidAttemptId: attempt.id,
+        activeAttemptId: attempt.id,
+        enforcementDeferredUntil: null,
+        enforcementLastError: null,
+        enforcementLeaseToken: null,
+        enforcementLeaseExpiresAt: null,
+        events: appendEvent(
+          appendEvent(booking.events, {
+            type: "commission_bank_receipt_approved",
+            at: timestamp,
+            detail: attempt.id,
+          }),
+          { type: "commission_paid", at: timestamp },
+        ),
+        updatedAt: timestamp,
+      });
+      for (const snapshot of staleCollectionJobSnapshots) {
+        if (!snapshot.exists) continue;
+        const job = snapshot.data() as BookingNotificationJob;
+        if (job.status !== "pending" && job.status !== "claimed") continue;
+        transaction.update(snapshot.ref, {
+          status: "cancelled",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: "commission_paid",
+          updatedAt: timestamp,
+        });
+      }
+      if (propertySnapshot.exists && obligationReleased) {
+        transaction.update(propertyRef, {
+          commissionHold: remainingHoldIds.length > 0
+            ? {
+                ...property.commissionHold,
+                active: true,
+                obligationIds: remainingHoldIds,
+                updatedAt: timestamp,
+              }
+            : {
+                active: false,
+                obligationIds: [],
+                appliedAt: property.commissionHold?.appliedAt,
+                releasedAt: timestamp,
+                updatedAt: timestamp,
+              },
+          updatedAt: timestamp,
+        });
+      }
+      if (propertyReleased && !releaseJobSnapshot.exists) {
+        transaction.create(releaseJobRef, buildNotificationJob({
+          booking,
+          kind: "property_released",
+          scheduledAt: timestamp,
+          now: timestamp,
+        }));
+      }
+      return {
+        status: "approved" as const,
+        bookingId: booking.id,
+        attemptId: attempt.id,
+        propertyReleased,
+        reviewReason: null,
+      };
     });
   }
 
@@ -1705,6 +2899,8 @@ export class BookingCommissionStore {
           providerCreatedAt: input.providerCreatedAt || null,
           paidAt: timestamp,
           failureReason: "duplicate_financial_success",
+          financialReviewDecision: "refund_review",
+          financialReviewReason: "commission_already_closed",
           updatedAt: timestamp,
         });
         transaction.set(transactionRef, {
@@ -1730,9 +2926,103 @@ export class BookingCommissionStore {
         } as const;
       }
 
+      const recordRefundReview = (
+        reason: string,
+        appendBookingEvent: boolean,
+      ) => {
+        transaction.update(attemptRef, {
+          status: "duplicate_paid",
+          transactionId: input.transactionId,
+          exactPaymentMethod: input.exactPaymentMethod!,
+          providerCreatedAt: input.providerCreatedAt || null,
+          paidAt: timestamp,
+          failureReason: "duplicate_financial_success",
+          financialReviewDecision: "refund_review",
+          financialReviewReason: reason,
+          updatedAt: timestamp,
+        });
+        transaction.set(transactionRef, {
+          transactionId: input.transactionId,
+          bookingId: booking.id,
+          attemptId: attempt.id,
+          success: true,
+          duplicate: true,
+          refundReview: true,
+          reviewReason: reason,
+          createdAt: timestamp,
+        });
+        if (appendBookingEvent) {
+          transaction.update(bookingRef, {
+            updatedAt: timestamp,
+            events: appendEvent(booking.events, {
+              type: "commission_duplicate_payment",
+              at: timestamp,
+              detail: `refund_review:${reason}:${attempt.id}`,
+            }),
+          });
+        }
+      };
+
+      if (!await this.ensureFreeBookingEligibility(
+        transaction,
+        bookingRef,
+        booking,
+        now,
+      )) {
+        // ensureFreeBookingEligibility already wrote the canonical booking
+        // transition and cancelled its jobs. Do not overwrite those writes
+        // using the stale booking snapshot; retain only the financial record.
+        recordRefundReview("booking_free_eligibility_lost", false);
+        return {
+          status: "duplicate_paid",
+          bookingId: booking.id,
+          released: false,
+        } as const;
+      }
+
       const propertyRef = this.db.collection("properties").doc(booking.propertyNumber);
-      const propertySnapshot = await transaction.get(propertyRef);
+      const staleCollectionJobRefs = [
+        ...([3, 4, 5] as const).map((offset) =>
+          this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+            notificationId(booking.id, `commission_reminder_${offset}`),
+          )),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "property_paused"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "commission_dispute_rejected"),
+        ),
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+          notificationId(booking.id, "owner_booking_confirmed"),
+        ),
+      ];
+      const [propertySnapshot, ...staleCollectionJobSnapshots] =
+        await Promise.all([
+          transaction.get(propertyRef),
+          ...staleCollectionJobRefs.map((ref) => transaction.get(ref)),
+        ]);
       const property = propertySnapshot.data() || {};
+      const ownerStillCurrent = propertySnapshot.exists &&
+        ownerIdentityMatches(booking, property);
+      const stateStillPayable =
+        booking.bookingStatus === "confirmed" &&
+        (booking.commissionStatus === "pending" ||
+          booking.commissionStatus === "overdue") &&
+        booking.commissionAmountHalalas === attempt.amountCents &&
+        booking.activeAttemptId === attempt.id;
+      if (!ownerStillCurrent || !stateStillPayable) {
+        const reason = !ownerStillCurrent
+          ? "owner_identity_changed"
+          : booking.activeAttemptId !== attempt.id
+              ? "payment_attempt_superseded"
+              : "commission_no_longer_payable";
+        recordRefundReview(reason, true);
+        return {
+          status: "duplicate_paid",
+          bookingId: booking.id,
+          released: false,
+        } as const;
+      }
       const activeHoldIds = Array.isArray(property.commissionHold?.obligationIds)
         ? property.commissionHold.obligationIds.map(String)
         : [];
@@ -1798,6 +3088,18 @@ export class BookingCommissionStore {
             : {}),
         }),
       });
+      for (const snapshot of staleCollectionJobSnapshots) {
+        if (!snapshot.exists) continue;
+        const job = snapshot.data() as BookingNotificationJob;
+        if (job.status !== "pending" && job.status !== "claimed") continue;
+        transaction.update(snapshot.ref, {
+          status: "cancelled",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: "commission_paid",
+          updatedAt: timestamp,
+        });
+      }
       transaction.set(transactionRef, {
         transactionId: input.transactionId,
         bookingId: booking.id,
@@ -2344,6 +3646,57 @@ export class BookingCommissionStore {
           });
           return null;
         }
+        if (
+          isCommissionPaymentPromptNotification(job, booking) &&
+          booking.activeAttemptId
+        ) {
+          const activeAttemptSnapshot = await transaction.get(
+            this.db.collection(ATTEMPTS_COLLECTION).doc(
+              booking.activeAttemptId,
+            ),
+          );
+          const activeAttempt = activeAttemptSnapshot.exists
+            ? activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt
+            : null;
+          if (bankAttemptPausesCollection(activeAttempt)) {
+            transaction.update(candidate.ref, {
+              status: "pending",
+              scheduledAt: new Date(
+                now.getTime() + BOOKING_OWNER_NOTICE_RETRY_MS,
+              ).toISOString(),
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError: "bank_transfer_under_review",
+              updatedAt: nowIso,
+            });
+            return null;
+          }
+        }
+        const stateCheck = notificationMatchesCurrentState(job, booking, now);
+        if (stateCheck.status !== "valid") {
+          if (stateCheck.retryAt) {
+            transaction.update(candidate.ref, {
+              scheduledAt: stateCheck.retryAt,
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError:
+                isCommissionCollectionNotification(job) &&
+                !booking.commissionNoticeSentAt
+                  ? "awaiting_owner_commission_notice"
+                  : "notification_state_changed",
+              updatedAt: nowIso,
+            });
+            return null;
+          }
+          transaction.update(candidate.ref, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: notificationStateChangedError(job, booking),
+            updatedAt: nowIso,
+          });
+          return null;
+        }
         if (job.recipientRole === "owner") {
           const propertySnapshot = await transaction.get(
             this.db.collection("properties").doc(booking.propertyNumber),
@@ -2365,10 +3718,24 @@ export class BookingCommissionStore {
             );
             return null;
           }
+          if (
+            job.kind === "property_released" &&
+            propertySnapshot.data()?.commissionHold?.active === true
+          ) {
+            transaction.update(candidate.ref, {
+              status: "cancelled",
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError: "notification_state_changed",
+              updatedAt: nowIso,
+            });
+            return null;
+          }
         }
         const commissionControlled =
           job.kind.startsWith("commission_reminder_") ||
           job.kind === "property_paused" ||
+          job.kind === "commission_dispute_rejected" ||
           (
             job.kind === "owner_booking_confirmed" &&
             booking.commissionStatus !== "not_applicable"
@@ -2513,7 +3880,7 @@ export class BookingCommissionStore {
     now = new Date(),
   ): Promise<
     | { status: "ready"; booking: BookingFollowUpDocument }
-    | { status: "blocked"; reason: "claim_invalid" | "booking_not_found" | "customer_response_expired" | "owner_identity_changed" | "booking_ineligible" }
+    | { status: "blocked"; reason: "claim_invalid" | "booking_not_found" | "customer_response_expired" | "owner_identity_changed" | "booking_ineligible" | "notification_state_changed" }
   > {
     const jobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(jobId);
     return this.db.runTransaction(async (transaction) => {
@@ -2562,6 +3929,58 @@ export class BookingCommissionStore {
         });
         return { status: "blocked", reason: "customer_response_expired" } as const;
       }
+      if (
+        isCommissionPaymentPromptNotification(job, booking) &&
+        booking.activeAttemptId
+      ) {
+        const activeAttemptSnapshot = await transaction.get(
+          this.db.collection(ATTEMPTS_COLLECTION).doc(
+            booking.activeAttemptId,
+          ),
+        );
+        const activeAttempt = activeAttemptSnapshot.exists
+          ? activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt
+          : null;
+        if (bankAttemptPausesCollection(activeAttempt)) {
+          transaction.update(jobRef, {
+            status: "pending",
+            scheduledAt: new Date(
+              now.getTime() + BOOKING_OWNER_NOTICE_RETRY_MS,
+            ).toISOString(),
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: "bank_transfer_under_review",
+            updatedAt: timestamp,
+          });
+          return { status: "blocked", reason: "notification_state_changed" } as const;
+        }
+      }
+      const stateCheck = notificationMatchesCurrentState(job, booking, now);
+      if (stateCheck.status !== "valid") {
+        if (stateCheck.retryAt) {
+          transaction.update(jobRef, {
+            status: "pending",
+            scheduledAt: stateCheck.retryAt,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError:
+              isCommissionCollectionNotification(job) &&
+              !booking.commissionNoticeSentAt
+                ? "awaiting_owner_commission_notice"
+                : "notification_state_changed",
+            updatedAt: timestamp,
+          });
+          return { status: "blocked", reason: "notification_state_changed" } as const;
+        }
+        transaction.update(jobRef, {
+          status: "cancelled",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: notificationStateChangedError(job, booking),
+          updatedAt: timestamp,
+        });
+        return { status: "blocked", reason: "notification_state_changed" } as const;
+      }
       if (job.recipientRole === "owner") {
         const propertySnapshot = await transaction.get(
           this.db.collection("properties").doc(booking.propertyNumber),
@@ -2582,6 +4001,19 @@ export class BookingCommissionStore {
             ownerIdentityReviewUpdates(booking, timestamp),
           );
           return { status: "blocked", reason: "owner_identity_changed" } as const;
+        }
+        if (
+          job.kind === "property_released" &&
+          propertySnapshot.data()?.commissionHold?.active === true
+        ) {
+          transaction.update(jobRef, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: "notification_state_changed",
+            updatedAt: timestamp,
+          });
+          return { status: "blocked", reason: "notification_state_changed" } as const;
         }
       }
       return { status: "ready", booking } as const;
@@ -2966,6 +4398,7 @@ export class BookingCommissionStore {
     id: string,
     now = new Date(),
     enforcementLeaseToken?: string,
+    observedActiveAttemptId?: string | null,
   ): Promise<"paused" | "skipped" | "owner_identity_changed"> {
     const bookingRef = this.db.collection(BOOKINGS_COLLECTION).doc(id);
     const ownerNoticeRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
@@ -2997,6 +4430,38 @@ export class BookingCommissionStore {
         booking,
         now,
       )) return "skipped" as const;
+      if (
+        observedActiveAttemptId !== undefined &&
+        (booking.activeAttemptId || null) !== observedActiveAttemptId
+      ) return "skipped" as const;
+      if (booking.activeAttemptId) {
+        const activeAttemptSnapshot = await transaction.get(
+          this.db.collection(ATTEMPTS_COLLECTION).doc(
+            booking.activeAttemptId,
+          ),
+        );
+        const activeAttempt = activeAttemptSnapshot.exists
+          ? activeAttemptSnapshot.data() as BookingCommissionPaymentAttempt
+          : null;
+        if (
+          activeAttempt &&
+          (
+            [
+              "creating",
+              "unknown",
+              "pending_review",
+              "review_required",
+            ].includes(activeAttempt.status) ||
+            (
+              activeAttempt.status === "created" &&
+              (
+                activeAttempt.paymentMethod === "bank_transfer" ||
+                observedActiveAttemptId !== activeAttempt.id
+              )
+            )
+          )
+        ) return "skipped" as const;
+      }
       const noticeSentAt = Date.parse(booking.commissionNoticeSentAt || "");
       const dueAt = Date.parse(booking.commissionDueAt || "");
       if (

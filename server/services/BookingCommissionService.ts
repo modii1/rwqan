@@ -41,12 +41,28 @@ import {
   PaymobIntentionError,
   paymobService,
 } from "../integrations/paymob";
+import {
+  BookingCommissionReceiptError,
+  removeBookingCommissionReceipt,
+  storeBookingCommissionReceipt,
+  type StoredBookingCommissionReceipt,
+} from "./BookingCommissionReceiptService";
 
 export const BOOKING_CUSTOMER_SESSION_COOKIE = "rwqan_booking_customer_session";
 export const BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 export const BOOKING_OWNER_TOKEN_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE =
   "مرحباً، معك الفريق التقني لمنصة روقان.";
+
+function isUsableBookingCommissionBankAccount(account: unknown): boolean {
+  if (!account || typeof account !== "object") return false;
+  const value = account as Record<string, unknown>;
+  const iban = String(value.iban || "").replace(/\s+/g, "").toUpperCase();
+  return value.isActive === true &&
+    Boolean(String(value.bankName || "").trim()) &&
+    Boolean(String(value.beneficiaryName || "").trim()) &&
+    /^SA\d{22}$/.test(iban);
+}
 
 export const bookingDecisionSchema = z.object({
   booked: z.boolean(),
@@ -76,6 +92,35 @@ export const bookingAdminReversalResolutionSchema = z.object({
   reversalTransactionId: z.string().trim().min(1).max(160),
   resolution: z.enum(["resume_collection", "keep_paid"]),
 }).strict();
+
+export const bookingAdminBankTransferResolutionSchema = z.object({
+  attemptId: z.string().trim().min(1).max(160),
+  resolution: z.enum(["approve", "reject"]),
+}).strict();
+
+export const bookingAdminNotificationResendSchema = z.object({
+  sourceJobId: z.string().trim().min(1).max(240),
+  idempotencyKey: z.string()
+    .trim()
+    .min(16)
+    .max(160)
+    .regex(/^[A-Za-z0-9_-]+$/),
+}).strict();
+
+export type BookingCommissionReceiptPersistence = {
+  store(input: {
+    bookingId: string;
+    attemptId: string;
+    file: Express.Multer.File;
+  }): Promise<StoredBookingCommissionReceipt>;
+  remove(objectKey: string): Promise<boolean>;
+};
+
+const defaultBookingCommissionReceiptPersistence:
+BookingCommissionReceiptPersistence = {
+  store: (input) => storeBookingCommissionReceipt(input),
+  remove: (objectKey) => removeBookingCommissionReceipt(objectKey),
+};
 
 function bookingSecret(): string {
   const secret = process.env.SESSION_SECRET || "";
@@ -213,7 +258,11 @@ function adminNotificationJob(
 function adminPaymentAttempt(
   attempt: BookingCommissionPaymentAttempt,
 ): BookingAdminPaymentAttempt {
-  const { checkoutUrl: _checkoutUrl, ...safeAttempt } = attempt;
+  const {
+    checkoutUrl: _checkoutUrl,
+    receiptObjectKey: _receiptObjectKey,
+    ...safeAttempt
+  } = attempt;
   return safeAttempt;
 }
 
@@ -300,6 +349,9 @@ export function selectAdminPaymentAttempt(
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   const financialReviewAttempt = bookingAttempts.find((attempt) =>
     attempt.status === "duplicate_paid" ||
+    attempt.status === "review_required" ||
+    attempt.status === "pending_review" ||
+    attempt.bankReviewDecision === "refund_review" ||
     Boolean(attempt.reversalStatus && !attempt.reversalResolution));
   if (financialReviewAttempt) return financialReviewAttempt;
   return bookingAttempts.find((attempt) => attempt.id === booking.activeAttemptId) ||
@@ -488,6 +540,29 @@ export class BookingCommissionService {
     ) {
       throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
     }
+    const activeAttempt = booking.activeAttemptId
+      ? await bookingCommissionStore.getPaymentAttempt(booking.activeAttemptId)
+      : null;
+    const bankTransferUnderReview = Boolean(
+      activeAttempt &&
+      activeAttempt.bookingId === booking.id &&
+      activeAttempt.paymentMethod === "bank_transfer" &&
+      (
+        activeAttempt.status === "creating" ||
+        activeAttempt.status === "unknown" ||
+        activeAttempt.status === "pending_review" ||
+        activeAttempt.status === "review_required"
+      ),
+    );
+    const electronicAttemptInProgress = Boolean(
+      activeAttempt &&
+      activeAttempt.bookingId === booking.id &&
+      activeAttempt.paymentMethod !== "bank_transfer" &&
+      (
+        activeAttempt.status === "creating" ||
+        activeAttempt.status === "unknown"
+      ),
+    );
     return {
       id: booking.id,
       propertyNumber: booking.propertyNumber,
@@ -508,9 +583,21 @@ export class BookingCommissionService {
       checkoutAvailable:
         booking.commissionStatus !== "paid" &&
         booking.commissionStatus !== "waived" &&
-        booking.disputeStatus !== "pending",
+        booking.disputeStatus !== "pending" &&
+        !bankTransferUnderReview &&
+        !electronicAttemptInProgress,
       disputeStatus: booking.disputeStatus,
       disputedAt: booking.disputedAt,
+      paymentAttempt: activeAttempt && activeAttempt.bookingId === booking.id
+        ? {
+            paymentMethod: activeAttempt.paymentMethod,
+            status: activeAttempt.status,
+            receiptSubmittedAt: activeAttempt.receiptSubmittedAt || null,
+            bankReviewDecision: activeAttempt.bankReviewDecision || null,
+            bankReviewReason: activeAttempt.bankReviewReason || null,
+            bankReviewedAt: activeAttempt.bankReviewedAt || null,
+          }
+        : null,
     };
   }
 
@@ -536,6 +623,21 @@ export class BookingCommissionService {
       commissionStatus: result.booking.commissionStatus,
       complianceStatus: result.booking.complianceStatus,
       propertyReleased: result.propertyReleased,
+      ownerNotificationScheduled: result.ownerNotificationScheduled,
+    };
+  }
+
+  async resendAdminNotification(bookingId: string, rawInput: unknown) {
+    const input = bookingAdminNotificationResendSchema.parse(rawInput);
+    const result = await bookingCommissionStore.scheduleManualNotificationResend({
+      bookingId,
+      sourceJobId: input.sourceJobId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return {
+      bookingId,
+      replayed: result.replayed,
+      notification: adminNotificationJob(result.job),
     };
   }
 
@@ -577,7 +679,9 @@ export class BookingCommissionService {
   }
 
   async getAdminCustomerWhatsAppUrl(bookingId: string): Promise<string> {
-    const booking = await bookingCommissionStore.getBooking(bookingId);
+    const booking = await bookingCommissionStore.getBookingForCurrentOwner(
+      bookingId,
+    );
     if (!booking) {
       throw new BookingWorkflowError(
         "BOOKING_NOT_FOUND",
@@ -594,6 +698,130 @@ export class BookingCommissionService {
       );
     }
     return `https://wa.me/${destination}?text=${encodeURIComponent(BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE)}`;
+  }
+
+  async submitBankTransfer(
+    token: string,
+    file: Express.Multer.File | undefined,
+    receiptPersistence: BookingCommissionReceiptPersistence =
+      defaultBookingCommissionReceiptPersistence,
+  ) {
+    const verified = this.verifyOwnerToken(token);
+    if (!file) {
+      throw new BookingCommissionReceiptError(
+        "RECEIPT_REQUIRED",
+        "الإيصال مطلوب.",
+        400,
+      );
+    }
+    const bankAccount = await firebaseService.getDefaultBankAccount();
+    if (!isUsableBookingCommissionBankAccount(bankAccount)) {
+      throw new BookingWorkflowError(
+        "BANK_ACCOUNT_UNAVAILABLE",
+        "بيانات الحساب البنكي غير متاحة أو غير مكتملة.",
+        503,
+      );
+    }
+    const attemptId = `BCOM-ATT-${Date.now()}-${randomBytes(5).toString("hex")}`;
+    const merchantAttemptKey = `RWQN-BCOM-${Date.now()}-${randomBytes(8).toString("hex")}`;
+    const reservation = await bookingCommissionStore.reservePaymentAttempt({
+      bookingId: verified.bookingId,
+      attemptId,
+      merchantAttemptKey,
+      paymentMethod: "bank_transfer",
+    });
+    if (reservation.status === "reused") {
+      await bookingCommissionStore.requireCurrentFreeEligibility(
+        reservation.booking.id,
+      );
+      return {
+        status: reservation.attempt.status,
+        attemptId: reservation.attempt.id,
+        receiptSubmittedAt: reservation.attempt.receiptSubmittedAt || null,
+      };
+    }
+
+    let storedReceipt: StoredBookingCommissionReceipt;
+    try {
+      storedReceipt = await receiptPersistence.store({
+        bookingId: reservation.booking.id,
+        attemptId: reservation.attempt.id,
+        file,
+      });
+    } catch (error) {
+      await bookingCommissionStore.markPaymentAttemptCreationFailure({
+        attemptId: reservation.attempt.id,
+        certainty: error instanceof BookingCommissionReceiptError
+          ? "rejected"
+          : "unknown",
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
+    try {
+      const result = await bookingCommissionStore.completeBankTransferAttempt({
+        attemptId: reservation.attempt.id,
+        receiptUrl: storedReceipt.url,
+        receiptObjectKey: storedReceipt.objectKey,
+        receiptContentType: storedReceipt.contentType,
+        receiptSizeBytes: storedReceipt.sizeBytes,
+      });
+      return {
+        status: result.status,
+        attemptId: result.attempt.id,
+        receiptSubmittedAt: result.attempt.receiptSubmittedAt || null,
+      };
+    } catch (error) {
+      let persistedAttempt: BookingCommissionPaymentAttempt | null = null;
+      let persistenceKnown = false;
+      try {
+        persistedAttempt = await bookingCommissionStore.getPaymentAttempt(
+          reservation.attempt.id,
+        );
+        persistenceKnown = true;
+      } catch {
+        // If Firestore is unavailable after the transaction, deleting the
+        // object could destroy evidence referenced by a committed write.
+      }
+      if (
+        persistedAttempt &&
+        persistedAttempt.receiptObjectKey === storedReceipt.objectKey &&
+        persistedAttempt.receiptUrl === storedReceipt.url &&
+        (persistedAttempt.status === "pending_review" ||
+          persistedAttempt.status === "review_required")
+      ) {
+        return {
+          status: persistedAttempt.status,
+          attemptId: persistedAttempt.id,
+          receiptSubmittedAt: persistedAttempt.receiptSubmittedAt || null,
+        };
+      }
+
+      let removed = false;
+      if (persistenceKnown) {
+        try {
+          removed = await receiptPersistence.remove(storedReceipt.objectKey);
+        } catch {
+          removed = false;
+        }
+      }
+      await bookingCommissionStore.markPaymentAttemptCreationFailure({
+        attemptId: reservation.attempt.id,
+        certainty: removed ? "rejected" : "unknown",
+        reason: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async resolveAdminBankTransfer(bookingId: string, rawInput: unknown) {
+    const input = bookingAdminBankTransferResolutionSchema.parse(rawInput);
+    return bookingCommissionStore.resolveBankTransferAttempt({
+      bookingId,
+      attemptId: input.attemptId,
+      resolution: input.resolution,
+    });
   }
 
   async createCheckout(token: string, rawInput: unknown) {
@@ -641,7 +869,7 @@ export class BookingCommissionService {
         propertyNumber: reservation.booking.propertyNumber,
         propertyName: reservation.booking.propertyName,
         ownerPhone: reservation.booking.ownerPhone,
-        paymentMethod: reservation.attempt.paymentMethod,
+        paymentMethod: input.paymentMethod,
       });
       const attempt = await bookingCommissionStore.completePaymentAttemptCreation({
         attemptId: reservation.attempt.id,
@@ -772,6 +1000,12 @@ export function bookingRouteError(error: unknown): {
     return {
       status: error.certainty === "rejected" ? 409 : 503,
       body: { code: "COMMISSION_PAYMENT_UNAVAILABLE", error: "تعذر إنشاء رابط الدفع حالياً" },
+    };
+  }
+  if (error instanceof BookingCommissionReceiptError) {
+    return {
+      status: error.status,
+      body: { code: error.code, error: error.message },
     };
   }
   console.error("Booking workflow error:", error);

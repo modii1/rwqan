@@ -159,10 +159,10 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
 
 test("admin customer WhatsApp handoff redirects privately without returning the phone as JSON", async () => {
   const store = bookingCommissionStore as any;
-  const originalGetBooking = store.getBooking;
+  const originalGetBooking = store.getBookingForCurrentOwner;
 
   try {
-    store.getBooking = async (id: string) => {
+    store.getBookingForCurrentOwner = async (id: string) => {
       if (id === "BOOK-MISSING") return null;
       return {
         id,
@@ -201,7 +201,7 @@ test("admin customer WhatsApp handoff redirects privately without returning the 
         error: "Booking not found",
       });
 
-      store.getBooking = async () => ({
+      store.getBookingForCurrentOwner = async () => ({
         id: "BOOK-INVALID",
         customerPhone: "invalid",
       });
@@ -216,6 +216,6 @@ test("admin customer WhatsApp handoff redirects privately without returning the 
       });
     });
   } finally {
-    store.getBooking = originalGetBooking;
+    store.getBookingForCurrentOwner = originalGetBooking;
   }
 });

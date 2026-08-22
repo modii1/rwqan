@@ -123,6 +123,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       request: args[3],
       event: args[5],
       dailyPropertyLimitReached: markDailyLimitReached,
+      bookingFollowUpCreated: Boolean(args[8]),
     };
   };
   (firebaseService as any).consumeContactRequestAttemptLimit = async (...args: any[]) => {
@@ -265,6 +266,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal(acceptedEvent.bookingFollowUpStatus, "scheduled");
       assert.equal("bookingFollowUpFailureCode" in acceptedEvent, false);
       assert.equal(acceptedCalls.at(-1)?.[8]?.followUp?.id, `BOOK-${acceptedEvent.requestCode}`);
+      assert.equal(
+        (await response.json() as Record<string, unknown>).bookingCustomerPhone,
+        "+966598765432",
+      );
       assert.deepEqual(workflowBuildOptions.at(-1)?.propertyPrices, {
         weekday: "750",
         weekend: "١٬٢٥٠٫٥٠",
@@ -543,6 +548,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
       followUpMode = "off";
 
       assert.equal(response.status, 200);
+      assert.equal(
+        "bookingCustomerPhone" in (await response.json() as Record<string, unknown>),
+        false,
+      );
       assert.equal(acceptedCalls.at(-1)?.[2], 0);
       assert.equal(acceptedCalls.at(-1)?.[6], undefined);
       assert.equal(acceptedCalls.at(-1)?.[7], undefined);

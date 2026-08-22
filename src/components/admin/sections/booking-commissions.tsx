@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
 import {
@@ -68,6 +68,7 @@ import {
   type BookingReversalReviewState,
 } from "@/components/booking/booking-reversal-state";
 import BookingCommissionSettingsCard from "./booking-commission-settings";
+import BookingBankTransferReview from "./booking-bank-transfer-review";
 import { getAdminCustomerWhatsAppHref } from "./booking-customer-whatsapp";
 
 interface BookingCommissionSummary {
@@ -141,6 +142,8 @@ function paymentAttemptStatusLabel(value: unknown): string {
   const status = normalize(value);
   if (status === "creating") return "جاري إنشاء رابط الدفع";
   if (status === "created") return "رابط الدفع جاهز";
+  if (status === "pending_review") return "إيصال بانتظار المراجعة";
+  if (status === "review_required") return "مراجعة مالية مطلوبة";
   if (status === "unknown") return "تحتاج مراجعة حالة المزود";
   if (status === "failed") return "فشل إنشاء رابط الدفع";
   if (status === "paid") return "تم الدفع";
@@ -152,6 +155,7 @@ function paymentMethodLabel(value: unknown): string {
   const method = normalize(value);
   if (method === "cards") return "بطاقة";
   if (method === "applepay") return "Apple Pay";
+  if (method === "bank_transfer") return "تحويل بنكي";
   return String(value || "—");
 }
 
@@ -163,6 +167,22 @@ function paymentFailureReasonLabel(value: unknown): string {
     return getPaymentReversalStatusLabel(reason);
   }
   return String(value || "—");
+}
+
+function receiptFileSizeLabel(value: unknown): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function bankReviewDecisionLabel(value: unknown): string {
+  const decision = normalize(value);
+  if (decision === "approved") return "معتمد";
+  if (decision === "rejected") return "مرفوض";
+  if (decision === "refund_review") return "مراجعة استرداد";
+  return "—";
 }
 
 function hasBookingEvent(row: BookingDisplayRow, type: string): boolean {
@@ -481,6 +501,9 @@ export default function BookingCommissionsSection() {
               }}
               onResolveDispute={resolveDispute}
               onResolveReversal={resolveReversal}
+              onNotificationResent={async () => {
+                await query.refetch();
+              }}
               resolutionPending={resolutionPending}
               resolutionError={resolutionError}
               resolutionNotice={resolutionNotice}
@@ -630,6 +653,7 @@ function BookingAdminDetails({
   onClose,
   onResolveDispute,
   onResolveReversal,
+  onNotificationResent,
   resolutionPending,
   resolutionError,
   resolutionNotice,
@@ -646,6 +670,7 @@ function BookingAdminDetails({
     reversalTransactionId: string,
     resolution: ReversalResolution,
   ) => Promise<void>;
+  onNotificationResent: () => Promise<void>;
   resolutionPending: DisputeResolution | null;
   resolutionError: string;
   resolutionNotice: string;
@@ -989,6 +1014,11 @@ function BookingAdminDetails({
           {paymentAttempt && (
             <section>
               <h3 className="mb-3 text-sm font-bold text-[#34332f]">آخر محاولة دفع</h3>
+              <BookingBankTransferReview
+                bookingId={row.id}
+                attempt={paymentAttempt}
+                onChanged={onNotificationResent}
+              />
               {(row.paymentAttempts?.length || 0) > 1 && <p className="mb-3 text-xs leading-5 text-muted-foreground">هذه هي المحاولة التي اختارها النظام للعرض المباشر والمراجعة. يظهر السجل الكامل أدناه.</p>}
               <div className="grid gap-3 rounded-xl border bg-muted/15 p-4 sm:grid-cols-2">
                 <AdminFact label="حالة المحاولة" value={paymentAttemptStatusLabel(paymentAttempt.status)} />
@@ -1032,7 +1062,9 @@ function BookingAdminDetails({
           {(row.notificationJobs?.length || 0) > 0 && (
             <AdminNotificationHistory
               key={`notification-history-${row.id}`}
+              bookingId={row.id}
               jobs={row.notificationJobs || []}
+              onResent={onNotificationResent}
             />
           )}
         </div>
@@ -1045,11 +1077,69 @@ function BookingAdminDetails({
   );
 }
 
-function AdminNotificationHistory({ jobs }: { jobs: BookingAdminNotificationJob[] }) {
+function createNotificationResendKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  if (!globalThis.crypto) {
+    return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+  }
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function AdminNotificationHistory({
+  bookingId,
+  jobs,
+  onResent,
+}: {
+  bookingId: string;
+  jobs: BookingAdminNotificationJob[];
+  onResent: () => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
+  const [resendPendingId, setResendPendingId] = useState<string | null>(null);
+  const [resendError, setResendError] = useState("");
+  const [resendNotice, setResendNotice] = useState("");
+  const resendKeys = useRef<Record<string, string>>({});
   const visibleJobs = jobs.slice(0, visibleCount);
   const remaining = Math.max(0, jobs.length - visibleJobs.length);
+
+  const resend = async (job: BookingAdminNotificationJob) => {
+    if (!job.id || resendPendingId) return;
+    const idempotencyKey = resendKeys.current[job.id] ||
+      createNotificationResendKey();
+    resendKeys.current[job.id] = idempotencyKey;
+    setResendPendingId(job.id);
+    setResendError("");
+    setResendNotice("");
+    try {
+      await bookingApiRequest(
+        `/api/admin/booking-commissions/${encodeURIComponent(bookingId)}/notifications/resend`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceJobId: job.id,
+            idempotencyKey,
+          }),
+        },
+      );
+      await onResent();
+      delete resendKeys.current[job.id];
+      setResendNotice("تمت جدولة نسخة إضافية من الرسالة للإرسال.");
+    } catch (error) {
+      setResendError(
+        error instanceof Error
+          ? error.message
+          : "تعذر جدولة إعادة الإرسال. حاول مرة أخرى.",
+      );
+    } finally {
+      setResendPendingId(null);
+    }
+  };
 
   return (
     <section className="overflow-hidden rounded-xl border">
@@ -1067,8 +1157,24 @@ function AdminNotificationHistory({ jobs }: { jobs: BookingAdminNotificationJob[
       </button>
       {open && (
         <div className="space-y-3 border-t p-3 sm:p-4">
+          {resendNotice && (
+            <p className="rounded-lg bg-emerald-50 p-3 text-xs font-medium text-emerald-800" role="status">
+              {resendNotice}
+            </p>
+          )}
+          {resendError && (
+            <p className="rounded-lg bg-red-50 p-3 text-xs font-medium text-destructive" role="alert">
+              {resendError}
+            </p>
+          )}
           {visibleJobs.map((job, index) => {
             const status = notificationStatusMeta(job.status);
+            const canResend = [
+              "sent",
+              "failed",
+              "cancelled",
+              "suppressed_quota",
+            ].includes(normalize(job.status));
             return (
               <article key={job.id || `${job.kind || "notification"}-${index}`} className="rounded-lg border bg-background p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1078,6 +1184,14 @@ function AdminNotificationHistory({ jobs }: { jobs: BookingAdminNotificationJob[
                   </div>
                   <StatusBadge label={status.label} tone={status.tone} />
                 </div>
+                {job.manualResendOfJobId && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <StatusBadge label="إعادة إرسال يدوية" tone="violet" />
+                    <span className="break-all text-[11px] text-muted-foreground">
+                      الرسالة الأصلية: {job.manualResendOfJobId}
+                    </span>
+                  </div>
+                )}
                 <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <AdminFact label="المستلم" value={notificationRecipientLabel(job.recipientRole)} />
                   <AdminFact label="الموعد المجدول" value={formatDateTime(job.scheduledAt)} />
@@ -1087,12 +1201,49 @@ function AdminNotificationHistory({ jobs }: { jobs: BookingAdminNotificationJob[
                   <AdminFact label="وقت الفشل" value={formatDateTime(job.failedAt)} />
                   <AdminFact label="وقت منع الرسالة" value={formatDateTime(job.suppressedAt)} />
                   <AdminFact label="وقت إنشاء السجل" value={formatDateTime(job.createdAt)} />
+                  {job.manualResendRequestedAt && (
+                    <AdminFact label="وقت طلب إعادة الإرسال" value={formatDateTime(job.manualResendRequestedAt)} />
+                  )}
                   <AdminFact label="آخر تحديث للسجل" value={formatDateTime(job.updatedAt)} />
                 </div>
                 {job.providerError && (
                   <p className="mt-3 break-words rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
                     سبب المزود أو سير العمل: {notificationProviderErrorLabel(job.providerError)}
                   </p>
+                )}
+                {canResend && (
+                  <div className="mt-3 border-t pt-3">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={resendPendingId !== null}
+                          data-testid={`button-resend-notification-${job.id}`}
+                        >
+                          {resendPendingId === job.id && (
+                            <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                          )}
+                          إعادة إرسال الرسالة
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent dir="rtl">
+                        <AlertDialogHeader className="text-right sm:text-right">
+                          <AlertDialogTitle>تأكيد إرسال نسخة إضافية</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            هذا إجراء يدوي مقصود وسيُنشئ رسالة إضافية جديدة من قالب {notificationKindLabel(job.kind)} إلى {notificationRecipientLabel(job.recipientRole)}. لن يتغير سجل الرسالة الأصلية.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter className="gap-2 sm:space-x-0">
+                          <AlertDialogCancel>رجوع</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => void resend(job)}>
+                            تأكيد إعادة الإرسال
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 )}
               </article>
             );
@@ -1169,6 +1320,14 @@ function AdminPaymentAttemptHistory({
                   <AdminFact label="رقم العملية" value={attempt.transactionId || "—"} />
                   <AdminFact label="تاريخ العملية لدى المزود" value={formatDateTime(attempt.providerCreatedAt)} />
                   <AdminFact label="تاريخ الدفع" value={formatDateTime(attempt.paidAt)} />
+                  <AdminFact label="وقت رفع الإيصال" value={formatDateTime(attempt.receiptSubmittedAt)} />
+                  <AdminFact label="نوع ملف الإيصال" value={attempt.receiptContentType || "—"} />
+                  <AdminFact label="حجم ملف الإيصال" value={receiptFileSizeLabel(attempt.receiptSizeBytes)} />
+                  <AdminFact label="قرار مراجعة الإيصال" value={bankReviewDecisionLabel(attempt.bankReviewDecision)} />
+                  <AdminFact label="سبب مراجعة الإيصال" value={attempt.bankReviewReason || "—"} />
+                  <AdminFact label="وقت مراجعة الإيصال" value={formatDateTime(attempt.bankReviewedAt)} />
+                  <AdminFact label="حالة المراجعة المالية" value={bankReviewDecisionLabel(attempt.financialReviewDecision)} />
+                  <AdminFact label="سبب المراجعة المالية" value={attempt.financialReviewReason || "—"} />
                   <AdminFact label="رقم عملية التفويض" value={attempt.authorizationTransactionId || "—"} />
                   <AdminFact label="تاريخ التفويض" value={formatDateTime(attempt.authorizedAt)} />
                   <AdminFact label="الحالة غير القابلة للاحتساب" value={attempt.nonPayableStatus ? getPaymentReversalStatusLabel(attempt.nonPayableStatus) : "—"} />

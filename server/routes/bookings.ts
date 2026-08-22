@@ -1,5 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Router, type Request, type Response } from "express";
+import {
+  Router,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from "express";
 import { firebaseService } from "../firebaseService";
 import { requireSameOrigin } from "./middleware";
 import {
@@ -12,6 +17,12 @@ import {
   bookingRouteError,
 } from "../services/BookingCommissionService";
 import { runBookingCommissionWorker } from "../services/BookingNotificationWorker";
+import {
+  BookingShortLinkError,
+  getBookingShortLinkService,
+} from "../services/BookingShortLinkService";
+import { BookingTokenError } from "../services/BookingTokenService";
+import { parseBookingCommissionReceipt } from "../services/BookingCommissionReceiptService";
 
 const router = Router();
 const BOOKING_MUTATION_WINDOW_MS = 10 * 60 * 1000;
@@ -19,6 +30,13 @@ const BOOKING_MUTATION_MAX_ATTEMPTS = 30;
 
 function setNoStore(res: Response): void {
   res.set("Cache-Control", "no-store, private");
+}
+
+function setShortLinkPrivacyHeaders(res: Response): void {
+  setNoStore(res);
+  res.set("Referrer-Policy", "no-referrer");
+  res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  res.set("X-Content-Type-Options", "nosniff");
 }
 
 function customerSessionCookieOptions(maxAge = BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS) {
@@ -73,6 +91,46 @@ function respondWithBookingError(res: Response, error: unknown): void {
   const response = bookingRouteError(error);
   res.status(response.status).json(response.body);
 }
+
+export function createBookingShortLinkHandler(
+  resolve: (code: string) => Promise<{ token: string; expiresAt: string }> =
+    (code) => getBookingShortLinkService().resolveCustomerResponse(code),
+): RequestHandler {
+  return async (req, res) => {
+    setShortLinkPrivacyHeaders(res);
+    try {
+      const resolved = await resolve(req.params.code);
+      const verified = bookingCommissionService.verifyCustomerToken(resolved.token);
+      if (verified.expiresAt !== resolved.expiresAt) {
+        throw new BookingShortLinkError(
+          "SHORT_LINK_INVALID",
+          "Booking short-link expiry mismatch",
+        );
+      }
+      return res.redirect(
+        302,
+        `/booking/${encodeURIComponent(resolved.token)}`,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof BookingShortLinkError) &&
+        !(error instanceof BookingTokenError)
+      ) {
+        console.error(
+          "Booking short-link resolution failed:",
+          error instanceof Error ? error.name : "UnknownError",
+        );
+      }
+      const status = error instanceof BookingShortLinkError &&
+          error.code === "SHORT_LINK_EXPIRED"
+        ? 410
+        : 404;
+      return res.status(status).type("text/plain; charset=utf-8").send("الرابط غير متاح");
+    }
+  };
+}
+
+router.get("/b/:code", createBookingShortLinkHandler());
 
 router.get("/api/booking-followups/:token", async (req, res) => {
   setNoStore(res);
@@ -169,6 +227,31 @@ router.post("/api/booking-commissions/:token/checkout", requireSameOrigin, async
     respondWithBookingError(res, error);
   }
 });
+
+router.post(
+  "/api/booking-commissions/:token/bank-transfer",
+  requireSameOrigin,
+  (req, res, next) => {
+    setNoStore(res);
+    enforceBookingMutationRateLimit(req, res)
+      .then((allowed) => {
+        if (allowed) next();
+      })
+      .catch((error) => respondWithBookingError(res, error));
+  },
+  parseBookingCommissionReceipt,
+  async (req, res) => {
+    try {
+      const result = await bookingCommissionService.submitBankTransfer(
+        req.params.token,
+        req.file,
+      );
+      return res.json(result);
+    } catch (error) {
+      respondWithBookingError(res, error);
+    }
+  },
+);
 
 router.post("/api/booking-commissions/:token/dispute", requireSameOrigin, async (req, res) => {
   setNoStore(res);

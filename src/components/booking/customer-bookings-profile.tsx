@@ -17,13 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   BookingPageShell,
-  QuestionnaireFacts,
   StatusBadge,
   formatDateTime,
   getBookingStatusMeta,
   getPropertyLabel,
   type BookingDisplayRow,
 } from "./booking-display";
+import { CustomerQuestionnaireFacts } from "./customer-questionnaire-facts";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
 
 interface CustomerBookingsPayload {
@@ -190,7 +190,7 @@ function CustomerBookingCard({ booking }: { booking: BookingDisplayRow }) {
         <div className="space-y-5 border-t px-4 py-5 sm:px-5">
           <section aria-labelledby={`facts-${booking.id}`}>
             <h3 id={`facts-${booking.id}`} className="mb-3 text-sm font-bold text-[#34332f]">بيانات الحجز</h3>
-            <QuestionnaireFacts questionnaire={booking.questionnaire || booking.confirmationFacts} />
+            <CustomerQuestionnaireFacts questionnaire={booking.questionnaire || booking.confirmationFacts} />
           </section>
           <Button asChild variant="outline" size="sm">
             <Link href={`/property/${encodeURIComponent(booking.propertyNumber)}`}>عرض العقار</Link>

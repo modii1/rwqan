@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { BookingTokenService } from "./BookingTokenService";
+import {
+  createCustomerBookingShortCode,
+} from "./BookingShortLinkService";
 import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../shared/booking";
 import type {
   BookingFollowUpDocument,
@@ -149,6 +152,13 @@ function tokenFromMessage(message: string, route: "booking" | "booking-commissio
   return decodeURIComponent(match[1]);
 }
 
+function customerShortCodeFromMessage(message: string): string {
+  const match = /https:\/\/booking\.example\/b\/([A-Za-z0-9_-]{22})(?:\s|$)/
+    .exec(message);
+  assert.ok(match, "expected compact customer booking link in message");
+  return match[1];
+}
+
 test("customer follow-up exposes only the intended property label and a purpose-bound link", () => {
   const paidBooking = confirmedBooking();
   const paidMessage = buildBookingNotificationMessage(
@@ -160,10 +170,13 @@ test("customer follow-up exposes only the intended property label and a purpose-
   ));
   assert.ok(paidMessage.includes("\n\nأكد النتيجة من الرابط التالي:\n"));
 
-  const tokenService = new BookingTokenService({ secret: TOKEN_SECRET });
-  const token = tokenFromMessage(paidMessage, "booking");
-  assert.equal(tokenService.verify(token, "customer_response").bookingId, paidBooking.id);
-  assert.throws(() => tokenService.verify(token, "owner_payment"));
+  const shortCode = customerShortCodeFromMessage(paidMessage);
+  assert.equal(
+    shortCode,
+    createCustomerBookingShortCode(paidBooking.id, TOKEN_SECRET),
+  );
+  assert.equal(paidMessage.includes(paidBooking.id), false);
+  assert.equal(paidMessage.includes("/booking/"), false);
 
   const freeMessage = buildBookingNotificationMessage(
     notificationJob("customer_followup", { isFreeProperty: true }),
@@ -181,6 +194,8 @@ test("owner confirmation states the three customer facts, price, 10% fee, deadli
   );
 
   assert.ok(message.includes("وقت الحجز: نهاية الأسبوع"));
+  assert.ok(message.includes("رقم الطلب: REQ-13383-001"));
+  assert.ok(message.includes("رقم العميل: +966500000002"));
   assert.match(message, /تاريخ الحجز: .+/);
   assert.ok(message.includes("المبلغ المدفوع: 1255.55 ريال"));
   assert.ok(message.includes("عمولة روقان (10%): 125.56 ريال"));
@@ -199,6 +214,8 @@ test("observe-only owner confirmation states booking facts without a fee or paym
   );
 
   assert.ok(message.startsWith("تم تسجيل حجز للعقار شاليه الريف المائي رقم 13383"));
+  assert.ok(message.includes("رقم الطلب: REQ-13383-001"));
+  assert.ok(message.includes("رقم العميل: +966500000002"));
   assert.ok(message.includes("وقت الحجز: نهاية الأسبوع"));
   assert.match(message, /تاريخ الحجز: .+/);
   assert.ok(message.includes("المبلغ المدفوع: 1255.55 ريال"));
@@ -228,6 +245,18 @@ test("day 3, 4, and 5 reminders preserve their offset and transactional payment 
     assert.match(message, /آخر موعد للسداد: .+/);
     tokenFromMessage(message, "booking-commission");
   }
+});
+
+test("rejected dispute message states collection facts and links back to payment", () => {
+  const message = buildBookingNotificationMessage(
+    notificationJob("commission_dispute_rejected"),
+    confirmedBooking({ disputeStatus: "rejected" }),
+  );
+
+  assert.ok(message.startsWith("تم رفض الاعتراض على عمولة حجز العقار"));
+  assert.ok(message.includes("المبلغ المستحق: 125.56 ريال"));
+  assert.match(message, /آخر موعد للسداد: .+/);
+  tokenFromMessage(message, "booking-commission");
 });
 
 test("pause and release messages describe the matching property outcome", () => {
@@ -277,6 +306,125 @@ test("worker message construction uses a validated non-default admin template", 
   );
 });
 
+test("an existing pending customer job lazily creates its compact alias before sending once", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = {
+    ...confirmedBooking(),
+    bookingStatus: "awaiting_response",
+    bookingDecision: null,
+    questionnaireStartedAt: null,
+    confirmationFacts: null,
+    confirmedAt: null,
+  } as unknown as BookingFollowUpDocument;
+  const claimed = {
+    ...notificationJob("customer_followup", {
+      status: "claimed",
+      leaseToken: "customer-short-link-lease",
+      quotaCategory: "customer_followup",
+    }),
+    leaseToken: "customer-short-link-lease",
+  };
+  const sequence: string[] = [];
+  const aliasInputs: Array<{
+    bookingId: string;
+    token: string;
+    expiresAt: Date | string | number;
+  }> = [];
+  const providerBodies: unknown[] = [];
+  const finalizations: unknown[] = [];
+  let claimCalls = 0;
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () =>
+      claimCalls++ === 0 ? [claimed] : [];
+    store.prepareNotificationForSend = async () => ({
+      status: "ready",
+      booking,
+    });
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: 3,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async (_url, init) => {
+      sequence.push("provider");
+      providerBodies.push(JSON.parse(String(init?.body)));
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(
+        new Date("2099-08-18T12:00:00.000Z"),
+        {
+          shortLinkService: {
+            ensureCustomerResponseLink: async (input) => {
+              sequence.push("alias");
+              aliasInputs.push(input);
+              return createCustomerBookingShortCode(input.bookingId, TOKEN_SECRET);
+            },
+          },
+        },
+      ),
+      { claimed: 1, sent: 1 },
+    );
+
+    assert.deepEqual(sequence, ["alias", "provider"]);
+    assert.equal(aliasInputs.length, 1);
+    assert.equal(aliasInputs[0].bookingId, booking.id);
+    const verified = new BookingTokenService({ secret: TOKEN_SECRET })
+      .verify(aliasInputs[0].token, "customer_response");
+    assert.equal(verified.bookingId, booking.id);
+    assert.equal(
+      aliasInputs[0].expiresAt,
+      Date.parse(booking.createdAt) + 90 * 24 * 60 * 60 * 1_000,
+    );
+    assert.equal(providerBodies.length, 1);
+    const providerMessage = String(
+      (providerBodies[0] as { message?: unknown }).message || "",
+    );
+    const code = customerShortCodeFromMessage(providerMessage);
+    assert.equal(code.length, 22);
+    assert.equal(code, createCustomerBookingShortCode(booking.id, TOKEN_SECRET));
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: claimed.leaseToken,
+      success: true,
+      error: undefined,
+    }]);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
 test("dispatch fetches the persisted template, sends its rendered body once, and finalizes the job", async () => {
   const store = bookingCommissionStore as any;
   const service = bookingCommissionService as any;
@@ -301,7 +449,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
   const customTemplates = {
     ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     owner_booking_facts:
-      "CUSTOM {{propertyNumber}} | {{propertyName}} | {{timing}} | {{bookingDate}} | {{pricePaidSar}}",
+      "CUSTOM {{propertyNumber}} | {{propertyName}} | {{requestCode}} | {{customerPhone}} | {{timing}} | {{bookingDate}} | {{pricePaidSar}}",
   };
   const providerRequests: Array<{ url: string; body: unknown }> = [];
   const finalizations: unknown[] = [];
@@ -362,7 +510,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
     assert.deepEqual(providerRequests[0].body, {
       number: "966500000001",
       message:
-        `CUSTOM 13383 | شاليه الريف المائي | نهاية الأسبوع | ${bookingDate} | 1255.55`,
+        `CUSTOM 13383 | شاليه الريف المائي | REQ-13383-001 | +966500000002 | نهاية الأسبوع | ${bookingDate} | 1255.55`,
     });
     assert.deepEqual(finalizations, [{
       jobId: claimed.id,

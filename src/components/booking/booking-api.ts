@@ -44,7 +44,18 @@ const bookingErrorMessages: Record<string, string> = {
   PAYMENT_ATTEMPT_NOT_FOUND: "محاولة الدفع غير موجودة.",
   PAYMENT_ATTEMPT_IDENTITY_CONFLICT: "تعذر مطابقة محاولة الدفع مع هذا الطلب.",
   PAYMENT_ATTEMPT_NOT_CREATABLE: "تعذر إكمال إنشاء محاولة الدفع.",
+  PAYMENT_ATTEMPT_NOT_REVIEWABLE: "محاولة التحويل البنكي ليست جاهزة للمراجعة.",
+  PAYMENT_ATTEMPT_RECONCILIATION_REQUIRED: "محاولة الدفع تحتاج مراجعة الإدارة.",
+  COMMISSION_BANK_TRANSFER_UNDER_REVIEW: "إيصال التحويل البنكي قيد المراجعة حالياً.",
+  BANK_TRANSFER_REVIEW_CONFLICT: "سبق حسم مراجعة التحويل البنكي بإجراء مختلف.",
+  BANK_ACCOUNT_UNAVAILABLE: "بيانات الحساب البنكي غير متاحة أو غير مكتملة.",
   PAYMOB_ORDER_CONFLICT: "طلب الدفع مرتبط بمحاولة أخرى.",
+  NOTIFICATION_NOT_FOUND: "سجل الرسالة غير موجود.",
+  NOTIFICATION_SEND_IN_PROGRESS: "الرسالة قيد الإرسال الآن ولا يمكن تكرارها.",
+  NOTIFICATION_NOT_RESENDABLE: "يمكن إعادة إرسال الرسائل المكتملة فقط.",
+  NOTIFICATION_REMINDER_SUPERSEDED: "يوجد تذكير أحدث مستحق، لذلك لا يمكن إعادة إرسال هذا التذكير.",
+  NOTIFICATION_STATE_CHANGED: "لم تعد هذه الرسالة مناسبة لحالة الحجز الحالية.",
+  NOTIFICATION_RESEND_INCONSISTENT: "تعذر مطابقة سجل إعادة الإرسال.",
 };
 
 export async function bookingApiRequest<T>(

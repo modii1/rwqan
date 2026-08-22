@@ -15,6 +15,7 @@ export const BOOKING_WHATSAPP_TEMPLATE_KEYS = [
   "property_paused",
   "property_released_paid",
   "property_released_waived",
+  "commission_dispute_rejected",
 ] as const;
 
 export type BookingWhatsAppTemplateKey =
@@ -93,6 +94,8 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
     placeholders: [
       "propertyName",
       "propertyNumber",
+      "requestCode",
+      "customerPhone",
       "timing",
       "bookingDate",
       "pricePaidSar",
@@ -105,6 +108,8 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
     placeholders: [
       "propertyName",
       "propertyNumber",
+      "requestCode",
+      "customerPhone",
       "timing",
       "bookingDate",
       "pricePaidSar",
@@ -150,6 +155,18 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
     description: "تؤكد قبول الاعتراض وإعادة إتاحة العقار.",
     placeholders: ["propertyName", "propertyNumber"],
   },
+  {
+    key: "commission_dispute_rejected",
+    label: "رفض الاعتراض واستئناف التحصيل",
+    description: "تُرسل للمالك تلقائياً عند رفض الاعتراض.",
+    placeholders: [
+      "propertyName",
+      "propertyNumber",
+      "commissionAmountSar",
+      "commissionDueAt",
+      "paymentLink",
+    ],
+  },
 ] as const;
 
 const TEMPLATE_DEFINITION_BY_KEY = new Map(
@@ -162,9 +179,11 @@ const UNSUPPORTED_CONTROL_CHARACTER_PATTERN =
 
 const PREVIEW_VALUES: Record<string, string> = {
   propertyLabel: "العقار الريف المائي رقم 13383",
-  followUpLink: "https://rwqan.sa/booking/example",
+  followUpLink: "https://rwqan.sa/b/RwqanExampleLink123456",
   propertyName: "الريف المائي",
   propertyNumber: "13383",
+  requestCode: "REQ-13383-001",
+  customerPhone: "+966500000002",
   timing: "نهاية الأسبوع",
   bookingDate: "20 أغسطس 2026",
   pricePaidSar: "1,000",

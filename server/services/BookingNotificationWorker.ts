@@ -2,11 +2,20 @@ import { notificationService } from "./NotificationService";
 import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import { paymobService } from "../integrations/paymob";
 import { getExactPaymobPaymentMethod } from "../utils/paymobPaymentMethod";
+import { normalizeWhatsAppDestination } from "../../shared/phone";
 import {
   bookingCommissionStore,
   type ClaimedBookingNotification,
 } from "./BookingCommissionStore";
-import { bookingCommissionService } from "./BookingCommissionService";
+import {
+  BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
+  bookingCommissionService,
+} from "./BookingCommissionService";
+import {
+  createCustomerBookingShortCode,
+  getBookingShortLinkService,
+  type BookingShortLinkService,
+} from "./BookingShortLinkService";
 import type {
   BookingFollowUpDocument,
   BookingNotificationJob,
@@ -64,6 +73,11 @@ function timingLabel(value: string): string {
   return "وقت آخر";
 }
 
+function customerPhoneLabel(value: string): string {
+  const destination = normalizeWhatsAppDestination(value);
+  return destination ? `+${destination}` : "—";
+}
+
 function bookingDateLabel(booking: BookingFollowUpDocument): string {
   const date = booking.confirmationFacts?.bookingDate;
   if (!date) return "—";
@@ -95,7 +109,6 @@ export function buildBookingNotificationMessage(
 ): string {
   const propertyName = String(booking.propertyName || "").trim() || "بدون اسم";
   if (job.kind === "customer_followup") {
-    const token = bookingCommissionService.issueCustomerResponseToken(booking);
     const propertyLabel = booking.isFreeProperty || !booking.propertyName
       ? `العقار رقم ${booking.propertyNumber}`
       : `${propertyName} رقم ${booking.propertyNumber}`;
@@ -104,7 +117,8 @@ export function buildBookingNotificationMessage(
       templates.customer_followup,
       {
         propertyLabel,
-        followUpLink: `${baseUrl()}/booking/${encodeURIComponent(token)}`,
+        followUpLink:
+          `${baseUrl()}/b/${createCustomerBookingShortCode(booking.id)}`,
       },
     );
   }
@@ -122,6 +136,8 @@ export function buildBookingNotificationMessage(
         {
           propertyName,
           propertyNumber: booking.propertyNumber,
+          requestCode: booking.requestCode,
+          customerPhone: customerPhoneLabel(booking.customerPhone),
           timing: timingLabel(facts?.timing || "other"),
           bookingDate: bookingDateLabel(booking),
           pricePaidSar: formatSar(facts?.pricePaidHalalas || 0),
@@ -136,6 +152,8 @@ export function buildBookingNotificationMessage(
       {
         propertyName,
         propertyNumber: booking.propertyNumber,
+        requestCode: booking.requestCode,
+        customerPhone: customerPhoneLabel(booking.customerPhone),
         timing: timingLabel(facts?.timing || "other"),
         bookingDate: bookingDateLabel(booking),
         pricePaidSar: formatSar(facts?.pricePaidHalalas || 0),
@@ -151,6 +169,20 @@ export function buildBookingNotificationMessage(
 
   const paymentToken = bookingCommissionService.issueOwnerPaymentToken(booking);
   const paymentLink = `${baseUrl()}/booking-commission/${encodeURIComponent(paymentToken)}`;
+
+  if (job.kind === "commission_dispute_rejected") {
+    return renderBookingWhatsAppTemplate(
+      "commission_dispute_rejected",
+      templates.commission_dispute_rejected,
+      {
+        propertyName,
+        propertyNumber: booking.propertyNumber,
+        commissionAmountSar: formatSar(booking.commissionAmountHalalas),
+        commissionDueAt: formatDate(booking.commissionDueAt),
+        paymentLink,
+      },
+    );
+  }
 
   if (job.kind.startsWith("commission_reminder_")) {
     const day = job.reminderOffsetDays || Number(job.kind.slice(-1));
@@ -196,7 +228,13 @@ export function buildBookingNotificationMessage(
   );
 }
 
-async function dispatchClaim(job: ClaimedBookingNotification): Promise<boolean> {
+async function dispatchClaim(
+  job: ClaimedBookingNotification,
+  shortLinkService?: Pick<
+    BookingShortLinkService,
+    "ensureCustomerResponseLink"
+  >,
+): Promise<boolean> {
   const prepared = await bookingCommissionStore.prepareNotificationForSend(
     job.id,
     job.leaseToken,
@@ -209,14 +247,29 @@ async function dispatchClaim(job: ClaimedBookingNotification): Promise<boolean> 
     }
     return false;
   }
-  const booking = prepared.booking;
+  const initialBooking = prepared.booking;
 
   let message: string;
   try {
+    if (job.kind === "customer_followup") {
+      const token = bookingCommissionService.issueCustomerResponseToken(initialBooking);
+      await (shortLinkService || getBookingShortLinkService())
+        .ensureCustomerResponseLink({
+          bookingId: initialBooking.id,
+          token,
+          expiresAt:
+            Date.parse(initialBooking.createdAt) + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
+        });
+    }
     const settings = await bookingCommissionStore.getFreeWorkflowSettings();
+    const sendPrepared = await bookingCommissionStore.prepareNotificationForSend(
+      job.id,
+      job.leaseToken,
+    );
+    if (sendPrepared.status === "blocked") return false;
     message = buildBookingNotificationMessage(
       job,
-      booking,
+      sendPrepared.booking,
       settings.whatsappTemplates,
     );
   } catch (error) {
@@ -241,6 +294,12 @@ async function dispatchClaim(job: ClaimedBookingNotification): Promise<boolean> 
 
 export async function dispatchDueBookingNotifications(
   now = new Date(),
+  options: {
+    shortLinkService?: Pick<
+      BookingShortLinkService,
+      "ensureCustomerResponseLink"
+    >;
+  } = {},
 ): Promise<{ claimed: number; sent: number }> {
   await bookingCommissionStore.recoverExpiredNotificationClaims(now);
   let commissionNotificationsEnabled = false;
@@ -263,7 +322,7 @@ export async function dispatchDueBookingNotifications(
   });
   const results = await Promise.all(claims.map(async (claim) => {
     try {
-      return await dispatchClaim(claim);
+      return await dispatchClaim(claim, options.shortLinkService);
     } catch (error) {
       console.error(`Booking notification ${claim.id} failed:`, error);
       try {
@@ -456,6 +515,7 @@ export async function enforceOverdueBookingCommissions(
         claimedBooking.id,
         now,
         leaseToken,
+        claimedBooking.activeAttemptId || null,
       );
       if (holdResult === "owner_identity_changed") {
         notificationService.sendAdmin(

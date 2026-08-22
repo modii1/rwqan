@@ -513,6 +513,9 @@ router.post("/api/requests/smart", async (req, res) => {
       requestCode,
       requestTime: riyadhTimeDisplay,
       whatsappNumber: property?.whatsappNumber || "",
+      ...(cooldown.bookingFollowUpCreated
+        ? { bookingCustomerPhone: `+966${resolvedClientPhone}` }
+        : {}),
       ...(responseContactIdentity
         ? { contactIdentity: responseContactIdentity }
         : {}),

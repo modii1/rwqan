@@ -17,18 +17,20 @@ import { Card } from "@/components/ui/card";
 import {
   BookingPageHeader,
   BookingPageShell,
-  QuestionnaireFacts,
   type BookingDatePrecision,
   type BookingQuestionnaire,
   type BookingTiming,
   formatSarFromHalalas,
 } from "./booking-display";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
+import { isCanonicalBookingDate } from "./booking-calendar";
+import { BookingDateInput } from "./booking-date-input";
 import {
   buildBookingQuestionnairePayload,
   normalizeListedPriceOptionsHalalas,
   sarInputFromHalalas,
 } from "./booking-price-options";
+import { CustomerQuestionnaireFacts } from "./customer-questionnaire-facts";
 
 interface FollowupBooking {
   id: string;
@@ -62,12 +64,6 @@ function isCompletedStatus(value: unknown): boolean {
 
 function propertyLabel(booking: FollowupBooking): string {
   return String(booking.propertyName || "").trim() || `عقار رقم ${booking.propertyNumber}`;
-}
-
-function isValidBookingDate(value: string, precision: BookingDatePrecision): boolean {
-  return precision === "month"
-    ? /^\d{4}-\d{2}$/.test(value)
-    : /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function normalizePriceInput(value: string): string {
@@ -163,7 +159,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
       setActionError("اختر وقت الحجز للمتابعة.");
       return;
     }
-    if (!isValidBookingDate(bookingDate, bookingDatePrecision)) {
+    if (!isCanonicalBookingDate(bookingDate, bookingDatePrecision)) {
       setActionError("أدخل تاريخ الحجز بالصيغة المطلوبة.");
       return;
     }
@@ -260,7 +256,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
             <p className="mt-1 text-xs text-emerald-700">رقم العقار: {booking.propertyNumber}</p>
           </div>
           <div className="p-5 sm:p-6">
-            <QuestionnaireFacts questionnaire={currentQuestionnaire} />
+            <CustomerQuestionnaireFacts questionnaire={currentQuestionnaire} />
             <Button asChild className="mt-6 w-full sm:w-auto">
               <Link href="/profile">عرض حجوزاتي</Link>
             </Button>
@@ -386,14 +382,10 @@ export default function BookingFollowupClient({ token }: { token: string }) {
                     </button>
                   ))}
                 </div>
-                <input
-                  type={bookingDatePrecision === "month" ? "month" : "date"}
+                <BookingDateInput
                   value={bookingDate}
-                  onChange={(event) => setBookingDate(event.target.value)}
-                  required
-                  aria-label={bookingDatePrecision === "month" ? "شهر الحجز" : "تاريخ الحجز"}
-                  className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="input-booking-date"
+                  precision={bookingDatePrecision}
+                  onChange={setBookingDate}
                 />
               </div>
             </fieldset>

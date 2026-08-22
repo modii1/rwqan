@@ -31,6 +31,12 @@
       "fieldPath": "expiresAtTtl",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "booking_short_links",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

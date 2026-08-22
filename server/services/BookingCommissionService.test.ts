@@ -14,6 +14,16 @@ import {
 import type { BookingFollowUpDocument } from "./BookingCommissionTypes";
 import { paymobService } from "../integrations/paymob";
 import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../shared/booking";
+import { firebaseService } from "../firebaseService";
+
+const usableBankAccount = {
+  id: "BANK-DEFAULT",
+  bankName: "Bank",
+  beneficiaryName: "Rwqan",
+  iban: "SA0000000000000000000000",
+  isActive: true,
+  isDefault: true,
+};
 
 type AwaitingBookingDocument = Extract<
   BookingFollowUpDocument,
@@ -110,7 +120,7 @@ test("admin payment details prioritize an attempt requiring financial review", (
 });
 
 test("admin customer WhatsApp handoff uses only a normalized snapshotted phone", async () => {
-  const originalGetBooking = bookingCommissionStore.getBooking;
+  const originalGetBooking = bookingCommissionStore.getBookingForCurrentOwner;
   const booking = awaitingBookingFixture({
     requestCode: "ADMIN-CUSTOMER-WHATSAPP",
     createdAt: new Date(),
@@ -118,7 +128,7 @@ test("admin customer WhatsApp handoff uses only a normalized snapshotted phone",
   const service = new BookingCommissionService();
 
   try {
-    (bookingCommissionStore as any).getBooking = async (id: string) =>
+    (bookingCommissionStore as any).getBookingForCurrentOwner = async (id: string) =>
       id === booking.id
         ? { ...booking, customerPhone: "+966 (50) 000-0002" }
         : null;
@@ -144,7 +154,7 @@ test("admin customer WhatsApp handoff uses only a normalized snapshotted phone",
         error.status === 404,
     );
 
-    (bookingCommissionStore as any).getBooking = async () => ({
+    (bookingCommissionStore as any).getBookingForCurrentOwner = async () => ({
       ...booking,
       customerPhone: "not-a-phone",
     });
@@ -156,7 +166,158 @@ test("admin customer WhatsApp handoff uses only a normalized snapshotted phone",
         error.status === 400,
     );
   } finally {
-    (bookingCommissionStore as any).getBooking = originalGetBooking;
+    (bookingCommissionStore as any).getBookingForCurrentOwner = originalGetBooking;
+  }
+});
+
+test("admin customer WhatsApp handoff fails closed after free eligibility is lost", async () => {
+  const original = bookingCommissionStore.getBookingForCurrentOwner;
+  const service = new BookingCommissionService();
+  try {
+    (bookingCommissionStore as any).getBookingForCurrentOwner = async () => null;
+    await assert.rejects(
+      () => service.getAdminCustomerWhatsAppUrl("BOOK-UPGRADED"),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "BOOKING_NOT_FOUND" &&
+        error.status === 404,
+    );
+  } finally {
+    (bookingCommissionStore as any).getBookingForCurrentOwner = original;
+  }
+});
+
+test("owner commission DTO exposes only sanitized active electronic state for safe resume UI", async () => {
+  const store = bookingCommissionStore as any;
+  const service = new BookingCommissionService();
+  const originals = {
+    getBooking: store.getBookingForCurrentOwner,
+    getAttempt: store.getPaymentAttempt,
+    verifyOwnerToken: service.verifyOwnerToken,
+  };
+  const base = awaitingBookingFixture({
+    requestCode: "OWNER-ELECTRONIC-STATE",
+    createdAt: new Date(),
+  });
+  const booking = {
+    ...base,
+    bookingStatus: "confirmed",
+    bookingDecision: "yes",
+    confirmationFacts: {
+      timing: "weekend",
+      bookingDate: { value: "2026-08-15", precision: "day" },
+      pricePaidHalalas: 100_000,
+    },
+    confirmedAt: new Date().toISOString(),
+    commissionStatus: "pending",
+    commissionAmountHalalas: 10_000,
+    commissionDueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    activeAttemptId: "ATT-ELECTRONIC-STATE",
+    disputeStatus: "none",
+  } as BookingFollowUpDocument;
+  let status: "created" | "creating" = "created";
+  try {
+    (service as any).verifyOwnerToken = () => ({ bookingId: booking.id });
+    store.getBookingForCurrentOwner = async () => booking;
+    store.getPaymentAttempt = async () => ({
+      id: "ATT-ELECTRONIC-STATE",
+      bookingId: booking.id,
+      paymentMethod: "cards",
+      status,
+      checkoutUrl: "SECRET-PAYMOB-CHECKOUT",
+      receiptObjectKey: "SECRET-OBJECT-KEY",
+    });
+
+    const resumable = await service.getOwnerCommission("owner-token");
+    assert.equal(resumable.checkoutAvailable, true);
+    assert.deepEqual(resumable.paymentAttempt, {
+      paymentMethod: "cards",
+      status: "created",
+      receiptSubmittedAt: null,
+      bankReviewDecision: null,
+      bankReviewReason: null,
+      bankReviewedAt: null,
+    });
+    assert.equal(JSON.stringify(resumable).includes("SECRET-PAYMOB"), false);
+
+    status = "creating";
+    const processing = await service.getOwnerCommission("owner-token");
+    assert.equal(processing.checkoutAvailable, false);
+    assert.equal(processing.paymentAttempt?.status, "creating");
+  } finally {
+    (service as any).verifyOwnerToken = originals.verifyOwnerToken;
+    store.getBookingForCurrentOwner = originals.getBooking;
+    store.getPaymentAttempt = originals.getAttempt;
+  }
+});
+
+test("admin manual resend validates idempotency input and never returns recipient secrets", async () => {
+  const store = bookingCommissionStore as any;
+  const original = store.scheduleManualNotificationResend;
+  const captured: unknown[] = [];
+  try {
+    store.scheduleManualNotificationResend = async (input: unknown) => {
+      captured.push(input);
+      return {
+        replayed: false,
+        job: {
+          id: "BOOK-1--owner_booking_confirmed--manual-safe",
+          bookingId: "BOOK-1",
+          propertyNumber: "13383",
+          recipientRole: "owner",
+          recipientPhone: "SECRET-OWNER-PHONE",
+          recipientQuotaKey: "SECRET-OWNER-QUOTA",
+          kind: "owner_booking_confirmed",
+          reminderOffsetDays: null,
+          scheduledAt: "2026-08-22T10:00:00.000Z",
+          status: "pending",
+          isFreeProperty: true,
+          quotaCategory: "free_owner_booking",
+          attempts: 0,
+          leaseToken: "SECRET-LEASE",
+          leaseExpiresAt: null,
+          claimedAt: null,
+          sentAt: null,
+          failedAt: null,
+          suppressedAt: null,
+          providerError: null,
+          manualResendOfJobId: "BOOK-1--owner_booking_confirmed",
+          manualResendRequestedAt: "2026-08-22T10:00:00.000Z",
+          createdAt: "2026-08-22T10:00:00.000Z",
+          updatedAt: "2026-08-22T10:00:00.000Z",
+        },
+      };
+    };
+
+    const response = await new BookingCommissionService()
+      .resendAdminNotification("BOOK-1", {
+        sourceJobId: "BOOK-1--owner_booking_confirmed",
+        idempotencyKey: "admin-resend-service-key-001",
+      });
+    assert.equal(captured.length, 1);
+    assert.deepEqual(captured[0], {
+      bookingId: "BOOK-1",
+      sourceJobId: "BOOK-1--owner_booking_confirmed",
+      idempotencyKey: "admin-resend-service-key-001",
+    });
+    assert.equal(response.notification.manualResendOfJobId, "BOOK-1--owner_booking_confirmed");
+    const serialized = JSON.stringify(response);
+    for (const secret of [
+      "SECRET-OWNER-PHONE",
+      "SECRET-OWNER-QUOTA",
+      "SECRET-LEASE",
+    ]) {
+      assert.equal(serialized.includes(secret), false);
+    }
+
+    await assert.rejects(() => new BookingCommissionService()
+      .resendAdminNotification("BOOK-1", {
+        sourceJobId: "BOOK-1--owner_booking_confirmed",
+        idempotencyKey: "too short",
+      }));
+    assert.equal(captured.length, 1);
+  } finally {
+    store.scheduleManualNotificationResend = original;
   }
 });
 
@@ -447,6 +608,14 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
       bookingId: anchor.id,
       status: "duplicate_paid",
       checkoutUrl: "SECRET-CHECKOUT-REVIEW",
+      receiptUrl: "https://receipts.example/review.pdf",
+      receiptObjectKey: "SECRET-RECEIPT-OBJECT-KEY",
+      receiptContentType: "application/pdf",
+      receiptSizeBytes: 2048,
+      receiptSubmittedAt: "2026-08-15T11:55:00.000Z",
+      bankReviewDecision: "refund_review",
+      bankReviewReason: "owner_identity_changed",
+      bankReviewedAt: "2026-08-15T12:01:00.000Z",
       updatedAt: "2026-08-15T12:00:00.000Z",
     },
   ];
@@ -475,8 +644,25 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
     assert.equal("leaseToken" in row.notificationJobs[0], false);
     assert.equal("customerPhone" in row, false);
     assert.equal("checkoutUrl" in row.paymentAttempt!, false);
+    assert.equal("receiptObjectKey" in row.paymentAttempt!, false);
+    assert.equal(
+      row.paymentAttempt?.receiptUrl,
+      "https://receipts.example/review.pdf",
+    );
+    assert.equal(row.paymentAttempt?.receiptContentType, "application/pdf");
+    assert.equal(row.paymentAttempt?.receiptSizeBytes, 2048);
+    assert.equal(
+      row.paymentAttempt?.receiptSubmittedAt,
+      "2026-08-15T11:55:00.000Z",
+    );
+    assert.equal(row.paymentAttempt?.bankReviewDecision, "refund_review");
+    assert.equal(row.paymentAttempt?.bankReviewReason, "owner_identity_changed");
     assert.equal(
       row.paymentAttempts.some((attempt) => "checkoutUrl" in attempt),
+      false,
+    );
+    assert.equal(
+      row.paymentAttempts.some((attempt) => "receiptObjectKey" in attempt),
       false,
     );
     const serialized = JSON.stringify(row);
@@ -486,6 +672,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
       "SECRET-LEASE-0",
       "SECRET-CHECKOUT-LATEST",
       "SECRET-CHECKOUT-REVIEW",
+      "SECRET-RECEIPT-OBJECT-KEY",
       anchor.customerPhone,
     ]) {
       assert.equal(serialized.includes(secret), false, secret);
@@ -569,5 +756,229 @@ test("checkout rechecks free eligibility before creating a provider intention", 
     (paymobService as any).createBookingCommissionIntention = originals.createIntention;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
+  }
+});
+
+test("bank receipt orchestration cleans up only a known-unpersisted upload", async () => {
+  const store = bookingCommissionStore as any;
+  const originals = {
+    reserve: store.reservePaymentAttempt,
+    complete: store.completeBankTransferAttempt,
+    getAttempt: store.getPaymentAttempt,
+    markFailure: store.markPaymentAttemptCreationFailure,
+    getDefaultBankAccount: firebaseService.getDefaultBankAccount,
+  };
+  const service = new BookingCommissionService();
+  const originalVerify = service.verifyOwnerToken;
+  const booking = awaitingBookingFixture({
+    requestCode: "BANK-RECEIPT-CLEANUP",
+    createdAt: new Date(),
+  });
+  const attempt = {
+    id: "ATT-BANK-CLEANUP",
+    bookingId: booking.id,
+    propertyNumber: booking.propertyNumber,
+    amountCents: 10_000,
+    currency: "SAR",
+    paymentMethod: "bank_transfer",
+    merchantAttemptKey: "KEY-BANK-CLEANUP",
+    status: "creating",
+    updatedAt: new Date().toISOString(),
+  } as any;
+  const receipt = {
+    url: "https://receipts.example/cleanup.pdf",
+    objectKey: "booking-commission-receipts/cleanup.pdf",
+    contentType: "application/pdf" as const,
+    sizeBytes: 512,
+  };
+  const removed: string[] = [];
+  const failures: any[] = [];
+
+  try {
+    (service as any).verifyOwnerToken = () => ({ bookingId: booking.id });
+    (firebaseService as any).getDefaultBankAccount = async () => usableBankAccount;
+    store.reservePaymentAttempt = async () => ({
+      status: "reserved",
+      booking,
+      attempt,
+    });
+    store.completeBankTransferAttempt = async () => {
+      throw new Error("firestore finalize failed");
+    };
+    store.getPaymentAttempt = async () => ({ ...attempt });
+    store.markPaymentAttemptCreationFailure = async (input: unknown) => {
+      failures.push(input);
+    };
+
+    await assert.rejects(
+      () => service.submitBankTransfer("owner-token", {} as Express.Multer.File, {
+        store: async () => receipt,
+        remove: async (objectKey) => {
+          removed.push(objectKey);
+          return true;
+        },
+      }),
+      /firestore finalize failed/,
+    );
+    assert.deepEqual(removed, [receipt.objectKey]);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].attemptId, attempt.id);
+    assert.equal(failures[0].certainty, "rejected");
+  } finally {
+    (service as any).verifyOwnerToken = originalVerify;
+    store.reservePaymentAttempt = originals.reserve;
+    store.completeBankTransferAttempt = originals.complete;
+    store.getPaymentAttempt = originals.getAttempt;
+    store.markPaymentAttemptCreationFailure = originals.markFailure;
+    (firebaseService as any).getDefaultBankAccount = originals.getDefaultBankAccount;
+  }
+});
+
+test("bank receipt upload requires a current active and complete bank account before reservation", async () => {
+  const store = bookingCommissionStore as any;
+  const service = new BookingCommissionService();
+  const originals = {
+    reserve: store.reservePaymentAttempt,
+    getDefaultBankAccount: firebaseService.getDefaultBankAccount,
+    verifyOwnerToken: service.verifyOwnerToken,
+  };
+  let reservations = 0;
+  try {
+    (service as any).verifyOwnerToken = () => ({ bookingId: "BOOK-BANK-GATE" });
+    store.reservePaymentAttempt = async () => {
+      reservations += 1;
+      throw new Error("reservation must not be reached");
+    };
+    for (const account of [
+      null,
+      { ...usableBankAccount, isActive: false },
+      { ...usableBankAccount, beneficiaryName: "" },
+      { ...usableBankAccount, iban: "SA123" },
+    ]) {
+      (firebaseService as any).getDefaultBankAccount = async () => account;
+      await assert.rejects(
+        () => service.submitBankTransfer(
+          "owner-token",
+          {} as Express.Multer.File,
+        ),
+        (error: unknown) =>
+          error instanceof BookingWorkflowError &&
+          error.code === "BANK_ACCOUNT_UNAVAILABLE" &&
+          error.status === 503 &&
+          !error.message.includes("SA123"),
+      );
+    }
+    assert.equal(reservations, 0);
+  } finally {
+    (service as any).verifyOwnerToken = originals.verifyOwnerToken;
+    store.reservePaymentAttempt = originals.reserve;
+    (firebaseService as any).getDefaultBankAccount = originals.getDefaultBankAccount;
+  }
+});
+
+test("bank receipt orchestration never deletes evidence after a successful or recovered finalize", async (t) => {
+  const store = bookingCommissionStore as any;
+  const originals = {
+    reserve: store.reservePaymentAttempt,
+    complete: store.completeBankTransferAttempt,
+    getAttempt: store.getPaymentAttempt,
+    markFailure: store.markPaymentAttemptCreationFailure,
+    getDefaultBankAccount: firebaseService.getDefaultBankAccount,
+  };
+  const service = new BookingCommissionService();
+  const originalVerify = service.verifyOwnerToken;
+  const booking = awaitingBookingFixture({
+    requestCode: "BANK-RECEIPT-PRESERVE",
+    createdAt: new Date(),
+  });
+  const receipt = {
+    url: "https://receipts.example/preserve.pdf",
+    objectKey: "booking-commission-receipts/preserve.pdf",
+    contentType: "application/pdf" as const,
+    sizeBytes: 512,
+  };
+  let sequence = 0;
+  let removeCalls = 0;
+  let failureCalls = 0;
+
+  try {
+    (service as any).verifyOwnerToken = () => ({ bookingId: booking.id });
+    (firebaseService as any).getDefaultBankAccount = async () => usableBankAccount;
+    store.reservePaymentAttempt = async () => {
+      sequence += 1;
+      return {
+        status: "reserved",
+        booking,
+        attempt: {
+          id: `ATT-BANK-PRESERVE-${sequence}`,
+          bookingId: booking.id,
+          propertyNumber: booking.propertyNumber,
+          amountCents: 10_000,
+          currency: "SAR",
+          paymentMethod: "bank_transfer",
+          merchantAttemptKey: `KEY-BANK-PRESERVE-${sequence}`,
+          status: "creating",
+        },
+      };
+    };
+    store.markPaymentAttemptCreationFailure = async () => {
+      failureCalls += 1;
+    };
+    const persistence = {
+      store: async () => receipt,
+      remove: async () => {
+        removeCalls += 1;
+        return true;
+      },
+    };
+
+    await t.test("normal finalize", async () => {
+      store.completeBankTransferAttempt = async (input: any) => ({
+        status: "pending_review",
+        attempt: {
+          id: input.attemptId,
+          status: "pending_review",
+          receiptSubmittedAt: "2026-08-22T12:00:00.000Z",
+        },
+      });
+      const result = await service.submitBankTransfer(
+        "owner-token",
+        {} as Express.Multer.File,
+        persistence,
+      );
+      assert.equal(result.status, "pending_review");
+      assert.equal(removeCalls, 0);
+    });
+
+    await t.test("transaction committed but response failed", async () => {
+      let committedAttemptId = "";
+      store.completeBankTransferAttempt = async (input: any) => {
+        committedAttemptId = input.attemptId;
+        throw new Error("connection dropped after commit");
+      };
+      store.getPaymentAttempt = async () => ({
+        id: committedAttemptId,
+        status: "pending_review",
+        receiptUrl: receipt.url,
+        receiptObjectKey: receipt.objectKey,
+        receiptSubmittedAt: "2026-08-22T12:00:00.000Z",
+      });
+      const result = await service.submitBankTransfer(
+        "owner-token",
+        {} as Express.Multer.File,
+        persistence,
+      );
+      assert.equal(result.status, "pending_review");
+      assert.equal(removeCalls, 0);
+    });
+
+    assert.equal(failureCalls, 0);
+  } finally {
+    (service as any).verifyOwnerToken = originalVerify;
+    store.reservePaymentAttempt = originals.reserve;
+    store.completeBankTransferAttempt = originals.complete;
+    store.getPaymentAttempt = originals.getAttempt;
+    store.markPaymentAttemptCreationFailure = originals.markFailure;
+    (firebaseService as any).getDefaultBankAccount = originals.getDefaultBankAccount;
   }
 });

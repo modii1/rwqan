@@ -5,7 +5,11 @@ export const metadata: Metadata = {
   title: "تأكيد الحجز | روقان",
   description: "تأكيد نتيجة طلب الحجز وتسجيل التفاصيل",
   robots: { index: false, follow: false },
+  referrer: "no-referrer",
 };
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function BookingFollowupPage({
   params,

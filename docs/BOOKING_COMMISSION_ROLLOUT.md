@@ -5,6 +5,7 @@
 - Booking follow-up, owner notifications, commission collection, and commission holds apply only to properties without an active premium subscription. A workflow must originate while the property is free; a premium-origin workflow is never created and cannot become eligible after a later downgrade.
 - If a free property becomes actively premium, the workflow is durably closed: queued messages are cancelled, any unpaid booking commission is waived, and only that booking's property-hold obligation is released. Historical payment attempts and signed provider callbacks remain available for financial audit.
 - An accepted anonymous contact request schedules one customer WhatsApp follow-up after 24 hours.
+- The customer message uses an internal `/b/<opaque-code>` alias. Opening the alias, follow-up page, bookings profile, or admin dashboard never creates or resends the automatic job; an admin resend is a separate audited action.
 - An unanswered workflow expires seven days after the original contact. A verified customer profile session remains separate from that response deadline.
 - An unanswered follow-up can be answered for seven days from the accepted contact. The signed customer session remains usable for 90 days to view an already answered profile, but expired unanswered links and queued messages are cancelled.
 - The follow-up first asks whether a booking happened. A “No” answer closes the workflow. A “Yes” answer opens exactly three facts:
@@ -12,6 +13,9 @@
   2. Booking date: an exact day or a month-only value.
   3. Price paid in SAR.
 - The confirmed facts are sent to the property owner. When commission enforcement is enabled, the same message includes the exact 10% commission and a signed Paymob payment link.
+- Booking dates remain stored as canonical Gregorian values. The customer can switch the questionnaire and profile display between Gregorian and Umm al-Qura Hijri without changing the stored date.
+- Commission payment supports the existing electronic Paymob methods or a bank transfer with a JPEG, PNG, WebP, or PDF receipt. A pending bank review parks payment reminders and enforcement; approval settles the obligation, while rejection preserves the evidence and resumes collection safely.
+- Rejecting an owner dispute schedules the dedicated configurable rejection template once. Accepting a dispute cancels collection and releases only that booking's hold obligation.
 - For accepted anonymous contacts evaluated while the feature is available, Contact Analytics records whether the follow-up was scheduled or failed during setup. Setup failures store only a bounded reason code and alert admin after the contact transaction succeeds.
 - Before confirmation, every owner-message send, and any property hold, the current property record must still exist and its canonical WhatsApp owner phone must match the owner identity captured at contact time. A mismatch is never retargeted automatically: collection stops, no new debt is created at confirmation, and an admin-visible review event is recorded without storing either phone in the event.
 - The five-day payment window starts only after the WhatsApp provider accepts that owner message for sending. Day 5 is mandatory; admins may enable or disable the optional day-3 and day-4 reminders for newly confirmed or restarted collection workflows.
@@ -27,7 +31,7 @@
 - Confirmed-booking fact messages for free-property owners: 3 per normalized owner phone per Riyadh day by default, across all of that phone’s free properties.
 - Billing messages (the initial payment notice, enabled day-3/day-4 reminders, mandatory day 5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
 - Admins can configure all three limits in the booking-commission dashboard. Environment values remain fallbacks through `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT`, `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT`, and `FREE_PROPERTY_DAILY_CONTACT_LIMIT`.
-- The same admin settings screen can edit the seven free-workflow WhatsApp templates. Required placeholders are validated and the 24-hour follow-up, five-day payment window, and mandatory day-5 warning cannot be changed.
+- The same admin settings screen can edit the eight free-workflow WhatsApp templates. Required placeholders are validated and the 24-hour follow-up, five-day payment window, and mandatory day-5 warning cannot be changed.
 
 ## Before deployment
 
@@ -40,7 +44,8 @@
    - Path: `/api/internal/booking-worker`
    - Header: `Authorization: Bearer <BOOKING_WORKER_SECRET>`
 6. Confirm the Enjazatik WhatsApp sender and Paymob production credentials/callback are healthy.
-7. Keep both new feature flags disabled at deploy time:
+7. Configure R2 receipt storage and verify at least one active bank account has a bank name, beneficiary name, and valid Saudi IBAN. Selecting a default account clears the prior default; inactive accounts are never offered for a new receipt.
+8. Keep both new feature flags disabled at deploy time:
    - `FEATURE_BOOKING_FOLLOWUP`
    - `FEATURE_BOOKING_COMMISSION_ENFORCEMENT`
 
@@ -76,6 +81,7 @@ For each first-cohort booking, verify:
 - duplicate success, reversal, identity mismatch, or uncertain creation is escalated for manual financial review rather than enforced automatically.
 - a canonical refund or void requires an admin choice: keep the obligation paid after finance review, or restart collection with a fresh owner notice and five-day window;
 - a pre-settlement void, error, refund, or other non-payable provider result closes only that attempt and permits a new checkout.
+- an issued Paymob checkout remains financially unresolved until Paymob reports a terminal result or finance reconciles it; do not waive its disputed commission merely because the owner abandoned the browser page.
 
 ### Phase 3 — complete five-day lifecycle
 

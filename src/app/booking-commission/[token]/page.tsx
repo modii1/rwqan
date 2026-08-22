@@ -5,7 +5,11 @@ export const metadata: Metadata = {
   title: "عمولة الحجز | روقان",
   description: "مراجعة بيانات الحجز وسداد العمولة",
   robots: { index: false, follow: false },
+  referrer: "no-referrer",
 };
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function BookingCommissionPage({
   params,

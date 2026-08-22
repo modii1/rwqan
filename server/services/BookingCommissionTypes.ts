@@ -17,8 +17,13 @@ export type BookingEventType =
   | "owner_notification_sent"
   | "owner_notification_failed"
   | "owner_notification_suppressed"
+  | "notification_manual_resend_scheduled"
   | "commission_checkout_created"
   | "commission_checkout_failed"
+  | "commission_bank_receipt_submitted"
+  | "commission_bank_receipt_approved"
+  | "commission_bank_receipt_rejected"
+  | "commission_bank_receipt_refund_review"
   | "commission_payment_failed"
   | "commission_paid"
   | "commission_duplicate_payment"
@@ -69,6 +74,7 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
 export type BookingNotificationKind =
   | "customer_followup"
   | "owner_booking_confirmed"
+  | "commission_dispute_rejected"
   | "commission_reminder_3"
   | "commission_reminder_4"
   | "commission_reminder_5"
@@ -104,6 +110,9 @@ export type BookingNotificationJob = {
   failedAt: string | null;
   suppressedAt: string | null;
   providerError: string | null;
+  /** Present only on an additional send explicitly requested by an admin. */
+  manualResendOfJobId?: string | null;
+  manualResendRequestedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -114,9 +123,17 @@ export type BookingCommissionPaymentAttempt = {
   propertyNumber: string;
   amountCents: number;
   currency: "SAR";
-  paymentMethod: "cards" | "applepay";
+  paymentMethod: "cards" | "applepay" | "bank_transfer";
   merchantAttemptKey: string;
-  status: "creating" | "created" | "unknown" | "failed" | "paid" | "duplicate_paid";
+  status:
+    | "creating"
+    | "created"
+    | "pending_review"
+    | "review_required"
+    | "unknown"
+    | "failed"
+    | "paid"
+    | "duplicate_paid";
   intentionId: string | null;
   paymobOrderId: string | null;
   checkoutUrl: string | null;
@@ -125,6 +142,19 @@ export type BookingCommissionPaymentAttempt = {
   providerCreatedAt: string | null;
   paidAt: string | null;
   failureReason: string | null;
+  receiptUrl?: string | null;
+  /** Internal storage identity. This must never be returned to a browser. */
+  receiptObjectKey?: string | null;
+  receiptContentType?: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" | null;
+  receiptSizeBytes?: number | null;
+  receiptSubmittedAt?: string | null;
+  bankReviewDecision?: "approved" | "rejected" | "refund_review" | null;
+  bankReviewReason?: string | null;
+  bankReviewedAt?: string | null;
+  bankReviewPropertyReleased?: boolean | null;
+  /** Financial evidence was received but must not settle this obligation. */
+  financialReviewDecision?: "refund_review" | null;
+  financialReviewReason?: string | null;
   authorizationTransactionId?: string | null;
   authorizedAt?: string | null;
   nonPayableStatus?: "refunded" | "voided" | "errored" | "other_nonpayable" | null;
@@ -160,7 +190,7 @@ export type BookingAdminNotificationJob = Omit<
 
 export type BookingAdminPaymentAttempt = Omit<
   BookingCommissionPaymentAttempt,
-  "checkoutUrl"
+  "checkoutUrl" | "receiptObjectKey"
 >;
 
 export type BookingAdminRow = Omit<

@@ -547,11 +547,17 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             }
 
             const requestTime = typeof result.requestTime === "string" ? result.requestTime : "";
+            const bookingCustomerPhone = typeof result.bookingCustomerPhone === "string"
+                ? result.bookingCustomerPhone.trim()
+                : "";
             const whatsappNumber = normalizeWhatsAppNumber(
                 typeof result.whatsappNumber === "string" ? result.whatsappNumber : undefined,
             );
             const nameText = isVerified(property) ? ` - ${property.name}` : "";
-            const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${requestCode}`;
+            const customerPhoneLine = bookingCustomerPhone
+                ? `\nرقم العميل: ${bookingCustomerPhone}`
+                : "";
+            const message = `مرحباً، أنا مهتم بالعقار رقم ${property.propertyNumber}${nameText}\n\nكود الطلب: ${requestCode}${customerPhoneLine}`;
 
             const url = buildWhatsAppUrl(whatsappNumber, message);
 

@@ -68,6 +68,8 @@ export interface BookingAdminNotificationJob {
   failedAt?: string | null;
   suppressedAt?: string | null;
   providerError?: string | null;
+  manualResendOfJobId?: string | null;
+  manualResendRequestedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 }
@@ -88,6 +90,16 @@ export interface BookingAdminPaymentAttempt {
   exactPaymentMethod?: string | null;
   providerCreatedAt?: string | null;
   paidAt?: string | null;
+  receiptUrl?: string | null;
+  receiptContentType?: string | null;
+  receiptSizeBytes?: number | null;
+  receiptSubmittedAt?: string | null;
+  bankReviewDecision?: string | null;
+  bankReviewReason?: string | null;
+  bankReviewedAt?: string | null;
+  bankReviewPropertyReleased?: boolean | null;
+  financialReviewDecision?: string | null;
+  financialReviewReason?: string | null;
   authorizationTransactionId?: string | null;
   authorizedAt?: string | null;
   nonPayableStatus?: "refunded" | "voided" | "errored" | "other_nonpayable" | string | null;
@@ -423,6 +435,7 @@ export function getBookingEventLabel(value: unknown): string {
     commission_reminder_failed: "فشل إرسال تذكير العمولة",
     commission_disputed: "اعترض المالك على العمولة",
     commission_dispute_rejected: "تم رفض الاعتراض واستئناف التحصيل",
+    notification_manual_resend_scheduled: "تمت جدولة إعادة إرسال يدوية",
     commission_dispute_accepted: "تم قبول الاعتراض وإلغاء العمولة",
     commission_enforcement_deferred: "تم تأجيل إجراء الإيقاف",
     booking_free_eligibility_lost: "تم إغلاق متابعة الحجز بعد تفعيل اشتراك مميز للعقار",
