@@ -1,4 +1,5 @@
 import type {
+  BookingAdminCustomerWhatsAppTemplateVariant,
   BookingFollowUpRecord,
   BookingTiming,
   CommissionReminderOffsetDays,
@@ -209,6 +210,8 @@ export type BookingAdminRow = Omit<
   bookingStatus: BookingFollowUpDocument["bookingStatus"] | "expired";
   customerPhoneMasked: string | null;
   customerWhatsAppNextAllowedAt: string | null;
+  adminCustomerWhatsAppTemplateVariants:
+    BookingAdminCustomerWhatsAppTemplateVariant[];
   notificationSummary: {
     sent: number;
     failed: number;

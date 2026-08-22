@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
 import {
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS,
+  type BookingAdminCustomerWhatsAppTemplateVariant,
+} from "@shared/booking";
+import {
   AlertTriangle,
   BellOff,
   CalendarClock,
@@ -41,6 +45,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   BookingTimeline,
   NotificationSummaryView,
   QuestionnaireFacts,
@@ -68,6 +79,9 @@ import {
   type BookingReversalReviewState,
 } from "@/components/booking/booking-reversal-state";
 import BookingCommissionSettingsCard from "./booking-commission-settings";
+import {
+  BOOKING_TEMPLATE_DEFINITIONS,
+} from "./booking-commission-settings-model";
 import BookingBankTransferReview from "./booking-bank-transfer-review";
 import {
   ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
@@ -121,6 +135,17 @@ interface ReversalResolutionResponse {
 
 interface AdminCustomerWhatsAppHandoffResponse {
   handoffUrl: string;
+}
+
+function adminCustomerWhatsAppTemplateLabel(
+  variant: BookingAdminCustomerWhatsAppTemplateVariant,
+): string {
+  if (variant === "technical_support") {
+    return "مرحباً، معك الفريق التقني لمنصة روقان.";
+  }
+  return BOOKING_TEMPLATE_DEFINITIONS.find(
+    (definition) => definition.key === "customer_followup",
+  )?.label || variant;
 }
 
 function normalize(value: unknown): string {
@@ -585,6 +610,7 @@ function BookingTableRow({ row, selected, onSelect, onCustomerWhatsAppChanged, s
           <CustomerWhatsAppLink
             bookingId={row.id}
             nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+            templateVariants={row.adminCustomerWhatsAppTemplateVariants}
             onChanged={onCustomerWhatsAppChanged}
           />
         </div>
@@ -658,6 +684,7 @@ function BookingMobileRow({ row, selected, onSelect, onCustomerWhatsAppChanged, 
           <CustomerWhatsAppLink
             bookingId={row.id}
             nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+            templateVariants={row.adminCustomerWhatsAppTemplateVariants}
             onChanged={onCustomerWhatsAppChanged}
           />
         </div>
@@ -788,6 +815,7 @@ function BookingAdminDetails({
                 <CustomerWhatsAppLink
                   bookingId={row.id}
                   nextAllowedAt={row.customerWhatsAppNextAllowedAt}
+                  templateVariants={row.adminCustomerWhatsAppTemplateVariants}
                   onChanged={onCustomerWhatsAppChanged}
                 />
               </div>
@@ -1133,6 +1161,7 @@ function AdminNotificationHistory({
 
   const resend = async (job: BookingAdminNotificationJob) => {
     if (!job.id || resendPendingId) return;
+    const sendNow = normalize(job.status) === "pending";
     const idempotencyKey = resendKeys.current[job.id] ||
       createNotificationResendKey();
     resendKeys.current[job.id] = idempotencyKey;
@@ -1153,7 +1182,11 @@ function AdminNotificationHistory({
       );
       await onResent();
       delete resendKeys.current[job.id];
-      setResendNotice("تمت جدولة نسخة إضافية من الرسالة للإرسال.");
+      setResendNotice(
+        sendNow
+          ? "تم تقديم موعد الرسالة لإرسالها الآن."
+          : "تمت جدولة نسخة إضافية من الرسالة للإرسال.",
+      );
     } catch (error) {
       setResendError(
         error instanceof Error
@@ -1194,11 +1227,13 @@ function AdminNotificationHistory({
           {visibleJobs.map((job, index) => {
             const status = notificationStatusMeta(job.status);
             const canResend = [
+              "pending",
               "sent",
               "failed",
               "cancelled",
               "suppressed_quota",
             ].includes(normalize(job.status));
+            const sendNow = normalize(job.status) === "pending";
             return (
               <article key={job.id || `${job.kind || "notification"}-${index}`} className="rounded-lg border bg-background p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1249,20 +1284,24 @@ function AdminNotificationHistory({
                           {resendPendingId === job.id && (
                             <Loader2 className="ml-2 h-4 w-4 animate-spin" />
                           )}
-                          إعادة إرسال الرسالة
+                          {sendNow ? "إرسال الرسالة الآن" : "إعادة إرسال الرسالة"}
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent dir="rtl">
                         <AlertDialogHeader className="text-right sm:text-right">
-                          <AlertDialogTitle>تأكيد إرسال نسخة إضافية</AlertDialogTitle>
+                          <AlertDialogTitle>
+                            {sendNow ? "تأكيد إرسال الرسالة الآن" : "تأكيد إرسال نسخة إضافية"}
+                          </AlertDialogTitle>
                           <AlertDialogDescription>
-                            هذا إجراء يدوي مقصود وسيُنشئ رسالة إضافية جديدة من قالب {notificationKindLabel(job.kind)} إلى {notificationRecipientLabel(job.recipientRole)}. لن يتغير سجل الرسالة الأصلية.
+                            {sendNow
+                              ? <>سيتم تقديم موعد رسالة {notificationKindLabel(job.kind)} وإرسالها الآن إلى {notificationRecipientLabel(job.recipientRole)} بدون إنشاء نسخة مكررة.</>
+                              : <>هذا إجراء يدوي مقصود وسيُنشئ رسالة إضافية جديدة من قالب {notificationKindLabel(job.kind)} إلى {notificationRecipientLabel(job.recipientRole)}. لن يتغير سجل الرسالة الأصلية.</>}
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter className="gap-2 sm:space-x-0">
                           <AlertDialogCancel>رجوع</AlertDialogCancel>
                           <AlertDialogAction onClick={() => void resend(job)}>
-                            تأكيد إعادة الإرسال
+                            {sendNow ? "تأكيد الإرسال الآن" : "تأكيد إعادة الإرسال"}
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
@@ -1392,10 +1431,12 @@ function AdminFact({ label, value }: { label: string; value: string }) {
 function CustomerWhatsAppLink({
   bookingId,
   nextAllowedAt,
+  templateVariants,
   onChanged,
 }: {
   bookingId: string;
   nextAllowedAt?: string | null;
+  templateVariants?: BookingAdminCustomerWhatsAppTemplateVariant[];
   onChanged: () => void;
 }) {
   const [nowMs, setNowMs] = useState<number | null>(null);
@@ -1421,10 +1462,16 @@ function CustomerWhatsAppLink({
     ? (localNextAllowedAt ? 1 : 0)
     : getAdminCustomerWhatsAppRemainingMinutes(localNextAllowedAt, nowMs);
   const coolingDown = remainingMinutes > 0;
+  const availableTemplateVariants = new Set(
+    templateVariants ?? ["technical_support"],
+  );
+  const hasAvailableTemplate = availableTemplateVariants.size > 0;
   const className =
     "inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2";
 
-  const openCustomerWhatsApp = async () => {
+  const openCustomerWhatsApp = async (
+    templateVariant: BookingAdminCustomerWhatsAppTemplateVariant,
+  ) => {
     if (pendingRef.current) return;
     const popup = window.open("about:blank", "_blank");
     if (!popup) {
@@ -1437,7 +1484,11 @@ function CustomerWhatsAppLink({
     try {
       const result = await bookingApiRequest<AdminCustomerWhatsAppHandoffResponse>(
         getAdminCustomerWhatsAppHref(bookingId),
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ templateVariant }),
+        },
       );
       const openedAt = Date.now();
       setNowMs(openedAt);
@@ -1480,16 +1531,38 @@ function CustomerWhatsAppLink({
   }
 
   return (
-    <button
-      type="button"
-      aria-label="فتح محادثة واتساب مع العميل"
-      title="فتح محادثة واتساب مع العميل"
-      disabled={pending}
-      className={`${className} ${pending ? "cursor-wait opacity-60" : ""}`}
-      onClick={() => void openCustomerWhatsApp()}
-      data-testid={`link-customer-whatsapp-${bookingId}`}
-    >
-      <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
-    </button>
+    <DropdownMenu dir="rtl">
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="فتح محادثة واتساب مع العميل"
+          title="فتح محادثة واتساب مع العميل"
+          disabled={pending || !hasAvailableTemplate}
+          className={`${className} ${pending || !hasAvailableTemplate ? "cursor-not-allowed opacity-60" : ""}`}
+          data-testid={`link-customer-whatsapp-${bookingId}`}
+        >
+          <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuLabel className="text-right">
+          قوالب رسائل واتساب
+        </DropdownMenuLabel>
+        {BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS.map((variant) => (
+          <DropdownMenuItem
+            key={variant}
+            disabled={pending || !availableTemplateVariants.has(variant)}
+            onSelect={() => void openCustomerWhatsApp(variant)}
+            className="items-start gap-2 text-right"
+            data-testid={`customer-whatsapp-template-${variant}-${bookingId}`}
+          >
+            <FaWhatsapp className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span className="whitespace-normal leading-5">
+              {adminCustomerWhatsAppTemplateLabel(variant)}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -9,11 +9,16 @@ import {
   BOOKING_FOLLOW_UP_DELAY_MS,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
   BOOKING_OWNER_NOTICE_RETRY_MS,
+  adminCustomerWhatsAppTemplateVariantsForBooking,
   BookingCommissionStore,
   BookingWorkflowError,
   buildInitialBookingWorkflow,
   latestCommissionReminderOffsetDue,
 } from "./BookingCommissionStore";
+import type {
+  BookingFollowUpDocument,
+  BookingNotificationKind,
+} from "./BookingCommissionTypes";
 
 const now = new Date("2026-08-15T12:34:56.789Z");
 
@@ -909,33 +914,278 @@ test("manual resend creates one separate audited job and replays the same idempo
   );
 });
 
-test("manual resend rejects active jobs, superseded reminders, and release messages for held properties", async () => {
-  for (const status of ["pending", "claimed"] as const) {
-    const activeDatabase = new FakeFirestore();
-    const activeBooking = confirmedObserveOnlyFixture();
-    const activeSource = ownerNotificationFixture(activeBooking, {
-      status,
-      ...(status === "claimed" ? { leaseToken: "active-send-lease" } : {}),
-    });
-    activeDatabase.seed("booking_followups", activeBooking.id, activeBooking);
-    activeDatabase.seed("booking_notification_outbox", activeSource.id, activeSource);
-    await assert.rejects(
-      () => new BookingCommissionStore(activeDatabase as any)
-        .scheduleManualNotificationResend({
-          bookingId: activeBooking.id,
-          sourceJobId: activeSource.id,
-          idempotencyKey: `admin-resend-active-${status}-000001`,
-          now,
-        }),
-      (error: unknown) => error instanceof BookingWorkflowError &&
-        error.code === (status === "claimed"
-          ? "NOTIFICATION_SEND_IN_PROGRESS"
-          : "NOTIFICATION_NOT_RESENDABLE"),
-    );
-    assert.equal(activeDatabase.entries("booking_notification_manual_resend_audit").length, 0);
-  }
+test("manual resend supports every customer and owner lifecycle notification in a valid state", async () => {
+  const dayMs = 24 * 60 * 60 * 1_000;
+  const base = confirmedObserveOnlyFixture() as BookingFollowUpDocument;
+  const payable = {
+    ...base,
+    commissionStatus: "pending" as const,
+    commissionAmountHalalas: 10_000,
+    commissionNoticeSentAt: new Date(now.getTime() - dayMs).toISOString(),
+    commissionDueAt: new Date(now.getTime() + 4 * dayMs).toISOString(),
+    disputeStatus: "none" as const,
+    complianceStatus: "clear" as const,
+  } as BookingFollowUpDocument;
+  const scenarios: Array<{
+    name: string;
+    kind: BookingNotificationKind;
+    recipientRole: "customer" | "owner";
+    reminderOffsetDays: 3 | 4 | 5 | null;
+    booking: BookingFollowUpDocument;
+  }> = [
+    {
+      name: "customer-followup",
+      kind: "customer_followup",
+      recipientRole: "customer",
+      reminderOffsetDays: null,
+      booking: {
+        ...buildWorkflow().followUp,
+        contactRequestId: "CONTACT-MANUAL-ALL-CUSTOMER",
+      } as BookingFollowUpDocument,
+    },
+    {
+      name: "owner-facts",
+      kind: "owner_booking_confirmed",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: base,
+    },
+    {
+      name: "owner-billing",
+      kind: "owner_booking_confirmed",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: payable,
+    },
+    {
+      name: "dispute-rejected",
+      kind: "commission_dispute_rejected",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: { ...payable, disputeStatus: "rejected" },
+    },
+    ...([3, 4, 5] as const).map((day) => ({
+      name: `reminder-${day}`,
+      kind: `commission_reminder_${day}` as BookingNotificationKind,
+      recipientRole: "owner" as const,
+      reminderOffsetDays: day,
+      booking: {
+        ...payable,
+        commissionNoticeSentAt: new Date(
+          now.getTime() - day * dayMs,
+        ).toISOString(),
+        commissionDueAt: new Date(
+          now.getTime() + (5 - day) * dayMs,
+        ).toISOString(),
+      } as BookingFollowUpDocument,
+    })),
+    {
+      name: "property-paused",
+      kind: "property_paused",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "overdue",
+        complianceStatus: "paused",
+        commissionNoticeSentAt: new Date(now.getTime() - 5 * dayMs).toISOString(),
+        commissionDueAt: new Date(now.getTime() - 1).toISOString(),
+      } as BookingFollowUpDocument,
+    },
+    {
+      name: "property-released-paid",
+      kind: "property_released",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "paid",
+        complianceStatus: "released",
+        commissionPaidAt: now.toISOString(),
+      } as BookingFollowUpDocument,
+    },
+    {
+      name: "property-released-waived",
+      kind: "property_released",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "waived",
+        complianceStatus: "released",
+        disputeStatus: "accepted",
+      } as BookingFollowUpDocument,
+    },
+  ];
 
+  for (const [index, scenario] of scenarios.entries()) {
+    const database = new FakeFirestore();
+    const booking = {
+      ...scenario.booking,
+      id: `BOOK-MANUAL-ALL-${index}`,
+      contactRequestId: `CONTACT-MANUAL-ALL-${index}`,
+    } as BookingFollowUpDocument;
+    const source = {
+      ...ownerNotificationFixture(base as ReturnType<typeof confirmedObserveOnlyFixture>),
+      id: `${booking.id}--${scenario.kind}`,
+      bookingId: booking.id,
+      propertyNumber: booking.propertyNumber,
+      recipientRole: scenario.recipientRole,
+      recipientPhone: scenario.recipientRole === "customer"
+        ? booking.customerPhone
+        : booking.ownerPhone,
+      recipientQuotaKey: scenario.recipientRole === "customer"
+        ? booking.customerSubject
+        : booking.ownerPhone.replace(/\D/g, ""),
+      kind: scenario.kind,
+      reminderOffsetDays: scenario.reminderOffsetDays,
+      quotaCategory: scenario.recipientRole === "customer"
+        ? "customer_followup"
+        : "transactional",
+    };
+    database.seed("booking_followups", booking.id, booking);
+    database.seed("booking_notification_outbox", source.id, source);
+    if (scenario.recipientRole === "owner") {
+      database.seed("properties", booking.propertyNumber, {
+        propertyNumber: booking.propertyNumber,
+        whatsappNumber: booking.ownerPhone,
+        commissionHold: { active: false, obligationIds: [] },
+      });
+    }
+
+    const result = await new BookingCommissionStore(database as any)
+      .scheduleManualNotificationResend({
+        bookingId: booking.id,
+        sourceJobId: source.id,
+        idempotencyKey: `admin-resend-all-${index}-00000001`,
+        now,
+      });
+
+    assert.equal(result.job.kind, scenario.kind, scenario.name);
+    assert.equal(result.job.recipientRole, scenario.recipientRole, scenario.name);
+    assert.equal(result.job.manualResendOfJobId, source.id, scenario.name);
+    assert.equal(result.job.status, "pending", scenario.name);
+  }
+});
+
+test("manual send moves a queued notification to now without creating a duplicate", async () => {
+  const database = new FakeFirestore();
+  const booking = confirmedObserveOnlyFixture();
+  const scheduledAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000)
+    .toISOString();
+  const source = ownerNotificationFixture(booking, {
+    status: "pending",
+    attempts: 0,
+    scheduledAt,
+    claimedAt: null,
+    sentAt: null,
+    providerError: "waiting_for_schedule",
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("booking_notification_outbox", source.id, source);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: booking.ownerPhone,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const input = {
+    bookingId: booking.id,
+    sourceJobId: source.id,
+    idempotencyKey: "admin-send-pending-now-00001",
+    now,
+  };
+
+  const first = await store.scheduleManualNotificationResend(input);
+  const replay = await store.scheduleManualNotificationResend(input);
+
+  assert.equal(first.job.id, source.id);
+  assert.equal(first.job.scheduledAt, now.toISOString());
+  assert.equal(first.job.providerError, null);
+  assert.equal(first.job.manualResendOfJobId, undefined);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.job.id, source.id);
+  assert.equal(database.entries("booking_notification_outbox").length, 1);
+  assert.equal(
+    database.read("booking_notification_outbox", source.id)?.scheduledAt,
+    now.toISOString(),
+  );
+  assert.equal(
+    database.entries("booking_notification_manual_resend_audit").length,
+    1,
+  );
+});
+
+test("manual resend rejects in-progress jobs, premature or superseded reminders, and release messages for held properties", async () => {
+  const activeDatabase = new FakeFirestore();
   const activeBooking = confirmedObserveOnlyFixture();
+  const activeSource = ownerNotificationFixture(activeBooking, {
+    status: "claimed",
+    leaseToken: "active-send-lease",
+  });
+  activeDatabase.seed("booking_followups", activeBooking.id, activeBooking);
+  activeDatabase.seed("booking_notification_outbox", activeSource.id, activeSource);
+  await assert.rejects(
+    () => new BookingCommissionStore(activeDatabase as any)
+      .scheduleManualNotificationResend({
+        bookingId: activeBooking.id,
+        sourceJobId: activeSource.id,
+        idempotencyKey: "admin-resend-active-claimed-000001",
+        now,
+      }),
+    (error: unknown) => error instanceof BookingWorkflowError &&
+      error.code === "NOTIFICATION_SEND_IN_PROGRESS",
+  );
+  assert.equal(activeDatabase.entries("booking_notification_manual_resend_audit").length, 0);
+
+  const reminderEarlyDatabase = new FakeFirestore();
+  const reminderEarlyBooking = {
+    ...activeBooking,
+    commissionStatus: "pending",
+    commissionAmountHalalas: 10_000,
+    commissionNoticeSentAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1_000).toISOString(),
+    commissionDueAt: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1_000).toISOString(),
+    disputeStatus: "none",
+  };
+  const reminderEarlySource = ownerNotificationFixture(reminderEarlyBooking as any, {
+    id: `${reminderEarlyBooking.id}--commission_reminder_3`,
+    kind: "commission_reminder_3",
+    reminderOffsetDays: 3,
+    status: "pending",
+    scheduledAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000).toISOString(),
+    quotaCategory: "transactional",
+  });
+  reminderEarlyDatabase.seed(
+    "booking_followups",
+    reminderEarlyBooking.id,
+    reminderEarlyBooking,
+  );
+  reminderEarlyDatabase.seed(
+    "booking_notification_outbox",
+    reminderEarlySource.id,
+    reminderEarlySource,
+  );
+  reminderEarlyDatabase.seed("properties", reminderEarlyBooking.propertyNumber, {
+    propertyNumber: reminderEarlyBooking.propertyNumber,
+    whatsappNumber: reminderEarlyBooking.ownerPhone,
+  });
+  await assert.rejects(
+    () => new BookingCommissionStore(reminderEarlyDatabase as any)
+      .scheduleManualNotificationResend({
+        bookingId: reminderEarlyBooking.id,
+        sourceJobId: reminderEarlySource.id,
+        idempotencyKey: "admin-send-reminder-too-early-001",
+        now,
+      }),
+    (error: unknown) => error instanceof BookingWorkflowError &&
+      error.code === "NOTIFICATION_STATE_CHANGED",
+  );
+  assert.equal(
+    reminderEarlyDatabase.read(
+      "booking_notification_outbox",
+      reminderEarlySource.id,
+    )?.scheduledAt,
+    reminderEarlySource.scheduledAt,
+  );
 
   const reminderDatabase = new FakeFirestore();
   const reminderBooking = {
@@ -1566,11 +1816,13 @@ test("admin customer WhatsApp contact is limited once per customer every 30 minu
   const first = await store.claimAdminCustomerWhatsAppContact(firstId, now);
   assert.equal(first?.adminCustomerWhatsAppLastOpenedAt, now.toISOString());
   assert.equal(first?.events.at(-1)?.type, "admin_customer_whatsapp_opened");
+  assert.equal(first?.events.at(-1)?.detail, "technical_support");
 
   await assert.rejects(
     () => store.claimAdminCustomerWhatsAppContact(
       secondId,
       new Date(now.getTime() + BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS - 60_000),
+      "customer_followup",
     ),
     (error: unknown) =>
       error instanceof BookingWorkflowError &&
@@ -1587,8 +1839,10 @@ test("admin customer WhatsApp contact is limited once per customer every 30 minu
   const otherCustomer = await store.claimAdminCustomerWhatsAppContact(
     otherCustomerId,
     new Date(now.getTime() + 5 * 60_000),
+    "customer_followup",
   );
   assert.ok(otherCustomer?.adminCustomerWhatsAppLastOpenedAt);
+  assert.equal(otherCustomer?.events.at(-1)?.detail, "customer_followup");
 
   const boundary = new Date(
     now.getTime() + BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
@@ -1598,6 +1852,46 @@ test("admin customer WhatsApp contact is limited once per customer every 30 minu
     boundary,
   );
   assert.equal(second?.adminCustomerWhatsAppLastOpenedAt, boundary.toISOString());
+});
+
+test("admin customer WhatsApp template availability is derived from current booking state", () => {
+  const awaiting = {
+    ...buildWorkflow().followUp,
+    contactRequestId: "CONTACT-ADMIN-TEMPLATE-AVAILABILITY",
+  } as BookingFollowUpDocument;
+  assert.deepEqual(
+    adminCustomerWhatsAppTemplateVariantsForBooking(awaiting, now),
+    ["technical_support", "customer_followup"],
+  );
+  assert.deepEqual(
+    adminCustomerWhatsAppTemplateVariantsForBooking(
+      {
+        ...awaiting,
+        createdAt: new Date(
+          now.getTime() - BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+        ).toISOString(),
+      },
+      now,
+    ),
+    ["technical_support"],
+  );
+
+  const confirmed = confirmedObserveOnlyFixture() as BookingFollowUpDocument;
+  assert.deepEqual(
+    adminCustomerWhatsAppTemplateVariantsForBooking(confirmed, now),
+    ["technical_support"],
+  );
+
+  for (const ineligible of [
+    { ...awaiting, isFreeProperty: false },
+    { ...awaiting, freeEligibilityRevokedAt: now.toISOString() },
+    { ...awaiting, customerPhone: "invalid" },
+  ]) {
+    assert.deepEqual(
+      adminCustomerWhatsAppTemplateVariantsForBooking(ineligible as any, now),
+      [],
+    );
+  }
 });
 
 test("rejected admin customer WhatsApp handoffs do not consume the cooldown", async () => {
@@ -1638,6 +1932,30 @@ test("rejected admin customer WhatsApp handoffs do not consume the cooldown", as
     (error: unknown) =>
       error instanceof BookingWorkflowError &&
       error.code === "OWNER_IDENTITY_CHANGED",
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.adminCustomerWhatsAppLastOpenedAt,
+    undefined,
+  );
+
+  database.update("properties", workflow.followUp.propertyNumber, {
+    whatsappNumber: "0500000001",
+  });
+  database.update("booking_followups", bookingId, {
+    createdAt: new Date(
+      now.getTime() - BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+    ).toISOString(),
+  });
+  await assert.rejects(
+    () => store.claimAdminCustomerWhatsAppContact(
+      bookingId,
+      now,
+      "customer_followup",
+    ),
+    (error: unknown) =>
+      error instanceof BookingWorkflowError &&
+      error.code === "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
   );
   assert.equal(
     database.read("booking_followups", bookingId)

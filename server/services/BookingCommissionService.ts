@@ -11,11 +11,16 @@ import {
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION,
   COMMISSION_PAYMENT_WINDOW_MS,
+  bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingConfirmationFactsSchema,
   bookingFreeWorkflowSettingsUpdateSchema,
   normalizeBookingListedPriceOptionsHalalas,
+  renderBookingWhatsAppTemplate,
+  type BookingAdminCustomerWhatsAppTemplateVariant,
   type BookingConfirmationFacts,
   type BookingFreeWorkflowSettings,
+  type BookingTokenPurpose,
+  type BookingWhatsAppTemplates,
 } from "../../shared/booking";
 import { maskContactPhone } from "./ContactIdentityService";
 import {
@@ -23,12 +28,18 @@ import {
   BookingTokenService,
 } from "./BookingTokenService";
 import {
+  adminCustomerWhatsAppTemplateVariantsForBooking,
   bookingCommissionStore,
   buildInitialBookingWorkflow,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
   BookingWorkflowError,
   type InitialBookingWorkflow,
 } from "./BookingCommissionStore";
+import {
+  createCustomerBookingShortCode,
+  getBookingShortLinkService,
+  type BookingShortLinkService,
+} from "./BookingShortLinkService";
 import type {
   BookingAdminNotificationJob,
   BookingAdminPaymentAttempt,
@@ -111,6 +122,20 @@ export const bookingAdminNotificationResendSchema = z.object({
     .max(160)
     .regex(/^[A-Za-z0-9_-]+$/),
 }).strict();
+
+export const bookingAdminCustomerWhatsAppHandoffSchema = z.object({
+  templateVariant:
+    bookingAdminCustomerWhatsAppTemplateVariantSchema
+      .default("technical_support"),
+}).strict();
+
+const ADMIN_CUSTOMER_WHATSAPP_TOKEN_PURPOSE = {
+  technical_support: "admin_customer_whatsapp",
+  customer_followup: "admin_customer_whatsapp_customer_followup",
+} as const satisfies Record<
+  BookingAdminCustomerWhatsAppTemplateVariant,
+  BookingTokenPurpose
+>;
 
 export type BookingCommissionReceiptPersistence = {
   store(input: {
@@ -214,6 +239,29 @@ function publicBaseUrlHealth(): {
   }
 }
 
+function bookingPublicBaseUrl(): string {
+  const configured = String(
+    process.env.PUBLIC_BASE_URL ||
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      "https://rwqan.sa",
+  ).trim();
+  try {
+    const parsed = new URL(configured);
+    if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") {
+      return "https://rwqan.sa";
+    }
+    if (
+      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password
+    ) return "https://rwqan.sa";
+    return parsed.origin;
+  } catch {
+    return "https://rwqan.sa";
+  }
+}
+
 function adminFreeWorkflowSettingsResponse(
   settings: BookingFreeWorkflowSettings,
 ) {
@@ -312,6 +360,7 @@ function adminRow(
   jobs: BookingNotificationJob[],
   attempts: BookingCommissionPaymentAttempt[],
   customerWhatsAppLastOpenedAt: string | null,
+  now = new Date(),
 ): BookingAdminRow & {
   questionnaire: ReturnType<typeof questionnaire>;
   dueAt: string | null;
@@ -332,7 +381,7 @@ function adminRow(
   const orderedAttempts = [...attempts].sort((left, right) =>
     Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   const selectedAttempt = selectAdminPaymentAttempt(booking, orderedAttempts);
-  const responseExpired = isUnansweredBookingExpired(booking);
+  const responseExpired = isUnansweredBookingExpired(booking, now.getTime());
   const createdAtMs = Date.parse(booking.createdAt);
   const expiryAt = Number.isFinite(createdAtMs)
     ? new Date(createdAtMs + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS).toISOString()
@@ -355,6 +404,8 @@ function adminRow(
             BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
         ).toISOString()
       : null,
+    adminCustomerWhatsAppTemplateVariants:
+      adminCustomerWhatsAppTemplateVariantsForBooking(booking, now),
     questionnaire: questionnaire(booking),
     dueAt: booking.commissionDueAt,
     contactAt: booking.createdAt,
@@ -389,6 +440,13 @@ export function selectAdminPaymentAttempt(
 }
 
 export class BookingCommissionService {
+  constructor(
+    private readonly adminCustomerShortLinkService?: Pick<
+      BookingShortLinkService,
+      "ensureCustomerResponseLink"
+    >,
+  ) {}
+
   async isFollowUpEnabled(): Promise<boolean> {
     return firebaseService.getFeatureFlag("FEATURE_BOOKING_FOLLOWUP");
   }
@@ -707,18 +765,9 @@ export class BookingCommissionService {
     );
   }
 
-  async issueAdminCustomerWhatsAppHandoff(bookingId: string): Promise<string> {
-    const handoffTokens = tokenService();
-    const booking = await bookingCommissionStore.claimAdminCustomerWhatsAppContact(
-      bookingId,
-    );
-    if (!booking) {
-      throw new BookingWorkflowError(
-        "BOOKING_NOT_FOUND",
-        "Booking not found",
-        404,
-      );
-    }
+  private requireAdminCustomerDestination(
+    booking: BookingFollowUpDocument,
+  ): string {
     const destination = normalizeWhatsAppDestination(booking.customerPhone);
     if (!destination) {
       throw new BookingWorkflowError(
@@ -727,20 +776,149 @@ export class BookingCommissionService {
         400,
       );
     }
+    return destination;
+  }
+
+  private requireAdminCustomerTemplateAvailable(
+    booking: BookingFollowUpDocument,
+    templateVariant: BookingAdminCustomerWhatsAppTemplateVariant,
+    now = new Date(),
+  ): void {
+    if (
+      !adminCustomerWhatsAppTemplateVariantsForBooking(booking, now)
+        .includes(templateVariant)
+    ) {
+      throw new BookingWorkflowError(
+        "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+        "Selected WhatsApp template is unavailable for this booking",
+        409,
+      );
+    }
+  }
+
+  private async renderAdminCustomerWhatsAppMessage(
+    booking: BookingFollowUpDocument,
+    templateVariant: BookingAdminCustomerWhatsAppTemplateVariant,
+    templates?: BookingWhatsAppTemplates,
+    now = new Date(),
+    ensureCustomerShortLink = true,
+  ): Promise<string> {
+    this.requireAdminCustomerDestination(booking);
+    this.requireAdminCustomerTemplateAvailable(booking, templateVariant, now);
+    if (templateVariant === "technical_support") {
+      return BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE;
+    }
+    if (!templates) {
+      throw new BookingWorkflowError(
+        "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+        "Selected WhatsApp template is unavailable for this booking",
+        409,
+      );
+    }
+
+    const propertyName = String(booking.propertyName || "").trim() ||
+      "بدون اسم";
+    if (templateVariant === "customer_followup") {
+      const expiresAt =
+        Date.parse(booking.createdAt) + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS;
+      const customerToken = this.issueCustomerResponseToken(booking);
+      const shortCode = ensureCustomerShortLink
+        ? await (
+          this.adminCustomerShortLinkService || getBookingShortLinkService()
+        ).ensureCustomerResponseLink({
+          bookingId: booking.id,
+          token: customerToken,
+          expiresAt,
+        })
+        : createCustomerBookingShortCode(booking.id);
+      const propertyLabel = booking.isFreeProperty || !booking.propertyName
+        ? `العقار رقم ${booking.propertyNumber}`
+        : `${propertyName} رقم ${booking.propertyNumber}`;
+      return renderBookingWhatsAppTemplate(
+        "customer_followup",
+        templates.customer_followup,
+        {
+          propertyLabel,
+          followUpLink: `${bookingPublicBaseUrl()}/b/${shortCode}`,
+        },
+      );
+    }
+
+    throw new BookingWorkflowError(
+      "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+      "Selected WhatsApp template is unavailable for this booking",
+      409,
+    );
+  }
+
+  async issueAdminCustomerWhatsAppHandoff(
+    bookingId: string,
+    rawInput: unknown = {},
+  ): Promise<string> {
+    const input = bookingAdminCustomerWhatsAppHandoffSchema.parse(
+      rawInput ?? {},
+    );
+    const now = new Date();
+    const handoffTokens = tokenService();
+    const preflightBooking = await bookingCommissionStore
+      .getBookingForCurrentOwner(bookingId);
+    if (!preflightBooking) {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    const templates = input.templateVariant === "technical_support"
+      ? undefined
+      : (await this.getFreeWorkflowSettings()).whatsappTemplates;
+    await this.renderAdminCustomerWhatsAppMessage(
+      preflightBooking,
+      input.templateVariant,
+      templates,
+      now,
+    );
     const token = handoffTokens.issue({
-      bookingId: booking.id,
-      purpose: "admin_customer_whatsapp",
+      bookingId: preflightBooking.id,
+      purpose: ADMIN_CUSTOMER_WHATSAPP_TOKEN_PURPOSE[input.templateVariant],
       expiresAt: Date.now() +
         BOOKING_ADMIN_CUSTOMER_WHATSAPP_TOKEN_MAX_AGE_MS,
     });
-    return `/api/admin/booking-commissions/${encodeURIComponent(booking.id)}/customer-whatsapp/open?token=${encodeURIComponent(token)}`;
+
+    const booking = await bookingCommissionStore.claimAdminCustomerWhatsAppContact(
+      bookingId,
+      now,
+      input.templateVariant,
+    );
+    if (!booking) {
+      throw new BookingWorkflowError(
+        "BOOKING_NOT_FOUND",
+        "Booking not found",
+        404,
+      );
+    }
+    this.requireAdminCustomerDestination(booking);
+    this.requireAdminCustomerTemplateAvailable(
+      booking,
+      input.templateVariant,
+      now,
+    );
+    return `/api/admin/booking-commissions/${encodeURIComponent(booking.id)}/customer-whatsapp/open?token=${encodeURIComponent(token)}&templateVariant=${encodeURIComponent(input.templateVariant)}`;
   }
 
   async resolveAdminCustomerWhatsAppHandoff(
     bookingId: string,
     token: unknown,
+    rawTemplateVariant: unknown = "technical_support",
   ): Promise<string> {
-    const verified = tokenService().verify(token, "admin_customer_whatsapp");
+    const templateVariant =
+      bookingAdminCustomerWhatsAppTemplateVariantSchema.parse(
+        rawTemplateVariant ?? "technical_support",
+      );
+    const verified = tokenService().verify(
+      token,
+      ADMIN_CUSTOMER_WHATSAPP_TOKEN_PURPOSE[templateVariant],
+    );
     if (verified.bookingId !== bookingId) {
       throw new BookingWorkflowError(
         "BOOKING_NOT_FOUND",
@@ -758,15 +936,18 @@ export class BookingCommissionService {
         404,
       );
     }
-    const destination = normalizeWhatsAppDestination(booking.customerPhone);
-    if (!destination) {
-      throw new BookingWorkflowError(
-        "INVALID_CUSTOMER_PHONE",
-        "Invalid customer phone",
-        400,
-      );
-    }
-    return `https://wa.me/${destination}?text=${encodeURIComponent(BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE)}`;
+    const destination = this.requireAdminCustomerDestination(booking);
+    const templates = templateVariant === "technical_support"
+      ? undefined
+      : (await this.getFreeWorkflowSettings()).whatsappTemplates;
+    const message = await this.renderAdminCustomerWhatsAppMessage(
+      booking,
+      templateVariant,
+      templates,
+      new Date(),
+      false,
+    );
+    return `https://wa.me/${destination}?text=${encodeURIComponent(message)}`;
   }
 
   async submitBankTransfer(
@@ -1010,6 +1191,7 @@ export class BookingCommissionService {
         jobsByBooking.get(booking.id) || [],
         attemptsByBooking.get(booking.id) || [],
         latestCustomerWhatsAppContact.get(booking.customerSubject) || null,
+        new Date(dashboardNow),
       ));
     const confirmed = bookings.filter((booking) => booking.bookingStatus === "confirmed");
     return {

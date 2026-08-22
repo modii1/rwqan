@@ -46,7 +46,8 @@ test("admin dashboard renders the safe customer WhatsApp control in all three bo
     3,
   );
   assert.match(source, /window\.open\("about:blank", "_blank"\)/);
-  assert.match(source, /\{ method: "POST" \}/);
+  assert.match(source, /method: "POST"/);
+  assert.match(source, /body: JSON\.stringify\(\{ templateVariant \}\)/);
   assert.match(source, /popup\.location\.replace\(result\.handoffUrl\)/);
   assert.match(source, /onChanged\(\)/);
   assert.match(source, /\[bookingId, nextAllowedAt\]/);
@@ -57,6 +58,12 @@ test("admin dashboard renders the safe customer WhatsApp control in all three bo
   assert.match(source, /title="فتح محادثة واتساب مع العميل"/);
   assert.match(source, /<FaWhatsapp/);
   assert.match(source, /customerWhatsAppNextAllowedAt/);
+  assert.match(source, /adminCustomerWhatsAppTemplateVariants/);
+  assert.match(source, /BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS\.map/);
+  assert.match(source, /!availableTemplateVariants\.has\(variant\)/);
+  assert.match(source, /<DropdownMenuLabel className="text-right">/);
   assert.match(source, /ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS/);
+  assert.match(source, /sendNow \? "إرسال الرسالة الآن" : "إعادة إرسال الرسالة"/);
+  assert.match(source, /بدون إنشاء نسخة مكررة/);
   assert.doesNotMatch(source, /getAdminCustomerWhatsAppHref\(row\.customerPhoneMasked/);
 });

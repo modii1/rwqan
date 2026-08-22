@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
+  BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
   BookingCommissionService,
   selectAdminPaymentAttempt,
 } from "./BookingCommissionService";
@@ -12,10 +13,12 @@ import {
   BookingWorkflowError,
 } from "./BookingCommissionStore";
 import type { BookingFollowUpDocument } from "./BookingCommissionTypes";
+import { createCustomerBookingShortCode } from "./BookingShortLinkService";
 import { paymobService } from "../integrations/paymob";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  renderBookingWhatsAppTemplate,
 } from "../../shared/booking";
 import { firebaseService } from "../firebaseService";
 
@@ -208,11 +211,19 @@ test("admin customer WhatsApp handoff keeps the phone behind a short-lived signe
 });
 
 test("admin customer WhatsApp handoff fails closed after free eligibility is lost", async () => {
-  const original = bookingCommissionStore.claimAdminCustomerWhatsAppContact;
+  const originals = {
+    claim: bookingCommissionStore.claimAdminCustomerWhatsAppContact,
+    getCurrent: bookingCommissionStore.getBookingForCurrentOwner,
+  };
   const previousSecret = process.env.SESSION_SECRET;
   const service = new BookingCommissionService();
+  const booking = awaitingBookingFixture({
+    requestCode: "ADMIN-WHATSAPP-UPGRADED",
+    createdAt: new Date(),
+  });
   try {
     process.env.SESSION_SECRET = "admin-whatsapp-eligibility-test-secret-12345678";
+    (bookingCommissionStore as any).getBookingForCurrentOwner = async () => booking;
     (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = async () => null;
     await assert.rejects(
       () => service.issueAdminCustomerWhatsAppHandoff("BOOK-UPGRADED"),
@@ -222,7 +233,204 @@ test("admin customer WhatsApp handoff fails closed after free eligibility is los
         error.status === 404,
     );
   } finally {
-    (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = original;
+    (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = originals.claim;
+    (bookingCommissionStore as any).getBookingForCurrentOwner = originals.getCurrent;
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+  }
+});
+
+test("admin customer follow-up handoff provisions the short link before cooldown and binds the selected template", async () => {
+  const store = bookingCommissionStore as any;
+  const originals = {
+    claim: store.claimAdminCustomerWhatsAppContact,
+    getCurrent: store.getBookingForCurrentOwner,
+    getSettings: store.getFreeWorkflowSettings,
+  };
+  const previousSecret = process.env.SESSION_SECRET;
+  const previousBaseUrl = process.env.PUBLIC_BASE_URL;
+  const booking = awaitingBookingFixture({
+    requestCode: "ADMIN-CUSTOMER-FOLLOWUP",
+    createdAt: new Date(),
+  });
+  let currentBooking: BookingFollowUpDocument = booking;
+  const calls: string[] = [];
+  const tokenSecret = "admin-customer-followup-template-secret-value-123456";
+  const shortCode = createCustomerBookingShortCode(booking.id, tokenSecret);
+  const editedCustomerFollowUpTemplate =
+    `[edited] ${DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_followup}`;
+  assert.match(shortCode, /^[A-Za-z0-9_-]{10}$/);
+  const service = new BookingCommissionService({
+    ensureCustomerResponseLink: async (input) => {
+      calls.push("short-link");
+      assert.equal(input.bookingId, booking.id);
+      assert.equal(
+        input.expiresAt,
+        Date.parse(booking.createdAt) + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
+      );
+      assert.equal(input.token.includes(booking.customerPhone), false);
+      return shortCode;
+    },
+  });
+
+  try {
+    process.env.SESSION_SECRET = tokenSecret;
+    process.env.PUBLIC_BASE_URL = "https://staging.rwqan.test/path-ignored";
+    store.getBookingForCurrentOwner = async (id: string) =>
+      id === booking.id ? currentBooking : null;
+    store.getFreeWorkflowSettings = async () => ({
+      whatsappTemplates: {
+        ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+        customer_followup: editedCustomerFollowUpTemplate,
+      },
+    });
+    store.claimAdminCustomerWhatsAppContact = async (
+      id: string,
+      _now: Date,
+      templateVariant: string,
+    ) => {
+      calls.push("cooldown-claim");
+      assert.equal(id, booking.id);
+      assert.equal(templateVariant, "customer_followup");
+      return currentBooking;
+    };
+
+    const handoffUrl = await service.issueAdminCustomerWhatsAppHandoff(
+      booking.id,
+      { templateVariant: "customer_followup" },
+    );
+    assert.deepEqual(calls, ["short-link", "cooldown-claim"]);
+    const handoff = new URL(handoffUrl, "https://rwqan.test");
+    const token = handoff.searchParams.get("token");
+    assert.ok(token);
+    assert.equal(
+      handoff.searchParams.get("templateVariant"),
+      "customer_followup",
+    );
+
+    const redirect = new URL(
+      await service.resolveAdminCustomerWhatsAppHandoff(
+        booking.id,
+        token,
+        "customer_followup",
+      ),
+    );
+    assert.deepEqual(
+      calls,
+      ["short-link", "cooldown-claim"],
+      "opening the handoff reuses the provisioned deterministic alias",
+    );
+    assert.equal(redirect.pathname, "/966500000002");
+    assert.equal(
+      redirect.searchParams.get("text"),
+      renderBookingWhatsAppTemplate(
+        "customer_followup",
+        editedCustomerFollowUpTemplate,
+        {
+          propertyLabel: `العقار رقم ${booking.propertyNumber}`,
+          followUpLink: `https://staging.rwqan.test/b/${shortCode}`,
+        },
+      ),
+    );
+
+    await assert.rejects(
+      () => service.resolveAdminCustomerWhatsAppHandoff(
+        booking.id,
+        token,
+        "technical_support",
+      ),
+      (error: unknown) =>
+        Boolean(error) &&
+        typeof error === "object" &&
+        (error as { code?: unknown }).code === "TOKEN_WRONG_PURPOSE",
+    );
+
+    const failedShortLinkService = new BookingCommissionService({
+      ensureCustomerResponseLink: async () => {
+        throw new Error("short-link-write-failed");
+      },
+    });
+    await assert.rejects(
+      () => failedShortLinkService.issueAdminCustomerWhatsAppHandoff(
+        booking.id,
+        { templateVariant: "customer_followup" },
+      ),
+      /short-link-write-failed/,
+    );
+    assert.deepEqual(
+      calls,
+      ["short-link", "cooldown-claim"],
+      "a short-link failure cannot consume the cooldown",
+    );
+
+    currentBooking = {
+      ...booking,
+      createdAt: new Date(
+        Date.now() - BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+      ).toISOString(),
+    };
+    await assert.rejects(
+      () => service.resolveAdminCustomerWhatsAppHandoff(
+        booking.id,
+        token,
+        "customer_followup",
+      ),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+    );
+    await assert.rejects(
+      () => service.issueAdminCustomerWhatsAppHandoff(
+        booking.id,
+        { templateVariant: "customer_followup" },
+      ),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+    );
+    assert.deepEqual(
+      calls,
+      ["short-link", "cooldown-claim"],
+      "an unavailable state is rejected before short-link or cooldown work",
+    );
+  } finally {
+    store.claimAdminCustomerWhatsAppContact = originals.claim;
+    store.getBookingForCurrentOwner = originals.getCurrent;
+    store.getFreeWorkflowSettings = originals.getSettings;
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+    if (previousBaseUrl === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previousBaseUrl;
+  }
+});
+
+test("admin customer WhatsApp handoff validates token configuration before consuming cooldown", async () => {
+  const store = bookingCommissionStore as any;
+  const originals = {
+    claim: store.claimAdminCustomerWhatsAppContact,
+    getCurrent: store.getBookingForCurrentOwner,
+  };
+  const previousSecret = process.env.SESSION_SECRET;
+  let claimCalls = 0;
+
+  try {
+    delete process.env.SESSION_SECRET;
+    store.getBookingForCurrentOwner = async () => {
+      throw new Error("booking lookup must not run before token preflight");
+    };
+    store.claimAdminCustomerWhatsAppContact = async () => {
+      claimCalls += 1;
+      return null;
+    };
+    await assert.rejects(
+      () => new BookingCommissionService()
+        .issueAdminCustomerWhatsAppHandoff("BOOK-NO-SECRET"),
+      /SESSION_SECRET must be at least 32 bytes for booking workflows/,
+    );
+    assert.equal(claimCalls, 0);
+  } finally {
+    store.claimAdminCustomerWhatsAppContact = originals.claim;
+    store.getBookingForCurrentOwner = originals.getCurrent;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }
@@ -597,6 +805,13 @@ test("seven-day expiry is derived for admin and customer views without persistin
     assert.ok(freshAdminRow);
     assert.equal(expiredAdminRow.bookingStatus, "expired");
     assert.equal(freshAdminRow.bookingStatus, "awaiting_response");
+    assert.deepEqual(expiredAdminRow.adminCustomerWhatsAppTemplateVariants, [
+      "technical_support",
+    ]);
+    assert.deepEqual(freshAdminRow.adminCustomerWhatsAppTemplateVariants, [
+      "technical_support",
+      "customer_followup",
+    ]);
     const expectedContactAt = new Date(
       Date.parse(expired.adminCustomerWhatsAppLastOpenedAt) +
         BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,

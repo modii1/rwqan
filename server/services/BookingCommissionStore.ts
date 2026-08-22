@@ -6,6 +6,7 @@ import {
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+  bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
   bookingFreeWorkflowConfigurationSchema,
@@ -19,6 +20,7 @@ import {
   calculateCommissionReminderSchedule,
   COMMISSION_PAYMENT_WINDOW_MS,
   type BookingConfirmationFacts,
+  type BookingAdminCustomerWhatsAppTemplateVariant,
   type BookingFreeWorkflowConfiguration,
   type BookingFreeWorkflowLimits,
   type BookingFreeWorkflowSettings,
@@ -284,6 +286,23 @@ function customerResponseExpired(
   const createdAt = Date.parse(booking.createdAt);
   return !Number.isFinite(createdAt) ||
     now.getTime() >= createdAt + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS;
+}
+
+export function adminCustomerWhatsAppTemplateVariantsForBooking(
+  booking: BookingFollowUpDocument,
+  now = new Date(),
+): BookingAdminCustomerWhatsAppTemplateVariant[] {
+  if (
+    !Number.isFinite(now.getTime()) ||
+    booking.isFreeProperty !== true ||
+    Boolean(booking.freeEligibilityRevokedAt) ||
+    !normalizeWhatsAppDestination(booking.customerPhone)
+  ) return [];
+
+  return booking.bookingStatus === "awaiting_response" &&
+      !customerResponseExpired(booking, now)
+    ? ["technical_support", "customer_followup"]
+    : ["technical_support"];
 }
 
 function ownerIdentityMatches(
@@ -957,7 +976,11 @@ export class BookingCommissionStore {
   async claimAdminCustomerWhatsAppContact(
     id: string,
     now = new Date(),
+    templateVariant: BookingAdminCustomerWhatsAppTemplateVariant =
+      "technical_support",
   ): Promise<BookingFollowUpDocument | null> {
+    const selectedVariant = bookingAdminCustomerWhatsAppTemplateVariantSchema
+      .parse(templateVariant);
     if (!Number.isFinite(now.getTime())) {
       throw new RangeError("Invalid admin customer contact time");
     }
@@ -991,6 +1014,16 @@ export class BookingCommissionStore {
           "INVALID_CUSTOMER_PHONE",
           "Invalid customer phone",
           400,
+        );
+      }
+      if (
+        !adminCustomerWhatsAppTemplateVariantsForBooking(booking, now)
+          .includes(selectedVariant)
+      ) {
+        throw new BookingWorkflowError(
+          "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
+          "Selected WhatsApp template is unavailable for this booking",
+          409,
         );
       }
 
@@ -1028,6 +1061,7 @@ export class BookingCommissionStore {
         events: appendEvent(booking.events, {
           type: "admin_customer_whatsapp_opened",
           at: timestamp,
+          detail: selectedVariant,
         }),
       };
       transaction.update(bookingRef, {
@@ -1141,6 +1175,7 @@ export class BookingCommissionStore {
         );
       }
       if (![
+        "pending",
         "sent",
         "failed",
         "cancelled",
@@ -1153,13 +1188,16 @@ export class BookingCommissionStore {
       }
       if (sourceJob.reminderOffsetDays) {
         const latestDueOffset = latestCommissionReminderOffsetDue(booking, now);
-        if (
-          latestDueOffset &&
-          sourceJob.reminderOffsetDays < latestDueOffset
-        ) {
+        if (latestDueOffset && sourceJob.reminderOffsetDays < latestDueOffset) {
           throw new BookingWorkflowError(
             "NOTIFICATION_REMINDER_SUPERSEDED",
             "A newer commission reminder is already due",
+          );
+        }
+        if (latestDueOffset !== sourceJob.reminderOffsetDays) {
+          throw new BookingWorkflowError(
+            "NOTIFICATION_STATE_CHANGED",
+            "Notification no longer matches the booking state",
           );
         }
       }
@@ -1226,21 +1264,39 @@ export class BookingCommissionStore {
         );
       }
 
-      const resendJobId = `${notificationId(booking.id, sourceJob.kind)}--manual-${digest}`;
+      const acceleratePending = sourceJob.status === "pending";
+      const resendJobId = acceleratePending
+        ? sourceJob.id
+        : `${notificationId(booking.id, sourceJob.kind)}--manual-${digest}`;
       const resendJobRef = this.db.collection(NOTIFICATIONS_COLLECTION)
         .doc(resendJobId);
-      const resendJob: BookingNotificationJob = {
-        ...buildNotificationJob({
-          booking,
-          kind: sourceJob.kind,
+      const resendJob: BookingNotificationJob = acceleratePending
+        ? {
+            ...sourceJob,
+            scheduledAt: timestamp,
+            providerError: null,
+            updatedAt: timestamp,
+          }
+        : {
+            ...buildNotificationJob({
+              booking,
+              kind: sourceJob.kind,
+              scheduledAt: timestamp,
+              now: timestamp,
+            }),
+            id: resendJobId,
+            manualResendOfJobId: sourceJob.id,
+            manualResendRequestedAt: timestamp,
+          };
+      if (acceleratePending) {
+        transaction.update(sourceJobRef, {
           scheduledAt: timestamp,
-          now: timestamp,
-        }),
-        id: resendJobId,
-        manualResendOfJobId: sourceJob.id,
-        manualResendRequestedAt: timestamp,
-      };
-      transaction.create(resendJobRef, resendJob);
+          providerError: null,
+          updatedAt: timestamp,
+        });
+      } else {
+        transaction.create(resendJobRef, resendJob);
+      }
       transaction.create(auditRef, {
         id: auditId,
         schemaVersion: 1,

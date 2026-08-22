@@ -34,6 +34,7 @@ test("issues a signed base64url token and verifies every supported purpose", () 
     "customer_response",
     "owner_payment",
     "admin_customer_whatsapp",
+    "admin_customer_whatsapp_customer_followup",
   ] as const) {
     const expiresAt = initialNow + 60_000;
     const token = service.issue({ bookingId: "BOOK-13383-1", purpose, expiresAt });
@@ -106,6 +107,19 @@ test("purpose-bound tokens cannot be reused for another operation", () => {
 
   assert.throws(
     () => service.verify(token, "owner_payment"),
+    (error: unknown) => errorCode(error) === "TOKEN_WRONG_PURPOSE",
+  );
+
+  const support = service.issue({
+    bookingId: "BOOK-1",
+    purpose: "admin_customer_whatsapp",
+    expiresAt: initialNow + 60_000,
+  });
+  assert.throws(
+    () => service.verify(
+      support,
+      "admin_customer_whatsapp_customer_followup",
+    ),
     (error: unknown) => errorCode(error) === "TOKEN_WRONG_PURPOSE",
   );
 });

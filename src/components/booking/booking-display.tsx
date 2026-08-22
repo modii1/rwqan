@@ -10,6 +10,7 @@ import {
   PauseCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { BookingAdminCustomerWhatsAppTemplateVariant } from "@shared/booking";
 
 export type BookingTiming = "midweek" | "weekend" | "other";
 export type BookingDatePrecision = "day" | "month";
@@ -138,6 +139,8 @@ export interface BookingDisplayRow {
   complianceStatus?: string | null;
   customerPhoneMasked?: string | null;
   customerWhatsAppNextAllowedAt?: string | null;
+  adminCustomerWhatsAppTemplateVariants?:
+    BookingAdminCustomerWhatsAppTemplateVariant[];
   isFreeProperty?: boolean;
   disputeStatus?: string | null;
   disputedAt?: string | null;

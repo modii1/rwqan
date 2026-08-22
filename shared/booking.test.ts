@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS,
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   COMMISSION_PAYMENT_WINDOW_MS,
   COMMISSION_REMINDER_OFFSET_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingConfirmationFactsSchema,
+  bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
   bookingDateSchema,
@@ -28,6 +30,26 @@ import {
   toBookingPublicDto,
   type BookingConfirmationFacts,
 } from "./booking";
+
+test("admin customer WhatsApp variants form a closed safe allowlist", () => {
+  assert.deepEqual(BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS, [
+    "technical_support",
+    "customer_followup",
+  ]);
+  for (const invalid of [
+    "commission_reminder",
+    "owner_booking_confirmed",
+    "arbitrary_copy",
+    "",
+    null,
+  ]) {
+    assert.equal(
+      bookingAdminCustomerWhatsAppTemplateVariantSchema.safeParse(invalid)
+        .success,
+      false,
+    );
+  }
+});
 
 test("default booking WhatsApp templates render the approved messages byte-for-byte", () => {
   assert.deepEqual(

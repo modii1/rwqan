@@ -94,6 +94,19 @@ export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
 export type BookingWhatsAppTemplateKey =
   keyof typeof BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS;
 
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS = [
+  "technical_support",
+  "customer_followup",
+] as const;
+
+export const bookingAdminCustomerWhatsAppTemplateVariantSchema = z.enum(
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS,
+);
+
+export type BookingAdminCustomerWhatsAppTemplateVariant = z.infer<
+  typeof bookingAdminCustomerWhatsAppTemplateVariantSchema
+>;
+
 export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
   customer_followup: `هل تم الحجز بعد تواصلك مع {{propertyLabel}}؟
 
@@ -367,6 +380,7 @@ export const bookingTokenPurposeSchema = z.enum([
   "customer_response",
   "owner_payment",
   "admin_customer_whatsapp",
+  "admin_customer_whatsapp_customer_followup",
 ]);
 export type BookingTokenPurpose = z.infer<typeof bookingTokenPurposeSchema>;
 

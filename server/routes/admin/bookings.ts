@@ -53,6 +53,7 @@ router.post("/api/admin/booking-commissions/:id/customer-whatsapp", async (req, 
   try {
     const handoffUrl = await bookingCommissionService.issueAdminCustomerWhatsAppHandoff(
       req.params.id,
+      req.body,
     );
     return res.json({ handoffUrl });
   } catch (error) {
@@ -73,7 +74,11 @@ router.get("/api/admin/booking-commissions/:id/customer-whatsapp/open", async (r
   res.set("Referrer-Policy", "no-referrer");
   try {
     const redirectUrl = await bookingCommissionService
-      .resolveAdminCustomerWhatsAppHandoff(req.params.id, req.query.token);
+      .resolveAdminCustomerWhatsAppHandoff(
+        req.params.id,
+        req.query.token,
+        req.query.templateVariant,
+      );
     return res.redirect(302, redirectUrl);
   } catch (error) {
     const response = bookingRouteError(error);

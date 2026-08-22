@@ -5,6 +5,7 @@ import express from "express";
 import {
   BookingWorkflowError,
   bookingCommissionStore,
+  buildInitialBookingWorkflow,
 } from "../../services/BookingCommissionStore";
 import { BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE } from "../../services/BookingCommissionService";
 import { DEFAULT_BOOKING_WHATSAPP_TEMPLATES } from "../../../shared/booking";
@@ -220,6 +221,17 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
   };
   const previousSecret = process.env.SESSION_SECRET;
   let claimCalls = 0;
+  const { followUp: handoffBooking } = buildInitialBookingWorkflow({
+    requestCode: "ADMIN-CUSTOMER-WHATSAPP-ROUTE",
+    propertyNumber: "13383",
+    propertyName: "شاليه الريف المائي",
+    ownerPhone: "+966500000001",
+    customerPhone: "+966500000002",
+    customerSubject: "admin-customer-whatsapp-route-subject",
+    isFreeProperty: true,
+    listedPriceOptionsHalalas: [75_000],
+    now: new Date(),
+  });
 
   try {
     process.env.SESSION_SECRET = "admin-whatsapp-route-test-secret-value-12345678";
@@ -235,11 +247,13 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
         );
       }
       return {
+        ...handoffBooking,
         id,
         customerPhone: "٠٥٠ ٠٠٠ ٠٠٠٢",
       };
     };
     store.getBookingForCurrentOwner = async (id: string) => ({
+      ...handoffBooking,
       id,
       customerPhone: "٠٥٠ ٠٠٠ ٠٠٠٢",
     });
@@ -278,6 +292,44 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
       );
       assert.equal(claimCalls, 1, "opening the signed handoff does not claim again");
 
+      const tamperedVariantUrl = new URL(payload.handoffUrl, baseUrl);
+      tamperedVariantUrl.searchParams.set(
+        "templateVariant",
+        "customer_followup",
+      );
+      const tamperedVariant = await fetch(tamperedVariantUrl, {
+        redirect: "manual",
+      });
+      assert.equal(tamperedVariant.status, 404);
+      assert.equal(tamperedVariant.headers.get("location"), null);
+
+      const tamperedTokenUrl = new URL(payload.handoffUrl, baseUrl);
+      tamperedTokenUrl.searchParams.set(
+        "token",
+        `${tamperedTokenUrl.searchParams.get("token")}A`,
+      );
+      const tamperedToken = await fetch(tamperedTokenUrl, {
+        redirect: "manual",
+      });
+      assert.equal(tamperedToken.status, 404);
+      assert.equal(tamperedToken.headers.get("location"), null);
+      assert.equal(claimCalls, 1, "tampered handoffs never consume another claim");
+
+      const invalidTemplate = await fetch(
+        `${baseUrl}/api/admin/booking-commissions/BOOK-HANDOFF/customer-whatsapp`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateVariant: "owner_payment" }),
+        },
+      );
+      assert.equal(invalidTemplate.status, 400);
+      assert.equal(
+        claimCalls,
+        1,
+        "invalid template input is rejected before consuming cooldown",
+      );
+
       const safeGet = await fetch(
         `${baseUrl}/api/admin/booking-commissions/BOOK-HANDOFF/customer-whatsapp`,
         { redirect: "manual" },
@@ -309,6 +361,7 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
       });
 
       store.claimAdminCustomerWhatsAppContact = async () => ({
+        ...handoffBooking,
         id: "BOOK-INVALID",
         customerPhone: "invalid",
       });

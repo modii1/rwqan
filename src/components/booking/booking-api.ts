@@ -55,6 +55,8 @@ const bookingErrorMessages: Record<string, string> = {
   NOTIFICATION_NOT_RESENDABLE: "يمكن إعادة إرسال الرسائل المكتملة فقط.",
   NOTIFICATION_REMINDER_SUPERSEDED: "يوجد تذكير أحدث مستحق، لذلك لا يمكن إعادة إرسال هذا التذكير.",
   NOTIFICATION_STATE_CHANGED: "لم تعد هذه الرسالة مناسبة لحالة الحجز الحالية.",
+  ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE:
+    "لم تعد هذه الرسالة مناسبة لحالة الحجز الحالية.",
   NOTIFICATION_RESEND_INCONSISTENT: "تعذر مطابقة سجل إعادة الإرسال.",
 };
 
