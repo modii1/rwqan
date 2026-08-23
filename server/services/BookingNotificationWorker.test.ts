@@ -480,6 +480,111 @@ test("an existing pending customer job lazily creates its compact alias before s
   }
 });
 
+test("worker performs a final prepare after alias creation and skips the provider when it is blocked", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = {
+    ...confirmedBooking(),
+    bookingStatus: "awaiting_response",
+    bookingDecision: null,
+    questionnaireStartedAt: null,
+    confirmationFacts: null,
+    confirmedAt: null,
+  } as unknown as BookingFollowUpDocument;
+  const claimed = {
+    ...notificationJob("customer_followup", {
+      status: "claimed",
+      leaseToken: "blocked-after-alias-lease",
+      quotaCategory: "customer_followup",
+    }),
+    leaseToken: "blocked-after-alias-lease",
+  };
+  const sequence: string[] = [];
+  const finalizations: unknown[] = [];
+  let prepareCalls = 0;
+  let providerCalls = 0;
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () => [claimed];
+    store.prepareNotificationForSend = async () => {
+      prepareCalls += 1;
+      sequence.push("prepare");
+      return prepareCalls === 3
+        ? { status: "blocked", reason: "notification_state_changed" }
+        : { status: "ready", booking };
+    };
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 0,
+      freeOwnerDailyLimit: 0,
+      freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayMinutes: 1_440,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async () => {
+      providerCalls += 1;
+      sequence.push("provider");
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(
+        new Date("2099-08-18T12:00:00.000Z"),
+        {
+          shortLinkService: {
+            ensureCustomerResponseLink: async () => {
+              sequence.push("alias");
+              return "customer-short-code";
+            },
+            ensureOwnerPaymentLink: async () => {
+              throw new Error("owner payment alias must not be provisioned");
+            },
+          },
+        },
+      ),
+      { claimed: 1, sent: 0 },
+    );
+
+    assert.deepEqual(sequence, [
+      "prepare",
+      "prepare",
+      "alias",
+      "prepare",
+    ]);
+    assert.equal(prepareCalls, 3);
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(finalizations, []);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
 test("a manual owner payment resend provisions its compact alias before provider delivery", async () => {
   const store = bookingCommissionStore as any;
   const service = bookingCommissionService as any;
@@ -559,7 +664,13 @@ test("a manual owner payment resend provisions its compact alias before provider
       { claimed: 1, sent: 1 },
     );
 
-    assert.deepEqual(sequence, ["prepare", "prepare", "alias", "provider"]);
+    assert.deepEqual(sequence, [
+      "prepare",
+      "prepare",
+      "alias",
+      "prepare",
+      "provider",
+    ]);
     assert.equal(aliasTokens.length, 1);
     const verified = new BookingTokenService({ secret: TOKEN_SECRET })
       .verify(aliasTokens[0], "owner_payment");

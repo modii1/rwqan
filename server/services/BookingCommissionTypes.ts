@@ -106,6 +106,8 @@ export type BookingNotificationJob = {
   status: BookingNotificationStatus;
   isFreeProperty: boolean;
   quotaCategory: "customer_followup" | "free_owner_booking" | "transactional";
+  /** Riyadh quota window already reserved by this logical job, if any. */
+  quotaReservedWindowStartedAt?: number | null;
   attempts: number;
   leaseToken: string | null;
   leaseExpiresAt: string | null;

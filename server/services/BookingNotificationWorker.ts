@@ -279,9 +279,14 @@ async function dispatchClaim(
       const token = bookingCommissionService.issueOwnerPaymentToken(sendBooking);
       await links.ensureOwnerPaymentLink({ token });
     }
+    const finalPrepared = await bookingCommissionStore.prepareNotificationForSend(
+      job.id,
+      job.leaseToken,
+    );
+    if (finalPrepared.status === "blocked") return false;
     message = buildBookingNotificationMessage(
       job,
-      sendBooking,
+      finalPrepared.booking,
       settings.whatsappTemplates,
     );
   } catch (error) {
@@ -324,10 +329,11 @@ export async function dispatchDueBookingNotifications(
   } catch (error) {
     console.error("Booking commission flag lookup failed during dispatch:", error);
   }
-  // Every send has a strict provider timeout and at most one retry. Claiming a
-  // small batch and starting it concurrently keeps all work well inside the
-  // two-minute Firestore lease, preventing another instance from reclaiming a
-  // job that is merely waiting behind earlier sends.
+  // Keep the batch small and concurrent. Link provisioning may outlive the
+  // initial lease, so preparation renews it and the final gate revalidates the
+  // same token immediately before the provider call. Transactional recovery
+  // then prevents a stale worker from sending after another worker reclaimed
+  // the job.
   const claims = await bookingCommissionStore.claimDueNotificationJobs(now, 5, {
     commissionNotificationsEnabled,
     followUpNotificationsEnabled,

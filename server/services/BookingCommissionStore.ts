@@ -523,6 +523,9 @@ function quotaLimitFor(
   job: BookingNotificationJob,
   limits: BookingFreeWorkflowLimits,
 ): number | null {
+  if (job.kind === "customer_followup" || job.manualResendRequestedAt) {
+    return null;
+  }
   if (job.quotaCategory === "transactional") return null;
   return job.quotaCategory === "customer_followup"
     ? limits.customerDailyLimit
@@ -1323,6 +1326,7 @@ export class BookingCommissionStore {
             ...sourceJob,
             scheduledAt: timestamp,
             providerError: null,
+            manualResendRequestedAt: timestamp,
             updatedAt: timestamp,
           }
         : {
@@ -1340,6 +1344,7 @@ export class BookingCommissionStore {
         transaction.update(sourceJobRef, {
           scheduledAt: timestamp,
           providerError: null,
+          manualResendRequestedAt: timestamp,
           updatedAt: timestamp,
         });
         for (const snapshot of earlierReminderSnapshots) {
@@ -3839,7 +3844,6 @@ export class BookingCommissionStore {
 
   async recoverExpiredNotificationClaims(now = new Date()): Promise<number> {
     const nowIso = now.toISOString();
-    const batch = this.db.batch();
     let recovered = 0;
     let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
     while (recovered < 100) {
@@ -3851,27 +3855,30 @@ export class BookingCommissionStore {
       const snapshot = await query.get();
       if (snapshot.empty) break;
       for (const document of snapshot.docs) {
-        const job = document.data() as BookingNotificationJob;
-        const leaseExpiresAt = Date.parse(job.leaseExpiresAt || "");
-        if (
-          job.status !== "claimed" ||
-          !Number.isFinite(leaseExpiresAt) ||
-          leaseExpiresAt > now.getTime()
-        ) continue;
-        batch.update(document.ref, {
-          status: "pending",
-          leaseToken: null,
-          leaseExpiresAt: null,
-          updatedAt: nowIso,
+        const didRecover = await this.db.runTransaction(async (transaction) => {
+          const currentSnapshot = await transaction.get(document.ref);
+          if (!currentSnapshot.exists) return false;
+          const current = currentSnapshot.data() as BookingNotificationJob;
+          const leaseExpiresAt = Date.parse(current.leaseExpiresAt || "");
+          if (
+            current.status !== "claimed" ||
+            !Number.isFinite(leaseExpiresAt) ||
+            leaseExpiresAt > now.getTime()
+          ) return false;
+          transaction.update(document.ref, {
+            status: "pending",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            updatedAt: nowIso,
+          });
+          return true;
         });
-        recovered++;
+        if (didRecover) recovered++;
         if (recovered >= 100) break;
       }
       cursor = snapshot.docs.at(-1);
       if (snapshot.size < 100) break;
     }
-    if (recovered === 0) return 0;
-    await batch.commit();
     return recovered;
   }
 
@@ -4109,41 +4116,50 @@ export class BookingCommissionStore {
         }
 
         const quotaLimit = quotaLimitFor(job, freeWorkflowLimits);
+        let quotaReservationUpdate: Pick<
+          BookingNotificationJob,
+          "quotaReservedWindowStartedAt"
+        > | Record<string, never> = {};
         if (quotaLimit !== null) {
           const windowStart = getStartOfDayRiyadh(now).getTime();
           const windowEnd = getEndOfDayRiyadh(now).getTime() + 1;
-          const quotaRef = this.db.collection(QUOTAS_COLLECTION)
-            .doc(quotaDocumentId(job, windowStart));
-          const quotaSnapshot = await transaction.get(quotaRef);
-          const currentCount = quotaSnapshot.exists
-            ? Number(quotaSnapshot.data()?.count || 0)
-            : 0;
-          if (currentCount >= quotaLimit) {
-            const eventType = job.recipientRole === "customer"
-              ? "customer_followup_suppressed"
-              : "owner_notification_suppressed";
-            transaction.update(candidate.ref, {
-              status: "suppressed_quota",
-              suppressedAt: nowIso,
-              providerError: "daily_notification_quota",
+          if (job.quotaReservedWindowStartedAt !== windowStart) {
+            const quotaRef = this.db.collection(QUOTAS_COLLECTION)
+              .doc(quotaDocumentId(job, windowStart));
+            const quotaSnapshot = await transaction.get(quotaRef);
+            const currentCount = quotaSnapshot.exists
+              ? Number(quotaSnapshot.data()?.count || 0)
+              : 0;
+            if (currentCount >= quotaLimit) {
+              const eventType = job.recipientRole === "customer"
+                ? "customer_followup_suppressed"
+                : "owner_notification_suppressed";
+              transaction.update(candidate.ref, {
+                status: "suppressed_quota",
+                suppressedAt: nowIso,
+                providerError: "daily_notification_quota",
+                updatedAt: nowIso,
+              });
+              transaction.update(bookingRef, {
+                events: appendEvent(booking.events, { type: eventType, at: nowIso }),
+                updatedAt: nowIso,
+              });
+              return null;
+            }
+            transaction.set(quotaRef, {
+              recipientRole: job.recipientRole,
+              recipientQuotaKey: job.recipientQuotaKey,
+              category: job.quotaCategory,
+              windowStartedAt: windowStart,
+              windowEndsAt: windowEnd,
+              count: currentCount + 1,
               updatedAt: nowIso,
+              expiresAtTtl: new Date(windowEnd + 24 * 60 * 60 * 1000),
             });
-            transaction.update(bookingRef, {
-              events: appendEvent(booking.events, { type: eventType, at: nowIso }),
-              updatedAt: nowIso,
-            });
-            return null;
+            quotaReservationUpdate = {
+              quotaReservedWindowStartedAt: windowStart,
+            };
           }
-          transaction.set(quotaRef, {
-            recipientRole: job.recipientRole,
-            recipientQuotaKey: job.recipientQuotaKey,
-            category: job.quotaCategory,
-            windowStartedAt: windowStart,
-            windowEndsAt: windowEnd,
-            count: currentCount + 1,
-            updatedAt: nowIso,
-            expiresAtTtl: new Date(windowEnd + 24 * 60 * 60 * 1000),
-          });
         }
 
         const leaseToken = randomBytes(18).toString("base64url");
@@ -4151,6 +4167,7 @@ export class BookingCommissionStore {
           ...job,
           status: "claimed",
           attempts: job.attempts + 1,
+          ...quotaReservationUpdate,
           leaseToken,
           leaseExpiresAt: new Date(now.getTime() + BOOKING_NOTIFICATION_LEASE_MS).toISOString(),
           claimedAt: nowIso,
@@ -4183,6 +4200,7 @@ export class BookingCommissionStore {
       if (job.status !== "claimed" || job.leaseToken !== leaseToken) {
         return { status: "blocked", reason: "claim_invalid" } as const;
       }
+      const timestamp = now.toISOString();
       const bookingRef = this.db.collection(BOOKINGS_COLLECTION).doc(job.bookingId);
       const bookingSnapshot = await transaction.get(bookingRef);
       if (!bookingSnapshot.exists) {
@@ -4197,7 +4215,6 @@ export class BookingCommissionStore {
         return { status: "blocked", reason: "booking_not_found" } as const;
       }
       const booking = bookingSnapshot.data() as BookingFollowUpDocument;
-      const timestamp = now.toISOString();
       if (!await this.ensureFreeBookingEligibility(
         transaction,
         bookingRef,
@@ -4309,6 +4326,12 @@ export class BookingCommissionStore {
           return { status: "blocked", reason: "notification_state_changed" } as const;
         }
       }
+      transaction.update(jobRef, {
+        leaseExpiresAt: new Date(
+          now.getTime() + BOOKING_NOTIFICATION_LEASE_MS,
+        ).toISOString(),
+        updatedAt: timestamp,
+      });
       return { status: "ready", booking } as const;
     });
   }

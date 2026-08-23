@@ -8,6 +8,7 @@ import {
 import {
   BOOKING_FOLLOW_UP_DELAY_MS,
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+  BOOKING_NOTIFICATION_LEASE_MS,
   BOOKING_OWNER_NOTICE_RETRY_MS,
   adminCustomerWhatsAppTemplateVariantsForBooking,
   BookingCommissionStore,
@@ -26,6 +27,7 @@ type FakeData = Record<string, any>;
 
 class FakeFirestore {
   private readonly collections = new Map<string, Map<string, FakeData>>();
+  private beforeNextTransaction: (() => void | Promise<void>) | null = null;
   readonly queryLog: Array<{
     collection: string;
     filters: Array<{ field: string; operator: string; value: unknown }>;
@@ -42,7 +44,14 @@ class FakeFirestore {
   }
 
   async runTransaction<T>(operation: (transaction: FakeTransaction) => Promise<T>): Promise<T> {
+    const beforeTransaction = this.beforeNextTransaction;
+    this.beforeNextTransaction = null;
+    if (beforeTransaction) await beforeTransaction();
     return operation(new FakeTransaction(this));
+  }
+
+  runBeforeNextTransaction(operation: () => void | Promise<void>): void {
+    this.beforeNextTransaction = operation;
   }
 
   batch() {
@@ -416,6 +425,53 @@ test("worker scans use single-field time indexes and retain exact status gates",
       query.filters.some((filter) => filter.field === "commissionDueAt")).length >= 2,
     "closed commissions filling the first page must not starve a later pending commission",
   );
+});
+
+test("send preparation renews the lease and stale recovery cannot clobber that renewal", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildWorkflow();
+  const leaseToken = "lease-renewed-during-recovery";
+  const expiredLease = new Date(now.getTime() - 1).toISOString();
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-LEASE-RENEWAL",
+  });
+  database.seed("booking_notification_outbox", workflow.customerNotification.id, {
+    ...workflow.customerNotification,
+    status: "claimed",
+    attempts: 1,
+    leaseToken,
+    leaseExpiresAt: expiredLease,
+    claimedAt: new Date(now.getTime() - BOOKING_NOTIFICATION_LEASE_MS)
+      .toISOString(),
+  });
+  const store = new BookingCommissionStore(database as any);
+  let prepared:
+    | Awaited<ReturnType<typeof store.prepareNotificationForSend>>
+    | undefined;
+
+  database.runBeforeNextTransaction(async () => {
+    prepared = await store.prepareNotificationForSend(
+      workflow.customerNotification.id,
+      leaseToken,
+      now,
+    );
+  });
+  const recovered = await store.recoverExpiredNotificationClaims(now);
+
+  assert.equal(prepared?.status, "ready");
+  assert.equal(recovered, 0);
+  const renewed = database.read(
+    "booking_notification_outbox",
+    workflow.customerNotification.id,
+  );
+  assert.equal(renewed?.status, "claimed");
+  assert.equal(renewed?.leaseToken, leaseToken);
+  assert.equal(
+    renewed?.leaseExpiresAt,
+    new Date(now.getTime() + BOOKING_NOTIFICATION_LEASE_MS).toISOString(),
+  );
+  assert.equal(renewed?.updatedAt, now.toISOString());
 });
 
 test("initial workflow has no booking, commission, dispute, or enforcement outcome yet", () => {
@@ -1029,6 +1085,62 @@ test("manual resend creates one separate audited job and replays the same idempo
   );
 });
 
+test("admin manual resend of a terminal quota-limited notification bypasses the free-owner limit", async () => {
+  const database = new FakeFirestore();
+  const booking = confirmedObserveOnlyFixture();
+  const source = ownerNotificationFixture(booking, {
+    status: "suppressed_quota",
+    attempts: 0,
+    claimedAt: null,
+    sentAt: null,
+    suppressedAt: now.toISOString(),
+    providerError: "daily_notification_quota",
+  });
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 1,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 0,
+    freePropertyContactDailyLimit: 6,
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("booking_notification_outbox", source.id, source);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: booking.ownerPhone,
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  const resend = await store.scheduleManualNotificationResend({
+    bookingId: booking.id,
+    sourceJobId: source.id,
+    idempotencyKey: "admin-resend-suppressed-quota-01",
+    now,
+  });
+  const claims = await store.claimDueNotificationJobs(now, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+
+  assert.notEqual(resend.job.id, source.id);
+  assert.equal(resend.job.manualResendOfJobId, source.id);
+  assert.equal(resend.job.manualResendRequestedAt, now.toISOString());
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]?.id, resend.job.id);
+  assert.equal(claims[0]?.status, "claimed");
+  assert.equal(
+    database.entries("booking_notification_quotas").length,
+    0,
+    "an admin resend must not reserve free-owner quota",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", source.id)?.status,
+    "suppressed_quota",
+    "the original audit record remains terminal",
+  );
+});
+
 test("manual resend supports every customer and owner lifecycle notification in a valid state", async () => {
   const dayMs = 24 * 60 * 60 * 1_000;
   const base = confirmedObserveOnlyFixture() as BookingFollowUpDocument;
@@ -1183,7 +1295,7 @@ test("manual resend supports every customer and owner lifecycle notification in 
   }
 });
 
-test("manual send moves a queued notification to now without creating a duplicate", async () => {
+test("admin send-now accelerates a pending notification and bypasses the free-owner limit", async () => {
   const database = new FakeFirestore();
   const booking = confirmedObserveOnlyFixture();
   const scheduledAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000)
@@ -1195,6 +1307,14 @@ test("manual send moves a queued notification to now without creating a duplicat
     claimedAt: null,
     sentAt: null,
     providerError: "waiting_for_schedule",
+  });
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 1,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 0,
+    freePropertyContactDailyLimit: 6,
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
   });
   database.seed("booking_followups", booking.id, booking);
   database.seed("booking_notification_outbox", source.id, source);
@@ -1217,6 +1337,7 @@ test("manual send moves a queued notification to now without creating a duplicat
   assert.equal(first.job.scheduledAt, now.toISOString());
   assert.equal(first.job.providerError, null);
   assert.equal(first.job.manualResendOfJobId, undefined);
+  assert.equal(first.job.manualResendRequestedAt, now.toISOString());
   assert.equal(replay.replayed, true);
   assert.equal(replay.job.id, source.id);
   assert.equal(database.entries("booking_notification_outbox").length, 1);
@@ -1227,6 +1348,19 @@ test("manual send moves a queued notification to now without creating a duplicat
   assert.equal(
     database.entries("booking_notification_manual_resend_audit").length,
     1,
+  );
+  const claims = await store.claimDueNotificationJobs(now, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]?.id, source.id);
+  assert.equal(claims[0]?.status, "claimed");
+  assert.equal(database.entries("booking_notification_outbox").length, 1);
+  assert.equal(
+    database.entries("booking_notification_quotas").length,
+    0,
+    "send-now is an explicit admin action and must not reserve quota",
   );
 });
 
@@ -1599,7 +1733,7 @@ test("a rejected-dispute notification is cancelled if payment closes before clai
   );
 });
 
-test("notification claims use persisted customer and free-owner quota limits", async () => {
+test("automatic customer follow-ups bypass the customer quota while free-owner notifications still use it", async () => {
   const database = new FakeFirestore();
   database.seed("settings", "booking_free_workflow_limits", {
     schemaVersion: 1,
@@ -1655,21 +1789,100 @@ test("notification claims use persisted customer and free-owner quota limits", a
   });
 
   const store = new BookingCommissionStore(database as any);
-  assert.deepEqual(await store.claimDueNotificationJobs(claimAt, 5, {
+  const claims = await store.claimDueNotificationJobs(claimAt, 5, {
     followUpNotificationsEnabled: true,
     commissionNotificationsEnabled: true,
-  }), []);
+  });
 
-  for (const [jobId, eventType] of [
-    [customerWorkflow.customerNotification.id, "customer_followup_suppressed"],
-    [ownerJobId, "owner_notification_suppressed"],
-  ] as const) {
-    const job = database.read("booking_notification_outbox", jobId);
-    assert.equal(job?.status, "suppressed_quota");
-    assert.equal(job?.providerError, "daily_notification_quota");
-    const booking = database.read("booking_followups", job?.bookingId);
-    assert.equal(booking?.events.at(-1)?.type, eventType);
-  }
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]?.id, customerWorkflow.customerNotification.id);
+  assert.equal(claims[0]?.kind, "customer_followup");
+  assert.equal(claims[0]?.status, "claimed");
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      customerWorkflow.customerNotification.id,
+    )?.providerError,
+    null,
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", ownerJobId)?.status,
+    "suppressed_quota",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", ownerJobId)?.providerError,
+    "daily_notification_quota",
+  );
+  assert.equal(
+    database.read("booking_followups", ownerBookingId)?.events.at(-1)?.type,
+    "owner_notification_suppressed",
+  );
+  assert.equal(
+    database.entries("booking_notification_quotas")
+      .filter(([, quota]) => quota.recipientRole === "customer").length,
+    0,
+    "automatic customer follow-ups must not create a customer quota record",
+  );
+});
+
+test("reclaiming one limited owner notification reserves its daily quota only once", async () => {
+  const database = new FakeFirestore();
+  const booking = confirmedObserveOnlyFixture();
+  const job = ownerNotificationFixture(booking, {
+    status: "pending",
+    attempts: 0,
+    leaseToken: null,
+    leaseExpiresAt: null,
+    claimedAt: null,
+    sentAt: null,
+    scheduledAt: now.toISOString(),
+  });
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 1,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 1,
+    freePropertyContactDailyLimit: 6,
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("booking_notification_outbox", job.id, job);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: booking.ownerPhone,
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  const firstClaims = await store.claimDueNotificationJobs(now, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(firstClaims.length, 1);
+  const reservedWindow = firstClaims[0]?.quotaReservedWindowStartedAt;
+  assert.equal(typeof reservedWindow, "number");
+  assert.equal(database.entries("booking_notification_quotas").length, 1);
+  assert.equal(database.entries("booking_notification_quotas")[0]?.[1].count, 1);
+
+  const reclaimAt = new Date(now.getTime() + BOOKING_NOTIFICATION_LEASE_MS + 1);
+  assert.equal(await store.recoverExpiredNotificationClaims(reclaimAt), 1);
+  const recovered = database.read("booking_notification_outbox", job.id);
+  assert.equal(recovered?.status, "pending");
+  assert.equal(recovered?.quotaReservedWindowStartedAt, reservedWindow);
+
+  const secondClaims = await store.claimDueNotificationJobs(reclaimAt, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(secondClaims.length, 1);
+  assert.equal(secondClaims[0]?.id, job.id);
+  assert.equal(secondClaims[0]?.attempts, 2);
+  assert.equal(secondClaims[0]?.quotaReservedWindowStartedAt, reservedWindow);
+  assert.equal(database.entries("booking_notification_quotas").length, 1);
+  assert.equal(
+    database.entries("booking_notification_quotas")[0]?.[1].count,
+    1,
+    "a reclaimed logical job must reuse its first quota reservation",
+  );
 });
 
 test("initial workflow rejects a non-free property origin", () => {
