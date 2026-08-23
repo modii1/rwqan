@@ -70,6 +70,19 @@ test("default booking WhatsApp templates render the approved messages byte-for-b
 https://rwqan.sa/booking/customer-token`);
 
   assert.equal(renderBookingWhatsAppTemplate(
+    "customer_final_reminder",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_final_reminder,
+    {},
+  ), `مرحبًا عميلنا العزيز 👋
+
+نأمل أن تكون تجربتك مع روقان كانت موفقة 🌿
+
+هذه آخر متابعة منا، ونحب نعرف فقط:
+هل تم الحجز من خلال منصة روقان؟
+
+نشكرك على وقتك وتعاونك 🤍`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
     "owner_booking_facts",
     DEFAULT_BOOKING_WHATSAPP_TEMPLATES.owner_booking_facts,
     {
@@ -202,6 +215,11 @@ test("booking WhatsApp templates require each safe placeholder exactly once", ()
   assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
     ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     extra_template: "unexpected",
+  }).success, false);
+
+  assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    customer_final_reminder: "رسالة {{followUpLink}}",
   }).success, false);
 });
 

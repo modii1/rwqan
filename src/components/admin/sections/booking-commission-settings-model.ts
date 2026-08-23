@@ -9,6 +9,7 @@ export type BookingSettingsLimitKey =
 
 export const BOOKING_WHATSAPP_TEMPLATE_KEYS = [
   "customer_followup",
+  "customer_final_reminder",
   "owner_booking_facts",
   "owner_booking_commission",
   "commission_reminder",
@@ -96,6 +97,12 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
     label: "متابعة العميل",
     description: "تُرسل مرة واحدة بعد المدة المحددة لطلب التواصل مع العقار المجاني.",
     placeholders: ["propertyLabel", "followUpLink"],
+  },
+  {
+    key: "customer_final_reminder",
+    label: "المتابعة الأخيرة للعميل",
+    description: "تُرسل بعد اكتمال عدد رسائل متابعة العميل وعدم استلام رد.",
+    placeholders: [],
   },
   {
     key: "owner_booking_facts",

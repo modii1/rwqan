@@ -236,6 +236,25 @@ function buildWorkflow(isFreeProperty = true) {
   });
 }
 
+function buildSequencedWorkflow(
+  requestCode: string,
+  messageLimit = 2,
+  delayMinutes = 90,
+) {
+  return buildInitialBookingWorkflow({
+    requestCode,
+    propertyNumber: "13383",
+    propertyName: "شاليه الريف المائي",
+    ownerPhone: "+966500000001",
+    customerPhone: "+966500000002",
+    customerSubject: "customer-subject-hmac",
+    isFreeProperty: true,
+    customerFollowUpDelayMinutes: delayMinutes,
+    customerFollowUpMessageLimit: messageLimit,
+    now,
+  });
+}
+
 test("initial workflow schedules one customer follow-up exactly 24 hours later", () => {
   const { followUp, customerNotification } = buildWorkflow();
   const expectedDueAt = new Date(now.getTime() + BOOKING_FOLLOW_UP_DELAY_MS).toISOString();
@@ -244,6 +263,11 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
   assert.equal(followUp.createdAt, now.toISOString());
   assert.equal(followUp.updatedAt, now.toISOString());
   assert.equal(followUp.followUpDueAt, expectedDueAt);
+  assert.equal(followUp.customerFollowUpDelayMinutes, 1_440);
+  assert.equal(
+    followUp.activeCustomerNotificationJobId,
+    customerNotification.id,
+  );
   assert.deepEqual(followUp.listedPriceOptionsHalalas, [75_000, 125_050]);
   assert.equal(Date.parse(followUp.followUpDueAt) - now.getTime(), 24 * 60 * 60 * 1_000);
   assert.deepEqual(followUp.events, [
@@ -264,6 +288,8 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
     status: "pending",
     isFreeProperty: true,
     quotaCategory: "customer_followup",
+    customerFollowUpSequenceNumber: 1,
+    customerFollowUpSequenceParentJobId: null,
     attempts: 0,
     leaseToken: null,
     leaseExpiresAt: null,
@@ -275,6 +301,296 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   });
+});
+
+test("a zero customer message limit keeps booking tracking but disables the automatic sequence", () => {
+  const workflow = buildInitialBookingWorkflow({
+    requestCode: "REQ-SEQUENCE-DISABLED",
+    propertyNumber: "13383",
+    propertyName: "شاليه الريف المائي",
+    ownerPhone: "+966500000001",
+    customerPhone: "+966500000002",
+    customerSubject: "customer-subject-hmac",
+    isFreeProperty: true,
+    customerFollowUpDelayMinutes: 90,
+    customerFollowUpMessageLimit: 0,
+    now,
+  });
+
+  assert.equal(workflow.followUp.bookingStatus, "awaiting_response");
+  assert.equal(workflow.followUp.customerFollowUpMessageLimit, 0);
+  assert.equal(workflow.followUp.customerFollowUpDelayMinutes, 90);
+  assert.equal(workflow.followUp.activeCustomerNotificationJobId, null);
+  assert.deepEqual(workflow.followUp.events, [
+    { type: "contact_accepted", at: now.toISOString() },
+  ]);
+  assert.equal(workflow.customerNotification.status, "cancelled");
+  assert.equal(
+    workflow.customerNotification.providerError,
+    "customer_sequence_disabled",
+  );
+});
+
+test("provider-accepted automatic sends advance one snapshotted per-booking sequence through the final reminder", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-SEQUENCE-TWO", 2, 90);
+  const bookingId = workflow.followUp.id;
+  const firstDueAt = new Date(workflow.customerNotification.scheduledAt);
+  const firstSentAt = new Date(firstDueAt.getTime() + 7 * 60_000);
+  const firstLease = "sequence-first-lease";
+  database.seed("booking_followups", bookingId, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-SEQUENCE-TWO",
+  });
+  database.seed("booking_notification_outbox", workflow.customerNotification.id, {
+    ...workflow.customerNotification,
+    status: "claimed",
+    attempts: 1,
+    leaseToken: firstLease,
+    leaseExpiresAt: new Date(
+      firstSentAt.getTime() + BOOKING_NOTIFICATION_LEASE_MS,
+    ).toISOString(),
+    claimedAt: firstSentAt.toISOString(),
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  assert.equal(await store.finishNotificationJob({
+    jobId: workflow.customerNotification.id,
+    leaseToken: firstLease,
+    success: true,
+    now: firstSentAt,
+  }), true);
+  assert.equal(await store.finishNotificationJob({
+    jobId: workflow.customerNotification.id,
+    leaseToken: firstLease,
+    success: true,
+    now: firstSentAt,
+  }), false, "a completed provider result must not advance twice");
+
+  const secondId = `${bookingId}--customer_followup_2`;
+  const secondDueAt = new Date(firstSentAt.getTime() + 90 * 60_000);
+  const second = database.read("booking_notification_outbox", secondId);
+  assert.equal(second?.kind, "customer_followup");
+  assert.equal(second?.recipientRole, "customer");
+  assert.equal(second?.customerFollowUpSequenceNumber, 2);
+  assert.equal(
+    second?.customerFollowUpSequenceParentJobId,
+    workflow.customerNotification.id,
+  );
+  assert.equal(second?.scheduledAt, secondDueAt.toISOString());
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.activeCustomerNotificationJobId,
+    secondId,
+  );
+
+  const secondClaims = await store.claimDueNotificationJobs(secondDueAt, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(secondClaims.length, 1);
+  assert.equal(secondClaims[0]?.id, secondId);
+  await store.finishNotificationJob({
+    jobId: secondId,
+    leaseToken: secondClaims[0]!.leaseToken,
+    success: true,
+    now: secondDueAt,
+  });
+
+  const finalId = `${bookingId}--customer_final_reminder`;
+  const finalDueAt = new Date(secondDueAt.getTime() + 90 * 60_000);
+  const final = database.read("booking_notification_outbox", finalId);
+  assert.equal(final?.kind, "customer_final_reminder");
+  assert.equal(final?.recipientRole, "customer");
+  assert.equal(final?.quotaCategory, "customer_followup");
+  assert.equal(final?.customerFollowUpSequenceNumber, 3);
+  assert.equal(final?.customerFollowUpSequenceParentJobId, secondId);
+  assert.equal(final?.scheduledAt, finalDueAt.toISOString());
+
+  const finalClaims = await store.claimDueNotificationJobs(finalDueAt, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(finalClaims.length, 1);
+  assert.equal(finalClaims[0]?.id, finalId);
+  await store.finishNotificationJob({
+    jobId: finalId,
+    leaseToken: finalClaims[0]!.leaseToken,
+    success: true,
+    now: finalDueAt,
+  });
+
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.activeCustomerNotificationJobId,
+    null,
+  );
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) => job.bookingId === bookingId).length,
+    3,
+  );
+  assert.equal(database.entries("booking_notification_quotas").length, 0);
+  assert.deepEqual(
+    database.read("booking_followups", bookingId)?.events.slice(-2)
+      .map((event: { type: string }) => event.type),
+    ["customer_final_reminder_scheduled", "customer_final_reminder_sent"],
+  );
+});
+
+test("failed and legacy customer follow-ups never create a repeat", async () => {
+  for (const scenario of ["failed", "legacy"] as const) {
+    const database = new FakeFirestore();
+    const workflow = scenario === "failed"
+      ? buildSequencedWorkflow("REQ-SEQUENCE-FAILED", 3, 60)
+      : buildInitialBookingWorkflow({
+          requestCode: "REQ-SEQUENCE-LEGACY",
+          propertyNumber: "13383",
+          propertyName: "شاليه الريف المائي",
+          ownerPhone: "+966500000001",
+          customerPhone: "+966500000002",
+          customerSubject: "customer-subject-hmac",
+          isFreeProperty: true,
+          now,
+        });
+    const booking = {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-${scenario}`,
+      ...(scenario === "legacy"
+        ? {
+            customerFollowUpMessageLimit: undefined,
+            customerFollowUpDelayMinutes: undefined,
+            activeCustomerNotificationJobId: undefined,
+          }
+        : {}),
+    };
+    const leaseToken = `sequence-${scenario}-lease`;
+    database.seed("booking_followups", booking.id, booking);
+    database.seed("booking_notification_outbox", workflow.customerNotification.id, {
+      ...workflow.customerNotification,
+      customerFollowUpSequenceNumber: scenario === "legacy" ? undefined : 1,
+      customerFollowUpSequenceParentJobId: undefined,
+      status: "claimed",
+      attempts: 1,
+      leaseToken,
+      leaseExpiresAt: new Date(now.getTime() + BOOKING_NOTIFICATION_LEASE_MS)
+        .toISOString(),
+    });
+
+    await new BookingCommissionStore(database as any).finishNotificationJob({
+      jobId: workflow.customerNotification.id,
+      leaseToken,
+      success: scenario === "legacy",
+      error: scenario === "failed" ? "provider_down" : undefined,
+      now,
+    });
+
+    assert.equal(
+      database.entries("booking_notification_outbox")
+        .filter(([id]) => id !== workflow.customerNotification.id).length,
+      0,
+    );
+  }
+});
+
+test("questionnaire start, decline, and confirmation each cancel the active customer sequence job", async () => {
+  for (const action of ["start", "decline", "confirm"] as const) {
+    const database = new FakeFirestore();
+    const workflow = buildSequencedWorkflow(`REQ-STOP-${action}`, 2, 60);
+    const finalJobId = `${workflow.followUp.id}--customer_final_reminder`;
+    const booking = {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-STOP-${action}`,
+      activeCustomerNotificationJobId: finalJobId,
+      ...(action === "confirm"
+        ? {
+            bookingDecision: "yes" as const,
+            questionnaireStartedAt: now.toISOString(),
+          }
+        : {}),
+    };
+    database.seed("booking_followups", booking.id, booking);
+    database.seed("booking_notification_outbox", finalJobId, {
+      ...workflow.customerNotification,
+      id: finalJobId,
+      kind: "customer_final_reminder",
+      customerFollowUpSequenceNumber: 3,
+      customerFollowUpSequenceParentJobId:
+        `${booking.id}--customer_followup_2`,
+      status: "pending",
+    });
+    database.seed("properties", booking.propertyNumber, {
+      propertyNumber: booking.propertyNumber,
+      whatsappNumber: booking.ownerPhone,
+    });
+    const store = new BookingCommissionStore(database as any);
+    const responseAt = new Date(now.getTime() + 1_000);
+
+    if (action === "start") {
+      await store.startQuestionnaire(booking.id, responseAt);
+    } else if (action === "decline") {
+      await store.declineBooking(booking.id, responseAt);
+    } else {
+      await store.confirmBooking(booking.id, {
+        timing: "weekend",
+        bookingDate: { value: "2026-08-15", precision: "day" },
+        pricePaidHalalas: 100_000,
+      }, responseAt, false);
+    }
+
+    assert.equal(
+      database.read("booking_notification_outbox", finalJobId)?.status,
+      "cancelled",
+      `${action} must cancel the active final reminder`,
+    );
+    assert.equal(
+      database.read("booking_notification_outbox", finalJobId)?.providerError,
+      "notification_state_changed",
+    );
+    assert.equal(
+      database.read("booking_followups", booking.id)
+        ?.activeCustomerNotificationJobId,
+      null,
+    );
+  }
+});
+
+test("a final reminder cannot be claimed after the customer has begun answering", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-FINAL-ANSWERED", 1, 60);
+  const finalJobId = `${workflow.followUp.id}--customer_final_reminder`;
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-FINAL-ANSWERED",
+    bookingDecision: "yes",
+    questionnaireStartedAt: now.toISOString(),
+    activeCustomerNotificationJobId: finalJobId,
+  });
+  database.seed("booking_notification_outbox", finalJobId, {
+    ...workflow.customerNotification,
+    id: finalJobId,
+    kind: "customer_final_reminder",
+    scheduledAt: now.toISOString(),
+    customerFollowUpSequenceNumber: 2,
+    customerFollowUpSequenceParentJobId: workflow.customerNotification.id,
+  });
+
+  const claims = await new BookingCommissionStore(database as any)
+    .claimDueNotificationJobs(now, 5, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+
+  assert.deepEqual(claims, []);
+  assert.equal(
+    database.read("booking_notification_outbox", finalJobId)?.status,
+    "cancelled",
+  );
+  assert.equal(
+    database.read("booking_followups", workflow.followUp.id)
+      ?.activeCustomerNotificationJobId,
+    null,
+  );
 });
 
 test("initial workflow snapshots a validated configurable follow-up delay", () => {
@@ -810,6 +1126,7 @@ test("legacy seven-template settings migrate per template without losing unrelat
   const database = new FakeFirestore();
   const {
     commission_dispute_rejected: _newTemplate,
+    customer_final_reminder: _finalReminderTemplate,
     ...legacyTemplates
   } = DEFAULT_BOOKING_WHATSAPP_TEMPLATES;
   const legacyOwnerFacts = `CUSTOM FACTS {{propertyName}} / {{propertyNumber}}
@@ -858,6 +1175,10 @@ test("legacy seven-template settings migrate per template without losing unrelat
   assert.equal(
     settings.whatsappTemplates.commission_dispute_rejected,
     DEFAULT_BOOKING_WHATSAPP_TEMPLATES.commission_dispute_rejected,
+  );
+  assert.equal(
+    settings.whatsappTemplates.customer_final_reminder,
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_final_reminder,
   );
   assert.deepEqual(
     database.read("settings", "booking_free_workflow_limits"),
@@ -1083,6 +1404,96 @@ test("manual resend creates one separate audited job and replays the same idempo
     database.read("booking_followups", booking.id)?.events.at(-1)?.type,
     "notification_manual_resend_scheduled",
   );
+});
+
+test("admin send-now copies a pending regular customer step without consuming its automatic slot", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-MANUAL-SEQUENCE", 2, 60);
+  const booking = {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-MANUAL-SEQUENCE",
+  };
+  database.seed("booking_followups", booking.id, booking);
+  database.seed(
+    "booking_notification_outbox",
+    workflow.customerNotification.id,
+    workflow.customerNotification,
+  );
+  const store = new BookingCommissionStore(database as any);
+  const originalDueAt = workflow.customerNotification.scheduledAt;
+
+  const manual = await store.scheduleManualNotificationResend({
+    bookingId: booking.id,
+    sourceJobId: workflow.customerNotification.id,
+    idempotencyKey: "admin-customer-sequence-send-now-01",
+    now,
+  });
+
+  assert.notEqual(manual.job.id, workflow.customerNotification.id);
+  assert.equal(manual.job.manualResendOfJobId, workflow.customerNotification.id);
+  assert.equal(manual.job.manualResendRequestedAt, now.toISOString());
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+    )?.scheduledAt,
+    originalDueAt,
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+    )?.manualResendRequestedAt,
+    undefined,
+  );
+
+  const manualClaims = await store.claimDueNotificationJobs(now, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(manualClaims.map((job) => job.id), [manual.job.id]);
+  await store.finishNotificationJob({
+    jobId: manual.job.id,
+    leaseToken: manualClaims[0]!.leaseToken,
+    success: true,
+    now,
+  });
+  assert.equal(
+    database.read("booking_followups", booking.id)
+      ?.activeCustomerNotificationJobId,
+    workflow.customerNotification.id,
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      `${booking.id}--customer_followup_2`,
+    ),
+    undefined,
+  );
+
+  const automaticDueAt = new Date(originalDueAt);
+  const automaticClaims = await store.claimDueNotificationJobs(
+    automaticDueAt,
+    5,
+    {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    },
+  );
+  assert.deepEqual(
+    automaticClaims.map((job) => job.id),
+    [workflow.customerNotification.id],
+  );
+  await store.finishNotificationJob({
+    jobId: workflow.customerNotification.id,
+    leaseToken: automaticClaims[0]!.leaseToken,
+    success: true,
+    now: automaticDueAt,
+  });
+  assert.ok(database.read(
+    "booking_notification_outbox",
+    `${booking.id}--customer_followup_2`,
+  ));
 });
 
 test("admin manual resend of a terminal quota-limited notification bypasses the free-owner limit", async () => {

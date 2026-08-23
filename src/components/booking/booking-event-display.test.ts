@@ -57,3 +57,22 @@ test("safety and reversal resolution events are localized", () => {
     "تمت معالجة العكس مع إبقاء العمولة مدفوعة",
   );
 });
+
+test("the final customer reminder lifecycle is localized", () => {
+  assert.equal(
+    getBookingEventLabel("customer_final_reminder_scheduled"),
+    "تمت جدولة المتابعة الأخيرة مع العميل",
+  );
+  assert.equal(
+    getBookingEventLabel("customer_final_reminder_sent"),
+    "تم إرسال المتابعة الأخيرة للعميل",
+  );
+  assert.equal(
+    getBookingEventLabel("customer_final_reminder_failed"),
+    "فشل إرسال المتابعة الأخيرة للعميل",
+  );
+  assert.equal(
+    getBookingEventLabel("customer_final_reminder_suppressed"),
+    "تم تقييد المتابعة الأخيرة للعميل",
+  );
+});

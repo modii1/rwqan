@@ -119,6 +119,8 @@ function notificationJob(
   kind: BookingNotificationKind,
   overrides: Partial<BookingNotificationJob> = {},
 ): BookingNotificationJob {
+  const isCustomer = kind === "customer_followup" ||
+    kind === "customer_final_reminder";
   const reminderOffsetDays = kind === "commission_reminder_3"
     ? 3
     : kind === "commission_reminder_4"
@@ -130,9 +132,9 @@ function notificationJob(
     id: `BOOK-REQ-13383-001--${kind}`,
     bookingId: "BOOK-REQ-13383-001",
     propertyNumber: "13383",
-    recipientRole: kind === "customer_followup" ? "customer" : "owner",
-    recipientPhone: kind === "customer_followup" ? "+966500000002" : "+966500000001",
-    recipientQuotaKey: kind === "customer_followup" ? "customer-subject-hmac" : "966500000001",
+    recipientRole: isCustomer ? "customer" : "owner",
+    recipientPhone: isCustomer ? "+966500000002" : "+966500000001",
+    recipientQuotaKey: isCustomer ? "customer-subject-hmac" : "966500000001",
     kind,
     reminderOffsetDays,
     scheduledAt: "2099-08-18T12:00:00.000Z",
@@ -205,6 +207,18 @@ test("customer follow-up exposes only the intended property label and a purpose-
   );
   assert.ok(freeMessage.startsWith("هل تم الحجز بعد تواصلك مع العقار رقم 13383؟"));
   assert.equal(freeMessage.includes("شاليه الريف المائي"), false);
+});
+
+test("the final customer reminder preserves the supplied copy and contains no link", () => {
+  const message = buildBookingNotificationMessage(
+    notificationJob("customer_final_reminder"),
+    confirmedBooking({ isFreeProperty: true }),
+  );
+
+  assert.equal(message, DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_final_reminder);
+  assert.equal(message.includes("https://"), false);
+  assert.equal(message.includes("/b/"), false);
+  assert.equal(message.includes("BOOK-REQ"), false);
 });
 
 test("owner confirmation states the three customer facts, price, 10% fee, deadline, and payment link", () => {
@@ -573,6 +587,109 @@ test("worker performs a final prepare after alias creation and skips the provide
     assert.equal(prepareCalls, 3);
     assert.equal(providerCalls, 0);
     assert.deepEqual(finalizations, []);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
+test("dispatch sends the final customer reminder without provisioning any short link", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = {
+    ...confirmedBooking({ isFreeProperty: true }),
+    bookingStatus: "awaiting_response",
+    bookingDecision: null,
+    questionnaireStartedAt: null,
+    confirmationFacts: null,
+    confirmedAt: null,
+  } as unknown as BookingFollowUpDocument;
+  const claimed = {
+    ...notificationJob("customer_final_reminder", {
+      status: "claimed",
+      leaseToken: "final-reminder-lease",
+      quotaCategory: "customer_followup",
+      customerFollowUpSequenceNumber: 4,
+    }),
+    leaseToken: "final-reminder-lease",
+  };
+  let claimCalls = 0;
+  let aliasCalls = 0;
+  const providerMessages: string[] = [];
+  const finalizations: unknown[] = [];
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () =>
+      claimCalls++ === 0 ? [claimed] : [];
+    store.prepareNotificationForSend = async () => ({
+      status: "ready",
+      booking,
+    });
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayMinutes: 1_440,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async (_url, init) => {
+      providerMessages.push(String(
+        (JSON.parse(String(init?.body)) as { message?: unknown }).message || "",
+      ));
+      return new Response("{}", { status: 200 });
+    };
+
+    assert.deepEqual(await dispatchDueBookingNotifications(
+      new Date("2099-08-18T12:00:00.000Z"),
+      {
+        shortLinkService: {
+          ensureCustomerResponseLink: async () => {
+            aliasCalls += 1;
+            return "must-not-be-created";
+          },
+          ensureOwnerPaymentLink: async () => {
+            aliasCalls += 1;
+            return "must-not-be-created";
+          },
+        },
+      },
+    ), { claimed: 1, sent: 1 });
+    assert.equal(aliasCalls, 0);
+    assert.deepEqual(providerMessages, [
+      DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_final_reminder,
+    ]);
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: claimed.leaseToken,
+      success: true,
+      error: undefined,
+    }]);
   } finally {
     store.recoverExpiredNotificationClaims = originals.recover;
     store.claimDueNotificationJobs = originals.claim;

@@ -359,6 +359,8 @@ router.post("/api/requests/smart", async (req, res) => {
               isFreeProperty: !isPremiumProperty,
               customerFollowUpDelayMinutes:
                 freeWorkflowSettings!.customerFollowUpDelayMinutes,
+              customerFollowUpMessageLimit:
+                freeWorkflowSettings!.customerDailyLimit,
               propertyPrices: property.prices,
               now: nowDate,
             });

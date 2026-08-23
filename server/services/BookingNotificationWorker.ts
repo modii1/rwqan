@@ -118,6 +118,13 @@ export function buildBookingNotificationMessage(
   templates: BookingWhatsAppTemplates = DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
 ): string {
   const propertyName = String(booking.propertyName || "").trim() || "بدون اسم";
+  if (job.kind === "customer_final_reminder") {
+    return renderBookingWhatsAppTemplate(
+      "customer_final_reminder",
+      templates.customer_final_reminder,
+      {},
+    );
+  }
   if (job.kind === "customer_followup") {
     const propertyLabel = booking.isFreeProperty || !booking.propertyName
       ? `العقار رقم ${booking.propertyNumber}`

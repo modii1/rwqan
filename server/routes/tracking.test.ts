@@ -288,6 +288,10 @@ test("smart contact requests resolve remembered and owner phones on the server",
         2_160,
       );
       assert.equal(
+        workflowBuildOptions.at(-1)?.customerFollowUpMessageLimit,
+        3,
+      );
+      assert.equal(
         freeWorkflowSettingsLookups - settingsLookupsBefore,
         1,
         "the route uses one settings snapshot for scheduling and the daily limit",

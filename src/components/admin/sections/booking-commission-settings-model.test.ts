@@ -17,7 +17,9 @@ import {
 function validTemplates(): BookingWhatsAppTemplates {
   return Object.fromEntries(BOOKING_TEMPLATE_DEFINITIONS.map((definition) => [
     definition.key,
-    definition.placeholders.map((placeholder) => `{{${placeholder}}}`).join("\n"),
+    definition.placeholders.length > 0
+      ? definition.placeholders.map((placeholder) => `{{${placeholder}}}`).join("\n")
+      : "رسالة ثابتة",
   ])) as BookingWhatsAppTemplates;
 }
 
@@ -64,6 +66,34 @@ test("template validation requires every allowed placeholder exactly once", () =
     ) || "",
     /غير مسموح/,
   );
+  assert.equal(
+    validateBookingTemplate(
+      "customer_final_reminder",
+      "هذه آخر متابعة منا.",
+      2_000,
+    ),
+    null,
+  );
+  assert.match(
+    validateBookingTemplate(
+      "customer_final_reminder",
+      "هذه آخر متابعة منا. {{followUpLink}}",
+      2_000,
+    ) || "",
+    /غير مسموح/,
+  );
+});
+
+test("admin settings expose the final customer reminder as a no-placeholder template", () => {
+  const definition = BOOKING_TEMPLATE_DEFINITIONS.find(
+    ({ key }) => key === "customer_final_reminder",
+  );
+  assert.deepEqual(definition, {
+    key: "customer_final_reminder",
+    label: "المتابعة الأخيرة للعميل",
+    description: "تُرسل بعد اكتمال عدد رسائل متابعة العميل وعدم استلام رد.",
+    placeholders: [],
+  });
 });
 
 test("template validation rejects malformed single braces and oversized copy", () => {

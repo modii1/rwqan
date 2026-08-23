@@ -12,6 +12,7 @@ export function notificationKindLabel(value: unknown): string {
   const kind = normalize(value);
   const labels: Record<string, string> = {
     customer_followup: "متابعة نتيجة الحجز مع العميل",
+    customer_final_reminder: "المتابعة الأخيرة مع العميل",
     owner_booking_confirmed: "إشعار المالك بتأكيد الحجز والعمولة",
     commission_dispute_rejected: "إشعار المالك برفض الاعتراض",
     commission_reminder_3: "تذكير العمولة لليوم الثالث",

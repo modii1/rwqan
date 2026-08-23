@@ -391,6 +391,49 @@ function notificationId(bookingId: string, kind: BookingNotificationKind): strin
   return `${bookingId}--${kind}`;
 }
 
+function customerFollowUpSequenceNotificationId(
+  bookingId: string,
+  sequenceNumber: number,
+): string {
+  return sequenceNumber === 1
+    ? notificationId(bookingId, "customer_followup")
+    : `${bookingId}--customer_followup_${sequenceNumber}`;
+}
+
+function isCustomerNotificationKind(
+  kind: BookingNotificationKind,
+): kind is "customer_followup" | "customer_final_reminder" {
+  return kind === "customer_followup" || kind === "customer_final_reminder";
+}
+
+function isAutomaticCustomerSequenceJob(
+  job: Pick<
+    BookingNotificationJob,
+    "kind" | "manualResendOfJobId" | "manualResendRequestedAt"
+  >,
+): boolean {
+  return isCustomerNotificationKind(job.kind) &&
+    !job.manualResendOfJobId &&
+    !job.manualResendRequestedAt;
+}
+
+function automaticCustomerSequenceJobIsActive(
+  job: Pick<
+    BookingNotificationJob,
+    "id" | "kind" | "manualResendOfJobId" | "manualResendRequestedAt" |
+    "customerFollowUpSequenceNumber"
+  >,
+  booking: BookingFollowUpDocument,
+): boolean {
+  if (!isAutomaticCustomerSequenceJob(job)) return true;
+  if (booking.activeCustomerNotificationJobId) {
+    return booking.activeCustomerNotificationJobId === job.id;
+  }
+  return booking.customerFollowUpMessageLimit === undefined &&
+    job.kind === "customer_followup" &&
+    (job.customerFollowUpSequenceNumber || 1) === 1;
+}
+
 function buildNotificationJob(options: {
   booking: Pick<BookingFollowUpDocument,
     "id" | "propertyNumber" | "ownerPhone" | "customerPhone" |
@@ -398,15 +441,22 @@ function buildNotificationJob(options: {
   kind: BookingNotificationKind;
   scheduledAt: string;
   now: string;
+  customerFollowUpSequenceNumber?: number;
+  customerFollowUpSequenceParentJobId?: string | null;
 }): BookingNotificationJob {
-  const isCustomer = options.kind === "customer_followup";
+  const isCustomer = isCustomerNotificationKind(options.kind);
   const isOwnerBookingFact = options.kind === "owner_booking_confirmed";
   const reminderMatch = /^commission_reminder_([345])$/.exec(options.kind);
   const reminderOffsetDays = reminderMatch
     ? Number(reminderMatch[1]) as 3 | 4 | 5
     : null;
   return {
-    id: notificationId(options.booking.id, options.kind),
+    id: options.kind === "customer_followup"
+      ? customerFollowUpSequenceNotificationId(
+          options.booking.id,
+          options.customerFollowUpSequenceNumber || 1,
+        )
+      : notificationId(options.booking.id, options.kind),
     bookingId: options.booking.id,
     propertyNumber: options.booking.propertyNumber,
     recipientRole: isCustomer ? "customer" : "owner",
@@ -428,6 +478,14 @@ function buildNotificationJob(options: {
           options.booking.commissionStatus === "not_applicable"
         ? "free_owner_booking"
         : "transactional",
+    ...(isCustomer
+      ? {
+          customerFollowUpSequenceNumber:
+            options.customerFollowUpSequenceNumber || 1,
+          customerFollowUpSequenceParentJobId:
+            options.customerFollowUpSequenceParentJobId || null,
+        }
+      : {}),
     attempts: 0,
     leaseToken: null,
     leaseExpiresAt: null,
@@ -450,6 +508,7 @@ export function buildInitialBookingWorkflow(options: {
   customerSubject: string;
   isFreeProperty: boolean;
   customerFollowUpDelayMinutes?: number;
+  customerFollowUpMessageLimit?: number;
   listedPriceOptionsHalalas?: number[];
   now?: Date;
 }): InitialBookingWorkflow {
@@ -463,11 +522,18 @@ export function buildInitialBookingWorkflow(options: {
       options.customerFollowUpDelayMinutes ??
         BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT,
     );
+  const customerFollowUpMessageLimit =
+    options.customerFollowUpMessageLimit === undefined
+      ? undefined
+      : bookingFreeWorkflowLimitsSchema.shape.customerDailyLimit.parse(
+          options.customerFollowUpMessageLimit,
+        );
   const createdAt = now.toISOString();
   const followUpDueAt = new Date(
     now.getTime() + customerFollowUpDelayMinutes * 60 * 1_000,
   ).toISOString();
   const id = `BOOK-${options.requestCode}`;
+  const customerNotificationId = customerFollowUpSequenceNotificationId(id, 1);
   const followUp: Omit<BookingFollowUpDocument, "contactRequestId"> = {
     id,
     requestCode: options.requestCode,
@@ -505,8 +571,16 @@ export function buildInitialBookingWorkflow(options: {
     schemaVersion: 1,
     events: [
       { type: "contact_accepted", at: createdAt },
-      { type: "customer_followup_scheduled", at: createdAt },
+      ...(customerFollowUpMessageLimit === 0
+        ? []
+        : [{ type: "customer_followup_scheduled" as const, at: createdAt }]),
     ],
+    ...(customerFollowUpMessageLimit === undefined
+      ? {}
+      : { customerFollowUpMessageLimit }),
+    customerFollowUpDelayMinutes,
+    activeCustomerNotificationJobId:
+      customerFollowUpMessageLimit === 0 ? null : customerNotificationId,
     createdAt,
     updatedAt: createdAt,
   };
@@ -515,7 +589,12 @@ export function buildInitialBookingWorkflow(options: {
     kind: "customer_followup",
     scheduledAt: followUpDueAt,
     now: createdAt,
+    customerFollowUpSequenceNumber: 1,
   });
+  if (customerFollowUpMessageLimit === 0) {
+    customerNotification.status = "cancelled";
+    customerNotification.providerError = "customer_sequence_disabled";
+  }
   return { followUp, customerNotification };
 }
 
@@ -523,7 +602,7 @@ function quotaLimitFor(
   job: BookingNotificationJob,
   limits: BookingFreeWorkflowLimits,
 ): number | null {
-  if (job.kind === "customer_followup" || job.manualResendRequestedAt) {
+  if (isCustomerNotificationKind(job.kind) || job.manualResendRequestedAt) {
     return null;
   }
   if (job.quotaCategory === "transactional") return null;
@@ -551,8 +630,10 @@ function notificationMatchesCurrentState(
   booking: BookingFollowUpDocument,
   now: Date,
 ): NotificationStateCheck {
-  if (job.kind === "customer_followup") {
+  if (isCustomerNotificationKind(job.kind)) {
     return booking.bookingStatus === "awaiting_response" &&
+      booking.bookingDecision === null &&
+      booking.questionnaireStartedAt === null &&
       !customerResponseExpired(booking, now)
       ? { status: "valid" }
       : { status: "invalid" };
@@ -682,6 +763,41 @@ export class BookingCommissionStore {
   }
 
   constructor(private readonly database?: Firestore | null) {}
+
+  private async readCustomerSequenceJobs(
+    transaction: FirebaseFirestore.Transaction,
+    booking: BookingFollowUpDocument,
+  ): Promise<FirebaseFirestore.DocumentSnapshot[]> {
+    const jobIds = Array.from(new Set([
+      notificationId(booking.id, "customer_followup"),
+      booking.activeCustomerNotificationJobId || "",
+    ].filter(Boolean)));
+    return Promise.all(jobIds.map((jobId) => transaction.get(
+      this.db.collection(NOTIFICATIONS_COLLECTION).doc(jobId),
+    )));
+  }
+
+  private cancelCustomerSequenceJobs(
+    transaction: FirebaseFirestore.Transaction,
+    snapshots: FirebaseFirestore.DocumentSnapshot[],
+    timestamp: string,
+  ): void {
+    for (const snapshot of snapshots) {
+      if (!snapshot.exists) continue;
+      const job = snapshot.data() as BookingNotificationJob;
+      if (
+        !isCustomerNotificationKind(job.kind) ||
+        (job.status !== "pending" && job.status !== "claimed")
+      ) continue;
+      transaction.update(snapshot.ref, {
+        status: "cancelled",
+        leaseToken: null,
+        leaseExpiresAt: null,
+        providerError: "notification_state_changed",
+        updatedAt: timestamp,
+      });
+    }
+  }
 
   async getFreeWorkflowSettings(): Promise<BookingFreeWorkflowSettings> {
     try {
@@ -820,6 +936,7 @@ export class BookingCommissionStore {
       enforcementLastError: null,
       enforcementLeaseToken: null,
       enforcementLeaseExpiresAt: null,
+      activeCustomerNotificationJobId: null,
       events: appendEventOnce(booking.events, {
         type: "booking_free_eligibility_lost",
         at: timestamp,
@@ -1315,7 +1432,14 @@ export class BookingCommissionStore {
         );
       }
 
-      const acceleratePending = sourceJob.status === "pending";
+      // A manual send of a pending automatic customer step is an audited copy.
+      // The original keeps its timer and remains the only job allowed to advance
+      // the automatic sequence after provider acceptance.
+      const acceleratePending = sourceJob.status === "pending" &&
+        !(
+          sourceJob.kind === "customer_followup" &&
+          isAutomaticCustomerSequenceJob(sourceJob)
+        );
       const resendJobId = acceleratePending
         ? sourceJob.id
         : `${notificationId(booking.id, sourceJob.kind)}--manual-${digest}`;
@@ -1337,6 +1461,14 @@ export class BookingCommissionStore {
               now: timestamp,
             }),
             id: resendJobId,
+            ...(isCustomerNotificationKind(sourceJob.kind)
+              ? {
+                  customerFollowUpSequenceNumber:
+                    sourceJob.customerFollowUpSequenceNumber || 1,
+                  customerFollowUpSequenceParentJobId:
+                    sourceJob.customerFollowUpSequenceParentJobId || null,
+                }
+              : {}),
             manualResendOfJobId: sourceJob.id,
             manualResendRequestedAt: timestamp,
           };
@@ -1453,13 +1585,19 @@ export class BookingCommissionStore {
           410,
         );
       }
+      const customerJobSnapshots = await this.readCustomerSequenceJobs(
+        transaction,
+        booking,
+      );
       const at = now.toISOString();
       const updates = {
         bookingDecision: "yes" as const,
         questionnaireStartedAt: at,
+        activeCustomerNotificationJobId: null,
         updatedAt: at,
       };
       transaction.update(ref, updates);
+      this.cancelCustomerSequenceJobs(transaction, customerJobSnapshots, at);
       return { ...booking, ...updates };
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1468,9 +1606,6 @@ export class BookingCommissionStore {
 
   async declineBooking(id: string, now = new Date()): Promise<BookingFollowUpDocument> {
     const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
-    const customerJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
-      notificationId(id, "customer_followup"),
-    );
     const result = await this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1488,29 +1623,22 @@ export class BookingCommissionStore {
           410,
         );
       }
-      const customerJobSnapshot = await transaction.get(customerJobRef);
+      const customerJobSnapshots = await this.readCustomerSequenceJobs(
+        transaction,
+        booking,
+      );
       const at = now.toISOString();
       const updates = {
         bookingStatus: "declined" as const,
         declinedAt: at,
         bookingDecision: null,
         questionnaireStartedAt: null,
+        activeCustomerNotificationJobId: null,
         updatedAt: at,
         events: appendEvent(booking.events, { type: "customer_declined", at }),
       };
       transaction.update(ref, updates);
-      if (customerJobSnapshot.exists) {
-        const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
-        if (customerJob.status === "pending" || customerJob.status === "claimed") {
-          transaction.update(customerJobRef, {
-            status: "cancelled",
-            leaseToken: null,
-            leaseExpiresAt: null,
-            providerError: "notification_state_changed",
-            updatedAt: at,
-          });
-        }
-      }
+      this.cancelCustomerSequenceJobs(transaction, customerJobSnapshots, at);
       return { ...booking, ...updates } as BookingFollowUpDocument;
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1534,9 +1662,6 @@ export class BookingCommissionStore {
         : [],
     );
     const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
-    const customerJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
-      notificationId(id, "customer_followup"),
-    );
     const result = await this.db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (!snapshot.exists) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1562,9 +1687,9 @@ export class BookingCommissionStore {
       }
 
       const propertyRef = this.db.collection("properties").doc(booking.propertyNumber);
-      const [propertySnapshot, customerJobSnapshot] = await Promise.all([
+      const [propertySnapshot, customerJobSnapshots] = await Promise.all([
         transaction.get(propertyRef),
-        transaction.get(customerJobRef),
+        this.readCustomerSequenceJobs(transaction, booking),
       ]);
       const confirmedAt = now.toISOString();
       const financials = buildConfirmedBookingFinancials(facts, now);
@@ -1580,6 +1705,7 @@ export class BookingCommissionStore {
           commissionAmountHalalas: null,
           commissionDueAt: null,
           commissionNoticeSentAt: null,
+          activeCustomerNotificationJobId: null,
           ...ownerIdentityReviewUpdates(booking, confirmedAt),
           events: appendEventOnce(
             appendEvent(booking.events, { type: "booking_confirmed", at: confirmedAt }),
@@ -1587,18 +1713,11 @@ export class BookingCommissionStore {
           ),
         };
         transaction.update(ref, updates);
-        if (customerJobSnapshot.exists) {
-          const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
-          if (customerJob.status === "pending" || customerJob.status === "claimed") {
-            transaction.update(customerJobRef, {
-              status: "cancelled",
-              leaseToken: null,
-              leaseExpiresAt: null,
-              providerError: "notification_state_changed",
-              updatedAt: confirmedAt,
-            });
-          }
-        }
+        this.cancelCustomerSequenceJobs(
+          transaction,
+          customerJobSnapshots,
+          confirmedAt,
+        );
         return { ...booking, ...updates } as BookingFollowUpDocument;
       }
       const updates = {
@@ -1615,6 +1734,7 @@ export class BookingCommissionStore {
           ? financials.commissionDueAt
           : null,
         commissionNoticeSentAt: null,
+        activeCustomerNotificationJobId: null,
         updatedAt: confirmedAt,
         events: appendEvent(booking.events, { type: "booking_confirmed", at: confirmedAt }),
       };
@@ -1643,18 +1763,11 @@ export class BookingCommissionStore {
       ];
 
       transaction.update(ref, updates);
-      if (customerJobSnapshot.exists) {
-        const customerJob = customerJobSnapshot.data() as BookingNotificationJob;
-        if (customerJob.status === "pending" || customerJob.status === "claimed") {
-          transaction.update(customerJobRef, {
-            status: "cancelled",
-            leaseToken: null,
-            leaseExpiresAt: null,
-            providerError: "notification_state_changed",
-            updatedAt: confirmedAt,
-          });
-        }
-      }
+      this.cancelCustomerSequenceJobs(
+        transaction,
+        customerJobSnapshots,
+        confirmedAt,
+      );
       for (const job of jobs) {
         transaction.create(this.db.collection(NOTIFICATIONS_COLLECTION).doc(job.id), job);
       }
@@ -3928,7 +4041,10 @@ export class BookingCommissionStore {
           booking,
           now,
         )) return null;
-        if (job.kind === "customer_followup" && customerResponseExpired(booking, now)) {
+        if (
+          isCustomerNotificationKind(job.kind) &&
+          customerResponseExpired(booking, now)
+        ) {
           transaction.update(candidate.ref, {
             status: "cancelled",
             leaseToken: null,
@@ -3941,6 +4057,42 @@ export class BookingCommissionStore {
               type: "customer_followup_expired",
               at: nowIso,
               detail: "customer_response_expired",
+            }),
+            ...(booking.activeCustomerNotificationJobId === job.id
+              ? { activeCustomerNotificationJobId: null }
+              : {}),
+            updatedAt: nowIso,
+          });
+          return null;
+        }
+        if (
+          isAutomaticCustomerSequenceJob(job) &&
+          (
+            booking.customerFollowUpMessageLimit === 0 ||
+            !automaticCustomerSequenceJobIsActive(job, booking)
+          )
+        ) {
+          transaction.update(candidate.ref, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: booking.customerFollowUpMessageLimit === 0
+              ? "customer_sequence_disabled"
+              : "notification_state_changed",
+            updatedAt: nowIso,
+          });
+          transaction.update(bookingRef, {
+            ...(booking.activeCustomerNotificationJobId === job.id
+              ? { activeCustomerNotificationJobId: null }
+              : {}),
+            events: appendEvent(booking.events, {
+              type: job.kind === "customer_final_reminder"
+                ? "customer_final_reminder_suppressed"
+                : "customer_followup_suppressed",
+              at: nowIso,
+              detail: booking.customerFollowUpMessageLimit === 0
+                ? "customer_sequence_disabled"
+                : "notification_state_changed",
             }),
             updatedAt: nowIso,
           });
@@ -3995,6 +4147,12 @@ export class BookingCommissionStore {
             providerError: notificationStateChangedError(job, booking),
             updatedAt: nowIso,
           });
+          if (booking.activeCustomerNotificationJobId === job.id) {
+            transaction.update(bookingRef, {
+              activeCustomerNotificationJobId: null,
+              updatedAt: nowIso,
+            });
+          }
           return null;
         }
         if (job.recipientRole === "owner") {
@@ -4041,7 +4199,7 @@ export class BookingCommissionStore {
             booking.commissionStatus !== "not_applicable"
           );
         const followUpControlled =
-          job.kind === "customer_followup" ||
+          isCustomerNotificationKind(job.kind) ||
           (
             job.kind === "owner_booking_confirmed" &&
             booking.commissionStatus === "not_applicable"
@@ -4221,7 +4379,10 @@ export class BookingCommissionStore {
         booking,
         now,
       )) return { status: "blocked", reason: "booking_ineligible" } as const;
-      if (job.kind === "customer_followup" && customerResponseExpired(booking, now)) {
+      if (
+        isCustomerNotificationKind(job.kind) &&
+        customerResponseExpired(booking, now)
+      ) {
         transaction.update(jobRef, {
           status: "cancelled",
           leaseToken: null,
@@ -4235,9 +4396,45 @@ export class BookingCommissionStore {
             at: timestamp,
             detail: "customer_response_expired",
           }),
+          ...(booking.activeCustomerNotificationJobId === job.id
+            ? { activeCustomerNotificationJobId: null }
+            : {}),
           updatedAt: timestamp,
         });
         return { status: "blocked", reason: "customer_response_expired" } as const;
+      }
+      if (
+        isAutomaticCustomerSequenceJob(job) &&
+        (
+          booking.customerFollowUpMessageLimit === 0 ||
+          !automaticCustomerSequenceJobIsActive(job, booking)
+        )
+      ) {
+        transaction.update(jobRef, {
+          status: "cancelled",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: booking.customerFollowUpMessageLimit === 0
+            ? "customer_sequence_disabled"
+            : "notification_state_changed",
+          updatedAt: timestamp,
+        });
+        transaction.update(bookingRef, {
+          ...(booking.activeCustomerNotificationJobId === job.id
+            ? { activeCustomerNotificationJobId: null }
+            : {}),
+          events: appendEvent(booking.events, {
+            type: job.kind === "customer_final_reminder"
+              ? "customer_final_reminder_suppressed"
+              : "customer_followup_suppressed",
+            at: timestamp,
+            detail: booking.customerFollowUpMessageLimit === 0
+              ? "customer_sequence_disabled"
+              : "notification_state_changed",
+          }),
+          updatedAt: timestamp,
+        });
+        return { status: "blocked", reason: "notification_state_changed" } as const;
       }
       if (
         isCommissionPaymentPromptNotification(job, booking) &&
@@ -4289,6 +4486,12 @@ export class BookingCommissionStore {
           providerError: notificationStateChangedError(job, booking),
           updatedAt: timestamp,
         });
+        if (booking.activeCustomerNotificationJobId === job.id) {
+          transaction.update(bookingRef, {
+            activeCustomerNotificationJobId: null,
+            updatedAt: timestamp,
+          });
+        }
         return { status: "blocked", reason: "notification_state_changed" } as const;
       }
       if (job.recipientRole === "owner") {
@@ -4389,18 +4592,22 @@ export class BookingCommissionStore {
       }
       const successEvent = job.kind === "customer_followup"
         ? "customer_followup_sent"
-        : job.kind === "owner_booking_confirmed"
-          ? "owner_notification_sent"
-          : job.kind.startsWith("commission_reminder_")
-            ? "commission_reminder_sent"
-            : job.kind === "property_released"
-              ? "property_released"
-              : "owner_notification_sent";
+        : job.kind === "customer_final_reminder"
+          ? "customer_final_reminder_sent"
+          : job.kind === "owner_booking_confirmed"
+            ? "owner_notification_sent"
+            : job.kind.startsWith("commission_reminder_")
+              ? "commission_reminder_sent"
+              : job.kind === "property_released"
+                ? "property_released"
+                : "owner_notification_sent";
       const failureEvent = job.kind === "customer_followup"
         ? "customer_followup_failed"
-        : job.kind.startsWith("commission_reminder_")
-          ? "commission_reminder_failed"
-          : "owner_notification_failed";
+        : job.kind === "customer_final_reminder"
+          ? "customer_final_reminder_failed"
+          : job.kind.startsWith("commission_reminder_")
+            ? "commission_reminder_failed"
+            : "owner_notification_failed";
       const retryOwnerCommissionNotice = Boolean(
         booking &&
         !options.success &&
@@ -4409,6 +4616,47 @@ export class BookingCommissionStore {
         !booking.commissionNoticeSentAt &&
         job.attempts < 3,
       );
+      let nextCustomerJob: BookingNotificationJob | null = null;
+      if (
+        booking &&
+        options.success &&
+        job.kind === "customer_followup" &&
+        isAutomaticCustomerSequenceJob(job) &&
+        automaticCustomerSequenceJobIsActive(job, booking) &&
+        notificationMatchesCurrentState(job, booking, now).status === "valid"
+      ) {
+        const messageLimit = booking.customerFollowUpMessageLimit;
+        const delay = bookingCustomerFollowUpDelayMinutesSchema.safeParse(
+          booking.customerFollowUpDelayMinutes,
+        );
+        const sequenceNumber = Number.isSafeInteger(
+          job.customerFollowUpSequenceNumber,
+        ) && Number(job.customerFollowUpSequenceNumber) > 0
+          ? Number(job.customerFollowUpSequenceNumber)
+          : 1;
+        // Missing snapshots identify legacy workflows. They may finish their
+        // already-created first send, but must not acquire a new sequence.
+        if (
+          Number.isSafeInteger(messageLimit) &&
+          Number(messageLimit) > 0 &&
+          delay.success
+        ) {
+          const nextKind: BookingNotificationKind =
+            sequenceNumber < Number(messageLimit)
+              ? "customer_followup"
+              : "customer_final_reminder";
+          nextCustomerJob = buildNotificationJob({
+            booking,
+            kind: nextKind,
+            scheduledAt: new Date(
+              now.getTime() + delay.data * 60 * 1_000,
+            ).toISOString(),
+            now: timestamp,
+            customerFollowUpSequenceNumber: sequenceNumber + 1,
+            customerFollowUpSequenceParentJobId: job.id,
+          });
+        }
+      }
       transaction.update(jobRef, {
         status: options.success
           ? "sent"
@@ -4446,16 +4694,42 @@ export class BookingCommissionStore {
                 commissionDueAt: calculateCommissionDueAt(timestamp),
               }
             : {};
+        let nextEvents = appendEvent(booking.events, {
+          type: options.success ? successEvent : failureEvent,
+          at: timestamp,
+          ...(!options.success && options.error ? { detail: options.error.slice(0, 200) } : {}),
+        });
+        if (nextCustomerJob) {
+          nextEvents = appendEvent(nextEvents, {
+            type: nextCustomerJob.kind === "customer_final_reminder"
+              ? "customer_final_reminder_scheduled"
+              : "customer_followup_scheduled",
+            at: timestamp,
+            detail: String(nextCustomerJob.customerFollowUpSequenceNumber || ""),
+          });
+        }
+        const activeCustomerNotificationUpdate =
+          nextCustomerJob
+            ? { activeCustomerNotificationJobId: nextCustomerJob.id }
+            : booking.activeCustomerNotificationJobId === job.id &&
+                isCustomerNotificationKind(job.kind)
+              ? { activeCustomerNotificationJobId: null }
+              : {};
         transaction.update(bookingRef, {
           commissionReminderOffsetsSent: reminderOffsets,
           ...commissionNoticeUpdates,
-          events: appendEvent(booking.events, {
-            type: options.success ? successEvent : failureEvent,
-            at: timestamp,
-            ...(!options.success && options.error ? { detail: options.error.slice(0, 200) } : {}),
-          }),
+          ...activeCustomerNotificationUpdate,
+          events: nextEvents,
           updatedAt: timestamp,
         });
+        if (nextCustomerJob) {
+          transaction.create(
+            this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+              nextCustomerJob.id,
+            ),
+            nextCustomerJob,
+          );
+        }
         if (Object.keys(commissionNoticeUpdates).length > 0) {
           const schedule = calculateCommissionReminderSchedule(timestamp);
           for (let index = 0; index < 3; index++) {

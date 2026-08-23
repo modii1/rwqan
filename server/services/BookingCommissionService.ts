@@ -538,6 +538,7 @@ export class BookingCommissionService {
     customerPhone: string;
     isFreeProperty: boolean;
     customerFollowUpDelayMinutes: number;
+    customerFollowUpMessageLimit: number;
     propertyPrices?: unknown;
     now?: Date;
   }): InitialBookingWorkflow {

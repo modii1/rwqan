@@ -4,12 +4,13 @@
 
 - Booking follow-up, owner notifications, commission collection, and commission holds apply only to properties without an active premium subscription. A workflow must originate while the property is free; a premium-origin workflow is never created and cannot become eligible after a later downgrade.
 - If a free property becomes actively premium, the workflow is durably closed: queued messages are cancelled, any unpaid booking commission is waived, and only that booking's property-hold obligation is released. Historical payment attempts and signed provider callbacks remain available for financial audit.
-- An accepted anonymous contact request schedules one customer WhatsApp follow-up after the configured delay. The default is 24 hours, and admins may set any whole-minute delay from 1 minute through 120 hours.
-- Changing the customer follow-up delay applies only to newly accepted contacts for free properties. Existing scheduled messages keep their original delivery time.
+- An accepted anonymous contact request snapshots the configured customer message count and delay for that free-property booking. The default delay is 24 hours, and admins may set any whole-minute delay from 1 minute through 120 hours.
+- A count of `N` sends exactly `N` normal automatic follow-ups, then one final reminder. The first normal follow-up is due after the snapshotted delay; each later step is created only after the WhatsApp provider accepts the preceding step and is due after that same delay. A count of `0` disables the automatic customer sequence.
+- Changing the customer follow-up count or delay applies only to newly accepted contacts for free properties. Existing workflows keep their snapshotted count and timing, and legacy workflows without a count snapshot never acquire repeat or final messages.
 - The customer message uses an internal `/b/<10-character-code>` alias. Previously issued 22-character aliases remain valid. Opening the alias, follow-up page, bookings profile, or admin dashboard never creates or resends the automatic job; an admin resend is a separate audited action.
 - An unanswered workflow expires seven days after the original contact. A verified customer profile session remains separate from that response deadline.
 - An unanswered follow-up can be answered for seven days from the accepted contact. The signed customer session remains usable for 90 days to view an already answered profile, but expired unanswered links and queued messages are cancelled.
-- The follow-up first asks whether a booking happened. A “No” answer closes the workflow. A “Yes” answer opens exactly three facts:
+- Every unanswered sequence remains scoped to one booking. Opening a link does not stop or advance it, while either a “No” decision or the start of the “Yes” questionnaire cancels the remaining automatic messages. A “Yes” answer opens exactly three facts:
   1. Booking timing: midweek, weekend, or other.
   2. Booking date: an exact day or a month-only value.
   3. Price paid in SAR.
@@ -27,15 +28,15 @@
 - While a property has an active commission hold, owner and general admin property edits cannot change its canonical WhatsApp owner phone. Resolve the obligation and release the hold through the booking-commission controls before transferring the property; equivalent formatting of the same canonical phone remains allowed.
 - Admin booking totals are calculated over the complete booking and notification collections. Each booking exposes a sanitized notification history and complete payment-attempt history without recipient phones, quota keys, checkout URLs, or lease tokens.
 - The admin customer-WhatsApp handoff offers the fixed technical-support message and, while the response window is still open, the current configured customer follow-up template. It is limited transactionally to once per customer every 30 minutes, including when the same customer has multiple booking rows. The raw phone remains server-side.
-- Every queued or completed customer or owner lifecycle notification—including booking facts, billing, reminders, pause, release, and dispute rejection—can be sent manually from its admin notification-history record. Sending a queued record moves that one job to now without creating a duplicate; resending a completed record creates an audited copy. Both paths bypass daily notification quotas without incrementing their counters, keep the original recipient role, use the current configured template and live booking facts, and are rejected if the free-property eligibility, owner identity, payment state, reminder date, or response window no longer matches.
+- Every queued or completed customer or owner lifecycle notification—including booking facts, billing, reminders, pause, release, dispute rejection, and the final customer reminder—can be sent manually from its admin notification-history record. Admin-triggered customer messages do not consume or advance the automatic sequence. A pending normal automatic follow-up is sent as a separate audited manual copy so its timer remains intact; a pending final reminder can be moved to now without creating a second final. Resending a completed record creates an audited copy. All manual paths bypass daily notification quotas without incrementing their counters, keep the original recipient role, use the current configured template and live booking facts, and are rejected if the free-property eligibility, owner identity, payment state, reminder date, or response window no longer matches.
 
 ## Limits
 
-- Automatic customer booking follow-ups and admin-triggered notification sends bypass daily notification quotas and do not increment their counters.
+- Automatic customer booking follow-ups and admin-triggered notification sends bypass daily notification quotas and do not increment their counters. The customer message count is a per-booking sequence length, not a per-phone quota.
 - Confirmed-booking fact messages for free-property owners: 3 per normalized owner phone per Riyadh day by default, across all of that phone’s free properties.
 - Billing messages (the initial payment notice, enabled day-3/day-4 reminders, mandatory day 5, pause, and release) are transactional and exempt from promotional quotas. They are persisted, idempotently keyed, and audited in the notification outbox.
-- Admins can configure the free-owner notification limit and free-property contact limit in the booking-commission dashboard. The persisted customer limit and `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT` fallback remain schema-compatible settings, but automatic customer follow-ups and admin-triggered sends do not consult them. The active environment fallbacks are `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT` and `FREE_PROPERTY_DAILY_CONTACT_LIMIT`.
-- The same admin settings screen can edit the customer follow-up delay in hours and minutes and the eight free-workflow WhatsApp templates. Required placeholders are validated; the five-day payment window and mandatory day-5 warning cannot be changed. `CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES` is the environment fallback; the older whole-hour variable is still migrated when the minute setting is absent.
+- Admins can configure the free-owner notification limit, the per-booking normal customer follow-up count, and the free-property contact limit in the booking-commission dashboard. `CUSTOMER_BOOKING_FOLLOWUP_DAILY_LIMIT` remains the environment fallback name for compatibility, while `FREE_OWNER_BOOKING_NOTIFICATION_DAILY_LIMIT` and `FREE_PROPERTY_DAILY_CONTACT_LIMIT` are the other active limit fallbacks.
+- The same admin settings screen can edit the customer follow-up delay in hours and minutes and the nine free-workflow WhatsApp templates, including the link-free final customer reminder. Required placeholders are validated; the five-day payment window and mandatory day-5 warning cannot be changed. `CUSTOMER_BOOKING_FOLLOWUP_DELAY_MINUTES` is the environment fallback; the older whole-hour variable is still migrated when the minute setting is absent.
 - During the schema-v5 rollout, the admin API accepts the schema-v4 whole-hour PUT field and returns deprecated whole-hour policy aliases for cached admin tabs. A minute value that is not an exact number of hours is returned as a fractional legacy alias so the old integer-only form fails closed instead of overwriting it; reload the dashboard to edit that value.
 
 ## Before deployment
@@ -64,7 +65,8 @@ Enable `FEATURE_BOOKING_FOLLOWUP` and leave commission enforcement disabled for 
 
 Validate:
 
-- accepted contact → follow-up scheduled → WhatsApp sent;
+- accepted contact → configured normal follow-ups sent in order → link-free final reminder sent;
+- customer Yes/No response after any step → every remaining automatic customer message cancelled;
 - Yes/No and the strict three-fact questionnaire;
 - month-only and exact-day dates;
 - customer profile isolation and masked phone;

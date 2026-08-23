@@ -9,6 +9,7 @@ import {
 
 test("admin notification history localizes kinds and recipients", () => {
   assert.equal(notificationKindLabel("commission_reminder_4"), "تذكير العمولة لليوم الرابع");
+  assert.equal(notificationKindLabel("customer_final_reminder"), "المتابعة الأخيرة مع العميل");
   assert.equal(notificationRecipientLabel("owner"), "المالك");
 });
 

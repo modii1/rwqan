@@ -45,6 +45,7 @@ export const bookingCustomerFollowUpDelayHoursSchema = z.number()
 
 export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   customer_followup: ["propertyLabel", "followUpLink"],
+  customer_final_reminder: [],
   owner_booking_facts: [
     "propertyName",
     "propertyNumber",
@@ -113,6 +114,14 @@ export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
 
 أكد النتيجة من الرابط التالي:
 {{followUpLink}}`,
+  customer_final_reminder: `مرحبًا عميلنا العزيز 👋
+
+نأمل أن تكون تجربتك مع روقان كانت موفقة 🌿
+
+هذه آخر متابعة منا، ونحب نعرف فقط:
+هل تم الحجز من خلال منصة روقان؟
+
+نشكرك على وقتك وتعاونك 🤍`,
   owner_booking_facts: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
 
 رقم الطلب: {{requestCode}}
@@ -216,6 +225,9 @@ function bookingWhatsAppTemplateSchemaFor(
 
 export const bookingWhatsAppTemplatesSchema = z.object({
   customer_followup: bookingWhatsAppTemplateSchemaFor("customer_followup"),
+  customer_final_reminder: bookingWhatsAppTemplateSchemaFor(
+    "customer_final_reminder",
+  ),
   owner_booking_facts: bookingWhatsAppTemplateSchemaFor("owner_booking_facts"),
   owner_booking_commission: bookingWhatsAppTemplateSchemaFor(
     "owner_booking_commission",

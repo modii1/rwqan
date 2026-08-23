@@ -12,6 +12,10 @@ export type BookingEventType =
   | "customer_followup_failed"
   | "customer_followup_suppressed"
   | "customer_followup_expired"
+  | "customer_final_reminder_scheduled"
+  | "customer_final_reminder_sent"
+  | "customer_final_reminder_failed"
+  | "customer_final_reminder_suppressed"
   | "customer_opened"
   | "admin_customer_whatsapp_opened"
   | "customer_declined"
@@ -71,12 +75,18 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
   enforcementLeaseToken?: string | null;
   enforcementLeaseExpiresAt?: string | null;
   events: BookingEvent[];
+  /** Automatic sequence policy captured when this workflow was created. */
+  customerFollowUpMessageLimit?: number;
+  customerFollowUpDelayMinutes?: number;
+  /** Current automatic customer-sequence job, if one is still actionable. */
+  activeCustomerNotificationJobId?: string | null;
   /** Last successful admin handoff to this customer's WhatsApp. */
   adminCustomerWhatsAppLastOpenedAt?: string | null;
 };
 
 export type BookingNotificationKind =
   | "customer_followup"
+  | "customer_final_reminder"
   | "owner_booking_confirmed"
   | "commission_dispute_rejected"
   | "commission_reminder_3"
@@ -108,6 +118,10 @@ export type BookingNotificationJob = {
   quotaCategory: "customer_followup" | "free_owner_booking" | "transactional";
   /** Riyadh quota window already reserved by this logical job, if any. */
   quotaReservedWindowStartedAt?: number | null;
+  /** One-based position in the automatic follow-up sequence. */
+  customerFollowUpSequenceNumber?: number | null;
+  /** Previous automatic sequence job which created this job. */
+  customerFollowUpSequenceParentJobId?: string | null;
   attempts: number;
   leaseToken: string | null;
   leaseExpiresAt: string | null;
