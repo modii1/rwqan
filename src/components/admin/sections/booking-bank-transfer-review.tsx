@@ -52,13 +52,20 @@ function safeReceiptUrl(value: unknown): string | null {
 
 function formatDateTime(value: unknown): string {
   const date = new Date(String(value || ""));
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
-        timeZone: "Asia/Riyadh",
-        dateStyle: "long",
-        timeStyle: "short",
-      }).format(date);
+  if (Number.isNaN(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hourCycle: "h12",
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+  const dayPeriod = read("dayPeriod");
+  return `${read("year")}/${Number(read("month"))}/${Number(read("day"))} ${Number(read("hour"))}:${read("minute")}${dayPeriod ? ` ${dayPeriod}` : ""}`;
 }
 
 function formatReceiptSize(value: unknown): string {
@@ -165,7 +172,7 @@ export default function BookingBankTransferReview({
       <dl className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-lg border bg-white p-3">
           <dt className="text-[11px] text-muted-foreground">وقت رفع الإيصال</dt>
-          <dd className="mt-1 text-xs font-semibold text-slate-800">{formatDateTime(attempt.receiptSubmittedAt)}</dd>
+          <dd className="mt-1 text-xs font-semibold text-slate-800" dir="auto">{formatDateTime(attempt.receiptSubmittedAt)}</dd>
         </div>
         <div className="rounded-lg border bg-white p-3">
           <dt className="text-[11px] text-muted-foreground">نوع الملف</dt>
@@ -185,7 +192,7 @@ export default function BookingBankTransferReview({
         </div>
         <div className="rounded-lg border bg-white p-3">
           <dt className="text-[11px] text-muted-foreground">وقت المراجعة</dt>
-          <dd className="mt-1 text-xs font-semibold text-slate-800">{formatDateTime(attempt.bankReviewedAt)}</dd>
+          <dd className="mt-1 text-xs font-semibold text-slate-800" dir="auto">{formatDateTime(attempt.bankReviewedAt)}</dd>
         </div>
       </dl>
 

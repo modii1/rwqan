@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { BookingAdminCustomerWhatsAppTemplateVariant } from "@shared/booking";
+import { formatCanonicalBookingDate } from "./booking-calendar";
 
 export type BookingTiming = "midweek" | "weekend" | "other";
 export type BookingDatePrecision = "day" | "month";
@@ -18,9 +19,18 @@ export type BookingDatePrecision = "day" | "month";
 export interface BookingQuestionnaire {
   timing?: BookingTiming | string | null;
   bookingTiming?: BookingTiming | string | null;
-  bookingDate?: string | { value?: string | null; precision?: BookingDatePrecision | string | null } | null;
+  bookingDate?: string | {
+    value?: string | null;
+    precision?: BookingDatePrecision | string | null;
+    calendar?: "gregorian" | "hijri" | string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
   date?: string | null;
   bookingDatePrecision?: BookingDatePrecision | string | null;
+  bookingDateCalendar?: "gregorian" | "hijri" | string | null;
+  bookingDateStart?: string | null;
+  bookingDateEnd?: string | null;
   pricePaidSar?: string | number | null;
   pricePaidHalalas?: number | null;
   [key: string]: unknown;
@@ -286,14 +296,19 @@ export function formatDateTime(value: unknown): string {
   if (!raw) return "—";
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return date.toLocaleString("en-US-u-ca-gregory-nu-latn", {
+  const parts = new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
     timeZone: "Asia/Riyadh",
     year: "numeric",
-    month: "long",
+    month: "numeric",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    hourCycle: "h12",
+  }).formatToParts(date);
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+  const dayPeriod = valueOf("dayPeriod");
+  return `${valueOf("year")}/${Number(valueOf("month"))}/${Number(valueOf("day"))} ${Number(valueOf("hour"))}:${valueOf("minute")}${dayPeriod ? ` ${dayPeriod}` : ""}`;
 }
 
 export function bookingTimingLabel(value: unknown): string {
@@ -315,16 +330,17 @@ export function formatBookingDate(questionnaire?: BookingQuestionnaire | null): 
   ).trim();
   if (!value) return "—";
   const precision = String(questionnaire?.bookingDatePrecision || nestedDate?.precision || "day");
-  const date = precision === "month"
-    ? new Date(`${value.slice(0, 7)}-01T12:00:00.000Z`)
-    : new Date(`${value.slice(0, 10)}T12:00:00.000Z`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US-u-ca-gregory-nu-latn", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "long",
-    ...(precision === "month" ? {} : { day: "numeric" }),
-  });
+  const calendar = String(
+    questionnaire?.bookingDateCalendar || nestedDate?.calendar || "gregorian",
+  ) === "hijri" ? "hijri" : "gregorian";
+  if (precision === "month") {
+    return formatCanonicalBookingDate(value, "month", calendar, {
+      calendar,
+      startDate: questionnaire?.bookingDateStart || nestedDate?.startDate,
+      endDate: questionnaire?.bookingDateEnd || nestedDate?.endDate,
+    }) || value;
+  }
+  return formatCanonicalBookingDate(value, "day", "gregorian") || value;
 }
 
 export function getQuestionnairePrice(questionnaire?: BookingQuestionnaire | null): string {
@@ -360,7 +376,7 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0 rounded-lg border border-border/70 bg-muted/25 p-3">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-words text-sm font-bold text-foreground">{value}</dd>
+      <dd className="mt-1 break-words text-sm font-bold text-foreground" dir="auto">{value}</dd>
     </div>
   );
 }
@@ -585,7 +601,7 @@ export function BookingTimeline({ row }: { row: BookingDisplayRow }) {
             <div className="min-w-0 pt-0.5">
               <p className="text-sm font-bold text-foreground">{entry.title || entry.label || getBookingEventLabel(entry.type || entry.status)}</p>
               {(entry.description || entry.detail) && <p className="mt-0.5 break-words text-xs leading-5 text-muted-foreground">{entry.description || getBookingEventDetail(entry.type || entry.status, entry.detail)}</p>}
-              {timestamp && <time className="mt-1 block text-[11px] text-muted-foreground">{formatDateTime(timestamp)}</time>}
+              {timestamp && <time className="mt-1 block text-[11px] text-muted-foreground" dir="auto">{formatDateTime(timestamp)}</time>}
             </div>
           </li>
         );

@@ -397,6 +397,22 @@ test("booking dates validate the declared day or month precision", () => {
     bookingDateSchema.parse({ value: "2026-12", precision: "month" }),
     { value: "2026-12", precision: "month" },
   );
+  assert.deepEqual(
+    bookingDateSchema.parse({
+      value: "1448-03",
+      precision: "month",
+      calendar: "hijri",
+      startDate: "2026-08-14",
+      endDate: "2026-09-11",
+    }),
+    {
+      value: "1448-03",
+      precision: "month",
+      calendar: "hijri",
+      startDate: "2026-08-14",
+      endDate: "2026-09-11",
+    },
+  );
 
   for (const invalid of [
     { value: "2026-02-29", precision: "day" },
@@ -405,6 +421,20 @@ test("booking dates validate the declared day or month precision", () => {
     { value: "2026-13", precision: "month" },
     { value: "2026-08", precision: "day" },
     { value: "2026-08-15", precision: "month" },
+    {
+      value: "1448-03",
+      precision: "month",
+      calendar: "hijri",
+      startDate: "2026-08-15",
+      endDate: "2026-09-11",
+    },
+    {
+      value: "1600-01",
+      precision: "month",
+      calendar: "hijri",
+      startDate: "2173-12-07",
+      endDate: "2174-01-04",
+    },
   ]) {
     assert.equal(bookingDateSchema.safeParse(invalid).success, false);
   }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { calendarMonthRange } from "./booking-calendar";
 
 export const BOOKING_COMMISSION_BASIS_POINTS = 1_000 as const;
 export const BASIS_POINTS_DENOMINATOR = 10_000 as const;
@@ -387,6 +388,9 @@ export type BookingTokenPurpose = z.infer<typeof bookingTokenPurposeSchema>;
 export const bookingDatePrecisionSchema = z.enum(["day", "month"]);
 export type BookingDatePrecision = z.infer<typeof bookingDatePrecisionSchema>;
 
+export const bookingCalendarSchema = z.enum(["gregorian", "hijri"]);
+export type BookingCalendar = z.infer<typeof bookingCalendarSchema>;
+
 const calendarDayPattern = /^\d{4}-\d{2}-\d{2}$/;
 const calendarMonthPattern = /^\d{4}-\d{2}$/;
 
@@ -435,9 +439,42 @@ const monthBookingDateSchema = z.object({
   precision: z.literal("month"),
 }).strict();
 
-export const bookingDateSchema = z.discriminatedUnion("precision", [
+const calendarMonthBookingDateSchema = z.object({
+  value: z.string(),
+  precision: z.literal("month"),
+  calendar: bookingCalendarSchema,
+  startDate: z.string().refine(isValidCalendarDay),
+  endDate: z.string().refine(isValidCalendarDay),
+}).strict().superRefine((value, context) => {
+  const expected = calendarMonthRange(value.value, value.calendar);
+  if (!expected) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["value"],
+      message: "Invalid booking calendar month",
+    });
+    return;
+  }
+  if (value.startDate !== expected.startDate) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["startDate"],
+      message: "Booking month start does not match the selected calendar month",
+    });
+  }
+  if (value.endDate !== expected.endDate) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["endDate"],
+      message: "Booking month end does not match the selected calendar month",
+    });
+  }
+});
+
+export const bookingDateSchema = z.union([
   dayBookingDateSchema,
   monthBookingDateSchema,
+  calendarMonthBookingDateSchema,
 ]);
 export type BookingDate = z.infer<typeof bookingDateSchema>;
 

@@ -92,23 +92,31 @@ const bookingFollowUpFailureLabels = {
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("en-US-u-ca-gregory-nu-latn", {
+  const parts = new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
     timeZone: "Asia/Riyadh",
     year: "numeric",
-    month: "long",
+    month: "numeric",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    hourCycle: "h12",
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+  const dayPeriod = read("dayPeriod");
+  return `${read("year")}/${Number(read("month"))}/${Number(read("day"))} ${Number(read("hour"))}:${read("minute")}${dayPeriod ? ` ${dayPeriod}` : ""}`;
 }
 function formatChartDate(value: string): string {
   const date = new Date(`${value}T12:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+  const parts = new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
     timeZone: "UTC",
-    month: "short",
+    month: "numeric",
     day: "numeric",
-  }).format(date);
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+  return `${Number(read("month"))}/${Number(read("day"))}`;
 }
 
 function formatClientPhone(value: string | null): string {
@@ -344,7 +352,7 @@ export default function ContactAnalyticsSection() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-[#34332f]">{event.propertyName} <span className="font-normal text-muted-foreground">({event.propertyNumber})</span></p>
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {formatDateTime(event.timestamp)}{event.requestCode ? ` · ${event.requestCode}` : ""}
+                    <bdi>{formatDateTime(event.timestamp)}{event.requestCode ? ` · ${event.requestCode}` : ""}</bdi>
                   </p>
                   <p className="mt-0.5 truncate text-right text-xs font-semibold text-[#5f543f]" dir={event.clientPhone ? "ltr" : "rtl"}>
                     {formatClientPhone(event.clientPhone)}

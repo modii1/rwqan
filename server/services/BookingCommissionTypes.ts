@@ -235,6 +235,9 @@ export type BookingPublicRow = {
     timing: BookingTiming;
     bookingDate: string;
     bookingDatePrecision: "day" | "month";
+    bookingDateCalendar?: "gregorian" | "hijri";
+    bookingDateStart?: string;
+    bookingDateEnd?: string;
     pricePaidHalalas: number;
   };
   answeredAt: string | null;

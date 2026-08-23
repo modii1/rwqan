@@ -23,7 +23,10 @@ import {
   formatSarFromHalalas,
 } from "./booking-display";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
-import { isCanonicalBookingDate } from "./booking-calendar";
+import {
+  isBookingDateSelectionValid,
+  type BookingCalendar,
+} from "./booking-calendar";
 import { BookingDateInput } from "./booking-date-input";
 import {
   buildBookingQuestionnairePayload,
@@ -82,6 +85,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
   const [timing, setTiming] = useState<BookingTiming | "">("");
   const [bookingDatePrecision, setBookingDatePrecision] = useState<BookingDatePrecision>("day");
   const [bookingDate, setBookingDate] = useState("");
+  const [bookingDateCalendar, setBookingDateCalendar] = useState<BookingCalendar>("gregorian");
   const [pricePaidSar, setPricePaidSar] = useState("");
   const [priceChoice, setPriceChoice] = useState("");
   const [actionError, setActionError] = useState("");
@@ -159,7 +163,11 @@ export default function BookingFollowupClient({ token }: { token: string }) {
       setActionError("اختر وقت الحجز للمتابعة.");
       return;
     }
-    if (!isCanonicalBookingDate(bookingDate, bookingDatePrecision)) {
+    if (!isBookingDateSelectionValid(
+      bookingDate,
+      bookingDatePrecision,
+      bookingDateCalendar,
+    )) {
       setActionError("أدخل تاريخ الحجز بالصيغة المطلوبة.");
       return;
     }
@@ -173,6 +181,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
       timing,
       bookingDate,
       bookingDatePrecision,
+      bookingDateCalendar,
       pricePaidSar,
     });
     try {
@@ -385,7 +394,11 @@ export default function BookingFollowupClient({ token }: { token: string }) {
                 <BookingDateInput
                   value={bookingDate}
                   precision={bookingDatePrecision}
-                  onChange={setBookingDate}
+                  selectionCalendar={bookingDateCalendar}
+                  onChange={(nextValue, nextCalendar) => {
+                    setBookingDate(nextValue);
+                    setBookingDateCalendar(nextCalendar);
+                  }}
                 />
               </div>
             </fieldset>

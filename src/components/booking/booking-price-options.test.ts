@@ -22,11 +22,12 @@ test("a listed halala price converts exactly to the existing SAR input contract"
   assert.equal(sarInputFromHalalas(75_055), "750.55");
 });
 
-test("questionnaire payload remains limited to the existing three booking facts", () => {
+test("questionnaire payload carries date calendar metadata without adding a fourth question", () => {
   const payload = buildBookingQuestionnairePayload({
     timing: "weekend",
     bookingDate: "2026-08-18",
     bookingDatePrecision: "day",
+    bookingDateCalendar: "gregorian",
     pricePaidSar: sarInputFromHalalas(90_000),
   });
 
@@ -34,12 +35,14 @@ test("questionnaire payload remains limited to the existing three booking facts"
     timing: "weekend",
     bookingDate: "2026-08-18",
     bookingDatePrecision: "day",
+    bookingDateCalendar: "gregorian",
     pricePaidSar: "900",
   });
   assert.deepEqual(Object.keys(payload), [
     "timing",
     "bookingDate",
     "bookingDatePrecision",
+    "bookingDateCalendar",
     "pricePaidSar",
   ]);
 });

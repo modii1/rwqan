@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   formatCanonicalBookingDate,
+  isBookingDateSelectionValid,
   isCanonicalBookingDate,
 } from "./booking-calendar";
 
@@ -13,47 +14,47 @@ test("booking dates remain strictly validated Gregorian canonical values", () =>
 });
 
 test("the same canonical day can be displayed in Gregorian or Hijri", () => {
-  const canonical = "2026-08-22";
+  const canonical = "2026-08-23";
   const gregorian = formatCanonicalBookingDate(canonical, "day", "gregorian");
   const hijri = formatCanonicalBookingDate(canonical, "day", "hijri");
 
-  assert.equal(gregorian, "August 22, 2026");
-  assert.match(hijri, /1448/);
+  assert.equal(gregorian, "2026/8/23");
+  assert.equal(hijri, "1448/03/10");
   assert.doesNotMatch(gregorian, /[٠-٩۰-۹]/);
   assert.doesNotMatch(hijri, /[٠-٩۰-۹]/);
   assert.notEqual(gregorian, hijri);
-  assert.equal(canonical, "2026-08-22");
+  assert.equal(canonical, "2026-08-23");
 });
 
-test("Gregorian month-only dates use a written English month and Western digits", () => {
+test("Gregorian month-only dates use numeric Western output", () => {
   assert.equal(
     formatCanonicalBookingDate("2026-01", "month", "gregorian"),
-    "January 2026",
+    "2026/1",
   );
 });
 
-test("a Gregorian month is shown as its exact Hijri boundary range", () => {
-  const formatHijriDay = new Intl.DateTimeFormat(
-    "ar-SA-u-ca-islamic-umalqura-nu-latn",
-    {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    },
-  );
-  const expectedStart = formatHijriDay.format(
-    new Date("2026-08-01T12:00:00.000Z"),
-  );
-  const expectedEnd = formatHijriDay.format(
-    new Date("2026-08-31T12:00:00.000Z"),
-  );
-
-  assert.notEqual(expectedStart.split(" ")[1], expectedEnd.split(" ")[1]);
+test("a Gregorian month is shown as its exact numeric Hijri boundary range", () => {
   assert.equal(
     formatCanonicalBookingDate("2026-08", "month", "hijri"),
-    `${expectedStart} – ${expectedEnd}`,
+    "1448/02/18 – 1448/03/18",
   );
-  assert.doesNotMatch(expectedStart, /[٠-٩۰-۹]/);
-  assert.doesNotMatch(expectedEnd, /[٠-٩۰-۹]/);
+});
+
+test("a selected Hijri month retains its identity and exact Gregorian range", () => {
+  const metadata = {
+    calendar: "hijri" as const,
+    startDate: "2026-08-14",
+    endDate: "2026-09-11",
+  };
+  assert.equal(
+    formatCanonicalBookingDate("1448-03", "month", "hijri", metadata),
+    "1448/03",
+  );
+  assert.equal(
+    formatCanonicalBookingDate("1448-03", "month", "gregorian", metadata),
+    "2026/8/14 – 2026/9/11",
+  );
+  assert.equal(isBookingDateSelectionValid("1448-03", "month", "hijri"), true);
+  assert.equal(isBookingDateSelectionValid("1448-13", "month", "hijri"), false);
+  assert.equal(isBookingDateSelectionValid("2174-01-01", "day", "hijri"), false);
 });

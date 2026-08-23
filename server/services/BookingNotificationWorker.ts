@@ -29,6 +29,10 @@ import {
   renderBookingWhatsAppTemplate,
   type BookingWhatsAppTemplates,
 } from "../../shared/booking";
+import {
+  formatCalendarMonthNumeric,
+  formatCanonicalDayNumeric,
+} from "../../shared/booking-calendar";
 
 const ENFORCEMENT_RETRY_MS = 30 * 60 * 1000;
 
@@ -83,24 +87,10 @@ function bookingDateLabel(booking: BookingFollowUpDocument): string {
   const date = booking.confirmationFacts?.bookingDate;
   if (!date) return "—";
   if (date.precision === "month") {
-    const parsed = new Date(`${date.value}-01T12:00:00.000Z`);
-    return Number.isFinite(parsed.getTime())
-      ? parsed.toLocaleDateString("ar-SA", {
-          timeZone: "Asia/Riyadh",
-          year: "numeric",
-          month: "long",
-        })
-      : date.value;
+    const calendar = "calendar" in date ? date.calendar : "gregorian";
+    return formatCalendarMonthNumeric(date.value, calendar) || date.value;
   }
-  const parsed = new Date(`${date.value}T12:00:00.000Z`);
-  return Number.isFinite(parsed.getTime())
-    ? parsed.toLocaleDateString("ar-SA", {
-        timeZone: "Asia/Riyadh",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : date.value;
+  return formatCanonicalDayNumeric(date.value, "gregorian") || date.value;
 }
 
 function ownerPaymentLink(booking: BookingFollowUpDocument): string {

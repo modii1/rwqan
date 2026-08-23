@@ -12,7 +12,9 @@ import {
   BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION,
   COMMISSION_PAYMENT_WINDOW_MS,
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
+  bookingCalendarSchema,
   bookingConfirmationFactsSchema,
+  bookingDateSchema,
   bookingFreeWorkflowSettingsUpdateSchema,
   normalizeBookingListedPriceOptionsHalalas,
   renderBookingWhatsAppTemplate,
@@ -22,6 +24,10 @@ import {
   type BookingTokenPurpose,
   type BookingWhatsAppTemplates,
 } from "../../shared/booking";
+import {
+  calendarDateFromCanonicalDay,
+  calendarMonthRange,
+} from "../../shared/booking-calendar";
 import { maskContactPhone } from "./ContactIdentityService";
 import {
   BookingTokenError,
@@ -88,8 +94,53 @@ export const bookingQuestionnaireRouteSchema = z.object({
   timing: z.enum(["midweek", "weekend", "other"]),
   bookingDate: z.string(),
   bookingDatePrecision: z.enum(["day", "month"]),
+  bookingDateCalendar: bookingCalendarSchema.optional(),
   pricePaidSar: z.union([z.string(), z.number()]),
-}).strict();
+}).strict().superRefine((input, context) => {
+  if (
+    input.bookingDatePrecision === "day"
+    && input.bookingDateCalendar === "hijri"
+    && !calendarDateFromCanonicalDay(input.bookingDate, "hijri")
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["bookingDate"],
+      message: "Booking day is outside the supported Umm al-Qura range",
+    });
+  }
+});
+
+export function normalizeQuestionnaireBookingDate(input: Pick<
+  z.infer<typeof bookingQuestionnaireRouteSchema>,
+  "bookingDate" | "bookingDatePrecision" | "bookingDateCalendar"
+>): BookingConfirmationFacts["bookingDate"] {
+  if (input.bookingDatePrecision !== "month" || !input.bookingDateCalendar) {
+    const bookingDate = bookingDateSchema.parse({
+      value: input.bookingDate,
+      precision: input.bookingDatePrecision,
+    });
+    if (
+      input.bookingDatePrecision === "day"
+      && input.bookingDateCalendar === "hijri"
+      && !calendarDateFromCanonicalDay(input.bookingDate, "hijri")
+    ) {
+      throw new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        path: ["bookingDate"],
+        message: "Booking day is outside the supported Umm al-Qura range",
+      }]);
+    }
+    return bookingDate;
+  }
+  const range = calendarMonthRange(input.bookingDate, input.bookingDateCalendar);
+  return bookingDateSchema.parse({
+    value: input.bookingDate,
+    precision: "month",
+    calendar: input.bookingDateCalendar,
+    startDate: range?.startDate || "",
+    endDate: range?.endDate || "",
+  });
+}
 
 export const bookingCheckoutSchema = z.object({
   paymentMethod: z.enum(["cards", "applepay"]),
@@ -183,10 +234,20 @@ function parseSarToHalalas(value: string | number): number {
 
 function questionnaire(document: BookingFollowUpDocument) {
   if (!document.confirmationFacts) return null;
+  const bookingDate = document.confirmationFacts.bookingDate;
   return {
     timing: document.confirmationFacts.timing,
-    bookingDate: document.confirmationFacts.bookingDate.value,
-    bookingDatePrecision: document.confirmationFacts.bookingDate.precision,
+    bookingDate: bookingDate.value,
+    bookingDatePrecision: bookingDate.precision,
+    ...(
+      bookingDate.precision === "month" && "calendar" in bookingDate
+        ? {
+            bookingDateCalendar: bookingDate.calendar,
+            bookingDateStart: bookingDate.startDate,
+            bookingDateEnd: bookingDate.endDate,
+          }
+        : {}
+    ),
     pricePaidHalalas: document.confirmationFacts.pricePaidHalalas,
   };
 }
@@ -553,10 +614,7 @@ export class BookingCommissionService {
     const input = bookingQuestionnaireRouteSchema.parse(routeInput);
     const facts: BookingConfirmationFacts = bookingConfirmationFactsSchema.parse({
       timing: input.timing,
-      bookingDate: {
-        value: input.bookingDate,
-        precision: input.bookingDatePrecision,
-      },
+      bookingDate: normalizeQuestionnaireBookingDate(input),
       pricePaidHalalas: parseSarToHalalas(input.pricePaidSar),
     });
     let commissionEnabled = false;

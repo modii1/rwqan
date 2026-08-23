@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
 import {
@@ -45,6 +45,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -84,10 +90,15 @@ import {
 } from "./booking-commission-settings-model";
 import BookingBankTransferReview from "./booking-bank-transfer-review";
 import {
+  getBookingCommissionDetailsPresentation,
+  type BookingCommissionDetailsPresentation,
+} from "./booking-commissions-layout";
+import {
   ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   getAdminCustomerWhatsAppHref,
   getAdminCustomerWhatsAppRemainingMinutes,
 } from "./booking-customer-whatsapp";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface BookingCommissionSummary {
   total: number;
@@ -279,6 +290,9 @@ function enforcementIssueMessage(value: unknown): string {
 }
 
 export default function BookingCommissionsSection() {
+  const isMobile = useIsMobile();
+  const mobileSelectionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const selectionPresentationRef = useRef<BookingCommissionDetailsPresentation | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -309,10 +323,44 @@ export default function BookingCommissionsSection() {
   const selected = filteredBookings.find((row) => row.id === selectedId)
     || query.data?.bookings.find((row) => row.id === selectedId)
     || null;
+  const detailsPresentation = selectionPresentationRef.current
+    || getBookingCommissionDetailsPresentation(isMobile);
 
-  const selectBooking = (bookingId: string) => {
+  const clearBookingSelection = useCallback((restoreMobileFocus = true) => {
+    const mobileTrigger = mobileSelectionTriggerRef.current;
+    mobileSelectionTriggerRef.current = null;
+    selectionPresentationRef.current = null;
+    setSelectedId(null);
+    setResolutionError("");
+    setResolutionNotice("");
+    setReversalError("");
+    setReversalNotice("");
+    if (restoreMobileFocus && mobileTrigger) {
+      window.requestAnimationFrame(() => {
+        if (mobileTrigger.isConnected) mobileTrigger.focus({ preventScroll: true });
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (
+      selectedId
+      && query.data
+      && !query.data.bookings.some((booking) => booking.id === selectedId)
+    ) {
+      clearBookingSelection(false);
+    }
+  }, [clearBookingSelection, query.data, selectedId]);
+
+  const selectBooking = (bookingId: string, mobileTrigger?: HTMLButtonElement) => {
     if (resolutionPending !== null || reversalPending !== null) return;
-    setSelectedId(selectedId === bookingId ? null : bookingId);
+    if (selectedId === bookingId) {
+      clearBookingSelection();
+      return;
+    }
+    mobileSelectionTriggerRef.current = mobileTrigger || null;
+    selectionPresentationRef.current = getBookingCommissionDetailsPresentation(isMobile);
+    setSelectedId(bookingId);
     setResolutionError("");
     setResolutionNotice("");
     setReversalError("");
@@ -496,7 +544,7 @@ export default function BookingCommissionsSection() {
         </Card>
       ) : (
         <>
-          <Card className="hidden min-w-0 overflow-hidden md:block">
+          {!isMobile && <Card className="hidden min-w-0 overflow-hidden md:block">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1120px] text-sm">
                 <thead className="border-b bg-muted/40 text-right text-xs text-muted-foreground">
@@ -516,23 +564,59 @@ export default function BookingCommissionsSection() {
                 </tbody>
               </table>
             </div>
-          </Card>
+          </Card>}
 
-          <div className="space-y-3 md:hidden">
-            {filteredBookings.map((row) => <BookingMobileRow key={row.id} row={row} selected={selectedId === row.id} onSelect={() => selectBooking(row.id)} onCustomerWhatsAppChanged={() => void query.refetch()} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
-          </div>
+          {isMobile && <div className="space-y-3 md:hidden">
+            {filteredBookings.map((row) => <BookingMobileRow key={row.id} row={row} selected={selectedId === row.id} onSelect={(trigger) => selectBooking(row.id, trigger)} onCustomerWhatsAppChanged={() => void query.refetch()} selectionDisabled={resolutionPending !== null || reversalPending !== null} />)}
+          </div>}
 
-          {selected && (
+          {selected && (detailsPresentation === "mobile_sheet" ? (
+            <Sheet
+              open
+              onOpenChange={(open) => {
+                if (!open && resolutionPending === null && reversalPending === null) {
+                  clearBookingSelection();
+                }
+              }}
+            >
+              <SheetContent
+                side="bottom"
+                dir="rtl"
+                className="inset-0 h-[100dvh] max-h-[100dvh] w-full max-w-none overflow-y-auto border-0 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] [&>button]:hidden"
+                data-testid="booking-commission-mobile-details-sheet"
+                onEscapeKeyDown={(event) => {
+                  if (resolutionPending !== null || reversalPending !== null) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <SheetTitle className="sr-only">تفاصيل المتابعة</SheetTitle>
+                <SheetDescription className="sr-only">{getPropertyLabel(selected)}</SheetDescription>
+                <BookingAdminDetails
+                  key={selected.id}
+                  row={selected}
+                  onClose={() => clearBookingSelection()}
+                  onResolveDispute={resolveDispute}
+                  onResolveReversal={resolveReversal}
+                  onNotificationResent={async () => {
+                    await query.refetch();
+                  }}
+                  onCustomerWhatsAppChanged={() => void query.refetch()}
+                  resolutionPending={resolutionPending}
+                  resolutionError={resolutionError}
+                  resolutionNotice={resolutionNotice}
+                  reversalPending={reversalPending}
+                  reversalError={reversalError}
+                  reversalNotice={reversalNotice}
+                  stickyHeader
+                />
+              </SheetContent>
+            </Sheet>
+          ) : (
             <BookingAdminDetails
               key={selected.id}
               row={selected}
-              onClose={() => {
-                setSelectedId(null);
-                setResolutionError("");
-                setResolutionNotice("");
-                setReversalError("");
-                setReversalNotice("");
-              }}
+              onClose={() => clearBookingSelection()}
               onResolveDispute={resolveDispute}
               onResolveReversal={resolveReversal}
               onNotificationResent={async () => {
@@ -546,7 +630,7 @@ export default function BookingCommissionsSection() {
               reversalError={reversalError}
               reversalNotice={reversalNotice}
             />
-          )}
+          ))}
         </>
       )}
     </section>
@@ -628,7 +712,7 @@ function BookingTableRow({ row, selected, onSelect, onCustomerWhatsAppChanged, s
         {reversalState === "collection_resumed" && <div className="mt-1"><StatusBadge label="استؤنف التحصيل" tone="blue" /></div>}
         {Number(row.commissionAmountHalalas) > 0 && <p className="mt-1 text-xs font-bold">{formatSarFromHalalas(row.commissionAmountHalalas)}</p>}
       </td>
-      <td className="p-3 text-xs text-muted-foreground">{formatDateTime(row.dueAt)}</td>
+      <td className="p-3 text-xs text-muted-foreground" dir="auto">{formatDateTime(row.dueAt)}</td>
       <td className="p-3"><StatusBadge label={compliance.label} tone={compliance.tone} /></td>
       <td className="p-3"><NotificationSummaryView summary={row.notificationSummary} /></td>
       <td className="p-3">
@@ -640,7 +724,7 @@ function BookingTableRow({ row, selected, onSelect, onCustomerWhatsAppChanged, s
   );
 }
 
-function BookingMobileRow({ row, selected, onSelect, onCustomerWhatsAppChanged, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: () => void; onCustomerWhatsAppChanged: () => void; selectionDisabled: boolean }) {
+function BookingMobileRow({ row, selected, onSelect, onCustomerWhatsAppChanged, selectionDisabled }: { row: BookingDisplayRow; selected: boolean; onSelect: (trigger: HTMLButtonElement) => void; onCustomerWhatsAppChanged: () => void; selectionDisabled: boolean }) {
   const booking = getBookingStatusMeta(row.bookingStatus);
   const commission = getCommissionStatusMeta(row.commissionStatus);
   const disputed = normalize(row.disputeStatus) === "pending";
@@ -657,7 +741,7 @@ function BookingMobileRow({ row, selected, onSelect, onCustomerWhatsAppChanged, 
   return (
     <Card className={selected ? "border-[#cdb46e] bg-[#fffdf6]" : ""}>
       <div className="p-4">
-        <button type="button" onClick={onSelect} disabled={selectionDisabled} aria-expanded={selected} className="w-full text-right disabled:cursor-not-allowed disabled:opacity-60">
+        <button type="button" onClick={(event) => onSelect(event.currentTarget)} disabled={selectionDisabled} aria-expanded={selected} className="w-full text-right disabled:cursor-not-allowed disabled:opacity-60">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate font-bold text-[#34332f]">{getPropertyLabel(row)}</p>
@@ -706,6 +790,7 @@ function BookingAdminDetails({
   reversalPending,
   reversalError,
   reversalNotice,
+  stickyHeader = false,
 }: {
   row: BookingDisplayRow;
   onClose: () => void;
@@ -724,6 +809,7 @@ function BookingAdminDetails({
   reversalPending: ReversalResolution | null;
   reversalError: string;
   reversalNotice: string;
+  stickyHeader?: boolean;
 }) {
   const booking = getBookingStatusMeta(row.bookingStatus);
   const commission = getCommissionStatusMeta(row.commissionStatus);
@@ -779,8 +865,8 @@ function BookingAdminDetails({
     && !hideInformationalAuthorizationError
     && !ownerIdentityChanged;
   return (
-    <Card className="overflow-hidden border-[#d6c18a]" data-testid="booking-commission-details">
-      <div className="flex items-start justify-between gap-3 border-b bg-[#fff9e9] p-4 sm:p-5">
+    <Card className={`${stickyHeader ? "overflow-visible" : "overflow-hidden"} border-[#d6c18a]`} data-testid="booking-commission-details">
+      <div className={`flex items-start justify-between gap-3 border-b bg-[#fff9e9] p-4 sm:p-5 ${stickyHeader ? "sticky top-0 z-20 rounded-t-xl shadow-sm" : ""}`}>
         <div className="min-w-0">
           <p className="text-xs font-semibold text-[#8b6b25]">تفاصيل المتابعة</p>
           <h2 className="mt-1 truncate text-lg font-bold text-[#34332f]">{getPropertyLabel(row)}</h2>
@@ -1423,7 +1509,7 @@ function AdminFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-muted/20 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 break-words text-sm font-bold text-[#34332f]">{value}</p>
+      <p className="mt-1 break-words text-sm font-bold text-[#34332f]" dir="auto">{value}</p>
     </div>
   );
 }

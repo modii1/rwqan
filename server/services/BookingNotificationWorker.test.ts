@@ -225,6 +225,38 @@ test("owner confirmation states the three customer facts, price, 10% fee, deadli
   assertOwnerPaymentShortLink(message, booking);
 });
 
+test("owner confirmation preserves numeric exact-day and Hijri-month booking dates", () => {
+  const exactDay = confirmedBooking({
+    confirmationFacts: {
+      timing: "weekend",
+      bookingDate: { value: "2026-08-23", precision: "day" },
+      pricePaidHalalas: 125_555,
+    },
+  });
+  assert.ok(buildBookingNotificationMessage(
+    notificationJob("owner_booking_confirmed"),
+    exactDay,
+  ).includes("تاريخ الحجز: 2026/8/23"));
+
+  const hijriMonth = confirmedBooking({
+    confirmationFacts: {
+      timing: "weekend",
+      bookingDate: {
+        value: "1448-03",
+        precision: "month",
+        calendar: "hijri",
+        startDate: "2026-08-14",
+        endDate: "2026-09-11",
+      },
+      pricePaidHalalas: 125_555,
+    },
+  });
+  assert.ok(buildBookingNotificationMessage(
+    notificationJob("owner_booking_confirmed"),
+    hijriMonth,
+  ).includes("تاريخ الحجز: 1448/03"));
+});
+
 test("observe-only owner confirmation states booking facts without a fee or payment link", () => {
   const message = buildBookingNotificationMessage(
     notificationJob("owner_booking_confirmed"),
@@ -727,16 +759,10 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
     assert.equal(settingsReads, 1);
     assert.equal(providerRequests.length, 1);
     assert.equal(providerRequests[0].url, "https://provider.example/send");
-    const bookingDate = new Date("2099-09-01T12:00:00.000Z")
-      .toLocaleDateString("ar-SA", {
-        timeZone: "Asia/Riyadh",
-        year: "numeric",
-        month: "long",
-      });
     assert.deepEqual(providerRequests[0].body, {
       number: "966500000001",
       message:
-        `CUSTOM 13383 | شاليه الريف المائي | REQ-13383-001 | +966500000002 | نهاية الأسبوع | ${bookingDate} | 1255.55`,
+        "CUSTOM 13383 | شاليه الريف المائي | REQ-13383-001 | +966500000002 | نهاية الأسبوع | 2099/9 | 1255.55",
     });
     assert.deepEqual(finalizations, [{
       jobId: claimed.id,

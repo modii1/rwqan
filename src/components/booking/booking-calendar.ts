@@ -1,71 +1,76 @@
 import type { BookingDatePrecision } from "./booking-display";
+import {
+  calendarDateFromCanonicalDay,
+  calendarMonthDate,
+  calendarMonthRange,
+  formatCalendarMonthNumeric,
+  formatCanonicalDayNumeric,
+  type BookingCalendar,
+} from "@shared/booking-calendar";
 
-export type BookingCalendar = "gregorian" | "hijri";
+export type { BookingCalendar } from "@shared/booking-calendar";
 
-function dateAtUtcNoon(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day, 12));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() + 1 !== month ||
-    date.getUTCDate() !== day
-  ) return null;
-  return date;
-}
-
-function formatter(
-  calendar: BookingCalendar,
-  precision: BookingDatePrecision,
-): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat(
-    calendar === "hijri"
-      ? "ar-SA-u-ca-islamic-umalqura-nu-latn"
-      : "en-US-u-ca-gregory-nu-latn",
-    {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "long",
-      ...(precision === "day" ? { day: "numeric" } : {}),
-    },
-  );
-}
+export type BookingMonthMetadata = {
+  calendar?: BookingCalendar | null;
+  startDate?: string | null;
+  endDate?: string | null;
+};
 
 export function isCanonicalBookingDate(
   value: string,
   precision: BookingDatePrecision,
 ): boolean {
   if (precision === "month") {
-    if (!/^\d{4}-\d{2}$/.test(value)) return false;
-    const month = Number(value.slice(5, 7));
-    return month >= 1 && month <= 12;
+    return calendarMonthDate(value, "gregorian") !== null;
   }
-  return dateAtUtcNoon(value) !== null;
+  return calendarDateFromCanonicalDay(value, "gregorian") !== null;
 }
 
-/**
- * The persisted value is always Gregorian. A Gregorian month overlaps parts
- * of two Hijri months, so its Hijri representation is deliberately a range;
- * presenting it as one Hijri month would silently change its meaning.
- */
+export function isBookingDateSelectionValid(
+  value: string,
+  precision: BookingDatePrecision,
+  calendar: BookingCalendar,
+): boolean {
+  return precision === "month"
+    ? calendarMonthDate(value, calendar) !== null
+    : calendarDateFromCanonicalDay(value, calendar) !== null;
+}
+
+function monthRange(
+  value: string,
+  metadata?: BookingMonthMetadata,
+): { calendar: BookingCalendar; startDate: string; endDate: string } | null {
+  const sourceCalendar = metadata?.calendar === "hijri" ? "hijri" : "gregorian";
+  const expected = calendarMonthRange(value, sourceCalendar);
+  if (!expected) return null;
+
+  if (metadata?.startDate || metadata?.endDate) {
+    if (
+      metadata.startDate !== expected.startDate
+      || metadata.endDate !== expected.endDate
+    ) return null;
+  }
+  return { calendar: sourceCalendar, ...expected };
+}
+
+/** Exact days remain Gregorian ISO values; calendar months retain their source calendar. */
 export function formatCanonicalBookingDate(
   value: string,
   precision: BookingDatePrecision,
   calendar: BookingCalendar,
+  metadata?: BookingMonthMetadata,
 ): string {
   if (precision === "day") {
-    const date = dateAtUtcNoon(value);
-    return date ? formatter(calendar, "day").format(date) : "";
+    return formatCanonicalDayNumeric(value, calendar);
   }
 
-  if (!isCanonicalBookingDate(value, "month")) return "";
-  const year = Number(value.slice(0, 4));
-  const month = Number(value.slice(5, 7));
-  const firstDay = new Date(Date.UTC(year, month - 1, 1, 12));
-  if (calendar === "gregorian") {
-    return formatter("gregorian", "month").format(firstDay);
+  const range = monthRange(value, metadata);
+  if (!range) return "";
+  if (calendar === range.calendar) {
+    return formatCalendarMonthNumeric(value, calendar);
   }
-  const lastDay = new Date(Date.UTC(year, month, 0, 12));
-  const hijriDayFormatter = formatter("hijri", "day");
-  return `${hijriDayFormatter.format(firstDay)} – ${hijriDayFormatter.format(lastDay)}`;
+
+  const start = formatCanonicalDayNumeric(range.startDate, calendar);
+  const end = formatCanonicalDayNumeric(range.endDate, calendar);
+  return start && end ? `${start} – ${end}` : "";
 }

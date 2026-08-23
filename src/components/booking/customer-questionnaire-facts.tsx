@@ -15,6 +15,9 @@ import {
 function canonicalDate(questionnaire: BookingQuestionnaire): {
   value: string;
   precision: BookingDatePrecision;
+  calendar: BookingCalendar;
+  startDate?: string;
+  endDate?: string;
 } | null {
   const nested = questionnaire.bookingDate &&
       typeof questionnaire.bookingDate === "object"
@@ -28,7 +31,16 @@ function canonicalDate(questionnaire: BookingQuestionnaire): {
   const precision = String(
     questionnaire.bookingDatePrecision || nested?.precision || "day",
   ) === "month" ? "month" : "day";
-  return value ? { value, precision } : null;
+  const calendar = String(
+    questionnaire.bookingDateCalendar || nested?.calendar || "gregorian",
+  ) === "hijri" ? "hijri" : "gregorian";
+  const startDate = String(
+    questionnaire.bookingDateStart || nested?.startDate || "",
+  ).trim() || undefined;
+  const endDate = String(
+    questionnaire.bookingDateEnd || nested?.endDate || "",
+  ).trim() || undefined;
+  return value ? { value, precision, calendar, startDate, endDate } : null;
 }
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
@@ -51,7 +63,11 @@ export function CustomerQuestionnaireFacts({
   }
   const date = canonicalDate(questionnaire);
   const dateValue = date
-    ? formatCanonicalBookingDate(date.value, date.precision, calendar) || date.value
+    ? formatCanonicalBookingDate(date.value, date.precision, calendar, {
+        calendar: date.calendar,
+        startDate: date.startDate,
+        endDate: date.endDate,
+      }) || date.value
     : "—";
 
   return (

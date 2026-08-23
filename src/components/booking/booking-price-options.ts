@@ -1,3 +1,5 @@
+import type { BookingCalendar } from "@shared/booking-calendar";
+
 const MAX_BOOKING_PRICE_HALALAS = 100_000_000;
 
 export function normalizeListedPriceOptionsHalalas(value: unknown): number[] {
@@ -28,17 +30,20 @@ export function buildBookingQuestionnairePayload({
   timing,
   bookingDate,
   bookingDatePrecision,
+  bookingDateCalendar,
   pricePaidSar,
 }: {
   timing: "midweek" | "weekend" | "other";
   bookingDate: string;
   bookingDatePrecision: "day" | "month";
+  bookingDateCalendar: BookingCalendar;
   pricePaidSar: string;
 }) {
   return {
     timing,
     bookingDate,
     bookingDatePrecision,
+    bookingDateCalendar,
     pricePaidSar,
   };
 }

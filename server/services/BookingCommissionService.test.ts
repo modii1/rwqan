@@ -4,6 +4,8 @@ import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
   BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
   BookingCommissionService,
+  bookingQuestionnaireRouteSchema,
+  normalizeQuestionnaireBookingDate,
   selectAdminPaymentAttempt,
 } from "./BookingCommissionService";
 import {
@@ -30,6 +32,54 @@ const usableBankAccount = {
   isActive: true,
   isDefault: true,
 };
+
+test("questionnaire dates keep legacy days while the server derives Hijri month boundaries", () => {
+  assert.deepEqual(normalizeQuestionnaireBookingDate({
+    bookingDate: "2026-08-23",
+    bookingDatePrecision: "day",
+    bookingDateCalendar: "hijri",
+  }), {
+    value: "2026-08-23",
+    precision: "day",
+  });
+  assert.deepEqual(normalizeQuestionnaireBookingDate({
+    bookingDate: "2026-08",
+    bookingDatePrecision: "month",
+  }), {
+    value: "2026-08",
+    precision: "month",
+  });
+  assert.deepEqual(normalizeQuestionnaireBookingDate({
+    bookingDate: "1448-03",
+    bookingDatePrecision: "month",
+    bookingDateCalendar: "hijri",
+  }), {
+    value: "1448-03",
+    precision: "month",
+    calendar: "hijri",
+    startDate: "2026-08-14",
+    endDate: "2026-09-11",
+  });
+  assert.throws(() => normalizeQuestionnaireBookingDate({
+    bookingDate: "1448-13",
+    bookingDatePrecision: "month",
+    bookingDateCalendar: "hijri",
+  }));
+  assert.equal(bookingQuestionnaireRouteSchema.safeParse({
+    timing: "weekend",
+    bookingDate: "2174-01-01",
+    bookingDatePrecision: "day",
+    bookingDateCalendar: "hijri",
+    pricePaidSar: "500",
+  }).success, false);
+  assert.equal(bookingQuestionnaireRouteSchema.safeParse({
+    timing: "weekend",
+    bookingDate: "2026-08-23",
+    bookingDatePrecision: "day",
+    bookingDateCalendar: "hijri",
+    pricePaidSar: "500",
+  }).success, true);
+});
 
 type AwaitingBookingDocument = Extract<
   BookingFollowUpDocument,
