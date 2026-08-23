@@ -63,3 +63,15 @@ test("admin follow-up delay explains its free-only forward scheduling semantics"
   assert.match(source, /input-customerFollowUpDelayHours/);
   assert.match(source, /input-customerFollowUpDelayMinutes/);
 });
+
+test("admin operational health omits the optional external worker secret", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-settings.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /مفتاح المشغّل الخارجي/);
+  assert.doesNotMatch(source, /health\.workerSecretConfigured/);
+  assert.match(source, /health\.whatsappProviderConfigured/);
+  assert.match(source, /health\.publicBaseUrlConfigured/);
+  assert.match(source, /health\.publicBaseUrlValid/);
+});

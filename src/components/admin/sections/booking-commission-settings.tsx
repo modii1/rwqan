@@ -583,12 +583,6 @@ function OperationalHealthPanel({
       warning: "بيانات مزود واتساب غير مكتملة؛ لن تُرسل الرسائل تلقائياً.",
     },
     {
-      key: "worker",
-      label: "مفتاح المشغّل الخارجي",
-      ready: health.workerSecretConfigured,
-      warning: "مفتاح التشغيل الخارجي غير مضبوط؛ يعتمد الإرسال على المشغّل الداخلي فقط.",
-    },
-    {
       key: "base-url-configured",
       label: "رابط المنصة العام",
       ready: health.publicBaseUrlConfigured,
@@ -626,7 +620,7 @@ function OperationalHealthPanel({
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             تعرض هذه اللوحة حالة الإعداد فقط، ولا تعرض المفاتيح أو القيم السرية.
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {checks.map((check) => (
               <div
                 key={check.key}
