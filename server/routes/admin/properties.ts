@@ -31,6 +31,10 @@ import {
 } from "../../errors/AdminApprovalError";
 import { assertPropertyNotSuspended } from "../../services/propertySuspension";
 import { selectCurrentSubscriptionForProperty } from "../../utils/subscriptionSelection";
+import {
+  getForwardTrackedPublicRegistration,
+  hasValidFreeCommissionConsent,
+} from "../../../shared/freeCommissionConsent";
 
 const router = Router();
 
@@ -440,6 +444,54 @@ router.put("/api/admin/properties/:propertyNumber/approve", async (req, res) => 
     const pendingPayment = payments
       .filter(p => p.status === "نجح - قيد التحقق")
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+
+    const trackedRegistration = getForwardTrackedPublicRegistration(
+      propertyForApproval,
+    );
+    if (!pendingPayment && trackedRegistration) {
+      if (
+        trackedRegistration.isFree &&
+        !hasValidFreeCommissionConsent(propertyForApproval)
+      ) {
+        throw new AdminApprovalError({
+          status: 409,
+          code: "FREE_COMMISSION_CONSENT_REQUIRED",
+          message:
+            "يجب توثيق الموافقة على عمولة روقان قبل قبول الاشتراك المجاني.",
+        });
+      }
+
+      if (!trackedRegistration.isFree) {
+        const trackedSubscription = await runAdminApprovalStage(
+          () => subscriptionService.getByProperty(propertyNumber),
+          {
+            status: 503,
+            code: "SUBSCRIPTION_LOOKUP_FAILED",
+            message:
+              "تعذر تحميل حالة الاشتراك الحالية. حدّث الصفحة ثم حاول مرة أخرى.",
+          },
+        );
+        const isPremiumActive = Boolean(
+          trackedSubscription &&
+          isActivePremiumSubscription({
+            subscriptionType: trackedSubscription.subscriptionType,
+            packageType: trackedSubscription.packageType,
+            status: trackedSubscription.status,
+            isExpired:
+              !trackedSubscription.endDate ||
+              calculateRemainingDays(trackedSubscription.endDate) < 0,
+          }),
+        );
+        if (!isPremiumActive) {
+          throw new AdminApprovalError({
+            status: 409,
+            code: "PAID_REGISTRATION_PAYMENT_REQUIRED",
+            message:
+              "لا يمكن قبول العقار كاشتراك مجاني لأن التسجيل مرتبط بباقة مدفوعة ولم تكتمل دفعتها.",
+          });
+        }
+      }
+    }
 
     if (pendingPayment) {
       if (!pendingPayment.packageId) {

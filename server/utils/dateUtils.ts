@@ -6,7 +6,10 @@
  * - جميع التواريخ تُخزن كـ epoch milliseconds
  * - لا تحويلات يدوية للتوقيت
  */
-import { MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS } from "../../shared/subscriptionPackagePolicy";
+import {
+  MAX_SUBSCRIPTION_REMAINING_DAYS,
+  SUBSCRIPTION_RENEWAL_WINDOW_DAYS,
+} from "../../shared/subscriptionPackagePolicy";
 
 /**
  * الحصول على الوقت الحالي كـ epoch milliseconds
@@ -165,8 +168,8 @@ export function calculateRemainingDays(endDate: Date | string | null): number {
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
 }
 
-export const MAX_SUBSCRIPTION_DAYS = MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS;
-export const RENEWAL_WINDOW_DAYS = 10;
+export const MAX_SUBSCRIPTION_DAYS = MAX_SUBSCRIPTION_REMAINING_DAYS;
+export const RENEWAL_WINDOW_DAYS = SUBSCRIPTION_RENEWAL_WINDOW_DAYS;
 export const SUBSCRIPTION_MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 export const MAX_SUBSCRIPTION_DURATION_MS =
   MAX_SUBSCRIPTION_DAYS * SUBSCRIPTION_MILLISECONDS_PER_DAY;

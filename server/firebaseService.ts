@@ -59,6 +59,7 @@ import {
 } from "../shared/subscriptionType";
 import { selectCurrentSubscriptionForProperty } from "./utils/subscriptionSelection";
 import {
+    MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS,
     isPurchasableSubscriptionPackage,
     isSubscriptionPackageDurationAllowed,
     normalizeSubscriptionPackageDuration,
@@ -742,7 +743,7 @@ export class FirebaseService {
 
     async addSubscriptionToSheet(propertyNumber: string, subscriptionData: any, property: any, receiptUrl?: string): Promise<void> {
         const id = `SUB-${propertyNumber}`;
-        // فرض الحد الأقصى (40 يوماً من اليوم) عند تفعيل الاشتراك.
+        // فرض الحد الأقصى للمدة المتبقية من اليوم عند تفعيل الاشتراك.
         // توجد حماية إضافية موحدة عند جميع حدود الكتابة.
         const cappedEndDate = capAtMaxDays(new Date(subscriptionData.endDate));
         const endDate = cappedEndDate;
@@ -2412,7 +2413,7 @@ export class FirebaseService {
         }
         const isActive = pkg.isActive !== false;
         if (!isSubscriptionPackageDurationAllowed(normalizedPackage.duration, isActive)) {
-            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_SUBSCRIPTION_DAYS} days`);
+            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS} days`);
         }
         const id = `pkg-${Date.now()}`;
         const newPackage: Package = {
@@ -2452,7 +2453,7 @@ export class FirebaseService {
             ? updates.isActive === true
             : existing.isActive !== false;
         if (!isSubscriptionPackageDurationAllowed(duration, isActive)) {
-            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_SUBSCRIPTION_DAYS} days`);
+            throw new RangeError(`Active subscription package duration cannot exceed ${MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS} days`);
         }
         const normalizedUpdates: Partial<Package> & { durationDays: number } = {
             ...updates,

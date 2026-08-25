@@ -1,6 +1,10 @@
 import { normalizeWhatsAppDestination } from "@shared/phone";
 import type { Property } from "@shared/schema";
 import { isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+  getForwardTrackedPublicRegistration,
+  hasValidFreeCommissionConsent,
+} from "@shared/freeCommissionConsent";
 
 export type VerificationLevel = "ok" | "warning" | "danger";
 
@@ -11,6 +15,16 @@ export type VerificationStatus = {
   blockers: string[];
   warnings: string[];
 };
+
+export type FreeCommissionConsentAdminStatus = "accepted" | "missing" | null;
+
+export function getFreeCommissionConsentAdminStatus(
+  property: Property,
+): FreeCommissionConsentAdminStatus {
+  const registrationPlan = getForwardTrackedPublicRegistration(property);
+  if (!registrationPlan?.isFree) return null;
+  return hasValidFreeCommissionConsent(property) ? "accepted" : "missing";
+}
 
 export function getVerificationStatus(
   property: Property,

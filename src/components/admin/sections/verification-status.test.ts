@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Property } from "@shared/schema";
-import { getVerificationStatus } from "./verification-status";
+import {
+  createPublicFreeCommissionConsent,
+  createPublicRegistrationPlan,
+} from "@shared/freeCommissionConsent";
+import {
+  getFreeCommissionConsentAdminStatus,
+  getVerificationStatus,
+} from "./verification-status";
 
 const now = new Date("2026-07-26T12:00:00.000Z");
 const completeProperty: Property = {
@@ -86,4 +93,55 @@ test("ordinary subscriptions are flagged immediately after the 40-day ceiling", 
   assert.ok(old.warnings.includes("اشتراك عادي قديم (أكثر من 40 يوماً)"));
   assert.equal(old.level, "danger");
   assert.equal(valid.warnings.some((warning) => warning.includes("40")), false);
+});
+
+test("admin consent status applies only to forward-tracked free registrations", () => {
+  const selectedAt = "2026-08-24T12:00:00.000Z";
+  const freeRegistrationPlan = createPublicRegistrationPlan({
+    packageId: "pkg-free",
+    isFree: true,
+    selectedAt,
+  });
+
+  assert.equal(getFreeCommissionConsentAdminStatus(completeProperty), null);
+  assert.equal(
+    getFreeCommissionConsentAdminStatus({
+      ...completeProperty,
+      registrationPlan: createPublicRegistrationPlan({
+        packageId: "pkg-paid",
+        isFree: false,
+        selectedAt,
+      }),
+    }),
+    null,
+  );
+  assert.equal(
+    getFreeCommissionConsentAdminStatus({
+      ...completeProperty,
+      registrationPlan: freeRegistrationPlan,
+    }),
+    "missing",
+  );
+  assert.equal(
+    getFreeCommissionConsentAdminStatus({
+      ...completeProperty,
+      registrationPlan: freeRegistrationPlan,
+      freeCommissionConsent: createPublicFreeCommissionConsent({
+        packageId: "pkg-free",
+        acceptedAt: selectedAt,
+      }),
+    }),
+    "accepted",
+  );
+  assert.equal(
+    getFreeCommissionConsentAdminStatus({
+      ...completeProperty,
+      registrationPlan: freeRegistrationPlan,
+      freeCommissionConsent: createPublicFreeCommissionConsent({
+        packageId: "pkg-other",
+        acceptedAt: selectedAt,
+      }),
+    }),
+    "missing",
+  );
 });

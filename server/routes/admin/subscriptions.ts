@@ -29,6 +29,11 @@ import {
   calculateFrozenRemainingDays,
 } from "../../services/subscriptionLifecycle";
 import { isPropertySuspended } from "../../services/propertySuspension";
+import {
+  getForwardTrackedPublicRegistration,
+  hasValidFreeCommissionConsent,
+  isFreeSubscriptionPackage,
+} from "../../../shared/freeCommissionConsent";
 
 const router = Router();
 
@@ -608,6 +613,29 @@ router.post("/api/admin/subscription/manual-activate", async (req, res) => {
     const pkg = await subscriptionService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+
+    if (isFreeSubscriptionPackage(pkg)) {
+      const trackedRegistration = getForwardTrackedPublicRegistration(property);
+      if (
+        trackedRegistration?.isFree &&
+        !hasValidFreeCommissionConsent(property)
+      ) {
+        return res.status(409).json({
+          success: false,
+          code: "FREE_COMMISSION_CONSENT_REQUIRED",
+          error:
+            "يجب توثيق الموافقة على عمولة روقان قبل تفعيل الاشتراك المجاني.",
+        });
+      }
+      if (trackedRegistration && !trackedRegistration.isFree) {
+        return res.status(409).json({
+          success: false,
+          code: "PAID_REGISTRATION_PAYMENT_REQUIRED",
+          error:
+            "لا يمكن تفعيل الاشتراك المجاني لأن التسجيل مرتبط بباقة مدفوعة ولم تكتمل دفعتها.",
+        });
+      }
     }
 
     const isPremium = isPremiumSubscriptionType(pkg.type) || pkg.price > 0;

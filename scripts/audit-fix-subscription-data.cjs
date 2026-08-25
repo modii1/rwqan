@@ -14,7 +14,8 @@ require("dotenv").config({ path: require("path").resolve(__dirname, "..", ".env"
 const admin = require("firebase-admin");
 
 const APPLY_FIXES = process.argv.includes("--fix");
-const MAX_SUBSCRIPTION_DAYS = 40;
+const MAX_ACTIVE_PACKAGE_DAYS = 90;
+const MAX_SUBSCRIPTION_DAYS = 100;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_STATUSES = new Set([
   "نشط",
@@ -80,10 +81,10 @@ async function loadAudit() {
   const maxEnd = new Date(todayStart.getTime() + (MAX_SUBSCRIPTION_DAYS + 1) * DAY_MS - 1);
 
   const activePackagesOverLimit = packages.filter(({ data }) =>
-    data.isActive === true && packageDuration(data) > MAX_SUBSCRIPTION_DAYS
+    data.isActive === true && packageDuration(data) > MAX_ACTIVE_PACKAGE_DAYS
   );
   const inactivePackagesOverLimit = packages.filter(({ data }) =>
-    data.isActive === false && packageDuration(data) > MAX_SUBSCRIPTION_DAYS
+    data.isActive === false && packageDuration(data) > MAX_ACTIVE_PACKAGE_DAYS
   );
   const activeSubscriptionsOverLimit = subscriptions.filter(({ data }) =>
     ACTIVE_STATUSES.has(String(data.status || "")) &&
@@ -160,16 +161,17 @@ function publicReport(audit) {
     mode: APPLY_FIXES ? "fix" : "audit",
     counts: audit.counts,
     limits: {
+      maxActivePackageDays: MAX_ACTIVE_PACKAGE_DAYS,
       maxSubscriptionDays: MAX_SUBSCRIPTION_DAYS,
       maxEndDate: audit.maxEnd.toISOString(),
     },
     issues: {
-      activePackagesOver40: ids(audit.activePackagesOverLimit),
-      inactivePackagesOver40Allowed: ids(audit.inactivePackagesOverLimit),
-      activeSubscriptionsOver40: ids(audit.activeSubscriptionsOverLimit),
-      suspendedSubscriptionsOver40: ids(audit.suspendedSubscriptionsOverLimit),
+      activePackagesOverLimit: ids(audit.activePackagesOverLimit),
+      inactivePackagesOverLimitAllowed: ids(audit.inactivePackagesOverLimit),
+      activeSubscriptionsOverLimit: ids(audit.activeSubscriptionsOverLimit),
+      suspendedSubscriptionsOverLimit: ids(audit.suspendedSubscriptionsOverLimit),
       expiredSubscriptionsStillActive: ids(audit.expiredActiveSubscriptions),
-      activeMultiSubscriptionsOver40: ids(audit.activeMultiOverLimit),
+      activeMultiSubscriptionsOverLimit: ids(audit.activeMultiOverLimit),
       expiredMultiSubscriptionsStillActive: ids(audit.expiredActiveMulti),
       propertySubscriptionTypeMismatches: ids(audit.propertyTypeMismatches),
       undatedLegacySubscriptionsPreserved: ids(audit.activeSubscriptionsWithoutEnd),
@@ -207,7 +209,7 @@ async function applyRepairs(audit) {
     await record("deactivate-package", candidate.id, guardedUpdate(
       "packages",
       candidate,
-      (data) => data.isActive === true && packageDuration(data) > MAX_SUBSCRIPTION_DAYS
+      (data) => data.isActive === true && packageDuration(data) > MAX_ACTIVE_PACKAGE_DAYS
         ? { isActive: false }
         : null,
     ));

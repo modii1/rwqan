@@ -33,23 +33,23 @@ test("frozen remaining days rounds partial days up for display", () => {
   assert.equal(calculateFrozenRemainingDays(24 * 60 * 60 * 1000 + 1), 2);
 });
 
-test("legacy frozen durations above 40 days are capped", () => {
-  const sixtyDays = 60 * 24 * 60 * 60 * 1000;
+test("legacy frozen durations above 100 days are capped", () => {
+  const oneHundredTwentyDays = 120 * 24 * 60 * 60 * 1000;
 
-  assert.equal(calculateFrozenRemainingDays(sixtyDays), 40);
+  assert.equal(calculateFrozenRemainingDays(oneHundredTwentyDays), 100);
   assert.equal(
     calculateRemainingDurationMs(
-      "2026-09-19T12:00:00.000Z",
+      "2026-11-18T12:00:00.000Z",
       new Date("2026-07-21T12:00:00.000Z"),
     ),
     MAX_SUBSCRIPTION_DURATION_MS,
   );
 });
 
-test("resume cannot restore more than 40 days", () => {
+test("resume cannot restore more than 100 days", () => {
   const resumedAt = new Date("2026-07-21T12:00:00+03:00");
   const resumedEnd = calculateResumedEndDate(
-    60 * 24 * 60 * 60 * 1000,
+    120 * 24 * 60 * 60 * 1000,
     resumedAt,
   );
 

@@ -61,6 +61,10 @@ import {
   createOwnerSubscriptionPaymentPlan,
   OwnerSubscriptionPaymentPlanError,
 } from "../utils/ownerSubscriptionPayment";
+import {
+  getForwardTrackedPublicRegistration,
+  hasValidFreeCommissionConsent,
+} from "../../shared/freeCommissionConsent";
 
 const router = Router();
 
@@ -1742,6 +1746,42 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     if (!pendingPayment) {
       const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
       const isNewProperty = !hasPriorSubscription(currentSubscription);
+      const trackedRegistration = getForwardTrackedPublicRegistration(property);
+      const isPremiumActive = Boolean(
+        currentSubscription &&
+        isActivePremiumSubscription({
+          subscriptionType: currentSubscription.subscriptionType,
+          packageType: currentSubscription.packageType,
+          status: currentSubscription.status,
+          isExpired:
+            !currentSubscription.endDate ||
+            calculateRemainingDays(currentSubscription.endDate) < 0,
+        }),
+      );
+      if (
+        trackedRegistration?.isFree &&
+        !isPremiumActive &&
+        !hasValidFreeCommissionConsent(property)
+      ) {
+        const message =
+          "يجب الموافقة على عمولة روقان لإكمال الاشتراك المجاني.";
+        return res.status(409).json({
+          success: false,
+          code: "FREE_COMMISSION_CONSENT_REQUIRED",
+          error: message,
+          message,
+        });
+      }
+      if (trackedRegistration && !trackedRegistration.isFree && !isPremiumActive) {
+        const message =
+          "لا يمكن تفعيل الاشتراك المجاني لأن التسجيل مرتبط بباقة مدفوعة ولم تكتمل دفعتها.";
+        return res.status(409).json({
+          success: false,
+          code: "PAID_REGISTRATION_PAYMENT_REQUIRED",
+          error: message,
+          message,
+        });
+      }
       const freePkg = await firebaseService.getPurchasablePackageById("pkg-free");
 
       const currentStatus = property.verificationStatus || "pending";
@@ -2410,7 +2450,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
     createdPaymentId = payment.id;
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
-    // للتمديد/الترقية بالبطاقة: احفظ التواريخ المعلقة (محدودة بـ40 يوماً) حتى يتمكن
+    // للتمديد/الترقية بالبطاقة: احفظ التواريخ المعلقة ضمن الحد الأقصى للمدة المتبقية حتى يتمكن
     // الـ webhook من تفعيل الاشتراك بالتواريخ الصحيحة. بدون هذا لا يجد الـ webhook
     // pendingEndDate فلا يُفعّل تمديد/ترقية البطاقة أبداً.
     if (action === 'extend' || action === 'upgrade') {

@@ -22,11 +22,13 @@ import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
 
 const router = Router();
 
-function toPublicProperty(property: any) {
+export function toPublicProperty(property: any) {
   const {
     pin: _pin,
     whatsappNumber: _whatsappNumber,
     commissionHold: _commissionHold,
+    registrationPlan: _registrationPlan,
+    freeCommissionConsent: _freeCommissionConsent,
     ...publicProperty
   } = property;
   return {

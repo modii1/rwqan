@@ -22,6 +22,7 @@ import {
   calculateExtensionEndDate,
   getStartOfDayRiyadh,
   formatDateRiyadh,
+  MAX_SUBSCRIPTION_DAYS,
 } from "../server/utils/dateUtils";
 
 const TEST_PREFIX = "TEST-SCEN";
@@ -399,15 +400,15 @@ async function runTests() {
 
     const currentEndDate = new Date("2026-07-20");
 
-    // Renewal: appends after current end (capped at MAX_SUBSCRIPTION_DAYS=40 from today)
+    // Renewal: appends after current end, within the remaining-duration horizon.
     const renewalEnd = calculateExtensionEndDate(currentEndDate, 30);
     const renewalDiff = Math.ceil((renewalEnd.getTime() - currentEndDate.getTime()) / (1000 * 60 * 60 * 24));
-    // capAtMaxDays limits to 40 days from today, so if current end + 30 > today + 40, it's capped
+    // capAtMaxDays limits the result to MAX_SUBSCRIPTION_DAYS from today.
     const maxEnd = new Date(today);
-    maxEnd.setDate(maxEnd.getDate() + 40);
+    maxEnd.setDate(maxEnd.getDate() + MAX_SUBSCRIPTION_DAYS);
     const maxDiff = Math.ceil((maxEnd.getTime() - currentEndDate.getTime()) / (1000 * 60 * 60 * 24));
     const expectedRenewalDiff = Math.min(30, maxDiff);
-    test("T9.1", renewalDiff === expectedRenewalDiff, `Renewal adds days (capped at MAX_SUBSCRIPTION_DAYS=40 from today)`, expectedRenewalDiff, renewalDiff);
+    test("T9.1", renewalDiff === expectedRenewalDiff, `Renewal adds days (capped at MAX_SUBSCRIPTION_DAYS=${MAX_SUBSCRIPTION_DAYS} from today)`, expectedRenewalDiff, renewalDiff);
 
     // Upgrade: starts from today
     const upgradeEndCalc = new Date(today);

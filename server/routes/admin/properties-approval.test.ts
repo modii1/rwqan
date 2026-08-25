@@ -13,6 +13,10 @@ import {
 } from "../../services";
 import { adminApprovalService } from "../../services/AdminApprovalService";
 import propertiesRouter from "./properties";
+import {
+  createPublicFreeCommissionConsent,
+  createPublicRegistrationPlan,
+} from "../../../shared/freeCommissionConsent";
 
 test("property approval preflight prevents mutations and returns safe errors", async (t) => {
   const originals = {
@@ -231,6 +235,165 @@ test("property approval preflight prevents mutations and returns safe errors", a
         return [];
       };
       (subscriptionService as any).getByProperty = async () => null;
+      (propertyService as any).getByNumber = async () => readyProperty;
+      (firebaseService as any).getNotificationSettings = async () => ({
+        allNotifications: false,
+        propertyVerification: false,
+      });
+      clearSettingsCache();
+
+      const response = await approve();
+      const payload = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.success, true);
+      assert.equal(paymentReads, 1);
+      assert.equal(verificationWrites, 1);
+      assert.equal(propertyWrites, 1);
+      assert.equal(verificationLogs, 1);
+    });
+
+    await t.test("a tracked free registration without valid consent cannot be approved", async () => {
+      resetCounters();
+      const readyProperty = {
+        propertyNumber: "PROP-1",
+        name: "Tracked free property",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-free",
+          isFree: true,
+          selectedAt: "2026-08-24T10:00:00.000Z",
+        }),
+      };
+      (adminApprovalService as any).requireCompleteProperty = async () => ({
+        property: readyProperty,
+        imageCount: 3,
+        validation: { isComplete: true, missingFields: [], warnings: [] },
+      });
+      (paymentService as any).getByProperty = async () => {
+        paymentReads += 1;
+        return [];
+      };
+
+      const response = await approve();
+      const payload = await response.json();
+
+      assert.equal(response.status, 409);
+      assert.equal(payload.code, "FREE_COMMISSION_CONSENT_REQUIRED");
+      assert.equal(paymentReads, 1);
+      assert.equal(verificationWrites, 0);
+      assert.equal(propertyWrites, 0);
+      assert.equal(verificationLogs, 0);
+    });
+
+    await t.test("a tracked free registration with matching consent can be approved", async () => {
+      resetCounters();
+      const selectedAt = "2026-08-24T10:00:00.000Z";
+      const readyProperty = {
+        propertyNumber: "PROP-1",
+        name: "Consented free property",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-free",
+          isFree: true,
+          selectedAt,
+        }),
+        freeCommissionConsent: createPublicFreeCommissionConsent({
+          packageId: "pkg-free",
+          acceptedAt: selectedAt,
+        }),
+      };
+      (adminApprovalService as any).requireCompleteProperty = async () => ({
+        property: readyProperty,
+        imageCount: 3,
+        validation: { isComplete: true, missingFields: [], warnings: [] },
+      });
+      (paymentService as any).getByProperty = async () => {
+        paymentReads += 1;
+        return [];
+      };
+      (subscriptionService as any).getByProperty = async () => null;
+      (propertyService as any).getByNumber = async () => readyProperty;
+      (firebaseService as any).getNotificationSettings = async () => ({
+        allNotifications: false,
+        propertyVerification: false,
+      });
+      clearSettingsCache();
+
+      const response = await approve();
+      const payload = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(payload.success, true);
+      assert.equal(verificationWrites, 1);
+      assert.equal(propertyWrites, 1);
+      assert.equal(verificationLogs, 1);
+    });
+
+    await t.test("a tracked paid registration cannot silently become free without payment", async () => {
+      resetCounters();
+      const readyProperty = {
+        propertyNumber: "PROP-1",
+        name: "Tracked paid property",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-paid",
+          isFree: false,
+          selectedAt: "2026-08-24T10:00:00.000Z",
+        }),
+      };
+      (adminApprovalService as any).requireCompleteProperty = async () => ({
+        property: readyProperty,
+        imageCount: 3,
+        validation: { isComplete: true, missingFields: [], warnings: [] },
+      });
+      (paymentService as any).getByProperty = async () => {
+        paymentReads += 1;
+        return [];
+      };
+      (subscriptionService as any).getByProperty = async () => null;
+
+      const response = await approve();
+      const payload = await response.json();
+
+      assert.equal(response.status, 409);
+      assert.equal(payload.code, "PAID_REGISTRATION_PAYMENT_REQUIRED");
+      assert.equal(paymentReads, 1);
+      assert.equal(verificationWrites, 0);
+      assert.equal(propertyWrites, 0);
+      assert.equal(verificationLogs, 0);
+    });
+
+    await t.test("a tracked paid registration with an active premium subscription can be approved", async () => {
+      resetCounters();
+      const readyProperty = {
+        propertyNumber: "PROP-1",
+        name: "Paid property with active subscription",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-paid",
+          isFree: false,
+          selectedAt: "2026-08-24T10:00:00.000Z",
+        }),
+      };
+      const activePremiumSubscription = {
+        id: "SUB-PROP-1",
+        propertyNumber: "PROP-1",
+        packageId: "pkg-paid",
+        subscriptionType: "مميز",
+        status: "ساري",
+        startDate: new Date().toISOString(),
+        endDate: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1_000,
+        ).toISOString(),
+      };
+      (adminApprovalService as any).requireCompleteProperty = async () => ({
+        property: readyProperty,
+        imageCount: 3,
+        validation: { isComplete: true, missingFields: [], warnings: [] },
+      });
+      (paymentService as any).getByProperty = async () => {
+        paymentReads += 1;
+        return [];
+      };
+      (subscriptionService as any).getByProperty = async () =>
+        activePremiumSubscription;
       (propertyService as any).getByNumber = async () => readyProperty;
       (firebaseService as any).getNotificationSettings = async () => ({
         allNotifications: false,

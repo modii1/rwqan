@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Pencil, Plus, Package, Puzzle, Star, Zap, Pin, ShieldCheck } from "lucide-react";
 import { Th, Td } from "../components/Table";
 import { useToast } from "@/hooks/use-toast";
+import { MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS } from "@shared/subscriptionPackagePolicy";
 
 type AdminPackage = {
   id: string;
@@ -356,7 +357,7 @@ export default function PackagesSection() {
 
       {/* Regular Package Dialog */}
       <Dialog open={!!editingPackage} onOpenChange={() => setEditingPackage(null)}>
-        <DialogContent className="max-w-md" dir="rtl">
+        <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة باقة اشتراك" : "تعديل الباقة"}</DialogTitle>
           </DialogHeader>
@@ -433,13 +434,13 @@ export default function PackagesSection() {
                 <Input
                   type="number"
                   min={1}
-                  max={editingPackage.isActive ? 40 : undefined}
+                  max={editingPackage.isActive ? MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS : undefined}
                   value={editingPackage.durationDays}
                   onChange={(e) => setEditingPackage({ ...editingPackage, durationDays: Number(e.target.value || 0) })}
                   data-testid="input-package-duration"
                 />
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  الحد الأقصى للباقة النشطة 40 يوماً. يمكن حفظ مدة أطول فقط عندما تكون الباقة معطّلة.
+                  الحد الأقصى للباقة النشطة {MAX_ACTIVE_SUBSCRIPTION_PACKAGE_DAYS} يوماً. يمكن حفظ مدة أطول فقط عندما تكون الباقة معطّلة.
                 </p>
               </div>
 

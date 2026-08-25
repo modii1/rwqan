@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
+import {
+  freeCommissionConsentSchema,
+  freeRegistrationPlanSchema,
+} from "./freeCommissionConsent";
 
 // =========================
 // Property Schema (العقارات)
@@ -36,6 +40,8 @@ export const propertySchema = z.object({
     updatedAt: z.string(),
     releasedAt: z.string().optional(),
   }).optional(),
+  registrationPlan: freeRegistrationPlanSchema.optional(),
+  freeCommissionConsent: freeCommissionConsentSchema.optional(),
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive
   imageUrls: z.array(z.string()).default([]), // روابط الصور (كاش)
   lastChanges: z.string().optional(), // آخر التغييرات

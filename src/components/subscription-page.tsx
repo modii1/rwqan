@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -17,6 +18,10 @@ import { Progress } from "@/components/ui/progress";
 import { formatDiscount, getCurrencyLabel } from "@/lib/currency";
 import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import {
+  FREE_COMMISSION_CONSENT_TEXT,
+  isFreeSubscriptionPackage,
+} from "@shared/freeCommissionConsent";
 
 // ─── Visual Captcha helpers ───
 const CAPTCHA_CHARS = '23456789';
@@ -83,6 +88,7 @@ export default function SubscriptionPage() {
 
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [freeCommissionConsentAccepted, setFreeCommissionConsentAccepted] = useState(false);
   const [packageToView, setPackageToView] = useState<Package | null>(null);
   const [showAllPackages, setShowAllPackages] = useState(true);
   const [expandedPackages, setExpandedPackages] = useState<Set<string>>(new Set());
@@ -229,7 +235,13 @@ export default function SubscriptionPage() {
     .filter(pkg => !ELITE_PACKAGE_IDS.includes(pkg.id));
 
   const selectedPackage = packages.find(p => p.id === selectedPackageId);
-  const isFreePackage = selectedPackage?.price === 0;
+  const isFreePackage = isFreeSubscriptionPackage(selectedPackage);
+  const requiresFreeCommissionConsent = isFreePackage;
+
+  const selectPackage = (packageId: string) => {
+    setFreeCommissionConsentAccepted(false);
+    setSelectedPackageId(packageId);
+  };
 
   const validateDiscount = async () => {
     if (!discountCode) return;
@@ -254,6 +266,7 @@ export default function SubscriptionPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPackageId) return;
+    if (requiresFreeCommissionConsent && !freeCommissionConsentAccepted) return;
 
     // Captcha validation
     const userInput = captchaInput.trim();
@@ -275,6 +288,8 @@ export default function SubscriptionPage() {
         ...formData,
         facilities,
         prices,
+        packageId: selectedPackageId,
+        freeCommissionConsentAccepted,
         subscriptionType: getSubscriptionTypeLabel(selectedPackage?.type),
       };
 
@@ -762,7 +777,7 @@ export default function SubscriptionPage() {
                       type="button"
                       size="sm"
                       onClick={() => {
-                        setSelectedPackageId(pkg.id);
+                        selectPackage(pkg.id);
                         setCurrentStep(2);
                       }}
                       className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}
@@ -1069,6 +1084,29 @@ export default function SubscriptionPage() {
                 </div>
               )}
 
+              {requiresFreeCommissionConsent && (
+                <div className="p-4 border border-border rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="free-commission-consent"
+                      checked={freeCommissionConsentAccepted}
+                      onCheckedChange={(checked) =>
+                        setFreeCommissionConsentAccepted(checked === true)
+                      }
+                      required
+                      aria-required="true"
+                      data-testid="checkbox-free-commission-consent"
+                    />
+                    <label
+                      htmlFor="free-commission-consent"
+                      className="text-sm leading-6 cursor-pointer"
+                    >
+                      {FREE_COMMISSION_CONSENT_TEXT}
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {/* Visual Captcha */}
               <div>
                 <label className="block text-sm font-semibold mb-2">رمز التحقق</label>
@@ -1110,7 +1148,11 @@ export default function SubscriptionPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || (!isFreePackage && !paymentMethod)}
+                  disabled={
+                    isSubmitting ||
+                    (!isFreePackage && !paymentMethod) ||
+                    (requiresFreeCommissionConsent && !freeCommissionConsentAccepted)
+                  }
                   className="flex-1"
                 >
                   {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
@@ -1169,7 +1211,7 @@ export default function SubscriptionPage() {
                   </Button>
                   <Button
                     onClick={() => {
-                      setSelectedPackageId(packageToView.id);
+                      selectPackage(packageToView.id);
                       setPackageToView(null);
                     }}
                     className="flex-1 bg-[#434040]"

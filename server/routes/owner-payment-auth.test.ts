@@ -14,6 +14,12 @@ import {
 } from "../services";
 import { firebaseService } from "../firebaseService";
 import { PaymobIntentionError, paymobService } from "../integrations/paymob";
+import {
+  FREE_COMMISSION_BASIS_POINTS,
+  FREE_COMMISSION_CONSENT_TEXT,
+  FREE_COMMISSION_TERMS_VERSION,
+  createPublicRegistrationPlan,
+} from "../../shared/freeCommissionConsent";
 
 test("public onboarding establishes an owner-bound payment session", async () => {
   const originals = {
@@ -50,7 +56,18 @@ test("public onboarding establishes an owner-bound payment session", async () =>
   };
   (notificationService as any).newProperty = async () => undefined;
   (firebaseService as any).getPurchasablePackageById = async (packageId: string) =>
-    packageId === "pkg-month-2properties"
+    packageId === "pkg-unavailable"
+      ? null
+      : packageId === "pkg-free"
+      ? {
+          id: packageId,
+          name: "Free",
+          price: 0,
+          duration: 30,
+          type: "free",
+          maxProperties: 1,
+        }
+      : packageId === "pkg-month-2properties"
       ? {
           id: packageId,
           name: "VIP",
@@ -60,7 +77,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
           maxProperties: 5,
         }
       : {
-          id: "PKG-1",
+          id: packageId,
           name: "Package",
           price: 100,
           duration: 30,
@@ -176,6 +193,96 @@ test("public onboarding establishes an owner-bound payment session", async () =>
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
+    const missingPackage = await fetch(`${baseUrl}/api/properties/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ propertyNumber: "PROP-MISSING-PACKAGE" }),
+    });
+    assert.equal(missingPackage.status, 400);
+    assert.equal(properties.has("PROP-MISSING-PACKAGE"), false);
+
+    const unavailablePackage = await fetch(
+      `${baseUrl}/api/properties/register`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          propertyNumber: "PROP-UNAVAILABLE-PACKAGE",
+          packageId: "pkg-unavailable",
+        }),
+      },
+    );
+    assert.equal(unavailablePackage.status, 404);
+    assert.equal(properties.has("PROP-UNAVAILABLE-PACKAGE"), false);
+
+    const freeWithoutConsent = await fetch(
+      `${baseUrl}/api/properties/register`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          propertyNumber: "PROP-FREE-NO-CONSENT",
+          packageId: "pkg-free",
+        }),
+      },
+    );
+    assert.equal(freeWithoutConsent.status, 400);
+    assert.equal(
+      (await freeWithoutConsent.json()).code,
+      "FREE_COMMISSION_CONSENT_REQUIRED",
+    );
+    assert.equal(properties.has("PROP-FREE-NO-CONSENT"), false);
+
+    const freeRegistration = await fetch(
+      `${baseUrl}/api/properties/register`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          propertyNumber: "PROP-FREE",
+          name: "Free property",
+          whatsappNumber: "0500000000",
+          location: "https://maps.example/free",
+          city: "Riyadh",
+          direction: "north",
+          type: "Chalet",
+          facilities: ["pool"],
+          pin: "1234",
+          prices: {
+            weekday: "100",
+            weekend: "120",
+            overnight: "150",
+            holidays: "180",
+          },
+          packageId: "pkg-free",
+          freeCommissionConsentAccepted: true,
+          commissionBasisPoints: 1,
+          termsVersion: "caller-controlled",
+        }),
+      },
+    );
+    assert.equal(freeRegistration.status, 200);
+    const persistedFreeProperty = properties.get("PROP-FREE");
+    assert.equal(persistedFreeProperty.registrationPlan.packageId, "pkg-free");
+    assert.equal(persistedFreeProperty.registrationPlan.isFree, true);
+    assert.equal(
+      persistedFreeProperty.registrationPlan.selectedAt,
+      persistedFreeProperty.freeCommissionConsent.acceptedAt,
+    );
+    assert.equal(persistedFreeProperty.freeCommissionConsent.accepted, true);
+    assert.equal(
+      persistedFreeProperty.freeCommissionConsent.commissionBasisPoints,
+      FREE_COMMISSION_BASIS_POINTS,
+    );
+    assert.equal(
+      persistedFreeProperty.freeCommissionConsent.termsVersion,
+      FREE_COMMISSION_TERMS_VERSION,
+    );
+    assert.equal(
+      persistedFreeProperty.freeCommissionConsent.statement,
+      FREE_COMMISSION_CONSENT_TEXT,
+    );
+
     const registration = await fetch(`${baseUrl}/api/properties/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -195,9 +302,14 @@ test("public onboarding establishes an owner-bound payment session", async () =>
           overnight: "150",
           holidays: "180",
         },
+        packageId: "PKG-1",
       }),
     });
     assert.equal(registration.status, 200);
+    const persistedPaidProperty = properties.get("PROP-OWNER");
+    assert.equal(persistedPaidProperty.registrationPlan.packageId, "PKG-1");
+    assert.equal(persistedPaidProperty.registrationPlan.isFree, false);
+    assert.equal("freeCommissionConsent" in persistedPaidProperty, false);
     const cookie = registration.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie);
 
@@ -205,6 +317,41 @@ test("public onboarding establishes an owner-bound payment session", async () =>
       headers: { cookie },
     });
     assert.deepEqual(await sessionState.json(), { propertyNumber: "PROP-OWNER" });
+
+    properties.set("PROP-FREE-MISSING-CONSENT", {
+      propertyNumber: "PROP-FREE-MISSING-CONSENT",
+      name: "Tracked free property",
+      verificationStatus: "rejected",
+      registrationPlan: createPublicRegistrationPlan({
+        packageId: "pkg-free",
+        isFree: true,
+        selectedAt: "2026-08-24T10:00:00.000Z",
+      }),
+    });
+    const trackedFreeSession = await fetch(
+      `${baseUrl}/test/session/PROP-FREE-MISSING-CONSENT`,
+      { method: "POST" },
+    );
+    const trackedFreeCookie = trackedFreeSession.headers
+      .get("set-cookie")
+      ?.split(";")[0];
+    assert.ok(trackedFreeCookie);
+    const trackedFreeActivation = await fetch(
+      `${baseUrl}/api/owner/property/activate`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: trackedFreeCookie,
+        },
+        body: JSON.stringify({ status: "approved" }),
+      },
+    );
+    assert.equal(trackedFreeActivation.status, 409);
+    assert.equal(
+      (await trackedFreeActivation.json()).code,
+      "FREE_COMMISSION_CONSENT_REQUIRED",
+    );
 
     const anonymous = await fetch(`${baseUrl}/api/owner/payment/initiate`, {
       method: "POST",
@@ -406,6 +553,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
         name: "Failure",
         whatsappNumber: "0500000000",
         prices: {},
+        packageId: "PKG-1",
       }),
     });
     assert.equal(failedRegistration.status, 500);
@@ -438,6 +586,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
             facilities: ["pool"],
             pin: "1234",
             prices: {},
+            packageId: "PKG-1",
           }),
         },
       );

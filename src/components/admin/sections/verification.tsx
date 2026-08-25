@@ -26,6 +26,7 @@ import {
   isSubscriptionStatusSuspended,
 } from "@shared/subscriptionType";
 import {
+  getFreeCommissionConsentAdminStatus,
   getVerificationStatus,
   type VerificationLevel,
 } from "./verification-status";
@@ -278,6 +279,7 @@ export default function AdminVerificationSection() {
       return {
         property: p,
         status: getVerificationStatus(p, imageCount),
+        freeCommissionConsentStatus: getFreeCommissionConsentAdminStatus(p),
         imageCount,
       };
     });
@@ -580,7 +582,12 @@ export default function AdminVerificationSection() {
             </p>
           )}
 
-          {filtered.map(({ property, status, imageCount }) => (
+          {filtered.map(({
+            property,
+            status,
+            freeCommissionConsentStatus,
+            imageCount,
+          }) => (
             <Card
               key={property.propertyNumber}
               className="p-3 flex flex-col gap-2"
@@ -611,6 +618,21 @@ export default function AdminVerificationSection() {
                           ? "مرفوض"
                           : "قيد المراجعة"}
                     </Badge>
+                    {freeCommissionConsentStatus && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          freeCommissionConsentStatus === "accepted"
+                            ? "border-green-300 bg-green-50 text-green-700"
+                            : "border-red-300 bg-red-50 text-red-700"
+                        }
+                        data-testid={`free-commission-consent-${property.propertyNumber}`}
+                      >
+                        {freeCommissionConsentStatus === "accepted"
+                          ? "موافقة العمولة مسجلة"
+                          : "موافقة العمولة غير مسجلة"}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {property.name || "بدون اسم"}

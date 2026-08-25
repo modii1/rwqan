@@ -7,6 +7,124 @@ import express from "express";
 import { firebaseService } from "../../firebaseService";
 import { propertyService, subscriptionService } from "../../services";
 import subscriptionsRouter from "./subscriptions";
+import { createPublicRegistrationPlan } from "../../../shared/freeCommissionConsent";
+
+test("manual free activation cannot bypass a forward-tracked registration", async (t) => {
+  const originals = {
+    getSubscriptionByPropertyNumber:
+      firebaseService.getSubscriptionByPropertyNumber,
+    getMultiPropertySubscriptions:
+      firebaseService.getMultiPropertySubscriptions,
+    addSubscriptionToSheet: firebaseService.addSubscriptionToSheet,
+    getPropertyByNumber: propertyService.getByNumber,
+    approveProperty: propertyService.approve,
+    getPurchasablePackageById:
+      subscriptionService.getPurchasablePackageById,
+  };
+  let property: Record<string, unknown> = {};
+  let subscriptionWrites = 0;
+  let approvalWrites = 0;
+
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
+  (firebaseService as any).addSubscriptionToSheet = async () => {
+    subscriptionWrites += 1;
+  };
+  (propertyService as any).getByNumber = async () => property;
+  (propertyService as any).approve = async () => {
+    approvalWrites += 1;
+  };
+  (subscriptionService as any).getPurchasablePackageById = async () => ({
+    id: "pkg-free",
+    name: "Free",
+    duration: 30,
+    price: 0,
+    type: "free",
+    isActive: true,
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = { isAdmin: true };
+    next();
+  });
+  app.use(subscriptionsRouter);
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+  const endpoint = `http://127.0.0.1:${port}/api/admin/subscription/manual-activate`;
+  const requestActivation = () => fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      propertyNumber: "PROP-TRACKED",
+      packageId: "pkg-free",
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1_000).toISOString(),
+    }),
+  });
+
+  try {
+    await t.test("tracked free registration needs matching consent", async () => {
+      property = {
+        propertyNumber: "PROP-TRACKED",
+        name: "Tracked free",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-free",
+          isFree: true,
+          selectedAt: "2026-08-24T10:00:00.000Z",
+        }),
+      };
+      const response = await requestActivation();
+      assert.equal(response.status, 409);
+      assert.equal(
+        (await response.json()).code,
+        "FREE_COMMISSION_CONSENT_REQUIRED",
+      );
+      assert.equal(subscriptionWrites, 0);
+      assert.equal(approvalWrites, 0);
+    });
+
+    await t.test("tracked paid registration cannot be converted to free", async () => {
+      property = {
+        propertyNumber: "PROP-TRACKED",
+        name: "Tracked paid",
+        registrationPlan: createPublicRegistrationPlan({
+          packageId: "pkg-paid",
+          isFree: false,
+          selectedAt: "2026-08-24T10:00:00.000Z",
+        }),
+      };
+      const response = await requestActivation();
+      assert.equal(response.status, 409);
+      assert.equal(
+        (await response.json()).code,
+        "PAID_REGISTRATION_PAYMENT_REQUIRED",
+      );
+      assert.equal(subscriptionWrites, 0);
+      assert.equal(approvalWrites, 0);
+    });
+  } finally {
+    firebaseService.getSubscriptionByPropertyNumber =
+      originals.getSubscriptionByPropertyNumber;
+    firebaseService.getMultiPropertySubscriptions =
+      originals.getMultiPropertySubscriptions;
+    firebaseService.addSubscriptionToSheet =
+      originals.addSubscriptionToSheet;
+    propertyService.getByNumber = originals.getPropertyByNumber;
+    propertyService.approve = originals.approveProperty;
+    subscriptionService.getPurchasablePackageById =
+      originals.getPurchasablePackageById;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
 
 test("manual activation preflights the full linked group before any write", async () => {
   const originals = {

@@ -10,6 +10,11 @@ import {
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
 import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
+import {
+  createPublicFreeCommissionConsent,
+  createPublicRegistrationPlan,
+  isFreeSubscriptionPackage,
+} from "../../shared/freeCommissionConsent";
 
 const router = Router();
 
@@ -138,7 +143,26 @@ router.post("/api/suggestions", async (req, res) => {
 // ================================
 router.post("/api/properties/register", async (req, res) => {
   try {
-    const data = req.body;
+    const data = req.body || {};
+    const packageId = String(data.packageId || "").trim();
+    if (!packageId) {
+      return res.status(400).json({ error: "معرف الباقة مطلوب" });
+    }
+
+    const selectedPackage = await firebaseService.getPurchasablePackageById(
+      packageId,
+    );
+    if (!selectedPackage) {
+      return res.status(404).json({ error: "الباقة غير موجودة أو غير متاحة" });
+    }
+    const isFreePackage = isFreeSubscriptionPackage(selectedPackage);
+    if (isFreePackage && data.freeCommissionConsentAccepted !== true) {
+      return res.status(400).json({
+        code: "FREE_COMMISSION_CONSENT_REQUIRED",
+        error: "يجب الموافقة على عمولة روقان لإكمال الاشتراك المجاني.",
+      });
+    }
+    const registrationSelectedAt = new Date().toISOString();
 
     // Check duplicate property number
     const exists = await propertyService.getByNumber(data.propertyNumber);
@@ -173,6 +197,19 @@ router.post("/api/properties/register", async (req, res) => {
       pin: String(data.pin || ""),
       imageUrls: [],
       verificationStatus: "pending",
+      registrationPlan: createPublicRegistrationPlan({
+        packageId: selectedPackage.id,
+        isFree: isFreePackage,
+        selectedAt: registrationSelectedAt,
+      }),
+      ...(isFreePackage
+        ? {
+            freeCommissionConsent: createPublicFreeCommissionConsent({
+              packageId: selectedPackage.id,
+              acceptedAt: registrationSelectedAt,
+            }),
+          }
+        : {}),
     };
 
     const created = await propertyService.create(newProperty);
