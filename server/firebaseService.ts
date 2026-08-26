@@ -1,5 +1,9 @@
+import { timingSafeEqual } from "node:crypto";
 import { db } from "./config/firebase";
-import { DEFAULT_FEATURE_FLAGS } from "../shared/schema";
+import {
+    DEFAULT_FEATURE_FLAGS,
+    customerPhoneOtpChallengeSchema,
+} from "../shared/schema";
 import type {
     Property,
     InsertProperty,
@@ -18,6 +22,8 @@ import type {
     ContactEvent,
     InsertContactEvent,
     ContactIdentitySession,
+    CustomerPhoneOtpChallenge,
+    CustomerPhoneOtpIssueLimit,
     Expense,
     InsertExpense,
     FeeConfig,
@@ -78,6 +84,53 @@ type PaymentFulfillmentClaimResult =
     | { status: "processing" }
     | { status: "action_conflict"; conflictingPaymentId?: string }
     | { status: "action_ineligible"; action: "new" | "extend" | "upgrade" };
+
+export type CustomerPhoneOtpIssueScope = "ip" | "phone";
+
+export type CreateCustomerPhoneOtpChallengeResult =
+    | { status: "created" }
+    | { status: "collision" }
+    | {
+        status: "rate_limited";
+        scope: CustomerPhoneOtpIssueScope;
+        retryAfterMs: number;
+    };
+
+export type CreateCustomerPhoneOtpChallengeInput = {
+    challenge: CustomerPhoneOtpChallenge;
+    ipSubject: string;
+    now: number;
+    windowMs: number;
+    maxIssuesPerIp: number;
+    maxIssuesPerPhone: number;
+};
+
+export type VerifyCustomerPhoneOtpChallengeResult =
+    | { status: "verified"; verifiedAt: string }
+    | { status: "invalid"; remainingAttempts: number }
+    | { status: "missing" }
+    | { status: "expired" }
+    | { status: "used" }
+    | { status: "exhausted" };
+
+export type VerifyCustomerPhoneOtpChallengeInput = {
+    challengeId: string;
+    phoneSubject: string;
+    candidateCodeHash: string;
+    now: number;
+};
+
+function otpDigestMatches(left: unknown, right: unknown): boolean {
+    if (
+        typeof left !== "string" ||
+        typeof right !== "string" ||
+        !/^[a-f0-9]{64}$/.test(left) ||
+        !/^[a-f0-9]{64}$/.test(right)
+    ) {
+        return false;
+    }
+    return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
 
 type GuardedPaymentFulfillmentClaimResult =
     | PaymentFulfillmentClaimResult
@@ -3895,6 +3948,207 @@ export class FirebaseService {
         await batch.commit();
     }
 
+    // ================== Customer Phone OTP Challenges ==================
+
+    async createCustomerPhoneOtpChallenge(
+        input: CreateCustomerPhoneOtpChallengeInput,
+    ): Promise<CreateCustomerPhoneOtpChallengeResult> {
+        const parsedChallenge = customerPhoneOtpChallengeSchema.safeParse(input.challenge);
+        if (
+            !parsedChallenge.success ||
+            !/^[a-f0-9]{64}$/.test(input.ipSubject) ||
+            !Number.isSafeInteger(input.now) ||
+            input.now < 0 ||
+            !Number.isSafeInteger(input.windowMs) ||
+            input.windowMs <= 0 ||
+            !Number.isSafeInteger(input.maxIssuesPerIp) ||
+            input.maxIssuesPerIp <= 0 ||
+            !Number.isSafeInteger(input.maxIssuesPerPhone) ||
+            input.maxIssuesPerPhone <= 0
+        ) {
+            throw new RangeError("Invalid customer phone OTP persistence input");
+        }
+
+        const challenge = parsedChallenge.data;
+        const challengeRef = this.db
+            .collection("customer_phone_otp_challenges")
+            .doc(challenge.id);
+        const ipLimitId = `ip-${input.ipSubject}`;
+        const phoneLimitId = `phone-${challenge.phoneSubject}`;
+        const limitsCollection = this.db.collection("customer_phone_otp_issue_limits");
+        const ipLimitRef = limitsCollection.doc(ipLimitId);
+        const phoneLimitRef = limitsCollection.doc(phoneLimitId);
+
+        return this.db.runTransaction(async (transaction) => {
+            // Firestore transactions require all reads before any writes.
+            const challengeSnapshot = await transaction.get(challengeRef);
+            const ipLimitSnapshot = await transaction.get(ipLimitRef);
+            const phoneLimitSnapshot = await transaction.get(phoneLimitRef);
+
+            if (challengeSnapshot.exists) return { status: "collision" } as const;
+
+            const readLimit = (
+                value: FirebaseFirestore.DocumentData | undefined,
+                maxIssues: number,
+            ) => {
+                const rawWindowStartedAt = Number(value?.windowStartedAt);
+                const hasValidWindowStart =
+                    Number.isSafeInteger(rawWindowStartedAt) && rawWindowStartedAt >= 0;
+                const windowStartedAt = hasValidWindowStart
+                    ? rawWindowStartedAt
+                    : input.now;
+                const elapsed = Math.max(0, input.now - windowStartedAt);
+                const inCurrentWindow = hasValidWindowStart && elapsed < input.windowMs;
+                const rawIssueCount = Number(value?.issueCount);
+                const issueCount = inCurrentWindow &&
+                    Number.isSafeInteger(rawIssueCount) && rawIssueCount >= 0
+                    ? rawIssueCount
+                    : 0;
+                return {
+                    windowStartedAt: inCurrentWindow ? windowStartedAt : input.now,
+                    issueCount,
+                    limited: issueCount >= maxIssues,
+                    retryAfterMs: Math.max(1, input.windowMs - elapsed),
+                };
+            };
+
+            const ipLimit = readLimit(ipLimitSnapshot.data(), input.maxIssuesPerIp);
+            const phoneLimit = readLimit(
+                phoneLimitSnapshot.data(),
+                input.maxIssuesPerPhone,
+            );
+
+            if (ipLimit.limited) {
+                return {
+                    status: "rate_limited",
+                    scope: "ip",
+                    retryAfterMs: ipLimit.retryAfterMs,
+                } as const;
+            }
+            if (phoneLimit.limited) {
+                return {
+                    status: "rate_limited",
+                    scope: "phone",
+                    retryAfterMs: phoneLimit.retryAfterMs,
+                } as const;
+            }
+
+            const updatedAt = new Date(input.now).toISOString();
+            const createLimitDocument = (
+                id: string,
+                scope: CustomerPhoneOtpIssueScope,
+                state: { windowStartedAt: number; issueCount: number },
+            ): CustomerPhoneOtpIssueLimit => ({
+                id,
+                scope,
+                windowStartedAt: state.windowStartedAt,
+                issueCount: state.issueCount + 1,
+                updatedAt,
+                expiresAtTtl: new Date(
+                    state.windowStartedAt + input.windowMs * 2,
+                ),
+            });
+
+            transaction.set(
+                ipLimitRef,
+                createLimitDocument(ipLimitId, "ip", ipLimit),
+            );
+            transaction.set(
+                phoneLimitRef,
+                createLimitDocument(phoneLimitId, "phone", phoneLimit),
+            );
+            transaction.create(challengeRef, challenge);
+            return { status: "created" } as const;
+        });
+    }
+
+    async verifyCustomerPhoneOtpChallenge(
+        input: VerifyCustomerPhoneOtpChallengeInput,
+    ): Promise<VerifyCustomerPhoneOtpChallengeResult> {
+        if (
+            !/^[A-Za-z0-9_-]{43}$/.test(input.challengeId) ||
+            !/^[a-f0-9]{64}$/.test(input.phoneSubject) ||
+            !/^[a-f0-9]{64}$/.test(input.candidateCodeHash) ||
+            !Number.isSafeInteger(input.now) ||
+            input.now < 0
+        ) {
+            throw new RangeError("Invalid customer phone OTP verification input");
+        }
+
+        const ref = this.db
+            .collection("customer_phone_otp_challenges")
+            .doc(input.challengeId);
+
+        return this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) return { status: "missing" } as const;
+
+            const raw = snapshot.data();
+            const ttlMillis = this.getDateMillis(raw?.expiresAtTtl);
+            const parsed = customerPhoneOtpChallengeSchema.safeParse({
+                ...raw,
+                expiresAtTtl: ttlMillis > 0 ? new Date(ttlMillis) : raw?.expiresAtTtl,
+            });
+            if (!parsed.success || parsed.data.id !== input.challengeId) {
+                // Corrupt or unexpected records fail closed.
+                return { status: "missing" } as const;
+            }
+
+            const challenge = parsed.data;
+            if (challenge.consumedAt) return { status: "used" } as const;
+
+            const expiresAt = Date.parse(challenge.expiresAt);
+            if (!Number.isFinite(expiresAt) || expiresAt <= input.now) {
+                return { status: "expired" } as const;
+            }
+            if (
+                challenge.exhaustedAt ||
+                challenge.attemptCount >= challenge.maxAttempts
+            ) {
+                return { status: "exhausted" } as const;
+            }
+
+            const phoneMatches = otpDigestMatches(
+                challenge.phoneSubject,
+                input.phoneSubject,
+            );
+            const codeMatches = otpDigestMatches(
+                challenge.codeHash,
+                input.candidateCodeHash,
+            );
+            const updatedAt = new Date(input.now).toISOString();
+
+            if (phoneMatches && codeMatches) {
+                transaction.update(ref, {
+                    consumedAt: updatedAt,
+                    updatedAt,
+                });
+                return { status: "verified", verifiedAt: updatedAt } as const;
+            }
+
+            const attemptCount = challenge.attemptCount + 1;
+            if (attemptCount >= challenge.maxAttempts) {
+                transaction.update(ref, {
+                    attemptCount,
+                    exhaustedAt: updatedAt,
+                    updatedAt,
+                });
+                return { status: "exhausted" } as const;
+            }
+
+            transaction.update(ref, { attemptCount, updatedAt });
+            return {
+                status: "invalid",
+                remainingAttempts: challenge.maxAttempts - attemptCount,
+            } as const;
+        });
+    }
+
+    async deleteCustomerPhoneOtpChallenge(id: string): Promise<void> {
+        if (!/^[A-Za-z0-9_-]{43}$/.test(id)) return;
+        await this.db.collection("customer_phone_otp_challenges").doc(id).delete();
+    }
+
     async consumeContactIdentityIssueLimit(
         id: string,
         now: number,
@@ -4009,6 +4263,8 @@ export class FirebaseService {
             "contact_request_attempt_limits",
             "contact_ip_rate_limits",
             "admin_login_attempt_limits",
+            "customer_phone_otp_challenges",
+            "customer_phone_otp_issue_limits",
         ];
         const batchSize = 400;
         let deleted = 0;

@@ -70,6 +70,7 @@ import AdminOccasionsSection from "./sections/occasions";
 import ContactAnalyticsSection from "./sections/contact-analytics";
 import SuspendedSubscriptionsSection from "./sections/suspended-subscriptions";
 import BookingCommissionsSection from "./sections/booking-commissions";
+import CustomersSection from "./sections/customers";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -85,6 +86,7 @@ export type AdminSection =
   | "requests"
   | "contact-analytics"
   | "booking-commissions"
+  | "customers"
   | "payments"
   | "analytics"
   | "verification"
@@ -274,6 +276,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         />
 
         <SidebarButton
+          icon={<Users className="w-4 h-4 text-emerald-700" />}
+          label="العملاء"
+          active={activeSection === "customers"}
+          onClick={() => setActiveSection("customers")}
+        />
+
+        <SidebarButton
           icon={<BarChart3 className="w-4 h-4" />}
           label="إحصائيات"
           active={activeSection === "analytics"}
@@ -406,6 +415,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "requests" && <RequestsSection />}
         {activeSection === "contact-analytics" && <ContactAnalyticsSection />}
         {activeSection === "booking-commissions" && <BookingCommissionsSection />}
+        {activeSection === "customers" && <CustomersSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
         {activeSection === "code-backup" && <AdminCodeBackup />}

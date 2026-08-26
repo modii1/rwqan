@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -25,6 +25,10 @@ import {
 } from "./booking-display";
 import { CustomerQuestionnaireFacts } from "./customer-questionnaire-facts";
 import { BookingApiError, bookingApiRequest } from "./booking-api";
+import { ContactPhoneDialog } from "@/components/contact/contact-phone-dialog";
+import {
+  CUSTOMER_BOOKINGS_QUERY_KEY,
+} from "@/hooks/use-contact-identity";
 
 interface CustomerBookingsPayload {
   identity: { maskedPhone?: string | null };
@@ -36,10 +40,14 @@ function normalized(value: unknown): string {
 }
 
 export default function CustomerBookingsProfile() {
+  const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const query = useQuery<CustomerBookingsPayload>({
-    queryKey: ["customer-bookings"],
+    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
     queryFn: () => bookingApiRequest<CustomerBookingsPayload>("/api/customer/bookings"),
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
 
@@ -51,7 +59,7 @@ export default function CustomerBookingsProfile() {
     };
   }, [query.data?.bookings]);
 
-  if (query.isLoading) {
+  if (query.isLoading || query.isFetching) {
     return (
       <BookingPageShell>
         <div className="flex min-h-[420px] items-center justify-center" role="status" aria-label="جاري تحميل الحجوزات">
@@ -67,34 +75,51 @@ export default function CustomerBookingsProfile() {
   if (query.isError || !query.data) {
     const unauthorized = query.error instanceof BookingApiError && query.error.status === 401;
     return (
-      <BookingPageShell>
-        <Card className="mx-auto max-w-xl p-6 text-center sm:p-8">
-          {unauthorized ? (
-            <Phone className="mx-auto h-10 w-10 text-[#8b6b25]" aria-hidden="true" />
-          ) : (
-            <AlertTriangle className="mx-auto h-10 w-10 text-amber-600" aria-hidden="true" />
-          )}
-          <h1 className="mt-4 text-xl font-bold text-[#34332f]">
-            {unauthorized ? "يلزم التحقق من رقم التواصل" : "تعذر تحميل الحجوزات"}
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {unauthorized
-              ? "افتح رابط المتابعة المرسل إلى واتساب لإثبات ملكية الرقم وعرض حجوزاتك بأمان."
-              : "تحقق من اتصالك ثم حاول مرة أخرى."}
-          </p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
-            {!unauthorized && (
-              <Button type="button" variant="outline" onClick={() => query.refetch()} className="gap-2">
-                <RefreshCw className="h-4 w-4" />
-                إعادة المحاولة
-              </Button>
+      <>
+        <BookingPageShell>
+          <Card className="mx-auto max-w-xl p-6 text-center sm:p-8">
+            {unauthorized ? (
+              <Phone className="mx-auto h-10 w-10 text-[#8b6b25]" aria-hidden="true" />
+            ) : (
+              <AlertTriangle className="mx-auto h-10 w-10 text-amber-600" aria-hidden="true" />
             )}
-            <Button asChild variant={unauthorized ? "default" : "outline"}>
-              <Link href="/">العودة للرئيسية</Link>
-            </Button>
-          </div>
-        </Card>
-      </BookingPageShell>
+            <h1 className="mt-4 text-xl font-bold text-[#34332f]">
+              {unauthorized ? "يلزم التحقق من رقم التواصل" : "تعذر تحميل الحجوزات"}
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {unauthorized
+                ? "افتح رابط المتابعة المرسل إلى واتساب لإثبات ملكية الرقم وعرض حجوزاتك بأمان."
+                : "تحقق من اتصالك ثم حاول مرة أخرى."}
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {unauthorized ? (
+                <Button type="button" onClick={() => setIsVerificationOpen(true)}>
+                  التحقق من رقم التواصل
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => query.refetch()} className="gap-2">
+                  <RefreshCw className="h-4 w-4" />
+                  إعادة المحاولة
+                </Button>
+              )}
+              <Button asChild variant="outline">
+                <Link href="/">العودة للرئيسية</Link>
+              </Button>
+            </div>
+          </Card>
+        </BookingPageShell>
+        {unauthorized && (
+          <ContactPhoneDialog
+            open={isVerificationOpen}
+            onOpenChange={setIsVerificationOpen}
+            onSubmit={async () => {
+              setIsVerificationOpen(false);
+              await query.refetch();
+            }}
+            mode="profile"
+          />
+        )}
+      </>
     );
   }
 

@@ -23,6 +23,12 @@ import {
 } from "../services/BookingShortLinkService";
 import { BookingTokenError } from "../services/BookingTokenService";
 import { parseBookingCommissionReceipt } from "../services/BookingCommissionReceiptService";
+import {
+  CONTACT_IDENTITY_COOKIE_NAME,
+  contactIdentityService,
+  getContactIdentityClearCookieOptions,
+} from "../services/ContactIdentityService";
+import { getContactIdentityCookieToken } from "../utils/contactIdentityRequest";
 
 const router = Router();
 const BOOKING_MUTATION_WINDOW_MS = 10 * 60 * 1000;
@@ -59,6 +65,26 @@ function rememberVerifiedCustomerToken(res: Response, token: string, expiresAt: 
     token,
     customerSessionCookieOptions(maxAge),
   );
+}
+
+function rejectCustomerBookingsAccess(
+  res: Response,
+  clearContactIdentity = false,
+): Response {
+  if (clearContactIdentity) {
+    res.clearCookie(
+      CONTACT_IDENTITY_COOKIE_NAME,
+      getContactIdentityClearCookieOptions(),
+    );
+  }
+  res.clearCookie(
+    BOOKING_CUSTOMER_SESSION_COOKIE,
+    customerSessionCookieOptions(0),
+  );
+  return res.status(401).json({
+    code: "CUSTOMER_BOOKING_SESSION_REQUIRED",
+    error: "افتح رابط المتابعة المرسل إلى واتساب لعرض الحجوزات",
+  });
 }
 
 async function enforceBookingMutationRateLimit(
@@ -220,24 +246,29 @@ router.post("/api/booking-followups/:token/confirm", requireSameOrigin, async (r
   }
 });
 
-router.get("/api/customer/bookings", async (req, res) => {
+router.get("/api/customer/bookings", requireSameOrigin, async (req, res) => {
   setNoStore(res);
   if (req.session?.propertyNumber || req.session?.isAdmin) {
-    res.clearCookie(BOOKING_CUSTOMER_SESSION_COOKIE, customerSessionCookieOptions(0));
-    return res.status(401).json({
-      code: "CUSTOMER_BOOKING_SESSION_REQUIRED",
-      error: "افتح رابط المتابعة المرسل إلى واتساب لعرض الحجوزات",
-    });
+    return rejectCustomerBookingsAccess(res);
   }
-  const token = String(req.cookies?.[BOOKING_CUSTOMER_SESSION_COOKIE] || "");
-  if (!token) {
-    return res.status(401).json({
-      code: "CUSTOMER_BOOKING_SESSION_REQUIRED",
-      error: "افتح رابط المتابعة المرسل إلى واتساب لعرض الحجوزات",
-    });
+  const contactIdentityToken = getContactIdentityCookieToken(req);
+  if (!contactIdentityToken) {
+    return rejectCustomerBookingsAccess(res);
   }
   try {
-    const data = await bookingCommissionService.getCustomerBookingsFromSession(token);
+    const contactIdentity = await contactIdentityService.resolve(contactIdentityToken);
+    if (!contactIdentity) {
+      return rejectCustomerBookingsAccess(res, true);
+    }
+    if (req.cookies?.[BOOKING_CUSTOMER_SESSION_COOKIE]) {
+      res.clearCookie(
+        BOOKING_CUSTOMER_SESSION_COOKIE,
+        customerSessionCookieOptions(0),
+      );
+    }
+    const data = await bookingCommissionService.getCustomerBookingsForVerifiedPhone(
+      contactIdentity.clientPhone,
+    );
     return res.json(data);
   } catch (error) {
     res.clearCookie(BOOKING_CUSTOMER_SESSION_COOKIE, customerSessionCookieOptions(0));

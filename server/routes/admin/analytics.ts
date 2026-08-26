@@ -5,6 +5,8 @@ import { firebaseService } from "../../firebaseService";
 import { updateRemainingDaysInSheet } from "../../scheduler";
 import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
 import { buildContactAnalytics } from "../../services/contactAnalytics";
+import { bookingCommissionService } from "../../services/BookingCommissionService";
+import { buildAdminCustomerContacts } from "../../services/AdminCustomerContactService";
 
 const router = Router();
 
@@ -20,6 +22,26 @@ router.get("/api/admin/requests", requireAdmin, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: "فشل في جلب الطلبات" });
+  }
+});
+
+router.get("/api/admin/customers", requireAdmin, async (_req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  try {
+    const [requests, properties, bookingDashboard] = await Promise.all([
+      analyticsService.getAllRequests(),
+      propertyService.getAll(),
+      bookingCommissionService.getAdminDashboard(),
+    ]);
+    const customers = buildAdminCustomerContacts(
+      requests,
+      properties,
+      bookingDashboard.bookings,
+    );
+    return res.json({ customers, total: customers.length });
+  } catch (error) {
+    console.error("Admin customers error:", error);
+    return res.status(500).json({ error: "فشل في جلب بيانات العملاء" });
   }
 });
 

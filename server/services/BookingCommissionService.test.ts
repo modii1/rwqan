@@ -917,6 +917,145 @@ test("seven-day expiry is derived for admin and customer views without persistin
   }
 });
 
+test("customer booking profiles reject a signed session bound to another saved phone", async () => {
+  const previousSecret = process.env.SESSION_SECRET;
+  const originals = {
+    requireEligibility: bookingCommissionStore.requireCurrentFreeEligibility,
+    isEligible: bookingCommissionStore.isBookingCurrentlyFreeEligible,
+    listCustomer: bookingCommissionStore.listBookingsForCustomer,
+  };
+  let customerListReads = 0;
+
+  try {
+    process.env.SESSION_SECRET = "customer-profile-isolation-test-secret-value-123456";
+    const service = new BookingCommissionService();
+    const anchor = awaitingBookingFixture({
+      requestCode: "PROFILE-ISOLATION",
+      createdAt: new Date(),
+      customerSubject: service.createCustomerSubject("512345678"),
+    });
+    anchor.customerPhone = "512345678";
+
+    (bookingCommissionStore as any).requireCurrentFreeEligibility = async (
+      bookingId: string,
+    ) => {
+      assert.equal(bookingId, anchor.id);
+      return anchor;
+    };
+    (bookingCommissionStore as any).isBookingCurrentlyFreeEligible = async () => true;
+    (bookingCommissionStore as any).listBookingsForCustomer = async (
+      customerSubject: string,
+    ) => {
+      customerListReads += 1;
+      assert.equal(customerSubject, anchor.customerSubject);
+      return [anchor];
+    };
+
+    const token = service.issueCustomerResponseToken(anchor);
+    await assert.rejects(
+      service.getCustomerBookingsFromSession(token, "598765432"),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "CUSTOMER_BOOKING_SESSION_REQUIRED" &&
+        error.status === 401,
+    );
+    assert.equal(customerListReads, 0);
+
+    const matchingProfile = await service.getCustomerBookingsFromSession(
+      token,
+      "512345678",
+    );
+    assert.equal(matchingProfile.bookings.length, 1);
+    assert.equal(customerListReads, 1);
+  } finally {
+    bookingCommissionStore.requireCurrentFreeEligibility = originals.requireEligibility;
+    bookingCommissionStore.isBookingCurrentlyFreeEligible = originals.isEligible;
+    bookingCommissionStore.listBookingsForCustomer = originals.listCustomer;
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+  }
+});
+
+test("verified customer phones load only their own currently eligible booking rows", async () => {
+  const previousSecret = process.env.SESSION_SECRET;
+  const originals = {
+    isEligible: bookingCommissionStore.isBookingCurrentlyFreeEligible,
+    listCustomer: bookingCommissionStore.listBookingsForCustomer,
+  };
+  const seenSubjects: string[] = [];
+
+  try {
+    process.env.SESSION_SECRET = "verified-phone-profile-test-secret-value-123456789";
+    const service = new BookingCommissionService();
+    const firstSubject = service.createCustomerSubject("512345678");
+    const secondSubject = service.createCustomerSubject("598765432");
+    const firstEligible = awaitingBookingFixture({
+      requestCode: "VERIFIED-PHONE-ONE",
+      createdAt: new Date("2026-08-25T10:00:00.000Z"),
+      customerSubject: firstSubject,
+    });
+    const firstIneligible = awaitingBookingFixture({
+      requestCode: "VERIFIED-PHONE-INELIGIBLE",
+      createdAt: new Date("2026-08-24T10:00:00.000Z"),
+      customerSubject: firstSubject,
+    });
+    const secondEligible = awaitingBookingFixture({
+      requestCode: "VERIFIED-PHONE-TWO",
+      createdAt: new Date("2026-08-23T10:00:00.000Z"),
+      customerSubject: secondSubject,
+    });
+
+    (bookingCommissionStore as any).listBookingsForCustomer = async (
+      customerSubject: string,
+    ) => {
+      seenSubjects.push(customerSubject);
+      if (customerSubject === firstSubject) return [firstEligible, firstIneligible];
+      if (customerSubject === secondSubject) return [secondEligible];
+      return [];
+    };
+    (bookingCommissionStore as any).isBookingCurrentlyFreeEligible = async (
+      booking: BookingFollowUpDocument,
+    ) => booking.requestCode !== "VERIFIED-PHONE-INELIGIBLE";
+
+    const firstProfile = await service.getCustomerBookingsForVerifiedPhone(
+      "+966 51 234 5678",
+    );
+    assert.deepEqual(firstProfile.identity, { maskedPhone: "05•• ••5678" });
+    assert.deepEqual(
+      firstProfile.bookings.map((booking) => booking.requestCode),
+      ["VERIFIED-PHONE-ONE"],
+    );
+
+    const secondProfile = await service.getCustomerBookingsForVerifiedPhone(
+      "0598765432",
+    );
+    assert.deepEqual(secondProfile.identity, { maskedPhone: "05•• ••5432" });
+    assert.deepEqual(
+      secondProfile.bookings.map((booking) => booking.requestCode),
+      ["VERIFIED-PHONE-TWO"],
+    );
+    assert.deepEqual(seenSubjects, [firstSubject, secondSubject]);
+
+    await assert.rejects(
+      service.getCustomerBookingsForVerifiedPhone("invalid"),
+      (error: unknown) =>
+        error instanceof BookingWorkflowError &&
+        error.code === "CUSTOMER_BOOKING_SESSION_REQUIRED" &&
+        error.status === 401,
+    );
+    assert.deepEqual(
+      seenSubjects,
+      [firstSubject, secondSubject],
+      "invalid identities must fail before querying customer bookings",
+    );
+  } finally {
+    bookingCommissionStore.isBookingCurrentlyFreeEligible = originals.isEligible;
+    bookingCommissionStore.listBookingsForCustomer = originals.listCustomer;
+    if (previousSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSecret;
+  }
+});
+
 test("admin dashboard totals and per-booking audit histories are complete and sanitized", async () => {
   const originals = {
     listAll: bookingCommissionStore.listAllBookings,

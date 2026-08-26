@@ -12,11 +12,13 @@ import { analyticsService, notificationService, propertyService, subscriptionSer
 import { firebaseService } from "../firebaseService";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
-  ContactIdentityRateLimitError,
   contactIdentityService,
   maskContactPhone,
 } from "../services/ContactIdentityService";
-import { bookingCommissionService } from "../services/BookingCommissionService";
+import {
+  BOOKING_CUSTOMER_SESSION_COOKIE,
+  bookingCommissionService,
+} from "../services/BookingCommissionService";
 
 const TEST_CONTACT_TOKEN = "t".repeat(43);
 
@@ -28,7 +30,6 @@ test("smart contact requests resolve remembered and owner phones on the server",
     consumeContactRequestAttemptLimit: firebaseService.consumeContactRequestAttemptLimit,
     getOwnerPhone: firebaseService.getOwnerPhone,
     resolveIdentity: contactIdentityService.resolve,
-    issueIdentity: contactIdentityService.issue,
     recordContactEvent: analyticsService.recordContactEvent,
     smartRequest: notificationService.smartRequest,
     sendAdmin: notificationService.sendAdmin,
@@ -39,10 +40,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
   };
 
   let identityMode: "none" | "remembered" | "must-not-run" = "none";
-  let issueMode: "success" | "failure" | "limited" = "success";
   let ownerPhone = "0512345678";
   let rememberedSessionId = "c".repeat(64);
-  const issueArguments: any[][] = [];
   let attemptLimitMode: "allowed" | "blocked" = "allowed";
   const attemptLimitCalls: any[][] = [];
   let forceCooldown = false;
@@ -96,18 +95,6 @@ test("smart contact requests resolve remembered and owner phones on the server",
       };
     }
     return null;
-  };
-  (contactIdentityService as any).issue = async (...args: any[]) => {
-    issueArguments.push(args);
-    if (issueMode === "failure") throw new Error("secret Firestore failure details");
-    if (issueMode === "limited") throw new ContactIdentityRateLimitError(45_000);
-    return {
-      token: TEST_CONTACT_TOKEN,
-      clientPhone: args[0],
-      sessionId: "d".repeat(64),
-      visitorId: "w".repeat(43),
-      expiresAt: "2026-10-20T12:00:00.000Z",
-    };
   };
   (firebaseService as any).createContactRequestWithCooldown = async (...args: any[]) => {
     acceptedCalls.push(args);
@@ -410,58 +397,33 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal("contactIdentity" in payload, false);
     });
 
-    await t.test("a first valid client phone issues the remembered cookie", async () => {
+    await t.test("an unverified submitted client phone cannot create a contact request", async () => {
       identityMode = "none";
-      issueMode = "success";
+      const acceptedBefore = acceptedCalls.length;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
         body: JSON.stringify({ propertyNumber: "TARGET-FIRST", clientPhone: "0512345678" }),
       });
 
-      assert.equal(response.status, 200);
-      const responseBody = await response.text();
-      const payload = JSON.parse(responseBody) as Record<string, unknown>;
-      assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
-      assert.equal(acceptedCalls.at(-1)?.[3]?.clientPhone, "512345678");
-      assert.match(String(issueArguments.at(-1)?.[2] || ""), /^[a-f0-9]{64}$/);
-      assert.deepEqual(payload.contactIdentity, {
-        kind: "client",
-        maskedPhone: maskContactPhone("512345678"),
-      });
-      assert.equal(responseBody.includes("512345678"), false);
-      assert.equal(responseBody.includes(TEST_CONTACT_TOKEN), false);
+      assert.equal(response.status, 428);
+      assert.equal((await response.json()).code, "CONTACT_PHONE_VERIFICATION_REQUIRED");
+      assert.equal(acceptedCalls.length, acceptedBefore);
+      assert.equal((response.headers.get("set-cookie") || "").includes(CONTACT_IDENTITY_COOKIE_NAME), false);
     });
 
-    await t.test("identity persistence failures are generic server errors, not invalid-phone errors", async () => {
-      identityMode = "none";
-      issueMode = "failure";
+    await t.test("a submitted number cannot replace a different verified identity", async () => {
+      identityMode = "remembered";
+      const acceptedBefore = acceptedCalls.length;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
         body: JSON.stringify({ propertyNumber: "TARGET-FAIL", clientPhone: "0512345678" }),
       });
-      const text = await response.text();
-      issueMode = "success";
 
-      assert.equal(response.status, 500);
-      assert.equal(JSON.parse(text).code, "CONTACT_IDENTITY_SAVE_FAILED");
-      assert.equal(text.includes("secret Firestore"), false);
-    });
-
-    await t.test("identity issuance throttling is returned with Retry-After", async () => {
-      identityMode = "none";
-      issueMode = "limited";
-      const response = await fetch(`${baseUrl}/api/requests/smart`, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: baseUrl },
-        body: JSON.stringify({ propertyNumber: "TARGET-LIMIT", clientPhone: "0512345678" }),
-      });
-      issueMode = "success";
-
-      assert.equal(response.status, 429);
-      assert.equal(response.headers.get("retry-after"), "45");
-      assert.equal((await response.json()).code, "CONTACT_IDENTITY_RATE_LIMIT");
+      assert.equal(response.status, 428);
+      assert.equal((await response.json()).code, "CONTACT_PHONE_VERIFICATION_REQUIRED");
+      assert.equal(acceptedCalls.length, acceptedBefore);
     });
 
     await t.test("a blocked repeat attempt is not written as another analytics event", async () => {
@@ -583,41 +545,37 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal("bookingFollowUpFailureCode" in acceptedCalls.at(-1)?.[5], false);
     });
 
-    await t.test("a first phone remains authenticated when the contact hits cooldown", async () => {
-      identityMode = "none";
-      issueMode = "success";
+    await t.test("a verified phone remains authenticated when the contact hits cooldown", async () => {
+      identityMode = "remembered";
       forceCooldown = true;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
-        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-COOLDOWN", clientPhone: "0512345678" }),
+        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-COOLDOWN" }),
       });
       forceCooldown = false;
 
       assert.equal(response.status, 429);
-      assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
       assert.deepEqual((await response.json()).contactIdentity, {
         kind: "client",
-        maskedPhone: maskContactPhone("512345678"),
+        maskedPhone: "05•• ••5432",
       });
     });
 
-    await t.test("a first phone remains authenticated after a later contact write error", async () => {
-      identityMode = "none";
-      issueMode = "success";
+    await t.test("a verified phone remains authenticated after a later contact write error", async () => {
+      identityMode = "remembered";
       forceContactWriteFailure = true;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
-        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-ERROR", clientPhone: "0512345678" }),
+        body: JSON.stringify({ propertyNumber: "TARGET-FIRST-ERROR" }),
       });
       forceContactWriteFailure = false;
 
       assert.equal(response.status, 500);
-      assert.match(response.headers.get("set-cookie") || "", new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
       assert.deepEqual((await response.json()).contactIdentity, {
         kind: "client",
-        maskedPhone: maskContactPhone("512345678"),
+        maskedPhone: "05•• ••5432",
       });
     });
 
@@ -669,13 +627,15 @@ test("smart contact requests resolve remembered and owner phones on the server",
         headers: {
           "content-type": "application/json",
           origin: baseUrl,
-          cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=${TEST_CONTACT_TOKEN}`,
+          cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=${TEST_CONTACT_TOKEN}; ${BOOKING_CUSTOMER_SESSION_COOKIE}=stale-booking-token`,
         },
         body: JSON.stringify({ propertyNumber: "TARGET-STALE" }),
       });
 
       assert.equal(response.status, 428);
-      assert.match(response.headers.get("set-cookie") || "", new RegExp(`${CONTACT_IDENTITY_COOKIE_NAME}=;`));
+      const setCookie = response.headers.get("set-cookie") || "";
+      assert.match(setCookie, new RegExp(`${CONTACT_IDENTITY_COOKIE_NAME}=;`));
+      assert.match(setCookie, new RegExp(`${BOOKING_CUSTOMER_SESSION_COOKIE}=;`));
     });
 
     await t.test("cross-origin contact mutations are rejected", async () => {
@@ -694,7 +654,6 @@ test("smart contact requests resolve remembered and owner phones on the server",
     firebaseService.consumeContactRequestAttemptLimit = originals.consumeContactRequestAttemptLimit;
     firebaseService.getOwnerPhone = originals.getOwnerPhone;
     contactIdentityService.resolve = originals.resolveIdentity;
-    contactIdentityService.issue = originals.issueIdentity;
     analyticsService.recordContactEvent = originals.recordContactEvent;
     notificationService.smartRequest = originals.smartRequest;
     notificationService.sendAdmin = originals.sendAdmin;

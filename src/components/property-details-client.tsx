@@ -156,6 +156,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const contactButtonRef = useRef<HTMLButtonElement>(null);
     const isSendingRef = useRef(false);
     const contactFlowActiveRef = useRef(false);
+    const otpWhatsAppTabRef = useRef<ReservedWhatsAppTab | null>(null);
     const [isSending, setIsSending] = useState(false);
     const [shake, setShake] = useState(false);
     const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
@@ -166,6 +167,11 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
     const [imageLoaded, setImageLoaded] = useState(false);
     const [failedImageUrls, setFailedImageUrls] = useState<string[]>([]);
     const [showAllFacilities, setShowAllFacilities] = useState(false);
+
+    useEffect(() => () => {
+        closeReservedWhatsAppTab(otpWhatsAppTabRef.current);
+        otpWhatsAppTabRef.current = null;
+    }, []);
 
     // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
     useEffect(() => {
@@ -648,7 +654,9 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
 
         contactFlowActiveRef.current = true;
         try {
-            const whatsappTab = reservePropertyWhatsAppTab(property.propertyNumber);
+            const whatsappTab = otpWhatsAppTabRef.current
+                || reservePropertyWhatsAppTab(property.propertyNumber);
+            otpWhatsAppTabRef.current = null;
             if (!whatsappTab) {
                 throw new Error(
                     "المتصفح منع فتح واتساب في علامة جديدة. اسمح بالنوافذ المنبثقة ثم حاول مجدداً.",
@@ -676,6 +684,22 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
         } finally {
             contactFlowActiveRef.current = false;
         }
+    };
+
+    const prepareOtpWhatsAppTab = () => {
+        closeReservedWhatsAppTab(otpWhatsAppTabRef.current);
+        const whatsappTab = reservePropertyWhatsAppTab(property.propertyNumber);
+        if (!whatsappTab) {
+            throw new Error(
+                "المتصفح منع فتح واتساب في علامة جديدة. اسمح بالنوافذ المنبثقة ثم حاول مجدداً.",
+            );
+        }
+        otpWhatsAppTabRef.current = whatsappTab;
+    };
+
+    const discardOtpWhatsAppTab = () => {
+        closeReservedWhatsAppTab(otpWhatsAppTabRef.current);
+        otpWhatsAppTabRef.current = null;
     };
 
     const handleShare = async () => {
@@ -734,6 +758,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 isSubmitting={isSending}
                 mode="contact"
                 returnFocusRef={contactButtonRef}
+                onBeforeCodeVerification={prepareOtpWhatsAppTab}
+                onCodeVerificationAborted={discardOtpWhatsAppTab}
             />
 
             {whatsappFallbackUrl && (

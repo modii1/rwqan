@@ -228,6 +228,10 @@ export const contactIdentitySessionSchema = z.object({
   // Optional only so sessions issued before this field existed remain valid.
   visitorId: z.string().optional(),
   clientPhone: z.string(),
+  // Only sessions issued after a successful customer-phone OTP may be used.
+  // Optional fields let the resolver safely reject legacy unverified records.
+  verifiedAt: z.string().optional(),
+  verificationVersion: z.number().int().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   expiresAt: z.string(),
@@ -236,6 +240,45 @@ export const contactIdentitySessionSchema = z.object({
 });
 
 export type ContactIdentitySession = z.infer<typeof contactIdentitySessionSchema>;
+
+// =========================
+// Customer Phone OTP Challenges
+// =========================
+// Phone numbers, IP addresses, and OTP values are deliberately absent from
+// these documents. Only domain-separated HMAC digests are persisted.
+export const customerPhoneOtpChallengeSchema = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  schemaVersion: z.literal(1),
+  phoneSubject: z.string().regex(/^[a-f0-9]{64}$/),
+  codeHash: z.string().regex(/^[a-f0-9]{64}$/),
+  attemptCount: z.number().int().min(0).max(5),
+  maxAttempts: z.number().int().min(1).max(5),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  consumedAt: z.string().datetime().nullable(),
+  exhaustedAt: z.string().datetime().nullable(),
+  // Firestore Timestamp-compatible field used by scheduled/TTL cleanup.
+  expiresAtTtl: z.date(),
+}).strict();
+
+export type CustomerPhoneOtpChallenge = z.infer<
+  typeof customerPhoneOtpChallengeSchema
+>;
+
+export const customerPhoneOtpIssueLimitSchema = z.object({
+  id: z.string(),
+  scope: z.enum(["ip", "phone"]),
+  windowStartedAt: z.number().int().nonnegative(),
+  issueCount: z.number().int().nonnegative(),
+  updatedAt: z.string().datetime(),
+  // Firestore Timestamp-compatible field used by scheduled/TTL cleanup.
+  expiresAtTtl: z.date(),
+}).strict();
+
+export type CustomerPhoneOtpIssueLimit = z.infer<
+  typeof customerPhoneOtpIssueLimitSchema
+>;
 
 // =========================
 // Suggestion Schema (الاقتراحات)

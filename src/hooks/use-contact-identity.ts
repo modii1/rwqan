@@ -13,7 +13,24 @@ export interface ContactIdentity {
   maskedPhone: string | null;
 }
 
+export interface ContactIdentityChallenge {
+  alreadyVerified: boolean;
+  challengeId?: string;
+  maskedPhone: string;
+  expiresInSeconds?: number;
+  identity?: ContactIdentity;
+}
+
+export interface VerifyContactIdentityCodeInput {
+  challengeId: string;
+  code: string;
+  clientPhone: string;
+}
+
 export const CONTACT_IDENTITY_QUERY_KEY = ["/api/contact-identity"] as const;
+export const CUSTOMER_BOOKINGS_QUERY_KEY = ["customer-bookings"] as const;
+export const CUSTOMER_BOOKING_SESSION_REVISION_STORAGE_KEY =
+  "rwqan-customer-booking-session-revision";
 
 export const EMPTY_CONTACT_IDENTITY: ContactIdentity = {
   kind: "none",
@@ -49,6 +66,21 @@ function syncContactIdentityHint(identity: ContactIdentity): void {
     } else {
       window.localStorage.removeItem(CONTACT_IDENTITY_HINT_STORAGE_KEY);
     }
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
+
+export function broadcastCustomerBookingSessionChange(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const nonce = typeof window.crypto?.randomUUID === "function"
+      ? window.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    window.localStorage.setItem(
+      CUSTOMER_BOOKING_SESSION_REVISION_STORAGE_KEY,
+      `${Date.now()}-${nonce}`,
+    );
   } catch {
     // Storage can be unavailable in private/restricted browser contexts.
   }
@@ -96,8 +128,17 @@ export async function commitContactIdentityCache(
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
     exact: true,
   });
+  await queryClient.cancelQueries({
+    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+    exact: true,
+  });
+  await queryClient.resetQueries({
+    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+    exact: true,
+  });
   queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
   syncContactIdentityHint(identity);
+  broadcastCustomerBookingSessionChange();
 }
 
 export async function commitContactIdentityStorageHint(
@@ -107,6 +148,14 @@ export async function commitContactIdentityStorageHint(
   const identity = parseContactIdentityHint(serializedHint) || EMPTY_CONTACT_IDENTITY;
   await queryClient.cancelQueries({
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
+    exact: true,
+  });
+  await queryClient.cancelQueries({
+    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+    exact: true,
+  });
+  await queryClient.resetQueries({
+    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
     exact: true,
   });
   queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
@@ -142,6 +191,95 @@ function parseIdentity(payload: unknown): ContactIdentity {
   };
 }
 
+function parseClientIdentity(payload: unknown, fallback: string): ContactIdentity {
+  const identity = parseIdentity(payload);
+  if (identity.kind !== "client" || !identity.maskedPhone) {
+    throw new Error(fallback);
+  }
+  return identity;
+}
+
+type ContactIdentityFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export async function requestContactIdentityCode(
+  clientPhone: string,
+  fetcher: ContactIdentityFetch = fetch,
+): Promise<ContactIdentityChallenge> {
+  const response = await fetcher("/api/contact-identity/challenge", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientPhone }),
+  });
+  const payload = await readJson(response);
+
+  if (!response.ok) {
+    throw new Error(getApiError(payload, "تعذر إرسال رمز التحقق"));
+  }
+  if (!payload || typeof payload !== "object") {
+    throw new Error("تعذر تأكيد إرسال رمز التحقق");
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.alreadyVerified !== "boolean") {
+    throw new Error("تعذر تأكيد إرسال رمز التحقق");
+  }
+  const maskedPhone = typeof record.maskedPhone === "string"
+    ? record.maskedPhone.trim()
+    : "";
+  if (!maskedPhone) {
+    throw new Error("تعذر تأكيد إرسال رمز التحقق");
+  }
+
+  const challengeId = typeof record.challengeId === "string"
+    ? record.challengeId.trim()
+    : "";
+  if (!record.alreadyVerified && !challengeId) {
+    throw new Error("تعذر تأكيد إرسال رمز التحقق");
+  }
+
+  const identity = record.identity === undefined
+    ? undefined
+    : parseClientIdentity(record.identity, "تعذر تأكيد رقم التواصل");
+  const expiresInSeconds = Number(record.expiresInSeconds);
+  return {
+    alreadyVerified: record.alreadyVerified,
+    ...(challengeId ? { challengeId } : {}),
+    maskedPhone,
+    ...(Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+      ? { expiresInSeconds: Math.floor(expiresInSeconds) }
+      : {}),
+    ...(identity ? { identity } : {}),
+  };
+}
+
+export async function verifyContactIdentityCode(
+  input: VerifyContactIdentityCodeInput,
+  fetcher: ContactIdentityFetch = fetch,
+): Promise<ContactIdentity> {
+  const response = await fetcher("/api/contact-identity/verify", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      challengeId: input.challengeId,
+      code: input.code,
+      clientPhone: input.clientPhone,
+    }),
+  });
+  const payload = await readJson(response);
+
+  if (!response.ok) {
+    throw new Error(getApiError(payload, "رمز التحقق غير صحيح أو منتهي"));
+  }
+  return parseClientIdentity(payload, "تعذر تأكيد رقم التواصل");
+}
+
 async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdentity> {
   const hintAtRequestStart = readSerializedContactIdentityHint();
   const response = await fetch("/api/contact-identity", {
@@ -170,26 +308,6 @@ async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdenti
   return identity;
 }
 
-async function saveContactIdentity(clientPhone: string): Promise<ContactIdentity> {
-  const response = await fetch("/api/contact-identity", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientPhone }),
-  });
-  const payload = await readJson(response);
-
-  if (!response.ok) {
-    throw new Error(getApiError(payload, "تعذر حفظ رقم التواصل"));
-  }
-
-  const identity = parseIdentity(payload);
-  if (identity.kind !== "client") {
-    throw new Error("تعذر تأكيد حفظ رقم التواصل");
-  }
-  return identity;
-}
-
 async function deleteContactIdentity(): Promise<void> {
   const response = await fetch("/api/contact-identity", {
     method: "DELETE",
@@ -207,8 +325,16 @@ export function useContactIdentityQuery() {
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== CONTACT_IDENTITY_HINT_STORAGE_KEY) return;
-      void commitContactIdentityStorageHint(queryClient, event.newValue);
+      if (event.key === CONTACT_IDENTITY_HINT_STORAGE_KEY) {
+        void commitContactIdentityStorageHint(queryClient, event.newValue);
+        return;
+      }
+      if (event.key === CUSTOMER_BOOKING_SESSION_REVISION_STORAGE_KEY) {
+        void queryClient.resetQueries({
+          queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+          exact: true,
+        });
+      }
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -226,11 +352,37 @@ export function useContactIdentityQuery() {
   });
 }
 
-export function useSaveContactIdentity() {
+export function useRequestContactIdentityCode() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: saveContactIdentity,
+    mutationFn: (clientPhone: string) => requestContactIdentityCode(clientPhone),
+    onSuccess: async (challenge) => {
+      if (!challenge.alreadyVerified) return;
+      if (challenge.identity) {
+        await commitContactIdentityCache(queryClient, challenge.identity);
+        return;
+      }
+
+      await queryClient.resetQueries({
+        queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+        exact: true,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: CONTACT_IDENTITY_QUERY_KEY,
+        exact: true,
+      });
+      broadcastCustomerBookingSessionChange();
+    },
+  });
+}
+
+export function useVerifyContactIdentityCode() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: VerifyContactIdentityCodeInput) =>
+      verifyContactIdentityCode(input),
     onMutate: async () => {
       await queryClient.cancelQueries({
         queryKey: CONTACT_IDENTITY_QUERY_KEY,

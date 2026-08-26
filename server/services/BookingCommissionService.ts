@@ -56,7 +56,10 @@ import type {
   BookingPublicRow,
 } from "./BookingCommissionTypes";
 import { firebaseService } from "../firebaseService";
-import { normalizeWhatsAppDestination } from "../../shared/phone";
+import {
+  normalizeSaudiMobilePhone,
+  normalizeWhatsAppDestination,
+} from "../../shared/phone";
 import { notificationService } from "./NotificationService";
 import {
   PaymobIntentionError,
@@ -653,20 +656,58 @@ export class BookingCommissionService {
     };
   }
 
-  async getCustomerBookingsFromSession(token: string) {
+  async getCustomerBookingsFromSession(
+    token: string,
+    expectedCustomerPhone?: string,
+  ) {
     const verified = this.verifyCustomerToken(token);
     const anchor = await bookingCommissionStore.requireCurrentFreeEligibility(
       verified.bookingId,
     );
-    const bookings = await bookingCommissionStore.listBookingsForCustomer(
+    if (
+      expectedCustomerPhone &&
+      this.createCustomerSubject(expectedCustomerPhone) !== anchor.customerSubject
+    ) {
+      throw new BookingWorkflowError(
+        "CUSTOMER_BOOKING_SESSION_REQUIRED",
+        "افتح رابط المتابعة المرسل إلى واتساب لعرض الحجوزات",
+        401,
+      );
+    }
+    return this.getCustomerBookingsForSubject(
       anchor.customerSubject,
+      anchor.customerPhone,
+    );
+  }
+
+  async getCustomerBookingsForVerifiedPhone(customerPhone: string) {
+    const normalizedPhone = normalizeSaudiMobilePhone(customerPhone);
+    if (!normalizedPhone) {
+      throw new BookingWorkflowError(
+        "CUSTOMER_BOOKING_SESSION_REQUIRED",
+        "افتح رابط المتابعة المرسل إلى واتساب لعرض الحجوزات",
+        401,
+      );
+    }
+    return this.getCustomerBookingsForSubject(
+      this.createCustomerSubject(normalizedPhone),
+      normalizedPhone,
+    );
+  }
+
+  private async getCustomerBookingsForSubject(
+    customerSubject: string,
+    customerPhone: string,
+  ) {
+    const bookings = await bookingCommissionStore.listBookingsForCustomer(
+      customerSubject,
     );
     const eligibility = await Promise.all(
       bookings.map((booking) =>
         bookingCommissionStore.isBookingCurrentlyFreeEligible(booking)),
     );
     return {
-      identity: { maskedPhone: maskContactPhone(anchor.customerPhone) },
+      identity: { maskedPhone: maskContactPhone(customerPhone) },
       bookings: bookings
         .filter((_, index) => eligibility[index])
         .map(publicRow),

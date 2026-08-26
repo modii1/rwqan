@@ -2,7 +2,7 @@
  * Auth Routes - Login, logout, password reset, session checks
  */
 import { createHmac, randomBytes } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import { authService } from "../services";
 import { firebaseService } from "../firebaseService";
 import {
@@ -11,6 +11,13 @@ import {
   AdminLoginRateLimiter,
 } from "../services/AdminLoginRateLimiter";
 import { isSameOriginRequest } from "../utils/requestOrigin";
+import { getContactIdentityCookieToken } from "../utils/contactIdentityRequest";
+import {
+  CONTACT_IDENTITY_COOKIE_NAME,
+  contactIdentityService,
+  getContactIdentityClearCookieOptions,
+} from "../services/ContactIdentityService";
+import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
 import { requireOwner } from "./middleware";
 
 const router = Router();
@@ -26,6 +33,30 @@ function adminLoginClientKey(req: Request): string {
     .digest("hex");
 }
 
+async function clearCustomerAccessForPrivilegedLogin(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const contactToken = getContactIdentityCookieToken(req);
+  res.clearCookie(
+    CONTACT_IDENTITY_COOKIE_NAME,
+    getContactIdentityClearCookieOptions(),
+  );
+  res.clearCookie(BOOKING_CUSTOMER_SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
+
+  try {
+    await contactIdentityService.revoke(contactToken);
+  } catch (error) {
+    // Privileged login must still succeed if cleanup is temporarily unavailable.
+    console.error("Customer identity cleanup during privileged login failed:", error);
+  }
+}
+
 // ======================
 // OWNER LOGIN/LOGOUT
 // ======================
@@ -35,6 +66,7 @@ router.post("/api/owner/login", async (req, res) => {
   if (!valid)
     return res.status(401).json({ error: "Invalid Credentials" });
 
+  await clearCustomerAccessForPrivilegedLogin(req, res);
   (req.session as any).propertyNumber = propertyNumber;
   req.session.save((err: any) => {
     if (err) return res.status(500).json({ error: "Session save failed" });
@@ -101,6 +133,7 @@ router.post("/api/admin/login", async (req, res) => {
   } catch (error) {
     console.error("Admin login rate-limit cleanup error:", error);
   }
+  await clearCustomerAccessForPrivilegedLogin(req, res);
   (req.session as any).isAdmin = true;
   req.session.save((err: any) => {
     if (err) return res.status(500).json({ error: "Session save failed" });

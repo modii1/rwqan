@@ -39,6 +39,10 @@ test("central admin boundary protects modular routes without hiding auth or publ
     assert.equal(bookingSettings.status, 401);
     assert.deepEqual(await bookingSettings.json(), { error: "Admin Login Required" });
 
+    const customers = await fetch(`${baseUrl}/api/admin/customers`);
+    assert.equal(customers.status, 401);
+    assert.deepEqual(await customers.json(), { error: "Admin Login Required" });
+
     const customerWhatsApp = await fetch(
       `${baseUrl}/api/admin/booking-commissions/BOOK-PRIVATE/customer-whatsapp`,
       { redirect: "manual" },

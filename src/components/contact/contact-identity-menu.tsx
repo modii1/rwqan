@@ -4,10 +4,7 @@ import { useRef, useState } from "react";
 import { CalendarCheck2, ChevronDown, LogIn, LogOut, Pencil, UserRoundCheck } from "lucide-react";
 import Link from "next/link";
 import type { ContactIdentity } from "@/hooks/use-contact-identity";
-import {
-  useDeleteContactIdentity,
-  useSaveContactIdentity,
-} from "@/hooks/use-contact-identity";
+import { useDeleteContactIdentity } from "@/hooks/use-contact-identity";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,11 +25,9 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
   const { toast } = useToast();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [isChangeDialogOpen, setIsChangeDialogOpen] = useState(false);
-  const saveIdentity = useSaveContactIdentity();
   const deleteIdentity = useDeleteContactIdentity();
 
-  const handleChangePhone = async (clientPhone: string) => {
-    await saveIdentity.mutateAsync(clientPhone);
+  const handleChangePhone = async (_clientPhone: string) => {
     setIsChangeDialogOpen(false);
     toast({
       title: "تم تحديث رقم التواصل",
@@ -118,7 +113,6 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
         open={isChangeDialogOpen}
         onOpenChange={setIsChangeDialogOpen}
         onSubmit={handleChangePhone}
-        isSubmitting={saveIdentity.isPending}
         mode="change"
         currentMaskedPhone={identity.maskedPhone}
         returnFocusRef={triggerRef}

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CalendarCheck2,
@@ -34,6 +34,10 @@ import {
   sarInputFromHalalas,
 } from "./booking-price-options";
 import { CustomerQuestionnaireFacts } from "./customer-questionnaire-facts";
+import {
+  broadcastCustomerBookingSessionChange,
+  CUSTOMER_BOOKINGS_QUERY_KEY,
+} from "@/hooks/use-contact-identity";
 
 interface FollowupBooking {
   id: string;
@@ -79,6 +83,7 @@ function normalizePriceInput(value: string): string {
 }
 
 export default function BookingFollowupClient({ token }: { token: string }) {
+  const queryClient = useQueryClient();
   const [bookedLocally, setBookedLocally] = useState(false);
   const [declinedLocally, setDeclinedLocally] = useState(false);
   const [completedQuestionnaire, setCompletedQuestionnaire] = useState<BookingQuestionnaire | null>(null);
@@ -96,8 +101,20 @@ export default function BookingFollowupClient({ token }: { token: string }) {
     queryFn: () => bookingApiRequest<FollowupPayload>(`/api/booking-followups/${encodeURIComponent(token)}`),
     enabled: Boolean(token),
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    if (!query.isSuccess || query.isFetching || query.dataUpdatedAt <= 0) return;
+    void queryClient.resetQueries({
+      queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+      exact: true,
+    });
+    broadcastCustomerBookingSessionChange();
+  }, [query.dataUpdatedAt, query.isFetching, query.isSuccess, queryClient, token]);
 
   const booking = query.data?.booking;
   const currentQuestionnaire = completedQuestionnaire || booking?.questionnaire || null;

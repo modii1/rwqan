@@ -24,6 +24,7 @@ export type RememberedContactIdentity = {
   clientPhone: string;
   sessionId: string;
   visitorId: string;
+  verifiedAt: string;
   expiresAt: string;
 };
 
@@ -93,25 +94,14 @@ export class ContactIdentityService {
       .digest("hex");
   }
 
-  async issue(
+  async issueVerified(
     value: unknown,
     previousToken?: string,
-    issueLimitKey?: string,
   ): Promise<IssuedContactIdentity> {
     const clientPhone = normalizeSaudiMobilePhone(value);
     if (!clientPhone) throw new RangeError("رقم الجوال غير صحيح");
 
     const now = this.now();
-    if (issueLimitKey) {
-      const rateLimit = await this.store.consumeContactIdentityIssueLimit(
-        issueLimitKey,
-        now,
-        CONTACT_IDENTITY_ISSUE_WINDOW_MS,
-        CONTACT_IDENTITY_MAX_ISSUES_PER_WINDOW,
-      );
-      if (!rateLimit.allowed) throw new ContactIdentityRateLimitError(rateLimit.retryAfterMs);
-    }
-
     const token = this.createToken();
     if (!this.isTokenWellFormed(token)) {
       throw new Error("Failed to create a valid contact identity token");
@@ -123,10 +113,13 @@ export class ContactIdentityService {
     if (!this.isVisitorIdWellFormed(visitorId)) {
       throw new Error("Failed to create a valid contact visitor ID");
     }
+    const verifiedAt = new Date(now).toISOString();
     const session: ContactIdentitySession = {
       id: sessionId,
       visitorId,
       clientPhone,
+      verifiedAt,
+      verificationVersion: 1,
       createdAt: new Date(now).toISOString(),
       updatedAt: new Date(now).toISOString(),
       expiresAt: new Date(now + CONTACT_IDENTITY_MAX_AGE_MS).toISOString(),
@@ -138,7 +131,14 @@ export class ContactIdentityService {
       : undefined;
     await this.store.replaceContactIdentitySession(session, previousId);
 
-    return { token, clientPhone, sessionId, visitorId, expiresAt: session.expiresAt };
+    return {
+      token,
+      clientPhone,
+      sessionId,
+      visitorId,
+      verifiedAt,
+      expiresAt: session.expiresAt,
+    };
   }
 
   async resolve(token: unknown): Promise<RememberedContactIdentity | null> {
@@ -149,8 +149,15 @@ export class ContactIdentityService {
     if (!session) return null;
 
     const expiresAt = Date.parse(session.expiresAt);
+    const verifiedAt = Date.parse(String(session.verifiedAt || ""));
     const clientPhone = normalizeSaudiMobilePhone(session.clientPhone);
-    if (!clientPhone || !Number.isFinite(expiresAt) || expiresAt <= this.now()) {
+    if (
+      !clientPhone ||
+      session.verificationVersion !== 1 ||
+      !Number.isFinite(verifiedAt) ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt <= this.now()
+    ) {
       try {
         await this.store.deleteContactIdentitySession(sessionId);
       } catch (error) {
@@ -166,7 +173,13 @@ export class ContactIdentityService {
       ? session.visitorId!
       : sessionId;
 
-    return { clientPhone, sessionId, visitorId, expiresAt: session.expiresAt };
+    return {
+      clientPhone,
+      sessionId,
+      visitorId,
+      verifiedAt: new Date(verifiedAt).toISOString(),
+      expiresAt: session.expiresAt,
+    };
   }
 
   async revoke(token: unknown): Promise<void> {

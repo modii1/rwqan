@@ -188,6 +188,9 @@ function fallbackStatusLabel(value: unknown): string {
 
 export function getBookingStatusMeta(value: unknown): { label: string; tone: StatusTone } {
   const status = normalizeStatus(value);
+  if (status === "contact_only") {
+    return { label: "طلب تواصل", tone: "blue" };
+  }
   if (status === "expired") {
     return { label: "انتهت مهلة الرد", tone: "red" };
   }

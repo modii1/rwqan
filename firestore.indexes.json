@@ -27,6 +27,24 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "contact_identity_sessions",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "customer_phone_otp_challenges",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "customer_phone_otp_issue_limits",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "booking_notification_quotas",
       "fieldPath": "expiresAtTtl",
       "ttl": true,

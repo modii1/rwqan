@@ -5,10 +5,11 @@ import cookieParser from "cookie-parser";
 import express from "express";
 import adminBookingRoutes from "../routes/admin/bookings";
 import bookingRoutes from "../routes/bookings";
+import { bookingCommissionService } from "./BookingCommissionService";
 import {
-  BOOKING_CUSTOMER_SESSION_COOKIE,
-  bookingCommissionService,
-} from "./BookingCommissionService";
+  CONTACT_IDENTITY_COOKIE_NAME,
+  contactIdentityService,
+} from "./ContactIdentityService";
 import {
   BOOKING_OWNER_NOTICE_RETRY_MS,
   BookingCommissionStore,
@@ -252,6 +253,7 @@ async function withBookingReadServer(
 
 test("follow-up, customer profile, and admin dashboard reads never dispatch or mutate outbox jobs", async () => {
   const previousSecret = process.env.SESSION_SECRET;
+  const originalResolveContactIdentity = contactIdentityService.resolve;
   const store = bookingCommissionStore as any;
   const originals = {
     markCustomerOpened: store.markCustomerOpened,
@@ -289,6 +291,15 @@ test("follow-up, customer profile, and admin dashboard reads never dispatch or m
 
   try {
     process.env.SESSION_SECRET = "once-only-read-test-secret-value-123456789";
+    (contactIdentityService as any).resolve = async (token: unknown) => token === "verified-profile-token"
+      ? {
+          clientPhone: booking.customerPhone,
+          sessionId: "verified-profile-session",
+          visitorId: "verified-profile-visitor",
+          verifiedAt: now.toISOString(),
+          expiresAt: new Date(now.getTime() + 60_000).toISOString(),
+        }
+      : null;
     store.markCustomerOpened = async () => {
       reads.opened += 1;
       return booking;
@@ -321,7 +332,7 @@ test("follow-up, customer profile, and admin dashboard reads never dispatch or m
 
         const profileResponse = await fetch(`${baseUrl}/api/customer/bookings`, {
           headers: {
-            cookie: `${BOOKING_CUSTOMER_SESSION_COOKIE}=${token}`,
+            cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=verified-profile-token`,
           },
         });
         assert.equal(profileResponse.status, 200);
@@ -340,6 +351,7 @@ test("follow-up, customer profile, and admin dashboard reads never dispatch or m
     for (const [name, original] of Object.entries(originals)) {
       store[name] = original;
     }
+    contactIdentityService.resolve = originalResolveContactIdentity;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }

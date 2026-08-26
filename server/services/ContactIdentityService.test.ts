@@ -3,8 +3,6 @@ import test from "node:test";
 import type { ContactIdentitySession } from "../../shared/schema";
 import {
   CONTACT_IDENTITY_MAX_AGE_MS,
-  CONTACT_IDENTITY_MAX_ISSUES_PER_WINDOW,
-  ContactIdentityRateLimitError,
   ContactIdentityService,
   getContactIdentityCookieOptions,
   maskContactPhone,
@@ -53,7 +51,7 @@ test("issues an opaque remembered-contact token and resolves the canonical phone
     createVisitorId: () => VISITOR_A,
   });
 
-  const issued = await service.issue("+966 51 234 5678");
+  const issued = await service.issueVerified("+966 51 234 5678");
   assert.equal(issued.token, TOKEN_A);
   assert.equal(issued.clientPhone, "512345678");
   assert.equal(issued.visitorId, VISITOR_A);
@@ -70,6 +68,7 @@ test("issues an opaque remembered-contact token and resolves the canonical phone
     clientPhone: "512345678",
     sessionId: service.hashToken(TOKEN_A),
     visitorId: VISITOR_A,
+    verifiedAt: new Date(now).toISOString(),
     expiresAt: issued.expiresAt,
   });
 });
@@ -86,8 +85,8 @@ test("rotates the token when the contact phone changes", async () => {
     },
   });
 
-  await service.issue("0512345678");
-  const changed = await service.issue("0598765432", TOKEN_A);
+  await service.issueVerified("0512345678");
+  const changed = await service.issueVerified("0598765432", TOKEN_A);
 
   assert.equal(changed.token, TOKEN_B);
   assert.equal(changed.visitorId, VISITOR_A);
@@ -98,13 +97,12 @@ test("rotates the token when the contact phone changes", async () => {
   assert.equal(store.previousIds.at(-1), service.hashToken(TOKEN_A));
 });
 
-test("legacy sessions keep their token-hash visitor identity across rotation", async () => {
+test("legacy unverified sessions are rejected and cannot authorize a customer", async () => {
   const store = new MemoryContactIdentityStore();
   const now = Date.parse("2026-07-22T12:00:00.000Z");
-  const tokens = [TOKEN_B];
   const service = new ContactIdentityService(store, {
     now: () => now,
-    createToken: () => tokens.shift()!,
+    createToken: () => TOKEN_B,
     createVisitorId: () => VISITOR_A,
   });
   const legacySessionId = service.hashToken(TOKEN_A);
@@ -117,10 +115,12 @@ test("legacy sessions keep their token-hash visitor identity across rotation", a
     expiresAtTtl: new Date(now + CONTACT_IDENTITY_MAX_AGE_MS),
   });
 
-  assert.equal((await service.resolve(TOKEN_A))?.visitorId, legacySessionId);
-  const rotated = await service.issue("0598765432", TOKEN_A);
-  assert.equal(rotated.visitorId, legacySessionId);
-  assert.equal(store.sessions.get(service.hashToken(TOKEN_B))?.visitorId, legacySessionId);
+  assert.equal(await service.resolve(TOKEN_A), null);
+  assert.equal(store.sessions.has(legacySessionId), false);
+
+  const verified = await service.issueVerified("0598765432", TOKEN_A);
+  assert.equal(verified.visitorId, VISITOR_A);
+  assert.equal(store.sessions.get(service.hashToken(TOKEN_B))?.verificationVersion, 1);
 });
 
 test("rejects malformed, expired, and invalid-phone identities", async () => {
@@ -132,10 +132,10 @@ test("rejects malformed, expired, and invalid-phone identities", async () => {
     createVisitorId: () => VISITOR_A,
   });
 
-  await assert.rejects(() => service.issue("0412345678"), RangeError);
+  await assert.rejects(() => service.issueVerified("0412345678"), RangeError);
   assert.equal(await service.resolve("not-a-token"), null);
 
-  await service.issue("0512345678");
+  await service.issueVerified("0512345678");
   now += CONTACT_IDENTITY_MAX_AGE_MS;
   assert.equal(await service.resolve(TOKEN_A), null);
   assert.equal(store.sessions.size, 0, "expired server records are deleted lazily");
@@ -148,7 +148,7 @@ test("revocation is idempotent and phone masking never returns the full number",
     createVisitorId: () => VISITOR_A,
   });
 
-  await service.issue("0512345678");
+  await service.issueVerified("0512345678");
   await service.revoke(TOKEN_A);
   await service.revoke(TOKEN_A);
 
@@ -163,20 +163,4 @@ test("contact identity cookies are protected and persist for ninety days", () =>
   assert.equal(options.sameSite, "lax");
   assert.equal(options.path, "/");
   assert.equal(options.maxAge, CONTACT_IDENTITY_MAX_AGE_MS);
-});
-
-test("persistent issuance limits stop unbounded contact-session creation", async () => {
-  const store = new MemoryContactIdentityStore();
-  store.issueLimitAllowed = false;
-  const service = new ContactIdentityService(store, {
-    createToken: () => TOKEN_A,
-    createVisitorId: () => VISITOR_A,
-  });
-
-  await assert.rejects(
-    () => service.issue("0512345678", undefined, "hashed-ip"),
-    ContactIdentityRateLimitError,
-  );
-  assert.equal(store.sessions.size, 0);
-  assert.equal(CONTACT_IDENTITY_MAX_ISSUES_PER_WINDOW, 10);
 });

@@ -1514,7 +1514,7 @@ function AdminFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CustomerWhatsAppLink({
+export function CustomerWhatsAppLink({
   bookingId,
   nextAllowedAt,
   templateVariants,

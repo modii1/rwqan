@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { createHmac } from "node:crypto";
 import { analyticsService, propertyService, notificationService, subscriptionService } from "../services";
 import { firebaseService } from "../firebaseService";
@@ -12,20 +12,20 @@ import type {
 import { isActivePremiumSubscription } from "../../shared/subscriptionType";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
-  ContactIdentityRateLimitError,
   contactIdentityService,
   getContactIdentityClearCookieOptions,
-  getContactIdentityCookieOptions,
   maskContactPhone,
 } from "../services/ContactIdentityService";
 import {
   getContactIdentityCookieToken,
-  getContactIdentityIssueLimitKeyForRequest,
   getOwnerContactPhone,
 } from "../utils/contactIdentityRequest";
 import { isSameOriginRequest } from "../utils/requestOrigin";
 import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
-import { bookingCommissionService } from "../services/BookingCommissionService";
+import {
+  BOOKING_CUSTOMER_SESSION_COOKIE,
+  bookingCommissionService,
+} from "../services/BookingCommissionService";
 
 const router = Router();
 
@@ -35,6 +35,15 @@ export const FREE_PROPERTY_DAILY_CONTACT_LIMIT = 3;
 
 // عدد الطلبات من كل IP لكل عقار (للتوافق مع حقل التحليلات القديم فقط).
 const ipPropertyCounter = new Map<string, Map<string, number>>();
+
+function clearCustomerBookingSession(res: Response): void {
+  res.clearCookie(BOOKING_CUSTOMER_SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
+}
 
 type ContactEventBase = Omit<InsertContactEvent, "outcome" | "requestCode">;
 
@@ -219,52 +228,41 @@ router.post("/api/requests/smart", async (req, res) => {
 
       if (cookieToken && !rememberedIdentity) {
         res.clearCookie(CONTACT_IDENTITY_COOKIE_NAME, getContactIdentityClearCookieOptions());
+        clearCustomerBookingSession(res);
       }
 
       if (rememberedIdentity) {
-        clientPhone = rememberedIdentity.clientPhone;
-        contactVisitorId = rememberedIdentity.visitorId;
-      } else if (submittedPhone) {
-        try {
-          clientPhone = normalizePhoneNumber(submittedPhone);
-        } catch (error: any) {
-          return res.status(400).json({
-            code: "INVALID_CONTACT_PHONE",
-            error: error?.message || "رقم الجوال غير صحيح",
-          });
-        }
-
-        try {
-          const issued = await contactIdentityService.issue(
-            clientPhone,
-            cookieToken,
-            getContactIdentityIssueLimitKeyForRequest(req),
-          );
-          contactVisitorId = issued.visitorId;
-          res.cookie(CONTACT_IDENTITY_COOKIE_NAME, issued.token, getContactIdentityCookieOptions());
-        } catch (error) {
-          if (error instanceof ContactIdentityRateLimitError) {
-            const retryAfterSeconds = Math.ceil(error.retryAfterMs / 1000);
-            res.set("Retry-After", String(retryAfterSeconds));
-            return res.status(429).json({
-              code: "CONTACT_IDENTITY_RATE_LIMIT",
-              error: error.message,
-              retryAfterSeconds,
+        if (submittedPhone) {
+          let normalizedSubmittedPhone: string;
+          try {
+            normalizedSubmittedPhone = normalizePhoneNumber(submittedPhone);
+          } catch (error: any) {
+            return res.status(400).json({
+              code: "INVALID_CONTACT_PHONE",
+              error: error?.message || "رقم الجوال غير صحيح",
             });
           }
-          console.error("Contact identity issuance error:", error);
-          return res.status(500).json({
-            code: "CONTACT_IDENTITY_SAVE_FAILED",
-            error: "تعذر حفظ رقم التواصل. حاول مرة أخرى.",
-          });
+          if (normalizedSubmittedPhone !== rememberedIdentity.clientPhone) {
+            await recordContactEvent(contactEventBase, "auth_required");
+            return res.status(428).json({
+              code: "CONTACT_PHONE_VERIFICATION_REQUIRED",
+              error: "يجب التحقق من رقم الجوال الجديد قبل استخدامه",
+            });
+          }
         }
+        clientPhone = rememberedIdentity.clientPhone;
+        contactVisitorId = rememberedIdentity.visitorId;
       }
 
       if (!clientPhone) {
         await recordContactEvent(contactEventBase, "auth_required");
         return res.status(428).json({
-          code: "CONTACT_PHONE_REQUIRED",
-          error: "أدخل رقم جوالك للمتابعة إلى واتساب",
+          code: submittedPhone
+            ? "CONTACT_PHONE_VERIFICATION_REQUIRED"
+            : "CONTACT_PHONE_REQUIRED",
+          error: submittedPhone
+            ? "يجب التحقق من رقم الجوال قبل المتابعة إلى واتساب"
+            : "أدخل رقم جوالك للمتابعة إلى واتساب",
         });
       }
     }
