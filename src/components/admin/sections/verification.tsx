@@ -381,7 +381,7 @@ export default function AdminVerificationSection() {
   }
 
   return (
-    <div className="p-4 space-y-6" dir="rtl">
+    <div className="min-w-0 space-y-6 p-2 sm:p-4" dir="rtl">
       {isPropertiesError && data && (
         <div
           role="alert"
@@ -401,11 +401,11 @@ export default function AdminVerificationSection() {
         </div>
       )}
       {/* 📊 الإحصائيات */}
-      <Card className="p-4">
-        <div className="flex justify-between items-center mb-4">
+      <Card className="min-w-0 p-3 sm:p-4">
+        <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-bold text-xl">نظام التحقق من بيانات العقار</h2>
 
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             {/* زر سجل التحقق */}
             <Button
               variant="secondary"
@@ -484,7 +484,7 @@ export default function AdminVerificationSection() {
 
       {/* 🔎 البحث / الفلترة */}
       <div className="flex flex-col md:flex-row gap-3">
-        <div className="flex-1 flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <Search className="w-4 h-4 text-muted-foreground" />
           <Input
             placeholder="بحث برقم العقار، الاسم أو المدينة…"
@@ -574,8 +574,8 @@ export default function AdminVerificationSection() {
       </div>
 
       {/* 🏡 قائمة العقارات */}
-      <Card className="p-4">
-        <div className="space-y-3 max-h-[520px] overflow-auto">
+      <Card className="min-w-0 overflow-hidden p-2 sm:p-4">
+        <div className="max-h-[520px] min-w-0 space-y-3 overflow-x-hidden overflow-y-auto">
           {filtered.length === 0 && (
             <p className="text-sm text-muted-foreground">
               لا توجد عقارات مطابقة للبحث.
@@ -590,12 +590,12 @@ export default function AdminVerificationSection() {
           }) => (
             <Card
               key={property.propertyNumber}
-              className="p-3 flex flex-col gap-2"
+              className="flex min-w-0 max-w-full flex-col gap-2 overflow-hidden p-3"
             >
               {/* ———————————— معلومات العقار ———————————— */}
-              <div className="flex justify-between flex-wrap gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="font-semibold">
                       عقار #{property.propertyNumber}
                     </span>
@@ -634,13 +634,13 @@ export default function AdminVerificationSection() {
                       </Badge>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="break-words text-sm text-muted-foreground">
                     {property.name || "بدون اسم"}
                   </p>
                 </div>
 
                 {/* الحالة + أزرار التحكم */}
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                   <Badge
                     className={
                       imageCount === null

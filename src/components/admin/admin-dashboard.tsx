@@ -148,7 +148,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
 
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-background" dir="rtl">
+    <div className="flex min-h-screen w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-background md:flex-row" dir="rtl">
       {/* Header للموبايل */}
       <div className="md:hidden border-b border-border bg-card p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -389,7 +389,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
       </aside>
 
       {/* المحتوى */}
-      <main className="flex-1 p-3 md:p-6 space-y-4 overflow-auto">
+      <main className="min-w-0 max-w-full flex-1 space-y-4 overflow-x-hidden overflow-y-auto p-3 md:p-6">
         {/* زر الرجوع */}
         {activeSection !== "" && (
           <button
