@@ -18,7 +18,7 @@ import {
 import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
 import { requireAdmin, requireSameOrigin } from "./middleware";
-import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
+import { hasActivePropertyHold } from "../../shared/propertyAvailability";
 
 const router = Router();
 
@@ -27,6 +27,8 @@ export function toPublicProperty(property: any) {
     pin: _pin,
     whatsappNumber: _whatsappNumber,
     commissionHold: _commissionHold,
+    adminAvailabilityHold: _adminAvailabilityHold,
+    commissionHoldOverride: _commissionHoldOverride,
     registrationPlan: _registrationPlan,
     freeCommissionConsent: _freeCommissionConsent,
     ...publicProperty
@@ -90,7 +92,7 @@ router.get("/api/properties", async (_req, res) => {
   try {
     const items = await propertyService.getAll();
     const availableItems = items.filter((property) => {
-      if (hasActiveCommissionHold(property)) return false;
+      if (hasActivePropertyHold(property)) return false;
       if (property.verificationStatus) {
         return property.verificationStatus === "approved";
       }
@@ -125,7 +127,7 @@ router.get("/api/properties/:id", async (req, res) => {
     const p = await propertyService.getByNumber(req.params.id);
     if (!p) return res.status(404).json({ error: "العقار غير موجود" });
 
-    if (hasActiveCommissionHold(p)) {
+    if (hasActivePropertyHold(p)) {
       return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
     }
 
@@ -189,7 +191,15 @@ router.put("/api/properties/:propertyNumber", requireSameOrigin, requireAdmin, a
 
     const changesForNotification: string[] = [];
     for (const key in incoming) {
-      if (key === "pin") continue;
+      if (
+        key === "pin" ||
+        key === "commissionHold" ||
+        key.startsWith("commissionHold.") ||
+        key === "adminAvailabilityHold" ||
+        key.startsWith("adminAvailabilityHold.") ||
+        key === "commissionHoldOverride" ||
+        key.startsWith("commissionHoldOverride.")
+      ) continue;
       if (SHEET_MAP[key]) {
         mapped[SHEET_MAP[key]] = incoming[key];
         const arabicName = Object.entries(SHEET_MAP).find(([_, v]) => v === SHEET_MAP[key])?.[0]?.replace(/[^\u0600-\u06FF\s]/g, '').trim() || key;
@@ -249,8 +259,18 @@ router.post("/api/suggestions", async (req, res) => {
 router.get("/api/properties/:id/seo", async (req, res) => {
   try {
     const { id } = req.params;
+    const property = await propertyService.getByNumber(id);
+    if (
+      !property ||
+      (property.verificationStatus && property.verificationStatus !== "approved")
+    ) {
+      return res.status(404).json({ error: "العقار غير موجود" });
+    }
+    if (hasActivePropertyHold(property)) {
+      return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
+    }
     const seo = await contentService.getPropertySeo(id);
-    res.json(seo || { propertyNumber: id, seoDescription: "", metaTitle: "", keywords: [] });
+    return res.json(seo || { propertyNumber: id, seoDescription: "", metaTitle: "", keywords: [] });
   } catch (err) {
     console.error("Error fetching property SEO:", err);
     res.status(500).json({ error: "فشل في جلب بيانات SEO" });
@@ -274,7 +294,7 @@ router.get("/api/search", async (req, res) => {
     const { search, city, direction, type, facilities, maxPrice } = req.query;
     let items = await propertyService.getAll();
     items = items.filter((p) => {
-      if (hasActiveCommissionHold(p)) return false;
+      if (hasActivePropertyHold(p)) return false;
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });
@@ -376,7 +396,7 @@ router.get("/api/cities", async (_req, res) => {
 
     // Only approved properties
     const approved = items.filter((p) => {
-      if (hasActiveCommissionHold(p)) return false;
+      if (hasActivePropertyHold(p)) return false;
       if (p.verificationStatus) return p.verificationStatus === "approved";
       return true;
     });

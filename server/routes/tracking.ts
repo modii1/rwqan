@@ -21,7 +21,7 @@ import {
   getOwnerContactPhone,
 } from "../utils/contactIdentityRequest";
 import { isSameOriginRequest } from "../utils/requestOrigin";
-import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
+import { hasActivePropertyHold } from "../../shared/propertyAvailability";
 import {
   BOOKING_CUSTOMER_SESSION_COOKIE,
   bookingCommissionService,
@@ -164,7 +164,7 @@ router.post("/api/requests/smart", async (req, res) => {
     if (!property) {
       return res.status(404).json({ error: "العقار غير موجود" });
     }
-    if (hasActiveCommissionHold(property)) {
+    if (hasActivePropertyHold(property)) {
       return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
     }
     if (property.verificationStatus && property.verificationStatus !== "approved") {

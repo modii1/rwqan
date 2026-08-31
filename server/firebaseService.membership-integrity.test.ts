@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AdminPropertyAvailabilityHoldError,
   CommissionHoldOwnerChangeError,
   FirebaseService,
   LinkedPropertyMutationError,
@@ -1107,6 +1108,10 @@ test("property phone transfer is atomically blocked by a commission hold but can
   database.update("properties", "PROP-HELD-PHONE", {
     whatsappNumber: "0501234567",
     commissionHold: { active: true, obligationIds: ["BOOK-1"] },
+    commissionHoldOverride: {
+      obligationIds: ["BOOK-1"],
+      appliedBy: "admin",
+    },
   });
   const service = createService(database);
 
@@ -1395,4 +1400,234 @@ test("direct activation, linked sync, generic updates, and verification cannot b
     database.get("properties", "PROP-LOCKED")?.verificationStatus,
     "pending",
   );
+});
+
+test("a free property can be paused idempotently without creating or changing a subscription", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-FREE-HOLD");
+  const service = createService(database);
+
+  const first = await service.pauseFreePropertyAvailability("PROP-FREE-HOLD");
+  const firstStoredHold = database.get(
+    "properties",
+    "PROP-FREE-HOLD",
+  )?.adminAvailabilityHold;
+  const replay = await service.pauseFreePropertyAvailability("PROP-FREE-HOLD");
+
+  assert.equal(first.changed, true);
+  assert.equal(replay.changed, false);
+  assert.equal(firstStoredHold?.active, true);
+  assert.equal(firstStoredHold?.appliedBy, "admin");
+  assert.equal(
+    database.get("properties", "PROP-FREE-HOLD")
+      ?.adminAvailabilityHold?.appliedAt,
+    firstStoredHold?.appliedAt,
+  );
+  assert.equal(database.get("subscriptions", "SUB-PROP-FREE-HOLD"), undefined);
+});
+
+test("an active premium property cannot use the free-property pause action", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-PREMIUM-HOLD");
+  database.set(
+    "subscriptions",
+    "SUB-PROP-PREMIUM-HOLD",
+    activeSubscription("PROP-PREMIUM-HOLD"),
+  );
+
+  await assert.rejects(
+    () => createService(database).pauseFreePropertyAvailability(
+      "PROP-PREMIUM-HOLD",
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof AdminPropertyAvailabilityHoldError);
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "PROPERTY_NOT_FREE");
+      return true;
+    },
+  );
+  assert.equal(
+    database.get("properties", "PROP-PREMIUM-HOLD")
+      ?.adminAvailabilityHold,
+    undefined,
+  );
+});
+
+test("admin resume releases the manual hold and overrides only current commission obligations", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-MIXED-HOLD");
+  const appliedAt = new Date(Date.now() - 86_400_000).toISOString();
+  database.update("properties", "PROP-MIXED-HOLD", {
+    adminAvailabilityHold: {
+      active: true,
+      appliedAt,
+      updatedAt: appliedAt,
+      appliedBy: "admin",
+    },
+    commissionHold: {
+      active: true,
+      obligationIds: ["BOOK-OLD", "BOOK-CURRENT"],
+      appliedAt,
+      updatedAt: appliedAt,
+    },
+    commissionHoldOverride: {
+      obligationIds: ["BOOK-OLD"],
+      appliedAt,
+      updatedAt: appliedAt,
+      appliedBy: "admin",
+    },
+  });
+  const service = createService(database);
+
+  const initialVersion = `timestamp:${appliedAt}`;
+  const result = await service.resumePropertyAvailability(
+    "PROP-MIXED-HOLD",
+    initialVersion,
+  );
+  const property = database.get("properties", "PROP-MIXED-HOLD");
+
+  assert.equal(result.changed, true);
+  assert.equal(result.manualHoldReleased, true);
+  assert.equal(result.overriddenCommissionObligations, 1);
+  assert.equal(property?.adminAvailabilityHold?.active, false);
+  assert.deepEqual(property?.commissionHold, {
+    active: true,
+    obligationIds: ["BOOK-OLD", "BOOK-CURRENT"],
+    appliedAt,
+    updatedAt: appliedAt,
+  });
+  assert.deepEqual(
+    property?.commissionHoldOverride?.obligationIds,
+    ["BOOK-OLD", "BOOK-CURRENT"],
+  );
+
+  const futureUpdatedAt = new Date().toISOString();
+  database.update("properties", "PROP-MIXED-HOLD", {
+    commissionHold: {
+      ...property?.commissionHold,
+      obligationIds: ["BOOK-OLD", "BOOK-CURRENT", "BOOK-FUTURE"],
+      updatedAt: futureUpdatedAt,
+    },
+  });
+
+  await assert.rejects(
+    () => service.resumePropertyAvailability(
+      "PROP-MIXED-HOLD",
+      initialVersion,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof AdminPropertyAvailabilityHoldError);
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "PROPERTY_HOLD_CHANGED");
+      return true;
+    },
+  );
+  assert.deepEqual(
+    database.get("properties", "PROP-MIXED-HOLD")
+      ?.commissionHoldOverride?.obligationIds,
+    ["BOOK-OLD", "BOOK-CURRENT"],
+  );
+
+  const futureResume = await service.resumePropertyAvailability(
+    "PROP-MIXED-HOLD",
+    `timestamp:${futureUpdatedAt}`,
+  );
+  assert.equal(futureResume.overriddenCommissionObligations, 1);
+  assert.deepEqual(
+    database.get("properties", "PROP-MIXED-HOLD")
+      ?.commissionHoldOverride?.obligationIds,
+    ["BOOK-OLD", "BOOK-CURRENT", "BOOK-FUTURE"],
+  );
+});
+
+test("admin resume handles a legacy empty commission hold idempotently", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-LEGACY-EMPTY-HOLD");
+  database.update("properties", "PROP-LEGACY-EMPTY-HOLD", {
+    commissionHold: {
+      active: true,
+      obligationIds: [],
+    },
+  });
+  const service = createService(database);
+
+  const first = await service.resumePropertyAvailability(
+    "PROP-LEGACY-EMPTY-HOLD",
+    "legacy:[]",
+  );
+  const propertyAfterFirst = database.get(
+    "properties",
+    "PROP-LEGACY-EMPTY-HOLD",
+  );
+  const stampedVersion = propertyAfterFirst?.commissionHold?.updatedAt;
+
+  assert.equal(first.changed, true);
+  assert.equal(first.manualHoldReleased, false);
+  assert.equal(first.overriddenCommissionObligations, 0);
+  assert.equal(typeof stampedVersion, "string");
+  assert.ok(stampedVersion.length > 0);
+  assert.equal(
+    propertyAfterFirst?.commissionHoldOverride?.emptyHoldFingerprint,
+    stampedVersion,
+  );
+
+  const replay = await service.resumePropertyAvailability(
+    "PROP-LEGACY-EMPTY-HOLD",
+    null,
+  );
+  assert.equal(replay.changed, false);
+  assert.deepEqual(
+    database.get("properties", "PROP-LEGACY-EMPTY-HOLD"),
+    propertyAfterFirst,
+  );
+});
+
+test("premium activation and upgrade release only the free-property manual hold", async () => {
+  const database = new FakeFirestore();
+  const appliedAt = new Date(Date.now() - 86_400_000).toISOString();
+  const commissionHold = {
+    active: true,
+    obligationIds: ["BOOK-UNPAID"],
+    appliedAt,
+    updatedAt: appliedAt,
+  };
+  for (const propertyNumber of ["PROP-DIRECT-PREMIUM", "PROP-UPGRADE-PREMIUM"]) {
+    seedProperty(database, propertyNumber);
+    database.update("properties", propertyNumber, {
+      adminAvailabilityHold: {
+        active: true,
+        appliedAt,
+        updatedAt: appliedAt,
+        appliedBy: "admin",
+      },
+      commissionHold,
+    });
+  }
+  const service = createService(database);
+
+  await service.activateSubscription("PROP-DIRECT-PREMIUM", {
+    status: "ساري",
+    subscriptionType: "مميز",
+    packageId: "PKG-GROUP",
+    startDate: new Date().toISOString(),
+    endDate: futureDate(20),
+  });
+  await service.addSubscriptionToSheet(
+    "PROP-UPGRADE-PREMIUM",
+    {
+      packageId: "PKG-GROUP",
+      subscriptionType: "مميز",
+      startDate: new Date().toISOString(),
+      endDate: futureDate(20),
+      paymentId: "PAY-PREMIUM-UPGRADE",
+    },
+    { propertyNumber: "PROP-UPGRADE-PREMIUM" },
+  );
+
+  for (const propertyNumber of ["PROP-DIRECT-PREMIUM", "PROP-UPGRADE-PREMIUM"]) {
+    const property = database.get("properties", propertyNumber);
+    assert.equal(property?.adminAvailabilityHold?.active, false);
+    assert.equal(typeof property?.adminAvailabilityHold?.releasedAt, "string");
+    assert.deepEqual(property?.commissionHold, commissionHold);
+  }
 });

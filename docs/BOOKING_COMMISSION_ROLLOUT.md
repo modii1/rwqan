@@ -119,6 +119,8 @@ The initial owner commission notice has three bounded delivery attempts. If all 
 
 Never clear `commissionHold` directly. General admin property-edit endpoints discard direct `commissionHold` and `commissionHold.*` fields. Resolve an obligation through a verified payment or an admin dispute decision. Duplicate payments and reversals require a provider-side financial review before any refund or collection decision.
 
+The paused-properties admin screen uses a separate `adminAvailabilityHold` for manual free-property pauses. If an administrator explicitly re-enables a commission-held property, the system records a `commissionHoldOverride` for the current obligation IDs without deleting or waiving the commission records. A later unpaid obligation, including a new enforcement cycle for the same booking, makes the property unavailable again. Generic property-edit endpoints must also discard both administrative hold fields; only the dedicated availability workflow may write them.
+
 ## Rollback
 
 - Disable `FEATURE_BOOKING_COMMISSION_ENFORCEMENT` to stop commission notices, reminders, new holds, and automated enforcement while preserving existing financial records.

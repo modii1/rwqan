@@ -74,3 +74,72 @@ test("property writes remove contradictory no-pool data when a pool is selected"
     firebaseService.updateProperty = originalUpdateProperty;
   }
 });
+
+test("generic property edits cannot mutate top-level or dotted availability or commission holds", async () => {
+  const originalGetProperty = firebaseService.getPropertyByNumber;
+  const originalUpdateProperty = firebaseService.updateProperty;
+  let persistedUpdates: Record<string, unknown> = {};
+
+  (firebaseService as any).getPropertyByNumber = async () => ({
+    propertyNumber: "P-HOLD",
+    name: "Before",
+  });
+  (firebaseService as any).updateProperty = async (
+    propertyNumber: string,
+    updates: Record<string, unknown>,
+  ) => {
+    persistedUpdates = updates;
+    return { propertyNumber, ...updates };
+  };
+
+  try {
+    await new PropertyService().update(
+      "P-HOLD",
+      {
+        name: "After",
+        commissionHold: {
+          active: false,
+          obligationIds: [],
+          updatedAt: new Date().toISOString(),
+        },
+        adminAvailabilityHold: {
+          active: false,
+          appliedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          appliedBy: "admin",
+        },
+        commissionHoldOverride: {
+          obligationIds: ["BOOK-1"],
+          appliedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          appliedBy: "admin",
+        },
+        "commissionHold.active": false,
+        "commissionHold.obligationIds": [],
+        "adminAvailabilityHold.active": false,
+        "adminAvailabilityHold.appliedBy": "attacker",
+        "commissionHoldOverride.obligationIds": ["BOOK-2"],
+        "commissionHoldOverride.appliedBy": "attacker",
+      } as any,
+      { skipVerification: true },
+    );
+
+    assert.equal(persistedUpdates.name, "After");
+    for (const protectedKey of [
+      "commissionHold",
+      "adminAvailabilityHold",
+      "commissionHoldOverride",
+      "commissionHold.active",
+      "commissionHold.obligationIds",
+      "adminAvailabilityHold.active",
+      "adminAvailabilityHold.appliedBy",
+      "commissionHoldOverride.obligationIds",
+      "commissionHoldOverride.appliedBy",
+    ]) {
+      assert.equal(protectedKey in persistedUpdates, false, protectedKey);
+    }
+  } finally {
+    firebaseService.getPropertyByNumber = originalGetProperty;
+    firebaseService.updateProperty = originalUpdateProperty;
+  }
+});

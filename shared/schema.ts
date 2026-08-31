@@ -40,6 +40,20 @@ export const propertySchema = z.object({
     updatedAt: z.string(),
     releasedAt: z.string().optional(),
   }).optional(),
+  adminAvailabilityHold: z.object({
+    active: z.boolean(),
+    appliedAt: z.string(),
+    updatedAt: z.string(),
+    releasedAt: z.string().optional(),
+    appliedBy: z.literal("admin"),
+  }).optional(),
+  commissionHoldOverride: z.object({
+    obligationIds: z.array(z.string()).default([]),
+    emptyHoldFingerprint: z.string().optional(),
+    appliedAt: z.string(),
+    updatedAt: z.string(),
+    appliedBy: z.literal("admin"),
+  }).optional(),
   registrationPlan: freeRegistrationPlanSchema.optional(),
   freeCommissionConsent: freeCommissionConsentSchema.optional(),
   driveFolderId: z.string().optional(), // معرف مجلد Google Drive

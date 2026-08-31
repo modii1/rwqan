@@ -29,6 +29,7 @@ import {
 } from "../../shared/booking";
 import type { Subscription } from "../../shared/schema";
 import { isActivePremiumSubscription } from "../../shared/subscriptionType";
+import { hasActivePropertyHold } from "../../shared/propertyAvailability";
 import {
   calculateRemainingDays,
   getEndOfDayRiyadh,
@@ -61,6 +62,42 @@ const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
   "booking_free_workflow_limits_audit";
 const MANUAL_RESEND_AUDIT_COLLECTION =
   "booking_notification_manual_resend_audit";
+
+function buildCommissionHoldAfterRelease(
+  property: Record<string, any>,
+  remainingHoldIds: string[],
+  timestamp: string,
+) {
+  return remainingHoldIds.length > 0
+    ? {
+        ...property.commissionHold,
+        active: true,
+        obligationIds: remainingHoldIds,
+        updatedAt: timestamp,
+      }
+    : {
+        active: false,
+        obligationIds: [],
+        appliedAt: property.commissionHold?.appliedAt,
+        releasedAt: timestamp,
+        updatedAt: timestamp,
+      };
+}
+
+function isAvailableAfterCommissionRelease(
+  property: Record<string, any>,
+  remainingHoldIds: string[],
+  timestamp: string,
+): boolean {
+  return !hasActivePropertyHold({
+    ...property,
+    commissionHold: buildCommissionHoldAfterRelease(
+      property,
+      remainingHoldIds,
+      timestamp,
+    ),
+  });
+}
 
 export const BOOKING_FOLLOW_UP_DELAY_MS =
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT * 60 * 1000;
@@ -1424,7 +1461,7 @@ export class BookingCommissionStore {
       }
       if (
         sourceJob.kind === "property_released" &&
-        propertySnapshot?.data()?.commissionHold?.active === true
+        hasActivePropertyHold(propertySnapshot?.data())
       ) {
         throw new BookingWorkflowError(
           "NOTIFICATION_STATE_CHANGED",
@@ -1931,7 +1968,7 @@ export class BookingCommissionStore {
             booking.isFreeProperty === true &&
             !booking.freeEligibilityRevokedAt &&
             currentPropertySnapshot.exists &&
-            currentPropertySnapshot.data()?.commissionHold?.active !== true &&
+            !hasActivePropertyHold(currentPropertySnapshot.data()) &&
             !releaseJobSnapshot.exists;
           if (ownerNotificationScheduled) {
             transaction.create(releaseJobRef, buildNotificationJob({
@@ -2125,8 +2162,11 @@ export class BookingCommissionStore {
       const remainingHoldIds = activeHoldIds.filter((value: string) => value !== booking.id);
       const obligationReleased =
         booking.complianceStatus === "paused" || activeHoldIds.includes(booking.id);
+      const propertyAvailableAfterResolution =
+        propertySnapshot.exists &&
+        isAvailableAfterCommissionRelease(property, remainingHoldIds, timestamp);
       const propertyReleased =
-        propertySnapshot.exists && obligationReleased && remainingHoldIds.length === 0;
+        obligationReleased && propertyAvailableAfterResolution;
       const updates = {
         commissionStatus: "waived" as const,
         complianceStatus: obligationReleased ? "released" as const : "clear" as const,
@@ -2162,20 +2202,11 @@ export class BookingCommissionStore {
       }
       if (propertySnapshot.exists && obligationReleased) {
         transaction.update(propertyRef, {
-          commissionHold: remainingHoldIds.length > 0
-            ? {
-                ...property.commissionHold,
-                active: true,
-                obligationIds: remainingHoldIds,
-                updatedAt: timestamp,
-              }
-            : {
-                active: false,
-                obligationIds: [],
-                appliedAt: property.commissionHold?.appliedAt,
-                releasedAt: timestamp,
-                updatedAt: timestamp,
-              },
+          commissionHold: buildCommissionHoldAfterRelease(
+            property,
+            remainingHoldIds,
+            timestamp,
+          ),
           updatedAt: timestamp,
         });
       }
@@ -2185,10 +2216,7 @@ export class BookingCommissionStore {
         !booking.freeEligibilityRevokedAt &&
         propertySnapshot.exists &&
         !releaseJobSnapshot.exists &&
-        (
-          propertyReleased ||
-          property.commissionHold?.active !== true
-        );
+        propertyAvailableAfterResolution;
       if (ownerNotificationScheduled) {
         transaction.create(releaseJobRef, buildNotificationJob({
           booking: resolvedBooking,
@@ -3016,7 +3044,11 @@ export class BookingCommissionStore {
       const propertyReleased =
         propertySnapshot.exists &&
         obligationReleased &&
-        remainingHoldIds.length === 0;
+        isAvailableAfterCommissionRelease(
+          property,
+          remainingHoldIds,
+          timestamp,
+        );
       transaction.update(attemptRef, {
         status: "paid",
         transactionId: `BANK-${attempt.id}`,
@@ -3063,20 +3095,11 @@ export class BookingCommissionStore {
       }
       if (propertySnapshot.exists && obligationReleased) {
         transaction.update(propertyRef, {
-          commissionHold: remainingHoldIds.length > 0
-            ? {
-                ...property.commissionHold,
-                active: true,
-                obligationIds: remainingHoldIds,
-                updatedAt: timestamp,
-              }
-            : {
-                active: false,
-                obligationIds: [],
-                appliedAt: property.commissionHold?.appliedAt,
-                releasedAt: timestamp,
-                updatedAt: timestamp,
-              },
+          commissionHold: buildCommissionHoldAfterRelease(
+            property,
+            remainingHoldIds,
+            timestamp,
+          ),
           updatedAt: timestamp,
         });
       }
@@ -3441,7 +3464,13 @@ export class BookingCommissionStore {
       const wasPaused = booking.complianceStatus === "paused" || activeHoldIds.includes(booking.id);
       const obligationReleased = wasPaused;
       const propertyReleased =
-        propertySnapshot.exists && wasPaused && remainingHoldIds.length === 0;
+        propertySnapshot.exists &&
+        wasPaused &&
+        isAvailableAfterCommissionRelease(
+          property,
+          remainingHoldIds,
+          timestamp,
+        );
       const resolvesAuthorizationOnly =
         attempt.reversalStatus === "authorization_only";
       const paymentEvents = resolvesAuthorizationOnly
@@ -3520,20 +3549,11 @@ export class BookingCommissionStore {
       });
       if (propertySnapshot.exists && wasPaused) {
         transaction.update(propertyRef, {
-          commissionHold: remainingHoldIds.length > 0
-            ? {
-                ...property.commissionHold,
-                active: true,
-                obligationIds: remainingHoldIds,
-                updatedAt: timestamp,
-              }
-            : {
-                active: false,
-                obligationIds: [],
-                appliedAt: property.commissionHold?.appliedAt,
-                releasedAt: timestamp,
-                updatedAt: timestamp,
-              },
+          commissionHold: buildCommissionHoldAfterRelease(
+            property,
+            remainingHoldIds,
+            timestamp,
+          ),
           updatedAt: timestamp,
         });
       }
@@ -4178,7 +4198,7 @@ export class BookingCommissionStore {
           }
           if (
             job.kind === "property_released" &&
-            propertySnapshot.data()?.commissionHold?.active === true
+            hasActivePropertyHold(propertySnapshot.data())
           ) {
             transaction.update(candidate.ref, {
               status: "cancelled",
@@ -4517,7 +4537,7 @@ export class BookingCommissionStore {
         }
         if (
           job.kind === "property_released" &&
-          propertySnapshot.data()?.commissionHold?.active === true
+          hasActivePropertyHold(propertySnapshot.data())
         ) {
           transaction.update(jobRef, {
             status: "cancelled",
@@ -5107,6 +5127,18 @@ export class BookingCommissionStore {
         : [];
       const obligationIds = Array.from(new Set([...currentIds, booking.id]));
       const timestamp = now.toISOString();
+      const overriddenIds = Array.isArray(
+        property.commissionHoldOverride?.obligationIds,
+      )
+        ? property.commissionHoldOverride.obligationIds.map(String)
+        : [];
+      // Reaching this point means the booking is pending and is entering a new
+      // overdue enforcement cycle. An administrator may have overridden an
+      // earlier cycle while leaving its raw obligation ID recorded for audit;
+      // that old override must not make this new hold ineffective.
+      const nextOverriddenIds = overriddenIds.filter(
+        (id: string) => id !== booking.id,
+      );
       transaction.update(propertyRef, {
         commissionHold: {
           active: true,
@@ -5114,6 +5146,15 @@ export class BookingCommissionStore {
           appliedAt: property.commissionHold?.appliedAt || timestamp,
           updatedAt: timestamp,
         },
+        ...(nextOverriddenIds.length !== overriddenIds.length
+          ? {
+              commissionHoldOverride: {
+                ...property.commissionHoldOverride,
+                obligationIds: nextOverriddenIds,
+                updatedAt: timestamp,
+              },
+            }
+          : {}),
         updatedAt: timestamp,
       });
       transaction.update(bookingRef, {

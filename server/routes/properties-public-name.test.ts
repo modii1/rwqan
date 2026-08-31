@@ -3,13 +3,15 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
 
-import { propertyService, subscriptionService } from "../services";
+import { contentService, propertyService, subscriptionService } from "../services";
 import propertiesRouter from "./properties";
 
 test("only active, unexpired premium properties expose or match their name", async () => {
   const originalGetAll = propertyService.getAll;
   const originalGetByNumber = propertyService.getByNumber;
   const originalGetSubscription = subscriptionService.getByProperty;
+  const originalGetPropertySeo = contentService.getPropertySeo;
+  const seoReads: string[] = [];
 
   const properties = [
     {
@@ -48,6 +50,26 @@ test("only active, unexpired premium properties expose or match their name", asy
       commissionHold: { active: true, obligationIds: ["BOOK-HELD-1"] },
       prices: { weekday: "90", weekend: "100" },
     },
+    {
+      propertyNumber: "ADMIN-HELD-1",
+      name: "Administratively Held Name",
+      city: "بريدة",
+      verificationStatus: "approved",
+      adminAvailabilityHold: {
+        active: true,
+        appliedAt: "2026-08-30T00:00:00.000Z",
+        updatedAt: "2026-08-30T00:00:00.000Z",
+        appliedBy: "admin",
+      },
+      prices: { weekday: "90", weekend: "100" },
+    },
+    {
+      propertyNumber: "PENDING-1",
+      name: "Pending Property Name",
+      city: "بريدة",
+      verificationStatus: "pending",
+      prices: { weekday: "90", weekend: "100" },
+    },
   ];
 
   (propertyService as any).getAll = async () => properties;
@@ -70,6 +92,15 @@ test("only active, unexpired premium properties expose or match their name", asy
         : "2099-12-31T00:00:00.000Z",
       status: isExpiredStatus ? "منتهي" : "ساري",
       subscriptionType: isOrdinary ? "عادي" : "مميز",
+    };
+  };
+  (contentService as any).getPropertySeo = async (propertyNumber: string) => {
+    seoReads.push(propertyNumber);
+    return {
+      propertyNumber,
+      seoDescription: "private SEO",
+      metaTitle: "private title",
+      keywords: ["private"],
     };
   };
 
@@ -119,15 +150,53 @@ test("only active, unexpired premium properties expose or match their name", asy
       false,
       "a held property must be removed before its private hold marker is stripped",
     );
+    assert.equal(
+      list.some((property: any) => property.propertyNumber === "ADMIN-HELD-1"),
+      false,
+      "an administratively held property must not be public",
+    );
 
     const heldDetailResponse = await fetch(`${baseUrl}/api/properties/HELD-1`);
     assert.equal(heldDetailResponse.status, 423);
+    const adminHeldDetailResponse = await fetch(
+      `${baseUrl}/api/properties/ADMIN-HELD-1`,
+    );
+    assert.equal(adminHeldDetailResponse.status, 423);
+
+    const heldSeoResponse = await fetch(
+      `${baseUrl}/api/properties/HELD-1/seo`,
+    );
+    assert.equal(heldSeoResponse.status, 423);
+    assert.deepEqual(await heldSeoResponse.json(), {
+      error: "هذا العقار غير متاح حالياً",
+    });
+    const adminHeldSeoResponse = await fetch(
+      `${baseUrl}/api/properties/ADMIN-HELD-1/seo`,
+    );
+    assert.equal(adminHeldSeoResponse.status, 423);
+    const pendingSeoResponse = await fetch(
+      `${baseUrl}/api/properties/PENDING-1/seo`,
+    );
+    assert.equal(pendingSeoResponse.status, 404);
+    assert.deepEqual(await pendingSeoResponse.json(), {
+      error: "العقار غير موجود",
+    });
+    assert.deepEqual(
+      seoReads,
+      [],
+      "SEO storage must not be queried for held or unapproved properties",
+    );
 
     const heldSearchResponse = await fetch(
       `${baseUrl}/api/search?search=${encodeURIComponent("Held Premium Name")}`,
     );
     assert.equal(heldSearchResponse.status, 200);
     assert.deepEqual(await heldSearchResponse.json(), []);
+    const adminHeldSearchResponse = await fetch(
+      `${baseUrl}/api/search?search=${encodeURIComponent("Administratively Held Name")}`,
+    );
+    assert.equal(adminHeldSearchResponse.status, 200);
+    assert.deepEqual(await adminHeldSearchResponse.json(), []);
 
     const detailResponse = await fetch(
       `${baseUrl}/api/properties/EXPIRED-STATUS`,
@@ -168,6 +237,7 @@ test("only active, unexpired premium properties expose or match their name", asy
     propertyService.getAll = originalGetAll;
     propertyService.getByNumber = originalGetByNumber;
     subscriptionService.getByProperty = originalGetSubscription;
+    contentService.getPropertySeo = originalGetPropertySeo;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

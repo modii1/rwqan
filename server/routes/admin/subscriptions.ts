@@ -1,4 +1,5 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
+import { z } from "zod";
 import { requireAdmin } from "../middleware";
 import {
   SubscriptionLifecycleError,
@@ -6,6 +7,7 @@ import {
   propertyService,
 } from "../../services";
 import {
+  AdminPropertyAvailabilityHoldError,
   firebaseService,
   LinkedPropertyMutationError,
 } from "../../firebaseService";
@@ -34,8 +36,17 @@ import {
   hasValidFreeCommissionConsent,
   isFreeSubscriptionPackage,
 } from "../../../shared/freeCommissionConsent";
+import { adminPropertyAvailabilityService } from "../../services/AdminPropertyAvailabilityService";
 
 const router = Router();
+
+const propertyAvailabilityNumberSchema = subscriptionIdentifierSchema.regex(
+  /^[A-Za-z0-9_-]+$/,
+  "رقم العقار غير صالح",
+);
+const propertyAvailabilityResumeSchema = z.object({
+  expectedCommissionHoldVersion: z.string().min(1).max(2_000).nullable(),
+}).strict();
 
 // All admin subscription routes require admin authentication
 router.use("/api/admin", requireAdmin);
@@ -103,6 +114,104 @@ function lifecycleErrorStatus(error: SubscriptionLifecycleError): number {
   }
   return 409;
 }
+
+function sendPropertyAvailabilityHoldError(
+  error: unknown,
+  res: Response,
+) {
+  if (error instanceof AdminPropertyAvailabilityHoldError) {
+    return res.status(error.status).json({
+      success: false,
+      code: error.code,
+      error: error.message,
+    });
+  }
+  console.error("Admin property availability hold error:", error);
+  return res.status(500).json({
+    success: false,
+    error: "تعذر تحديث حالة إيقاف العقار.",
+  });
+}
+
+router.get("/api/admin/property-availability-holds", async (_req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  try {
+    return res.json(await adminPropertyAvailabilityService.getDashboard());
+  } catch (error) {
+    return sendPropertyAvailabilityHoldError(error, res);
+  }
+});
+
+router.post(
+  "/api/admin/property-availability-holds/:propertyNumber/pause",
+  async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const propertyNumber = propertyAvailabilityNumberSchema.safeParse(
+      req.params.propertyNumber,
+    );
+    if (!propertyNumber.success) {
+      return res.status(400).json({
+        success: false,
+        error: propertyNumber.error.issues[0]?.message,
+      });
+    }
+    try {
+      const result = await adminPropertyAvailabilityService.pause(
+        propertyNumber.data,
+      );
+      return res.json({
+        success: true,
+        changed: result.changed,
+        message: result.changed
+          ? "تم إيقاف العقار المجاني من الظهور والتواصل."
+          : "العقار موقوف بالفعل.",
+      });
+    } catch (error) {
+      return sendPropertyAvailabilityHoldError(error, res);
+    }
+  },
+);
+
+router.post(
+  "/api/admin/property-availability-holds/:propertyNumber/resume",
+  async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const propertyNumber = propertyAvailabilityNumberSchema.safeParse(
+      req.params.propertyNumber,
+    );
+    if (!propertyNumber.success) {
+      return res.status(400).json({
+        success: false,
+        error: propertyNumber.error.issues[0]?.message,
+      });
+    }
+    const resumeInput = propertyAvailabilityResumeSchema.safeParse(req.body);
+    if (!resumeInput.success) {
+      return res.status(400).json({
+        success: false,
+        error: resumeInput.error.issues[0]?.message,
+      });
+    }
+    try {
+      const result = await adminPropertyAvailabilityService.resume(
+        propertyNumber.data,
+        resumeInput.data.expectedCommissionHoldVersion,
+      );
+      return res.json({
+        success: true,
+        changed: result.changed,
+        manualHoldReleased: result.manualHoldReleased,
+        overriddenCommissionObligations:
+          result.overriddenCommissionObligations,
+        message: result.changed
+          ? "تم إلغاء الإيقاف وتفعيل إتاحة العقار."
+          : "العقار غير موقوف حالياً.",
+      });
+    } catch (error) {
+      return sendPropertyAvailabilityHoldError(error, res);
+    }
+  },
+);
 
 // ======================
 // 🏠🏠 اشتراكات العقارين

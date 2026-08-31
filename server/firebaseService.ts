@@ -71,7 +71,13 @@ import {
     normalizeSubscriptionPackageDuration,
 } from "../shared/subscriptionPackagePolicy";
 import { getExactPaymobPaymentMethod } from "./utils/paymobPaymentMethod";
-import { hasActiveCommissionHold } from "../shared/propertyAvailability";
+import {
+    getActiveCommissionHoldVersion,
+    getActiveCommissionHoldObligationIds,
+    hasActiveCommissionHold,
+    hasActivePropertyHold,
+    hasUnreleasedCommissionHold,
+} from "../shared/propertyAvailability";
 import {
     normalizePhoneDigits,
     normalizeSaudiMobilePhone,
@@ -163,6 +169,21 @@ export type AdminPropertyAddOnDecisionResult =
             | "unsafe_legacy_state";
     };
 
+function releasedAdminAvailabilityHoldUpdates(
+    property: Partial<Property> | null | undefined,
+    timestamp: string,
+): Record<string, unknown> {
+    if (property?.adminAvailabilityHold?.active !== true) return {};
+    return {
+        adminAvailabilityHold: {
+            ...property.adminAvailabilityHold,
+            active: false,
+            releasedAt: timestamp,
+            updatedAt: timestamp,
+        },
+    };
+}
+
 export class PaymentActionConflictError extends Error {
     readonly status = 409;
     readonly code = "PAYMENT_ACTION_IN_PROGRESS";
@@ -219,6 +240,17 @@ export class CommissionHoldOwnerChangeError extends Error {
             "لا يمكن تغيير رقم واتساب بينما العقار موقوف بسبب عمولة حجز. يجب حل العمولة وإلغاء الإيقاف أولاً.",
         );
         this.name = "CommissionHoldOwnerChangeError";
+    }
+}
+
+export class AdminPropertyAvailabilityHoldError extends Error {
+    constructor(
+        message: string,
+        readonly status: number,
+        readonly code: string,
+    ) {
+        super(message);
+        this.name = "AdminPropertyAvailabilityHoldError";
     }
 }
 
@@ -606,7 +638,7 @@ export class FirebaseService {
                     ) || normalizePhoneDigits(updates.whatsappNumber);
                     if (
                         currentPhone !== requestedPhone &&
-                        hasActiveCommissionHold(property)
+                        hasUnreleasedCommissionHold(property)
                     ) {
                         throw new CommissionHoldOwnerChangeError();
                     }
@@ -632,6 +664,253 @@ export class FirebaseService {
         muted: boolean
     ): Promise<Property> {
         return this.updateProperty(propertyNumber, { muteExpiryNotification: muted });
+    }
+
+    async pauseFreePropertyAvailability(
+        propertyNumber: string,
+    ): Promise<{
+        property: Property;
+        changed: boolean;
+    }> {
+        const normalizedPropertyNumber = String(propertyNumber || "").trim();
+        if (!normalizedPropertyNumber) {
+            throw new AdminPropertyAvailabilityHoldError(
+                "رقم العقار مطلوب.",
+                400,
+                "PROPERTY_NUMBER_REQUIRED",
+            );
+        }
+
+        const propertyRef = this.db
+            .collection("properties")
+            .doc(normalizedPropertyNumber);
+        const subscriptionQuery = this.db
+            .collection("subscriptions")
+            .where("propertyNumber", "==", normalizedPropertyNumber);
+
+        return this.db.runTransaction(async (transaction) => {
+            const [propertySnapshot, subscriptionSnapshot] = await Promise.all([
+                transaction.get(propertyRef),
+                transaction.get(subscriptionQuery),
+            ]);
+            if (!propertySnapshot.exists) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "لم يتم العثور على العقار المطلوب.",
+                    404,
+                    "PROPERTY_NOT_FOUND",
+                );
+            }
+
+            const property = propertySnapshot.data() as Property;
+            const verificationStatus = String(
+                property.verificationStatus || "",
+            ).trim();
+            if (
+                verificationStatus &&
+                verificationStatus !== "approved" &&
+                verificationStatus !== "verified"
+            ) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "يمكن إيقاف العقارات المعتمدة فقط من هذه الصفحة.",
+                    409,
+                    "PROPERTY_NOT_APPROVED",
+                );
+            }
+
+            const currentSubscriptionDocument =
+                this.getCurrentSubscriptionDocument(
+                    subscriptionSnapshot.docs,
+                    normalizedPropertyNumber,
+                );
+            const currentSubscription = currentSubscriptionDocument?.data();
+            if (isSubscriptionStatusSuspended(currentSubscription?.status)) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "اشتراك العقار موقوف مؤقتاً بالفعل.",
+                    409,
+                    "SUBSCRIPTION_ALREADY_SUSPENDED",
+                );
+            }
+            const isExpired = !currentSubscription?.endDate ||
+                calculateRemainingDays(currentSubscription.endDate) < 0;
+            const hasActivePremiumSubscription = Boolean(
+                currentSubscription &&
+                isActivePremiumSubscription({
+                    subscriptionType: currentSubscription.subscriptionType,
+                    packageType: currentSubscription.packageType,
+                    status: currentSubscription.status,
+                    isExpired,
+                }),
+            );
+            if (hasActivePremiumSubscription) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "هذا الإجراء مخصص للعقارات المجانية فقط.",
+                    409,
+                    "PROPERTY_NOT_FREE",
+                );
+            }
+
+            if (property.adminAvailabilityHold?.active === true) {
+                return { property, changed: false };
+            }
+
+            const timestamp = new Date().toISOString();
+            const adminAvailabilityHold = {
+                active: true as const,
+                appliedAt: timestamp,
+                updatedAt: timestamp,
+                appliedBy: "admin" as const,
+            };
+            transaction.update(propertyRef, {
+                adminAvailabilityHold,
+                updatedAt: timestamp,
+            });
+            return {
+                property: {
+                    ...property,
+                    adminAvailabilityHold,
+                    updatedAt: timestamp,
+                },
+                changed: true,
+            };
+        });
+    }
+
+    async resumePropertyAvailability(
+        propertyNumber: string,
+        expectedCommissionHoldVersion?: string | null,
+    ): Promise<{
+        property: Property;
+        changed: boolean;
+        manualHoldReleased: boolean;
+        overriddenCommissionObligations: number;
+    }> {
+        const normalizedPropertyNumber = String(propertyNumber || "").trim();
+        if (!normalizedPropertyNumber) {
+            throw new AdminPropertyAvailabilityHoldError(
+                "رقم العقار مطلوب.",
+                400,
+                "PROPERTY_NUMBER_REQUIRED",
+            );
+        }
+
+        const propertyRef = this.db
+            .collection("properties")
+            .doc(normalizedPropertyNumber);
+        return this.db.runTransaction(async (transaction) => {
+            const propertySnapshot = await transaction.get(propertyRef);
+            if (!propertySnapshot.exists) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "لم يتم العثور على العقار المطلوب.",
+                    404,
+                    "PROPERTY_NOT_FOUND",
+                );
+            }
+
+            const property = propertySnapshot.data() as Property;
+            const manualHoldReleased =
+                property.adminAvailabilityHold?.active === true;
+            const activeCommissionHold = hasActiveCommissionHold(property);
+            const currentCommissionHoldVersion = activeCommissionHold
+                ? getActiveCommissionHoldVersion(property)
+                : null;
+            if (
+                expectedCommissionHoldVersion !== undefined &&
+                expectedCommissionHoldVersion !== currentCommissionHoldVersion
+            ) {
+                throw new AdminPropertyAvailabilityHoldError(
+                    "تغيرت حالة عمولة العقار. حدّث البيانات ثم أعد المحاولة.",
+                    409,
+                    "PROPERTY_HOLD_CHANGED",
+                );
+            }
+            const activeCommissionObligationIds =
+                getActiveCommissionHoldObligationIds(property);
+            if (!manualHoldReleased && !activeCommissionHold) {
+                return {
+                    property,
+                    changed: false,
+                    manualHoldReleased: false,
+                    overriddenCommissionObligations: 0,
+                };
+            }
+
+            const timestamp = new Date().toISOString();
+            const updates: Record<string, unknown> = { updatedAt: timestamp };
+            let adminAvailabilityHold = property.adminAvailabilityHold;
+            let commissionHold = property.commissionHold;
+            let commissionHoldOverride = property.commissionHoldOverride;
+            if (manualHoldReleased && property.adminAvailabilityHold) {
+                adminAvailabilityHold = {
+                    ...property.adminAvailabilityHold,
+                    active: false,
+                    releasedAt: timestamp,
+                    updatedAt: timestamp,
+                };
+                updates.adminAvailabilityHold = adminAvailabilityHold;
+            }
+            if (activeCommissionHold) {
+                let emptyHoldFingerprint = String(
+                    property.commissionHold?.updatedAt ||
+                    property.commissionHold?.appliedAt ||
+                    "",
+                );
+                if (
+                    activeCommissionObligationIds.length === 0 &&
+                    !emptyHoldFingerprint
+                ) {
+                    commissionHold = {
+                        ...property.commissionHold,
+                        active: true,
+                        obligationIds: [],
+                        updatedAt: timestamp,
+                    };
+                    emptyHoldFingerprint = timestamp;
+                    updates.commissionHold = commissionHold;
+                }
+                const existingIds = Array.isArray(
+                    property.commissionHoldOverride?.obligationIds,
+                )
+                    ? property.commissionHoldOverride.obligationIds.map(String)
+                    : [];
+                commissionHoldOverride = {
+                    obligationIds: Array.from(new Set([
+                        ...existingIds,
+                        ...activeCommissionObligationIds,
+                    ])),
+                    ...(activeCommissionObligationIds.length === 0
+                        ? {
+                            emptyHoldFingerprint,
+                        }
+                        : property.commissionHoldOverride
+                            ?.emptyHoldFingerprint
+                            ? {
+                                emptyHoldFingerprint:
+                                    property.commissionHoldOverride
+                                        .emptyHoldFingerprint,
+                            }
+                            : {}),
+                    appliedAt:
+                        property.commissionHoldOverride?.appliedAt || timestamp,
+                    updatedAt: timestamp,
+                    appliedBy: "admin" as const,
+                };
+                updates.commissionHoldOverride = commissionHoldOverride;
+            }
+            transaction.update(propertyRef, updates);
+            return {
+                property: {
+                    ...property,
+                    adminAvailabilityHold,
+                    commissionHold,
+                    commissionHoldOverride,
+                    updatedAt: timestamp,
+                },
+                changed: true,
+                manualHoldReleased,
+                overriddenCommissionObligations:
+                    activeCommissionObligationIds.length,
+            };
+        });
     }
 
     async deleteProperty(propertyNumber: string): Promise<void> {
@@ -718,11 +997,12 @@ export class FirebaseService {
         const isPremium = hasValidEndDate &&
             isPremiumSubscriptionType(planType) &&
             isSubscriptionStatusActive(normalizedSubscription.status);
+        const activationTimestamp = new Date().toISOString();
         const propertyUpdates: Record<string, unknown> = {
             subscriptionType: isPremium ? "مميز" : "عادي",
             lastUpdate: toRiyadhISO(getNowInRiyadh()).split("T")[0],
             subscriptionDate: normalizedSubscription.startDate.split("T")[0],
-            updatedAt: new Date().toISOString(),
+            updatedAt: activationTimestamp,
         };
 
         await this.db.runTransaction(async (transaction) => {
@@ -755,6 +1035,15 @@ export class FirebaseService {
             }
             if (!propertySnapshot.exists) {
                 throw new Error(`Property not found: ${subscription.propertyNumber}`);
+            }
+            if (isPremium) {
+                Object.assign(
+                    propertyUpdates,
+                    releasedAdminAvailabilityHoldUpdates(
+                        propertySnapshot.data() as Property,
+                        activationTimestamp,
+                    ),
+                );
             }
             if (subscription.linkedProperty) {
                 const mainPropertyNumber = String(subscription.linkedProperty).trim();
@@ -823,15 +1112,16 @@ export class FirebaseService {
 
         const docRef = this.db.collection("subscriptions").doc(id);
         const propertyRef = this.db.collection("properties").doc(propertyNumber);
+        const activatesPremium =
+            status !== "منتهي" &&
+            isPremiumSubscriptionType(subscriptionData.subscriptionType);
+        const activationTimestamp = new Date().toISOString();
         const propertyUpdates: any = {
-            subscriptionType:
-                status !== "منتهي" && isPremiumSubscriptionType(subscriptionData.subscriptionType)
-                    ? "مميز"
-                    : "عادي",
+            subscriptionType: activatesPremium ? "مميز" : "عادي",
             pendingPaidSubscription: false,
             lastUpdate: new Date().toISOString().split("T")[0],
             subscriptionDate: subscription.startDate.split("T")[0],
-            updatedAt: new Date().toISOString(),
+            updatedAt: activationTimestamp,
         };
 
         if (subscriptionData.linkedProperty) {
@@ -868,6 +1158,15 @@ export class FirebaseService {
             }
             if (!propertySnapshot.exists) {
                 throw new Error(`Property not found: ${propertyNumber}`);
+            }
+            if (activatesPremium) {
+                Object.assign(
+                    propertyUpdates,
+                    releasedAdminAvailabilityHoldUpdates(
+                        propertySnapshot.data() as Property,
+                        activationTimestamp,
+                    ),
+                );
             }
 
             if (subscriptionData.linkedProperty) {
@@ -2072,7 +2371,13 @@ export class FirebaseService {
                 pendingApprovalFrom: null as any,
                 subscriptionDate: data.startDate.split("T")[0],
                 lastUpdate: new Date().toISOString().split("T")[0],
-                updatedAt: new Date().toISOString(),
+                updatedAt: subUpdates.updatedAt,
+                ...(propertySubscriptionType === "مميز"
+                    ? releasedAdminAvailabilityHoldUpdates(
+                        childPropertyData as Property,
+                        subUpdates.updatedAt,
+                    )
+                    : {}),
                 ...(restoreState ? { linkedPropertyRestoreState: restoreState } : {}),
             });
         });
@@ -2247,6 +2552,13 @@ export class FirebaseService {
         }
 
         const normalizedUpdates = this.enforceSubscriptionDurationLimit(updates);
+        const activationTimestamp = new Date().toISOString();
+        const activatesPremium = isActivePremiumSubscription({
+            subscriptionType: normalizedUpdates.subscriptionType,
+            status: normalizedUpdates.status,
+            isExpired:
+                calculateRemainingDays(normalizedUpdates.endDate) < 0,
+        });
         
         console.log(`[FIREBASE] activateSubscription - updates to apply:`, normalizedUpdates);
 
@@ -2272,9 +2584,7 @@ export class FirebaseService {
                 )
                 : null;
             const propertyRef = this.db.collection("properties").doc(propertyNumber);
-            const propertySnapshot = data.linkedProperty
-                ? await transaction.get(propertyRef)
-                : null;
+            const propertySnapshot = await transaction.get(propertyRef);
 
             this.assertCurrentSubscriptionNotSuspended(
                 subscriptionSnapshot.docs,
@@ -2286,25 +2596,32 @@ export class FirebaseService {
                     parentPropertyNumber,
                 );
             }
+            if (!propertySnapshot.exists) {
+                throw new Error(`Property not found: ${propertyNumber}`);
+            }
 
             canonicalDocumentExists = subscriptionSnapshot.docs.some(
                 (document) => document.id === id,
             );
-            if (data.linkedProperty && propertySnapshot?.exists) {
+            const propertyData = propertySnapshot.data() || {};
+            const propertyUpdates: Record<string, unknown> = activatesPremium
+                ? releasedAdminAvailabilityHoldUpdates(
+                    propertyData as Property,
+                    activationTimestamp,
+                )
+                : {};
+            if (data.linkedProperty) {
                 const mainPropertyNumber = String(data.linkedProperty).trim();
                 const canonicalDocument = subscriptionSnapshot.docs.find(
                     (document) => document.id === id,
                 );
                 const canonicalSubscription = canonicalDocument?.data();
-                const propertyData = propertySnapshot.data() || {};
                 const existingRestoreState = propertyData
                     .linkedPropertyRestoreState as LinkedPropertyRestoreState | undefined;
                 const alreadyLinkedToMain =
                     String(propertyData.linkedProperty || "").trim() === mainPropertyNumber ||
                     String(canonicalSubscription?.linkedProperty || "").trim() === mainPropertyNumber;
-                const propertyUpdates: Record<string, unknown> = {
-                    linkedProperty: mainPropertyNumber,
-                };
+                propertyUpdates.linkedProperty = mainPropertyNumber;
                 if (existingRestoreState?.mainPropertyNumber === mainPropertyNumber) {
                     propertyUpdates.linkedPropertyRestoreState = existingRestoreState;
                 } else if (!alreadyLinkedToMain) {
@@ -2323,6 +2640,8 @@ export class FirebaseService {
                         ),
                     } satisfies LinkedPropertyRestoreState;
                 }
+            }
+            if (Object.keys(propertyUpdates).length > 0) {
                 transaction.update(propertyRef, propertyUpdates);
             }
             if (canonicalDocumentExists) {
@@ -3752,7 +4071,7 @@ export class FirebaseService {
             const currentProperty = propertySnapshot.data();
             if (
                 !propertySnapshot.exists ||
-                hasActiveCommissionHold(currentProperty) ||
+                hasActivePropertyHold(currentProperty) ||
                 (
                     currentProperty?.verificationStatus &&
                     currentProperty.verificationStatus !== "approved"

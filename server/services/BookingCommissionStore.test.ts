@@ -1356,6 +1356,58 @@ test("accepting a dispute does not queue a released notification while another h
   );
 });
 
+test("accepting a dispute does not release a property that remains manually paused by admin", async () => {
+  const database = new FakeFirestore();
+  const booking = pendingCommissionDisputeFixture({
+    complianceStatus: "paused" as const,
+  });
+  database.seed("booking_followups", booking.id, booking);
+  database.seed("properties", booking.propertyNumber, {
+    propertyNumber: booking.propertyNumber,
+    whatsappNumber: "0500000001",
+    commissionHold: {
+      active: true,
+      obligationIds: [booking.id],
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    adminAvailabilityHold: {
+      active: true,
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+  });
+
+  const result = await new BookingCommissionStore(database as any)
+    .resolveCommissionDispute(
+      booking.id,
+      "cancel_commission",
+      new Date(now.getTime() + 1_000),
+    );
+
+  assert.equal(result.booking.commissionStatus, "waived");
+  assert.equal(result.booking.complianceStatus, "released");
+  assert.equal(result.propertyReleased, false);
+  assert.equal(result.ownerNotificationScheduled, false);
+  assert.equal(
+    database.read("properties", booking.propertyNumber)
+      ?.commissionHold?.active,
+    false,
+  );
+  assert.equal(
+    database.read("properties", booking.propertyNumber)
+      ?.adminAvailabilityHold?.active,
+    true,
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      `${booking.id}--property_released`,
+    ),
+    undefined,
+  );
+});
+
 test("manual resend creates one separate audited job and replays the same idempotency key", async () => {
   const database = new FakeFirestore();
   const booking = confirmedObserveOnlyFixture();
@@ -3456,6 +3508,105 @@ test("bank receipt approval is idempotent and releases only its own property obl
   );
 });
 
+test("bank receipt approval does not release a property that remains manually paused by admin", async () => {
+  const { database, store, bookingId, attemptId } =
+    await pendingBankReceiptFixture();
+  database.update("booking_followups", bookingId, {
+    commissionStatus: "overdue",
+    complianceStatus: "paused",
+  });
+  database.update("properties", "13383", {
+    commissionHold: {
+      active: true,
+      obligationIds: [bookingId],
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    adminAvailabilityHold: {
+      active: true,
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+  });
+
+  const approved = await store.resolveBankTransferAttempt({
+    bookingId,
+    attemptId,
+    resolution: "approve",
+    now: new Date(now.getTime() + 4_000),
+  });
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.propertyReleased, false);
+  assert.equal(
+    database.read("booking_commission_payment_attempts", attemptId)
+      ?.bankReviewPropertyReleased,
+    false,
+  );
+  assert.equal(
+    database.read("properties", "13383")?.commissionHold?.active,
+    false,
+  );
+  assert.equal(
+    database.read("properties", "13383")?.adminAvailabilityHold?.active,
+    true,
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      `${bookingId}--property_released`,
+    ),
+    undefined,
+  );
+});
+
+test("bank receipt approval releases when every remaining raw obligation is overridden", async () => {
+  const { database, store, bookingId, attemptId } =
+    await pendingBankReceiptFixture();
+  const otherBookingId = "BOOK-OTHER-OVERRIDDEN";
+  database.update("booking_followups", bookingId, {
+    commissionStatus: "overdue",
+    complianceStatus: "paused",
+  });
+  database.update("properties", "13383", {
+    commissionHold: {
+      active: true,
+      obligationIds: [bookingId, otherBookingId],
+      appliedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    commissionHoldOverride: {
+      obligationIds: [otherBookingId],
+      updatedAt: now.toISOString(),
+    },
+  });
+
+  const approved = await store.resolveBankTransferAttempt({
+    bookingId,
+    attemptId,
+    resolution: "approve",
+    now: new Date(now.getTime() + 4_000),
+  });
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.propertyReleased, true);
+  assert.deepEqual(
+    database.read("properties", "13383")?.commissionHold?.obligationIds,
+    [otherBookingId],
+  );
+  assert.equal(
+    database.read("properties", "13383")?.commissionHold?.active,
+    true,
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      `${bookingId}--property_released`,
+    )?.kind,
+    "property_released",
+  );
+});
+
 test("bank receipt rejection is idempotent, preserves evidence, and rejects a later opposite decision", async () => {
   const { database, store, bookingId, attemptId } =
     await pendingBankReceiptFixture();
@@ -4337,6 +4488,74 @@ test("a hold requires the anchored deadline and every owner notice to be deliver
   assert.equal(reviewed?.disputeStatus, "pending");
   assert.equal(reviewed?.enforcementLastError, "owner_identity_changed");
   assert.equal(database.read("properties", "13383")?.commissionHold.active, false);
+});
+
+test("a fresh commission hold cycle removes the booking from a stale admin override", async () => {
+  const database = new FakeFirestore();
+  const bookingId = "BOOK-REQ-13383-RECOLLECTED";
+  database.seed("booking_followups", bookingId, {
+    id: bookingId,
+    propertyNumber: "13383",
+    ownerPhone: "+966500000001",
+    isFreeProperty: true,
+    bookingStatus: "confirmed",
+    commissionStatus: "pending",
+    complianceStatus: "clear",
+    disputeStatus: "none",
+    commissionNoticeSentAt: "2026-08-10T12:00:00.000Z",
+    commissionDueAt: "2026-08-15T12:00:00.000Z",
+    commissionReminderOffsetsSent: [5],
+    enforcementLeaseToken: "recollection-lease",
+    enforcementLeaseExpiresAt: "2026-08-15T12:36:56.789Z",
+    events: [],
+  });
+  database.seed("properties", "13383", {
+    propertyNumber: "13383",
+    whatsappNumber: "0500000001",
+    commissionHold: {
+      active: true,
+      obligationIds: [bookingId],
+      appliedAt: new Date(now.getTime() - 1_000).toISOString(),
+      updatedAt: new Date(now.getTime() - 1_000).toISOString(),
+    },
+    commissionHoldOverride: {
+      obligationIds: [bookingId, "BOOK-OLDER-OVERRIDDEN"],
+      updatedAt: new Date(now.getTime() - 1_000).toISOString(),
+    },
+  });
+  for (const kind of [
+    "owner_booking_confirmed",
+    "commission_reminder_5",
+    "property_paused",
+  ] as const) {
+    database.seed("booking_notification_outbox", `${bookingId}--${kind}`, {
+      bookingId,
+      kind,
+      status: "sent",
+    });
+  }
+
+  const result = await new BookingCommissionStore(database as any)
+    .applyCommissionHold(bookingId, now, "recollection-lease");
+
+  assert.equal(result, "paused");
+  assert.deepEqual(
+    database.read("properties", "13383")?.commissionHold?.obligationIds,
+    [bookingId],
+  );
+  assert.deepEqual(
+    database.read("properties", "13383")
+      ?.commissionHoldOverride?.obligationIds,
+    ["BOOK-OLDER-OVERRIDDEN"],
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)?.commissionStatus,
+    "overdue",
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)?.complianceStatus,
+    "paused",
+  );
 });
 
 test("hold application honors the payment attempt identity observed by provider reconciliation", async () => {

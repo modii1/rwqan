@@ -50,7 +50,12 @@ function withoutCommissionHoldUpdates(
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value).filter(([key]) =>
-      key !== "commissionHold" && !key.startsWith("commissionHold.")),
+      key !== "commissionHold" &&
+      !key.startsWith("commissionHold.") &&
+      key !== "adminAvailabilityHold" &&
+      !key.startsWith("adminAvailabilityHold.") &&
+      key !== "commissionHoldOverride" &&
+      !key.startsWith("commissionHoldOverride.")),
   );
 }
 

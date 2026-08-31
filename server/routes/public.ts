@@ -9,7 +9,7 @@ import {
 } from "../utils/r2";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
-import { hasActiveCommissionHold } from "../../shared/propertyAvailability";
+import { hasActivePropertyHold } from "../../shared/propertyAvailability";
 import {
   createPublicFreeCommissionConsent,
   createPublicRegistrationPlan,
@@ -55,7 +55,7 @@ router.get("/sitemap.xml", async (_req, res) => {
     // جلب العقارات النشطة
     const properties = await propertyService.getAll();
     const activeProperties = properties.filter((p: any) =>
-      !hasActiveCommissionHold(p) &&
+      !hasActivePropertyHold(p) &&
       (p.verificationStatus === "approved" || p.verificationStatus === "verified")
     );
 
@@ -301,7 +301,7 @@ router.get(
   async (req, res, next) => {
     try {
       const property = await propertyService.getByNumber(req.params.propertyNumber);
-      if (hasActiveCommissionHold(property)) {
+      if (hasActivePropertyHold(property)) {
         return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
       }
       next();
@@ -435,7 +435,7 @@ router.get("/api/occasions/active", async (_req, res) => {
     const visibleProperties = [];
     for (const occasionProperty of result.properties) {
       const property = await propertyService.getByNumber(occasionProperty.propertyNumber);
-      if (!hasActiveCommissionHold(property)) visibleProperties.push(occasionProperty);
+      if (!hasActivePropertyHold(property)) visibleProperties.push(occasionProperty);
     }
     res.json({ ...result, properties: visibleProperties });
   } catch (err: any) {
@@ -457,7 +457,7 @@ router.get("/api/occasions/:slug", async (req, res) => {
     for (const occasionProperty of properties) {
       if (!occasionProperty.approvedByAdmin) continue;
       const property = await propertyService.getByNumber(occasionProperty.propertyNumber);
-      if (!hasActiveCommissionHold(property)) approved.push(occasionProperty);
+      if (!hasActivePropertyHold(property)) approved.push(occasionProperty);
     }
     res.json({ occasion, properties: approved });
   } catch (err: any) {

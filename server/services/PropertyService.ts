@@ -66,7 +66,16 @@ export class PropertyService {
       }
     }
 
-    const persistedUpdates: Partial<Property> = { ...updates };
+    const allowedUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([key]) =>
+        key !== "commissionHold" &&
+        !key.startsWith("commissionHold.") &&
+        key !== "adminAvailabilityHold" &&
+        !key.startsWith("adminAvailabilityHold.") &&
+        key !== "commissionHoldOverride" &&
+        !key.startsWith("commissionHoldOverride.")),
+    ) as Partial<Property>;
+    const persistedUpdates: Partial<Property> = { ...allowedUpdates };
     if (updates.facilities !== undefined) {
       persistedUpdates.facilities = normalizePropertyFacilitySelection(updates.facilities);
     }
