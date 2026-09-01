@@ -4,6 +4,10 @@ import {
   freeCommissionConsentSchema,
   freeRegistrationPlanSchema,
 } from "./freeCommissionConsent";
+import {
+  DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+  ownerSubscriptionWhatsAppTemplatesSchema,
+} from "./subscription-whatsapp";
 
 // =========================
 // Property Schema (العقارات)
@@ -480,19 +484,37 @@ export const notificationSettingsSchema = z.object({
   smartRequest: z.boolean().default(true), // إشعار طلب واتساب
   propertyVerification: z.boolean().default(true), // إشعار تحقق
   subscriptionExpired: z.boolean().default(true), // إشعار انتهاء اشتراك
+  ownerSubscriptionWhatsAppTemplates:
+    ownerSubscriptionWhatsAppTemplatesSchema.default(
+      DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+    ),
   smartSchedule: z.object({
     enabled: z.boolean().default(true),
-    sendDays: z.array(z.string()).default(["Sunday", "Wednesday"]),
-    sendTimes: z.record(z.string()).default({
+    sendDays: z.array(
+      z.string().refine(
+        (day) => [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ].includes(day),
+      ),
+    ).length(2).default(["Sunday", "Wednesday"]),
+    sendTimes: z.record(
+      z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+    ).default({
       Sunday: "09:00",
       Wednesday: "21:00",
     }),
-    batchSize: z.number().default(10),
-    slotIntervalMinutes: z.number().default(60),
-    dailyMaxRecipients: z.number().default(50),
-  }).optional(),
+    batchSize: z.number().int().min(1).max(200).default(10),
+    slotIntervalMinutes: z.number().int().min(10).max(180).default(60),
+    dailyMaxRecipients: z.number().int().min(1).max(500).default(50),
+  }).strict().optional(),
   updatedAt: z.string().optional(),
-});
+}).strict();
 
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 

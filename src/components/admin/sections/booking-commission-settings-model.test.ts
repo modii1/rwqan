@@ -29,6 +29,8 @@ function settingsFixture(): BookingCommissionSettings {
     customerDailyLimit: 3,
     freeOwnerDailyLimit: 4,
     freePropertyContactDailyLimit: 5,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
     whatsappTemplates: validTemplates(),
     optionalCommissionReminderDays: [3, 4],
     updatedAt: null,
@@ -37,7 +39,7 @@ function settingsFixture(): BookingCommissionSettings {
   };
 }
 
-test("template validation requires every allowed placeholder exactly once", () => {
+test("template validation enforces every allowed placeholder occurrence rule", () => {
   assert.equal(
     validateBookingTemplate(
       "customer_followup",
@@ -82,6 +84,58 @@ test("template validation requires every allowed placeholder exactly once", () =
     ) || "",
     /غير مسموح/,
   );
+  assert.equal(
+    validateBookingTemplate(
+      "admin_customer_technical_support",
+      "مرحباً، معك فريق الدعم.",
+      2_000,
+    ),
+    null,
+  );
+  assert.match(
+    validateBookingTemplate(
+      "admin_customer_technical_support",
+      "مرحباً {{customerPhone}}",
+      2_000,
+    ) || "",
+    /غير مسموح/,
+  );
+  assert.equal(
+    validateBookingTemplate(
+      "owner_contact_limit_reached",
+      "{{propertyNumber}} {{dailyLimit}} {{dailyLimit}} {{renewalLink}}",
+      2_000,
+    ),
+    null,
+  );
+  assert.equal(
+    validateBookingTemplate(
+      "owner_contact_limit_reached",
+      "{{propertyNumber}} {{dailyLimit}} {{renewalLink}}",
+      2_000,
+    ),
+    null,
+  );
+  assert.match(
+    validateBookingTemplate(
+      "owner_contact_limit_reached",
+      "{{propertyNumber}} {{dailyLimit}} {{dailyLimit}} {{dailyLimit}} {{renewalLink}}",
+      2_000,
+    ) || "",
+    /مرة أو مرتين فقط/,
+  );
+});
+
+test("admin settings expose the editable technical-support template without placeholders", () => {
+  const definition = BOOKING_TEMPLATE_DEFINITIONS.find(
+    ({ key }) => key === "admin_customer_technical_support",
+  );
+  assert.deepEqual(definition, {
+    key: "admin_customer_technical_support",
+    label: "التواصل التقني مع العميل",
+    description: "القالب الجاهز الذي يفتحه المشرف للتواصل التقني مع العميل.",
+    placeholders: [],
+  });
 });
 
 test("admin settings expose the final customer reminder as a no-placeholder template", () => {
@@ -94,6 +148,24 @@ test("admin settings expose the final customer reminder as a no-placeholder temp
     description: "تُرسل بعد اكتمال عدد رسائل متابعة العميل وعدم استلام رد.",
     placeholders: [],
   });
+});
+
+test("admin settings expose the editable owner contact-limit template", () => {
+  const definition = BOOKING_TEMPLATE_DEFINITIONS.find(
+    ({ key }) => key === "owner_contact_limit_reached",
+  );
+  assert.deepEqual(definition, {
+    key: "owner_contact_limit_reached",
+    label: "بلوغ حد طلبات التواصل",
+    description: "تُرسل لمالك العقار المجاني عند بلوغ الحد اليومي لطلبات التواصل.",
+    placeholders: ["propertyNumber", "dailyLimit", "renewalLink"],
+  });
+  assert.equal(
+    previewBookingTemplate(
+      "العقار {{propertyNumber}} ({{dailyLimit}} من {{dailyLimit}}): {{renewalLink}}",
+    ),
+    "العقار 13383 (3 من 3): https://rwqan.sa/r",
+  );
 });
 
 test("template validation rejects malformed single braces and oversized copy", () => {
@@ -137,14 +209,19 @@ test("draft validation creates the strict full-replacement payload", () => {
   draft.optionalCommissionReminderDays = [4, 3];
   draft.customerFollowUpDelayHours = "٣٦";
   draft.customerFollowUpDelayMinutes = "١٥";
+  draft.customerFollowUpMessageLimit = "٣";
+  draft.adminCustomerWhatsAppCooldownMinutes = "٠";
   draft.limits.customerDailyLimit = "٠";
 
   const validation = validateBookingSettingsDraft(draft, 2_000);
   assert.equal(validation.limitsValid, true);
   assert.deepEqual(validation.templateErrors, {});
   assert.equal(validation.customerFollowUpDelayValid, true);
+  assert.equal(validation.workflowControlsValid, true);
   assert.deepEqual(validation.update, {
     customerFollowUpDelayMinutes: 2_175,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 0,
     customerDailyLimit: 0,
     freeOwnerDailyLimit: 4,
     freePropertyContactDailyLimit: 5,
@@ -152,6 +229,31 @@ test("draft validation creates the strict full-replacement payload", () => {
     optionalCommissionReminderDays: [3, 4],
   });
   assert.equal(bookingSettingsUpdateEquals(validation.update!, settings), false);
+});
+
+test("workflow controls accept zero and bounds while rejecting fractions and overflow", () => {
+  const settings = settingsFixture();
+  const draft = bookingSettingsToDraft(settings);
+  assert.equal(draft.customerFollowUpMessageLimit, "3");
+  assert.equal(draft.adminCustomerWhatsAppCooldownMinutes, "30");
+
+  draft.customerFollowUpMessageLimit = "٠";
+  draft.adminCustomerWhatsAppCooldownMinutes = "۱۰۰۸۰";
+  let validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.workflowControlsValid, true);
+  assert.equal(validation.update?.customerFollowUpMessageLimit, 0);
+  assert.equal(validation.update?.adminCustomerWhatsAppCooldownMinutes, 10_080);
+
+  draft.customerFollowUpMessageLimit = "1.5";
+  validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.workflowControlsValid, false);
+  assert.equal(validation.update, null);
+
+  draft.customerFollowUpMessageLimit = "3";
+  draft.adminCustomerWhatsAppCooldownMinutes = "10081";
+  validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.workflowControlsValid, false);
+  assert.equal(validation.update, null);
 });
 
 test("follow-up delay accepts Arabic-digit hour and minute components within policy bounds", () => {
@@ -175,7 +277,7 @@ test("follow-up delay accepts Arabic-digit hour and minute components within pol
   assert.equal(validation.update, null);
 });
 
-test("settings equality includes the configurable follow-up delay", () => {
+test("settings equality includes delay, sequence length, cooldown, and templates", () => {
   const settings = settingsFixture();
   const validation = validateBookingSettingsDraft(
     bookingSettingsToDraft(settings),
@@ -188,6 +290,33 @@ test("settings equality includes the configurable follow-up delay", () => {
   assert.equal(
     bookingSettingsUpdateEquals(
       { ...validation.update!, customerFollowUpDelayMinutes: 1_500 },
+      settings,
+    ),
+    false,
+  );
+  assert.equal(
+    bookingSettingsUpdateEquals(
+      { ...validation.update!, customerFollowUpMessageLimit: 4 },
+      settings,
+    ),
+    false,
+  );
+  assert.equal(
+    bookingSettingsUpdateEquals(
+      { ...validation.update!, adminCustomerWhatsAppCooldownMinutes: 0 },
+      settings,
+    ),
+    false,
+  );
+  assert.equal(
+    bookingSettingsUpdateEquals(
+      {
+        ...validation.update!,
+        whatsappTemplates: {
+          ...validation.update!.whatsappTemplates,
+          admin_customer_technical_support: "نص تقني مخصص",
+        },
+      },
       settings,
     ),
     false,

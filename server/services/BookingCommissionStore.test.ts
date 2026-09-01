@@ -20,6 +20,7 @@ import type {
   BookingFollowUpDocument,
   BookingNotificationKind,
 } from "./BookingCommissionTypes";
+import { getEndOfDayRiyadh, getStartOfDayRiyadh } from "../utils/dateUtils";
 
 const now = new Date("2026-08-15T12:34:56.789Z");
 
@@ -331,27 +332,111 @@ test("a zero customer message limit keeps booking tracking but disables the auto
   );
 });
 
-test("provider-accepted automatic sends advance one snapshotted per-booking sequence through the final reminder", async () => {
+test("a one-message sequence starts and finishes as the final reminder", async () => {
   const database = new FakeFirestore();
-  const workflow = buildSequencedWorkflow("REQ-SEQUENCE-TWO", 2, 90);
+  const workflow = buildSequencedWorkflow("REQ-SEQUENCE-ONE", 1, 90);
+  const bookingId = workflow.followUp.id;
+  const finalJobId = `${bookingId}--customer_final_reminder`;
+  const dueAt = new Date(workflow.customerNotification.scheduledAt);
+
+  assert.equal(workflow.customerNotification.id, finalJobId);
+  assert.equal(workflow.customerNotification.kind, "customer_final_reminder");
+  assert.equal(workflow.customerNotification.customerFollowUpSequenceNumber, 1);
+  assert.equal(
+    workflow.customerNotification.customerFollowUpSequenceParentJobId,
+    null,
+  );
+  assert.equal(workflow.followUp.activeCustomerNotificationJobId, finalJobId);
+  assert.deepEqual(workflow.followUp.events, [
+    { type: "contact_accepted", at: now.toISOString() },
+    { type: "customer_final_reminder_scheduled", at: now.toISOString() },
+  ]);
+
+  database.seed("booking_followups", bookingId, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-SEQUENCE-ONE",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    finalJobId,
+    workflow.customerNotification,
+  );
+  const store = new BookingCommissionStore(database as any);
+  const claims = await store.claimDueNotificationJobs(dueAt, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]?.id, finalJobId);
+  assert.equal(claims[0]?.kind, "customer_final_reminder");
+  assert.equal(await store.finishNotificationJob({
+    jobId: finalJobId,
+    leaseToken: claims[0]!.leaseToken,
+    success: true,
+    now: dueAt,
+  }), true);
+
+  assert.equal(
+    database.read("booking_notification_outbox", finalJobId)?.status,
+    "sent",
+  );
+  assert.equal(
+    database.read("booking_followups", bookingId)
+      ?.activeCustomerNotificationJobId,
+    null,
+  );
+  assert.deepEqual(
+    database.read("booking_followups", bookingId)?.events
+      .map((event: { type: string }) => event.type),
+    [
+      "contact_accepted",
+      "customer_final_reminder_scheduled",
+      "customer_final_reminder_sent",
+    ],
+  );
+  assert.deepEqual(
+    database.entries("booking_notification_outbox").map(([id]) => id),
+    [finalJobId],
+  );
+});
+
+test("a three-message sequence sends exactly two ordinary follow-ups and one final reminder", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-SEQUENCE-THREE", 3, 90);
   const bookingId = workflow.followUp.id;
   const firstDueAt = new Date(workflow.customerNotification.scheduledAt);
   const firstSentAt = new Date(firstDueAt.getTime() + 7 * 60_000);
   const firstLease = "sequence-first-lease";
+  const firstQuotaWindow = getStartOfDayRiyadh(firstDueAt).getTime();
   database.seed("booking_followups", bookingId, {
     ...workflow.followUp,
-    contactRequestId: "CONTACT-SEQUENCE-TWO",
+    contactRequestId: "CONTACT-SEQUENCE-THREE",
   });
   database.seed("booking_notification_outbox", workflow.customerNotification.id, {
     ...workflow.customerNotification,
     status: "claimed",
     attempts: 1,
+    quotaReservedWindowStartedAt: firstQuotaWindow,
     leaseToken: firstLease,
     leaseExpiresAt: new Date(
       firstSentAt.getTime() + BOOKING_NOTIFICATION_LEASE_MS,
     ).toISOString(),
     claimedAt: firstSentAt.toISOString(),
   });
+  database.seed(
+    "booking_notification_quotas",
+    `customer-customer-subject-hmac-${firstQuotaWindow}`,
+    {
+      recipientRole: "customer",
+      recipientQuotaKey: "customer-subject-hmac",
+      category: "customer_followup",
+      windowStartedAt: firstQuotaWindow,
+      windowEndsAt: getEndOfDayRiyadh(firstDueAt).getTime() + 1,
+      count: 1,
+      updatedAt: firstDueAt.toISOString(),
+    },
+  );
   const store = new BookingCommissionStore(database as any);
 
   assert.equal(await store.finishNotificationJob({
@@ -430,7 +515,10 @@ test("provider-accepted automatic sends advance one snapshotted per-booking sequ
       .filter(([, job]) => job.bookingId === bookingId).length,
     3,
   );
-  assert.equal(database.entries("booking_notification_quotas").length, 0);
+  const customerQuotas = database.entries("booking_notification_quotas");
+  assert.equal(customerQuotas.length, 1);
+  assert.equal(customerQuotas[0]?.[1].recipientRole, "customer");
+  assert.equal(customerQuotas[0]?.[1].count, 3);
   assert.deepEqual(
     database.read("booking_followups", bookingId)?.events.slice(-2)
       .map((event: { type: string }) => event.type),
@@ -568,11 +656,7 @@ test("a final reminder cannot be claimed after the customer has begun answering"
   });
   database.seed("booking_notification_outbox", finalJobId, {
     ...workflow.customerNotification,
-    id: finalJobId,
-    kind: "customer_final_reminder",
     scheduledAt: now.toISOString(),
-    customerFollowUpSequenceNumber: 2,
-    customerFollowUpSequenceParentJobId: workflow.customerNotification.id,
   });
 
   const claims = await new BookingCommissionStore(database as any)
@@ -870,6 +954,8 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       freeOwnerDailyLimit: 8,
       freePropertyContactDailyLimit: 9,
       customerFollowUpDelayMinutes: 2_160,
+      customerFollowUpMessageLimit: 3,
+      adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: null,
@@ -901,8 +987,11 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       freeOwnerDailyLimit: 5,
       freePropertyContactDailyLimit: 6,
       customerFollowUpDelayMinutes: 2_880,
+      customerFollowUpMessageLimit: 2,
+      adminCustomerWhatsAppCooldownMinutes: 45,
       whatsappTemplates: {
         ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+        admin_customer_technical_support: "رسالة دعم مخصصة من الإدارة.",
         property_released_paid:
           "{{propertyName}} ({{propertyNumber}}): paid and released",
       },
@@ -925,7 +1014,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       "changing the configured delay does not reschedule an existing job",
     );
     assert.deepEqual(database.read("settings", "booking_free_workflow_limits"), {
-      schemaVersion: 5,
+      schemaVersion: 6,
       ...configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin",
@@ -963,6 +1052,10 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       { ...configuration, customerFollowUpDelayMinutes: 0 },
       { ...configuration, customerFollowUpDelayMinutes: 1.5 },
       { ...configuration, customerFollowUpDelayMinutes: 7_201 },
+      { ...configuration, customerFollowUpMessageLimit: -1 },
+      { ...configuration, customerFollowUpMessageLimit: 1.5 },
+      { ...configuration, adminCustomerWhatsAppCooldownMinutes: -1 },
+      { ...configuration, adminCustomerWhatsAppCooldownMinutes: 10_081 },
       { ...configuration, whatsappTemplates: {} },
       { ...configuration, optionalCommissionReminderDays: [5] },
     ]) {
@@ -1003,6 +1096,8 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       freeOwnerDailyLimit: 12,
       freePropertyContactDailyLimit: 13,
       customerFollowUpDelayMinutes: 1_440,
+      customerFollowUpMessageLimit: 11,
+      adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
       updatedAt: legacy.updatedAt,
@@ -1025,6 +1120,8 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       freeOwnerDailyLimit: 12,
       freePropertyContactDailyLimit: 13,
       customerFollowUpDelayMinutes: 1_440,
+      customerFollowUpMessageLimit: 11,
+      adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
     },
@@ -1033,7 +1130,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
       ?.schemaVersion,
-    5,
+    6,
   );
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
@@ -1076,11 +1173,14 @@ test("schema-four whole-hour follow-up delay migrates to minutes on the next adm
     freeOwnerDailyLimit: migrated.freeOwnerDailyLimit,
     freePropertyContactDailyLimit: migrated.freePropertyContactDailyLimit,
     customerFollowUpDelayMinutes: migrated.customerFollowUpDelayMinutes,
+    customerFollowUpMessageLimit: migrated.customerFollowUpMessageLimit,
+    adminCustomerWhatsAppCooldownMinutes:
+      migrated.adminCustomerWhatsAppCooldownMinutes,
     whatsappTemplates: migrated.whatsappTemplates,
     optionalCommissionReminderDays: migrated.optionalCommissionReminderDays,
   }, new Date("2026-08-18T10:00:00.000Z"));
   const persisted = database.read("settings", "booking_free_workflow_limits");
-  assert.equal(persisted?.schemaVersion, 5);
+  assert.equal(persisted?.schemaVersion, 6);
   assert.equal(persisted?.customerFollowUpDelayMinutes, 2_160);
   assert.equal("customerFollowUpDelayHours" in (persisted || {}), false);
   assert.equal(
@@ -1125,6 +1225,7 @@ test("malformed schema-four hour values do not become valid minute delays", asyn
 test("legacy seven-template settings migrate per template without losing unrelated custom copy", async () => {
   const database = new FakeFirestore();
   const {
+    admin_customer_technical_support: _technicalSupportTemplate,
     commission_dispute_rejected: _newTemplate,
     customer_final_reminder: _finalReminderTemplate,
     ...legacyTemplates
@@ -1160,6 +1261,12 @@ test("legacy seven-template settings migrate per template without losing unrelat
     "CUSTOM {{propertyLabel}} {{followUpLink}}",
   );
   assert.equal(settings.customerFollowUpDelayMinutes, 1_440);
+  assert.equal(settings.customerFollowUpMessageLimit, 7);
+  assert.equal(settings.adminCustomerWhatsAppCooldownMinutes, 30);
+  assert.equal(
+    settings.whatsappTemplates.admin_customer_technical_support,
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.admin_customer_technical_support,
+  );
   assert.equal(
     settings.whatsappTemplates.property_released_paid,
     "CUSTOM PAID {{propertyName}} {{propertyNumber}}",
@@ -1211,7 +1318,7 @@ function confirmedObserveOnlyFixture() {
 }
 
 function ownerNotificationFixture(
-  booking: ReturnType<typeof confirmedObserveOnlyFixture>,
+  booking: Pick<BookingFollowUpDocument, "id" | "propertyNumber" | "ownerPhone">,
   overrides: Record<string, unknown> = {},
 ) {
   return {
@@ -1518,7 +1625,7 @@ test("admin send-now copies a pending regular customer step without consuming it
   assert.equal(
     database.read(
       "booking_notification_outbox",
-      `${booking.id}--customer_followup_2`,
+      `${booking.id}--customer_final_reminder`,
     ),
     undefined,
   );
@@ -1544,8 +1651,58 @@ test("admin send-now copies a pending regular customer step without consuming it
   });
   assert.ok(database.read(
     "booking_notification_outbox",
-    `${booking.id}--customer_followup_2`,
+    `${booking.id}--customer_final_reminder`,
   ));
+});
+
+test("admin customer send-now bypasses a zero automatic customer quota", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-MANUAL-CUSTOMER-ZERO", 3, 60);
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 6,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-MANUAL-CUSTOMER-ZERO",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    workflow.customerNotification.id,
+    workflow.customerNotification,
+  );
+  const store = new BookingCommissionStore(database as any);
+
+  const resend = await store.scheduleManualNotificationResend({
+    bookingId: workflow.followUp.id,
+    sourceJobId: workflow.customerNotification.id,
+    idempotencyKey: "admin-customer-zero-quota-send-now-01",
+    now,
+  });
+  const claims = await store.claimDueNotificationJobs(now, 5, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+
+  assert.deepEqual(claims.map((job) => job.id), [resend.job.id]);
+  assert.equal(claims[0]?.manualResendRequestedAt, now.toISOString());
+  assert.equal(database.entries("booking_notification_quotas").length, 0);
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+    )?.status,
+    "pending",
+  );
 });
 
 test("admin manual resend of a terminal quota-limited notification bypasses the free-owner limit", async () => {
@@ -1606,7 +1763,7 @@ test("admin manual resend of a terminal quota-limited notification bypasses the 
 
 test("manual resend supports every customer and owner lifecycle notification in a valid state", async () => {
   const dayMs = 24 * 60 * 60 * 1_000;
-  const base = confirmedObserveOnlyFixture() as BookingFollowUpDocument;
+  const base = confirmedObserveOnlyFixture();
   const payable = {
     ...base,
     commissionStatus: "pending" as const,
@@ -1638,7 +1795,14 @@ test("manual resend supports every customer and owner lifecycle notification in 
       kind: "owner_booking_confirmed",
       recipientRole: "owner",
       reminderOffsetDays: null,
-      booking: base,
+      booking: base as BookingFollowUpDocument,
+    },
+    {
+      name: "owner-contact-limit",
+      kind: "owner_contact_limit_reached",
+      recipientRole: "owner",
+      reminderOffsetDays: null,
+      booking: base as BookingFollowUpDocument,
     },
     {
       name: "owner-billing",
@@ -2196,60 +2360,60 @@ test("a rejected-dispute notification is cancelled if payment closes before clai
   );
 });
 
-test("automatic customer follow-ups bypass the customer quota while free-owner notifications still use it", async () => {
+test("customer daily quota is shared across properties and positive exhaustion defers to the next Riyadh day", async () => {
   const database = new FakeFirestore();
   database.seed("settings", "booking_free_workflow_limits", {
-    schemaVersion: 1,
-    customerDailyLimit: 0,
-    freeOwnerDailyLimit: 0,
+    schemaVersion: 6,
+    customerDailyLimit: 1,
+    freeOwnerDailyLimit: 3,
     freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
     updatedAt: now.toISOString(),
     updatedBy: "admin",
   });
 
-  const customerWorkflow = buildWorkflow();
-  const claimAt = new Date(Date.parse(customerWorkflow.customerNotification.scheduledAt));
-  database.seed("booking_followups", customerWorkflow.followUp.id, {
-    ...customerWorkflow.followUp,
-    contactRequestId: "CONTACT-QUOTA-CUSTOMER",
-  });
-  database.seed(
-    "booking_notification_outbox",
-    customerWorkflow.customerNotification.id,
-    customerWorkflow.customerNotification,
-  );
-
-  const ownerBookingId = "BOOK-REQ-13383-OWNER-QUOTA";
-  const ownerJobId = `${ownerBookingId}--owner_booking_confirmed`;
-  database.seed("booking_followups", ownerBookingId, {
-    ...customerWorkflow.followUp,
-    id: ownerBookingId,
-    requestCode: "REQ-13383-OWNER-QUOTA",
-    contactRequestId: "CONTACT-QUOTA-OWNER",
-    bookingStatus: "confirmed",
-    bookingDecision: "yes",
-    confirmedAt: claimAt.toISOString(),
-    commissionStatus: "not_applicable",
-    confirmationFacts: {
-      timing: "weekend",
-      bookingDate: { value: "2026-08-15", precision: "day" },
-      pricePaidHalalas: 100_000,
-    },
-  });
-  database.seed("properties", "13383", {
-    propertyNumber: "13383",
-    whatsappNumber: "0500000001",
-  });
-  database.seed("booking_notification_outbox", ownerJobId, {
-    ...customerWorkflow.customerNotification,
-    id: ownerJobId,
-    bookingId: ownerBookingId,
-    recipientRole: "owner",
-    recipientPhone: customerWorkflow.followUp.ownerPhone,
-    recipientQuotaKey: "500000001",
-    kind: "owner_booking_confirmed",
-    quotaCategory: "free_owner_booking",
-  });
+  const workflows = [
+    buildInitialBookingWorkflow({
+      requestCode: "REQ-CUSTOMER-QUOTA-A",
+      propertyNumber: "CUSTOMER-PROP-A",
+      propertyName: "Property A",
+      ownerPhone: "+966500000001",
+      customerPhone: "+966500000002",
+      customerSubject: "same-customer-across-properties",
+      isFreeProperty: true,
+      customerFollowUpDelayMinutes: 60,
+      customerFollowUpMessageLimit: 3,
+      now,
+    }),
+    buildInitialBookingWorkflow({
+      requestCode: "REQ-CUSTOMER-QUOTA-B",
+      propertyNumber: "CUSTOMER-PROP-B",
+      propertyName: "Property B",
+      ownerPhone: "+966500000003",
+      customerPhone: "+966500000002",
+      customerSubject: "same-customer-across-properties",
+      isFreeProperty: true,
+      customerFollowUpDelayMinutes: 60,
+      customerFollowUpMessageLimit: 3,
+      now,
+    }),
+  ];
+  for (const [index, workflow] of workflows.entries()) {
+    database.seed("booking_followups", workflow.followUp.id, {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-CUSTOMER-QUOTA-${index}`,
+    });
+    database.seed(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+      workflow.customerNotification,
+    );
+  }
+  const claimAt = new Date(workflows[0]!.customerNotification.scheduledAt);
 
   const store = new BookingCommissionStore(database as any);
   const claims = await store.claimDueNotificationJobs(claimAt, 5, {
@@ -2258,34 +2422,364 @@ test("automatic customer follow-ups bypass the customer quota while free-owner n
   });
 
   assert.equal(claims.length, 1);
-  assert.equal(claims[0]?.id, customerWorkflow.customerNotification.id);
+  assert.equal(claims[0]?.id, workflows[0]!.customerNotification.id);
   assert.equal(claims[0]?.kind, "customer_followup");
   assert.equal(claims[0]?.status, "claimed");
+  const deferred = database.read(
+    "booking_notification_outbox",
+    workflows[1]!.customerNotification.id,
+  );
+  const nextRiyadhDay = new Date(
+    getEndOfDayRiyadh(claimAt).getTime() + 1,
+  ).toISOString();
+  assert.equal(deferred?.status, "pending");
+  assert.equal(deferred?.providerError, "daily_notification_quota_deferred");
+  assert.equal(deferred?.scheduledAt, nextRiyadhDay);
+  assert.equal(
+    database.entries("booking_notification_quotas").length,
+    1,
+  );
+  assert.equal(database.entries("booking_notification_quotas")[0]?.[1].count, 1);
+
+  const nextDayClaims = await store.claimDueNotificationJobs(
+    new Date(nextRiyadhDay),
+    5,
+    {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    },
+  );
+  assert.deepEqual(
+    nextDayClaims.map((job) => job.id),
+    [workflows[1]!.customerNotification.id],
+  );
+  assert.equal(
+    database.entries("booking_notification_quotas").length,
+    2,
+    "the next Riyadh day uses a fresh shared customer quota window",
+  );
+});
+
+test("a zero customer daily quota suppresses the automatic sequence terminally", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-CUSTOMER-ZERO-QUOTA", 3, 60);
+  const claimAt = new Date(workflow.customerNotification.scheduledAt);
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 6,
+    customerDailyLimit: 0,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-CUSTOMER-ZERO-QUOTA",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    workflow.customerNotification.id,
+    workflow.customerNotification,
+  );
+
+  const claims = await new BookingCommissionStore(database as any)
+    .claimDueNotificationJobs(claimAt, 5, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+
+  assert.deepEqual(claims, []);
   assert.equal(
     database.read(
       "booking_notification_outbox",
-      customerWorkflow.customerNotification.id,
-    )?.providerError,
-    null,
-  );
-  assert.equal(
-    database.read("booking_notification_outbox", ownerJobId)?.status,
+      workflow.customerNotification.id,
+    )?.status,
     "suppressed_quota",
   );
   assert.equal(
-    database.read("booking_notification_outbox", ownerJobId)?.providerError,
+    database.read(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+    )?.providerError,
     "daily_notification_quota",
   );
   assert.equal(
-    database.read("booking_followups", ownerBookingId)?.events.at(-1)?.type,
-    "owner_notification_suppressed",
+    database.read("booking_followups", workflow.followUp.id)
+      ?.activeCustomerNotificationJobId,
+    null,
   );
   assert.equal(
-    database.entries("booking_notification_quotas")
-      .filter(([, quota]) => quota.recipientRole === "customer").length,
+    database.entries("booking_notification_quotas").length,
     0,
-    "automatic customer follow-ups must not create a customer quota record",
   );
+});
+
+test("a quota change is read atomically by the notification claim", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-ATOMIC-QUOTA-CHANGE", 3, 60);
+  const claimAt = new Date(workflow.customerNotification.scheduledAt);
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 6,
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  database.seed("booking_followups", workflow.followUp.id, {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-ATOMIC-QUOTA-CHANGE",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    workflow.customerNotification.id,
+    workflow.customerNotification,
+  );
+  database.runBeforeNextTransaction(() => {
+    database.update("settings", "booking_free_workflow_limits", {
+      customerDailyLimit: 0,
+    });
+  });
+
+  const claims = await new BookingCommissionStore(database as any)
+    .claimDueNotificationJobs(claimAt, 5, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+
+  assert.deepEqual(claims, []);
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+    )?.status,
+    "suppressed_quota",
+  );
+});
+
+test("every automatic owner booking and commission notification uses the owner-wide daily quota", async () => {
+  const dayMs = 24 * 60 * 60 * 1_000;
+  const base = confirmedObserveOnlyFixture();
+  const payable = {
+    ...base,
+    commissionStatus: "pending" as const,
+    commissionAmountHalalas: 10_000,
+    commissionNoticeSentAt: new Date(now.getTime() - dayMs).toISOString(),
+    commissionDueAt: new Date(now.getTime() + 4 * dayMs).toISOString(),
+    disputeStatus: "none" as const,
+    complianceStatus: "clear" as const,
+  } as BookingFollowUpDocument;
+  const scenarios: Array<{
+    name: string;
+    kind: BookingNotificationKind;
+    reminderOffsetDays: 3 | 4 | 5 | null;
+    booking: BookingFollowUpDocument;
+  }> = [
+    {
+      name: "contact-limit-reached",
+      kind: "owner_contact_limit_reached",
+      reminderOffsetDays: null,
+      booking: base as BookingFollowUpDocument,
+    },
+    {
+      name: "booking-facts",
+      kind: "owner_booking_confirmed",
+      reminderOffsetDays: null,
+      booking: base as BookingFollowUpDocument,
+    },
+    {
+      name: "booking-commission",
+      kind: "owner_booking_confirmed",
+      reminderOffsetDays: null,
+      booking: payable,
+    },
+    {
+      name: "dispute-rejected",
+      kind: "commission_dispute_rejected",
+      reminderOffsetDays: null,
+      booking: { ...payable, disputeStatus: "rejected" },
+    },
+    ...([3, 4, 5] as const).map((day) => ({
+      name: `reminder-${day}`,
+      kind: `commission_reminder_${day}` as BookingNotificationKind,
+      reminderOffsetDays: day,
+      booking: {
+        ...payable,
+        commissionNoticeSentAt: new Date(
+          now.getTime() - day * dayMs,
+        ).toISOString(),
+        commissionDueAt: new Date(
+          now.getTime() + (5 - day) * dayMs,
+        ).toISOString(),
+      } as BookingFollowUpDocument,
+    })),
+    {
+      name: "property-paused",
+      kind: "property_paused",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "overdue",
+        complianceStatus: "paused",
+        commissionNoticeSentAt: new Date(now.getTime() - 5 * dayMs)
+          .toISOString(),
+        commissionDueAt: new Date(now.getTime() - 1).toISOString(),
+      } as BookingFollowUpDocument,
+    },
+    {
+      name: "property-released-paid",
+      kind: "property_released",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "paid",
+        complianceStatus: "released",
+        commissionPaidAt: now.toISOString(),
+      } as BookingFollowUpDocument,
+    },
+    {
+      name: "property-released-waived",
+      kind: "property_released",
+      reminderOffsetDays: null,
+      booking: {
+        ...payable,
+        commissionStatus: "waived",
+        complianceStatus: "released",
+        disputeStatus: "accepted",
+      } as BookingFollowUpDocument,
+    },
+  ];
+
+  for (const [index, scenario] of scenarios.entries()) {
+    const database = new FakeFirestore();
+    const booking = {
+      ...scenario.booking,
+      id: `BOOK-OWNER-QUOTA-${index}`,
+      requestCode: `REQ-OWNER-QUOTA-${index}`,
+      contactRequestId: `CONTACT-OWNER-QUOTA-${index}`,
+      propertyNumber: `OWNER-QUOTA-PROP-${index}`,
+    } as BookingFollowUpDocument;
+    const job = ownerNotificationFixture(base, {
+      id: `${booking.id}--${scenario.kind}`,
+      bookingId: booking.id,
+      propertyNumber: booking.propertyNumber,
+      kind: scenario.kind,
+      reminderOffsetDays: scenario.reminderOffsetDays,
+      scheduledAt: now.toISOString(),
+      status: "pending",
+      attempts: 0,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      claimedAt: null,
+      sentAt: null,
+      quotaCategory: scenario.kind === "owner_booking_confirmed" &&
+          booking.commissionStatus === "not_applicable"
+        ? "free_owner_booking"
+        : "transactional",
+    });
+    database.seed("settings", "booking_free_workflow_limits", {
+      schemaVersion: 6,
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 0,
+      freePropertyContactDailyLimit: 6,
+      customerFollowUpDelayMinutes: 60,
+      customerFollowUpMessageLimit: 3,
+      adminCustomerWhatsAppCooldownMinutes: 30,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: now.toISOString(),
+      updatedBy: "admin",
+    });
+    database.seed("booking_followups", booking.id, booking);
+    database.seed("booking_notification_outbox", job.id, job);
+    database.seed("properties", booking.propertyNumber, {
+      propertyNumber: booking.propertyNumber,
+      whatsappNumber: booking.ownerPhone,
+      commissionHold: { active: false, obligationIds: [] },
+    });
+
+    const claims = await new BookingCommissionStore(database as any)
+      .claimDueNotificationJobs(now, 5, {
+        followUpNotificationsEnabled: true,
+        commissionNotificationsEnabled: true,
+      });
+
+    assert.deepEqual(claims, [], scenario.name);
+    assert.equal(
+      database.read("booking_notification_outbox", job.id)?.status,
+      "suppressed_quota",
+      scenario.name,
+    );
+    assert.equal(
+      database.read("booking_notification_outbox", job.id)?.providerError,
+      "daily_notification_quota",
+      scenario.name,
+    );
+  }
+
+  const sharedDatabase = new FakeFirestore();
+  sharedDatabase.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 6,
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 1,
+    freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+  for (const suffix of ["A", "B"] as const) {
+    const booking = {
+      ...base,
+      id: `BOOK-OWNER-WIDE-${suffix}`,
+      requestCode: `REQ-OWNER-WIDE-${suffix}`,
+      contactRequestId: `CONTACT-OWNER-WIDE-${suffix}`,
+      propertyNumber: `OWNER-WIDE-PROP-${suffix}`,
+    } as BookingFollowUpDocument;
+    const job = ownerNotificationFixture(base, {
+      id: `${booking.id}--owner_booking_confirmed`,
+      bookingId: booking.id,
+      propertyNumber: booking.propertyNumber,
+      scheduledAt: now.toISOString(),
+      status: "pending",
+      attempts: 0,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      claimedAt: null,
+      sentAt: null,
+    });
+    sharedDatabase.seed("booking_followups", booking.id, booking);
+    sharedDatabase.seed("booking_notification_outbox", job.id, job);
+    sharedDatabase.seed("properties", booking.propertyNumber, {
+      propertyNumber: booking.propertyNumber,
+      whatsappNumber: booking.ownerPhone,
+    });
+  }
+
+  const sharedClaims = await new BookingCommissionStore(sharedDatabase as any)
+    .claimDueNotificationJobs(now, 5, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+  assert.equal(sharedClaims.length, 1);
+  const deferredOwnerJobs = sharedDatabase
+    .entries("booking_notification_outbox")
+    .filter(([, job]) => job.providerError === "daily_notification_quota_deferred");
+  assert.equal(deferredOwnerJobs.length, 1);
+  assert.equal(sharedDatabase.entries("booking_notification_quotas").length, 1);
 });
 
 test("reclaiming one limited owner notification reserves its daily quota only once", async () => {
@@ -2753,6 +3247,76 @@ test("admin customer WhatsApp contact is limited once per customer every 30 minu
     boundary,
   );
   assert.equal(second?.adminCustomerWhatsAppLastOpenedAt, boundary.toISOString());
+});
+
+test("admin customer WhatsApp cooldown accepts a configured duration and zero disables it", async () => {
+  const database = new FakeFirestore();
+  const store = new BookingCommissionStore(database as any);
+  const seedBooking = (suffix: string) => {
+    const workflow = buildInitialBookingWorkflow({
+      requestCode: `ADMIN-CUSTOM-COOLDOWN-${suffix}`,
+      propertyNumber: `ADMIN-CUSTOM-PROP-${suffix}`,
+      propertyName: `Property ${suffix}`,
+      ownerPhone: "+966500000001",
+      customerPhone: "+966500000002",
+      customerSubject: "configured-cooldown-customer",
+      isFreeProperty: true,
+      now,
+    });
+    database.seed("booking_followups", workflow.followUp.id, {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-ADMIN-CUSTOM-${suffix}`,
+    });
+    database.seed("properties", workflow.followUp.propertyNumber, {
+      propertyNumber: workflow.followUp.propertyNumber,
+      whatsappNumber: "0500000001",
+    });
+    return workflow.followUp.id;
+  };
+  const firstId = seedBooking("A");
+  const secondId = seedBooking("B");
+
+  await store.claimAdminCustomerWhatsAppContact(
+    firstId,
+    now,
+    "technical_support",
+    10,
+  );
+  await assert.rejects(
+    () => store.claimAdminCustomerWhatsAppContact(
+      secondId,
+      new Date(now.getTime() + 9 * 60_000),
+      "technical_support",
+      10,
+    ),
+    (error: unknown) =>
+      error instanceof BookingWorkflowError &&
+      error.code === "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED" &&
+      error.retryAfterSeconds === 60,
+  );
+  const atBoundary = new Date(now.getTime() + 10 * 60_000);
+  const allowed = await store.claimAdminCustomerWhatsAppContact(
+    secondId,
+    atBoundary,
+    "technical_support",
+    10,
+  );
+  assert.equal(
+    allowed?.adminCustomerWhatsAppLastOpenedAt,
+    atBoundary.toISOString(),
+  );
+
+  const noCooldownTime = new Date(atBoundary.getTime() + 1);
+  const immediate = await store.claimAdminCustomerWhatsAppContact(
+    firstId,
+    noCooldownTime,
+    "technical_support",
+    0,
+  );
+  assert.equal(
+    immediate?.adminCustomerWhatsAppLastOpenedAt,
+    noCooldownTime.toISOString(),
+  );
 });
 
 test("admin customer WhatsApp template availability is derived from current booking state", () => {

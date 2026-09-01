@@ -6,11 +6,37 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Bell, BellOff, Save, Loader2, MessageCircle, Home, CreditCard, Receipt, Edit, DollarSign, Smartphone, ShieldCheck, Clock } from "lucide-react";
 import type { NotificationSettings } from "@shared/schema";
+import {
+  DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+  OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATE_PLACEHOLDERS,
+  normalizeStoredOwnerSubscriptionWhatsAppTemplates,
+  ownerSubscriptionWhatsAppTemplatesSchema,
+  type OwnerSubscriptionWhatsAppTemplateKey,
+} from "@shared/subscription-whatsapp";
+
+type SmartScheduleDay = NonNullable<
+  NotificationSettings["smartSchedule"]
+>["sendDays"][number];
+
+const SMART_SCHEDULE_DAYS: readonly SmartScheduleDay[] = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+function isSmartScheduleDay(value: string): value is SmartScheduleDay {
+  return (SMART_SCHEDULE_DAYS as readonly string[]).includes(value);
+}
 
 const notificationTypes = [
   { key: "newProperty" as const, label: "عقار جديد", description: "عند إضافة عقار جديد", icon: Home },
@@ -24,7 +50,29 @@ const notificationTypes = [
   { key: "subscriptionExpired" as const, label: "انتهاء الاشتراك", description: "عند انتهاء صلاحية اشتراك", icon: Clock },
 ];
 
-export default function SettingsSection() {
+const ownerSubscriptionTemplateDefinitions: ReadonlyArray<{
+  key: OwnerSubscriptionWhatsAppTemplateKey;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "activated",
+    label: "تفعيل الاشتراك",
+    description: "تُرسل للمالك بعد تفعيل الاشتراك.",
+  },
+  {
+    key: "expiringSoon",
+    label: "قرب انتهاء الاشتراك",
+    description: "تُرسل للمالك قبل انتهاء الاشتراك.",
+  },
+  {
+    key: "expired",
+    label: "انتهاء الاشتراك",
+    description: "تُرسل للمالك بعد انتهاء الاشتراك.",
+  },
+];
+
+export function WhatsAppNotificationSettings() {
   const { toast } = useToast();
   const [settings, setSettings] = useState<NotificationSettings>({
     allNotifications: true,
@@ -37,6 +85,9 @@ export default function SettingsSection() {
     smartRequest: true,
     propertyVerification: true,
     subscriptionExpired: true,
+    ownerSubscriptionWhatsAppTemplates: {
+      ...DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+    },
     smartSchedule: {
       enabled: true,
       sendDays: ["Sunday", "Wednesday"],
@@ -47,15 +98,24 @@ export default function SettingsSection() {
     },
   });
 
-  const { data: savedSettings, isLoading } = useQuery<NotificationSettings>({
+  const { data: savedSettings, isLoading, isError, refetch } = useQuery<NotificationSettings>({
     queryKey: ["/api/admin/settings/notifications"],
   });
 
   useEffect(() => {
     if (savedSettings) {
-      setSettings(savedSettings);
+      setSettings({
+        ...savedSettings,
+        ownerSubscriptionWhatsAppTemplates:
+          normalizeStoredOwnerSubscriptionWhatsAppTemplates(
+            savedSettings.ownerSubscriptionWhatsAppTemplates,
+          ),
+      });
     }
   }, [savedSettings]);
+
+  const ownerTemplatesValid = ownerSubscriptionWhatsAppTemplatesSchema
+    .safeParse(settings.ownerSubscriptionWhatsAppTemplates).success;
 
   const saveMutation = useMutation({
     mutationFn: async (newSettings: NotificationSettings) => {
@@ -92,8 +152,6 @@ export default function SettingsSection() {
   };
 
   const handleSave = () => {
-    // Prune complex objects for the API (it only expects what NotificationSettings expects)
-    const { smartSchedule, ...baseSettings } = settings;
     saveMutation.mutate(settings);
   };
 
@@ -105,9 +163,27 @@ export default function SettingsSection() {
     );
   }
 
+  if (isError) {
+    return (
+      <Card className="min-w-0 p-4 text-center sm:p-6" dir="rtl">
+        <p className="text-sm font-semibold text-destructive">
+          تعذر تحميل إعدادات الإشعارات
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void refetch()}
+          className="mt-4 w-full sm:w-auto"
+        >
+          إعادة المحاولة
+        </Button>
+      </Card>
+    );
+  }
+
   return (
-    <div className="space-y-6" dir="rtl">
-      <Card>
+    <div className="min-w-0 max-w-full space-y-6" dir="rtl">
+      <Card className="min-w-0 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bell className="w-5 h-5" />
@@ -118,14 +194,14 @@ export default function SettingsSection() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col items-stretch gap-3 rounded-lg border bg-muted/50 p-4 min-[360px]:flex-row min-[360px]:items-center min-[360px]:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               {settings.allNotifications ? (
                 <Bell className="w-6 h-6 text-primary" />
               ) : (
                 <BellOff className="w-6 h-6 text-muted-foreground" />
               )}
-              <div>
+              <div className="min-w-0">
                 <Label className="text-base font-semibold">جميع الإشعارات</Label>
                 <p className="text-sm text-muted-foreground">
                   تفعيل أو تعطيل جميع الإشعارات
@@ -136,6 +212,7 @@ export default function SettingsSection() {
               checked={settings.allNotifications}
               onCheckedChange={handleToggleAll}
               data-testid="switch-all-notifications"
+              className="self-end min-[360px]:self-auto"
             />
           </div>
 
@@ -147,15 +224,15 @@ export default function SettingsSection() {
               return (
                 <div
                   key={type.key}
-                  className={`flex items-center justify-between p-4 rounded-lg border transition-opacity ${
+                  className={`flex flex-col items-stretch gap-3 rounded-lg border p-4 transition-opacity min-[360px]:flex-row min-[360px]:items-center min-[360px]:justify-between ${
                     !settings.allNotifications ? "opacity-50" : ""
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className={`p-2 rounded-lg ${isEnabled ? "bg-primary/10" : "bg-muted"}`}>
                       <IconComponent className={`w-4 h-4 ${isEnabled ? "text-primary" : "text-muted-foreground"}`} />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="font-medium">{type.label}</Label>
                       <p className="text-sm text-muted-foreground">{type.description}</p>
                     </div>
@@ -165,17 +242,101 @@ export default function SettingsSection() {
                     onCheckedChange={(checked) => handleToggleSingle(type.key, checked)}
                     disabled={!settings.allNotifications}
                     data-testid={`switch-${type.key}`}
+                    className="self-end min-[360px]:self-auto"
                   />
                 </div>
               );
             })}
           </div>
 
-          <div className="flex justify-end pt-4 border-t">
+          <section
+            className="min-w-0 space-y-4 rounded-lg border bg-muted/20 p-3 sm:p-4"
+            aria-labelledby="owner-subscription-whatsapp-templates-title"
+          >
+            <div className="min-w-0">
+              <h3
+                id="owner-subscription-whatsapp-templates-title"
+                className="text-base font-semibold"
+              >
+                قوالب رسائل اشتراكات الملاك
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                عدّل رسائل التفعيل وقرب الانتهاء والانتهاء التي تُرسل لمالك العقار.
+              </p>
+            </div>
+
+            <div className="grid min-w-0 grid-cols-1 gap-4">
+              {ownerSubscriptionTemplateDefinitions.map((definition) => {
+                const template =
+                  settings.ownerSubscriptionWhatsAppTemplates[definition.key];
+                const templateValid =
+                  ownerSubscriptionWhatsAppTemplatesSchema.shape[definition.key]
+                    .safeParse(template).success;
+
+                return (
+                  <div
+                    key={definition.key}
+                    className="min-w-0 space-y-3 rounded-lg border bg-background p-3 sm:p-4"
+                  >
+                    <div className="min-w-0">
+                      <Label
+                        htmlFor={`owner-subscription-template-${definition.key}`}
+                        className="font-semibold"
+                      >
+                        {definition.label}
+                      </Label>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {definition.description}
+                      </p>
+                    </div>
+
+                    <div className="flex min-w-0 flex-wrap gap-2" dir="ltr">
+                      {OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATE_PLACEHOLDERS[
+                        definition.key
+                      ].map((placeholder) => (
+                        <code
+                          key={placeholder}
+                          className="max-w-full break-all rounded bg-muted px-2 py-1 text-xs"
+                        >
+                          {`{{${placeholder}}}`}
+                        </code>
+                      ))}
+                    </div>
+
+                    <Textarea
+                      id={`owner-subscription-template-${definition.key}`}
+                      data-testid={`textarea-owner-subscription-${definition.key}`}
+                      value={template}
+                      onChange={(event) =>
+                        setSettings((previous) => ({
+                          ...previous,
+                          ownerSubscriptionWhatsAppTemplates: {
+                            ...previous.ownerSubscriptionWhatsAppTemplates,
+                            [definition.key]: event.target.value,
+                          },
+                        }))
+                      }
+                      className="min-h-40 w-full max-w-full resize-y whitespace-pre-wrap break-words text-start [overflow-wrap:anywhere]"
+                      dir="rtl"
+                      aria-invalid={!templateValid}
+                    />
+
+                    {!templateValid ? (
+                      <p className="text-sm text-destructive" role="alert">
+                        تأكد من إبقاء جميع المتغيرات المطلوبة مرة واحدة وكتابة القالب بصيغة صحيحة.
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="flex justify-end border-t pt-4">
             <Button
               onClick={handleSave}
-              disabled={saveMutation.isPending}
-              className="gap-2"
+              disabled={saveMutation.isPending || !ownerTemplatesValid}
+              className="w-full gap-2 sm:w-auto"
               data-testid="button-save-settings"
             >
               {saveMutation.isPending ? (
@@ -190,7 +351,7 @@ export default function SettingsSection() {
       </Card>
 
       {/* 📅 Smart Schedule Config Card */}
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="w-5 h-5 text-blue-600" />
@@ -201,14 +362,14 @@ export default function SettingsSection() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col items-stretch gap-3 rounded-lg border bg-muted/50 p-4 min-[360px]:flex-row min-[360px]:items-center min-[360px]:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               {settings.smartSchedule?.enabled ? (
                 <Clock className="w-6 h-6 text-blue-600" />
               ) : (
                 <Clock className="w-6 h-6 text-muted-foreground" />
               )}
-              <div>
+              <div className="min-w-0">
                 <Label className="text-base font-semibold">تفعيل الجدولة الذكية</Label>
                 <p className="text-sm text-muted-foreground">
                   إرسال الرسائل مرتين أسبوعياً فقط ( الأحد صباحاً والأربعاء مساءً )
@@ -223,6 +384,7 @@ export default function SettingsSection() {
                   smartSchedule: { ...prev.smartSchedule!, enabled: checked },
                 }))
               }
+              className="self-end min-[360px]:self-auto"
             />
           </div>
 
@@ -293,6 +455,7 @@ export default function SettingsSection() {
                 value={(settings.smartSchedule?.sendDays?.[0] ?? "Sunday")}
                 onValueChange={(val) =>
                   setSettings((prev) => {
+                    if (!isSmartScheduleDay(val)) return prev;
                     const days = [...(prev.smartSchedule?.sendDays ?? [])];
                     days[0] = val;
                     return { ...prev, smartSchedule: { ...prev.smartSchedule!, sendDays: days } };
@@ -339,6 +502,7 @@ export default function SettingsSection() {
                 value={(settings.smartSchedule?.sendDays?.[1] ?? "Wednesday")}
                 onValueChange={(val) =>
                   setSettings((prev) => {
+                    if (!isSmartScheduleDay(val)) return prev;
                     const days = [...(prev.smartSchedule?.sendDays ?? [])];
                     days[1] = val;
                     return { ...prev, smartSchedule: { ...prev.smartSchedule!, sendDays: days } };
@@ -379,10 +543,26 @@ export default function SettingsSection() {
               />
             </div>
           </div>
+
+          <div className="flex justify-end border-t pt-4">
+            <Button
+              onClick={handleSave}
+              disabled={saveMutation.isPending || !ownerTemplatesValid}
+              className="w-full gap-2 sm:w-auto"
+              data-testid="button-save-schedule-settings"
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              حفظ الإعدادات
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <MessageCircle className="w-5 h-5 text-green-600" />
@@ -405,4 +585,8 @@ export default function SettingsSection() {
       </Card>
     </div>
   );
+}
+
+export default function SettingsSection() {
+  return <WhatsAppNotificationSettings />;
 }

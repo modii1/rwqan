@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS,
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
+  BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   COMMISSION_PAYMENT_WINDOW_MS,
   COMMISSION_REMINDER_OFFSET_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingConfirmationFactsSchema,
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
+  bookingAdminCustomerWhatsAppCooldownMinutesSchema,
+  bookingCustomerFollowUpMessageLimitSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
   bookingDateSchema,
@@ -58,6 +62,12 @@ test("default booking WhatsApp templates render the approved messages byte-for-b
   );
 
   assert.equal(renderBookingWhatsAppTemplate(
+    "admin_customer_technical_support",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.admin_customer_technical_support,
+    {},
+  ), "مرحباً، معك الفريق التقني لمنصة روقان.");
+
+  assert.equal(renderBookingWhatsAppTemplate(
     "customer_followup",
     DEFAULT_BOOKING_WHATSAPP_TEMPLATES.customer_followup,
     {
@@ -81,6 +91,19 @@ https://rwqan.sa/booking/customer-token`);
 هل تم الحجز من خلال منصة روقان؟
 
 نشكرك على وقتك وتعاونك 🤍`);
+
+  assert.equal(renderBookingWhatsAppTemplate(
+    "owner_contact_limit_reached",
+    DEFAULT_BOOKING_WHATSAPP_TEMPLATES.owner_contact_limit_reached,
+    {
+      propertyNumber: "10001",
+      dailyLimit: 7,
+      renewalLink: "https://rwqan.sa/r",
+    },
+  ), `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 10001 ضمن الباقة المجانية (7 من 7).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://rwqan.sa/r`);
 
   assert.equal(renderBookingWhatsAppTemplate(
     "owner_booking_facts",
@@ -198,7 +221,7 @@ https://rwqan.sa/booking-commission/owner-token`);
 https://rwqan.sa/booking-commission/owner-token`);
 });
 
-test("booking WhatsApp templates require each safe placeholder exactly once", () => {
+test("booking WhatsApp templates enforce safe placeholder occurrence rules", () => {
   for (const customerFollowup of [
     "{{propertyLabel}}",
     "{{propertyLabel}} {{followUpLink}} {{unknown}}",
@@ -221,6 +244,22 @@ test("booking WhatsApp templates require each safe placeholder exactly once", ()
     ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     customer_final_reminder: "رسالة {{followUpLink}}",
   }).success, false);
+
+  assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    admin_customer_technical_support: "دعم {{customerPhone}}",
+  }).success, false);
+
+  assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    owner_contact_limit_reached:
+      "{{propertyNumber}} {{dailyLimit}} {{renewalLink}}",
+  }).success, true);
+  assert.equal(bookingWhatsAppTemplatesSchema.safeParse({
+    ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    owner_contact_limit_reached:
+      "{{propertyNumber}} {{dailyLimit}} {{dailyLimit}} {{dailyLimit}} {{renewalLink}}",
+  }).success, false);
 });
 
 test("only optional commission reminders on days three and four are configurable", () => {
@@ -238,6 +277,8 @@ test("only optional commission reminders on days three and four are configurable
     freeOwnerDailyLimit: 3,
     freePropertyContactDailyLimit: 3,
     customerFollowUpDelayMinutes: 1_440,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
     whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     optionalCommissionReminderDays: [3, 4],
   }).success, true);
@@ -255,6 +296,35 @@ test("customer follow-up delay accepts whole minutes from one through five days"
   }
 });
 
+test("customer sequence length and admin WhatsApp cooldown accept their documented bounds", () => {
+  for (const value of [0, 3, 1_000]) {
+    assert.equal(bookingCustomerFollowUpMessageLimitSchema.parse(value), value);
+  }
+  for (const value of [-1, 1.5, 1_001, "3", null]) {
+    assert.equal(
+      bookingCustomerFollowUpMessageLimitSchema.safeParse(value).success,
+      false,
+    );
+  }
+
+  for (const value of [0, 30, 10_080]) {
+    assert.equal(
+      bookingAdminCustomerWhatsAppCooldownMinutesSchema.parse(value),
+      value,
+    );
+  }
+  for (const value of [-1, 1.5, 10_081, "30", null]) {
+    assert.equal(
+      bookingAdminCustomerWhatsAppCooldownMinutesSchema.safeParse(value)
+        .success,
+      false,
+    );
+  }
+
+  assert.equal(BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT, 3);
+  assert.equal(BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT, 30);
+});
+
 test("legacy whole-hour settings transform to canonical minutes without accepting fractions", () => {
   for (const value of [1, 24, 120]) {
     assert.equal(bookingCustomerFollowUpDelayHoursSchema.parse(value), value);
@@ -270,6 +340,8 @@ test("legacy whole-hour settings transform to canonical minutes without acceptin
     customerDailyLimit: 3,
     freeOwnerDailyLimit: 3,
     freePropertyContactDailyLimit: 3,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
     whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     optionalCommissionReminderDays: [3, 4],
   };

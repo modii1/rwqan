@@ -314,6 +314,9 @@ router.post("/api/requests/smart", async (req, res) => {
     const freeWorkflowSettings = !isPremiumProperty
       ? await bookingCommissionService.getFreeWorkflowSettings()
       : null;
+    const freePropertyContactDailyLimit = !isPremiumProperty
+      ? freeWorkflowSettings!.freePropertyContactDailyLimit
+      : FREE_PROPERTY_DAILY_CONTACT_LIMIT;
 
     let bookingWorkflow: ReturnType<typeof bookingCommissionService.buildContactWorkflow> | undefined;
     let bookingFollowUpStatus: BookingFollowUpStatus | undefined;
@@ -358,7 +361,8 @@ router.post("/api/requests/smart", async (req, res) => {
               customerFollowUpDelayMinutes:
                 freeWorkflowSettings!.customerFollowUpDelayMinutes,
               customerFollowUpMessageLimit:
-                freeWorkflowSettings!.customerDailyLimit,
+                freeWorkflowSettings!.customerFollowUpMessageLimit,
+              freePropertyContactDailyLimit,
               propertyPrices: property.prices,
               now: nowDate,
             });
@@ -371,10 +375,6 @@ router.post("/api/requests/smart", async (req, res) => {
         }
       }
     }
-
-    const freePropertyContactDailyLimit = !isPremiumProperty
-      ? freeWorkflowSettings!.freePropertyContactDailyLimit
-      : FREE_PROPERTY_DAILY_CONTACT_LIMIT;
 
     // احسب عدد الطلبات من هذا IP للعقار هذا
     if (!ipPropertyCounter.has(ipAddress)) {
@@ -479,26 +479,6 @@ router.post("/api/requests/smart", async (req, res) => {
         `تعذر إعداد متابعة الحجز للطلب ${requestCode} للعقار ${propertyNumber}. رمز الخطأ: ${bookingFollowUpFailureCode}`,
       ).catch((error) =>
         console.error("Booking follow-up setup admin alert failed:", error));
-    }
-
-    if (cooldown.dailyPropertyLimitReached && property.whatsappNumber) {
-      notificationService.ownerFreeContactLimitReached({
-        ownerPhone: property.whatsappNumber,
-        propertyNumber,
-        dailyLimit: freePropertyContactDailyLimit,
-      }).then((result) => {
-        if (!result.success && !result.suppressed) {
-          console.error(
-            `Free-property daily-limit owner notification failed for ${propertyNumber}:`,
-            result.error,
-          );
-        }
-      }).catch((error) => {
-        console.error(
-          `Free-property daily-limit owner notification error for ${propertyNumber}:`,
-          error,
-        );
-      });
     }
 
     // حدّث المتتبع

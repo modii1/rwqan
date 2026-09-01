@@ -44,6 +44,18 @@ import {
 
 type LegacySettingsDraft = Record<BookingSettingsLimitKey, string>;
 
+interface BookingFeatureFlag {
+  key: string;
+  name: string;
+  description: string;
+  isEnabled: boolean;
+}
+
+const BOOKING_FEATURE_FLAG_KEYS = new Set([
+  "FEATURE_BOOKING_FOLLOWUP",
+  "FEATURE_BOOKING_COMMISSION_ENFORCEMENT",
+]);
+
 const EMPTY_LIMITS: LegacySettingsDraft = {
   customerDailyLimit: "",
   freeOwnerDailyLimit: "",
@@ -57,6 +69,8 @@ const EMPTY_TEMPLATES = Object.fromEntries(
 const EMPTY_DRAFT: BookingCommissionSettingsDraft = {
   customerFollowUpDelayHours: "24",
   customerFollowUpDelayMinutes: "0",
+  customerFollowUpMessageLimit: "3",
+  adminCustomerWhatsAppCooldownMinutes: "30",
   limits: EMPTY_LIMITS,
   whatsappTemplates: EMPTY_TEMPLATES,
   optionalCommissionReminderDays: [],
@@ -69,13 +83,13 @@ const LIMIT_FIELDS: Array<{
 }> = [
   {
     key: "customerDailyLimit",
-    label: "رسائل متابعة العميل يومياً",
-    description: "الحد لكل رقم عميل، ويشمل رسالة السؤال عن نتيجة الحجز.",
+    label: "كل رسائل متابعة الحجز للعميل يومياً",
+    description: "حد واحد لكل عميل عبر جميع العقارات والطلبات، وليس لكل عقار.",
   },
   {
     key: "freeOwnerDailyLimit",
-    label: "إشعارات الحجز للمالك يومياً",
-    description: "الحد لكل مالك للعقارات المجانية، ويشمل إرسال حقائق الحجز الجديدة.",
+    label: "كل رسائل الحجز والعمولة للمالك يومياً",
+    description: "حد واحد لكل مالك عبر جميع عقاراته ويشمل الحجز والعمولة والتذكير والإيقاف والإتاحة.",
   },
   {
     key: "freePropertyContactDailyLimit",
@@ -95,6 +109,7 @@ export default function BookingCommissionSettingsCard() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<BookingCommissionSettingsDraft>(EMPTY_DRAFT);
   const [saving, setSaving] = useState(false);
+  const [updatingFeatureFlag, setUpdatingFeatureFlag] = useState<string | null>(null);
   const [saveError, setSaveError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
 
@@ -106,6 +121,18 @@ export default function BookingCommissionSettingsCard() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  const featureFlagsQuery = useQuery<BookingFeatureFlag[]>({
+    queryKey: ["/api/admin/feature-flags"],
+    queryFn: () => bookingApiRequest<BookingFeatureFlag[]>(
+      "/api/admin/feature-flags",
+    ),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const bookingFeatureFlags = (featureFlagsQuery.data || []).filter((flag) =>
+    BOOKING_FEATURE_FLAG_KEYS.has(flag.key));
 
   useEffect(() => {
     if (query.data?.settings) setDraft(bookingSettingsToDraft(query.data.settings));
@@ -147,6 +174,8 @@ export default function BookingCommissionSettingsCard() {
       setSaveError(
         !validation.customerFollowUpDelayValid
           ? "أدخل مدة متابعة صحيحة من دقيقة واحدة إلى 120 ساعة."
+          : !validation.workflowControlsValid
+            ? "راجع عدد رسائل المتابعة ومدة انتظار التواصل اليدوي."
           : validation.limitsValid
             ? "راجع قوالب الرسائل المطلوبة قبل الحفظ."
             : "أدخل أعداداً صحيحة من 0 إلى 1000 لكل حد.",
@@ -182,6 +211,36 @@ export default function BookingCommissionSettingsCard() {
     }
   };
 
+  const updateFeatureFlag = async (
+    flag: BookingFeatureFlag,
+    isEnabled: boolean,
+  ) => {
+    setUpdatingFeatureFlag(flag.key);
+    clearMessages();
+    try {
+      await bookingApiRequest(
+        `/api/admin/feature-flags/${encodeURIComponent(flag.key)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isEnabled }),
+        },
+      );
+      queryClient.setQueryData<BookingFeatureFlag[]>(
+        ["/api/admin/feature-flags"],
+        (current = []) => current.map((item) =>
+          item.key === flag.key ? { ...item, isEnabled } : item),
+      );
+      setSaveNotice(isEnabled ? "تم تفعيل الميزة بنجاح" : "تم إلغاء الميزة بنجاح");
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : "فشل في تحديث الميزة",
+      );
+    } finally {
+      setUpdatingFeatureFlag(null);
+    }
+  };
+
   return (
     <Card
       className="overflow-hidden border-[#d8c795]"
@@ -200,9 +259,6 @@ export default function BookingCommissionSettingsCard() {
             ويمكنك أيضاً تخصيص قوالب واتساب واختيار تذكيرات اليوم الثالث والرابع.
           </p>
         </div>
-        <Button asChild type="button" size="sm" variant="outline" className="w-fit">
-          <Link href="/admin/feature-flags">إدارة تشغيل الميزة</Link>
-        </Button>
       </div>
 
       <div className="space-y-6 p-4 sm:p-5">
@@ -233,6 +289,53 @@ export default function BookingCommissionSettingsCard() {
         ) : (
           <>
             <OperationalHealthPanel health={query.data.operationalHealth} />
+
+            <section aria-labelledby="booking-feature-controls-heading">
+              <div className="mb-3 flex items-center gap-2">
+                <Settings2 className="h-4 w-4 text-[#7b5d1f]" aria-hidden="true" />
+                <h3 id="booking-feature-controls-heading" className="text-sm font-bold">
+                  تشغيل نظام المتابعة والعمولة
+                </h3>
+              </div>
+
+              {featureFlagsQuery.isLoading ? (
+                <div className="flex min-h-20 items-center justify-center rounded-xl border">
+                  <Loader2 className="h-5 w-5 animate-spin text-[#8b6b25]" />
+                </div>
+              ) : featureFlagsQuery.isError || bookingFeatureFlags.length === 0 ? (
+                <div className="rounded-xl border bg-muted/10 p-4 text-sm">
+                  <p className="text-muted-foreground">
+                    تعذر عرض مفاتيح تشغيل المتابعة هنا.
+                  </p>
+                  <Button asChild type="button" size="sm" variant="outline" className="mt-3 w-full sm:w-auto">
+                    <Link href="/admin/feature-flags">إدارة تشغيل الميزة</Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {bookingFeatureFlags.map((flag) => (
+                    <div
+                      key={flag.key}
+                      className="flex min-w-0 flex-col gap-3 rounded-xl border bg-muted/10 p-4 min-[360px]:flex-row min-[360px]:items-center min-[360px]:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#34332f]">{flag.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {flag.description}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={flag.isEnabled}
+                        onCheckedChange={(checked) => void updateFeatureFlag(flag, checked)}
+                        disabled={updatingFeatureFlag !== null}
+                        className="self-end shrink-0 min-[360px]:self-auto"
+                        data-testid={`switch-${flag.key}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section aria-labelledby="booking-fixed-policy-heading">
               <div className="mb-3 flex items-center gap-2">
@@ -382,6 +485,83 @@ export default function BookingCommissionSettingsCard() {
               </div>
             </section>
 
+            <section aria-labelledby="booking-workflow-controls-heading">
+              <h3 id="booking-workflow-controls-heading" className="mb-3 text-sm font-bold">
+                ضوابط التسلسل والتواصل اليدوي
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label
+                  htmlFor="booking-setting-customerFollowUpMessageLimit"
+                  className="min-w-0 rounded-xl border bg-muted/10 p-4"
+                >
+                  <span className="text-sm font-bold text-[#34332f]">
+                    إجمالي رسائل المتابعة لكل طلب
+                  </span>
+                  <span className="mt-1 block min-h-10 text-xs leading-5 text-muted-foreground">
+                    يشمل العدد الرسالة الأخيرة. عند اختيار 3 تُرسل ثلاث رسائل إجمالاً، وليس أربعاً.
+                  </span>
+                  <Input
+                    id="booking-setting-customerFollowUpMessageLimit"
+                    type="text"
+                    inputMode="numeric"
+                    value={draft.customerFollowUpMessageLimit}
+                    onChange={(event) => {
+                      setDraft((current) => ({
+                        ...current,
+                        customerFollowUpMessageLimit: event.target.value,
+                      }));
+                      clearMessages();
+                    }}
+                    aria-invalid={
+                      draft.customerFollowUpMessageLimit !== "" &&
+                      parseBookingSettingsLimit(draft.customerFollowUpMessageLimit) === null
+                    }
+                    className="mt-3 text-center text-lg font-bold"
+                    dir="ltr"
+                    data-testid="input-customerFollowUpMessageLimit"
+                  />
+                  <span className="mt-2 block text-[11px] text-muted-foreground">
+                    من 0 إلى 1000. القيمة 0 توقف تسلسل المتابعة للطلبات الجديدة.
+                  </span>
+                </label>
+
+                <label
+                  htmlFor="booking-setting-adminCustomerWhatsAppCooldownMinutes"
+                  className="min-w-0 rounded-xl border bg-muted/10 p-4"
+                >
+                  <span className="text-sm font-bold text-[#34332f]">
+                    الانتظار بين تواصل المشرف مع العميل
+                  </span>
+                  <span className="mt-1 block min-h-10 text-xs leading-5 text-muted-foreground">
+                    بالدقائق ولكل عميل عبر جميع طلباته. الإرسال اليدوي لا يستهلك الحد اليومي التلقائي.
+                  </span>
+                  <Input
+                    id="booking-setting-adminCustomerWhatsAppCooldownMinutes"
+                    type="text"
+                    inputMode="numeric"
+                    value={draft.adminCustomerWhatsAppCooldownMinutes}
+                    onChange={(event) => {
+                      setDraft((current) => ({
+                        ...current,
+                        adminCustomerWhatsAppCooldownMinutes: event.target.value,
+                      }));
+                      clearMessages();
+                    }}
+                    aria-invalid={
+                      draft.adminCustomerWhatsAppCooldownMinutes !== "" &&
+                      !validation.workflowControlsValid
+                    }
+                    className="mt-3 text-center text-lg font-bold"
+                    dir="ltr"
+                    data-testid="input-adminCustomerWhatsAppCooldownMinutes"
+                  />
+                  <span className="mt-2 block text-[11px] text-muted-foreground">
+                    من 0 إلى 10080 دقيقة. القيمة 0 تلغي الانتظار بين المحاولات اليدوية.
+                  </span>
+                </label>
+              </div>
+            </section>
+
             <ReminderDaysSection
               allowedDays={query.data.fixedPolicy.allowedOptionalCommissionReminderDays}
               selectedDays={draft.optionalCommissionReminderDays}
@@ -511,7 +691,8 @@ export default function BookingCommissionSettingsCard() {
             <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs leading-5 text-muted-foreground">
                 <p>موعد متابعة العميل المحدد لا يغيّر نسبة العمولة أو مهلة السداد.</p>
-                <p>إشعارات الدفع والتذكير والإيقاف وإعادة التفعيل إلزامية ولا تدخل ضمن حدود الرسائل أعلاه.</p>
+                <p>كل رسائل الحجز والعمولة التلقائية تدخل ضمن الحد اليومي للعميل أو المالك، وتُؤجل لليوم التالي عند اكتمال الحد.</p>
+                <p>الإرسال وإعادة الإرسال اليدويان من لوحة الإدارة لا يستهلكان الحدود التلقائية.</p>
                 <p>تُطبّق القوالب المحفوظة على كل رسالة لم تُرسل بعد، ولا تعيد إرسال الرسائل التي سبق إرسالها.</p>
                 <p className="mt-1">
                   آخر تحديث: {query.data.settings.updatedAt

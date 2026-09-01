@@ -8,6 +8,9 @@ import {
   LinkedPropertyMutationError,
   SuspendedSubscriptionWriteError,
 } from "./firebaseService";
+import {
+  DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+} from "../shared/subscription-whatsapp";
 
 type FakeData = Record<string, any>;
 
@@ -261,6 +264,29 @@ function actionablePayment(
     ...overrides,
   };
 }
+
+test("notification settings preserve valid owner templates and repair invalid legacy fields", async () => {
+  const database = new FakeFirestore();
+  const customActivated =
+    "تم التفعيل: {{propertyName}} / {{propertyNumber}} / {{endDate}}";
+  database.set("settings", "notification_settings", {
+    allNotifications: false,
+    ownerSubscriptionWhatsAppTemplates: {
+      activated: customActivated,
+      expiringSoon: "invalid",
+    },
+  });
+
+  const settings = await createService(database).getNotificationSettings();
+
+  assert.equal(settings.allNotifications, false);
+  assert.deepEqual(settings.ownerSubscriptionWhatsAppTemplates, {
+    activated: customActivated,
+    expiringSoon:
+      DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES.expiringSoon,
+    expired: DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES.expired,
+  });
+});
 
 test("an expired historical child link does not lock a new payment", async () => {
   const database = new FakeFirestore();
@@ -808,6 +834,73 @@ test("free-property daily contact quota accepts only three requests atomically",
     database.get("contact_property_daily_limits", "PROP-FREE-DAY")?.acceptedCount,
     3,
   );
+});
+
+test("the contact that fills the free-property allowance atomically queues the owner alert", async () => {
+  const database = new FakeFirestore();
+  seedProperty(database, "PROP-FREE-OWNER-ALERT");
+  const service = createService(database);
+  const windowEndsAt = Date.now() + 60_000;
+
+  for (let index = 1; index <= 3; index += 1) {
+    const bookingId = `BOOK-FREE-OWNER-ALERT-${index}`;
+    const outcome = await service.createContactRequestWithCooldown(
+      `VISITOR-FREE-OWNER-ALERT-${index}`,
+      "PROP-FREE-OWNER-ALERT",
+      0,
+      {
+        propertyNumber: "PROP-FREE-OWNER-ALERT",
+        requestCode: `REQ-FREE-OWNER-ALERT-${index}`,
+        timestamp: String(Date.now()),
+        clientPhone: "512345678",
+        ipAddress: `192.0.2.${index}`,
+        dayOfWeek: "الجمعة",
+        hourOfDay: 12,
+        deviceType: "mobile",
+      },
+      index,
+      {
+        propertyNumber: "PROP-FREE-OWNER-ALERT",
+        visitorKey: `VISITOR-FREE-OWNER-ALERT-${index}`,
+        actorType: "anonymous",
+        deviceType: "mobile",
+        outcome: "accepted",
+        requestCode: `REQ-FREE-OWNER-ALERT-${index}`,
+        bookingFollowUpStatus: "scheduled",
+      },
+      undefined,
+      {
+        key: "PROP-FREE-OWNER-ALERT-DAY",
+        windowStartedAt: 1,
+        windowEndsAt,
+        maxAcceptedRequests: 3,
+      },
+      {
+        followUp: {
+          id: bookingId,
+          propertyNumber: "PROP-FREE-OWNER-ALERT",
+          isFreeProperty: true,
+        },
+        customerNotification: {
+          id: `${bookingId}--customer_followup`,
+          bookingId,
+        },
+        ownerContactLimitNotification: {
+          id: `${bookingId}--owner_contact_limit_reached`,
+          bookingId,
+        },
+      },
+    );
+
+    assert.equal(outcome.accepted, true);
+    assert.equal(
+      database.get(
+        "booking_notification_outbox",
+        `${bookingId}--owner_contact_limit_reached`,
+      ) !== undefined,
+      index === 3,
+    );
+  }
 });
 
 test("an upgrade observed inside contact acceptance neither blocks nor consumes the free-property quota", async () => {

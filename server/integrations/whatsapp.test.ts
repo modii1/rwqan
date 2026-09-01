@@ -8,13 +8,19 @@ import whatsappRouter, {
   buildOwnerSubscriptionActivatedMessage,
   buildOwnerSubscriptionExpiredMessage,
   buildOwnerSubscriptionExpiringSoonMessage,
+  clearSettingsCache,
   createEnjazatikWhatsAppSender,
+  createOwnerSubscriptionWhatsAppNotifier,
   createPropertyOwnerWhatsAppSender,
   notifyOwnerFreeContactLimitReached,
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
 } from "./whatsapp";
+import {
+  DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+  type OwnerSubscriptionWhatsAppTemplates,
+} from "../../shared/subscription-whatsapp";
 
 function withOwnerMessageEnvironment<T>(
   values: {
@@ -194,6 +200,93 @@ test("subscription activation message displays an ISO end date as a Riyadh calen
 
   assert.match(message, /صالح حتى 2026-08-28/);
   assert.doesNotMatch(message, /T00:00:00\.000Z/);
+  assert.equal(message, `مرحبا بك في نظام روقـان للعقارات
+
+تم تفعيل اشتراكك للعقار ڤي ڤي فيلا الفندقيه رقم 66077
+
+صالح حتى 2026-08-28
+
+شكرا لثقتك بنا`);
+});
+
+test("subscription owner message builders render validated custom templates", () => {
+  withOwnerMessageEnvironment({ nodeEnv: "production" }, () => {
+    assert.equal(buildOwnerSubscriptionActivatedMessage({
+      propertyNumber: "66077",
+      propertyName: "الريف المائي",
+      endDate: "2026-08-28T00:00:00.000Z",
+    }, "{{propertyName}}|{{propertyNumber}}|{{endDate}}"),
+    "الريف المائي|66077|2026-08-28");
+
+    assert.equal(buildOwnerSubscriptionExpiringSoonMessage({
+      propertyNumber: "66077",
+      propertyName: "الريف المائي",
+      daysLeft: 3,
+    }, "{{propertyName}}|{{propertyNumber}}|{{daysLeft}}|{{renewalLink}}"),
+    "الريف المائي|66077|3|https://rwqan.sa/r");
+
+    assert.equal(buildOwnerSubscriptionExpiredMessage({
+      propertyNumber: "66077",
+      propertyName: "الريف المائي",
+    }, "{{propertyName}}|{{propertyNumber}}|{{renewalLink}}"),
+    "الريف المائي|66077|https://rwqan.sa/r");
+  });
+});
+
+test("subscription owner notifier uses configured templates while explicit activation copy wins", async () => {
+  const templates: OwnerSubscriptionWhatsAppTemplates = {
+    activated: "A {{propertyName}} {{propertyNumber}} {{endDate}}",
+    expiringSoon:
+      "S {{propertyName}} {{propertyNumber}} {{daysLeft}} {{renewalLink}}",
+    expired: "E {{propertyName}} {{propertyNumber}} {{renewalLink}}",
+  };
+  let templateReads = 0;
+  const sends: Array<{
+    ownerPhone: string;
+    propertyNumber: string;
+    message: string;
+  }> = [];
+  const notifier = createOwnerSubscriptionWhatsAppNotifier({
+    getTemplates: async () => {
+      templateReads += 1;
+      return templates;
+    },
+    send: async (options) => {
+      sends.push(options);
+      return { success: true };
+    },
+  });
+
+  await notifier.activated({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+    endDate: "2026-08-28T00:00:00.000Z",
+  });
+  await notifier.expiringSoon({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+    daysLeft: 3,
+  });
+  await notifier.expired({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+  });
+  await notifier.activated({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+    endDate: "2026-08-28T00:00:00.000Z",
+    message: "explicit activation copy",
+  });
+
+  assert.equal(templateReads, 3);
+  assert.equal(sends[0].message, "A Test property 10001 2026-08-28");
+  assert.match(sends[1].message, /^S Test property 10001 3 https?:\/\/[^/]+\/r$/);
+  assert.match(sends[2].message, /^E Test property 10001 https?:\/\/[^/]+\/r$/);
+  assert.equal(sends[3].message, "explicit activation copy");
 });
 
 test("property owner sender rechecks suspension immediately before every retry", async () => {
@@ -294,11 +387,19 @@ test("property owner sender can succeed after a guarded retry", async () => {
 test("every subscription-owner notification wrapper uses the suspension guard", async () => {
   const originalGetSubscriptionByPropertyNumber =
     firebaseService.getSubscriptionByPropertyNumber;
+  const originalGetNotificationSettings = firebaseService.getNotificationSettings;
   let suspensionChecks = 0;
   (firebaseService as any).getSubscriptionByPropertyNumber = async () => {
     suspensionChecks += 1;
     return { status: "suspended" };
   };
+  (firebaseService as any).getNotificationSettings = async () => ({
+    allNotifications: true,
+    ownerSubscriptionWhatsAppTemplates: {
+      ...DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+    },
+  });
+  clearSettingsCache();
 
   try {
     const results = await Promise.all([
@@ -334,6 +435,8 @@ test("every subscription-owner notification wrapper uses the suspension guard", 
   } finally {
     firebaseService.getSubscriptionByPropertyNumber =
       originalGetSubscriptionByPropertyNumber;
+    firebaseService.getNotificationSettings = originalGetNotificationSettings;
+    clearSettingsCache();
   }
 });
 

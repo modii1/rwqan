@@ -51,11 +51,11 @@ router.post("/api/admin/booking-commissions/:id/customer-whatsapp", async (req, 
   res.set("Cache-Control", "no-store, private");
   res.set("Referrer-Policy", "no-referrer");
   try {
-    const handoffUrl = await bookingCommissionService.issueAdminCustomerWhatsAppHandoff(
+    const handoff = await bookingCommissionService.issueAdminCustomerWhatsAppHandoff(
       req.params.id,
       req.body,
     );
-    return res.json({ handoffUrl });
+    return res.json(handoff);
   } catch (error) {
     if (
       error instanceof BookingWorkflowError &&

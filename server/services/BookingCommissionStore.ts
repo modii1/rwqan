@@ -2,11 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
-  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
+  BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
+  bookingAdminCustomerWhatsAppCooldownMinutesSchema,
+  bookingCustomerFollowUpMessageLimitSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
   bookingFreeWorkflowConfigurationSchema,
@@ -134,6 +137,7 @@ export class BookingWorkflowError extends Error {
 export type InitialBookingWorkflow = {
   followUp: Omit<BookingFollowUpDocument, "contactRequestId">;
   customerNotification: BookingNotificationJob;
+  ownerContactLimitNotification: BookingNotificationJob;
 };
 
 const DEFAULT_FREE_WORKFLOW_LIMIT = 3;
@@ -184,6 +188,10 @@ export function getDefaultFreeWorkflowConfiguration(): BookingFreeWorkflowConfig
   return {
     ...getEnvironmentFreeWorkflowLimits(),
     customerFollowUpDelayMinutes: environmentCustomerFollowUpDelayMinutes(),
+    customerFollowUpMessageLimit:
+      BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
+    adminCustomerWhatsAppCooldownMinutes:
+      BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [
       ...BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
@@ -222,6 +230,13 @@ function storedFreeWorkflowConfiguration(
   const storedDelayMinutes = bookingCustomerFollowUpDelayMinutesSchema.safeParse(
     data.customerFollowUpDelayMinutes,
   );
+  const storedMessageLimit = bookingCustomerFollowUpMessageLimitSchema.safeParse(
+    data.customerFollowUpMessageLimit,
+  );
+  const storedAdminCooldown =
+    bookingAdminCustomerWhatsAppCooldownMinutesSchema.safeParse(
+      data.adminCustomerWhatsAppCooldownMinutes,
+    );
   const legacyDelayHours = bookingCustomerFollowUpDelayHoursSchema.safeParse(
     data.customerFollowUpDelayHours,
   );
@@ -259,6 +274,12 @@ function storedFreeWorkflowConfiguration(
       : legacyDelayHours.success
         ? legacyDelayHours.data * 60
         : defaults.customerFollowUpDelayMinutes,
+    customerFollowUpMessageLimit: storedMessageLimit.success
+      ? storedMessageLimit.data
+      : limits.customerDailyLimit,
+    adminCustomerWhatsAppCooldownMinutes: storedAdminCooldown.success
+      ? storedAdminCooldown.data
+      : defaults.adminCustomerWhatsAppCooldownMinutes,
     whatsappTemplates: templates,
     optionalCommissionReminderDays: optionalDays.success
       ? optionalDays.data
@@ -463,6 +484,11 @@ function automaticCustomerSequenceJobIsActive(
   booking: BookingFollowUpDocument,
 ): boolean {
   if (!isAutomaticCustomerSequenceJob(job)) return true;
+  const sequenceNumber = Number(job.customerFollowUpSequenceNumber || 1);
+  if (
+    Number.isSafeInteger(booking.customerFollowUpMessageLimit) &&
+    sequenceNumber > Number(booking.customerFollowUpMessageLimit)
+  ) return false;
   if (booking.activeCustomerNotificationJobId) {
     return booking.activeCustomerNotificationJobId === job.id;
   }
@@ -546,6 +572,7 @@ export function buildInitialBookingWorkflow(options: {
   isFreeProperty: boolean;
   customerFollowUpDelayMinutes?: number;
   customerFollowUpMessageLimit?: number;
+  freePropertyContactDailyLimit?: number;
   listedPriceOptionsHalalas?: number[];
   now?: Date;
 }): InitialBookingWorkflow {
@@ -565,12 +592,23 @@ export function buildInitialBookingWorkflow(options: {
       : bookingFreeWorkflowLimitsSchema.shape.customerDailyLimit.parse(
           options.customerFollowUpMessageLimit,
         );
+  const freePropertyContactDailyLimit =
+    bookingFreeWorkflowLimitsSchema.shape.freePropertyContactDailyLimit.parse(
+      options.freePropertyContactDailyLimit ?? DEFAULT_FREE_WORKFLOW_LIMIT,
+    );
   const createdAt = now.toISOString();
   const followUpDueAt = new Date(
     now.getTime() + customerFollowUpDelayMinutes * 60 * 1_000,
   ).toISOString();
   const id = `BOOK-${options.requestCode}`;
-  const customerNotificationId = customerFollowUpSequenceNotificationId(id, 1);
+  const initialCustomerNotificationKind: BookingNotificationKind =
+    customerFollowUpMessageLimit === 1
+      ? "customer_final_reminder"
+      : "customer_followup";
+  const customerNotificationId = notificationId(
+    id,
+    initialCustomerNotificationKind,
+  );
   const followUp: Omit<BookingFollowUpDocument, "contactRequestId"> = {
     id,
     requestCode: options.requestCode,
@@ -610,12 +648,18 @@ export function buildInitialBookingWorkflow(options: {
       { type: "contact_accepted", at: createdAt },
       ...(customerFollowUpMessageLimit === 0
         ? []
-        : [{ type: "customer_followup_scheduled" as const, at: createdAt }]),
+        : [{
+            type: initialCustomerNotificationKind === "customer_final_reminder"
+              ? "customer_final_reminder_scheduled" as const
+              : "customer_followup_scheduled" as const,
+            at: createdAt,
+          }]),
     ],
     ...(customerFollowUpMessageLimit === undefined
       ? {}
       : { customerFollowUpMessageLimit }),
     customerFollowUpDelayMinutes,
+    freePropertyContactDailyLimit,
     activeCustomerNotificationJobId:
       customerFollowUpMessageLimit === 0 ? null : customerNotificationId,
     createdAt,
@@ -623,7 +667,7 @@ export function buildInitialBookingWorkflow(options: {
   };
   const customerNotification = buildNotificationJob({
     booking: followUp,
-    kind: "customer_followup",
+    kind: initialCustomerNotificationKind,
     scheduledAt: followUpDueAt,
     now: createdAt,
     customerFollowUpSequenceNumber: 1,
@@ -632,24 +676,27 @@ export function buildInitialBookingWorkflow(options: {
     customerNotification.status = "cancelled";
     customerNotification.providerError = "customer_sequence_disabled";
   }
-  return { followUp, customerNotification };
+  const ownerContactLimitNotification = buildNotificationJob({
+    booking: followUp,
+    kind: "owner_contact_limit_reached",
+    scheduledAt: createdAt,
+    now: createdAt,
+  });
+  return { followUp, customerNotification, ownerContactLimitNotification };
 }
 
 function quotaLimitFor(
   job: BookingNotificationJob,
   limits: BookingFreeWorkflowLimits,
 ): number | null {
-  if (isCustomerNotificationKind(job.kind) || job.manualResendRequestedAt) {
-    return null;
-  }
-  if (job.quotaCategory === "transactional") return null;
-  return job.quotaCategory === "customer_followup"
+  if (job.manualResendRequestedAt) return null;
+  return job.recipientRole === "customer"
     ? limits.customerDailyLimit
     : limits.freeOwnerDailyLimit;
 }
 
 function quotaDocumentId(job: BookingNotificationJob, windowStart: number): string {
-  const role = job.quotaCategory === "customer_followup" ? "customer" : "owner";
+  const role = job.recipientRole;
   return `${role}-${job.recipientQuotaKey}-${windowStart}`;
 }
 
@@ -667,6 +714,11 @@ function notificationMatchesCurrentState(
   booking: BookingFollowUpDocument,
   now: Date,
 ): NotificationStateCheck {
+  if (job.kind === "owner_contact_limit_reached") {
+    return booking.isFreeProperty && !booking.freeEligibilityRevokedAt
+      ? { status: "valid" }
+      : { status: "invalid" };
+  }
   if (isCustomerNotificationKind(job.kind)) {
     return booking.bookingStatus === "awaiting_response" &&
       booking.bookingDecision === null &&
@@ -876,7 +928,7 @@ export class BookingCommissionStore {
           ).success
         : false;
       if (
-        currentSchemaVersion === 5 &&
+        currentSchemaVersion === 6 &&
         currentDelayIsPersisted &&
         currentStored &&
         JSON.stringify(currentStored) === JSON.stringify(settings)
@@ -886,7 +938,7 @@ export class BookingCommissionStore {
 
       const updatedAt = now.toISOString();
       const storedSettings = {
-        schemaVersion: 5,
+        schemaVersion: 6,
         ...settings,
         updatedAt,
         updatedBy: "admin" as const,
@@ -1135,9 +1187,13 @@ export class BookingCommissionStore {
     now = new Date(),
     templateVariant: BookingAdminCustomerWhatsAppTemplateVariant =
       "technical_support",
+    cooldownMinutes: number =
+      BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
   ): Promise<BookingFollowUpDocument | null> {
     const selectedVariant = bookingAdminCustomerWhatsAppTemplateVariantSchema
       .parse(templateVariant);
+    const validatedCooldownMinutes =
+      bookingAdminCustomerWhatsAppCooldownMinutesSchema.parse(cooldownMinutes);
     if (!Number.isFinite(now.getTime())) {
       throw new RangeError("Invalid admin customer contact time");
     }
@@ -1184,31 +1240,35 @@ export class BookingCommissionStore {
         );
       }
 
-      const customerBookingsSnapshot = await transaction.get(
-        this.db.collection(BOOKINGS_COLLECTION)
-          .where("customerSubject", "==", booking.customerSubject),
-      );
-      const latestOpenedAtMs = customerBookingsSnapshot.docs.reduce(
-        (latest, document) => {
-          const openedAt = Date.parse(String(
-            (document.data() as BookingFollowUpDocument)
-              .adminCustomerWhatsAppLastOpenedAt || "",
-          ));
-          return Number.isFinite(openedAt) && openedAt > latest
-            ? openedAt
-            : latest;
-        },
-        Number.NEGATIVE_INFINITY,
-      );
-      const nextAllowedAtMs =
-        latestOpenedAtMs + BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS;
-      if (Number.isFinite(nextAllowedAtMs) && now.getTime() < nextAllowedAtMs) {
-        throw new BookingWorkflowError(
-          "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED",
-          "يمكن التواصل مع العميل مرة واحدة كل 30 دقيقة.",
-          429,
-          Math.max(1, Math.ceil((nextAllowedAtMs - now.getTime()) / 1_000)),
+      if (validatedCooldownMinutes > 0) {
+        const customerBookingsSnapshot = await transaction.get(
+          this.db.collection(BOOKINGS_COLLECTION)
+            .where("customerSubject", "==", booking.customerSubject),
         );
+        const latestOpenedAtMs = customerBookingsSnapshot.docs.reduce(
+          (latest, document) => {
+            const openedAt = Date.parse(String(
+              (document.data() as BookingFollowUpDocument)
+                .adminCustomerWhatsAppLastOpenedAt || "",
+            ));
+            return Number.isFinite(openedAt) && openedAt > latest
+              ? openedAt
+              : latest;
+          },
+          Number.NEGATIVE_INFINITY,
+        );
+        const nextAllowedAtMs = latestOpenedAtMs +
+          validatedCooldownMinutes * 60 * 1_000;
+        if (Number.isFinite(nextAllowedAtMs) && now.getTime() < nextAllowedAtMs) {
+          throw new BookingWorkflowError(
+            "ADMIN_CUSTOMER_WHATSAPP_RATE_LIMITED",
+            validatedCooldownMinutes === 30
+              ? "يمكن التواصل مع العميل مرة واحدة كل 30 دقيقة."
+              : `يمكن التواصل مع العميل مرة واحدة كل ${validatedCooldownMinutes} دقيقة.`,
+            429,
+            Math.max(1, Math.ceil((nextAllowedAtMs - now.getTime()) / 1_000)),
+          );
+        }
       }
 
       const timestamp = now.toISOString();
@@ -4021,10 +4081,9 @@ export class BookingCommissionStore {
     options: {
       commissionNotificationsEnabled?: boolean;
       followUpNotificationsEnabled?: boolean;
-    } = {},
+  } = {},
   ): Promise<ClaimedBookingNotification[]> {
     const nowIso = now.toISOString();
-    const freeWorkflowLimits = await this.getFreeWorkflowSettings();
     const claims: ClaimedBookingNotification[] = [];
     const claimLimit = Math.min(Math.max(1, maxJobs), 100);
     let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
@@ -4043,6 +4102,13 @@ export class BookingCommissionStore {
         if (!jobSnapshot.exists) return null;
         const job = jobSnapshot.data() as BookingNotificationJob;
         if (job.status !== "pending" || Date.parse(job.scheduledAt) > now.getTime()) return null;
+        const settingsSnapshot = await transaction.get(
+          this.db.collection(SETTINGS_COLLECTION)
+            .doc(FREE_WORKFLOW_SETTINGS_DOCUMENT),
+        );
+        const freeWorkflowLimits = resolvedFreeWorkflowSettings(
+          settingsSnapshot.exists ? settingsSnapshot.data() : null,
+        );
         const bookingRef = this.db.collection(BOOKINGS_COLLECTION).doc(job.bookingId);
         const bookingSnapshot = await transaction.get(bookingRef);
         if (!bookingSnapshot.exists) {
@@ -4220,6 +4286,7 @@ export class BookingCommissionStore {
           );
         const followUpControlled =
           isCustomerNotificationKind(job.kind) ||
+          job.kind === "owner_contact_limit_reached" ||
           (
             job.kind === "owner_booking_confirmed" &&
             booking.commissionStatus === "not_applicable"
@@ -4309,19 +4376,36 @@ export class BookingCommissionStore {
               ? Number(quotaSnapshot.data()?.count || 0)
               : 0;
             if (currentCount >= quotaLimit) {
-              const eventType = job.recipientRole === "customer"
-                ? "customer_followup_suppressed"
-                : "owner_notification_suppressed";
-              transaction.update(candidate.ref, {
-                status: "suppressed_quota",
-                suppressedAt: nowIso,
-                providerError: "daily_notification_quota",
-                updatedAt: nowIso,
-              });
-              transaction.update(bookingRef, {
-                events: appendEvent(booking.events, { type: eventType, at: nowIso }),
-                updatedAt: nowIso,
-              });
+              if (quotaLimit === 0) {
+                const eventType = job.recipientRole === "customer"
+                  ? "customer_followup_suppressed"
+                  : "owner_notification_suppressed";
+                transaction.update(candidate.ref, {
+                  status: "suppressed_quota",
+                  suppressedAt: nowIso,
+                  providerError: "daily_notification_quota",
+                  updatedAt: nowIso,
+                });
+                transaction.update(bookingRef, {
+                  ...(job.recipientRole === "customer" &&
+                      booking.activeCustomerNotificationJobId === job.id
+                    ? { activeCustomerNotificationJobId: null }
+                    : {}),
+                  events: appendEvent(booking.events, {
+                    type: eventType,
+                    at: nowIso,
+                  }),
+                  updatedAt: nowIso,
+                });
+              } else {
+                transaction.update(candidate.ref, {
+                  status: "pending",
+                  scheduledAt: new Date(windowEnd).toISOString(),
+                  suppressedAt: null,
+                  providerError: "daily_notification_quota_deferred",
+                  updatedAt: nowIso,
+                });
+              }
               return null;
             }
             transaction.set(quotaRef, {
@@ -4661,20 +4745,23 @@ export class BookingCommissionStore {
           Number(messageLimit) > 0 &&
           delay.success
         ) {
-          const nextKind: BookingNotificationKind =
-            sequenceNumber < Number(messageLimit)
-              ? "customer_followup"
-              : "customer_final_reminder";
-          nextCustomerJob = buildNotificationJob({
-            booking,
-            kind: nextKind,
-            scheduledAt: new Date(
-              now.getTime() + delay.data * 60 * 1_000,
-            ).toISOString(),
-            now: timestamp,
-            customerFollowUpSequenceNumber: sequenceNumber + 1,
-            customerFollowUpSequenceParentJobId: job.id,
-          });
+          const nextSequenceNumber = sequenceNumber + 1;
+          if (nextSequenceNumber <= Number(messageLimit)) {
+            const nextKind: BookingNotificationKind =
+              nextSequenceNumber === Number(messageLimit)
+                ? "customer_final_reminder"
+                : "customer_followup";
+            nextCustomerJob = buildNotificationJob({
+              booking,
+              kind: nextKind,
+              scheduledAt: new Date(
+                now.getTime() + delay.data * 60 * 1_000,
+              ).toISOString(),
+              now: timestamp,
+              customerFollowUpSequenceNumber: nextSequenceNumber,
+              customerFollowUpSequenceParentJobId: job.id,
+            });
+          }
         }
       }
       transaction.update(jobRef, {

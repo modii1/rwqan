@@ -19,6 +19,7 @@ import {
   isSubscriptionStatusSuspended,
 } from "../shared/subscriptionType";
 import { calculateRemainingDays } from "./utils/dateUtils";
+import { shouldStartScheduledBackgroundWork } from "./config/schedulerStartup";
 
 
 
@@ -475,6 +476,8 @@ function getNextNoonTime(): { nextNoon: Date; delayMs: number } {
 
 // تشغيل المهام المجدولة
 export function startScheduler() {
+  if (!shouldStartScheduledBackgroundWork()) return;
+
   console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
   
   const { nextNoon, delayMs } = getNextNoonTime();

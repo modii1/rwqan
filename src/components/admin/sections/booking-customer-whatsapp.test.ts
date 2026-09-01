@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   getAdminCustomerWhatsAppHref,
   getAdminCustomerWhatsAppRemainingMinutes,
 } from "./booking-customer-whatsapp";
@@ -15,9 +14,8 @@ test("customer WhatsApp link stays internal and encodes only the booking id", ()
   );
 });
 
-test("customer WhatsApp control calculates the fixed 30-minute cooldown", () => {
+test("customer WhatsApp control calculates the server-provided cooldown", () => {
   const now = Date.parse("2026-08-22T12:00:00.000Z");
-  assert.equal(ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS, 30 * 60 * 1_000);
   assert.equal(
     getAdminCustomerWhatsAppRemainingMinutes(
       "2026-08-22T12:30:00.000Z",
@@ -62,7 +60,10 @@ test("admin dashboard renders the safe customer WhatsApp control in all three bo
   assert.match(source, /BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS\.map/);
   assert.match(source, /!availableTemplateVariants\.has\(variant\)/);
   assert.match(source, /<DropdownMenuLabel className="text-right">/);
-  assert.match(source, /ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS/);
+  assert.doesNotMatch(source, /ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS/);
+  assert.match(source, /nextAllowedAt: string \| null/);
+  assert.match(source, /setLocalNextAllowedAt\(result\.nextAllowedAt\)/);
+  assert.match(source, /aria-label="التواصل مع العميل متوقف مؤقتاً"/);
   assert.match(source, /sendNow \? "إرسال الرسالة الآن" : "إعادة إرسال الرسالة"/);
   assert.match(source, /بدون إنشاء نسخة مكررة/);
   assert.doesNotMatch(source, /getAdminCustomerWhatsAppHref\(row\.customerPhoneMasked/);

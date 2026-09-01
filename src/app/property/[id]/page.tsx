@@ -40,6 +40,10 @@ async function getPropertyApiLookup(id: string): Promise<PropertyApiLookup> {
             subscriptionStatus: data.subscriptionStatus,
             subscriptionEndDate: data.subscriptionEndDate,
             isSubscriptionExpired: data.isSubscriptionExpired,
+            freePropertyContactDailyLimit:
+                typeof data.freePropertyContactDailyLimit === "number"
+                    ? data.freePropertyContactDailyLimit
+                    : undefined,
             imageCount: 0,
         } as PropertyDetails, status: res.status };
     } catch {

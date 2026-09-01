@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
@@ -19,6 +20,7 @@ import {
   PauseCircle,
   RefreshCw,
   Search,
+  Settings2,
   WalletCards,
   XCircle,
 } from "lucide-react";
@@ -84,7 +86,6 @@ import {
   getBookingReversalReviewState,
   type BookingReversalReviewState,
 } from "@/components/booking/booking-reversal-state";
-import BookingCommissionSettingsCard from "./booking-commission-settings";
 import {
   BOOKING_TEMPLATE_DEFINITIONS,
 } from "./booking-commission-settings-model";
@@ -94,7 +95,6 @@ import {
   type BookingCommissionDetailsPresentation,
 } from "./booking-commissions-layout";
 import {
-  ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   getAdminCustomerWhatsAppHref,
   getAdminCustomerWhatsAppRemainingMinutes,
 } from "./booking-customer-whatsapp";
@@ -146,13 +146,14 @@ interface ReversalResolutionResponse {
 
 interface AdminCustomerWhatsAppHandoffResponse {
   handoffUrl: string;
+  nextAllowedAt: string | null;
 }
 
 function adminCustomerWhatsAppTemplateLabel(
   variant: BookingAdminCustomerWhatsAppTemplateVariant,
 ): string {
   if (variant === "technical_support") {
-    return "مرحباً، معك الفريق التقني لمنصة روقان.";
+    return "التواصل مع العميل";
   }
   return BOOKING_TEMPLATE_DEFINITIONS.find(
     (definition) => definition.key === "customer_followup",
@@ -474,7 +475,22 @@ export default function BookingCommissionsSection() {
         </Button>
       </div>
 
-      <BookingCommissionSettingsCard />
+      <Card className="min-w-0 overflow-hidden border-[#d8c795] bg-[#fffaf0] p-4 sm:p-5">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[#7b5d1f]">
+              <Settings2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <h2 className="font-bold">إعدادات رسائل واتساب والمتابعة</h2>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              إدارة القوالب والمواعيد والحدود أصبحت في قسم نظام الواتساب.
+            </p>
+          </div>
+          <Button asChild type="button" variant="outline" className="w-full gap-2 sm:w-auto">
+            <Link href="/admin/whatsapp">فتح إعدادات الواتساب</Link>
+          </Button>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
         <KpiCard label="الإجمالي" value={summary.total} icon={<ClipboardCheck className="h-4 w-4" />} tone="slate" />
@@ -1578,9 +1594,7 @@ export function CustomerWhatsAppLink({
       );
       const openedAt = Date.now();
       setNowMs(openedAt);
-      setLocalNextAllowedAt(
-        new Date(openedAt + ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS).toISOString(),
-      );
+      setLocalNextAllowedAt(result.nextAllowedAt);
       popup.location.replace(result.handoffUrl);
     } catch (error) {
       popup.close();
@@ -1602,7 +1616,7 @@ export function CustomerWhatsAppLink({
         <button
           type="button"
           disabled
-          aria-label="التواصل مع العميل متاح مرة واحدة كل 30 دقيقة"
+          aria-label="التواصل مع العميل متوقف مؤقتاً"
           title={`يمكن إعادة التواصل بعد ${remainingMinutes} دقيقة`}
           className={`${className} cursor-not-allowed opacity-45`}
           data-testid={`link-customer-whatsapp-${bookingId}`}
@@ -1630,7 +1644,10 @@ export function CustomerWhatsAppLink({
           <FaWhatsapp className="h-5 w-5" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80">
+      <DropdownMenuContent
+        align="end"
+        className="w-[min(20rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]"
+      >
         <DropdownMenuLabel className="text-right">
           قوالب رسائل واتساب
         </DropdownMenuLabel>

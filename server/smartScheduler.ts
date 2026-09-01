@@ -16,6 +16,7 @@ import {
 import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
 import { isSubscriptionStatusSuspended } from "../shared/subscriptionType";
+import { shouldStartScheduledBackgroundWork } from "./config/schedulerStartup";
 
 
 // ─── Configuration (mirrors Firebase settings shape) ─────────────────────────
@@ -333,6 +334,8 @@ function scheduleNextTick() {
 }
 
 export function startSmartScheduler() {
+  if (!shouldStartScheduledBackgroundWork()) return;
+
   console.log("🧠 [SmartScheduler] Initializing non-spam expired subscription scheduler...");
 
   // Check if we missed a dispatch today (e.g. server restarted after scheduled time)

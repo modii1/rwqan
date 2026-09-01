@@ -45,6 +45,8 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
     customerFollowUpDelayMinutes: 2_160,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 20,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [3] as Array<3 | 4>,
   };
@@ -167,6 +169,18 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
         },
         {
           settings: {
+            ...configuration,
+            customerFollowUpMessageLimit: 1_001,
+          },
+        },
+        {
+          settings: {
+            ...configuration,
+            adminCustomerWhatsAppCooldownMinutes: 10_081,
+          },
+        },
+        {
+          settings: {
             ...legacyConfiguration,
             customerFollowUpDelayHours: 1.5,
           },
@@ -218,6 +232,7 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
   const originals = {
     claim: store.claimAdminCustomerWhatsAppContact,
     getCurrent: store.getBookingForCurrentOwner,
+    getSettings: store.getFreeWorkflowSettings,
   };
   const previousSecret = process.env.SESSION_SECRET;
   let claimCalls = 0;
@@ -235,8 +250,18 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
 
   try {
     process.env.SESSION_SECRET = "admin-whatsapp-route-test-secret-value-12345678";
-    store.claimAdminCustomerWhatsAppContact = async (id: string) => {
+    store.getFreeWorkflowSettings = async () => ({
+      whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
+      adminCustomerWhatsAppCooldownMinutes: 17,
+    });
+    store.claimAdminCustomerWhatsAppContact = async (
+      id: string,
+      _now: Date,
+      _templateVariant: string,
+      cooldownMinutes: number,
+    ) => {
       claimCalls += 1;
+      assert.equal(cooldownMinutes, 17);
       if (id === "BOOK-MISSING") return null;
       if (id === "BOOK-RATE-LIMITED") {
         throw new BookingWorkflowError(
@@ -267,7 +292,8 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
       assert.equal(response.headers.get("cache-control"), "no-store, private");
       assert.equal(response.headers.get("referrer-policy"), "no-referrer");
       const payload = await response.json();
-      assert.deepEqual(Object.keys(payload), ["handoffUrl"]);
+      assert.deepEqual(Object.keys(payload), ["handoffUrl", "nextAllowedAt"]);
+      assert.ok(Number.isFinite(Date.parse(payload.nextAllowedAt)));
       assert.match(
         payload.handoffUrl,
         /^\/api\/admin\/booking-commissions\/BOOK-HANDOFF\/customer-whatsapp\/open\?token=/,
@@ -378,6 +404,7 @@ test("admin customer WhatsApp handoff requires POST and keeps the phone behind a
   } finally {
     store.claimAdminCustomerWhatsAppContact = originals.claim;
     store.getBookingForCurrentOwner = originals.getCurrent;
+    store.getFreeWorkflowSettings = originals.getSettings;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }

@@ -59,6 +59,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
   let followUpMode: "off" | "scheduled" | "flag_failure" | "workflow_failure" = "off";
   let configuredFreePropertyContactDailyLimit = FREE_PROPERTY_DAILY_CONTACT_LIMIT;
   let configuredCustomerFollowUpDelayMinutes = 1_440;
+  let configuredCustomerFollowUpMessageLimit = 3;
   let freeWorkflowSettingsLookups = 0;
 
   (propertyService as any).getByNumber = async (propertyNumber: string) => {
@@ -144,10 +145,12 @@ test("smart contact requests resolve remembered and owner phones on the server",
   (bookingCommissionService as any).getFreeWorkflowSettings = async () => {
     freeWorkflowSettingsLookups++;
     return {
-      customerDailyLimit: 3,
+      customerDailyLimit: 9,
       freeOwnerDailyLimit: 3,
       freePropertyContactDailyLimit: configuredFreePropertyContactDailyLimit,
       customerFollowUpDelayMinutes: configuredCustomerFollowUpDelayMinutes,
+      customerFollowUpMessageLimit: configuredCustomerFollowUpMessageLimit,
+      adminCustomerWhatsAppCooldownMinutes: 30,
       updatedAt: "2026-08-18T10:00:00.000Z",
       updatedBy: "admin",
       source: "firestore",
@@ -161,6 +164,9 @@ test("smart contact requests resolve remembered and owner phones on the server",
     return {
       followUp: { id: `BOOK-${options.requestCode}` },
       customerNotification: { id: `BOOK-${options.requestCode}--customer_followup` },
+      ownerContactLimitNotification: {
+        id: `BOOK-${options.requestCode}--owner_contact_limit_reached`,
+      },
     };
   };
 
@@ -247,6 +253,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       identityMode = "remembered";
       followUpMode = "scheduled";
       configuredCustomerFollowUpDelayMinutes = 2_160;
+      configuredCustomerFollowUpMessageLimit = 3;
       const alertCountBefore = adminNotifications.length;
       const settingsLookupsBefore = freeWorkflowSettingsLookups;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
@@ -256,6 +263,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       });
       followUpMode = "off";
       configuredCustomerFollowUpDelayMinutes = 1_440;
+      configuredCustomerFollowUpMessageLimit = 3;
 
       assert.equal(response.status, 200);
       const acceptedEvent = acceptedCalls.at(-1)?.[5];
@@ -500,22 +508,31 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.match(String(payload.error), /\(7\)/);
     });
 
-    await t.test("the accepted request that reaches three contacts notifies the property owner", async () => {
+    await t.test("the accepted request carries the owner contact-limit alert into the quota-managed workflow", async () => {
       identityMode = "remembered";
+      followUpMode = "scheduled";
       markDailyLimitReached = true;
+      const directNotificationCountBefore = ownerLimitNotifications.length;
       const response = await fetch(`${baseUrl}/api/requests/smart`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: baseUrl },
         body: JSON.stringify({ propertyNumber: "TARGET-LIMIT-NOTIFY" }),
       });
       markDailyLimitReached = false;
+      followUpMode = "off";
 
       assert.equal(response.status, 200);
-      assert.deepEqual(ownerLimitNotifications.at(-1), {
-        ownerPhone: "0555555555",
-        propertyNumber: "TARGET-LIMIT-NOTIFY",
-        dailyLimit: FREE_PROPERTY_DAILY_CONTACT_LIMIT,
-      });
+      const workflowOptions = workflowBuildOptions.at(-1);
+      assert.equal(workflowOptions.propertyNumber, "TARGET-LIMIT-NOTIFY");
+      assert.equal(
+        workflowOptions.freePropertyContactDailyLimit,
+        FREE_PROPERTY_DAILY_CONTACT_LIMIT,
+      );
+      assert.equal(
+        acceptedCalls.at(-1)?.[8]?.ownerContactLimitNotification?.id,
+        `BOOK-${workflowOptions.requestCode}--owner_contact_limit_reached`,
+      );
+      assert.equal(ownerLimitNotifications.length, directNotificationCountBefore);
     });
 
     await t.test("a premium property has no client contact quota, cooldown, or booking follow-up", async () => {

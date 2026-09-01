@@ -1,7 +1,16 @@
 // server/whatsapp.ts
 import express from "express";
 import { firebaseService } from "../firebaseService";
-import type { NotificationSettings } from "../../shared/schema";
+import {
+  notificationSettingsSchema,
+  type NotificationSettings,
+} from "../../shared/schema";
+import {
+  DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
+  normalizeStoredOwnerSubscriptionWhatsAppTemplates,
+  renderOwnerSubscriptionWhatsAppTemplate,
+  type OwnerSubscriptionWhatsAppTemplates,
+} from "../../shared/subscription-whatsapp";
 import { requireAdmin, requireSameOrigin } from "../routes/middleware";
 import { isPropertySuspended } from "../services/propertySuspension";
 import { formatDateRiyadh } from "../utils/dateUtils";
@@ -42,18 +51,7 @@ async function getNotificationSettings(): Promise<NotificationSettings> {
     return cachedSettings;
   } catch (err) {
     console.error("Error loading notification settings:", err);
-    return {
-      allNotifications: true,
-      newProperty: true,
-      newSubscription: true,
-      subscriptionRenewal: true,
-      receiptUpload: true,
-      propertyUpdate: true,
-      newPayment: true,
-      smartRequest: true,
-      propertyVerification: true,
-      subscriptionExpired: true,
-    };
+    return notificationSettingsSchema.parse({});
   }
 }
 
@@ -799,106 +797,146 @@ export async function notifyOwnerFreeContactLimitReached(data: {
   });
 }
 
-export function buildOwnerSubscriptionActivatedMessage(data: {
-  propertyNumber: string;
-  propertyName: string;
-  endDate: string;
-}): string {
-  const parsedEndDate = new Date(data.endDate);
-  const displayedEndDate = Number.isFinite(parsedEndDate.getTime())
-    ? formatDateRiyadh(parsedEndDate)
-    : data.endDate;
-
-  return `مرحبا بك في نظام روقـان للعقارات
-
-تم تفعيل اشتراكك للعقار ${data.propertyName} رقم ${data.propertyNumber}
-
-صالح حتى ${displayedEndDate}
-
-شكرا لثقتك بنا`;
-}
-
-/**
- * إشعار تفعيل الاشتراك للمالك
- */
-export async function notifyOwnerSubscriptionActivated(data: {
+export type OwnerSubscriptionActivatedNotification = {
   ownerPhone: string;
   propertyNumber: string;
   propertyName: string;
   endDate: string;
   message?: string;
-}) {
-  const defaultMessage = buildOwnerSubscriptionActivatedMessage(data);
+};
 
-  const finalMessage = data.message || defaultMessage;
+export type OwnerSubscriptionExpiringSoonNotification = {
+  ownerPhone: string;
+  propertyNumber: string;
+  propertyName: string;
+  daysLeft: number;
+};
 
-  return sendPropertyOwnerWhatsApp({
-    ownerPhone: data.ownerPhone,
+export type OwnerSubscriptionExpiredNotification = {
+  ownerPhone: string;
+  propertyNumber: string;
+  propertyName: string;
+};
+
+export function buildOwnerSubscriptionActivatedMessage(
+  data: Omit<OwnerSubscriptionActivatedNotification, "ownerPhone" | "message">,
+  template: string = DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES.activated,
+): string {
+  const parsedEndDate = new Date(data.endDate);
+  const displayedEndDate = Number.isFinite(parsedEndDate.getTime())
+    ? formatDateRiyadh(parsedEndDate)
+    : data.endDate;
+
+  return renderOwnerSubscriptionWhatsAppTemplate("activated", template, {
+    propertyName: data.propertyName,
     propertyNumber: data.propertyNumber,
-    message: finalMessage,
+    endDate: displayedEndDate,
   });
 }
 
 /**
  * إشعار تنبيه قبل انتهاء الاشتراك (3 أيام)
  */
-export function buildOwnerSubscriptionExpiringSoonMessage(data: {
-  propertyNumber: string;
-  propertyName: string;
-  daysLeft: number;
-}): string {
-  return `مرحبا بك في نظام روقـان للعقارات
-
-اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber} ينتهي خلال ${data.daysLeft} ايام
-
-جدد الان للحفاظ على ظهورك المميز
-${ownerRenewalShortLink()}`;
-}
-
-export async function notifyOwnerSubscriptionExpiringSoon(data: {
-  ownerPhone: string;
-  propertyNumber: string;
-  propertyName: string;
-  daysLeft: number;
-}) {
-  const message = buildOwnerSubscriptionExpiringSoonMessage(data);
-
-  return sendPropertyOwnerWhatsApp({
-    ownerPhone: data.ownerPhone,
+export function buildOwnerSubscriptionExpiringSoonMessage(
+  data: Omit<OwnerSubscriptionExpiringSoonNotification, "ownerPhone">,
+  template: string = DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES.expiringSoon,
+): string {
+  return renderOwnerSubscriptionWhatsAppTemplate("expiringSoon", template, {
+    propertyName: data.propertyName,
     propertyNumber: data.propertyNumber,
-    message,
+    daysLeft: data.daysLeft,
+    renewalLink: ownerRenewalShortLink(),
   });
 }
 
 /**
  * إشعار انتهاء الاشتراك للمالك
  */
-export function buildOwnerSubscriptionExpiredMessage(data: {
-  propertyNumber: string;
-  propertyName: string;
-}): string {
-  return `مرحبا بك في نظام روقـان للعقارات
-
-انتهى اشتراك عقارك ${data.propertyName} رقم ${data.propertyNumber}
-
-تم تحويله للعرض العادي
-
-جدد الان لاستعادة المميزات
-${ownerRenewalShortLink()}`;
+export function buildOwnerSubscriptionExpiredMessage(
+  data: Omit<OwnerSubscriptionExpiredNotification, "ownerPhone">,
+  template: string = DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES.expired,
+): string {
+  return renderOwnerSubscriptionWhatsAppTemplate("expired", template, {
+    propertyName: data.propertyName,
+    propertyNumber: data.propertyNumber,
+    renewalLink: ownerRenewalShortLink(),
+  });
 }
 
-export async function notifyOwnerSubscriptionExpired(data: {
-  ownerPhone: string;
-  propertyNumber: string;
-  propertyName: string;
-}) {
-  const message = buildOwnerSubscriptionExpiredMessage(data);
+interface OwnerSubscriptionWhatsAppNotifierDependencies {
+  getTemplates: () => Promise<OwnerSubscriptionWhatsAppTemplates>;
+  send: typeof sendPropertyOwnerWhatsApp;
+}
 
-  return sendPropertyOwnerWhatsApp({
-    ownerPhone: data.ownerPhone,
-    propertyNumber: data.propertyNumber,
-    message,
+export function createOwnerSubscriptionWhatsAppNotifier(
+  dependencies: OwnerSubscriptionWhatsAppNotifierDependencies,
+) {
+  return {
+    async activated(data: OwnerSubscriptionActivatedNotification) {
+      const message = data.message || buildOwnerSubscriptionActivatedMessage(
+        data,
+        (await dependencies.getTemplates()).activated,
+      );
+      return dependencies.send({
+        ownerPhone: data.ownerPhone,
+        propertyNumber: data.propertyNumber,
+        message,
+      });
+    },
+
+    async expiringSoon(data: OwnerSubscriptionExpiringSoonNotification) {
+      const templates = await dependencies.getTemplates();
+      return dependencies.send({
+        ownerPhone: data.ownerPhone,
+        propertyNumber: data.propertyNumber,
+        message: buildOwnerSubscriptionExpiringSoonMessage(
+          data,
+          templates.expiringSoon,
+        ),
+      });
+    },
+
+    async expired(data: OwnerSubscriptionExpiredNotification) {
+      const templates = await dependencies.getTemplates();
+      return dependencies.send({
+        ownerPhone: data.ownerPhone,
+        propertyNumber: data.propertyNumber,
+        message: buildOwnerSubscriptionExpiredMessage(data, templates.expired),
+      });
+    },
+  };
+}
+
+const ownerSubscriptionWhatsAppNotifier =
+  createOwnerSubscriptionWhatsAppNotifier({
+    getTemplates: async () => {
+      const settings = await getNotificationSettings();
+      return normalizeStoredOwnerSubscriptionWhatsAppTemplates(
+        settings.ownerSubscriptionWhatsAppTemplates,
+      );
+    },
+    send: sendPropertyOwnerWhatsApp,
   });
+
+/**
+ * إشعار تفعيل الاشتراك للمالك
+ */
+export async function notifyOwnerSubscriptionActivated(
+  data: OwnerSubscriptionActivatedNotification,
+) {
+  return ownerSubscriptionWhatsAppNotifier.activated(data);
+}
+
+export async function notifyOwnerSubscriptionExpiringSoon(
+  data: OwnerSubscriptionExpiringSoonNotification,
+) {
+  return ownerSubscriptionWhatsAppNotifier.expiringSoon(data);
+}
+
+export async function notifyOwnerSubscriptionExpired(
+  data: OwnerSubscriptionExpiredNotification,
+) {
+  return ownerSubscriptionWhatsAppNotifier.expired(data);
 }
 
 // نصدر الراوتر كـ default

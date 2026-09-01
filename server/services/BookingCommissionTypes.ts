@@ -78,6 +78,8 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
   /** Automatic sequence policy captured when this workflow was created. */
   customerFollowUpMessageLimit?: number;
   customerFollowUpDelayMinutes?: number;
+  /** Free-property contact allowance captured when this request was accepted. */
+  freePropertyContactDailyLimit?: number;
   /** Current automatic customer-sequence job, if one is still actionable. */
   activeCustomerNotificationJobId?: string | null;
   /** Last successful admin handoff to this customer's WhatsApp. */
@@ -87,6 +89,7 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
 export type BookingNotificationKind =
   | "customer_followup"
   | "customer_final_reminder"
+  | "owner_contact_limit_reached"
   | "owner_booking_confirmed"
   | "commission_dispute_rejected"
   | "commission_reminder_3"

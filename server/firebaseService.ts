@@ -3,7 +3,11 @@ import { db } from "./config/firebase";
 import {
     DEFAULT_FEATURE_FLAGS,
     customerPhoneOtpChallengeSchema,
+    notificationSettingsSchema,
 } from "../shared/schema";
+import {
+    normalizeStoredOwnerSubscriptionWhatsAppTemplates,
+} from "../shared/subscription-whatsapp";
 import type {
     Property,
     InsertProperty,
@@ -4020,6 +4024,7 @@ export class FirebaseService {
         bookingWorkflow?: {
             followUp: Record<string, unknown> & { id: string };
             customerNotification: Record<string, unknown> & { id: string };
+            ownerContactLimitNotification?: Record<string, unknown> & { id: string };
         },
     ): Promise<
         | {
@@ -4055,6 +4060,11 @@ export class FirebaseService {
             : null;
         const bookingNotificationRef = bookingWorkflow
             ? this.db.collection("booking_notification_outbox").doc(bookingWorkflow.customerNotification.id)
+            : null;
+        const ownerContactLimitNotificationRef = bookingWorkflow
+            ?.ownerContactLimitNotification
+            ? this.db.collection("booking_notification_outbox")
+                .doc(bookingWorkflow.ownerContactLimitNotification.id)
             : null;
         const subscriptionQuery = bookingWorkflow || dailyPropertyLimit
             ? this.db.collection("subscriptions").where("propertyNumber", "==", propertyNumber)
@@ -4225,6 +4235,18 @@ export class FirebaseService {
                     contactRequestId: requestId,
                 });
                 transaction.create(bookingNotificationRef, bookingWorkflow.customerNotification);
+                if (
+                    !hasActivePremiumSubscription &&
+                    dailyPropertyLimit &&
+                    dailyAcceptedCount + 1 === dailyPropertyLimit.maxAcceptedRequests &&
+                    ownerContactLimitNotificationRef &&
+                    bookingWorkflow.ownerContactLimitNotification
+                ) {
+                    transaction.create(
+                        ownerContactLimitNotificationRef,
+                        bookingWorkflow.ownerContactLimitNotification,
+                    );
+                }
             }
 
             return {
@@ -5644,24 +5666,29 @@ export class FirebaseService {
         try {
             const doc = await this.db.collection("settings").doc("notification_settings").get();
             if (doc.exists) {
-                return doc.data() as NotificationSettings;
+                const stored = doc.data();
+                const parsed = notificationSettingsSchema.safeParse(
+                    stored && typeof stored === "object"
+                        ? {
+                            ...stored,
+                            ownerSubscriptionWhatsAppTemplates:
+                                normalizeStoredOwnerSubscriptionWhatsAppTemplates(
+                                    stored.ownerSubscriptionWhatsAppTemplates,
+                                ),
+                        }
+                        : stored,
+                );
+                if (parsed.success) return parsed.data;
+                console.error(
+                    "Invalid notification settings stored in Firebase; using defaults:",
+                    parsed.error.issues,
+                );
             }
         } catch (err) {
             console.error("Error loading notification settings from Firebase:", err);
         }
 
-        return {
-            allNotifications: true,
-            newProperty: true,
-            newSubscription: true,
-            subscriptionRenewal: true,
-            receiptUpload: true,
-            propertyUpdate: true,
-            newPayment: true,
-            smartRequest: true,
-            propertyVerification: true,
-            subscriptionExpired: true,
-        };
+        return notificationSettingsSchema.parse({});
     }
 
     async saveNotificationSettings(settings: NotificationSettings): Promise<void> {

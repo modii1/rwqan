@@ -88,6 +88,15 @@ test("contact policy explains the free daily limit and premium unlimited access"
       subscriptionType: "عادي",
       subscriptionStatus: "نشط مجاني",
       subscriptionEndDate: "2026-07-11",
+      freePropertyContactDailyLimit: 7,
+    }, now),
+    "العقار المجاني يتيح 7 محاولات تواصل عبر واتساب يومياً.",
+  );
+  assert.equal(
+    getPublicPropertyContactPolicyMessage({
+      subscriptionType: "عادي",
+      subscriptionStatus: "نشط مجاني",
+      subscriptionEndDate: "2026-07-11",
     }, now),
     "العقار المجاني يتيح 3 محاولات تواصل عبر واتساب يومياً.",
   );

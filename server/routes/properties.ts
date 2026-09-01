@@ -19,6 +19,7 @@ import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../..
 import { calculateRemainingDays } from "../utils/dateUtils";
 import { requireAdmin, requireSameOrigin } from "./middleware";
 import { hasActivePropertyHold } from "../../shared/propertyAvailability";
+import { bookingCommissionService } from "../services/BookingCommissionService";
 
 const router = Router();
 
@@ -136,9 +137,23 @@ router.get("/api/properties/:id", async (req, res) => {
     }
 
     // Check subscription status
-    const subscription = await subscriptionService.getByProperty(req.params.id);
+    const [subscription, freeWorkflowSettings] = await Promise.all([
+      subscriptionService.getByProperty(req.params.id),
+      bookingCommissionService.getFreeWorkflowSettings().catch((error) => {
+        console.error("Public contact-policy settings lookup failed:", error);
+        return null;
+      }),
+    ]);
     
-    const response = toPublicPropertyWithSubscription(p, subscription);
+    const response = {
+      ...toPublicPropertyWithSubscription(p, subscription),
+      ...(freeWorkflowSettings
+        ? {
+            freePropertyContactDailyLimit:
+              freeWorkflowSettings.freePropertyContactDailyLimit,
+          }
+        : {}),
+    };
 
     return res.json(response);
   } catch (err) {

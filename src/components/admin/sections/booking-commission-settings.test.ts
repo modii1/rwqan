@@ -75,3 +75,15 @@ test("admin operational health omits the optional external worker secret", () =>
   assert.match(source, /health\.publicBaseUrlConfigured/);
   assert.match(source, /health\.publicBaseUrlValid/);
 });
+
+test("booking workflow feature switches are managed inside the WhatsApp settings card", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-settings.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /FEATURE_BOOKING_FOLLOWUP/);
+  assert.match(source, /FEATURE_BOOKING_COMMISSION_ENFORCEMENT/);
+  assert.match(source, /\/api\/admin\/feature-flags/);
+  assert.match(source, /تشغيل نظام المتابعة والعمولة/);
+  assert.match(source, /min-\[360px\]:flex-row/);
+});

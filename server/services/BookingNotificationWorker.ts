@@ -33,6 +33,7 @@ import {
   formatCalendarMonthNumeric,
   formatCanonicalDayNumeric,
 } from "../../shared/booking-calendar";
+import { shouldStartScheduledBackgroundWork } from "../config/schedulerStartup";
 
 const ENFORCEMENT_RETRY_MS = 30 * 60 * 1000;
 
@@ -136,6 +137,23 @@ export function buildBookingNotificationMessage(
         propertyLabel,
         followUpLink:
           `${baseUrl()}/b/${createCustomerBookingShortCode(booking.id)}`,
+      },
+    );
+  }
+
+  if (job.kind === "owner_contact_limit_reached") {
+    const dailyLimit = Number.isSafeInteger(
+      booking.freePropertyContactDailyLimit,
+    )
+      ? Number(booking.freePropertyContactDailyLimit)
+      : 3;
+    return renderBookingWhatsAppTemplate(
+      "owner_contact_limit_reached",
+      templates.owner_contact_limit_reached,
+      {
+        propertyNumber: booking.propertyNumber,
+        dailyLimit,
+        renewalLink: `${baseUrl()}/r`,
       },
     );
   }
@@ -586,12 +604,27 @@ export async function runBookingCommissionWorker(now = new Date()) {
 let workerStarted = false;
 export const BOOKING_WORKER_INTERVAL_MS = 60 * 1_000;
 
+export function shouldStartBookingCommissionWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return shouldStartScheduledBackgroundWork(
+    environment,
+    ["ENABLE_BOOKING_WORKER_IN_DEVELOPMENT"],
+  );
+}
+
 /**
  * Best-effort in-process safety net. The authenticated worker endpoint is the
  * authoritative production trigger; Firestore leases make concurrent calls
  * from multiple instances safe.
  */
 export function startBookingCommissionWorker(): void {
+  if (!shouldStartBookingCommissionWorker()) {
+    console.info(
+      "Booking commission worker is disabled outside production; set ENABLE_BOOKING_WORKER_IN_DEVELOPMENT=true to opt in.",
+    );
+    return;
+  }
   if (workerStarted) return;
   workerStarted = true;
   setTimeout(() => {

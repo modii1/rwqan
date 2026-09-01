@@ -8,8 +8,10 @@ export type BookingSettingsLimitKey =
   typeof BOOKING_SETTINGS_LIMIT_KEYS[number];
 
 export const BOOKING_WHATSAPP_TEMPLATE_KEYS = [
+  "admin_customer_technical_support",
   "customer_followup",
   "customer_final_reminder",
+  "owner_contact_limit_reached",
   "owner_booking_facts",
   "owner_booking_commission",
   "commission_reminder",
@@ -34,6 +36,8 @@ export interface BookingCommissionSettings {
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
+  customerFollowUpMessageLimit: number;
+  adminCustomerWhatsAppCooldownMinutes: number;
   whatsappTemplates: BookingWhatsAppTemplates;
   optionalCommissionReminderDays: Array<3 | 4>;
   updatedAt: string | null;
@@ -70,6 +74,8 @@ export interface BookingCommissionSettingsPayload {
 export interface BookingCommissionSettingsDraft {
   customerFollowUpDelayHours: string;
   customerFollowUpDelayMinutes: string;
+  customerFollowUpMessageLimit: string;
+  adminCustomerWhatsAppCooldownMinutes: string;
   limits: Record<BookingSettingsLimitKey, string>;
   whatsappTemplates: BookingWhatsAppTemplates;
   optionalCommissionReminderDays: Array<3 | 4>;
@@ -77,6 +83,8 @@ export interface BookingCommissionSettingsDraft {
 
 export interface BookingCommissionSettingsUpdate {
   customerFollowUpDelayMinutes: number;
+  customerFollowUpMessageLimit: number;
+  adminCustomerWhatsAppCooldownMinutes: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
@@ -93,6 +101,12 @@ export interface BookingTemplateDefinition {
 
 export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] = [
   {
+    key: "admin_customer_technical_support",
+    label: "التواصل التقني مع العميل",
+    description: "القالب الجاهز الذي يفتحه المشرف للتواصل التقني مع العميل.",
+    placeholders: [],
+  },
+  {
     key: "customer_followup",
     label: "متابعة العميل",
     description: "تُرسل مرة واحدة بعد المدة المحددة لطلب التواصل مع العقار المجاني.",
@@ -103,6 +117,12 @@ export const BOOKING_TEMPLATE_DEFINITIONS: readonly BookingTemplateDefinition[] 
     label: "المتابعة الأخيرة للعميل",
     description: "تُرسل بعد اكتمال عدد رسائل متابعة العميل وعدم استلام رد.",
     placeholders: [],
+  },
+  {
+    key: "owner_contact_limit_reached",
+    label: "بلوغ حد طلبات التواصل",
+    description: "تُرسل لمالك العقار المجاني عند بلوغ الحد اليومي لطلبات التواصل.",
+    placeholders: ["propertyNumber", "dailyLimit", "renewalLink"],
   },
   {
     key: "owner_booking_facts",
@@ -199,6 +219,8 @@ const PREVIEW_VALUES: Record<string, string> = {
   followUpLink: "https://rwqan.sa/b/RwqanEx123",
   propertyName: "الريف المائي",
   propertyNumber: "13383",
+  dailyLimit: "3",
+  renewalLink: "https://rwqan.sa/r",
   requestCode: "REQ-13383-001",
   customerPhone: "+966500000002",
   timing: "نهاية الأسبوع",
@@ -298,6 +320,12 @@ export function bookingSettingsToDraft(
   return {
     customerFollowUpDelayHours: String(Math.floor(totalDelayMinutes / 60)),
     customerFollowUpDelayMinutes: String(totalDelayMinutes % 60),
+    customerFollowUpMessageLimit: String(
+      settings.customerFollowUpMessageLimit ?? settings.customerDailyLimit,
+    ),
+    adminCustomerWhatsAppCooldownMinutes: String(
+      settings.adminCustomerWhatsAppCooldownMinutes ?? 30,
+    ),
     limits: {
       customerDailyLimit: String(settings.customerDailyLimit),
       freeOwnerDailyLimit: String(settings.freeOwnerDailyLimit),
@@ -346,9 +374,18 @@ export function validateBookingTemplate(
   if (missing) return `المتغير {{${missing}}} مطلوب مرة واحدة.`;
 
   const duplicate = definition.placeholders.find(
-    (placeholder) => counts.get(placeholder) !== 1,
+    (placeholder) => {
+      const count = counts.get(placeholder);
+      return key === "owner_contact_limit_reached" && placeholder === "dailyLimit"
+        ? count !== 1 && count !== 2
+        : count !== 1;
+    },
   );
-  if (duplicate) return `المتغير {{${duplicate}}} يجب أن يظهر مرة واحدة فقط.`;
+  if (duplicate) {
+    return key === "owner_contact_limit_reached" && duplicate === "dailyLimit"
+      ? `المتغير {{${duplicate}}} يجب أن يظهر مرة أو مرتين فقط.`
+      : `المتغير {{${duplicate}}} يجب أن يظهر مرة واحدة فقط.`;
+  }
   return null;
 }
 
@@ -362,6 +399,7 @@ export function validateBookingSettingsDraft(
   templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>>;
   limitsValid: boolean;
   customerFollowUpDelayValid: boolean;
+  workflowControlsValid: boolean;
 } {
   const parsedLimits = parseBookingSettingsLimits(draft.limits);
   const customerFollowUpDelayMinutes = parseCustomerFollowUpDelayMinutes(
@@ -369,6 +407,14 @@ export function validateBookingSettingsDraft(
     draft.customerFollowUpDelayMinutes,
     customerFollowUpDelayMinMinutes,
     customerFollowUpDelayMaxMinutes,
+  );
+  const customerFollowUpMessageLimit = parseBookingSettingsLimit(
+    draft.customerFollowUpMessageLimit,
+  );
+  const adminCustomerWhatsAppCooldownMinutes = parseBookingSettingsInteger(
+    draft.adminCustomerWhatsAppCooldownMinutes,
+    0,
+    10_080,
   );
   const templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>> = {};
   for (const key of BOOKING_WHATSAPP_TEMPLATE_KEYS) {
@@ -386,14 +432,20 @@ export function validateBookingSettingsDraft(
   const valid = Boolean(
     parsedLimits &&
     customerFollowUpDelayMinutes !== null &&
+    customerFollowUpMessageLimit !== null &&
+    adminCustomerWhatsAppCooldownMinutes !== null &&
     remindersValid &&
     Object.keys(templateErrors).length === 0,
   );
   return {
-    update: valid && parsedLimits && customerFollowUpDelayMinutes !== null
+    update: valid && parsedLimits && customerFollowUpDelayMinutes !== null &&
+        customerFollowUpMessageLimit !== null &&
+        adminCustomerWhatsAppCooldownMinutes !== null
       ? {
           ...parsedLimits,
           customerFollowUpDelayMinutes,
+          customerFollowUpMessageLimit,
+          adminCustomerWhatsAppCooldownMinutes,
           whatsappTemplates: { ...draft.whatsappTemplates },
           optionalCommissionReminderDays: [...draft.optionalCommissionReminderDays]
             .sort((left, right) => left - right),
@@ -402,6 +454,9 @@ export function validateBookingSettingsDraft(
     templateErrors,
     limitsValid: Boolean(parsedLimits),
     customerFollowUpDelayValid: customerFollowUpDelayMinutes !== null,
+    workflowControlsValid:
+      customerFollowUpMessageLimit !== null &&
+      adminCustomerWhatsAppCooldownMinutes !== null,
   };
 }
 
@@ -415,6 +470,9 @@ export function bookingSettingsUpdateEquals(
     rightDelay.customerFollowUpDelayMinutes,
   );
   return left.customerFollowUpDelayMinutes === rightDelayMinutes &&
+    left.customerFollowUpMessageLimit === right.customerFollowUpMessageLimit &&
+    left.adminCustomerWhatsAppCooldownMinutes ===
+      right.adminCustomerWhatsAppCooldownMinutes &&
     BOOKING_SETTINGS_LIMIT_KEYS.every((key) => left[key] === right[key]) &&
     BOOKING_WHATSAPP_TEMPLATE_KEYS.every(
       (key) => left.whatsappTemplates[key] === right.whatsappTemplates[key],

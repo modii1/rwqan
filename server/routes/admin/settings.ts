@@ -7,6 +7,7 @@ import {
   assertPropertyNotSuspended,
   PropertySuspendedError,
 } from "../../services/propertySuspension";
+import { notificationSettingsSchema } from "../../../shared/schema";
 
 const router = Router();
 
@@ -25,7 +26,11 @@ router.get("/api/admin/settings/notifications", async (req, res) => {
 
 router.put("/api/admin/settings/notifications", async (req, res) => {
   try {
-    const settings = req.body;
+    const parsed = notificationSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "إعدادات الإشعارات غير صالحة" });
+    }
+    const settings = parsed.data;
     await firebaseService.saveNotificationSettings(settings);
     // مسح كاش الإعدادات في whatsapp.ts
     const { clearSettingsCache } = await import("../../integrations/whatsapp");

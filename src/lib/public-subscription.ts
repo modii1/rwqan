@@ -14,6 +14,7 @@ interface PublicPropertySubscriptionState {
   subscriptionStatus?: string | null;
   subscriptionEndDate?: string | null;
   isSubscriptionExpired?: boolean;
+  freePropertyContactDailyLimit?: number | null;
 }
 
 function parseSubscriptionEndDate(value?: string | null): Date | null {
@@ -96,5 +97,9 @@ export function getPublicPropertyContactPolicyMessage(
 ): string {
   return isPublicPropertyPremium(property, now)
     ? "العقار المميز يتيح للعملاء تواصلاً غير محدود عبر واتساب."
-    : "العقار المجاني يتيح 3 محاولات تواصل عبر واتساب يومياً.";
+    : property.freePropertyContactDailyLimit === undefined ||
+        property.freePropertyContactDailyLimit === null ||
+        property.freePropertyContactDailyLimit === 3
+      ? "العقار المجاني يتيح 3 محاولات تواصل عبر واتساب يومياً."
+      : `العقار المجاني يتيح ${property.freePropertyContactDailyLimit} محاولات تواصل عبر واتساب يومياً.`;
 }

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
   BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
   BookingCommissionService,
   bookingQuestionnaireRouteSchema,
@@ -18,7 +17,6 @@ import type { BookingFollowUpDocument } from "./BookingCommissionTypes";
 import { createCustomerBookingShortCode } from "./BookingShortLinkService";
 import { paymobService } from "../integrations/paymob";
 import {
-  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
   DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   renderBookingWhatsAppTemplate,
 } from "../../shared/booking";
@@ -179,6 +177,7 @@ test("admin customer WhatsApp handoff keeps the phone behind a short-lived signe
   const originals = {
     claim: bookingCommissionStore.claimAdminCustomerWhatsAppContact,
     getCurrent: bookingCommissionStore.getBookingForCurrentOwner,
+    getSettings: bookingCommissionStore.getFreeWorkflowSettings,
   };
   const previousSecret = process.env.SESSION_SECRET;
   const booking = awaitingBookingFixture({
@@ -186,26 +185,43 @@ test("admin customer WhatsApp handoff keeps the phone behind a short-lived signe
     createdAt: new Date(),
   });
   const service = new BookingCommissionService();
+  const technicalSupportMessage = "رسالة الدعم التقني المخصصة.";
 
   try {
     process.env.SESSION_SECRET = "admin-whatsapp-handoff-test-secret-value-123456";
-    (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = async (id: string) =>
-      id === booking.id
+    (bookingCommissionStore as any).getFreeWorkflowSettings = async () => ({
+      whatsappTemplates: {
+        ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+        admin_customer_technical_support: technicalSupportMessage,
+      },
+      adminCustomerWhatsAppCooldownMinutes: 7,
+    });
+    (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = async (
+      id: string,
+      _now: Date,
+      templateVariant: string,
+      cooldownMinutes: number,
+    ) => {
+      assert.equal(templateVariant, "technical_support");
+      assert.equal(cooldownMinutes, 7);
+      return id === booking.id
         ? { ...booking, customerPhone: "+966 (50) 000-0002" }
         : null;
+    };
     (bookingCommissionStore as any).getBookingForCurrentOwner = async (id: string) =>
       id === booking.id
         ? { ...booking, customerPhone: "+966 (50) 000-0002" }
         : null;
 
-    const handoffUrl = await service.issueAdminCustomerWhatsAppHandoff(booking.id);
+    const handoff = await service.issueAdminCustomerWhatsAppHandoff(booking.id);
     assert.match(
-      handoffUrl,
+      handoff.handoffUrl,
       /^\/api\/admin\/booking-commissions\/[^/]+\/customer-whatsapp\/open\?token=/,
     );
-    assert.equal(handoffUrl.includes("966500000002"), false);
-    assert.equal(handoffUrl.includes("wa.me"), false);
-    const token = new URL(handoffUrl, "https://rwqan.test")
+    assert.equal(handoff.handoffUrl.includes("966500000002"), false);
+    assert.equal(handoff.handoffUrl.includes("wa.me"), false);
+    assert.ok(Number.isFinite(Date.parse(handoff.nextAllowedAt || "")));
+    const token = new URL(handoff.handoffUrl, "https://rwqan.test")
       .searchParams.get("token");
     assert.ok(token);
 
@@ -218,11 +234,7 @@ test("admin customer WhatsApp handoff keeps the phone behind a short-lived signe
     assert.equal(parsed.pathname, "/966500000002");
     assert.equal(
       parsed.searchParams.get("text"),
-      "مرحباً، معك الفريق التقني لمنصة روقان.",
-    );
-    assert.equal(
-      parsed.searchParams.get("text"),
-      BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE,
+      technicalSupportMessage,
     );
 
     await assert.rejects(
@@ -255,6 +267,7 @@ test("admin customer WhatsApp handoff keeps the phone behind a short-lived signe
   } finally {
     (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = originals.claim;
     (bookingCommissionStore as any).getBookingForCurrentOwner = originals.getCurrent;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = originals.getSettings;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }
@@ -264,6 +277,7 @@ test("admin customer WhatsApp handoff fails closed after free eligibility is los
   const originals = {
     claim: bookingCommissionStore.claimAdminCustomerWhatsAppContact,
     getCurrent: bookingCommissionStore.getBookingForCurrentOwner,
+    getSettings: bookingCommissionStore.getFreeWorkflowSettings,
   };
   const previousSecret = process.env.SESSION_SECRET;
   const service = new BookingCommissionService();
@@ -274,6 +288,10 @@ test("admin customer WhatsApp handoff fails closed after free eligibility is los
   try {
     process.env.SESSION_SECRET = "admin-whatsapp-eligibility-test-secret-12345678";
     (bookingCommissionStore as any).getBookingForCurrentOwner = async () => booking;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = async () => ({
+      whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
+      adminCustomerWhatsAppCooldownMinutes: 0,
+    });
     (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = async () => null;
     await assert.rejects(
       () => service.issueAdminCustomerWhatsAppHandoff("BOOK-UPGRADED"),
@@ -285,6 +303,7 @@ test("admin customer WhatsApp handoff fails closed after free eligibility is los
   } finally {
     (bookingCommissionStore as any).claimAdminCustomerWhatsAppContact = originals.claim;
     (bookingCommissionStore as any).getBookingForCurrentOwner = originals.getCurrent;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = originals.getSettings;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }
@@ -333,24 +352,28 @@ test("admin customer follow-up handoff provisions the short link before cooldown
         ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
         customer_followup: editedCustomerFollowUpTemplate,
       },
+      adminCustomerWhatsAppCooldownMinutes: 12,
     });
     store.claimAdminCustomerWhatsAppContact = async (
       id: string,
       _now: Date,
       templateVariant: string,
+      cooldownMinutes: number,
     ) => {
       calls.push("cooldown-claim");
       assert.equal(id, booking.id);
       assert.equal(templateVariant, "customer_followup");
+      assert.equal(cooldownMinutes, 12);
       return currentBooking;
     };
 
-    const handoffUrl = await service.issueAdminCustomerWhatsAppHandoff(
+    const handoffResult = await service.issueAdminCustomerWhatsAppHandoff(
       booking.id,
       { templateVariant: "customer_followup" },
     );
     assert.deepEqual(calls, ["short-link", "cooldown-claim"]);
-    const handoff = new URL(handoffUrl, "https://rwqan.test");
+    assert.ok(Number.isFinite(Date.parse(handoffResult.nextAllowedAt || "")));
+    const handoff = new URL(handoffResult.handoffUrl, "https://rwqan.test");
     const token = handoff.searchParams.get("token");
     assert.ok(token);
     assert.equal(
@@ -631,6 +654,8 @@ test("admin free-workflow settings preserve the strict service response contract
     freeOwnerDailyLimit: 5,
     freePropertyContactDailyLimit: 6,
     customerFollowUpDelayMinutes: 2_160,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 20,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [3] as Array<3 | 4>,
   };
@@ -707,7 +732,25 @@ test("admin free-workflow settings preserve the strict service response contract
         customerFollowUpDelayHours: 36,
       },
     }), expectedResponse);
-    assert.deepEqual(updates, [configuration, configuration]);
+    const {
+      customerFollowUpMessageLimit: _legacyMissingSequenceLimit,
+      adminCustomerWhatsAppCooldownMinutes: _legacyMissingCooldown,
+      whatsappTemplates: _currentTemplates,
+      ...cachedReleaseConfiguration
+    } = configuration;
+    const {
+      admin_customer_technical_support: _legacyMissingTechnicalTemplate,
+      owner_contact_limit_reached: _legacyMissingContactLimitTemplate,
+      ...cachedReleaseTemplates
+    } = configuration.whatsappTemplates;
+    assert.deepEqual(await service.updateAdminFreeWorkflowSettings({
+      settings: {
+        ...cachedReleaseConfiguration,
+        customerFollowUpDelayMinutes: configuration.customerFollowUpDelayMinutes,
+        whatsappTemplates: cachedReleaseTemplates,
+      },
+    }), expectedResponse);
+    assert.deepEqual(updates, [configuration, configuration, configuration]);
 
     store.getFreeWorkflowSettings = async () => ({
       ...persisted,
@@ -749,6 +792,13 @@ test("admin free-workflow settings preserve the strict service response contract
       { settings: { ...configuration, customerFollowUpDelayMinutes: 0 } },
       { settings: { ...configuration, customerFollowUpDelayMinutes: 1.5 } },
       { settings: { ...configuration, customerFollowUpDelayMinutes: 7_201 } },
+      { settings: { ...configuration, customerFollowUpMessageLimit: 1_001 } },
+      {
+        settings: {
+          ...configuration,
+          adminCustomerWhatsAppCooldownMinutes: 10_081,
+        },
+      },
       {
         settings: {
           ...legacyConfiguration,
@@ -778,7 +828,7 @@ test("admin free-workflow settings preserve the strict service response contract
     ]) {
       await assert.rejects(() => service.updateAdminFreeWorkflowSettings(input));
     }
-    assert.equal(updates.length, 2, "invalid bodies never reach persistence");
+    assert.equal(updates.length, 3, "invalid bodies never reach persistence");
   } finally {
     store.getFreeWorkflowSettings = originals.getSettings;
     store.updateFreeWorkflowSettings = originals.updateSettings;
@@ -801,6 +851,7 @@ test("seven-day expiry is derived for admin and customer views without persistin
     listJobs: bookingCommissionStore.listAllNotificationJobs,
     listAttempts: bookingCommissionStore.listPaymentAttempts,
     markOpened: bookingCommissionStore.markCustomerOpened,
+    getSettings: bookingCommissionStore.getFreeWorkflowSettings,
   };
   const nowMs = Date.now();
   const expired = awaitingBookingFixture({
@@ -838,6 +889,9 @@ test("seven-day expiry is derived for admin and customer views without persistin
     (bookingCommissionStore as any).listAllBookings = async () => [expired, fresh];
     (bookingCommissionStore as any).listAllNotificationJobs = async () => [];
     (bookingCommissionStore as any).listPaymentAttempts = async () => [];
+    (bookingCommissionStore as any).getFreeWorkflowSettings = async () => ({
+      adminCustomerWhatsAppCooldownMinutes: 12,
+    });
     (bookingCommissionStore as any).markCustomerOpened = async () => {
       markOpenedCalls += 1;
       throw new Error("profile rendering must not persist an expiry event");
@@ -864,7 +918,7 @@ test("seven-day expiry is derived for admin and customer views without persistin
     ]);
     const expectedContactAt = new Date(
       Date.parse(expired.adminCustomerWhatsAppLastOpenedAt) +
-        BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+        12 * 60 * 1_000,
     ).toISOString();
     assert.equal(expiredAdminRow.customerWhatsAppNextAllowedAt, expectedContactAt);
     assert.equal(freshAdminRow.customerWhatsAppNextAllowedAt, expectedContactAt);
@@ -912,6 +966,7 @@ test("seven-day expiry is derived for admin and customer views without persistin
     (bookingCommissionStore as any).listAllNotificationJobs = originals.listJobs;
     (bookingCommissionStore as any).listPaymentAttempts = originals.listAttempts;
     (bookingCommissionStore as any).markCustomerOpened = originals.markOpened;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = originals.getSettings;
     if (previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = previousSecret;
   }
@@ -1061,6 +1116,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
     listAll: bookingCommissionStore.listAllBookings,
     listJobs: bookingCommissionStore.listAllNotificationJobs,
     listAttempts: bookingCommissionStore.listPaymentAttempts,
+    getSettings: bookingCommissionStore.getFreeWorkflowSettings,
   };
   const createdAt = new Date();
   const bookings = Array.from({ length: 501 }, (_, index) =>
@@ -1123,6 +1179,9 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
     (bookingCommissionStore as any).listAllBookings = async () => bookings;
     (bookingCommissionStore as any).listAllNotificationJobs = async () => jobs;
     (bookingCommissionStore as any).listPaymentAttempts = async () => attempts;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = async () => ({
+      adminCustomerWhatsAppCooldownMinutes: 0,
+    });
 
     const dashboard = await new BookingCommissionService().getAdminDashboard();
     assert.equal(dashboard.summary.total, 501);
@@ -1131,6 +1190,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
 
     const row = dashboard.bookings.find((candidate) => candidate.id === anchor.id);
     assert.ok(row);
+    assert.equal(row.customerWhatsAppNextAllowedAt, null);
     assert.equal(row.notificationSummary.suppressed, 5_001);
     assert.equal(row.notificationJobs.length, 5_001);
     assert.equal(row.paymentAttempt?.id, "ATT-REVIEW");
@@ -1180,6 +1240,7 @@ test("admin dashboard totals and per-booking audit histories are complete and sa
     (bookingCommissionStore as any).listAllBookings = originals.listAll;
     (bookingCommissionStore as any).listAllNotificationJobs = originals.listJobs;
     (bookingCommissionStore as any).listPaymentAttempts = originals.listAttempts;
+    (bookingCommissionStore as any).getFreeWorkflowSettings = originals.getSettings;
   }
 });
 

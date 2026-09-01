@@ -20,6 +20,7 @@ const TOKEN_SECRET = "booking-message-test-secret-value-1234567890";
 
 let buildBookingNotificationMessage: typeof import("./BookingNotificationWorker")["buildBookingNotificationMessage"];
 let dispatchDueBookingNotifications: typeof import("./BookingNotificationWorker")["dispatchDueBookingNotifications"];
+let shouldStartBookingCommissionWorker: typeof import("./BookingNotificationWorker")["shouldStartBookingCommissionWorker"];
 let bookingWorkerIntervalMs: number;
 let bookingCommissionStore: typeof import("./BookingCommissionStore")["bookingCommissionStore"];
 let bookingCommissionService: typeof import("./BookingCommissionService")["bookingCommissionService"];
@@ -39,6 +40,7 @@ before(async () => {
     BOOKING_WORKER_INTERVAL_MS: bookingWorkerIntervalMs,
     buildBookingNotificationMessage,
     dispatchDueBookingNotifications,
+    shouldStartBookingCommissionWorker,
   } = await import("./BookingNotificationWorker"));
 });
 
@@ -55,6 +57,44 @@ after(() => {
 
 test("booking worker polls every minute to honor minute-precision delays", () => {
   assert.equal(bookingWorkerIntervalMs, 60 * 1_000);
+});
+
+test("booking worker starts automatically only in production", () => {
+  assert.equal(shouldStartBookingCommissionWorker({ NODE_ENV: "production" }), true);
+  assert.equal(shouldStartBookingCommissionWorker({ NODE_ENV: "development" }), false);
+  assert.equal(shouldStartBookingCommissionWorker({ NODE_ENV: "test" }), false);
+});
+
+test("booking worker can be explicitly enabled for development", () => {
+  assert.equal(
+    shouldStartBookingCommissionWorker({
+      NODE_ENV: "development",
+      ENABLE_SCHEDULERS_IN_DEVELOPMENT: "true",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldStartBookingCommissionWorker({
+      NODE_ENV: "development",
+      ENABLE_BOOKING_WORKER_IN_DEVELOPMENT: "true",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldStartBookingCommissionWorker({
+      NODE_ENV: "development",
+      ENABLE_BOOKING_WORKER_IN_DEVELOPMENT: "TRUE",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStartBookingCommissionWorker({
+      NODE_ENV: "test",
+      ENABLE_BOOKING_WORKER_IN_DEVELOPMENT: "true",
+      ENABLE_SCHEDULERS_IN_DEVELOPMENT: "true",
+    }),
+    false,
+  );
 });
 
 function confirmedBooking(
@@ -219,6 +259,21 @@ test("the final customer reminder preserves the supplied copy and contains no li
   assert.equal(message.includes("https://"), false);
   assert.equal(message.includes("/b/"), false);
   assert.equal(message.includes("BOOK-REQ"), false);
+});
+
+test("the owner contact-limit alert uses the configured allowance and compact renewal link", () => {
+  const message = buildBookingNotificationMessage(
+    notificationJob("owner_contact_limit_reached"),
+    confirmedBooking({ freePropertyContactDailyLimit: 7 }),
+  );
+
+  assert.equal(
+    message,
+    `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم 13383 ضمن الباقة المجانية (7 من 7).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+https://booking.example/r`,
+  );
 });
 
 test("owner confirmation states the three customer facts, price, 10% fee, deadline, and payment link", () => {

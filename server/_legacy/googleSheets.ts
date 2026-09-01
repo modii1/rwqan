@@ -34,7 +34,8 @@ import type {
   AddOnHistory,
   InsertAddOnHistory,
 } from "../../shared/schema";
-import { DEFAULT_FEE_CONFIGS, DEFAULT_FEATURE_FLAGS, BankAccount, InsertBankAccount, FeatureFlag, InsertFeatureFlag, OcrResult, InsertOcrResult } from "../../shared/schema";
+import { DEFAULT_FEE_CONFIGS, DEFAULT_FEATURE_FLAGS, BankAccount, InsertBankAccount, FeatureFlag, InsertFeatureFlag, OcrResult, InsertOcrResult, notificationSettingsSchema } from "../../shared/schema";
+import { normalizeStoredOwnerSubscriptionWhatsAppTemplates } from "../../shared/subscription-whatsapp";
 import { getNowInRiyadh, toRiyadhISO, getStartOfMonthRiyadh, getEndOfMonthRiyadh, addDays, addMonths, parseArabicDate } from "../utils/dateUtils";
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID || "";
@@ -2443,24 +2444,26 @@ class GoogleSheetsService {
 
     if (settingsRow && settingsRow[1]) {
       try {
-        return JSON.parse(settingsRow[1]);
+        const stored = JSON.parse(settingsRow[1]);
+        const parsed = notificationSettingsSchema.safeParse(
+          stored && typeof stored === "object"
+            ? {
+                ...stored,
+                ownerSubscriptionWhatsAppTemplates:
+                  normalizeStoredOwnerSubscriptionWhatsAppTemplates(
+                    stored.ownerSubscriptionWhatsAppTemplates,
+                  ),
+              }
+            : stored,
+        );
+        if (parsed.success) return parsed.data;
+        console.error("Invalid notification settings");
       } catch {
         console.error("Error parsing notification settings");
       }
     }
 
-    return {
-      allNotifications: true,
-      newProperty: true,
-      newSubscription: true,
-      subscriptionRenewal: true,
-      receiptUpload: true,
-      propertyUpdate: true,
-      newPayment: true,
-      smartRequest: true,
-      propertyVerification: true,
-      subscriptionExpired: true,
-    };
+    return notificationSettingsSchema.parse({});
   }
 
   async saveNotificationSettings(settings: NotificationSettings): Promise<void> {
@@ -3831,5 +3834,4 @@ class GoogleSheetsService {
 }
 
 export const googleSheetsService = new GoogleSheetsService();
-
 

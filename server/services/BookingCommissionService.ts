@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
-  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MAX,
@@ -11,6 +11,7 @@ import {
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION,
   COMMISSION_PAYMENT_WINDOW_MS,
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingCalendarSchema,
   bookingConfirmationFactsSchema,
@@ -77,7 +78,7 @@ export const BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 export const BOOKING_OWNER_TOKEN_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_TOKEN_MAX_AGE_MS = 2 * 60 * 1000;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE =
-  "مرحباً، معك الفريق التقني لمنصة روقان.";
+  DEFAULT_BOOKING_WHATSAPP_TEMPLATES.admin_customer_technical_support;
 
 function isUsableBookingCommissionBankAccount(account: unknown): boolean {
   if (!account || typeof account !== "object") return false;
@@ -425,6 +426,8 @@ function adminRow(
   attempts: BookingCommissionPaymentAttempt[],
   customerWhatsAppLastOpenedAt: string | null,
   now = new Date(),
+  adminCustomerWhatsAppCooldownMinutes: number =
+    BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
 ): BookingAdminRow & {
   questionnaire: ReturnType<typeof questionnaire>;
   dueAt: string | null;
@@ -463,9 +466,10 @@ function adminRow(
     bookingStatus: responseExpired ? "expired" as const : safeBooking.bookingStatus,
     customerPhoneMasked: maskContactPhone(booking.customerPhone),
     customerWhatsAppNextAllowedAt: customerWhatsAppLastOpenedAt
+      && adminCustomerWhatsAppCooldownMinutes > 0
       ? new Date(
           Date.parse(customerWhatsAppLastOpenedAt) +
-            BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS,
+            adminCustomerWhatsAppCooldownMinutes * 60 * 1_000,
         ).toISOString()
       : null,
     adminCustomerWhatsAppTemplateVariants:
@@ -542,6 +546,7 @@ export class BookingCommissionService {
     isFreeProperty: boolean;
     customerFollowUpDelayMinutes: number;
     customerFollowUpMessageLimit: number;
+    freePropertyContactDailyLimit?: number;
     propertyPrices?: unknown;
     now?: Date;
   }): InitialBookingWorkflow {
@@ -859,7 +864,56 @@ export class BookingCommissionService {
   }
 
   async updateAdminFreeWorkflowSettings(rawInput: unknown) {
-    const input = bookingFreeWorkflowSettingsUpdateSchema.parse(rawInput);
+    const current = await this.getFreeWorkflowSettings();
+    let compatibleInput = rawInput;
+    if (
+      rawInput &&
+      typeof rawInput === "object" &&
+      !Array.isArray(rawInput)
+    ) {
+      const root = rawInput as Record<string, unknown>;
+      const rawSettings = root.settings;
+      if (
+        rawSettings &&
+        typeof rawSettings === "object" &&
+        !Array.isArray(rawSettings)
+      ) {
+        const settings = rawSettings as Record<string, unknown>;
+        const rawTemplates = settings.whatsappTemplates;
+        const rawTemplateRecord = rawTemplates &&
+            typeof rawTemplates === "object" &&
+            !Array.isArray(rawTemplates)
+          ? rawTemplates as Record<string, unknown>
+          : null;
+        const legacyTemplateShape = rawTemplateRecord &&
+          Object.keys(current.whatsappTemplates)
+            .filter((key) => !(key in rawTemplateRecord))
+            .every((key) =>
+              key === "admin_customer_technical_support" ||
+              key === "owner_contact_limit_reached"
+            );
+        compatibleInput = {
+          ...root,
+          settings: {
+            ...settings,
+            customerFollowUpMessageLimit:
+              settings.customerFollowUpMessageLimit ??
+              current.customerFollowUpMessageLimit,
+            adminCustomerWhatsAppCooldownMinutes:
+              settings.adminCustomerWhatsAppCooldownMinutes ??
+              current.adminCustomerWhatsAppCooldownMinutes,
+            whatsappTemplates:
+              rawTemplateRecord && legacyTemplateShape
+                ? {
+                    ...current.whatsappTemplates,
+                    ...rawTemplateRecord,
+                  }
+                : rawTemplates,
+          },
+        };
+      }
+    }
+    const input = bookingFreeWorkflowSettingsUpdateSchema.parse(compatibleInput);
     return adminFreeWorkflowSettingsResponse(
       await bookingCommissionStore.updateFreeWorkflowSettings(input.settings),
     );
@@ -905,14 +959,12 @@ export class BookingCommissionService {
   ): Promise<string> {
     this.requireAdminCustomerDestination(booking);
     this.requireAdminCustomerTemplateAvailable(booking, templateVariant, now);
+    const configuredTemplates = templates || DEFAULT_BOOKING_WHATSAPP_TEMPLATES;
     if (templateVariant === "technical_support") {
-      return BOOKING_ADMIN_CUSTOMER_WHATSAPP_MESSAGE;
-    }
-    if (!templates) {
-      throw new BookingWorkflowError(
-        "ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE",
-        "Selected WhatsApp template is unavailable for this booking",
-        409,
+      return renderBookingWhatsAppTemplate(
+        "admin_customer_technical_support",
+        configuredTemplates.admin_customer_technical_support,
+        {},
       );
     }
 
@@ -936,7 +988,7 @@ export class BookingCommissionService {
         : `${propertyName} رقم ${booking.propertyNumber}`;
       return renderBookingWhatsAppTemplate(
         "customer_followup",
-        templates.customer_followup,
+        configuredTemplates.customer_followup,
         {
           propertyLabel,
           followUpLink: `${bookingPublicBaseUrl()}/b/${shortCode}`,
@@ -954,7 +1006,7 @@ export class BookingCommissionService {
   async issueAdminCustomerWhatsAppHandoff(
     bookingId: string,
     rawInput: unknown = {},
-  ): Promise<string> {
+  ): Promise<{ handoffUrl: string; nextAllowedAt: string | null }> {
     const input = bookingAdminCustomerWhatsAppHandoffSchema.parse(
       rawInput ?? {},
     );
@@ -969,9 +1021,8 @@ export class BookingCommissionService {
         404,
       );
     }
-    const templates = input.templateVariant === "technical_support"
-      ? undefined
-      : (await this.getFreeWorkflowSettings()).whatsappTemplates;
+    const freeWorkflowSettings = await this.getFreeWorkflowSettings();
+    const templates = freeWorkflowSettings.whatsappTemplates;
     await this.renderAdminCustomerWhatsAppMessage(
       preflightBooking,
       input.templateVariant,
@@ -989,6 +1040,7 @@ export class BookingCommissionService {
       bookingId,
       now,
       input.templateVariant,
+      freeWorkflowSettings.adminCustomerWhatsAppCooldownMinutes,
     );
     if (!booking) {
       throw new BookingWorkflowError(
@@ -1003,7 +1055,17 @@ export class BookingCommissionService {
       input.templateVariant,
       now,
     );
-    return `/api/admin/booking-commissions/${encodeURIComponent(booking.id)}/customer-whatsapp/open?token=${encodeURIComponent(token)}&templateVariant=${encodeURIComponent(input.templateVariant)}`;
+    return {
+      handoffUrl: `/api/admin/booking-commissions/${encodeURIComponent(booking.id)}/customer-whatsapp/open?token=${encodeURIComponent(token)}&templateVariant=${encodeURIComponent(input.templateVariant)}`,
+      nextAllowedAt:
+        freeWorkflowSettings.adminCustomerWhatsAppCooldownMinutes > 0
+          ? new Date(
+              now.getTime() +
+                freeWorkflowSettings.adminCustomerWhatsAppCooldownMinutes *
+                  60 * 1_000,
+            ).toISOString()
+          : null,
+    };
   }
 
   async resolveAdminCustomerWhatsAppHandoff(
@@ -1037,9 +1099,7 @@ export class BookingCommissionService {
       );
     }
     const destination = this.requireAdminCustomerDestination(booking);
-    const templates = templateVariant === "technical_support"
-      ? undefined
-      : (await this.getFreeWorkflowSettings()).whatsappTemplates;
+    const templates = (await this.getFreeWorkflowSettings()).whatsappTemplates;
     const message = await this.renderAdminCustomerWhatsAppMessage(
       booking,
       templateVariant,
@@ -1256,10 +1316,11 @@ export class BookingCommissionService {
   }
 
   async getAdminDashboard() {
-    const [bookings, jobs, attempts] = await Promise.all([
+    const [bookings, jobs, attempts, freeWorkflowSettings] = await Promise.all([
       bookingCommissionStore.listAllBookings(),
       bookingCommissionStore.listAllNotificationJobs(),
       bookingCommissionStore.listPaymentAttempts(),
+      this.getFreeWorkflowSettings(),
     ]);
     const jobsByBooking = new Map<string, BookingNotificationJob[]>();
     for (const job of jobs) {
@@ -1292,6 +1353,7 @@ export class BookingCommissionService {
         attemptsByBooking.get(booking.id) || [],
         latestCustomerWhatsAppContact.get(booking.customerSubject) || null,
         new Date(dashboardNow),
+        freeWorkflowSettings.adminCustomerWhatsAppCooldownMinutes,
       ));
     const confirmed = bookings.filter((booking) => booking.bookingStatus === "confirmed");
     return {

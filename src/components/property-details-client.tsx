@@ -81,6 +81,7 @@ export interface PropertyDetails {
     subscriptionStatus?: string;
     subscriptionEndDate?: string;
     isSubscriptionExpired?: boolean;
+    freePropertyContactDailyLimit?: number;
     imageCount: number;
     imageUrls?: string[];
 }
@@ -216,6 +217,10 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                             subscriptionStatus: data.subscriptionStatus,
                             subscriptionEndDate: data.subscriptionEndDate,
                             isSubscriptionExpired: data.isSubscriptionExpired,
+                            freePropertyContactDailyLimit:
+                                typeof data.freePropertyContactDailyLimit === "number"
+                                    ? data.freePropertyContactDailyLimit
+                                    : undefined,
                             imageCount: 0,
                             imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],
                         } as PropertyDetails;

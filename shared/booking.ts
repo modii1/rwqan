@@ -13,8 +13,13 @@ export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT = 1_440 as const;
 /** Deprecated compatibility bounds for schema-v4 settings and cached admin clients. */
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN = 1 as const;
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX = 120 as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT = 3 as const;
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT = 30 as const;
+export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_MAX =
+  10_080 as const;
+/** Deprecated compatibility constant for callers that still use the default. */
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MS =
-  30 * 60 * 1_000;
+  BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT * 60 * 1_000;
 export const BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH = 2_000 as const;
 export const BOOKING_WHATSAPP_TEMPLATE_SYNTAX_VERSION = 1 as const;
 export const BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS = [3, 4] as const;
@@ -32,6 +37,14 @@ export const bookingFreeWorkflowLimitsSchema = z.object({
 }).strict();
 export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimitsSchema>;
 
+export const bookingCustomerFollowUpMessageLimitSchema =
+  bookingFreeWorkflowLimitSchema;
+
+export const bookingAdminCustomerWhatsAppCooldownMinutesSchema = z.number()
+  .int()
+  .min(0)
+  .max(BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_MAX);
+
 export const bookingCustomerFollowUpDelayMinutesSchema = z.number()
   .int()
   .min(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_MIN)
@@ -44,8 +57,14 @@ export const bookingCustomerFollowUpDelayHoursSchema = z.number()
   .max(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX);
 
 export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
+  admin_customer_technical_support: [],
   customer_followup: ["propertyLabel", "followUpLink"],
   customer_final_reminder: [],
+  owner_contact_limit_reached: [
+    "propertyNumber",
+    "dailyLimit",
+    "renewalLink",
+  ],
   owner_booking_facts: [
     "propertyName",
     "propertyNumber",
@@ -110,6 +129,8 @@ export type BookingAdminCustomerWhatsAppTemplateVariant = z.infer<
 >;
 
 export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
+  admin_customer_technical_support:
+    "مرحباً، معك الفريق التقني لمنصة روقان.",
   customer_followup: `هل تم الحجز بعد تواصلك مع {{propertyLabel}}؟
 
 أكد النتيجة من الرابط التالي:
@@ -122,6 +143,10 @@ export const DEFAULT_BOOKING_WHATSAPP_TEMPLATES = {
 هل تم الحجز من خلال منصة روقان؟
 
 نشكرك على وقتك وتعاونك 🤍`,
+  owner_contact_limit_reached: `تم الوصول إلى الحد اليومي لطلبات التواصل للعقار رقم {{propertyNumber}} ضمن الباقة المجانية ({{dailyLimit}} من {{dailyLimit}}).
+
+قم بترقية الباقة لاستقبال طلبات تواصل غير محدودة:
+{{renewalLink}}`,
   owner_booking_facts: `تم تسجيل حجز للعقار {{propertyName}} رقم {{propertyNumber}}
 
 رقم الطلب: {{requestCode}}
@@ -213,10 +238,17 @@ function bookingWhatsAppTemplateSchemaFor(
       }
       for (const placeholder of required) {
         const occurrences = placeholders.filter((value) => value === placeholder).length;
-        if (occurrences !== 1) {
+        const occurrenceIsValid =
+          key === "owner_contact_limit_reached" && placeholder === "dailyLimit"
+            ? occurrences === 1 || occurrences === 2
+            : occurrences === 1;
+        if (!occurrenceIsValid) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
-            message: `Placeholder {{${placeholder}}} must appear exactly once for ${key}`,
+            message:
+              key === "owner_contact_limit_reached" && placeholder === "dailyLimit"
+                ? `Placeholder {{${placeholder}}} must appear once or twice for ${key}`
+                : `Placeholder {{${placeholder}}} must appear exactly once for ${key}`,
           });
         }
       }
@@ -224,9 +256,15 @@ function bookingWhatsAppTemplateSchemaFor(
 }
 
 export const bookingWhatsAppTemplatesSchema = z.object({
+  admin_customer_technical_support: bookingWhatsAppTemplateSchemaFor(
+    "admin_customer_technical_support",
+  ),
   customer_followup: bookingWhatsAppTemplateSchemaFor("customer_followup"),
   customer_final_reminder: bookingWhatsAppTemplateSchemaFor(
     "customer_final_reminder",
+  ),
+  owner_contact_limit_reached: bookingWhatsAppTemplateSchemaFor(
+    "owner_contact_limit_reached",
   ),
   owner_booking_facts: bookingWhatsAppTemplateSchemaFor("owner_booking_facts"),
   owner_booking_commission: bookingWhatsAppTemplateSchemaFor(
@@ -269,6 +307,9 @@ export type BookingOptionalCommissionReminderDay =
 export const bookingFreeWorkflowConfigurationSchema =
   bookingFreeWorkflowLimitsSchema.extend({
     customerFollowUpDelayMinutes: bookingCustomerFollowUpDelayMinutesSchema,
+    customerFollowUpMessageLimit: bookingCustomerFollowUpMessageLimitSchema,
+    adminCustomerWhatsAppCooldownMinutes:
+      bookingAdminCustomerWhatsAppCooldownMinutesSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
     optionalCommissionReminderDays:
       bookingOptionalCommissionReminderDaysSchema,
@@ -284,6 +325,9 @@ const bookingFreeWorkflowSettingsCompatibleUpdateSchema =
       bookingCustomerFollowUpDelayMinutesSchema.optional(),
     customerFollowUpDelayHours:
       bookingCustomerFollowUpDelayHoursSchema.optional(),
+    customerFollowUpMessageLimit: bookingCustomerFollowUpMessageLimitSchema,
+    adminCustomerWhatsAppCooldownMinutes:
+      bookingAdminCustomerWhatsAppCooldownMinutesSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
     optionalCommissionReminderDays:
       bookingOptionalCommissionReminderDaysSchema,
