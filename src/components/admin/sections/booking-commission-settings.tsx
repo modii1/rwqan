@@ -26,12 +26,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   BOOKING_TEMPLATE_DEFINITIONS,
   bookingSettingsToDraft,
   bookingSettingsUpdateEquals,
+  parseCustomerFollowUpLimitScope,
   parseBookingSettingsLimit,
   parseBookingSettingsLimits,
   previewBookingTemplate,
@@ -70,11 +72,27 @@ const EMPTY_DRAFT: BookingCommissionSettingsDraft = {
   customerFollowUpDelayHours: "24",
   customerFollowUpDelayMinutes: "0",
   customerFollowUpMessageLimit: "3",
+  customerFollowUpLimitScope: "customer",
   adminCustomerWhatsAppCooldownMinutes: "30",
   limits: EMPTY_LIMITS,
   whatsappTemplates: EMPTY_TEMPLATES,
   optionalCommissionReminderDays: [],
 };
+
+const FOLLOW_UP_SCOPE_OPTIONS = [
+  {
+    value: "customer" as const,
+    label: "مشترك لكل عميل",
+    description:
+      "العدد إجمالي واحد للعميل عبر جميع العقارات والطلبات التي تواصل معها.",
+  },
+  {
+    value: "property" as const,
+    label: "منفصل لكل عقار",
+    description:
+      "يبدأ عدد مستقل لكل عقار، مع بقاء الحد اليومي العام للعميل.",
+  },
+] as const;
 
 const LIMIT_FIELDS: Array<{
   key: BookingSettingsLimitKey;
@@ -490,6 +508,66 @@ export default function BookingCommissionSettingsCard() {
                 ضوابط التسلسل والتواصل اليدوي
               </h3>
               <div className="grid gap-3 sm:grid-cols-2">
+                <fieldset className="min-w-0 rounded-xl border bg-muted/10 p-4 sm:col-span-2">
+                  <legend className="px-1 text-sm font-bold text-[#34332f]">
+                    نطاق عدد رسائل المتابعة
+                  </legend>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    اختر ما إذا كان العدد المحدد يُشارك بين كل عقارات العميل أو يُحسب لكل عقار.
+                  </p>
+                  <RadioGroup
+                    value={draft.customerFollowUpLimitScope}
+                    onValueChange={(value) => {
+                      const scope = parseCustomerFollowUpLimitScope(value);
+                      if (!scope) return;
+                      setDraft((current) => ({
+                        ...current,
+                        customerFollowUpLimitScope: scope,
+                      }));
+                      clearMessages();
+                    }}
+                    className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+                    aria-label="نطاق عدد رسائل متابعة العميل"
+                    data-testid="customer-follow-up-limit-scope"
+                  >
+                    {FOLLOW_UP_SCOPE_OPTIONS.map((option) => {
+                      const selected = draft.customerFollowUpLimitScope === option.value;
+                      return (
+                        <label
+                          key={option.value}
+                          htmlFor={`booking-setting-customerFollowUpLimitScope-${option.value}`}
+                          className={
+                            selected
+                              ? "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border border-[#b8943b] bg-[#fffaf0] p-3"
+                              : "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border bg-background p-3"
+                          }
+                        >
+                          <RadioGroupItem
+                            id={`booking-setting-customerFollowUpLimitScope-${option.value}`}
+                            value={option.value}
+                            className="mt-0.5 shrink-0"
+                            data-testid={`scope-${option.value}`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block break-words text-sm font-bold text-[#34332f]">
+                              {option.label}
+                            </span>
+                            <span className="mt-1 block break-words text-xs leading-5 text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </RadioGroup>
+                  <p className="mt-3 text-xs font-medium leading-5 text-[#7b5d1f]">
+                    في كلا الخيارين، تُرسل رسالة المتابعة الأخيرة مرة واحدة فقط لكل عميل بعد انتهاء رسائل المتابعة من دون رد.
+                  </p>
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    عند اختيار النطاق المنفصل، يُطبّق العدد المدخل على كل عقار. تبقى رسالة المتابعة الأخيرة مشتركة على مستوى العميل دائماً، ويُطبّق تغيير النطاق على طلبات التواصل الجديدة فقط.
+                  </p>
+                </fieldset>
+
                 <label
                   htmlFor="booking-setting-customerFollowUpMessageLimit"
                   className="min-w-0 rounded-xl border bg-muted/10 p-4"
@@ -522,6 +600,9 @@ export default function BookingCommissionSettingsCard() {
                   />
                   <span className="mt-2 block text-[11px] text-muted-foreground">
                     من 0 إلى 1000. القيمة 0 توقف تسلسل المتابعة للطلبات الجديدة.
+                  </span>
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    يجب أن يبقى مجموع الفواصل حتى الرسالة الأخيرة أقل من مهلة الرد البالغة 7 أيام.
                   </span>
                 </label>
 

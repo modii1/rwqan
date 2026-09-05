@@ -324,7 +324,15 @@ async function dispatchClaim(
     return false;
   }
 
-  const result = await sendOwnerWhatsApp(job.recipientPhone, message, 1);
+  const providerRetries = job.kind === "customer_final_reminder" &&
+      !job.manualResendOfJobId
+    ? 0
+    : 1;
+  const result = await sendOwnerWhatsApp(
+    job.recipientPhone,
+    message,
+    providerRetries,
+  );
   await bookingCommissionStore.finishNotificationJob({
     jobId: job.id,
     leaseToken: job.leaseToken,
@@ -587,7 +595,16 @@ export async function enforceOverdueBookingCommissions(
   return { reviewed, paused };
 }
 
-export async function runBookingCommissionWorker(now = new Date()) {
+type BookingCommissionWorkerResult = {
+  notificationsClaimed: number;
+  notificationsSent: number;
+  enforcementReviewed: number;
+  propertiesPaused: number;
+};
+
+async function executeBookingCommissionWorker(
+  now: Date,
+): Promise<BookingCommissionWorkerResult> {
   await bookingCommissionStore.reconcilePausedFreeEligibility(now);
   const firstDispatch = await dispatchDueBookingNotifications(now);
   const firstEnforcement = await enforceOverdueBookingCommissions(now);
@@ -599,6 +616,33 @@ export async function runBookingCommissionWorker(now = new Date()) {
     enforcementReviewed: firstEnforcement.reviewed + secondEnforcement.reviewed,
     propertiesPaused: firstEnforcement.paused + secondEnforcement.paused,
   };
+}
+
+let bookingCommissionWorkerRunInFlight:
+  Promise<BookingCommissionWorkerResult> | null = null;
+
+/**
+ * Coalesce overlapping triggers inside this process. The worker is invoked by
+ * the timer as well as authenticated routes and webhook follow-ups, so letting
+ * those executions overlap can needlessly contend for short notification
+ * leases. Firestore remains the cross-process coordination boundary.
+ */
+export function runBookingCommissionWorker(
+  now = new Date(),
+): Promise<BookingCommissionWorkerResult> {
+  if (bookingCommissionWorkerRunInFlight) {
+    return bookingCommissionWorkerRunInFlight;
+  }
+
+  const run = executeBookingCommissionWorker(now);
+  bookingCommissionWorkerRunInFlight = run;
+  const release = () => {
+    if (bookingCommissionWorkerRunInFlight === run) {
+      bookingCommissionWorkerRunInFlight = null;
+    }
+  };
+  run.then(release, release);
+  return run;
 }
 
 let workerStarted = false;
@@ -615,8 +659,8 @@ export function shouldStartBookingCommissionWorker(
 
 /**
  * Best-effort in-process safety net. The authenticated worker endpoint is the
- * authoritative production trigger; Firestore leases make concurrent calls
- * from multiple instances safe.
+ * authoritative production trigger; Firestore leases coordinate claims from
+ * multiple instances, while provider delivery remains at-least-once.
  */
 export function startBookingCommissionWorker(): void {
   if (!shouldStartBookingCommissionWorker()) {

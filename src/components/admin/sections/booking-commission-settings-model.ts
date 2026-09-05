@@ -7,6 +7,16 @@ export const BOOKING_SETTINGS_LIMIT_KEYS = [
 export type BookingSettingsLimitKey =
   typeof BOOKING_SETTINGS_LIMIT_KEYS[number];
 
+export const BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES = [
+  "customer",
+  "property",
+] as const;
+
+const BOOKING_CUSTOMER_RESPONSE_WINDOW_MINUTES = 7 * 24 * 60;
+
+export type BookingCustomerFollowUpLimitScope =
+  typeof BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES[number];
+
 export const BOOKING_WHATSAPP_TEMPLATE_KEYS = [
   "admin_customer_technical_support",
   "customer_followup",
@@ -37,6 +47,8 @@ export interface BookingCommissionSettings {
   freeOwnerDailyLimit: number;
   freePropertyContactDailyLimit: number;
   customerFollowUpMessageLimit: number;
+  /** Missing on legacy responses; those safely use the customer-wide scope. */
+  customerFollowUpLimitScope?: BookingCustomerFollowUpLimitScope;
   adminCustomerWhatsAppCooldownMinutes: number;
   whatsappTemplates: BookingWhatsAppTemplates;
   optionalCommissionReminderDays: Array<3 | 4>;
@@ -75,6 +87,7 @@ export interface BookingCommissionSettingsDraft {
   customerFollowUpDelayHours: string;
   customerFollowUpDelayMinutes: string;
   customerFollowUpMessageLimit: string;
+  customerFollowUpLimitScope: BookingCustomerFollowUpLimitScope;
   adminCustomerWhatsAppCooldownMinutes: string;
   limits: Record<BookingSettingsLimitKey, string>;
   whatsappTemplates: BookingWhatsAppTemplates;
@@ -84,6 +97,7 @@ export interface BookingCommissionSettingsDraft {
 export interface BookingCommissionSettingsUpdate {
   customerFollowUpDelayMinutes: number;
   customerFollowUpMessageLimit: number;
+  customerFollowUpLimitScope: BookingCustomerFollowUpLimitScope;
   adminCustomerWhatsAppCooldownMinutes: number;
   customerDailyLimit: number;
   freeOwnerDailyLimit: number;
@@ -254,6 +268,12 @@ export function parseBookingSettingsLimit(value: string): number | null {
   return parseBookingSettingsInteger(value, 0, 1_000);
 }
 
+export function parseCustomerFollowUpLimitScope(
+  value: unknown,
+): BookingCustomerFollowUpLimitScope | null {
+  return value === "customer" || value === "property" ? value : null;
+}
+
 export function parseCustomerFollowUpDelayHours(
   value: string,
   maximum = 120,
@@ -323,6 +343,9 @@ export function bookingSettingsToDraft(
     customerFollowUpMessageLimit: String(
       settings.customerFollowUpMessageLimit ?? settings.customerDailyLimit,
     ),
+    customerFollowUpLimitScope:
+      parseCustomerFollowUpLimitScope(settings.customerFollowUpLimitScope) ||
+      "customer",
     adminCustomerWhatsAppCooldownMinutes: String(
       settings.adminCustomerWhatsAppCooldownMinutes ?? 30,
     ),
@@ -411,11 +434,20 @@ export function validateBookingSettingsDraft(
   const customerFollowUpMessageLimit = parseBookingSettingsLimit(
     draft.customerFollowUpMessageLimit,
   );
+  const customerFollowUpLimitScope = parseCustomerFollowUpLimitScope(
+    draft.customerFollowUpLimitScope,
+  );
   const adminCustomerWhatsAppCooldownMinutes = parseBookingSettingsInteger(
     draft.adminCustomerWhatsAppCooldownMinutes,
     0,
     10_080,
   );
+  const followUpScheduleFitsResponseWindow =
+    customerFollowUpDelayMinutes !== null &&
+    customerFollowUpMessageLimit !== null &&
+    (customerFollowUpMessageLimit === 0 ||
+      customerFollowUpDelayMinutes * customerFollowUpMessageLimit <
+        BOOKING_CUSTOMER_RESPONSE_WINDOW_MINUTES);
   const templateErrors: Partial<Record<BookingWhatsAppTemplateKey, string>> = {};
   for (const key of BOOKING_WHATSAPP_TEMPLATE_KEYS) {
     const error = validateBookingTemplate(
@@ -433,6 +465,8 @@ export function validateBookingSettingsDraft(
     parsedLimits &&
     customerFollowUpDelayMinutes !== null &&
     customerFollowUpMessageLimit !== null &&
+    followUpScheduleFitsResponseWindow &&
+    customerFollowUpLimitScope !== null &&
     adminCustomerWhatsAppCooldownMinutes !== null &&
     remindersValid &&
     Object.keys(templateErrors).length === 0,
@@ -440,11 +474,14 @@ export function validateBookingSettingsDraft(
   return {
     update: valid && parsedLimits && customerFollowUpDelayMinutes !== null &&
         customerFollowUpMessageLimit !== null &&
+        followUpScheduleFitsResponseWindow &&
+        customerFollowUpLimitScope !== null &&
         adminCustomerWhatsAppCooldownMinutes !== null
       ? {
           ...parsedLimits,
           customerFollowUpDelayMinutes,
           customerFollowUpMessageLimit,
+          customerFollowUpLimitScope,
           adminCustomerWhatsAppCooldownMinutes,
           whatsappTemplates: { ...draft.whatsappTemplates },
           optionalCommissionReminderDays: [...draft.optionalCommissionReminderDays]
@@ -456,6 +493,8 @@ export function validateBookingSettingsDraft(
     customerFollowUpDelayValid: customerFollowUpDelayMinutes !== null,
     workflowControlsValid:
       customerFollowUpMessageLimit !== null &&
+      followUpScheduleFitsResponseWindow &&
+      customerFollowUpLimitScope !== null &&
       adminCustomerWhatsAppCooldownMinutes !== null,
   };
 }
@@ -471,6 +510,9 @@ export function bookingSettingsUpdateEquals(
   );
   return left.customerFollowUpDelayMinutes === rightDelayMinutes &&
     left.customerFollowUpMessageLimit === right.customerFollowUpMessageLimit &&
+    left.customerFollowUpLimitScope ===
+      (parseCustomerFollowUpLimitScope(right.customerFollowUpLimitScope) ||
+        "customer") &&
     left.adminCustomerWhatsAppCooldownMinutes ===
       right.adminCustomerWhatsAppCooldownMinutes &&
     BOOKING_SETTINGS_LIMIT_KEYS.every((key) => left[key] === right[key]) &&

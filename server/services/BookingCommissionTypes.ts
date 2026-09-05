@@ -1,5 +1,6 @@
 import type {
   BookingAdminCustomerWhatsAppTemplateVariant,
+  BookingCustomerFollowUpLimitScope,
   BookingFollowUpRecord,
   BookingTiming,
   CommissionReminderOffsetDays,
@@ -78,6 +79,8 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
   /** Automatic sequence policy captured when this workflow was created. */
   customerFollowUpMessageLimit?: number;
   customerFollowUpDelayMinutes?: number;
+  /** Whether ordinary sequence slots are shared by the customer or per property. */
+  customerFollowUpLimitScope?: BookingCustomerFollowUpLimitScope;
   /** Free-property contact allowance captured when this request was accepted. */
   freePropertyContactDailyLimit?: number;
   /** Current automatic customer-sequence job, if one is still actionable. */
@@ -125,6 +128,10 @@ export type BookingNotificationJob = {
   customerFollowUpSequenceNumber?: number | null;
   /** Previous automatic sequence job which created this job. */
   customerFollowUpSequenceParentJobId?: string | null;
+  /** Scope captured from the booking when this automatic customer job was built. */
+  customerFollowUpLimitScope?: BookingCustomerFollowUpLimitScope;
+  /** Shared customer-scope ordinary slot reserved by this logical job. */
+  customerSharedSequenceSlotReservedAt?: string | null;
   attempts: number;
   leaseToken: string | null;
   leaseExpiresAt: string | null;
@@ -136,6 +143,21 @@ export type BookingNotificationJob = {
   /** Present only on an additional send explicitly requested by an admin. */
   manualResendOfJobId?: string | null;
   manualResendRequestedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BookingCustomerFollowUpState = {
+  schemaVersion: 2;
+  customerSubject: string;
+  campaignId: string;
+  campaignStartedAt: string;
+  campaignEndsAt: string;
+  effectiveLimitScope: BookingCustomerFollowUpLimitScope;
+  sharedOrdinarySlotsReserved: number;
+  propertyOrdinarySlotsReserved: Record<string, number>;
+  finalReminderJobId: string | null;
+  finalReminderSentAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -3,6 +3,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { db as configuredDb } from "../config/firebase";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
+  BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
   BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
   BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT,
   BOOKING_OPTIONAL_COMMISSION_REMINDER_DAYS,
@@ -10,6 +11,7 @@ import {
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingAdminCustomerWhatsAppCooldownMinutesSchema,
   bookingCustomerFollowUpMessageLimitSchema,
+  bookingCustomerFollowUpLimitScopeSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
   bookingFreeWorkflowConfigurationSchema,
@@ -24,6 +26,7 @@ import {
   COMMISSION_PAYMENT_WINDOW_MS,
   type BookingConfirmationFacts,
   type BookingAdminCustomerWhatsAppTemplateVariant,
+  type BookingCustomerFollowUpLimitScope,
   type BookingFreeWorkflowConfiguration,
   type BookingFreeWorkflowLimits,
   type BookingFreeWorkflowSettings,
@@ -45,6 +48,7 @@ import {
 } from "../../shared/phone";
 import type {
   BookingCommissionPaymentAttempt,
+  BookingCustomerFollowUpState,
   BookingCommissionWebhookInput,
   BookingEvent,
   BookingFollowUpDocument,
@@ -59,6 +63,8 @@ const ORDER_BINDINGS_COLLECTION = "booking_commission_order_bindings";
 const TRANSACTION_BINDINGS_COLLECTION = "booking_commission_transaction_bindings";
 const REVERSAL_BINDINGS_COLLECTION = "booking_commission_reversal_bindings";
 const QUOTAS_COLLECTION = "booking_notification_quotas";
+const CUSTOMER_FOLLOW_UP_STATES_COLLECTION =
+  "booking_customer_followup_states";
 const SETTINGS_COLLECTION = "settings";
 const FREE_WORKFLOW_SETTINGS_DOCUMENT = "booking_free_workflow_limits";
 const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
@@ -190,6 +196,8 @@ export function getDefaultFreeWorkflowConfiguration(): BookingFreeWorkflowConfig
     customerFollowUpDelayMinutes: environmentCustomerFollowUpDelayMinutes(),
     customerFollowUpMessageLimit:
       BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
+    customerFollowUpLimitScope:
+      BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
     adminCustomerWhatsAppCooldownMinutes:
       BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
@@ -232,6 +240,9 @@ function storedFreeWorkflowConfiguration(
   );
   const storedMessageLimit = bookingCustomerFollowUpMessageLimitSchema.safeParse(
     data.customerFollowUpMessageLimit,
+  );
+  const storedLimitScope = bookingCustomerFollowUpLimitScopeSchema.safeParse(
+    data.customerFollowUpLimitScope,
   );
   const storedAdminCooldown =
     bookingAdminCustomerWhatsAppCooldownMinutesSchema.safeParse(
@@ -277,6 +288,9 @@ function storedFreeWorkflowConfiguration(
     customerFollowUpMessageLimit: storedMessageLimit.success
       ? storedMessageLimit.data
       : limits.customerDailyLimit,
+    customerFollowUpLimitScope: storedLimitScope.success
+      ? storedLimitScope.data
+      : BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
     adminCustomerWhatsAppCooldownMinutes: storedAdminCooldown.success
       ? storedAdminCooldown.data
       : defaults.adminCustomerWhatsAppCooldownMinutes,
@@ -472,7 +486,10 @@ function isAutomaticCustomerSequenceJob(
 ): boolean {
   return isCustomerNotificationKind(job.kind) &&
     !job.manualResendOfJobId &&
-    !job.manualResendRequestedAt;
+    (
+      !job.manualResendRequestedAt ||
+      job.kind === "customer_final_reminder"
+    );
 }
 
 function automaticCustomerSequenceJobIsActive(
@@ -500,7 +517,8 @@ function automaticCustomerSequenceJobIsActive(
 function buildNotificationJob(options: {
   booking: Pick<BookingFollowUpDocument,
     "id" | "propertyNumber" | "ownerPhone" | "customerPhone" |
-    "customerSubject" | "isFreeProperty" | "commissionStatus">;
+    "customerSubject" | "isFreeProperty" | "commissionStatus" |
+    "customerFollowUpLimitScope">;
   kind: BookingNotificationKind;
   scheduledAt: string;
   now: string;
@@ -547,6 +565,9 @@ function buildNotificationJob(options: {
             options.customerFollowUpSequenceNumber || 1,
           customerFollowUpSequenceParentJobId:
             options.customerFollowUpSequenceParentJobId || null,
+          customerFollowUpLimitScope:
+            options.booking.customerFollowUpLimitScope ??
+            BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
         }
       : {}),
     attempts: 0,
@@ -572,6 +593,7 @@ export function buildInitialBookingWorkflow(options: {
   isFreeProperty: boolean;
   customerFollowUpDelayMinutes?: number;
   customerFollowUpMessageLimit?: number;
+  customerFollowUpLimitScope?: BookingCustomerFollowUpLimitScope;
   freePropertyContactDailyLimit?: number;
   listedPriceOptionsHalalas?: number[];
   now?: Date;
@@ -592,6 +614,11 @@ export function buildInitialBookingWorkflow(options: {
       : bookingFreeWorkflowLimitsSchema.shape.customerDailyLimit.parse(
           options.customerFollowUpMessageLimit,
         );
+  const customerFollowUpLimitScope = bookingCustomerFollowUpLimitScopeSchema
+    .parse(
+      options.customerFollowUpLimitScope ??
+        BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
+    );
   const freePropertyContactDailyLimit =
     bookingFreeWorkflowLimitsSchema.shape.freePropertyContactDailyLimit.parse(
       options.freePropertyContactDailyLimit ?? DEFAULT_FREE_WORKFLOW_LIMIT,
@@ -659,6 +686,7 @@ export function buildInitialBookingWorkflow(options: {
       ? {}
       : { customerFollowUpMessageLimit }),
     customerFollowUpDelayMinutes,
+    customerFollowUpLimitScope,
     freePropertyContactDailyLimit,
     activeCustomerNotificationJobId:
       customerFollowUpMessageLimit === 0 ? null : customerNotificationId,
@@ -698,6 +726,365 @@ function quotaLimitFor(
 function quotaDocumentId(job: BookingNotificationJob, windowStart: number): string {
   const role = job.recipientRole;
   return `${role}-${job.recipientQuotaKey}-${windowStart}`;
+}
+
+function customerFollowUpStateCustomerKey(customerSubject: string): string {
+  return createHash("sha256")
+    .update(`booking-customer-followup-state:${customerSubject}`)
+    .digest("hex");
+}
+
+function customerFollowUpStateDocumentId(
+  customerSubject: string,
+  campaignStartedAt: number,
+): string {
+  return `${customerFollowUpStateCustomerKey(customerSubject)}-${campaignStartedAt}`;
+}
+
+function customerFollowUpLimitScopeFor(
+  value: Pick<BookingFollowUpDocument, "customerFollowUpLimitScope"> |
+    Pick<BookingNotificationJob, "customerFollowUpLimitScope">,
+): BookingCustomerFollowUpLimitScope {
+  return bookingCustomerFollowUpLimitScopeSchema.safeParse(
+      value.customerFollowUpLimitScope,
+    ).success
+    ? value.customerFollowUpLimitScope as BookingCustomerFollowUpLimitScope
+    : BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT;
+}
+
+function customerFollowUpMessageLimitFor(
+  booking: Pick<BookingFollowUpDocument, "customerFollowUpMessageLimit">,
+): number {
+  const parsed = bookingCustomerFollowUpMessageLimitSchema.safeParse(
+    booking.customerFollowUpMessageLimit,
+  );
+  return parsed.success
+    ? parsed.data
+    : BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT;
+}
+
+function bookingCampaignBounds(
+  booking: Pick<BookingFollowUpDocument, "createdAt">,
+): { start: number; end: number } {
+  const parsed = Date.parse(booking.createdAt);
+  const start = Number.isFinite(parsed) ? parsed : 0;
+  return {
+    start,
+    end: start + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+  };
+}
+
+function bookingCustomerResponseAt(
+  booking: BookingFollowUpDocument,
+): number | null {
+  const candidates = [
+    booking.questionnaireStartedAt,
+    booking.declinedAt,
+    booking.confirmedAt,
+  ]
+    .map((value) => Date.parse(value || ""))
+    .filter(Number.isFinite);
+  return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
+function campaignBookingsContaining(
+  seed: BookingFollowUpDocument,
+  allBookings: BookingFollowUpDocument[],
+): BookingFollowUpDocument[] {
+  const seedCreatedAt = bookingCampaignBounds(seed).start;
+  const responseBoundaries = allBookings
+    .map(bookingCustomerResponseAt)
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  const priorResponse = responseBoundaries
+    .filter((value) => value < seedCreatedAt)
+    .at(-1) ?? Number.NEGATIVE_INFINITY;
+  const nextResponse = responseBoundaries
+    .find((value) => value >= seedCreatedAt) ?? Number.POSITIVE_INFINITY;
+  const eligibleBookings = allBookings.filter((booking) => {
+    const createdAt = bookingCampaignBounds(booking).start;
+    return createdAt > priorResponse && createdAt <= nextResponse;
+  });
+  let { start, end } = bookingCampaignBounds(seed);
+  const selected = new Map<string, BookingFollowUpDocument>([[seed.id, seed]]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const booking of eligibleBookings) {
+      if (selected.has(booking.id)) continue;
+      const bounds = bookingCampaignBounds(booking);
+      if (bounds.start > end || bounds.end < start) continue;
+      selected.set(booking.id, booking);
+      start = Math.min(start, bounds.start);
+      end = Math.max(end, bounds.end);
+      changed = true;
+    }
+  }
+  return [...selected.values()];
+}
+
+function automaticCustomerJob(
+  job: BookingNotificationJob,
+): boolean {
+  return isAutomaticCustomerSequenceJob(job);
+}
+
+type CustomerFollowUpCampaignContext = {
+  stateRef: FirebaseFirestore.DocumentReference;
+  state: BookingCustomerFollowUpState;
+  bookings: BookingFollowUpDocument[];
+  jobs: BookingNotificationJob[];
+  effectiveLimitScope: BookingCustomerFollowUpLimitScope;
+  ordinaryMessageBudget: number;
+  sharedOrdinaryMessagesSent: number;
+  propertyOrdinaryMessageBudgets: Map<string, number>;
+  propertyOrdinaryMessagesSent: Map<string, number>;
+  customerResponded: boolean;
+  canonicalFinalJobId: string;
+};
+
+async function readCustomerFollowUpCampaignContext(options: {
+  db: Firestore;
+  transaction: FirebaseFirestore.Transaction;
+  booking: BookingFollowUpDocument;
+  now: Date;
+}): Promise<CustomerFollowUpCampaignContext> {
+  const { db, transaction, booking, now } = options;
+  const bookingsQuery = db.collection(BOOKINGS_COLLECTION)
+    .where("customerSubject", "==", booking.customerSubject);
+  const bookingsSnapshot = await transaction.get(bookingsQuery);
+  const allBookings = (bookingsSnapshot as FirebaseFirestore.QuerySnapshot).docs
+    .map((snapshot) => snapshot.data() as BookingFollowUpDocument);
+  if (!allBookings.some((candidate) => candidate.id === booking.id)) {
+    allBookings.push(booking);
+  }
+  const campaignBookings = campaignBookingsContaining(booking, allBookings);
+  const campaignBookingIds = new Set(campaignBookings.map(({ id }) => id));
+  const campaignStart = Math.min(
+    ...campaignBookings.map((candidate) => bookingCampaignBounds(candidate).start),
+  );
+  const campaignEnd = Math.max(
+    ...campaignBookings.map((candidate) => bookingCampaignBounds(candidate).end),
+  );
+  const stateId = customerFollowUpStateDocumentId(
+    booking.customerSubject,
+    campaignStart,
+  );
+  const stateRef = db.collection(CUSTOMER_FOLLOW_UP_STATES_COLLECTION)
+    .doc(stateId);
+  const jobsQuery = db.collection(NOTIFICATIONS_COLLECTION)
+    .where("recipientQuotaKey", "==", booking.customerSubject);
+  const [stateSnapshot, jobsSnapshot] = await Promise.all([
+    transaction.get(stateRef),
+    transaction.get(jobsQuery),
+  ]);
+  const campaignJobs = (jobsSnapshot as FirebaseFirestore.QuerySnapshot).docs
+    .map((snapshot) => snapshot.data() as BookingNotificationJob)
+    .filter((job) => campaignBookingIds.has(job.bookingId));
+  // A mixed legacy/new campaign is intentionally fail-safe: one customer-scoped
+  // booking makes the whole overlapping campaign customer-scoped.
+  const effectiveLimitScope: BookingCustomerFollowUpLimitScope =
+    campaignBookings.every((candidate) =>
+      customerFollowUpLimitScopeFor(candidate) === "property")
+      ? "property"
+      : "customer";
+  const ordinaryMessageBudget = Math.max(
+    0,
+    Math.min(...campaignBookings.map(customerFollowUpMessageLimitFor)) - 1,
+  );
+  const customerResponded = campaignBookings.some((candidate) =>
+    candidate.bookingStatus !== "awaiting_response" ||
+    candidate.bookingDecision !== null ||
+    candidate.questionnaireStartedAt !== null
+  );
+  const reservedOrdinaryJobs = campaignJobs.filter((job) =>
+    automaticCustomerJob(job) &&
+    job.kind === "customer_followup" &&
+    (
+      job.status === "sent" ||
+      job.status === "claimed" ||
+      (
+        job.status === "pending" &&
+        Boolean(job.customerSharedSequenceSlotReservedAt)
+      )
+    )
+  );
+  const observedReservedOrdinary = reservedOrdinaryJobs.length;
+  const sharedOrdinaryMessagesSent = campaignJobs.filter((job) =>
+    automaticCustomerJob(job) &&
+    job.kind === "customer_followup" &&
+    job.status === "sent"
+  ).length;
+  const propertyOrdinaryMessageBudgets = new Map<string, number>();
+  const campaignJobById = new Map(campaignJobs.map((job) => [job.id, job]));
+  const eligiblePropertyOrdinaryMessageBudgets = new Map<string, number>();
+  const propertiesWithActiveOrdinary = new Set<string>();
+  for (const candidate of campaignBookings) {
+    const budget = Math.max(0, customerFollowUpMessageLimitFor(candidate) - 1);
+    if (
+      candidate.isFreeProperty !== true ||
+      Boolean(candidate.freeEligibilityRevokedAt) ||
+      candidate.bookingStatus !== "awaiting_response" ||
+      candidate.bookingDecision !== null ||
+      candidate.questionnaireStartedAt !== null ||
+      customerResponseExpired(candidate, now) ||
+      budget <= 0
+    ) continue;
+    const current = eligiblePropertyOrdinaryMessageBudgets.get(
+      candidate.propertyNumber,
+    );
+    eligiblePropertyOrdinaryMessageBudgets.set(
+      candidate.propertyNumber,
+      current === undefined ? budget : Math.min(current, budget),
+    );
+    const activeOrdinaryJob = candidate.activeCustomerNotificationJobId
+      ? campaignJobById.get(candidate.activeCustomerNotificationJobId)
+      : null;
+    if (
+      activeOrdinaryJob?.kind === "customer_followup" &&
+      automaticCustomerJob(activeOrdinaryJob) &&
+      (activeOrdinaryJob.status === "pending" ||
+        activeOrdinaryJob.status === "claimed")
+    ) {
+      propertiesWithActiveOrdinary.add(candidate.propertyNumber);
+    }
+  }
+  for (const propertyNumber of propertiesWithActiveOrdinary) {
+    const budget = eligiblePropertyOrdinaryMessageBudgets.get(propertyNumber);
+    if (budget !== undefined) {
+      propertyOrdinaryMessageBudgets.set(propertyNumber, budget);
+    }
+  }
+  const observedPropertyReservations: Record<string, number> = {};
+  const propertyOrdinaryMessagesSent = new Map<string, number>();
+  for (const reservedJob of reservedOrdinaryJobs) {
+    observedPropertyReservations[reservedJob.propertyNumber] =
+      (observedPropertyReservations[reservedJob.propertyNumber] || 0) + 1;
+    if (reservedJob.status === "sent") {
+      propertyOrdinaryMessagesSent.set(
+        reservedJob.propertyNumber,
+        (propertyOrdinaryMessagesSent.get(reservedJob.propertyNumber) || 0) + 1,
+      );
+    }
+  }
+  const sentFinal = campaignJobs
+    .filter((job) =>
+      automaticCustomerJob(job) &&
+      job.kind === "customer_final_reminder" &&
+      job.status === "sent"
+    )
+    .sort((left, right) =>
+      String(left.sentAt || left.updatedAt).localeCompare(
+        String(right.sentAt || right.updatedAt),
+      ))[0];
+  const activeFinal = campaignJobs
+    .filter((job) =>
+      automaticCustomerJob(job) &&
+      job.kind === "customer_final_reminder" &&
+      (job.status === "pending" || job.status === "claimed")
+    )
+    .sort((left, right) =>
+      String(left.scheduledAt).localeCompare(String(right.scheduledAt)) ||
+      left.id.localeCompare(right.id)
+    )[0];
+  const campaignId = stateId;
+  const canonicalFinalJobId =
+    `CUSTOMER-${stateId}--customer_final_reminder`;
+  const stored = stateSnapshot.exists
+    ? stateSnapshot.data() as Partial<BookingCustomerFollowUpState>
+    : null;
+  const storedMatchesCampaign = stored?.campaignId === campaignId;
+  const storedFinalJob = storedMatchesCampaign && stored?.finalReminderJobId
+    ? campaignJobs.find((job) => job.id === stored.finalReminderJobId)
+    : null;
+  const storedFinalStillReserved = Boolean(
+    storedFinalJob &&
+    (storedFinalJob.status === "pending" ||
+      storedFinalJob.status === "claimed" ||
+      storedFinalJob.status === "sent"),
+  );
+  const timestamp = now.toISOString();
+  const storedPropertyReservations = storedMatchesCampaign &&
+      stored?.propertyOrdinarySlotsReserved &&
+      typeof stored.propertyOrdinarySlotsReserved === "object"
+    ? stored.propertyOrdinarySlotsReserved
+    : {};
+  const propertyOrdinarySlotsReserved = Object.fromEntries(
+    [...new Set([
+      ...Object.keys(storedPropertyReservations),
+      ...Object.keys(observedPropertyReservations),
+    ])].map((propertyNumber) => [
+      propertyNumber,
+      Math.max(
+        Number.isSafeInteger(storedPropertyReservations[propertyNumber])
+          ? Number(storedPropertyReservations[propertyNumber])
+          : 0,
+        observedPropertyReservations[propertyNumber] || 0,
+      ),
+    ]),
+  );
+  const state: BookingCustomerFollowUpState = {
+    schemaVersion: 2,
+    customerSubject: booking.customerSubject,
+    campaignId,
+    campaignStartedAt: new Date(campaignStart).toISOString(),
+    campaignEndsAt: new Date(campaignEnd).toISOString(),
+    effectiveLimitScope,
+    sharedOrdinarySlotsReserved: Math.max(
+      observedReservedOrdinary,
+      storedMatchesCampaign && Number.isSafeInteger(
+          stored?.sharedOrdinarySlotsReserved,
+        )
+        ? Number(stored!.sharedOrdinarySlotsReserved)
+        : 0,
+    ),
+    propertyOrdinarySlotsReserved,
+    finalReminderJobId: sentFinal?.id ||
+      (storedFinalStillReserved ? String(stored?.finalReminderJobId || "") : "") ||
+      activeFinal?.id ||
+      null,
+    finalReminderSentAt: sentFinal?.sentAt ||
+      (storedMatchesCampaign ? stored?.finalReminderSentAt || null : null),
+    createdAt: storedMatchesCampaign && stored?.createdAt
+      ? stored.createdAt
+      : timestamp,
+    updatedAt: timestamp,
+  };
+  return {
+    stateRef,
+    state,
+    bookings: campaignBookings,
+    jobs: campaignJobs,
+    effectiveLimitScope,
+    ordinaryMessageBudget,
+    sharedOrdinaryMessagesSent,
+    propertyOrdinaryMessageBudgets,
+    propertyOrdinaryMessagesSent,
+    customerResponded,
+    canonicalFinalJobId,
+  };
+}
+
+function buildCanonicalCustomerFinalReminder(options: {
+  campaign: CustomerFollowUpCampaignContext;
+  booking: BookingFollowUpDocument;
+  scheduledAt: string;
+  now: string;
+  sequenceNumber: number;
+  parentJobId?: string | null;
+}): BookingNotificationJob {
+  return {
+    ...buildNotificationJob({
+      booking: options.booking,
+      kind: "customer_final_reminder",
+      scheduledAt: options.scheduledAt,
+      now: options.now,
+      customerFollowUpSequenceNumber: options.sequenceNumber,
+      customerFollowUpSequenceParentJobId: options.parentJobId || null,
+    }),
+    id: options.campaign.canonicalFinalJobId,
+    customerFollowUpLimitScope: options.campaign.effectiveLimitScope,
+  };
 }
 
 type NotificationStateCheck =
@@ -853,39 +1240,239 @@ export class BookingCommissionStore {
 
   constructor(private readonly database?: Firestore | null) {}
 
-  private async readCustomerSequenceJobs(
+  private async readCustomerCampaignForResponse(
     transaction: FirebaseFirestore.Transaction,
     booking: BookingFollowUpDocument,
-  ): Promise<FirebaseFirestore.DocumentSnapshot[]> {
-    const jobIds = Array.from(new Set([
-      notificationId(booking.id, "customer_followup"),
-      booking.activeCustomerNotificationJobId || "",
-    ].filter(Boolean)));
-    return Promise.all(jobIds.map((jobId) => transaction.get(
-      this.db.collection(NOTIFICATIONS_COLLECTION).doc(jobId),
-    )));
+    now: Date,
+  ): Promise<CustomerFollowUpCampaignContext> {
+    return readCustomerFollowUpCampaignContext({
+      db: this.db,
+      transaction,
+      booking,
+      now,
+    });
   }
 
-  private cancelCustomerSequenceJobs(
+  private cancelCustomerCampaignForResponse(
     transaction: FirebaseFirestore.Transaction,
-    snapshots: FirebaseFirestore.DocumentSnapshot[],
+    campaign: CustomerFollowUpCampaignContext,
+    respondingBookingId: string,
     timestamp: string,
   ): void {
-    for (const snapshot of snapshots) {
-      if (!snapshot.exists) continue;
-      const job = snapshot.data() as BookingNotificationJob;
+    const cancelledJobIds = new Set<string>();
+    for (const job of campaign.jobs) {
       if (
-        !isCustomerNotificationKind(job.kind) ||
+        !automaticCustomerJob(job) ||
         (job.status !== "pending" && job.status !== "claimed")
       ) continue;
-      transaction.update(snapshot.ref, {
-        status: "cancelled",
-        leaseToken: null,
-        leaseExpiresAt: null,
-        providerError: "notification_state_changed",
-        updatedAt: timestamp,
-      });
+      cancelledJobIds.add(job.id);
+      transaction.update(
+        this.db.collection(NOTIFICATIONS_COLLECTION).doc(job.id),
+        {
+          status: "cancelled",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          providerError: "customer_campaign_responded",
+          updatedAt: timestamp,
+        },
+      );
     }
+    transaction.set(campaign.stateRef, {
+      ...campaign.state,
+      updatedAt: timestamp,
+    });
+    for (const booking of campaign.bookings) {
+      if (
+        booking.id === respondingBookingId ||
+        !booking.activeCustomerNotificationJobId ||
+        !cancelledJobIds.has(booking.activeCustomerNotificationJobId)
+      ) continue;
+      transaction.update(
+        this.db.collection(BOOKINGS_COLLECTION).doc(booking.id),
+        {
+          activeCustomerNotificationJobId: null,
+          updatedAt: timestamp,
+        },
+      );
+    }
+  }
+
+  private reanchorCustomerFinalAfterEligibilityLoss(
+    transaction: FirebaseFirestore.Transaction,
+    campaign: CustomerFollowUpCampaignContext,
+    job: BookingNotificationJob,
+    ineligibleBooking: BookingFollowUpDocument,
+    now: Date,
+  ): boolean {
+    if (
+      job.kind !== "customer_final_reminder" ||
+      !automaticCustomerJob(job) ||
+      campaign.customerResponded ||
+      campaign.state.finalReminderSentAt
+    ) return false;
+    const competingFinal = campaign.jobs.find((candidateJob) =>
+      candidateJob.id !== job.id &&
+      candidateJob.kind === "customer_final_reminder" &&
+      automaticCustomerJob(candidateJob) &&
+      (candidateJob.status === "pending" || candidateJob.status === "claimed")
+    );
+    const replacementBooking = campaign.bookings.find((candidateBooking) =>
+      candidateBooking.id !== ineligibleBooking.id &&
+      candidateBooking.propertyNumber !== ineligibleBooking.propertyNumber &&
+      candidateBooking.isFreeProperty === true &&
+      !candidateBooking.freeEligibilityRevokedAt &&
+      customerFollowUpMessageLimitFor(candidateBooking) > 0 &&
+      candidateBooking.bookingStatus === "awaiting_response" &&
+      candidateBooking.bookingDecision === null &&
+      candidateBooking.questionnaireStartedAt === null &&
+      !customerResponseExpired(candidateBooking, now) &&
+      !campaign.jobs.some((candidateJob) =>
+        candidateJob.id === candidateBooking.activeCustomerNotificationJobId &&
+        candidateJob.kind === "customer_followup" &&
+        automaticCustomerJob(candidateJob) &&
+        (candidateJob.status === "pending" || candidateJob.status === "claimed")
+      )
+    );
+    if (competingFinal || !replacementBooking) return false;
+    const timestamp = now.toISOString();
+    const replacementParentJobId = job.id === campaign.canonicalFinalJobId
+      ? job.customerFollowUpSequenceParentJobId === job.id
+        ? null
+        : job.customerFollowUpSequenceParentJobId
+      : job.id;
+    const replacement = {
+      ...buildCanonicalCustomerFinalReminder({
+        campaign,
+        booking: replacementBooking,
+        scheduledAt: timestamp,
+        now: timestamp,
+        sequenceNumber: customerFollowUpMessageLimitFor(replacementBooking),
+        parentJobId: replacementParentJobId,
+      }),
+      createdAt: job.createdAt,
+      ...(job.quotaReservedWindowStartedAt === undefined
+        ? {}
+        : {
+            quotaReservedWindowStartedAt:
+              job.quotaReservedWindowStartedAt,
+          }),
+      ...(job.manualResendRequestedAt === undefined
+        ? {}
+        : { manualResendRequestedAt: job.manualResendRequestedAt }),
+    };
+    campaign.state.finalReminderJobId = replacement.id;
+    transaction.set(
+      this.db.collection(NOTIFICATIONS_COLLECTION).doc(replacement.id),
+      replacement,
+    );
+    transaction.update(
+      this.db.collection(BOOKINGS_COLLECTION).doc(replacementBooking.id),
+      {
+        activeCustomerNotificationJobId: replacement.id,
+        events: appendEvent(replacementBooking.events, {
+          type: "customer_final_reminder_scheduled",
+          at: timestamp,
+          detail: String(replacement.customerFollowUpSequenceNumber || ""),
+        }),
+        updatedAt: timestamp,
+      },
+    );
+    transaction.set(campaign.stateRef, {
+      ...campaign.state,
+      updatedAt: timestamp,
+    });
+    return true;
+  }
+
+  private schedulePropertyCampaignFinalAfterTerminalOrdinary(
+    transaction: FirebaseFirestore.Transaction,
+    campaign: CustomerFollowUpCampaignContext,
+    terminalJob: BookingNotificationJob,
+    now: Date,
+    excludedPropertyNumber?: string,
+  ): BookingNotificationJob | null {
+    if (
+      campaign.effectiveLimitScope !== "property" ||
+      terminalJob.kind !== "customer_followup" ||
+      !automaticCustomerJob(terminalJob) ||
+      campaign.customerResponded ||
+      campaign.state.finalReminderSentAt ||
+      campaign.state.finalReminderJobId
+    ) return null;
+    const bookingById = new Map(
+      campaign.bookings.map((candidate) => [candidate.id, candidate]),
+    );
+    const actionableBooking = (candidate: BookingFollowUpDocument) =>
+      candidate.propertyNumber !== excludedPropertyNumber &&
+      candidate.isFreeProperty === true &&
+      !candidate.freeEligibilityRevokedAt &&
+      customerFollowUpMessageLimitFor(candidate) > 0 &&
+      candidate.bookingStatus === "awaiting_response" &&
+      candidate.bookingDecision === null &&
+      candidate.questionnaireStartedAt === null &&
+      !customerResponseExpired(candidate, now);
+    const unfinishedOrdinary = campaign.jobs.some((candidateJob) => {
+      if (
+        candidateJob.id === terminalJob.id ||
+        candidateJob.kind !== "customer_followup" ||
+        !automaticCustomerJob(candidateJob) ||
+        (candidateJob.status !== "pending" && candidateJob.status !== "claimed")
+      ) return false;
+      const candidateBooking = bookingById.get(candidateJob.bookingId);
+      return Boolean(
+        candidateBooking &&
+        actionableBooking(candidateBooking) &&
+        candidateBooking.activeCustomerNotificationJobId === candidateJob.id,
+      );
+    });
+    if (unfinishedOrdinary) return null;
+    const anchor = campaign.bookings.find(actionableBooking);
+    if (!anchor) return null;
+    const existingCanonical = campaign.jobs.find(
+      (candidateJob) => candidateJob.id === campaign.canonicalFinalJobId,
+    );
+    if (
+      existingCanonical &&
+      (existingCanonical.status === "pending" ||
+        existingCanonical.status === "claimed" ||
+        existingCanonical.status === "sent")
+    ) return null;
+    const timestamp = now.toISOString();
+    const finalJob = buildCanonicalCustomerFinalReminder({
+      campaign,
+      booking: anchor,
+      scheduledAt: new Date(
+        now.getTime() + bookingCustomerFollowUpDelayMinutesSchema.parse(
+          anchor.customerFollowUpDelayMinutes ??
+            BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT,
+        ) * 60_000,
+      ).toISOString(),
+      now: timestamp,
+      sequenceNumber: customerFollowUpMessageLimitFor(anchor),
+      parentJobId: terminalJob.id,
+    });
+    campaign.state.finalReminderJobId = finalJob.id;
+    transaction.set(
+      this.db.collection(NOTIFICATIONS_COLLECTION).doc(finalJob.id),
+      finalJob,
+    );
+    transaction.update(
+      this.db.collection(BOOKINGS_COLLECTION).doc(anchor.id),
+      {
+        activeCustomerNotificationJobId: finalJob.id,
+        events: appendEvent(anchor.events, {
+          type: "customer_final_reminder_scheduled",
+          at: timestamp,
+          detail: String(finalJob.customerFollowUpSequenceNumber || ""),
+        }),
+        updatedAt: timestamp,
+      },
+    );
+    transaction.set(campaign.stateRef, {
+      ...campaign.state,
+      updatedAt: timestamp,
+    });
+    return finalJob;
   }
 
   async getFreeWorkflowSettings(): Promise<BookingFreeWorkflowSettings> {
@@ -928,7 +1515,7 @@ export class BookingCommissionStore {
           ).success
         : false;
       if (
-        currentSchemaVersion === 6 &&
+        currentSchemaVersion === 7 &&
         currentDelayIsPersisted &&
         currentStored &&
         JSON.stringify(currentStored) === JSON.stringify(settings)
@@ -938,7 +1525,7 @@ export class BookingCommissionStore {
 
       const updatedAt = now.toISOString();
       const storedSettings = {
-        schemaVersion: 6,
+        schemaVersion: 7,
         ...settings,
         updatedAt,
         updatedBy: "admin" as const,
@@ -1682,9 +2269,10 @@ export class BookingCommissionStore {
           410,
         );
       }
-      const customerJobSnapshots = await this.readCustomerSequenceJobs(
+      const customerCampaign = await this.readCustomerCampaignForResponse(
         transaction,
         booking,
+        now,
       );
       const at = now.toISOString();
       const updates = {
@@ -1694,7 +2282,12 @@ export class BookingCommissionStore {
         updatedAt: at,
       };
       transaction.update(ref, updates);
-      this.cancelCustomerSequenceJobs(transaction, customerJobSnapshots, at);
+      this.cancelCustomerCampaignForResponse(
+        transaction,
+        customerCampaign,
+        booking.id,
+        at,
+      );
       return { ...booking, ...updates };
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1720,9 +2313,10 @@ export class BookingCommissionStore {
           410,
         );
       }
-      const customerJobSnapshots = await this.readCustomerSequenceJobs(
+      const customerCampaign = await this.readCustomerCampaignForResponse(
         transaction,
         booking,
+        now,
       );
       const at = now.toISOString();
       const updates = {
@@ -1735,7 +2329,12 @@ export class BookingCommissionStore {
         events: appendEvent(booking.events, { type: "customer_declined", at }),
       };
       transaction.update(ref, updates);
-      this.cancelCustomerSequenceJobs(transaction, customerJobSnapshots, at);
+      this.cancelCustomerCampaignForResponse(
+        transaction,
+        customerCampaign,
+        booking.id,
+        at,
+      );
       return { ...booking, ...updates } as BookingFollowUpDocument;
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
@@ -1784,9 +2383,9 @@ export class BookingCommissionStore {
       }
 
       const propertyRef = this.db.collection("properties").doc(booking.propertyNumber);
-      const [propertySnapshot, customerJobSnapshots] = await Promise.all([
+      const [propertySnapshot, customerCampaign] = await Promise.all([
         transaction.get(propertyRef),
-        this.readCustomerSequenceJobs(transaction, booking),
+        this.readCustomerCampaignForResponse(transaction, booking, now),
       ]);
       const confirmedAt = now.toISOString();
       const financials = buildConfirmedBookingFinancials(facts, now);
@@ -1810,9 +2409,10 @@ export class BookingCommissionStore {
           ),
         };
         transaction.update(ref, updates);
-        this.cancelCustomerSequenceJobs(
+        this.cancelCustomerCampaignForResponse(
           transaction,
-          customerJobSnapshots,
+          customerCampaign,
+          booking.id,
           confirmedAt,
         );
         return { ...booking, ...updates } as BookingFollowUpDocument;
@@ -1860,9 +2460,10 @@ export class BookingCommissionStore {
       ];
 
       transaction.update(ref, updates);
-      this.cancelCustomerSequenceJobs(
+      this.cancelCustomerCampaignForResponse(
         transaction,
-        customerJobSnapshots,
+        customerCampaign,
+        booking.id,
         confirmedAt,
       );
       for (const job of jobs) {
@@ -4121,16 +4722,50 @@ export class BookingCommissionStore {
           return null;
         }
         const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+        const customerCampaign = isAutomaticCustomerSequenceJob(job)
+          ? await readCustomerFollowUpCampaignContext({
+              db: this.db,
+              transaction,
+              booking,
+              now,
+            })
+          : null;
         if (!await this.ensureFreeBookingEligibility(
           transaction,
           bookingRef,
           booking,
           now,
-        )) return null;
+        )) {
+          if (customerCampaign) {
+            this.reanchorCustomerFinalAfterEligibilityLoss(
+              transaction,
+              customerCampaign,
+              job,
+              booking,
+              now,
+            );
+            this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+              transaction,
+              customerCampaign,
+              job,
+              now,
+              booking.propertyNumber,
+            );
+          }
+          return null;
+        }
         if (
           isCustomerNotificationKind(job.kind) &&
           customerResponseExpired(booking, now)
         ) {
+          if (customerCampaign) {
+            this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+              transaction,
+              customerCampaign,
+              job,
+              now,
+            );
+          }
           transaction.update(candidate.ref, {
             status: "cancelled",
             leaseToken: null,
@@ -4150,6 +4785,162 @@ export class BookingCommissionStore {
             updatedAt: nowIso,
           });
           return null;
+        }
+        let customerSharedSlotUpdate:
+          | Pick<BookingNotificationJob, "customerSharedSequenceSlotReservedAt">
+          | Record<string, never> = {};
+        if (customerCampaign) {
+          const cancelForCampaign = (reason: string) => {
+            transaction.set(
+              customerCampaign.stateRef,
+              { ...customerCampaign.state, updatedAt: nowIso },
+            );
+            transaction.update(candidate.ref, {
+              status: "cancelled",
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError: reason,
+              updatedAt: nowIso,
+            });
+            transaction.update(bookingRef, {
+              ...(booking.activeCustomerNotificationJobId === job.id
+                ? { activeCustomerNotificationJobId: null }
+                : {}),
+              events: appendEvent(booking.events, {
+                type: job.kind === "customer_final_reminder"
+                  ? "customer_final_reminder_suppressed"
+                  : "customer_followup_suppressed",
+                at: nowIso,
+                detail: reason,
+              }),
+              updatedAt: nowIso,
+            });
+          };
+          if (customerCampaign.customerResponded) {
+            cancelForCampaign("customer_campaign_responded");
+            return null;
+          }
+          if (job.kind === "customer_final_reminder") {
+            if (customerCampaign.state.finalReminderSentAt) {
+              cancelForCampaign("customer_final_reminder_already_sent");
+              return null;
+            }
+            if (
+              customerCampaign.state.finalReminderJobId &&
+              customerCampaign.state.finalReminderJobId !== job.id
+            ) {
+              cancelForCampaign("customer_final_reminder_already_scheduled");
+              return null;
+            }
+            customerCampaign.state.finalReminderJobId = job.id;
+            const bookingById = new Map(
+              customerCampaign.bookings.map((candidate) => [candidate.id, candidate]),
+            );
+            const unfinishedOrdinary = customerCampaign.jobs.filter((candidateJob) => {
+              if (
+                candidateJob.id === job.id ||
+                candidateJob.kind !== "customer_followup" ||
+                !automaticCustomerJob(candidateJob) ||
+                (candidateJob.status !== "pending" &&
+                  candidateJob.status !== "claimed")
+              ) return false;
+              const candidateBooking = bookingById.get(candidateJob.bookingId);
+              if (
+                !candidateBooking ||
+                candidateBooking.activeCustomerNotificationJobId !== candidateJob.id
+              ) return false;
+              if (customerCampaign.effectiveLimitScope === "property") return true;
+              return Boolean(candidateJob.customerSharedSequenceSlotReservedAt) ||
+                candidateJob.status === "claimed";
+            });
+            if (unfinishedOrdinary.length > 0) {
+              const retryMinutes = Math.max(
+                1,
+                ...unfinishedOrdinary.map((candidateJob) => {
+                  const candidateBooking = bookingById.get(candidateJob.bookingId);
+                  const parsed = bookingCustomerFollowUpDelayMinutesSchema.safeParse(
+                    candidateBooking?.customerFollowUpDelayMinutes,
+                  );
+                  return parsed.success ? parsed.data : 1;
+                }),
+              );
+              transaction.set(customerCampaign.stateRef, {
+                ...customerCampaign.state,
+                updatedAt: nowIso,
+              });
+              transaction.update(candidate.ref, {
+                scheduledAt: new Date(
+                  now.getTime() + retryMinutes * 60 * 1_000,
+                ).toISOString(),
+                providerError: "customer_campaign_ordinary_messages_pending",
+                updatedAt: nowIso,
+              });
+              return null;
+            }
+          } else {
+            if (
+              customerCampaign.state.finalReminderSentAt ||
+              (
+                customerCampaign.effectiveLimitScope === "customer" &&
+                customerCampaign.state.finalReminderJobId
+              )
+            ) {
+              cancelForCampaign("customer_campaign_finalized");
+              return null;
+            }
+            if (!job.customerSharedSequenceSlotReservedAt) {
+              const propertyNumber = job.propertyNumber;
+              const propertyScope =
+                customerCampaign.effectiveLimitScope === "property";
+              const messageBudget = propertyScope
+                ? customerCampaign.propertyOrdinaryMessageBudgets.get(
+                    propertyNumber,
+                  ) || 0
+                : customerCampaign.ordinaryMessageBudget;
+              const reserved = propertyScope
+                ? customerCampaign.state.propertyOrdinarySlotsReserved[
+                    propertyNumber
+                  ] || 0
+                : customerCampaign.state.sharedOrdinarySlotsReserved;
+              const sent = propertyScope
+                ? customerCampaign.propertyOrdinaryMessagesSent.get(
+                    propertyNumber,
+                  ) || 0
+                : customerCampaign.sharedOrdinaryMessagesSent;
+              if (reserved >= messageBudget) {
+                if (sent < messageBudget) {
+                  transaction.update(candidate.ref, {
+                    scheduledAt: new Date(now.getTime() + 60_000).toISOString(),
+                    providerError: "customer_sequence_slots_in_flight",
+                    updatedAt: nowIso,
+                  });
+                } else {
+                  transaction.update(candidate.ref, {
+                    status: "cancelled",
+                    leaseToken: null,
+                    leaseExpiresAt: null,
+                    providerError: "customer_sequence_limit_reached",
+                    updatedAt: nowIso,
+                  });
+                }
+                transaction.set(customerCampaign.stateRef, {
+                  ...customerCampaign.state,
+                  updatedAt: nowIso,
+                });
+                return null;
+              }
+              if (propertyScope) {
+                customerCampaign.state.propertyOrdinarySlotsReserved[
+                  propertyNumber
+                ] = reserved + 1;
+              } else {
+                customerCampaign.state.sharedOrdinarySlotsReserved = reserved + 1;
+              }
+              customerSharedSlotUpdate = {
+                customerSharedSequenceSlotReservedAt: nowIso,
+              };
+            }
+          }
         }
         if (
           isAutomaticCustomerSequenceJob(job) &&
@@ -4430,12 +5221,19 @@ export class BookingCommissionStore {
           status: "claimed",
           attempts: job.attempts + 1,
           ...quotaReservationUpdate,
+          ...customerSharedSlotUpdate,
           leaseToken,
           leaseExpiresAt: new Date(now.getTime() + BOOKING_NOTIFICATION_LEASE_MS).toISOString(),
           claimedAt: nowIso,
           updatedAt: nowIso,
         };
         transaction.update(candidate.ref, claimedJob);
+        if (customerCampaign) {
+          transaction.set(customerCampaign.stateRef, {
+            ...customerCampaign.state,
+            updatedAt: nowIso,
+          });
+        }
         return claimedJob;
         });
         if (claimed) claims.push(claimed);
@@ -4477,16 +5275,154 @@ export class BookingCommissionStore {
         return { status: "blocked", reason: "booking_not_found" } as const;
       }
       const booking = bookingSnapshot.data() as BookingFollowUpDocument;
+      const customerCampaign = isCustomerNotificationKind(job.kind)
+        ? await readCustomerFollowUpCampaignContext({
+            db: this.db,
+            transaction,
+            booking,
+            now,
+          })
+        : null;
       if (!await this.ensureFreeBookingEligibility(
         transaction,
         bookingRef,
         booking,
         now,
-      )) return { status: "blocked", reason: "booking_ineligible" } as const;
+      )) {
+        if (customerCampaign) {
+          this.reanchorCustomerFinalAfterEligibilityLoss(
+            transaction,
+            customerCampaign,
+            job,
+            booking,
+            now,
+          );
+          this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+            transaction,
+            customerCampaign,
+            job,
+            now,
+            booking.propertyNumber,
+          );
+        }
+        return { status: "blocked", reason: "booking_ineligible" } as const;
+      }
+      if (customerCampaign && isAutomaticCustomerSequenceJob(job)) {
+        const blockForCampaign = (reason: string) => {
+          transaction.set(customerCampaign.stateRef, {
+            ...customerCampaign.state,
+            updatedAt: timestamp,
+          });
+          transaction.update(jobRef, {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: reason,
+            updatedAt: timestamp,
+          });
+          transaction.update(bookingRef, {
+            ...(booking.activeCustomerNotificationJobId === job.id
+              ? { activeCustomerNotificationJobId: null }
+              : {}),
+            events: appendEvent(booking.events, {
+              type: job.kind === "customer_final_reminder"
+                ? "customer_final_reminder_suppressed"
+                : "customer_followup_suppressed",
+              at: timestamp,
+              detail: reason,
+            }),
+            updatedAt: timestamp,
+          });
+        };
+        if (customerCampaign.customerResponded) {
+          blockForCampaign("customer_campaign_responded");
+          return { status: "blocked", reason: "notification_state_changed" } as const;
+        }
+        if (job.kind === "customer_final_reminder") {
+          if (
+            customerCampaign.state.finalReminderSentAt ||
+            (
+              customerCampaign.state.finalReminderJobId &&
+              customerCampaign.state.finalReminderJobId !== job.id
+            )
+          ) {
+            blockForCampaign(
+              customerCampaign.state.finalReminderSentAt
+                ? "customer_final_reminder_already_sent"
+                : "customer_final_reminder_already_scheduled",
+            );
+            return { status: "blocked", reason: "notification_state_changed" } as const;
+          }
+          const bookingsById = new Map(
+            customerCampaign.bookings.map((candidate) => [candidate.id, candidate]),
+          );
+          const unfinishedOrdinary = customerCampaign.jobs.filter((candidateJob) => {
+            if (
+              candidateJob.kind !== "customer_followup" ||
+              !automaticCustomerJob(candidateJob) ||
+              (candidateJob.status !== "pending" &&
+                candidateJob.status !== "claimed")
+            ) return false;
+            const candidateBooking = bookingsById.get(candidateJob.bookingId);
+            if (
+              !candidateBooking ||
+              candidateBooking.activeCustomerNotificationJobId !== candidateJob.id
+            ) return false;
+            if (customerCampaign.effectiveLimitScope === "property") return true;
+            return Boolean(candidateJob.customerSharedSequenceSlotReservedAt) ||
+              candidateJob.status === "claimed";
+          });
+          if (unfinishedOrdinary.length > 0) {
+            const retryMinutes = Math.max(
+              1,
+              ...unfinishedOrdinary.map((candidateJob) => {
+                const pendingBooking = bookingsById.get(candidateJob.bookingId);
+                const parsed = bookingCustomerFollowUpDelayMinutesSchema.safeParse(
+                  pendingBooking?.customerFollowUpDelayMinutes,
+                );
+                return parsed.success ? parsed.data : 1;
+              }),
+            );
+            customerCampaign.state.finalReminderJobId = job.id;
+            transaction.set(customerCampaign.stateRef, {
+              ...customerCampaign.state,
+              updatedAt: timestamp,
+            });
+            transaction.update(jobRef, {
+              status: "pending",
+              scheduledAt: new Date(
+                now.getTime() + retryMinutes * 60 * 1_000,
+              ).toISOString(),
+              leaseToken: null,
+              leaseExpiresAt: null,
+              providerError: "customer_campaign_ordinary_messages_pending",
+              updatedAt: timestamp,
+            });
+            return { status: "blocked", reason: "notification_state_changed" } as const;
+          }
+        } else if (
+          customerCampaign.state.finalReminderSentAt ||
+          (
+            customerCampaign.effectiveLimitScope === "customer" &&
+            customerCampaign.state.finalReminderJobId
+          )
+        ) {
+          blockForCampaign("customer_campaign_finalized");
+          return { status: "blocked", reason: "notification_state_changed" } as const;
+        }
+      }
       if (
         isCustomerNotificationKind(job.kind) &&
         customerResponseExpired(booking, now)
       ) {
+        if (customerCampaign) {
+          this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+            transaction,
+            customerCampaign,
+            job,
+            now,
+          );
+        }
         transaction.update(jobRef, {
           status: "cancelled",
           leaseToken: null,
@@ -4663,6 +5599,14 @@ export class BookingCommissionStore {
       const booking = bookingSnapshot.exists
         ? bookingSnapshot.data() as BookingFollowUpDocument
         : null;
+      const customerCampaign = booking && isCustomerNotificationKind(job.kind)
+        ? await readCustomerFollowUpCampaignContext({
+            db: this.db,
+            transaction,
+            booking,
+            now,
+          })
+        : null;
       if (
         booking &&
         !await this.ensureFreeBookingEligibility(
@@ -4671,7 +5615,79 @@ export class BookingCommissionStore {
           booking,
           now,
         )
-      ) return true;
+      ) {
+        if (
+          options.success &&
+          job.kind === "customer_final_reminder" &&
+          customerCampaign
+        ) {
+          customerCampaign.state.finalReminderJobId = job.id;
+          customerCampaign.state.finalReminderSentAt = timestamp;
+          transaction.update(jobRef, {
+            status: "sent",
+            sentAt: timestamp,
+            failedAt: null,
+            providerError: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            updatedAt: timestamp,
+          });
+          transaction.set(customerCampaign.stateRef, {
+            ...customerCampaign.state,
+            updatedAt: timestamp,
+          });
+          const cancelledJobIds = new Set<string>();
+          for (const candidateJob of customerCampaign.jobs) {
+            if (
+              candidateJob.id === job.id ||
+              !automaticCustomerJob(candidateJob) ||
+              (candidateJob.status !== "pending" &&
+                candidateJob.status !== "claimed")
+            ) continue;
+            cancelledJobIds.add(candidateJob.id);
+            transaction.update(
+              this.db.collection(NOTIFICATIONS_COLLECTION).doc(candidateJob.id),
+              {
+                status: "cancelled",
+                leaseToken: null,
+                leaseExpiresAt: null,
+                providerError: "customer_campaign_finalized",
+                updatedAt: timestamp,
+              },
+            );
+          }
+          for (const campaignBooking of customerCampaign.bookings) {
+            if (
+              campaignBooking.id === booking.id ||
+              !campaignBooking.activeCustomerNotificationJobId ||
+              !cancelledJobIds.has(
+                campaignBooking.activeCustomerNotificationJobId,
+              )
+            ) continue;
+            transaction.update(
+              this.db.collection(BOOKINGS_COLLECTION).doc(campaignBooking.id),
+              {
+                activeCustomerNotificationJobId: null,
+                updatedAt: timestamp,
+              },
+            );
+          }
+        }
+        if (
+          customerCampaign &&
+          job.kind === "customer_followup" &&
+          isAutomaticCustomerSequenceJob(job)
+        ) {
+          this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+            transaction,
+            customerCampaign,
+            job,
+            now,
+            booking.propertyNumber,
+          );
+        }
+        return true;
+      }
       let reminderSnapshots: FirebaseFirestore.DocumentSnapshot[] = [];
       if (
         booking &&
@@ -4721,13 +5737,16 @@ export class BookingCommissionStore {
         job.attempts < 3,
       );
       let nextCustomerJob: BookingNotificationJob | null = null;
+      let terminalPropertyFinal: BookingNotificationJob | null = null;
       if (
         booking &&
         options.success &&
         job.kind === "customer_followup" &&
         isAutomaticCustomerSequenceJob(job) &&
         automaticCustomerSequenceJobIsActive(job, booking) &&
-        notificationMatchesCurrentState(job, booking, now).status === "valid"
+        notificationMatchesCurrentState(job, booking, now).status === "valid" &&
+        customerCampaign &&
+        !customerCampaign.customerResponded
       ) {
         const messageLimit = booking.customerFollowUpMessageLimit;
         const delay = bookingCustomerFollowUpDelayMinutesSchema.safeParse(
@@ -4746,14 +5765,84 @@ export class BookingCommissionStore {
           delay.success
         ) {
           const nextSequenceNumber = sequenceNumber + 1;
-          if (nextSequenceNumber <= Number(messageLimit)) {
-            const nextKind: BookingNotificationKind =
-              nextSequenceNumber === Number(messageLimit)
-                ? "customer_final_reminder"
-                : "customer_followup";
+          const propertyScope =
+            customerCampaign.effectiveLimitScope === "property";
+          const otherInFlightOrdinary = customerCampaign.jobs.some(
+            (candidateJob) =>
+              candidateJob.id !== job.id &&
+              candidateJob.kind === "customer_followup" &&
+              automaticCustomerJob(candidateJob) &&
+              (
+                candidateJob.status === "claimed" ||
+                (
+                  candidateJob.status === "pending" &&
+                  Boolean(candidateJob.customerSharedSequenceSlotReservedAt)
+                )
+              ),
+          );
+          const sharedSentAfter =
+            customerCampaign.sharedOrdinaryMessagesSent + 1;
+          const propertySentAfter =
+            (customerCampaign.propertyOrdinaryMessagesSent.get(
+              job.propertyNumber,
+            ) || 0) + 1;
+          const everyPropertyBudgetCompleted =
+            [...customerCampaign.propertyOrdinaryMessageBudgets.entries()]
+              .every(([propertyNumber, budget]) => {
+                const sent = propertyNumber === job.propertyNumber
+                  ? propertySentAfter
+                  : customerCampaign.propertyOrdinaryMessagesSent.get(
+                      propertyNumber,
+                    ) || 0;
+                return sent >= budget;
+              });
+          const shouldScheduleFinal =
+            !otherInFlightOrdinary &&
+            (propertyScope
+              ? everyPropertyBudgetCompleted
+              : sharedSentAfter >= customerCampaign.ordinaryMessageBudget);
+          const existingCanonicalFinal = customerCampaign.jobs.find(
+            (candidate) =>
+              candidate.id === customerCampaign.canonicalFinalJobId,
+          );
+          const canonicalFinalIsInactive = Boolean(
+            existingCanonicalFinal &&
+            existingCanonicalFinal.status !== "pending" &&
+            existingCanonicalFinal.status !== "claimed" &&
+            existingCanonicalFinal.status !== "sent",
+          );
+          if (
+            shouldScheduleFinal &&
+            !customerCampaign.state.finalReminderSentAt &&
+            !customerCampaign.state.finalReminderJobId &&
+            (!existingCanonicalFinal || canonicalFinalIsInactive)
+          ) {
+            nextCustomerJob = buildCanonicalCustomerFinalReminder({
+              campaign: customerCampaign,
+              booking,
+              scheduledAt: new Date(
+                now.getTime() + delay.data * 60 * 1_000,
+              ).toISOString(),
+              now: timestamp,
+              sequenceNumber: Number(messageLimit),
+              parentJobId: job.id,
+            });
+            customerCampaign.state.finalReminderJobId = nextCustomerJob.id;
+          } else if (
+            !shouldScheduleFinal &&
+            nextSequenceNumber < Number(messageLimit) &&
+            (
+              propertyScope
+                ? propertySentAfter <
+                  (customerCampaign.propertyOrdinaryMessageBudgets.get(
+                    job.propertyNumber,
+                  ) || 0)
+                : sharedSentAfter < customerCampaign.ordinaryMessageBudget
+            )
+          ) {
             nextCustomerJob = buildNotificationJob({
               booking,
-              kind: nextKind,
+              kind: "customer_followup",
               scheduledAt: new Date(
                 now.getTime() + delay.data * 60 * 1_000,
               ).toISOString(),
@@ -4764,6 +5853,97 @@ export class BookingCommissionStore {
           }
         }
       }
+      if (customerCampaign && job.kind === "customer_final_reminder") {
+        if (options.success) {
+          if (!customerCampaign.state.finalReminderSentAt) {
+            customerCampaign.state.finalReminderJobId = job.id;
+            customerCampaign.state.finalReminderSentAt = timestamp;
+          }
+        } else if (
+          customerCampaign.state.finalReminderJobId === job.id &&
+          !customerCampaign.state.finalReminderSentAt
+        ) {
+          customerCampaign.state.finalReminderJobId = null;
+        }
+      }
+      if (
+        customerCampaign &&
+        !options.success &&
+        job.kind === "customer_followup" &&
+        isAutomaticCustomerSequenceJob(job) &&
+        Boolean(job.customerSharedSequenceSlotReservedAt)
+      ) {
+        if (customerCampaign.effectiveLimitScope === "property") {
+          const reserved =
+            customerCampaign.state.propertyOrdinarySlotsReserved[
+              job.propertyNumber
+            ] || 0;
+          customerCampaign.state.propertyOrdinarySlotsReserved[
+            job.propertyNumber
+          ] = Math.max(0, reserved - 1);
+        } else {
+          customerCampaign.state.sharedOrdinarySlotsReserved = Math.max(
+            0,
+            customerCampaign.state.sharedOrdinarySlotsReserved - 1,
+          );
+        }
+        terminalPropertyFinal = this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+          transaction,
+          customerCampaign,
+          job,
+          now,
+        );
+      }
+      if (
+        customerCampaign &&
+        booking &&
+        options.success &&
+        job.kind === "customer_followup" &&
+        isAutomaticCustomerSequenceJob(job) &&
+        !nextCustomerJob &&
+        notificationMatchesCurrentState(job, booking, now).status !== "valid"
+      ) {
+        terminalPropertyFinal = this.schedulePropertyCampaignFinalAfterTerminalOrdinary(
+          transaction,
+          customerCampaign,
+          job,
+          now,
+        );
+      }
+      const customerJobsToCancel = customerCampaign
+        ? customerCampaign.jobs.filter((candidate) => {
+            if (
+              candidate.id === job.id ||
+              !automaticCustomerJob(candidate) ||
+              (candidate.status !== "pending" && candidate.status !== "claimed")
+            ) return false;
+            if (
+              customerCampaign.customerResponded ||
+              (options.success && job.kind === "customer_final_reminder")
+            ) return true;
+            if (
+              candidate.kind !== "customer_followup" ||
+              candidate.status !== "pending" ||
+              candidate.customerSharedSequenceSlotReservedAt
+            ) return false;
+            if (nextCustomerJob?.kind === "customer_final_reminder") return true;
+            return customerCampaign.effectiveLimitScope === "property" &&
+              options.success &&
+              job.kind === "customer_followup" &&
+              candidate.propertyNumber === job.propertyNumber &&
+              (
+                customerCampaign.propertyOrdinaryMessagesSent.get(
+                  job.propertyNumber,
+                ) || 0
+              ) + 1 >=
+                (customerCampaign.propertyOrdinaryMessageBudgets.get(
+                  job.propertyNumber,
+                ) || 0);
+          })
+        : [];
+      const cancelledCustomerJobIds = new Set(
+        customerJobsToCancel.map(({ id }) => id),
+      );
       transaction.update(jobRef, {
         status: options.success
           ? "sent"
@@ -4784,6 +5964,42 @@ export class BookingCommissionStore {
         leaseExpiresAt: null,
         updatedAt: timestamp,
       });
+      for (const customerJob of customerJobsToCancel) {
+        transaction.update(
+          this.db.collection(NOTIFICATIONS_COLLECTION).doc(customerJob.id),
+          {
+            status: "cancelled",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            providerError: customerCampaign?.customerResponded
+              ? "customer_campaign_responded"
+              : "customer_campaign_finalized",
+            updatedAt: timestamp,
+          },
+        );
+      }
+      if (customerCampaign) {
+        transaction.set(customerCampaign.stateRef, {
+          ...customerCampaign.state,
+          updatedAt: timestamp,
+        });
+        for (const campaignBooking of customerCampaign.bookings) {
+          if (
+            campaignBooking.id === booking?.id ||
+            !campaignBooking.activeCustomerNotificationJobId ||
+            !cancelledCustomerJobIds.has(
+              campaignBooking.activeCustomerNotificationJobId,
+            )
+          ) continue;
+          transaction.update(
+            this.db.collection(BOOKINGS_COLLECTION).doc(campaignBooking.id),
+            {
+              activeCustomerNotificationJobId: null,
+              updatedAt: timestamp,
+            },
+          );
+        }
+      }
       if (booking) {
         const reminderOffsets = job.reminderOffsetDays && options.success
           ? Array.from(new Set([
@@ -4818,6 +6034,8 @@ export class BookingCommissionStore {
         const activeCustomerNotificationUpdate =
           nextCustomerJob
             ? { activeCustomerNotificationJobId: nextCustomerJob.id }
+            : terminalPropertyFinal?.bookingId === booking.id
+              ? { activeCustomerNotificationJobId: terminalPropertyFinal.id }
             : booking.activeCustomerNotificationJobId === job.id &&
                 isCustomerNotificationKind(job.kind)
               ? { activeCustomerNotificationJobId: null }
@@ -4830,12 +6048,22 @@ export class BookingCommissionStore {
           updatedAt: timestamp,
         });
         if (nextCustomerJob) {
-          transaction.create(
-            this.db.collection(NOTIFICATIONS_COLLECTION).doc(
-              nextCustomerJob.id,
-            ),
-            nextCustomerJob,
+          const nextJobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(
+            nextCustomerJob.id,
           );
+          const replaceInactiveCanonical =
+            nextCustomerJob.kind === "customer_final_reminder" &&
+            customerCampaign?.jobs.some((candidate) =>
+              candidate.id === nextCustomerJob!.id &&
+              candidate.status !== "pending" &&
+              candidate.status !== "claimed" &&
+              candidate.status !== "sent"
+            );
+          if (replaceInactiveCanonical) {
+            transaction.set(nextJobRef, nextCustomerJob);
+          } else {
+            transaction.create(nextJobRef, nextCustomerJob);
+          }
         }
         if (Object.keys(commissionNoticeUpdates).length > 0) {
           const schedule = calculateCommissionReminderSchedule(timestamp);

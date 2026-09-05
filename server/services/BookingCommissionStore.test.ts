@@ -29,6 +29,7 @@ type FakeData = Record<string, any>;
 class FakeFirestore {
   private readonly collections = new Map<string, Map<string, FakeData>>();
   private beforeNextTransaction: (() => void | Promise<void>) | null = null;
+  private transactionTail: Promise<void> = Promise.resolve();
   readonly queryLog: Array<{
     collection: string;
     filters: Array<{ field: string; operator: string; value: unknown }>;
@@ -48,7 +49,17 @@ class FakeFirestore {
     const beforeTransaction = this.beforeNextTransaction;
     this.beforeNextTransaction = null;
     if (beforeTransaction) await beforeTransaction();
-    return operation(new FakeTransaction(this));
+    const previousTransaction = this.transactionTail;
+    let releaseTransaction!: () => void;
+    this.transactionTail = new Promise<void>((resolve) => {
+      releaseTransaction = resolve;
+    });
+    await previousTransaction;
+    try {
+      return await operation(new FakeTransaction(this));
+    } finally {
+      releaseTransaction();
+    }
   }
 
   runBeforeNextTransaction(operation: () => void | Promise<void>): void {
@@ -291,6 +302,7 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
     quotaCategory: "customer_followup",
     customerFollowUpSequenceNumber: 1,
     customerFollowUpSequenceParentJobId: null,
+    customerFollowUpLimitScope: "customer",
     attempts: 0,
     leaseToken: null,
     leaseExpiresAt: null,
@@ -482,9 +494,15 @@ test("a three-message sequence sends exactly two ordinary follow-ups and one fin
     now: secondDueAt,
   });
 
-  const finalId = `${bookingId}--customer_final_reminder`;
   const finalDueAt = new Date(secondDueAt.getTime() + 90 * 60_000);
-  const final = database.read("booking_notification_outbox", finalId);
+  const finalEntry = database.entries("booking_notification_outbox")
+    .find(([, job]) =>
+      job.bookingId === bookingId &&
+      job.kind === "customer_final_reminder" &&
+      !job.manualResendOfJobId &&
+      !job.manualResendRequestedAt);
+  assert.ok(finalEntry);
+  const [finalId, final] = finalEntry;
   assert.equal(final?.kind, "customer_final_reminder");
   assert.equal(final?.recipientRole, "customer");
   assert.equal(final?.quotaCategory, "customer_followup");
@@ -633,7 +651,7 @@ test("questionnaire start, decline, and confirmation each cancel the active cust
     );
     assert.equal(
       database.read("booking_notification_outbox", finalJobId)?.providerError,
-      "notification_state_changed",
+      "customer_campaign_responded",
     );
     assert.equal(
       database.read("booking_followups", booking.id)
@@ -719,6 +737,7 @@ test("worker scans use single-field time indexes and retain exact status gates",
   database.seed("booking_notification_outbox", "CLAIMED-EXPIRED", {
     ...workflow.customerNotification,
     id: "CLAIMED-EXPIRED",
+    manualResendRequestedAt: now.toISOString(),
     status: "claimed",
     leaseToken: "lease-expired",
     leaseExpiresAt: expiredLease,
@@ -726,6 +745,7 @@ test("worker scans use single-field time indexes and retain exact status gates",
   database.seed("booking_notification_outbox", "SENT-WITH-OLD-LEASE", {
     ...workflow.customerNotification,
     id: "SENT-WITH-OLD-LEASE",
+    manualResendRequestedAt: now.toISOString(),
     status: "sent",
     leaseToken: null,
     leaseExpiresAt: expiredLease,
@@ -747,6 +767,7 @@ test("worker scans use single-field time indexes and retain exact status gates",
   database.seed("booking_notification_outbox", "TERMINAL-DUE", {
     ...workflow.customerNotification,
     id: "TERMINAL-DUE",
+    manualResendRequestedAt: now.toISOString(),
     status: "sent",
     scheduledAt: new Date(now.getTime() - 120_000).toISOString(),
   });
@@ -754,6 +775,7 @@ test("worker scans use single-field time indexes and retain exact status gates",
     database.seed("booking_notification_outbox", `TERMINAL-DUE-${index}`, {
       ...workflow.customerNotification,
       id: `TERMINAL-DUE-${index}`,
+      manualResendRequestedAt: now.toISOString(),
       status: "sent",
       scheduledAt: new Date(now.getTime() - 10_000_000 + index).toISOString(),
     });
@@ -955,6 +977,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       freePropertyContactDailyLimit: 9,
       customerFollowUpDelayMinutes: 2_160,
       customerFollowUpMessageLimit: 3,
+      customerFollowUpLimitScope: "customer" as const,
       adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
@@ -988,6 +1011,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       freePropertyContactDailyLimit: 6,
       customerFollowUpDelayMinutes: 2_880,
       customerFollowUpMessageLimit: 2,
+      customerFollowUpLimitScope: "property" as const,
       adminCustomerWhatsAppCooldownMinutes: 45,
       whatsappTemplates: {
         ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
@@ -1014,7 +1038,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       "changing the configured delay does not reschedule an existing job",
     );
     assert.deepEqual(database.read("settings", "booking_free_workflow_limits"), {
-      schemaVersion: 6,
+      schemaVersion: 7,
       ...configuration,
       updatedAt: updatedAt.toISOString(),
       updatedBy: "admin",
@@ -1054,6 +1078,7 @@ test("free-workflow settings fall back to env and persist idempotently with one 
       { ...configuration, customerFollowUpDelayMinutes: 7_201 },
       { ...configuration, customerFollowUpMessageLimit: -1 },
       { ...configuration, customerFollowUpMessageLimit: 1.5 },
+      { ...configuration, customerFollowUpLimitScope: "booking" },
       { ...configuration, adminCustomerWhatsAppCooldownMinutes: -1 },
       { ...configuration, adminCustomerWhatsAppCooldownMinutes: 10_081 },
       { ...configuration, whatsappTemplates: {} },
@@ -1097,6 +1122,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       freePropertyContactDailyLimit: 13,
       customerFollowUpDelayMinutes: 1_440,
       customerFollowUpMessageLimit: 11,
+      customerFollowUpLimitScope: "customer",
       adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
@@ -1121,6 +1147,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
       freePropertyContactDailyLimit: 13,
       customerFollowUpDelayMinutes: 1_440,
       customerFollowUpMessageLimit: 11,
+      customerFollowUpLimitScope: "customer",
       adminCustomerWhatsAppCooldownMinutes: 30,
       whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
       optionalCommissionReminderDays: [3, 4],
@@ -1130,7 +1157,7 @@ test("legacy limit-only settings migrate in memory without writing during GET", 
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
       ?.schemaVersion,
-    6,
+    7,
   );
   assert.equal(
     database.read("settings", "booking_free_workflow_limits")
@@ -1174,13 +1201,14 @@ test("schema-four whole-hour follow-up delay migrates to minutes on the next adm
     freePropertyContactDailyLimit: migrated.freePropertyContactDailyLimit,
     customerFollowUpDelayMinutes: migrated.customerFollowUpDelayMinutes,
     customerFollowUpMessageLimit: migrated.customerFollowUpMessageLimit,
+    customerFollowUpLimitScope: migrated.customerFollowUpLimitScope,
     adminCustomerWhatsAppCooldownMinutes:
       migrated.adminCustomerWhatsAppCooldownMinutes,
     whatsappTemplates: migrated.whatsappTemplates,
     optionalCommissionReminderDays: migrated.optionalCommissionReminderDays,
   }, new Date("2026-08-18T10:00:00.000Z"));
   const persisted = database.read("settings", "booking_free_workflow_limits");
-  assert.equal(persisted?.schemaVersion, 6);
+  assert.equal(persisted?.schemaVersion, 7);
   assert.equal(persisted?.customerFollowUpDelayMinutes, 2_160);
   assert.equal("customerFollowUpDelayHours" in (persisted || {}), false);
   assert.equal(
@@ -1623,11 +1651,13 @@ test("admin send-now copies a pending regular customer step without consuming it
     workflow.customerNotification.id,
   );
   assert.equal(
-    database.read(
-      "booking_notification_outbox",
-      `${booking.id}--customer_final_reminder`,
-    ),
-    undefined,
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) =>
+        job.kind === "customer_final_reminder" &&
+        !job.manualResendOfJobId &&
+        !job.manualResendRequestedAt)
+      .length,
+    0,
   );
 
   const automaticDueAt = new Date(originalDueAt);
@@ -1649,10 +1679,15 @@ test("admin send-now copies a pending regular customer step without consuming it
     success: true,
     now: automaticDueAt,
   });
-  assert.ok(database.read(
-    "booking_notification_outbox",
-    `${booking.id}--customer_final_reminder`,
-  ));
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) =>
+        job.kind === "customer_final_reminder" &&
+        !job.manualResendOfJobId &&
+        !job.manualResendRequestedAt)
+      .length,
+    1,
+  );
 });
 
 test("admin customer send-now bypasses a zero automatic customer quota", async () => {
@@ -2458,6 +2493,1191 @@ test("customer daily quota is shared across properties and positive exhaustion d
     2,
     "the next Riyadh day uses a fresh shared customer quota window",
   );
+});
+
+function seedCustomerFollowUpCampaignSettings(
+  database: FakeFirestore,
+  scope: "customer" | "property",
+  messageLimit = 3,
+  delayMinutes = 60,
+): void {
+  database.seed("settings", "booking_free_workflow_limits", {
+    schemaVersion: 7,
+    customerDailyLimit: 20,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 6,
+    customerFollowUpDelayMinutes: delayMinutes,
+    customerFollowUpMessageLimit: messageLimit,
+    customerFollowUpLimitScope: scope,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+    updatedAt: now.toISOString(),
+    updatedBy: "admin",
+  });
+}
+
+function seedOverlappingCustomerWorkflows(options: {
+  database: FakeFirestore;
+  scope: "customer" | "property";
+  messageLimit?: number;
+  delayMinutes?: number;
+  count?: number;
+  startedAt?: Date;
+}) {
+  const messageLimit = options.messageLimit ?? 3;
+  const delayMinutes = options.delayMinutes ?? 60;
+  const startedAt = options.startedAt ?? now;
+  const workflows = Array.from({ length: options.count ?? 2 }, (_, index) =>
+    buildInitialBookingWorkflow({
+      requestCode: `REQ-CAMPAIGN-${options.scope}-${index + 1}`,
+      propertyNumber: `CAMPAIGN-${options.scope}-${index + 1}`,
+      propertyName: `Property ${index + 1}`,
+      ownerPhone: `+9665000000${index + 1}`,
+      customerPhone: "+966500000099",
+      customerSubject: "multi-property-customer-subject",
+      isFreeProperty: true,
+      customerFollowUpDelayMinutes: delayMinutes,
+      customerFollowUpMessageLimit: messageLimit,
+      customerFollowUpLimitScope: options.scope,
+      now: new Date(startedAt.getTime() + index * 60_000),
+    }));
+  for (const [index, workflow] of workflows.entries()) {
+    options.database.seed("booking_followups", workflow.followUp.id, {
+      ...workflow.followUp,
+      contactRequestId: `CONTACT-CAMPAIGN-${options.scope}-${index + 1}`,
+    });
+    options.database.seed(
+      "booking_notification_outbox",
+      workflow.customerNotification.id,
+      workflow.customerNotification,
+    );
+  }
+  return workflows;
+}
+
+function actionableAutomaticCustomerJobs(database: FakeFirestore) {
+  return database.entries("booking_notification_outbox")
+    .map(([, job]) => job)
+    .filter((job) =>
+      (job.kind === "customer_followup" ||
+        job.kind === "customer_final_reminder") &&
+      !job.manualResendOfJobId &&
+      !job.manualResendRequestedAt &&
+      (job.status === "pending" || job.status === "claimed")
+    );
+}
+
+async function scheduleCanonicalFinalForReanchorTest(
+  database: FakeFirestore,
+  customerDailyLimit: number,
+) {
+  seedCustomerFollowUpCampaignSettings(database, "customer", 2, 60);
+  database.update("settings", "booking_free_workflow_limits", {
+    customerDailyLimit,
+  });
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "customer",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const ordinaryDueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const ordinaryClaims = await store.claimDueNotificationJobs(ordinaryDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(ordinaryClaims.length, 1);
+  assert.equal(await store.finishNotificationJob({
+    jobId: ordinaryClaims[0]!.id,
+    leaseToken: ordinaryClaims[0]!.leaseToken,
+    success: true,
+    now: ordinaryDueAt,
+  }), true);
+  const final = database.entries("booking_notification_outbox")
+    .map(([, job]) => job)
+    .find((job) =>
+      job.kind === "customer_final_reminder" && job.status === "pending"
+    );
+  assert.ok(final);
+  return { final, store };
+}
+
+function customerQuotaCount(database: FakeFirestore): number {
+  return database.entries("booking_notification_quotas")
+    .reduce((total, [, quota]) => total + Number(quota.count || 0), 0);
+}
+
+test("customer scope shares the ordinary budget across properties and concurrent completions schedule one final", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "customer", 3, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "customer",
+    messageLimit: 3,
+    delayMinutes: 60,
+  });
+  const claimAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const store = new BookingCommissionStore(database as any);
+  const ordinaryClaims = await store.claimDueNotificationJobs(claimAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(ordinaryClaims.length, 2);
+  assert.ok(ordinaryClaims.every((job) => job.kind === "customer_followup"));
+
+  const completionAt = new Date(claimAt.getTime() + 1_000);
+  await Promise.all(ordinaryClaims.map((job) =>
+    store.finishNotificationJob({
+      jobId: job.id,
+      leaseToken: job.leaseToken,
+      success: true,
+      now: completionAt,
+    })));
+
+  const actionable = actionableAutomaticCustomerJobs(database);
+  assert.equal(
+    actionable.filter((job) => job.kind === "customer_followup").length,
+    0,
+    "the two first sends consume the shared N-1 ordinary-message budget",
+  );
+  const finalJobs = actionable.filter((job) =>
+    job.kind === "customer_final_reminder");
+  assert.equal(finalJobs.length, 1);
+  assert.match(finalJobs[0]!.id, /customer_final_reminder$/);
+
+  const finalAt = new Date(finalJobs[0]!.scheduledAt);
+  const competingClaims = await Promise.all([
+    store.claimDueNotificationJobs(finalAt, 10, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    }),
+    new BookingCommissionStore(database as any).claimDueNotificationJobs(
+      finalAt,
+      10,
+      {
+        followUpNotificationsEnabled: true,
+        commissionNotificationsEnabled: true,
+      },
+    ),
+  ]);
+  const finalClaims = competingClaims.flat().filter((job) =>
+    job.kind === "customer_final_reminder");
+  assert.equal(finalClaims.length, 1, "concurrent workers claim the final once");
+  assert.equal(await store.finishNotificationJob({
+    jobId: finalClaims[0]!.id,
+    leaseToken: finalClaims[0]!.leaseToken,
+    success: true,
+    now: finalAt,
+  }), true);
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) =>
+        job.kind === "customer_final_reminder" && job.status === "sent")
+      .length,
+    1,
+  );
+});
+
+test("property scope completes each property's ordinary budget before one customer-wide final", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 3, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 3,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const firstDueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const firstClaims = await store.claimDueNotificationJobs(firstDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(firstClaims.length, 2);
+  await Promise.all(firstClaims.map((job) => store.finishNotificationJob({
+    jobId: job.id,
+    leaseToken: job.leaseToken,
+    success: true,
+    now: firstDueAt,
+  })));
+
+  const secondOrdinary = actionableAutomaticCustomerJobs(database)
+    .filter((job) => job.kind === "customer_followup");
+  assert.equal(secondOrdinary.length, 2);
+  assert.deepEqual(
+    secondOrdinary.map((job) => job.customerFollowUpSequenceNumber).sort(),
+    [2, 2],
+  );
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    0,
+  );
+
+  const secondDueAt = new Date(Math.max(
+    ...secondOrdinary.map((job) => Date.parse(job.scheduledAt)),
+  ));
+  const secondClaims = await store.claimDueNotificationJobs(secondDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(secondClaims.length, 2);
+  await store.finishNotificationJob({
+    jobId: secondClaims[0]!.id,
+    leaseToken: secondClaims[0]!.leaseToken,
+    success: true,
+    now: secondDueAt,
+  });
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    0,
+    "the final waits while another property's ordinary sequence is active",
+  );
+  await store.finishNotificationJob({
+    jobId: secondClaims[1]!.id,
+    leaseToken: secondClaims[1]!.leaseToken,
+    success: true,
+    now: secondDueAt,
+  });
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    1,
+  );
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) => job.kind === "customer_followup" && job.status === "sent")
+      .length,
+    4,
+    "property scope preserves N-1 ordinary messages for each property",
+  );
+});
+
+test("property scope shares its ordinary budget across repeated contacts to one property", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 3, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 3,
+    delayMinutes: 60,
+  });
+  const sharedPropertyNumber = workflows[0]!.followUp.propertyNumber;
+  database.update("booking_followups", workflows[1]!.followUp.id, {
+    propertyNumber: sharedPropertyNumber,
+  });
+  database.update(
+    "booking_notification_outbox",
+    workflows[1]!.customerNotification.id,
+    { propertyNumber: sharedPropertyNumber },
+  );
+  const dueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const store = new BookingCommissionStore(database as any);
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 2);
+  await Promise.all(claims.map((job) => store.finishNotificationJob({
+    jobId: job.id,
+    leaseToken: job.leaseToken,
+    success: true,
+    now: dueAt,
+  })));
+
+  const automaticJobs = actionableAutomaticCustomerJobs(database);
+  assert.equal(
+    automaticJobs.filter((job) => job.kind === "customer_followup").length,
+    0,
+    "two contacts to one property share the same two-message ordinary budget",
+  );
+  assert.equal(
+    automaticJobs.filter((job) => job.kind === "customer_final_reminder").length,
+    1,
+  );
+});
+
+test("repeated property contacts use the strictest active campaign limit", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 4, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 4,
+    delayMinutes: 60,
+  });
+  const sharedPropertyNumber = workflows[0]!.followUp.propertyNumber;
+  database.update("booking_followups", workflows[1]!.followUp.id, {
+    propertyNumber: sharedPropertyNumber,
+    customerFollowUpMessageLimit: 2,
+  });
+  database.update("booking_notification_outbox", workflows[1]!.customerNotification.id, {
+    propertyNumber: sharedPropertyNumber,
+  });
+  const dueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+    Date.parse(customerNotification.scheduledAt))));
+  const store = new BookingCommissionStore(database as any);
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 1, "the lower two-message snapshot permits one ordinary send");
+  await store.finishNotificationJob({
+    jobId: claims[0]!.id,
+    leaseToken: claims[0]!.leaseToken,
+    success: true,
+    now: dueAt,
+  });
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) => job.kind === "customer_followup" && job.status === "sent").length,
+    1,
+  );
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    1,
+  );
+});
+
+for (const scope of ["customer", "property"] as const) {
+  test(`${scope} scope enforces its cap across 20 concurrent properties and schedules one final`, async () => {
+    const database = new FakeFirestore();
+    seedCustomerFollowUpCampaignSettings(database, scope, 3, 60);
+    database.update("settings", "booking_free_workflow_limits", {
+      customerDailyLimit: 100,
+    });
+    const workflows = seedOverlappingCustomerWorkflows({
+      database,
+      scope,
+      messageLimit: 3,
+      delayMinutes: 60,
+      count: 20,
+    });
+    const store = new BookingCommissionStore(database as any);
+    const firstDueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt))));
+    const firstClaims = await store.claimDueNotificationJobs(firstDueAt, 100, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+    assert.equal(firstClaims.length, scope === "customer" ? 2 : 20);
+    await Promise.all(firstClaims.map((job) => store.finishNotificationJob({
+      jobId: job.id,
+      leaseToken: job.leaseToken,
+      success: true,
+      now: firstDueAt,
+    })));
+    if (scope === "property") {
+      const secondJobs = actionableAutomaticCustomerJobs(database)
+        .filter((job) => job.kind === "customer_followup");
+      assert.equal(secondJobs.length, 20);
+      const secondDueAt = new Date(Math.max(...secondJobs.map((job) =>
+        Date.parse(job.scheduledAt))));
+      const secondClaims = await store.claimDueNotificationJobs(secondDueAt, 100, {
+        followUpNotificationsEnabled: true,
+        commissionNotificationsEnabled: true,
+      });
+      assert.equal(secondClaims.length, 20);
+      await Promise.all(secondClaims.map((job) => store.finishNotificationJob({
+        jobId: job.id,
+        leaseToken: job.leaseToken,
+        success: true,
+        now: secondDueAt,
+      })));
+    }
+    assert.equal(
+      database.entries("booking_notification_outbox")
+        .filter(([, job]) => job.kind === "customer_followup" && job.status === "sent").length,
+      scope === "customer" ? 2 : 40,
+    );
+    assert.equal(
+      actionableAutomaticCustomerJobs(database)
+        .filter((job) => job.kind === "customer_final_reminder").length,
+      1,
+    );
+  });
+}
+
+test("customer-scope failures release their slot without order-dependent final scheduling", async () => {
+  for (const successfulJobFinishesFirst of [false, true]) {
+    const database = new FakeFirestore();
+    seedCustomerFollowUpCampaignSettings(database, "customer", 3, 60);
+    const workflows = seedOverlappingCustomerWorkflows({
+      database,
+      scope: "customer",
+      messageLimit: 3,
+      delayMinutes: 60,
+    });
+    const dueAt = new Date(Math.max(
+      ...workflows.map(({ customerNotification }) =>
+        Date.parse(customerNotification.scheduledAt)),
+    ));
+    const store = new BookingCommissionStore(database as any);
+    const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    });
+    assert.equal(claims.length, 2);
+    const successful = claims[0]!;
+    const failed = claims[1]!;
+    const finishSuccessful = () => store.finishNotificationJob({
+      jobId: successful.id,
+      leaseToken: successful.leaseToken,
+      success: true,
+      now: dueAt,
+    });
+    const finishFailed = () => store.finishNotificationJob({
+      jobId: failed.id,
+      leaseToken: failed.leaseToken,
+      success: false,
+      error: "provider_failure",
+      now: dueAt,
+    });
+    if (successfulJobFinishesFirst) {
+      await finishSuccessful();
+      await finishFailed();
+    } else {
+      await finishFailed();
+      await finishSuccessful();
+    }
+
+    assert.equal(
+      actionableAutomaticCustomerJobs(database)
+        .filter((job) => job.kind === "customer_final_reminder").length,
+      0,
+      "one successful ordinary send must not complete a two-send budget",
+    );
+    assert.equal(
+      actionableAutomaticCustomerJobs(database)
+        .filter((job) => job.kind === "customer_followup").length,
+      1,
+      "the remaining slot stays available after either completion order",
+    );
+  }
+});
+
+test("an inactive canonical final re-anchors to another eligible free booking", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "customer", 2, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "customer",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const ordinaryDueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const ordinaryClaims = await store.claimDueNotificationJobs(ordinaryDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(ordinaryClaims.length, 1);
+  await store.finishNotificationJob({
+    jobId: ordinaryClaims[0]!.id,
+    leaseToken: ordinaryClaims[0]!.leaseToken,
+    success: true,
+    now: ordinaryDueAt,
+  });
+  const originalFinal = actionableAutomaticCustomerJobs(database)
+    .find((job) => job.kind === "customer_final_reminder");
+  assert.ok(originalFinal);
+  assert.equal(originalFinal.bookingId, ordinaryClaims[0]!.bookingId);
+  database.seed("subscriptions", "SUB-CANONICAL-ANCHOR-UPGRADE", {
+    id: "SUB-CANONICAL-ANCHOR-UPGRADE",
+    propertyNumber: originalFinal.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+
+  const finalDueAt = new Date(originalFinal.scheduledAt);
+  assert.deepEqual(await store.claimDueNotificationJobs(finalDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  }), []);
+  const replacement = database.read(
+    "booking_notification_outbox",
+    originalFinal.id,
+  );
+  assert.equal(replacement?.status, "pending");
+  assert.notEqual(replacement?.bookingId, originalFinal.bookingId);
+  assert.equal(
+    database.read("booking_followups", originalFinal.bookingId)
+      ?.freeEligibilityRevokedAt !== null,
+    true,
+  );
+  const replacementClaims = await store.claimDueNotificationJobs(finalDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(replacementClaims.map((job) => job.id), [originalFinal.id]);
+});
+
+test("a claimed canonical final keeps its quota reservation when its anchor upgrades before send", async () => {
+  const database = new FakeFirestore();
+  const { final, store } = await scheduleCanonicalFinalForReanchorTest(
+    database,
+    2,
+  );
+  const finalDueAt = new Date(final.scheduledAt);
+  const finalClaims = await store.claimDueNotificationJobs(finalDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(finalClaims.length, 1);
+  const claimedFinal = finalClaims[0]!;
+  assert.equal(typeof claimedFinal.quotaReservedWindowStartedAt, "number");
+  assert.equal(customerQuotaCount(database), 2);
+  database.seed("subscriptions", "SUB-CLAIMED-FINAL-ANCHOR-UPGRADE", {
+    id: "SUB-CLAIMED-FINAL-ANCHOR-UPGRADE",
+    propertyNumber: claimedFinal.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+
+  const prepareAt = new Date(finalDueAt.getTime() + 1_000);
+  assert.deepEqual(
+    await store.prepareNotificationForSend(
+      claimedFinal.id,
+      claimedFinal.leaseToken,
+      prepareAt,
+    ),
+    { status: "blocked", reason: "booking_ineligible" },
+  );
+  const replacement = database.read(
+    "booking_notification_outbox",
+    claimedFinal.id,
+  );
+  assert.equal(replacement?.status, "pending");
+  assert.notEqual(replacement?.bookingId, claimedFinal.bookingId);
+  assert.equal(
+    replacement?.quotaReservedWindowStartedAt,
+    claimedFinal.quotaReservedWindowStartedAt,
+  );
+  assert.equal(replacement?.createdAt, final.createdAt);
+  assert.equal(
+    replacement?.customerFollowUpSequenceParentJobId,
+    final.customerFollowUpSequenceParentJobId,
+  );
+  assert.notEqual(
+    replacement?.customerFollowUpSequenceParentJobId,
+    claimedFinal.id,
+  );
+
+  const replacementClaims = await store.claimDueNotificationJobs(prepareAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(replacementClaims.map((job) => job.id), [claimedFinal.id]);
+  assert.equal(
+    customerQuotaCount(database),
+    2,
+    "reclaiming the same logical final must reuse its Riyadh-day quota slot",
+  );
+});
+
+test("an accelerated claimed final keeps its admin bypass when its anchor upgrades before send", async () => {
+  const database = new FakeFirestore();
+  const { final, store } = await scheduleCanonicalFinalForReanchorTest(
+    database,
+    1,
+  );
+  const accelerateAt = new Date(Date.parse(final.scheduledAt) - 30 * 60 * 1_000);
+  await store.scheduleManualNotificationResend({
+    bookingId: final.bookingId,
+    sourceJobId: final.id,
+    idempotencyKey: "admin-accelerated-final-reanchor-001",
+    now: accelerateAt,
+  });
+  const accelerated = database.read("booking_notification_outbox", final.id);
+  assert.equal(accelerated?.manualResendRequestedAt, accelerateAt.toISOString());
+  const finalClaims = await store.claimDueNotificationJobs(accelerateAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(finalClaims.length, 1);
+  const claimedFinal = finalClaims[0]!;
+  assert.equal(claimedFinal.manualResendRequestedAt, accelerateAt.toISOString());
+  assert.equal(claimedFinal.quotaReservedWindowStartedAt, undefined);
+  assert.equal(customerQuotaCount(database), 1);
+  database.seed("subscriptions", "SUB-ACCELERATED-FINAL-ANCHOR-UPGRADE", {
+    id: "SUB-ACCELERATED-FINAL-ANCHOR-UPGRADE",
+    propertyNumber: claimedFinal.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+
+  const prepareAt = new Date(accelerateAt.getTime() + 1_000);
+  assert.deepEqual(
+    await store.prepareNotificationForSend(
+      claimedFinal.id,
+      claimedFinal.leaseToken,
+      prepareAt,
+    ),
+    { status: "blocked", reason: "booking_ineligible" },
+  );
+  const replacement = database.read(
+    "booking_notification_outbox",
+    claimedFinal.id,
+  );
+  assert.equal(
+    replacement?.manualResendRequestedAt,
+    accelerateAt.toISOString(),
+  );
+  assert.equal(replacement?.createdAt, final.createdAt);
+  assert.notEqual(
+    replacement?.customerFollowUpSequenceParentJobId,
+    claimedFinal.id,
+  );
+
+  const replacementClaims = await store.claimDueNotificationJobs(prepareAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(replacementClaims.map((job) => job.id), [claimedFinal.id]);
+  assert.equal(
+    replacementClaims[0]?.manualResendRequestedAt,
+    accelerateAt.toISOString(),
+  );
+  assert.equal(
+    customerQuotaCount(database),
+    1,
+    "the accelerated final must remain outside the automatic daily quota",
+  );
+});
+
+test("legacy duplicate pending finals are reconciled to one claim after customer-wide rollout", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 1, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 1,
+    delayMinutes: 60,
+  });
+  for (const workflow of workflows) {
+    database.update("booking_followups", workflow.followUp.id, {
+      customerFollowUpLimitScope: undefined,
+    });
+    database.update("booking_notification_outbox", workflow.customerNotification.id, {
+      customerFollowUpLimitScope: undefined,
+    });
+  }
+  database.update("settings", "booking_free_workflow_limits", {
+    schemaVersion: 7,
+    customerFollowUpLimitScope: "customer",
+  });
+  const dueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const store = new BookingCommissionStore(database as any);
+  const workerResults = await Promise.all([
+    store.claimDueNotificationJobs(dueAt, 10, {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    }),
+    new BookingCommissionStore(database as any).claimDueNotificationJobs(
+      dueAt,
+      10,
+      {
+        followUpNotificationsEnabled: true,
+        commissionNotificationsEnabled: true,
+      },
+    ),
+  ]);
+  const claims = workerResults.flat().filter((job) =>
+    job.kind === "customer_final_reminder");
+  assert.equal(claims.length, 1);
+  const siblingFinals = database.entries("booking_notification_outbox")
+    .map(([, job]) => job)
+    .filter((job) => job.kind === "customer_final_reminder");
+  assert.equal(siblingFinals.filter((job) => job.status === "claimed").length, 1);
+  assert.equal(siblingFinals.filter((job) => job.status === "cancelled").length, 1);
+  assert.equal(
+    siblingFinals.find((job) => job.status === "cancelled")?.providerError,
+    "customer_final_reminder_already_scheduled",
+  );
+});
+
+test("send-now keeps a pending final inside campaign dedupe and response cancellation", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 1, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 1,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const accelerated = await store.scheduleManualNotificationResend({
+    bookingId: workflows[0]!.followUp.id,
+    sourceJobId: workflows[0]!.customerNotification.id,
+    idempotencyKey: "admin-accelerated-campaign-final-01",
+    now,
+  });
+  assert.equal(accelerated.job.id, workflows[0]!.customerNotification.id);
+  assert.equal(accelerated.job.manualResendRequestedAt, now.toISOString());
+
+  const dueAt = new Date(Math.max(
+    ...workflows.map(({ customerNotification }) =>
+      Date.parse(customerNotification.scheduledAt)),
+  ));
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(claims.map((job) => job.id), [accelerated.job.id]);
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      workflows[1]!.customerNotification.id,
+    )?.providerError,
+    "customer_final_reminder_already_scheduled",
+  );
+
+  await store.declineBooking(
+    workflows[1]!.followUp.id,
+    new Date(dueAt.getTime() + 1_000),
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", accelerated.job.id)?.status,
+    "cancelled",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", accelerated.job.id)
+      ?.providerError,
+    "customer_campaign_responded",
+  );
+  assert.deepEqual(
+    await store.prepareNotificationForSend(
+      accelerated.job.id,
+      claims[0]!.leaseToken,
+      new Date(dueAt.getTime() + 2_000),
+    ),
+    { status: "blocked", reason: "claim_invalid" },
+  );
+});
+
+test("a sent final suppresses a later ordinary job in the same property-scope campaign", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 1, 60);
+  const initial = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 1,
+    delayMinutes: 60,
+    count: 1,
+  })[0]!;
+  const store = new BookingCommissionStore(database as any);
+  const finalDueAt = new Date(initial.customerNotification.scheduledAt);
+  const finalClaims = await store.claimDueNotificationJobs(finalDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(finalClaims.map((job) => job.id), [
+    initial.customerNotification.id,
+  ]);
+  assert.equal(await store.finishNotificationJob({
+    jobId: finalClaims[0]!.id,
+    leaseToken: finalClaims[0]!.leaseToken,
+    success: true,
+    now: finalDueAt,
+  }), true);
+
+  const laterStartedAt = new Date(finalDueAt.getTime() + 60_000);
+  const later = buildInitialBookingWorkflow({
+    requestCode: "REQ-PROPERTY-CAMPAIGN-AFTER-FINAL",
+    propertyNumber: "PROPERTY-CAMPAIGN-AFTER-FINAL",
+    propertyName: "Later property",
+    ownerPhone: "+966500000008",
+    customerPhone: "+966500000099",
+    customerSubject: "multi-property-customer-subject",
+    isFreeProperty: true,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    customerFollowUpLimitScope: "property",
+    now: laterStartedAt,
+  });
+  database.seed("booking_followups", later.followUp.id, {
+    ...later.followUp,
+    contactRequestId: "CONTACT-PROPERTY-CAMPAIGN-AFTER-FINAL",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    later.customerNotification.id,
+    later.customerNotification,
+  );
+
+  const claims = await store.claimDueNotificationJobs(
+    new Date(later.customerNotification.scheduledAt),
+    10,
+    {
+      followUpNotificationsEnabled: true,
+      commissionNotificationsEnabled: true,
+    },
+  );
+  assert.deepEqual(claims, []);
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      later.customerNotification.id,
+    )?.status,
+    "cancelled",
+  );
+  assert.equal(
+    database.read(
+      "booking_notification_outbox",
+      later.customerNotification.id,
+    )?.providerError,
+    "customer_campaign_finalized",
+  );
+});
+
+test("a response closes only its campaign and a later property contact starts a fresh sequence", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "customer", 2, 30);
+  const oldWorkflow = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "customer",
+    messageLimit: 2,
+    delayMinutes: 30,
+    count: 1,
+  })[0]!;
+  const store = new BookingCommissionStore(database as any);
+  const responseAt = new Date(now.getTime() + 10 * 60_000);
+  await store.declineBooking(oldWorkflow.followUp.id, responseAt);
+
+  const freshStartedAt = new Date(responseAt.getTime() + 60_000);
+  const freshWorkflow = buildInitialBookingWorkflow({
+    requestCode: "REQ-CAMPAIGN-AFTER-RESPONSE",
+    propertyNumber: "CAMPAIGN-AFTER-RESPONSE",
+    propertyName: "Fresh property",
+    ownerPhone: "+966500000008",
+    customerPhone: "+966500000099",
+    customerSubject: "multi-property-customer-subject",
+    isFreeProperty: true,
+    customerFollowUpDelayMinutes: 30,
+    customerFollowUpMessageLimit: 2,
+    customerFollowUpLimitScope: "customer",
+    now: freshStartedAt,
+  });
+  database.seed("booking_followups", freshWorkflow.followUp.id, {
+    ...freshWorkflow.followUp,
+    contactRequestId: "CONTACT-CAMPAIGN-AFTER-RESPONSE",
+  });
+  database.seed(
+    "booking_notification_outbox",
+    freshWorkflow.customerNotification.id,
+    freshWorkflow.customerNotification,
+  );
+
+  const firstDueAt = new Date(freshWorkflow.customerNotification.scheduledAt);
+  const firstClaims = await store.claimDueNotificationJobs(firstDueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(
+    firstClaims.map((job) => job.id),
+    [freshWorkflow.customerNotification.id],
+    "the earlier decline must not suppress a later campaign",
+  );
+  await store.finishNotificationJob({
+    jobId: firstClaims[0]!.id,
+    leaseToken: firstClaims[0]!.leaseToken,
+    success: true,
+    now: firstDueAt,
+  });
+  const final = actionableAutomaticCustomerJobs(database)
+    .find((job) => job.kind === "customer_final_reminder");
+  assert.ok(final, "the fresh campaign may schedule its own final reminder");
+  const finalAt = new Date(final.scheduledAt);
+  const finalClaims = await store.claimDueNotificationJobs(finalAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.deepEqual(finalClaims.map((job) => job.id), [final.id]);
+  await store.finishNotificationJob({
+    jobId: final.id,
+    leaseToken: finalClaims[0]!.leaseToken,
+    success: true,
+    now: finalAt,
+  });
+  assert.equal(
+    database.entries("booking_notification_outbox")
+      .filter(([, job]) =>
+        job.kind === "customer_final_reminder" && job.status === "sent")
+      .length,
+    1,
+  );
+});
+
+test("a provider-confirmed final remains durably sent when its anchor upgrades after prepare", async () => {
+  const database = new FakeFirestore();
+  const { final, store } = await scheduleCanonicalFinalForReanchorTest(database, 5);
+  const finalAt = new Date(final.scheduledAt);
+  const [claim] = await store.claimDueNotificationJobs(finalAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.ok(claim);
+  assert.equal(
+    (await store.prepareNotificationForSend(claim.id, claim.leaseToken, finalAt)).status,
+    "ready",
+  );
+  database.seed("subscriptions", "SUB-UPGRADE-AFTER-PREPARE", {
+    id: "SUB-UPGRADE-AFTER-PREPARE",
+    propertyNumber: claim.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+
+  assert.equal(await store.finishNotificationJob({
+    jobId: claim.id,
+    leaseToken: claim.leaseToken,
+    success: true,
+    now: new Date(finalAt.getTime() + 1_000),
+  }), true);
+  assert.equal(database.read("booking_notification_outbox", claim.id)?.status, "sent");
+  assert.ok(database.read("booking_followups", claim.bookingId)?.freeEligibilityRevokedAt);
+  const campaignStates = database.entries("booking_customer_followup_states")
+    .map(([, state]) => state);
+  assert.equal(campaignStates.length, 1);
+  assert.ok(campaignStates[0]?.finalReminderSentAt);
+
+  const later = buildInitialBookingWorkflow({
+    requestCode: "REQ-AFTER-PHYSICAL-FINAL",
+    propertyNumber: "PROPERTY-AFTER-PHYSICAL-FINAL",
+    propertyName: "Later property",
+    ownerPhone: "+966500000008",
+    customerPhone: "+966500000099",
+    customerSubject: "multi-property-customer-subject",
+    isFreeProperty: true,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 2,
+    customerFollowUpLimitScope: "customer",
+    now: new Date(finalAt.getTime() + 2_000),
+  });
+  database.seed("booking_followups", later.followUp.id, later.followUp);
+  database.seed("booking_notification_outbox", later.customerNotification.id, later.customerNotification);
+  assert.deepEqual(await store.claimDueNotificationJobs(
+    new Date(later.customerNotification.scheduledAt),
+    10,
+    { followUpNotificationsEnabled: true, commissionNotificationsEnabled: true },
+  ), []);
+  assert.equal(
+    database.read("booking_notification_outbox", later.customerNotification.id)?.providerError,
+    "customer_campaign_finalized",
+  );
+});
+
+test("property scope schedules its shared final after the remaining ordinary property upgrades", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 2, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const dueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+    Date.parse(customerNotification.scheduledAt))));
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 2);
+  await store.finishNotificationJob({
+    jobId: claims[0]!.id,
+    leaseToken: claims[0]!.leaseToken,
+    success: true,
+    now: dueAt,
+  });
+  database.seed("subscriptions", "SUB-PROPERTY-UPGRADE-TERMINAL", {
+    id: "SUB-PROPERTY-UPGRADE-TERMINAL",
+    propertyNumber: claims[1]!.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+  assert.deepEqual(
+    await store.prepareNotificationForSend(
+      claims[1]!.id,
+      claims[1]!.leaseToken,
+      new Date(dueAt.getTime() + 1_000),
+    ),
+    { status: "blocked", reason: "booking_ineligible" },
+  );
+  const finals = actionableAutomaticCustomerJobs(database)
+    .filter((job) => job.kind === "customer_final_reminder");
+  assert.equal(finals.length, 1);
+  assert.notEqual(finals[0]!.propertyNumber, claims[1]!.propertyNumber);
+});
+
+test("property scope schedules one final after terminal ordinary failure and response cancels it", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 2, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const dueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+    Date.parse(customerNotification.scheduledAt))));
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  await store.finishNotificationJob({
+    jobId: claims[0]!.id,
+    leaseToken: claims[0]!.leaseToken,
+    success: true,
+    now: dueAt,
+  });
+  await store.finishNotificationJob({
+    jobId: claims[1]!.id,
+    leaseToken: claims[1]!.leaseToken,
+    success: false,
+    error: "provider_failure",
+    now: new Date(dueAt.getTime() + 1_000),
+  });
+  const [final] = actionableAutomaticCustomerJobs(database)
+    .filter((job) => job.kind === "customer_final_reminder");
+  assert.ok(final);
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    1,
+  );
+  await store.declineBooking(workflows[0]!.followUp.id, new Date(dueAt.getTime() + 2_000));
+  assert.equal(database.read("booking_notification_outbox", final.id)?.status, "cancelled");
+  assert.equal(
+    database.read("booking_notification_outbox", final.id)?.providerError,
+    "customer_campaign_responded",
+  );
+});
+
+test("property scope schedules one final when one property terminates before the other succeeds", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 2, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const dueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+    Date.parse(customerNotification.scheduledAt))));
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 2);
+  await store.finishNotificationJob({
+    jobId: claims[0]!.id,
+    leaseToken: claims[0]!.leaseToken,
+    success: false,
+    error: "provider_failure",
+    now: dueAt,
+  });
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    0,
+  );
+  await store.finishNotificationJob({
+    jobId: claims[1]!.id,
+    leaseToken: claims[1]!.leaseToken,
+    success: true,
+    now: new Date(dueAt.getTime() + 1_000),
+  });
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    1,
+  );
+});
+
+test("an ordinary provider success followed by eligibility loss schedules one final on another property", async () => {
+  const database = new FakeFirestore();
+  seedCustomerFollowUpCampaignSettings(database, "property", 2, 60);
+  const workflows = seedOverlappingCustomerWorkflows({
+    database,
+    scope: "property",
+    messageLimit: 2,
+    delayMinutes: 60,
+  });
+  const store = new BookingCommissionStore(database as any);
+  const dueAt = new Date(Math.max(...workflows.map(({ customerNotification }) =>
+    Date.parse(customerNotification.scheduledAt))));
+  const claims = await store.claimDueNotificationJobs(dueAt, 10, {
+    followUpNotificationsEnabled: true,
+    commissionNotificationsEnabled: true,
+  });
+  assert.equal(claims.length, 2);
+  assert.equal(
+    (await store.prepareNotificationForSend(
+      claims[0]!.id,
+      claims[0]!.leaseToken,
+      dueAt,
+    )).status,
+    "ready",
+  );
+  database.seed("subscriptions", "SUB-ORDINARY-UPGRADE-AFTER-PREPARE", {
+    id: "SUB-ORDINARY-UPGRADE-AFTER-PREPARE",
+    propertyNumber: claims[0]!.propertyNumber,
+    subscriptionType: "مميز",
+    status: "ساري",
+    endDate: "2099-12-31T00:00:00.000Z",
+  });
+  assert.equal(await store.finishNotificationJob({
+    jobId: claims[0]!.id,
+    leaseToken: claims[0]!.leaseToken,
+    success: true,
+    now: new Date(dueAt.getTime() + 1_000),
+  }), true);
+  assert.equal(
+    actionableAutomaticCustomerJobs(database)
+      .filter((job) => job.kind === "customer_final_reminder").length,
+    0,
+    "the final still waits for the other in-flight property",
+  );
+  await store.finishNotificationJob({
+    jobId: claims[1]!.id,
+    leaseToken: claims[1]!.leaseToken,
+    success: true,
+    now: new Date(dueAt.getTime() + 2_000),
+  });
+  const finals = actionableAutomaticCustomerJobs(database)
+    .filter((job) => job.kind === "customer_final_reminder");
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0]!.propertyNumber, claims[1]!.propertyNumber);
 });
 
 test("a zero customer daily quota suppresses the automatic sequence terminally", async () => {

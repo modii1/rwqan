@@ -87,3 +87,23 @@ test("booking workflow feature switches are managed inside the WhatsApp settings
   assert.match(source, /تشغيل نظام المتابعة والعمولة/);
   assert.match(source, /min-\[360px\]:flex-row/);
 });
+
+test("admin can choose a mobile-safe customer-wide or per-property follow-up scope", () => {
+  const source = readFileSync(
+    new URL("./booking-commission-settings.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /customerFollowUpLimitScope/);
+  assert.match(source, /مشترك لكل عميل/);
+  assert.match(source, /منفصل لكل عقار/);
+  assert.match(
+    source,
+    /تُرسل رسالة المتابعة الأخيرة مرة واحدة فقط لكل عميل/,
+  );
+  assert.match(
+    source,
+    /تبقى رسالة المتابعة الأخيرة مشتركة على مستوى العميل دائماً/,
+  );
+  assert.match(source, /grid-cols-1 gap-3 sm:grid-cols-2/);
+  assert.match(source, /sm:col-span-2/);
+});

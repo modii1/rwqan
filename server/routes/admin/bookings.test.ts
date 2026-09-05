@@ -46,6 +46,7 @@ test("admin booking settings GET and PUT expose the strict full-replacement cont
     freePropertyContactDailyLimit: 6,
     customerFollowUpDelayMinutes: 2_160,
     customerFollowUpMessageLimit: 3,
+    customerFollowUpLimitScope: "customer" as const,
     adminCustomerWhatsAppCooldownMinutes: 20,
     whatsappTemplates: { ...DEFAULT_BOOKING_WHATSAPP_TEMPLATES },
     optionalCommissionReminderDays: [3] as Array<3 | 4>,

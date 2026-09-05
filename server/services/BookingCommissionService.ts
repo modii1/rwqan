@@ -21,6 +21,7 @@ import {
   renderBookingWhatsAppTemplate,
   type BookingAdminCustomerWhatsAppTemplateVariant,
   type BookingConfirmationFacts,
+  type BookingCustomerFollowUpLimitScope,
   type BookingFreeWorkflowSettings,
   type BookingTokenPurpose,
   type BookingWhatsAppTemplates,
@@ -546,6 +547,7 @@ export class BookingCommissionService {
     isFreeProperty: boolean;
     customerFollowUpDelayMinutes: number;
     customerFollowUpMessageLimit: number;
+    customerFollowUpLimitScope: BookingCustomerFollowUpLimitScope;
     freePropertyContactDailyLimit?: number;
     propertyPrices?: unknown;
     now?: Date;
@@ -899,6 +901,9 @@ export class BookingCommissionService {
             customerFollowUpMessageLimit:
               settings.customerFollowUpMessageLimit ??
               current.customerFollowUpMessageLimit,
+            customerFollowUpLimitScope:
+              settings.customerFollowUpLimitScope ??
+              current.customerFollowUpLimitScope,
             adminCustomerWhatsAppCooldownMinutes:
               settings.adminCustomerWhatsAppCooldownMinutes ??
               current.adminCustomerWhatsAppCooldownMinutes,

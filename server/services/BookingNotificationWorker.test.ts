@@ -20,6 +20,7 @@ const TOKEN_SECRET = "booking-message-test-secret-value-1234567890";
 
 let buildBookingNotificationMessage: typeof import("./BookingNotificationWorker")["buildBookingNotificationMessage"];
 let dispatchDueBookingNotifications: typeof import("./BookingNotificationWorker")["dispatchDueBookingNotifications"];
+let runBookingCommissionWorker: typeof import("./BookingNotificationWorker")["runBookingCommissionWorker"];
 let shouldStartBookingCommissionWorker: typeof import("./BookingNotificationWorker")["shouldStartBookingCommissionWorker"];
 let bookingWorkerIntervalMs: number;
 let bookingCommissionStore: typeof import("./BookingCommissionStore")["bookingCommissionStore"];
@@ -40,6 +41,7 @@ before(async () => {
     BOOKING_WORKER_INTERVAL_MS: bookingWorkerIntervalMs,
     buildBookingNotificationMessage,
     dispatchDueBookingNotifications,
+    runBookingCommissionWorker,
     shouldStartBookingCommissionWorker,
   } = await import("./BookingNotificationWorker"));
 });
@@ -95,6 +97,83 @@ test("booking worker can be explicitly enabled for development", () => {
     }),
     false,
   );
+});
+
+test("booking worker coalesces overlapping triggers in one process", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    reconcile: store.reconcilePausedFreeEligibility,
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    listCandidates: store.listCommissionEnforcementCandidates,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+  };
+  let releaseFirstClaim!: () => void;
+  const firstClaimCanFinish = new Promise<void>((resolve) => {
+    releaseFirstClaim = resolve;
+  });
+  let notifyFirstClaimStarted!: () => void;
+  const firstClaimStarted = new Promise<void>((resolve) => {
+    notifyFirstClaimStarted = resolve;
+  });
+  let reconcileCalls = 0;
+  let claimCalls = 0;
+
+  try {
+    store.reconcilePausedFreeEligibility = async () => {
+      reconcileCalls += 1;
+    };
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () => {
+      claimCalls += 1;
+      if (claimCalls === 1) {
+        notifyFirstClaimStarted();
+        await firstClaimCanFinish;
+      }
+      return [];
+    };
+    store.listCommissionEnforcementCandidates = async () => [];
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => false;
+
+    const firstRun = runBookingCommissionWorker(
+      new Date("2099-08-15T12:00:00.000Z"),
+    );
+    await firstClaimStarted;
+    const overlappingRun = runBookingCommissionWorker(
+      new Date("2099-08-15T12:01:00.000Z"),
+    );
+
+    assert.equal(overlappingRun, firstRun);
+    assert.equal(reconcileCalls, 1);
+    assert.equal(claimCalls, 1);
+
+    releaseFirstClaim();
+    assert.deepEqual(await firstRun, {
+      notificationsClaimed: 0,
+      notificationsSent: 0,
+      enforcementReviewed: 0,
+      propertiesPaused: 0,
+    });
+    assert.deepEqual(await overlappingRun, {
+      notificationsClaimed: 0,
+      notificationsSent: 0,
+      enforcementReviewed: 0,
+      propertiesPaused: 0,
+    });
+    assert.equal(reconcileCalls, 1);
+    assert.equal(claimCalls, 2);
+  } finally {
+    releaseFirstClaim();
+    store.reconcilePausedFreeEligibility = originals.reconcile;
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.listCommissionEnforcementCandidates = originals.listCandidates;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+  }
 });
 
 function confirmedBooking(
@@ -744,6 +823,95 @@ test("dispatch sends the final customer reminder without provisioning any short 
       leaseToken: claimed.leaseToken,
       success: true,
       error: undefined,
+    }]);
+  } finally {
+    store.recoverExpiredNotificationClaims = originals.recover;
+    store.claimDueNotificationJobs = originals.claim;
+    store.prepareNotificationForSend = originals.prepare;
+    store.getFreeWorkflowSettings = originals.settings;
+    store.finishNotificationJob = originals.finish;
+    service.isFollowUpEnabled = originals.followUpFlag;
+    service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    globalThis.fetch = originals.fetch;
+  }
+});
+
+test("an accelerated automatic final reminder makes one provider attempt after a failed response", async () => {
+  const store = bookingCommissionStore as any;
+  const service = bookingCommissionService as any;
+  const originals = {
+    recover: store.recoverExpiredNotificationClaims,
+    claim: store.claimDueNotificationJobs,
+    prepare: store.prepareNotificationForSend,
+    settings: store.getFreeWorkflowSettings,
+    finish: store.finishNotificationJob,
+    followUpFlag: service.isFollowUpEnabled,
+    commissionFlag: service.isCommissionEnforcementEnabled,
+    fetch: globalThis.fetch,
+  };
+  const booking = {
+    ...confirmedBooking({ isFreeProperty: true }),
+    bookingStatus: "awaiting_response",
+    bookingDecision: null,
+    questionnaireStartedAt: null,
+    confirmationFacts: null,
+    confirmedAt: null,
+  } as unknown as BookingFollowUpDocument;
+  const claimed = {
+    ...notificationJob("customer_final_reminder", {
+      status: "claimed",
+      leaseToken: "failed-final-reminder-lease",
+      quotaCategory: "customer_followup",
+      customerFollowUpSequenceNumber: 3,
+      manualResendRequestedAt: "2099-08-18T11:59:00.000Z",
+    }),
+    leaseToken: "failed-final-reminder-lease",
+  };
+  let claimCalls = 0;
+  let providerCalls = 0;
+  const finalizations: unknown[] = [];
+
+  try {
+    store.recoverExpiredNotificationClaims = async () => 0;
+    store.claimDueNotificationJobs = async () =>
+      claimCalls++ === 0 ? [claimed] : [];
+    store.prepareNotificationForSend = async () => ({
+      status: "ready",
+      booking,
+    });
+    store.getFreeWorkflowSettings = async () => ({
+      customerDailyLimit: 3,
+      freeOwnerDailyLimit: 3,
+      freePropertyContactDailyLimit: 3,
+      customerFollowUpDelayMinutes: 1_440,
+      whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+      optionalCommissionReminderDays: [3, 4],
+      updatedAt: null,
+      updatedBy: "environment",
+      source: "environment",
+    });
+    store.finishNotificationJob = async (input: unknown) => {
+      finalizations.push(input);
+    };
+    service.isFollowUpEnabled = async () => true;
+    service.isCommissionEnforcementEnabled = async () => true;
+    globalThis.fetch = async () => {
+      providerCalls += 1;
+      return new Response("{}", { status: 503 });
+    };
+
+    assert.deepEqual(
+      await dispatchDueBookingNotifications(
+        new Date("2099-08-18T12:00:00.000Z"),
+      ),
+      { claimed: 1, sent: 0 },
+    );
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(finalizations, [{
+      jobId: claimed.id,
+      leaseToken: claimed.leaseToken,
+      success: false,
+      error: "فشل في إرسال الرسالة بعد عدة محاولات",
     }]);
   } finally {
     store.recoverExpiredNotificationClaims = originals.recover;

@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_VARIANTS,
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
+  BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES,
+  BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
   BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT,
   BOOKING_WHATSAPP_TEMPLATE_MAX_LENGTH,
   COMMISSION_PAYMENT_WINDOW_MS,
@@ -11,6 +13,7 @@ import {
   bookingConfirmationFactsSchema,
   bookingAdminCustomerWhatsAppTemplateVariantSchema,
   bookingAdminCustomerWhatsAppCooldownMinutesSchema,
+  bookingCustomerFollowUpLimitScopeSchema,
   bookingCustomerFollowUpMessageLimitSchema,
   bookingCustomerFollowUpDelayHoursSchema,
   bookingCustomerFollowUpDelayMinutesSchema,
@@ -278,6 +281,7 @@ test("only optional commission reminders on days three and four are configurable
     freePropertyContactDailyLimit: 3,
     customerFollowUpDelayMinutes: 1_440,
     customerFollowUpMessageLimit: 3,
+    customerFollowUpLimitScope: "customer",
     adminCustomerWhatsAppCooldownMinutes: 30,
     whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
     optionalCommissionReminderDays: [3, 4],
@@ -323,6 +327,45 @@ test("customer sequence length and admin WhatsApp cooldown accept their document
 
   assert.equal(BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT, 3);
   assert.equal(BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT, 30);
+});
+
+test("customer follow-up limit scope is closed and defaults legacy updates to customer-wide", () => {
+  assert.deepEqual(BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES, [
+    "customer",
+    "property",
+  ]);
+  assert.equal(BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT, "customer");
+  for (const scope of BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES) {
+    assert.equal(bookingCustomerFollowUpLimitScopeSchema.parse(scope), scope);
+  }
+  for (const invalid of ["booking", "global", "", null, undefined]) {
+    assert.equal(
+      bookingCustomerFollowUpLimitScopeSchema.safeParse(invalid).success,
+      false,
+    );
+  }
+
+  const common = {
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    customerFollowUpDelayMinutes: 60,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+  };
+  assert.equal(
+    bookingFreeWorkflowSettingsUpdateSchema.parse({ settings: common })
+      .settings.customerFollowUpLimitScope,
+    "customer",
+  );
+  assert.equal(
+    bookingFreeWorkflowSettingsUpdateSchema.parse({
+      settings: { ...common, customerFollowUpLimitScope: "property" },
+    }).settings.customerFollowUpLimitScope,
+    "property",
+  );
 });
 
 test("legacy whole-hour settings transform to canonical minutes without accepting fractions", () => {
@@ -375,6 +418,34 @@ test("legacy whole-hour settings transform to canonical minutes without acceptin
       false,
     );
   }
+});
+
+test("settings reject a follow-up sequence whose final step reaches or exceeds the response window", () => {
+  const common = {
+    customerDailyLimit: 3,
+    freeOwnerDailyLimit: 3,
+    freePropertyContactDailyLimit: 3,
+    customerFollowUpMessageLimit: 3,
+    adminCustomerWhatsAppCooldownMinutes: 30,
+    whatsappTemplates: DEFAULT_BOOKING_WHATSAPP_TEMPLATES,
+    optionalCommissionReminderDays: [3, 4],
+  };
+  assert.equal(bookingFreeWorkflowSettingsUpdateSchema.safeParse({
+    settings: { ...common, customerFollowUpDelayMinutes: 3_359 },
+  }).success, true);
+  assert.equal(bookingFreeWorkflowSettingsUpdateSchema.safeParse({
+    settings: { ...common, customerFollowUpDelayMinutes: 3_360 },
+  }).success, false);
+  assert.equal(bookingFreeWorkflowSettingsUpdateSchema.safeParse({
+    settings: { ...common, customerFollowUpDelayHours: 56 },
+  }).success, false);
+  assert.equal(bookingFreeWorkflowSettingsUpdateSchema.safeParse({
+    settings: {
+      ...common,
+      customerFollowUpDelayMinutes: 7_200,
+      customerFollowUpMessageLimit: 0,
+    },
+  }).success, true);
 });
 
 const confirmedAt = "2026-08-15T12:30:00.000Z";

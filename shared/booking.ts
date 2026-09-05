@@ -14,6 +14,14 @@ export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_MINUTES_DEFAULT = 1_440 as const;
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN = 1 as const;
 export const BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX = 120 as const;
 export const BOOKING_CUSTOMER_FOLLOW_UP_MESSAGE_LIMIT_DEFAULT = 3 as const;
+export const BOOKING_CUSTOMER_RESPONSE_WINDOW_MINUTES =
+  7 * 24 * 60;
+export const BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES = [
+  "customer",
+  "property",
+] as const;
+export const BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT =
+  "customer" as const;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT = 30 as const;
 export const BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_MAX =
   10_080 as const;
@@ -40,6 +48,13 @@ export type BookingFreeWorkflowLimits = z.infer<typeof bookingFreeWorkflowLimits
 export const bookingCustomerFollowUpMessageLimitSchema =
   bookingFreeWorkflowLimitSchema;
 
+export const bookingCustomerFollowUpLimitScopeSchema = z.enum(
+  BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPES,
+);
+export type BookingCustomerFollowUpLimitScope = z.infer<
+  typeof bookingCustomerFollowUpLimitScopeSchema
+>;
+
 export const bookingAdminCustomerWhatsAppCooldownMinutesSchema = z.number()
   .int()
   .min(0)
@@ -55,6 +70,14 @@ export const bookingCustomerFollowUpDelayHoursSchema = z.number()
   .int()
   .min(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MIN)
   .max(BOOKING_CUSTOMER_FOLLOW_UP_DELAY_HOURS_MAX);
+
+export function bookingCustomerFollowUpScheduleFitsResponseWindow(
+  delayMinutes: number,
+  messageLimit: number,
+): boolean {
+  return messageLimit === 0 ||
+    delayMinutes * messageLimit < BOOKING_CUSTOMER_RESPONSE_WINDOW_MINUTES;
+}
 
 export const BOOKING_WHATSAPP_TEMPLATE_PLACEHOLDERS = {
   admin_customer_technical_support: [],
@@ -308,6 +331,9 @@ export const bookingFreeWorkflowConfigurationSchema =
   bookingFreeWorkflowLimitsSchema.extend({
     customerFollowUpDelayMinutes: bookingCustomerFollowUpDelayMinutesSchema,
     customerFollowUpMessageLimit: bookingCustomerFollowUpMessageLimitSchema,
+    customerFollowUpLimitScope: bookingCustomerFollowUpLimitScopeSchema.default(
+      BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
+    ),
     adminCustomerWhatsAppCooldownMinutes:
       bookingAdminCustomerWhatsAppCooldownMinutesSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
@@ -326,6 +352,8 @@ const bookingFreeWorkflowSettingsCompatibleUpdateSchema =
     customerFollowUpDelayHours:
       bookingCustomerFollowUpDelayHoursSchema.optional(),
     customerFollowUpMessageLimit: bookingCustomerFollowUpMessageLimitSchema,
+    customerFollowUpLimitScope:
+      bookingCustomerFollowUpLimitScopeSchema.optional(),
     adminCustomerWhatsAppCooldownMinutes:
       bookingAdminCustomerWhatsAppCooldownMinutesSchema,
     whatsappTemplates: bookingWhatsAppTemplatesSchema,
@@ -354,6 +382,21 @@ const bookingFreeWorkflowSettingsCompatibleUpdateSchema =
           path: ["customerFollowUpDelayMinutes"],
         });
       }
+      const effectiveMinutes = minutes ??
+        (legacyHours === undefined ? undefined : legacyHours * 60);
+      if (
+        effectiveMinutes !== undefined &&
+        !bookingCustomerFollowUpScheduleFitsResponseWindow(
+          effectiveMinutes,
+          settings.customerFollowUpMessageLimit,
+        )
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Customer follow-up schedule exceeds the response window",
+          path: ["customerFollowUpMessageLimit"],
+        });
+      }
     })
     .transform((settings): BookingFreeWorkflowConfiguration => {
       const {
@@ -363,6 +406,9 @@ const bookingFreeWorkflowSettingsCompatibleUpdateSchema =
       } = settings;
       return {
         ...configuration,
+        customerFollowUpLimitScope:
+          configuration.customerFollowUpLimitScope ??
+          BOOKING_CUSTOMER_FOLLOW_UP_LIMIT_SCOPE_DEFAULT,
         customerFollowUpDelayMinutes:
           customerFollowUpDelayMinutes ?? customerFollowUpDelayHours! * 60,
       };

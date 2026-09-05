@@ -30,6 +30,7 @@ function settingsFixture(): BookingCommissionSettings {
     freeOwnerDailyLimit: 4,
     freePropertyContactDailyLimit: 5,
     customerFollowUpMessageLimit: 3,
+    customerFollowUpLimitScope: "customer",
     adminCustomerWhatsAppCooldownMinutes: 30,
     whatsappTemplates: validTemplates(),
     optionalCommissionReminderDays: [3, 4],
@@ -221,6 +222,7 @@ test("draft validation creates the strict full-replacement payload", () => {
   assert.deepEqual(validation.update, {
     customerFollowUpDelayMinutes: 2_175,
     customerFollowUpMessageLimit: 3,
+    customerFollowUpLimitScope: "customer",
     adminCustomerWhatsAppCooldownMinutes: 0,
     customerDailyLimit: 0,
     freeOwnerDailyLimit: 4,
@@ -256,6 +258,59 @@ test("workflow controls accept zero and bounds while rejecting fractions and ove
   assert.equal(validation.update, null);
 });
 
+test("workflow controls reject a sequence whose final step reaches the response window", () => {
+  const draft = bookingSettingsToDraft(settingsFixture());
+  draft.customerFollowUpDelayHours = "56";
+  draft.customerFollowUpDelayMinutes = "0";
+  draft.customerFollowUpMessageLimit = "3";
+  let validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.customerFollowUpDelayValid, true);
+  assert.equal(validation.workflowControlsValid, false);
+  assert.equal(validation.update, null);
+
+  draft.customerFollowUpDelayHours = "55";
+  draft.customerFollowUpDelayMinutes = "59";
+  validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.workflowControlsValid, true);
+  assert.notEqual(validation.update, null);
+
+  draft.customerFollowUpDelayHours = "120";
+  draft.customerFollowUpDelayMinutes = "0";
+  draft.customerFollowUpMessageLimit = "0";
+  validation = validateBookingSettingsDraft(draft, 2_000);
+  assert.equal(validation.workflowControlsValid, true);
+  assert.notEqual(validation.update, null);
+});
+
+test("follow-up scope supports customer-wide and per-property limits with a safe legacy default", () => {
+  const settings = settingsFixture();
+  const customerDraft = bookingSettingsToDraft(settings);
+  assert.equal(customerDraft.customerFollowUpLimitScope, "customer");
+  assert.equal(
+    validateBookingSettingsDraft(customerDraft, 2_000).update
+      ?.customerFollowUpLimitScope,
+    "customer",
+  );
+
+  const propertyDraft = {
+    ...customerDraft,
+    customerFollowUpLimitScope: "property" as const,
+  };
+  const propertyUpdate = validateBookingSettingsDraft(
+    propertyDraft,
+    2_000,
+  ).update;
+  assert.equal(propertyUpdate?.customerFollowUpLimitScope, "property");
+  assert.equal(bookingSettingsUpdateEquals(propertyUpdate!, settings), false);
+
+  const legacy = { ...settings };
+  delete legacy.customerFollowUpLimitScope;
+  assert.equal(
+    bookingSettingsToDraft(legacy).customerFollowUpLimitScope,
+    "customer",
+  );
+});
+
 test("follow-up delay accepts Arabic-digit hour and minute components within policy bounds", () => {
   assert.equal(parseCustomerFollowUpDelayHours("٢٤", 120), 24);
   assert.equal(parseCustomerFollowUpDelayHours("۱۲۰", 120), 120);
@@ -277,7 +332,7 @@ test("follow-up delay accepts Arabic-digit hour and minute components within pol
   assert.equal(validation.update, null);
 });
 
-test("settings equality includes delay, sequence length, cooldown, and templates", () => {
+test("settings equality includes delay, sequence length, scope, cooldown, and templates", () => {
   const settings = settingsFixture();
   const validation = validateBookingSettingsDraft(
     bookingSettingsToDraft(settings),
@@ -297,6 +352,13 @@ test("settings equality includes delay, sequence length, cooldown, and templates
   assert.equal(
     bookingSettingsUpdateEquals(
       { ...validation.update!, customerFollowUpMessageLimit: 4 },
+      settings,
+    ),
+    false,
+  );
+  assert.equal(
+    bookingSettingsUpdateEquals(
+      { ...validation.update!, customerFollowUpLimitScope: "property" },
       settings,
     ),
     false,
