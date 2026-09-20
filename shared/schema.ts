@@ -196,6 +196,10 @@ export const requestSchema = z.object({
   requestCode: z.string(), // كود قصير
   timestamp: z.string(),
   clientPhone: z.string().optional(),
+  // Stable server-only account subject. Raw phone matches are intentionally
+  // insufficient for attaching legacy requests to a customer account.
+  customerSubject: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  actorType: z.enum(["owner", "admin", "anonymous"]).optional(),
   ipAddress: z.string(), // IP العميل
   deviceType: z.enum(['mobile', 'desktop', 'tablet']).default('desktop'), // نوع الجهاز
   dayOfWeek: z.string(), // يوم الأسبوع (الجمعة، السبت، إلخ)

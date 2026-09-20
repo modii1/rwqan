@@ -20,6 +20,7 @@ import propertiesRoutes from "./properties";
 import publicRoutes from "./public";
 import trackingRoutes from "./tracking";
 import contactIdentityRoutes from "./contactIdentity";
+import customerRoutes from "./customer";
 import webhookRoutes from "./webhooks";
 import bookingRoutes from "./bookings";
 import { requireAdmin, requireSameOrigin } from "./middleware";
@@ -82,6 +83,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Remembered public-client contact phone (separate from owner/admin auth)
   app.use(contactIdentityRoutes);
+
+  // Verified customer account, profile, favorites, and complete contact history.
+  app.use(customerRoutes);
 
   // Tracking routes (smart requests, pageview)
   app.use(trackingRoutes);

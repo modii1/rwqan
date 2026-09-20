@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import cookieParser from "cookie-parser";
 import express from "express";
+import { CUSTOMER_SESSION_REVISION_HEADER } from "../../shared/customer";
 import adminBookingRoutes from "../routes/admin/bookings";
 import bookingRoutes from "../routes/bookings";
 import { bookingCommissionService } from "./BookingCommissionService";
@@ -252,6 +253,7 @@ async function withBookingReadServer(
 }
 
 test("follow-up, customer profile, and admin dashboard reads never dispatch or mutate outbox jobs", async () => {
+  const customerSessionRevision = "c".repeat(64);
   const previousSecret = process.env.SESSION_SECRET;
   const originalResolveContactIdentity = contactIdentityService.resolve;
   const store = bookingCommissionStore as any;
@@ -294,7 +296,7 @@ test("follow-up, customer profile, and admin dashboard reads never dispatch or m
     (contactIdentityService as any).resolve = async (token: unknown) => token === "verified-profile-token"
       ? {
           clientPhone: booking.customerPhone,
-          sessionId: "verified-profile-session",
+          sessionId: customerSessionRevision,
           visitorId: "verified-profile-visitor",
           verifiedAt: now.toISOString(),
           expiresAt: new Date(now.getTime() + 60_000).toISOString(),
@@ -333,6 +335,7 @@ test("follow-up, customer profile, and admin dashboard reads never dispatch or m
         const profileResponse = await fetch(`${baseUrl}/api/customer/bookings`, {
           headers: {
             cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=verified-profile-token`,
+            [CUSTOMER_SESSION_REVISION_HEADER]: customerSessionRevision,
           },
         });
         assert.equal(profileResponse.status, 200);

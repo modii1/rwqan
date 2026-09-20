@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { requireAdmin, requireSameOrigin } from "../middleware";
 import { storage } from "../../storage";
+import { firebaseService } from "../../firebaseService";
 import { propertyService, subscriptionService, paymentService, discountService, analyticsService } from "../../services";
 import type { Backup, CodeBackup } from "../../../shared/schema";
 
@@ -100,6 +101,18 @@ router.post("/api/backups", async (req, res) => {
       backupData.requests = await analyticsService.getAllRequests();
       filesCount += backupData.requests.length;
       sizeInMB += JSON.stringify(backupData.requests).length / (1024 * 1024);
+    }
+
+    if (dataTypes.includes('customer_accounts')) {
+      backupData.customer_accounts = await firebaseService.getCustomerAccountsForBackup();
+      filesCount += backupData.customer_accounts.length;
+      sizeInMB += JSON.stringify(backupData.customer_accounts).length / (1024 * 1024);
+    }
+
+    if (dataTypes.includes('booking_followups')) {
+      backupData.booking_followups = await firebaseService.getBookingFollowUpsForBackup();
+      filesCount += backupData.booking_followups.length;
+      sizeInMB += JSON.stringify(backupData.booking_followups).length / (1024 * 1024);
     }
 
     // Create backup record

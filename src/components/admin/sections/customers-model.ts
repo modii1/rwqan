@@ -1,5 +1,28 @@
 import type { BookingDisplayRow } from "@/components/booking/booking-display";
 
+export interface AdminCustomerAccountRow {
+  id: string;
+  fullName: string;
+  email: string | null;
+  customerPhoneMasked: string | null;
+  favoritePropertyNumbers: string[];
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string;
+  contactCount: number;
+  confirmedBookingCount: number;
+  latestContactAt: string | null;
+  contacts: Array<BookingDisplayRow & { bookingWorkflowId?: string | null }>;
+}
+
+export interface AdminCustomerAccountSummary {
+  total: number;
+  withProfile: number;
+  favoriteProperties: number;
+  verifiedContacts: number;
+  confirmedBookings: number;
+}
+
 export type CustomerContactStatusFilter =
   | "all"
   | "contact_only"
@@ -72,4 +95,32 @@ export function summarizeCustomerContacts(rows: BookingDisplayRow[]) {
     declined: statuses.filter((status) => status === "declined").length,
     expired: statuses.filter((status) => status === "expired").length,
   };
+}
+
+export function filterCustomerAccounts(
+  rows: AdminCustomerAccountRow[],
+  search: string,
+): AdminCustomerAccountRow[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  return rows
+    .filter((row) => {
+      if (!normalizedSearch) return true;
+      return [
+        row.fullName,
+        row.email,
+        row.customerPhoneMasked,
+        ...row.favoritePropertyNumbers,
+        ...row.contacts.flatMap((contact) => [
+          contact.propertyNumber,
+          contact.propertyName,
+          contact.requestCode,
+        ]),
+      ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+    })
+    .sort((left, right) => {
+      const rightAt = Date.parse(right.lastLoginAt);
+      const leftAt = Date.parse(left.lastLoginAt);
+      return (Number.isFinite(rightAt) ? rightAt : 0)
+        - (Number.isFinite(leftAt) ? leftAt : 0);
+    });
 }

@@ -15,9 +15,22 @@ test("production accepts complete security configuration", () => {
       NODE_ENV: "production",
       ADMIN_CODE: "configured-code",
       ADMIN_PASSWORD: "configured-password",
-      SESSION_SECRET: "configured-session-secret",
+      SESSION_SECRET: "configured-session-secret-value-123456789",
       PAYMOB_HMAC_SECRET: "configured-paymob-hmac",
     }),
+  );
+});
+
+test("production rejects a session secret shorter than customer workflows require", () => {
+  assert.throws(
+    () => assertProductionSecurityEnvironment({
+      NODE_ENV: "production",
+      ADMIN_CODE: "configured-code",
+      ADMIN_PASSWORD: "configured-password",
+      SESSION_SECRET: "too-short",
+      PAYMOB_HMAC_SECRET: "configured-paymob-hmac",
+    }),
+    /SESSION_SECRET must be at least 32 bytes/,
   );
 });
 

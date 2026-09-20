@@ -26,6 +26,7 @@ import {
   BOOKING_CUSTOMER_SESSION_COOKIE,
   bookingCommissionService,
 } from "../services/BookingCommissionService";
+import { createCustomerSubject } from "../utils/customerSubject";
 
 const router = Router();
 
@@ -128,7 +129,11 @@ async function recordContactEvent(
 router.post("/api/requests/smart", async (req, res) => {
   let contactEventBase: ContactEventBase | null = null;
   let acceptedEventRecorded = false;
-  let responseContactIdentity: { kind: "client"; maskedPhone: string } | undefined;
+  let responseContactIdentity: {
+    kind: "client";
+    maskedPhone: string;
+    sessionRevision: string;
+  } | undefined;
   try {
     if (!isSameOriginRequest(req)) {
       return res.status(403).json({ code: "CROSS_ORIGIN_REQUEST", error: "الطلب غير مسموح" });
@@ -193,6 +198,8 @@ router.post("/api/requests/smart", async (req, res) => {
     };
     let clientPhone: string | null = null;
     let contactVisitorId: string | null = null;
+    let customerSubject: string | null = null;
+    let customerSessionRevision: string | null = null;
 
     if (actor === "owner") {
       clientPhone = await getOwnerContactPhone(String(req.session.propertyNumber));
@@ -252,6 +259,8 @@ router.post("/api/requests/smart", async (req, res) => {
         }
         clientPhone = rememberedIdentity.clientPhone;
         contactVisitorId = rememberedIdentity.visitorId;
+        customerSubject = createCustomerSubject(rememberedIdentity.clientPhone);
+        customerSessionRevision = rememberedIdentity.sessionId;
       }
 
       if (!clientPhone) {
@@ -270,8 +279,12 @@ router.post("/api/requests/smart", async (req, res) => {
     const resolvedClientPhone = clientPhone;
     if (actor === "anonymous" && resolvedClientPhone) {
       const maskedPhone = maskContactPhone(resolvedClientPhone);
-      if (maskedPhone) {
-        responseContactIdentity = { kind: "client", maskedPhone };
+      if (maskedPhone && customerSessionRevision) {
+        responseContactIdentity = {
+          kind: "client",
+          maskedPhone,
+          sessionRevision: customerSessionRevision,
+        };
       }
     }
 
@@ -396,6 +409,8 @@ router.post("/api/requests/smart", async (req, res) => {
         requestCode,
         timestamp: String(nowTimestamp), // CRITICAL: حفظ epoch milliseconds فقط
         clientPhone,
+        ...(customerSubject ? { customerSubject } : {}),
+        actorType: actor,
         ipAddress,
         dayOfWeek,
         hourOfDay,

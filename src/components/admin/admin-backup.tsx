@@ -46,6 +46,9 @@ export default function AdminBackup() {
     "properties",
     "subscriptions",
     "packages",
+    "requests",
+    "customer_accounts",
+    "booking_followups",
   ]);
 
   // Fetch backups
@@ -217,6 +220,8 @@ export default function AdminBackup() {
                   { id: "payments", label: "المدفوعات" },
                   { id: "discounts", label: "أكواد الخصم" },
                   { id: "requests", label: "الطلبات" },
+                  { id: "customer_accounts", label: "حسابات العملاء" },
+                  { id: "booking_followups", label: "متابعات الحجوزات" },
                 ].map((type) => (
                   <div key={type.id} className="flex items-center gap-2">
                     <Checkbox

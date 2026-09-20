@@ -58,6 +58,7 @@ const bookingErrorMessages: Record<string, string> = {
   ADMIN_CUSTOMER_WHATSAPP_TEMPLATE_UNAVAILABLE:
     "لم تعد هذه الرسالة مناسبة لحالة الحجز الحالية.",
   NOTIFICATION_RESEND_INCONSISTENT: "تعذر مطابقة سجل إعادة الإرسال.",
+  CUSTOMER_SESSION_CHANGED: "تغيّرت جلسة العميل. حدّث الصفحة ثم حاول مرة أخرى.",
 };
 
 export async function bookingApiRequest<T>(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CalendarCheck2, ChevronDown, LogIn, LogOut, Pencil, UserRoundCheck } from "lucide-react";
+import { CalendarCheck2, ChevronDown, Heart, LogIn, LogOut, Pencil, Settings2, UserRoundCheck } from "lucide-react";
 import Link from "next/link";
 import type { ContactIdentity } from "@/hooks/use-contact-identity";
 import { useDeleteContactIdentity } from "@/hooks/use-contact-identity";
@@ -19,13 +19,19 @@ import { ContactPhoneDialog } from "./contact-phone-dialog";
 
 interface ContactIdentityMenuProps {
   identity: ContactIdentity;
+  customerName?: string | null;
 }
 
-export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
+export function ContactIdentityMenu({
+  identity,
+  customerName,
+}: ContactIdentityMenuProps) {
   const { toast } = useToast();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [isChangeDialogOpen, setIsChangeDialogOpen] = useState(false);
   const deleteIdentity = useDeleteContactIdentity();
+  const displayName = customerName?.trim() || null;
+  const customerInitial = displayName?.charAt(0) || null;
 
   const handleChangePhone = async (_clientPhone: string) => {
     setIsChangeDialogOpen(false);
@@ -59,33 +65,58 @@ export function ContactIdentityMenu({ identity }: ContactIdentityMenuProps) {
             ref={triggerRef}
             type="button"
             variant="outline"
-            title="رقم التواصل محفوظ"
-            aria-label="إدارة رقم التواصل المحفوظ"
-            className="h-10 w-10 rounded-xl border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 md:w-auto md:px-3"
+            title={displayName || "رقم التواصل محفوظ"}
+            aria-label={displayName ? `إدارة حساب ${displayName}` : "إدارة رقم التواصل المحفوظ"}
+            className="h-10 w-10 rounded-xl border-emerald-200 bg-emerald-50 px-0 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 md:w-auto md:max-w-52 md:px-3"
             data-testid="button-contact-identity"
           >
-            <UserRoundCheck className="h-5 w-5" />
-            <span className="hidden whitespace-nowrap font-semibold md:inline" dir="ltr">
-              {identity.maskedPhone || "رقم محفوظ"}
+            {customerInitial ? (
+              <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-emerald-700 text-sm font-bold text-white" aria-hidden="true">
+                {customerInitial}
+              </span>
+            ) : (
+              <UserRoundCheck className="h-5 w-5 flex-none" />
+            )}
+            <span
+              className="hidden min-w-0 truncate whitespace-nowrap font-semibold md:inline"
+              dir={displayName ? "rtl" : "ltr"}
+            >
+              {displayName || identity.maskedPhone || "رقم محفوظ"}
             </span>
-            <ChevronDown className="hidden h-4 w-4 md:block" />
+            <ChevronDown className="hidden h-4 w-4 flex-none md:block" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
           <DropdownMenuLabel className="space-y-1 text-right">
-            <span className="block text-sm font-semibold">رقم التواصل محفوظ</span>
+            <span className="block truncate text-sm font-semibold">
+              {displayName || "رقم التواصل محفوظ"}
+            </span>
             <span className="block text-xs font-normal text-muted-foreground" dir="ltr">
               {identity.maskedPhone || "رقم محفوظ"}
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           {identity.kind === "client" && (
-            <DropdownMenuItem asChild>
-              <Link href="/profile">
-                <CalendarCheck2 className="h-4 w-4" />
-                حجوزاتي
-              </Link>
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem asChild>
+                <Link href="/profile">
+                  <CalendarCheck2 className="h-4 w-4" />
+                  حجوزاتي
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/profile?section=favorites">
+                  <Heart className="h-4 w-4" />
+                  المفضلة
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/profile?section=account">
+                  <Settings2 className="h-4 w-4" />
+                  بيانات الحساب
+                </Link>
+              </DropdownMenuItem>
+            </>
           )}
           <DropdownMenuItem onSelect={() => setIsChangeDialogOpen(true)}>
             <Pencil className="h-4 w-4" />

@@ -20,4 +20,10 @@ export function assertProductionSecurityEnvironment(
       `Missing required production security environment variables: ${missing.join(", ")}`,
     );
   }
+
+  if (Buffer.byteLength(environment.SESSION_SECRET!, "utf8") < 32) {
+    throw new Error(
+      "SESSION_SECRET must be at least 32 bytes in production",
+    );
+  }
 }

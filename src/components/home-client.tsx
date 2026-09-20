@@ -47,6 +47,7 @@ import {
     getPrimaryPropertyPrice,
     getPrimaryPropertyPriceDisplay,
 } from "@shared/propertyPrice";
+import { PropertyFavoriteButton } from "@/components/customer/property-favorite-button";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -863,6 +864,11 @@ function PropertyCard({ property, isPremium, onNext, onPrev, imgIdx, onClick, pr
                     onError={(e) => {
                         (e.target as HTMLImageElement).src = PROPERTY_IMAGE_PLACEHOLDER;
                     }}
+                />
+
+                <PropertyFavoriteButton
+                    propertyNumber={property.propertyNumber}
+                    className="absolute left-2 top-2 z-20"
                 />
 
                 {!isPremium && property.createdAt && (Date.now() - new Date(property.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000 && (

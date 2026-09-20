@@ -5,12 +5,17 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
+import {
+  CUSTOMER_HISTORY_QUERY_KEY,
+  CUSTOMER_PROFILE_QUERY_KEY,
+} from "@/hooks/use-customer-account";
 
 export type ContactIdentityKind = "none" | "client" | "owner" | "admin";
 
 export interface ContactIdentity {
   kind: ContactIdentityKind;
   maskedPhone: string | null;
+  sessionRevision?: string;
 }
 
 export interface ContactIdentityChallenge {
@@ -38,6 +43,32 @@ export const EMPTY_CONTACT_IDENTITY: ContactIdentity = {
 };
 
 export const CONTACT_IDENTITY_HINT_STORAGE_KEY = "rwqan-contact-identity-hint";
+
+export function hasServerResolvedContactIdentity(query: {
+  isSuccess: boolean;
+  dataUpdatedAt: number;
+}): boolean {
+  return query.isSuccess && query.dataUpdatedAt > 0;
+}
+
+export function getCustomerSessionCacheScope(query: {
+  isSuccess: boolean;
+  dataUpdatedAt: number;
+  data?: ContactIdentity;
+}): string | null {
+  if (!hasServerResolvedContactIdentity(query)) {
+    return null;
+  }
+  return customerSessionCacheScopeForIdentity(query.data);
+}
+
+export function customerSessionCacheScopeForIdentity(
+  identity: ContactIdentity | undefined,
+): string | null {
+  if (identity?.kind !== "client") return null;
+  const revision = String(identity.sessionRevision || "").trim();
+  return /^[a-f0-9]{64}$/.test(revision) ? `session:${revision}` : null;
+}
 
 export function parseContactIdentityHint(value: string | null): ContactIdentity | undefined {
   if (!value) return undefined;
@@ -114,31 +145,66 @@ function readSerializedContactIdentityHint(): string | null | undefined {
   }
 }
 
-function readContactIdentityHint(): ContactIdentity | undefined {
-  return parseContactIdentityHint(readSerializedContactIdentityHint() ?? null);
-}
-
 export async function commitContactIdentityCache(
   queryClient: QueryClient,
   identity: ContactIdentity,
 ): Promise<void> {
   // A focus-triggered GET may start while POST/DELETE is pending. Cancel it
   // again at commit time so an older response cannot overwrite the mutation.
-  await queryClient.cancelQueries({
+  const identityCancellation = queryClient.cancelQueries({
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
     exact: true,
   });
-  await queryClient.cancelQueries({
-    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-    exact: true,
-  });
-  await queryClient.resetQueries({
-    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-    exact: true,
-  });
   queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
+  const customerQueriesReset = resetCustomerSessionQueries(queryClient);
   syncContactIdentityHint(identity);
   broadcastCustomerBookingSessionChange();
+  await Promise.all([identityCancellation, customerQueriesReset]);
+}
+
+export async function resetCustomerSessionQueries(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.cancelQueries({
+      queryKey: CUSTOMER_PROFILE_QUERY_KEY,
+      exact: false,
+    }),
+    queryClient.cancelQueries({
+      queryKey: CUSTOMER_HISTORY_QUERY_KEY,
+      exact: false,
+    }),
+    queryClient.cancelQueries({
+      queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+      exact: true,
+    }),
+  ]);
+  await Promise.all([
+    queryClient.resetQueries({
+      queryKey: CUSTOMER_PROFILE_QUERY_KEY,
+      exact: false,
+    }),
+    queryClient.resetQueries({
+      queryKey: CUSTOMER_HISTORY_QUERY_KEY,
+      exact: false,
+    }),
+    queryClient.resetQueries({
+      queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+      exact: true,
+    }),
+  ]);
+}
+
+export function isCurrentContactIdentityHintEvent(
+  serializedHint: string | null,
+  storage?: Pick<Storage, "getItem">,
+): boolean {
+  if (!storage) return true;
+  try {
+    return storage.getItem(CONTACT_IDENTITY_HINT_STORAGE_KEY) === serializedHint;
+  } catch {
+    return true;
+  }
 }
 
 export async function commitContactIdentityStorageHint(
@@ -146,19 +212,73 @@ export async function commitContactIdentityStorageHint(
   serializedHint: string | null,
 ): Promise<void> {
   const identity = parseContactIdentityHint(serializedHint) || EMPTY_CONTACT_IDENTITY;
-  await queryClient.cancelQueries({
+  const identityCancellation = queryClient.cancelQueries({
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
     exact: true,
   });
-  await queryClient.cancelQueries({
-    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
+  queryClient.setQueryData(
+    CONTACT_IDENTITY_QUERY_KEY,
+    identity,
+    { updatedAt: 0 },
+  );
+  const customerQueriesReset = resetCustomerSessionQueries(queryClient);
+  await identityCancellation;
+  await Promise.all([
+    customerQueriesReset,
+    queryClient.invalidateQueries({
+      queryKey: CONTACT_IDENTITY_QUERY_KEY,
+      exact: true,
+    }),
+  ]);
+}
+
+export async function handleCustomerSessionStorageChange(
+  queryClient: QueryClient,
+  event: Pick<StorageEvent, "key" | "newValue">,
+): Promise<boolean> {
+  if (event.key === CONTACT_IDENTITY_HINT_STORAGE_KEY) {
+    let storage: Pick<Storage, "getItem"> | undefined;
+    if (typeof window !== "undefined") {
+      try {
+        storage = window.localStorage;
+      } catch {
+        // Storage can be unavailable in private/restricted browser contexts.
+      }
+    }
+    if (!isCurrentContactIdentityHintEvent(event.newValue, storage)) {
+      return true;
+    }
+    await commitContactIdentityStorageHint(queryClient, event.newValue);
+    return true;
+  }
+  if (event.key !== CUSTOMER_BOOKING_SESSION_REVISION_STORAGE_KEY) {
+    return false;
+  }
+
+  const identityCancellation = queryClient.cancelQueries({
+    queryKey: CONTACT_IDENTITY_QUERY_KEY,
     exact: true,
   });
-  await queryClient.resetQueries({
-    queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-    exact: true,
-  });
-  queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, identity);
+  const currentIdentity = queryClient.getQueryData<ContactIdentity>(
+    CONTACT_IDENTITY_QUERY_KEY,
+  );
+  if (currentIdentity) {
+    queryClient.setQueryData(
+      CONTACT_IDENTITY_QUERY_KEY,
+      currentIdentity,
+      { updatedAt: 0 },
+    );
+  }
+  const customerQueriesReset = resetCustomerSessionQueries(queryClient);
+  await identityCancellation;
+  await Promise.all([
+    customerQueriesReset,
+    queryClient.invalidateQueries({
+      queryKey: CONTACT_IDENTITY_QUERY_KEY,
+      exact: true,
+    }),
+  ]);
+  return true;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -185,15 +305,23 @@ function parseIdentity(payload: unknown): ContactIdentity {
     return EMPTY_CONTACT_IDENTITY;
   }
 
+  const sessionRevision = typeof record.sessionRevision === "string"
+    ? record.sessionRevision.trim()
+    : "";
   return {
     kind,
     maskedPhone: typeof record.maskedPhone === "string" ? record.maskedPhone : null,
+    ...(sessionRevision ? { sessionRevision } : {}),
   };
 }
 
 function parseClientIdentity(payload: unknown, fallback: string): ContactIdentity {
   const identity = parseIdentity(payload);
-  if (identity.kind !== "client" || !identity.maskedPhone) {
+  if (
+    identity.kind !== "client"
+    || !identity.maskedPhone
+    || !customerSessionCacheScopeForIdentity(identity)
+  ) {
     throw new Error(fallback);
   }
   return identity;
@@ -280,7 +408,7 @@ export async function verifyContactIdentityCode(
   return parseClientIdentity(payload, "تعذر تأكيد رقم التواصل");
 }
 
-async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdentity> {
+export async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdentity> {
   const hintAtRequestStart = readSerializedContactIdentityHint();
   const response = await fetch("/api/contact-identity", {
     credentials: "include",
@@ -294,6 +422,9 @@ async function fetchContactIdentity(signal?: AbortSignal): Promise<ContactIdenti
   }
 
   const identity = parseIdentity(payload);
+  if (identity.kind === "client" && !customerSessionCacheScopeForIdentity(identity)) {
+    throw new Error("تعذر التحقق من رقم التواصل المحفوظ");
+  }
   if (hintAtRequestStart !== undefined && typeof window !== "undefined") {
     try {
       syncContactIdentityHintIfUnchanged(
@@ -325,16 +456,7 @@ export function useContactIdentityQuery() {
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === CONTACT_IDENTITY_HINT_STORAGE_KEY) {
-        void commitContactIdentityStorageHint(queryClient, event.newValue);
-        return;
-      }
-      if (event.key === CUSTOMER_BOOKING_SESSION_REVISION_STORAGE_KEY) {
-        void queryClient.resetQueries({
-          queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-          exact: true,
-        });
-      }
+      void handleCustomerSessionStorageChange(queryClient, event);
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -343,8 +465,6 @@ export function useContactIdentityQuery() {
   return useQuery<ContactIdentity>({
     queryKey: CONTACT_IDENTITY_QUERY_KEY,
     queryFn: ({ signal }) => fetchContactIdentity(signal),
-    initialData: readContactIdentityHint,
-    initialDataUpdatedAt: 0,
     staleTime: 1000 * 60,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
@@ -364,10 +484,7 @@ export function useRequestContactIdentityCode() {
         return;
       }
 
-      await queryClient.resetQueries({
-        queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-        exact: true,
-      });
+      await resetCustomerSessionQueries(queryClient);
       await queryClient.invalidateQueries({
         queryKey: CONTACT_IDENTITY_QUERY_KEY,
         exact: true,

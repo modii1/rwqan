@@ -6,6 +6,11 @@ import {
     notificationSettingsSchema,
 } from "../shared/schema";
 import {
+    customerAccountSchema,
+    type CustomerAccount,
+    type CustomerProfileUpdate,
+} from "../shared/customer";
+import {
     normalizeStoredOwnerSubscriptionWhatsAppTemplates,
 } from "../shared/subscription-whatsapp";
 import type {
@@ -4267,6 +4272,161 @@ export class FirebaseService {
     async getContactEvents(): Promise<ContactEvent[]> {
         const snapshot = await this.db.collection("contact_events").orderBy("timestamp", "desc").get();
         return snapshot.docs.map((doc) => doc.data() as ContactEvent);
+    }
+
+    // ================== Customer Accounts ==================
+
+    async getCustomerAccount(id: string): Promise<CustomerAccount | null> {
+        const snapshot = await this.db.collection("customer_accounts").doc(id).get();
+        if (!snapshot.exists) return null;
+        return customerAccountSchema.parse(snapshot.data());
+    }
+
+    async getCustomerAccounts(): Promise<CustomerAccount[]> {
+        const snapshot = await this.db.collection("customer_accounts").get();
+        return snapshot.docs.map((document) => customerAccountSchema.parse({
+            ...document.data(),
+            id: document.data().id || document.id,
+        }));
+    }
+
+    async getCustomerAccountsForBackup(): Promise<CustomerAccount[]> {
+        const snapshot = await this.db.collection("customer_accounts").get();
+        return snapshot.docs.map((document) => ({
+            ...document.data(),
+            id: document.data().id || document.id,
+        } as CustomerAccount));
+    }
+
+    async getBookingFollowUpsForBackup(): Promise<Array<Record<string, unknown>>> {
+        const snapshot = await this.db.collection("booking_followups").get();
+        return snapshot.docs.map((document) => ({
+            ...document.data(),
+            id: document.data().id || document.id,
+        }));
+    }
+
+    async ensureCustomerAccount(
+        account: CustomerAccount,
+        touchLastLogin: boolean,
+    ): Promise<CustomerAccount> {
+        const proposed = customerAccountSchema.parse(account);
+        const ref = this.db.collection("customer_accounts").doc(proposed.id);
+
+        return this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) {
+                transaction.create(ref, proposed);
+                return proposed;
+            }
+
+            const current = customerAccountSchema.parse(snapshot.data());
+            if (current.id !== proposed.id || current.phone !== proposed.phone) {
+                throw new Error("Customer account identity conflict");
+            }
+            if (!touchLastLogin) return current;
+
+            const lastLoginAt = Date.parse(current.lastLoginAt) >=
+                    Date.parse(proposed.lastLoginAt)
+                ? current.lastLoginAt
+                : proposed.lastLoginAt;
+            if (lastLoginAt === current.lastLoginAt) return current;
+
+            const next = customerAccountSchema.parse({
+                ...current,
+                lastLoginAt,
+            });
+            transaction.update(ref, { lastLoginAt: next.lastLoginAt });
+            return next;
+        });
+    }
+
+    async updateCustomerAccountProfile(
+        id: string,
+        updates: CustomerProfileUpdate & { updatedAt: string },
+    ): Promise<CustomerAccount> {
+        const ref = this.db.collection("customer_accounts").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) throw new Error("Customer account not found");
+
+            const current = customerAccountSchema.parse(snapshot.data());
+            const next = customerAccountSchema.parse({
+                ...current,
+                ...updates,
+            });
+            transaction.update(ref, {
+                ...(updates.fullName !== undefined
+                    ? { fullName: next.fullName }
+                    : {}),
+                ...(updates.email !== undefined
+                    ? { email: next.email }
+                    : {}),
+                updatedAt: next.updatedAt,
+            });
+            return next;
+        });
+    }
+
+    async setCustomerFavorite(
+        id: string,
+        propertyNumber: string,
+        selected: boolean,
+        updatedAt: string,
+    ): Promise<CustomerAccount> {
+        const ref = this.db.collection("customer_accounts").doc(id);
+        return this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) throw new Error("Customer account not found");
+
+            const current = customerAccountSchema.parse(snapshot.data());
+            const favorites = new Set(current.favoritePropertyNumbers);
+            if (selected) favorites.add(propertyNumber);
+            else favorites.delete(propertyNumber);
+
+            const nextPropertyNumbers = [...favorites];
+            if (
+                nextPropertyNumbers.length === current.favoritePropertyNumbers.length &&
+                nextPropertyNumbers.every(
+                    (property, index) => property === current.favoritePropertyNumbers[index],
+                )
+            ) {
+                return current;
+            }
+
+            const next = customerAccountSchema.parse({
+                ...current,
+                favoritePropertyNumbers: nextPropertyNumbers,
+                updatedAt,
+            });
+            transaction.update(ref, {
+                favoritePropertyNumbers: next.favoritePropertyNumbers,
+                updatedAt: next.updatedAt,
+            });
+            return next;
+        });
+    }
+
+    async getCustomerRequests(
+        customerSubject: string,
+    ): Promise<Request[]> {
+        const requests = this.db.collection("requests");
+        const subjectSnapshot = await requests
+            .where("customerSubject", "==", customerSubject)
+            .get();
+
+        const byId = new Map<string, Request>();
+
+        for (const document of subjectSnapshot.docs) {
+            const request = document.data() as Request;
+            if (request.customerSubject !== customerSubject) continue;
+            if (request.actorType && request.actorType !== "anonymous") continue;
+            byId.set(request.id || document.id, request);
+        }
+
+        return [...byId.values()].sort(
+            (left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp),
+        );
     }
 
     // ================== Remembered Contact Identity Sessions ==================

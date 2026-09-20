@@ -1,7 +1,12 @@
 "use client";
 
 import { useSessionQuery } from "@/hooks/use-session";
-import { useContactIdentityQuery } from "@/hooks/use-contact-identity";
+import {
+    getCustomerSessionCacheScope,
+    hasServerResolvedContactIdentity,
+    useContactIdentityQuery,
+} from "@/hooks/use-contact-identity";
+import { useCustomerProfileQuery } from "@/hooks/use-customer-account";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Home, Lightbulb, Loader2, LogIn, LogOut, LayoutDashboard, Shield, BookOpen } from "lucide-react";
@@ -14,7 +19,19 @@ export function Header() {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { data: session } = useSessionQuery();
-    const { data: contactIdentity, isPending: isContactIdentityPending } = useContactIdentityQuery();
+    const contactIdentityQuery = useContactIdentityQuery();
+    const hasResolvedContactIdentity = hasServerResolvedContactIdentity(contactIdentityQuery);
+    const contactIdentity = hasResolvedContactIdentity
+        ? contactIdentityQuery.data
+        : undefined;
+    const customerSessionScope = getCustomerSessionCacheScope(contactIdentityQuery);
+    const customerProfileQuery = useCustomerProfileQuery(
+        contactIdentity?.kind === "client" && Boolean(customerSessionScope),
+        customerSessionScope,
+    );
+    const customerName = customerProfileQuery.data?.fullName.trim() || null;
+    const isContactIdentityPending = !hasResolvedContactIdentity
+        && (contactIdentityQuery.isPending || contactIdentityQuery.isFetching);
 
     // التحقق من الأدمن
     const { data: adminSession } = useQuery<{ isAdmin: boolean }>({
@@ -132,12 +149,15 @@ export function Header() {
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                         </div>
                     ) : accountMode === "client" && contactIdentity ? (
-                        <ContactIdentityMenu identity={contactIdentity} />
+                        <ContactIdentityMenu
+                            identity={contactIdentity}
+                            customerName={customerName}
+                        />
                     ) : (
                         <Button
                             variant={isAuthenticated ? "outline" : "default"}
                             size="icon"
-                            onClick={isAuthenticated ? handleLogout : () => router.push("/owner/login")}
+                            onClick={isAuthenticated ? handleLogout : () => router.push("/customer/login")}
                             title={isAuthenticated ? "تسجيل الخروج" : "تسجيل الدخول"}
                             className={`transition-all duration-200 rounded-xl h-10 w-10 ${!isAuthenticated ? 'gradient-golden hover:shadow-golden' : 'border-primary/30 hover:bg-primary/5'}`}
                         >

@@ -112,6 +112,10 @@ class FakeQueryReference {
       this.database.query(this.collectionName, this.field, this.value),
     );
   }
+
+  async get(): Promise<FakeQuerySnapshot> {
+    return this.snapshot();
+  }
 }
 
 class FakeQuerySnapshot {
@@ -264,6 +268,115 @@ function actionablePayment(
     ...overrides,
   };
 }
+
+test("customer request history never trusts legacy raw-phone matches", async () => {
+  const database = new FakeFirestore();
+  const customerSubject = "a".repeat(64);
+  const otherSubject = "b".repeat(64);
+  const clientPhone = "512345678";
+  const request = (
+    id: string,
+    requestCode: string,
+    propertyNumber: string,
+    overrides: FakeData = {},
+  ) => ({
+    id,
+    requestCode,
+    propertyNumber,
+    clientPhone,
+    timestamp: `2026-09-20T12:00:0${id.length}.000Z`,
+    ipAddress: "127.0.0.1",
+    deviceType: "mobile",
+    dayOfWeek: "الأحد",
+    hourOfDay: 15,
+    ...overrides,
+  });
+  const event = (
+    id: string,
+    requestCode: string,
+    propertyNumber: string,
+    actorType: "anonymous" | "owner" | "admin",
+  ) => ({
+    id,
+    requestCode,
+    propertyNumber,
+    clientPhone,
+    timestamp: "2026-09-20T12:00:00.000Z",
+    visitorKey: `visitor-${id}`,
+    actorType,
+    deviceType: "mobile",
+    outcome: "accepted",
+  });
+
+  database.set("requests", "subject-owned", request(
+    "subject-owned",
+    "REQ-SUBJECT",
+    "PROP-SUBJECT",
+    { customerSubject, actorType: "anonymous" },
+  ));
+  database.set("requests", "legacy-owned", request(
+    "legacy-owned",
+    "REQ-LEGACY",
+    "PROP-LEGACY",
+  ));
+  database.set("contact_events", "legacy-owned-event", event(
+    "legacy-owned-event",
+    "REQ-LEGACY",
+    "PROP-LEGACY",
+    "anonymous",
+  ));
+
+  database.set("requests", "owner-same-phone", request(
+    "owner-same-phone",
+    "REQ-OWNER",
+    "PROP-OWNER",
+    { actorType: "owner" },
+  ));
+  database.set("contact_events", "owner-event", event(
+    "owner-event",
+    "REQ-OWNER",
+    "PROP-OWNER",
+    "owner",
+  ));
+  database.set("requests", "admin-same-phone", request(
+    "admin-same-phone",
+    "REQ-ADMIN",
+    "PROP-ADMIN",
+    { actorType: "admin" },
+  ));
+  database.set("contact_events", "admin-event", event(
+    "admin-event",
+    "REQ-ADMIN",
+    "PROP-ADMIN",
+    "admin",
+  ));
+  database.set("requests", "uncorroborated-legacy", request(
+    "uncorroborated-legacy",
+    "REQ-NO-EVIDENCE",
+    "PROP-NO-EVIDENCE",
+  ));
+  database.set("requests", "other-subject", request(
+    "other-subject",
+    "REQ-OTHER-SUBJECT",
+    "PROP-OTHER-SUBJECT",
+    { customerSubject: otherSubject, actorType: "anonymous" },
+  ));
+  database.set("contact_events", "other-subject-event", event(
+    "other-subject-event",
+    "REQ-OTHER-SUBJECT",
+    "PROP-OTHER-SUBJECT",
+    "anonymous",
+  ));
+
+  const requests = await createService(database).getCustomerRequests(
+    customerSubject,
+  );
+
+  assert.deepEqual(
+    requests.map(({ id }) => id).sort(),
+    ["subject-owned"],
+  );
+});
 
 test("notification settings preserve valid owner templates and repair invalid legacy fields", async () => {
   const database = new FakeFirestore();

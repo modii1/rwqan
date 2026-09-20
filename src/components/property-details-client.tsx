@@ -11,7 +11,6 @@ import { PriceDisplay } from "@/components/price-display";
 import { useToast } from "@/hooks/use-toast";
 import { useSessionQuery } from "@/hooks/use-session";
 import {
-    CONTACT_IDENTITY_QUERY_KEY,
     EMPTY_CONTACT_IDENTITY,
     commitContactIdentityCache,
     useContactIdentityQuery,
@@ -34,6 +33,7 @@ import {
 } from "@/lib/whatsapp-navigation";
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
 import { ContactPhoneDialog } from "@/components/contact/contact-phone-dialog";
+import { PropertyFavoriteButton } from "@/components/customer/property-favorite-button";
 
 const DEFAULT_WHATSAPP = "966533220646";
 
@@ -520,6 +520,11 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 await commitContactIdentityCache(queryClient, {
                     kind: "client",
                     maskedPhone: (returnedIdentity as Record<string, unknown>).maskedPhone as string,
+                    ...(typeof (returnedIdentity as Record<string, unknown>).sessionRevision === "string"
+                        ? {
+                            sessionRevision: (returnedIdentity as Record<string, unknown>).sessionRevision as string,
+                        }
+                        : {}),
                 });
             }
 
@@ -641,7 +646,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                 closeReservedWhatsAppTab(whatsappTab);
                 const isOwnerContact = ownerIsLoggedIn || identity?.kind === "owner";
                 if (error instanceof ContactRequestError && error.kind === "phone_required" && !isOwnerContact) {
-                    queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                    await commitContactIdentityCache(queryClient, EMPTY_CONTACT_IDENTITY);
                     setIsContactDialogOpen(true);
                     return;
                 }
@@ -673,7 +678,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
             } catch (error) {
                 closeReservedWhatsAppTab(whatsappTab);
                 if (error instanceof ContactRequestError && error.kind === "phone_required") {
-                    queryClient.setQueryData(CONTACT_IDENTITY_QUERY_KEY, EMPTY_CONTACT_IDENTITY);
+                    await commitContactIdentityCache(queryClient, EMPTY_CONTACT_IDENTITY);
                     throw new Error("تعذر استخدام رقم التواصل المحفوظ. حاول حفظه مرة أخرى.");
                 }
                 if (
@@ -854,6 +859,10 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                 onTouchStart={handleTouchStart}
                                 onTouchEnd={handleTouchEnd}
                             >
+                                <PropertyFavoriteButton
+                                    propertyNumber={property.propertyNumber}
+                                    className="absolute left-3 top-3 z-20"
+                                />
                                 {galleryImages.length > 1 && (
                                     <link rel="preload" as="image" href={galleryImages[(selectedImage + 1) % galleryImages.length]} />
                                 )}

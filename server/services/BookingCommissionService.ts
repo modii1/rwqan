@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
   BOOKING_ADMIN_CUSTOMER_WHATSAPP_COOLDOWN_MINUTES_DEFAULT,
@@ -73,6 +73,7 @@ import {
   storeBookingCommissionReceipt,
   type StoredBookingCommissionReceipt,
 } from "./BookingCommissionReceiptService";
+import { createCustomerSubject as createStableCustomerSubject } from "../utils/customerSubject";
 
 export const BOOKING_CUSTOMER_SESSION_COOKIE = "rwqan_booking_customer_session";
 export const BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -400,7 +401,7 @@ function adminPaymentAttempt(
   return safeAttempt;
 }
 
-function publicRow(
+export function toCustomerBookingPublicRow(
   booking: BookingFollowUpDocument,
 ): BookingPublicRow {
   const responseExpired = isUnansweredBookingExpired(booking);
@@ -419,6 +420,14 @@ function publicRow(
     questionnaire: questionnaire(booking),
     answeredAt: booking.confirmedAt || booking.declinedAt,
   };
+}
+
+export function hasExplicitCustomerBookingResponse(
+  booking: BookingFollowUpDocument,
+): boolean {
+  return typeof booking.bookingDecision === "string" ||
+    (typeof booking.confirmedAt === "string" && booking.confirmedAt.length > 0) ||
+    (typeof booking.declinedAt === "string" && booking.declinedAt.length > 0);
 }
 
 function adminRow(
@@ -533,9 +542,7 @@ export class BookingCommissionService {
         400,
       );
     }
-    return createHmac("sha256", bookingSecret())
-      .update(`booking-customer-phone:${normalizedPhone}`)
-      .digest("hex");
+    return createStableCustomerSubject(normalizedPhone);
   }
 
   buildContactWorkflow(options: {
@@ -699,12 +706,14 @@ export class BookingCommissionService {
     return this.getCustomerBookingsForSubject(
       this.createCustomerSubject(normalizedPhone),
       normalizedPhone,
+      { requireExplicitCustomerResponse: true },
     );
   }
 
   private async getCustomerBookingsForSubject(
     customerSubject: string,
     customerPhone: string,
+    options: { requireExplicitCustomerResponse?: boolean } = {},
   ) {
     const bookings = await bookingCommissionStore.listBookingsForCustomer(
       customerSubject,
@@ -716,8 +725,14 @@ export class BookingCommissionService {
     return {
       identity: { maskedPhone: maskContactPhone(customerPhone) },
       bookings: bookings
-        .filter((_, index) => eligibility[index])
-        .map(publicRow),
+        .filter((booking, index) =>
+          eligibility[index] &&
+          (
+            !options.requireExplicitCustomerResponse ||
+            hasExplicitCustomerBookingResponse(booking)
+          )
+        )
+        .map(toCustomerBookingPublicRow),
     };
   }
 

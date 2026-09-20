@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import cookieParser from "cookie-parser";
 import express from "express";
+import { CUSTOMER_SESSION_REVISION_HEADER } from "../../shared/customer";
 import bookingRoutes from "./bookings";
 import {
   BOOKING_CUSTOMER_SESSION_COOKIE,
@@ -13,6 +14,9 @@ import {
   CONTACT_IDENTITY_COOKIE_NAME,
   contactIdentityService,
 } from "../services/ContactIdentityService";
+
+const CONTACT_REVISION_ONE = "a".repeat(64);
+const CONTACT_REVISION_TWO = "b".repeat(64);
 
 test("customer bookings require a verified contact identity and isolate its phone", async (t) => {
   const originalGetCustomerBookingsFromSession =
@@ -31,7 +35,9 @@ test("customer bookings require a verified contact identity and isolate its phon
     return clientPhone
       ? {
           clientPhone,
-          sessionId: `contact-session-${clientPhone}`,
+          sessionId: clientPhone === "512345678"
+            ? CONTACT_REVISION_ONE
+            : CONTACT_REVISION_TWO,
           visitorId: `contact-visitor-${clientPhone}`,
           verifiedAt: new Date().toISOString(),
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -152,10 +158,32 @@ test("customer bookings require a verified contact identity and isolate its phon
       assert.deepEqual(seenPhones, []);
     });
 
-    await t.test("a verified contact identity alone loads its own profile", async () => {
+    await t.test("a stale customer screen cannot load a newly active contact identity", async () => {
+      for (const revision of [undefined, CONTACT_REVISION_TWO]) {
+        const response = await fetch(`${baseUrl}/api/customer/bookings`, {
+          headers: {
+            cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=verified-contact-one`,
+            ...(revision
+              ? { [CUSTOMER_SESSION_REVISION_HEADER]: revision }
+              : {}),
+          },
+        });
+        const responseText = await response.text();
+
+        assert.equal(response.status, 409);
+        assert.equal(JSON.parse(responseText).code, "CUSTOMER_SESSION_CHANGED");
+        assert.equal(responseText.includes("512345678"), false);
+        assert.equal(responseText.includes(CONTACT_REVISION_ONE), false);
+        assert.equal(responseText.includes(CONTACT_REVISION_TWO), false);
+      }
+      assert.deepEqual(seenPhones, []);
+    });
+
+    await t.test("a verified contact identity with its current revision loads its own profile", async () => {
       const response = await fetch(`${baseUrl}/api/customer/bookings`, {
         headers: {
           cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=verified-contact-one`,
+          [CUSTOMER_SESSION_REVISION_HEADER]: CONTACT_REVISION_ONE,
         },
       });
 
@@ -171,6 +199,7 @@ test("customer bookings require a verified contact identity and isolate its phon
       const response = await fetch(`${baseUrl}/api/customer/bookings`, {
         headers: {
           cookie: `${staleCookie}; ${CONTACT_IDENTITY_COOKIE_NAME}=verified-contact-two`,
+          [CUSTOMER_SESSION_REVISION_HEADER]: CONTACT_REVISION_TWO,
         },
       });
 

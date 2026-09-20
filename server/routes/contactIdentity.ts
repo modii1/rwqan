@@ -19,6 +19,7 @@ import {
 import { isSameOriginRequest } from "../utils/requestOrigin";
 import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
 import { normalizeSaudiMobilePhone } from "../../shared/phone";
+import { customerAccountService } from "../services/CustomerAccountService";
 
 const router = Router();
 
@@ -119,6 +120,7 @@ router.get("/api/contact-identity", async (req, res) => {
     return res.json({
       kind: "client",
       maskedPhone: maskContactPhone(identity.clientPhone),
+      sessionRevision: identity.sessionId,
     });
   } catch (error) {
     console.error("Contact identity status error:", error);
@@ -154,7 +156,11 @@ router.post("/api/contact-identity/challenge", async (req, res) => {
       return res.json({
         alreadyVerified: true,
         maskedPhone,
-        identity: { kind: "client", maskedPhone },
+        identity: {
+          kind: "client",
+          maskedPhone,
+          sessionRevision: currentIdentity.sessionId,
+        },
       });
     }
 
@@ -187,6 +193,10 @@ router.post("/api/contact-identity/verify", async (req, res) => {
       phone: req.body?.clientPhone,
       code: req.body?.code,
     });
+    await customerAccountService.ensureForVerifiedPhone(
+      req.body?.clientPhone,
+      { touchLastLogin: true },
+    );
     const issued = await contactIdentityService.issueVerified(
       req.body?.clientPhone,
       getContactIdentityCookieToken(req),
@@ -200,6 +210,7 @@ router.post("/api/contact-identity/verify", async (req, res) => {
     return res.json({
       kind: "client",
       maskedPhone: maskContactPhone(issued.clientPhone),
+      sessionRevision: issued.sessionId,
     });
   } catch (error) {
     return respondWithOtpError(res, error);

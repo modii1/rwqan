@@ -14,6 +14,7 @@ import {
   customerPhoneOtpService,
 } from "../services/CustomerPhoneOtpService";
 import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
+import { customerAccountService } from "../services/CustomerAccountService";
 
 const EXISTING_TOKEN = "x".repeat(43);
 const NEW_TOKEN = "y".repeat(43);
@@ -27,11 +28,13 @@ test("contact identity API returns only masked state and manages its own protect
     revoke: contactIdentityService.revoke,
     issueOtp: customerPhoneOtpService.issue,
     verifyOtp: customerPhoneOtpService.verify,
+    ensureCustomerAccount: customerAccountService.ensureForVerifiedPhone,
   };
   const revoked: unknown[] = [];
   const issuedChallenges: any[] = [];
   const verifiedChallenges: any[] = [];
   const issuedIdentities: any[] = [];
+  const ensuredAccounts: any[] = [];
   let otpIssueMode: "success" | "limited" = "success";
   let otpVerifyMode: "success" | "invalid" = "success";
   let revokeShouldFail = false;
@@ -99,6 +102,12 @@ test("contact identity API returns only masked state and manages its own protect
     if (revokeShouldFail) throw new Error("Firebase unavailable");
     revoked.push(token);
   };
+  (customerAccountService as any).ensureForVerifiedPhone = async (...args: any[]) => {
+    ensuredAccounts.push(args);
+    return {
+      id: "a".repeat(64),
+    };
+  };
 
   const app = express();
   app.use(express.json());
@@ -129,7 +138,11 @@ test("contact identity API returns only masked state and manages its own protect
       const payload = JSON.parse(text);
 
       assert.equal(response.status, 200);
-      assert.deepEqual(payload, { kind: "client", maskedPhone: "05•• ••5432" });
+      assert.deepEqual(payload, {
+        kind: "client",
+        maskedPhone: "05•• ••5432",
+        sessionRevision: "a".repeat(64),
+      });
       assert.equal(text.includes("598765432"), false);
       assert.equal(text.includes(EXISTING_TOKEN), false);
       assert.match(response.headers.get("cache-control") || "", /no-store/);
@@ -170,6 +183,29 @@ test("contact identity API returns only masked state and manages its own protect
       assert.equal(typeof issuedChallenges.at(-1)?.ipAddress, "string");
     });
 
+    await t.test("an already verified phone returns its opaque session revision", async () => {
+      const response = await fetch(`${baseUrl}/api/contact-identity/challenge`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: baseUrl,
+          cookie: `${CONTACT_IDENTITY_COOKIE_NAME}=${EXISTING_TOKEN}`,
+        },
+        body: JSON.stringify({ clientPhone: "0598765432" }),
+      });
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        alreadyVerified: true,
+        maskedPhone: "05•• ••5432",
+        identity: {
+          kind: "client",
+          maskedPhone: "05•• ••5432",
+          sessionRevision: "a".repeat(64),
+        },
+      });
+    });
+
     await t.test("requesting a code cannot preserve invalid legacy customer cookies", async () => {
       const response = await fetch(`${baseUrl}/api/contact-identity/challenge`, {
         method: "POST",
@@ -205,7 +241,11 @@ test("contact identity API returns only masked state and manages its own protect
       const setCookie = response.headers.get("set-cookie") || "";
 
       assert.equal(response.status, 200);
-      assert.deepEqual(payload, { kind: "client", maskedPhone: "05•• ••5678" });
+      assert.deepEqual(payload, {
+        kind: "client",
+        maskedPhone: "05•• ••5678",
+        sessionRevision: "b".repeat(64),
+      });
       assert.match(setCookie, new RegExp(`^${CONTACT_IDENTITY_COOKIE_NAME}=`));
       assert.match(setCookie, /HttpOnly/i);
       assert.match(setCookie, /SameSite=Lax/i);
@@ -220,6 +260,10 @@ test("contact identity API returns only masked state and manages its own protect
         phone: "0512345678",
         previousToken: EXISTING_TOKEN,
       });
+      assert.deepEqual(ensuredAccounts.at(-1), [
+        "0512345678",
+        { touchLastLogin: true },
+      ]);
       assert.equal(JSON.stringify(payload).includes(NEW_TOKEN), false);
     });
 
@@ -398,6 +442,7 @@ test("contact identity API returns only masked state and manages its own protect
     contactIdentityService.revoke = originals.revoke;
     customerPhoneOtpService.issue = originals.issueOtp;
     customerPhoneOtpService.verify = originals.verifyOtp;
+    customerAccountService.ensureForVerifiedPhone = originals.ensureCustomerAccount;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

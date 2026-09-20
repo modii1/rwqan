@@ -54,6 +54,7 @@ import {
     getMaximumPrimaryPropertyPrice,
     getPrimaryPropertyPriceDisplay,
 } from "@shared/propertyPrice";
+import { PropertyFavoriteButton } from "@/components/customer/property-favorite-button";
 
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
 const TYPES = ["قسم", "قسمين"];
@@ -675,6 +676,11 @@ function PropertyCard({ property, isPremium, imgIdx, onNext, onPrev, onClick, oc
                     onError={(e) => {
                         (e.target as HTMLImageElement).src = PROPERTY_IMAGE_PLACEHOLDER;
                     }}
+                />
+
+                <PropertyFavoriteButton
+                    propertyNumber={property.propertyNumber}
+                    className="absolute left-2 top-2 z-20"
                 />
 
                 {!isPremium && property.createdAt && (Date.now() - new Date(property.createdAt).getTime()) < 7 * 24 * 60 * 60 * 1000 && (

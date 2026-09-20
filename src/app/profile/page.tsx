@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import CustomerBookingsProfile from "@/components/booking/customer-bookings-profile";
 
 export const metadata: Metadata = {
@@ -8,5 +9,9 @@ export const metadata: Metadata = {
 };
 
 export default function CustomerProfilePage() {
-  return <CustomerBookingsProfile />;
+  return (
+    <Suspense fallback={null}>
+      <CustomerBookingsProfile />
+    </Suspense>
+  );
 }

@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import backupRouter from "./backup";
 import { storage } from "../../storage";
+import { firebaseService } from "../../firebaseService";
 
 test("backup routes require an admin session before any backup handler runs", async (t) => {
   const methodNames = [
@@ -129,7 +130,10 @@ test("backup list and create responses omit stored payloads", async (t) => {
     updateBackup: storage.updateBackup,
     getCodeBackups: storage.getCodeBackups,
     createCodeBackup: storage.createCodeBackup,
+    getCustomerAccountsForBackup: firebaseService.getCustomerAccountsForBackup,
+    getBookingFollowUpsForBackup: firebaseService.getBookingFollowUpsForBackup,
   };
+  let createdBackupInput: any;
   const dataBackup = {
     id: "backup-1",
     backupType: "full",
@@ -153,10 +157,25 @@ test("backup list and create responses omit stored payloads", async (t) => {
   };
 
   (storage as any).getBackups = async () => [dataBackup];
-  (storage as any).createBackup = async () => dataBackup;
-  (storage as any).updateBackup = async () => dataBackup;
+  (storage as any).createBackup = async (input: any) => {
+    createdBackupInput = input;
+    return { ...dataBackup, ...input };
+  };
+  (storage as any).updateBackup = async (_id: string, updates: any) => ({
+    ...dataBackup,
+    ...createdBackupInput,
+    ...updates,
+  });
   (storage as any).getCodeBackups = async () => [codeBackup];
   (storage as any).createCodeBackup = async () => codeBackup;
+  (firebaseService as any).getCustomerAccountsForBackup = async () => [{
+    id: "customer-subject",
+    phone: "512345678",
+  }];
+  (firebaseService as any).getBookingFollowUpsForBackup = async () => [{
+    id: "booking-1",
+    customerSubject: "customer-subject",
+  }];
 
   const app = express();
   app.use(express.json());
@@ -184,11 +203,20 @@ test("backup list and create responses omit stored payloads", async (t) => {
       const create = await fetch(`${baseUrl}/api/backups`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ backupType: "full", backupName: "test", dataTypes: [] }),
+        body: JSON.stringify({
+          backupType: "full",
+          backupName: "test",
+          dataTypes: ["customer_accounts", "booking_followups"],
+        }),
       });
       const created = await create.json();
       assert.equal(create.status, 200);
       assert.equal("backupData" in created, false);
+      assert.deepEqual(Object.keys(createdBackupInput.backupData).sort(), [
+        "booking_followups",
+        "customer_accounts",
+      ]);
+      assert.equal(createdBackupInput.filesCount, 2);
     });
 
     await t.test("code backup list and create return metadata only", async () => {
@@ -212,6 +240,8 @@ test("backup list and create responses omit stored payloads", async (t) => {
     storage.updateBackup = originals.updateBackup;
     storage.getCodeBackups = originals.getCodeBackups;
     storage.createCodeBackup = originals.createCodeBackup;
+    firebaseService.getCustomerAccountsForBackup = originals.getCustomerAccountsForBackup;
+    firebaseService.getBookingFollowUpsForBackup = originals.getBookingFollowUpsForBackup;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

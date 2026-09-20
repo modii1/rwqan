@@ -36,7 +36,7 @@ import {
 import { CustomerQuestionnaireFacts } from "./customer-questionnaire-facts";
 import {
   broadcastCustomerBookingSessionChange,
-  CUSTOMER_BOOKINGS_QUERY_KEY,
+  resetCustomerSessionQueries,
 } from "@/hooks/use-contact-identity";
 
 interface FollowupBooking {
@@ -109,10 +109,7 @@ export default function BookingFollowupClient({ token }: { token: string }) {
 
   useEffect(() => {
     if (!query.isSuccess || query.isFetching || query.dataUpdatedAt <= 0) return;
-    void queryClient.resetQueries({
-      queryKey: CUSTOMER_BOOKINGS_QUERY_KEY,
-      exact: true,
-    });
+    void resetCustomerSessionQueries(queryClient);
     broadcastCustomerBookingSessionChange();
   }, [query.dataUpdatedAt, query.isFetching, query.isSuccess, queryClient, token]);
 

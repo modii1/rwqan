@@ -6,7 +6,11 @@ import { updateRemainingDaysInSheet } from "../../scheduler";
 import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
 import { buildContactAnalytics } from "../../services/contactAnalytics";
 import { bookingCommissionService } from "../../services/BookingCommissionService";
-import { buildAdminCustomerContacts } from "../../services/AdminCustomerContactService";
+import {
+  buildAdminCustomerAccounts,
+  buildAdminCustomerContacts,
+  summarizeAdminCustomerAccounts,
+} from "../../services/AdminCustomerContactService";
 
 const router = Router();
 
@@ -28,17 +32,28 @@ router.get("/api/admin/requests", requireAdmin, async (req, res) => {
 router.get("/api/admin/customers", requireAdmin, async (_req, res) => {
   res.set("Cache-Control", "no-store, private");
   try {
-    const [requests, properties, bookingDashboard] = await Promise.all([
+    const [requests, properties, bookingDashboard, customerAccounts] = await Promise.all([
       analyticsService.getAllRequests(),
       propertyService.getAll(),
       bookingCommissionService.getAdminDashboard(),
+      firebaseService.getCustomerAccounts(),
     ]);
     const customers = buildAdminCustomerContacts(
       requests,
       properties,
       bookingDashboard.bookings,
     );
-    return res.json({ customers, total: customers.length });
+    const accounts = buildAdminCustomerAccounts(
+      customerAccounts,
+      requests,
+      customers,
+    );
+    return res.json({
+      customers,
+      total: customers.length,
+      accounts,
+      accountSummary: summarizeAdminCustomerAccounts(accounts),
+    });
   } catch (error) {
     console.error("Admin customers error:", error);
     return res.status(500).json({ error: "فشل في جلب بيانات العملاء" });

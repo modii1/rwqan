@@ -23,6 +23,8 @@ import {
 const TEST_CONTACT_TOKEN = "t".repeat(43);
 
 test("smart contact requests resolve remembered and owner phones on the server", async (t) => {
+  const previousSessionSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "tracking-customer-subject-test-secret-value-123456";
   const originals = {
     getByNumber: propertyService.getByNumber,
     getSubscriptionByProperty: subscriptionService.getByProperty,
@@ -225,6 +227,9 @@ test("smart contact requests resolve remembered and owner phones on the server",
       const secondEvent = acceptedCalls.at(-1)?.[5];
       assert.equal(firstRequest.clientPhone, "598765432");
       assert.equal(secondRequest.clientPhone, "598765432");
+      assert.equal(firstRequest.actorType, "anonymous");
+      assert.match(firstRequest.customerSubject || "", /^[a-f0-9]{64}$/);
+      assert.equal(secondRequest.customerSubject, firstRequest.customerSubject);
       assert.equal(firstEvent.visitorKey, secondEvent.visitorKey);
       assert.notEqual(firstEvent.visitorKey, "v".repeat(43));
       assert.equal(firstEvent.actorType, "anonymous");
@@ -245,8 +250,13 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.deepEqual(firstPayload.contactIdentity, {
         kind: "client",
         maskedPhone: maskContactPhone("598765432"),
+        sessionRevision: "c".repeat(64),
       });
-      assert.deepEqual(secondPayload.contactIdentity, firstPayload.contactIdentity);
+      assert.deepEqual(secondPayload.contactIdentity, {
+        kind: "client",
+        maskedPhone: maskContactPhone("598765432"),
+        sessionRevision: "e".repeat(64),
+      });
     });
 
     await t.test("an enabled follow-up is marked scheduled on the atomically accepted contact event", async () => {
@@ -576,6 +586,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.deepEqual((await response.json()).contactIdentity, {
         kind: "client",
         maskedPhone: "05•• ••5432",
+        sessionRevision: rememberedSessionId,
       });
     });
 
@@ -593,6 +604,7 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.deepEqual((await response.json()).contactIdentity, {
         kind: "client",
         maskedPhone: "05•• ••5432",
+        sessionRevision: rememberedSessionId,
       });
     });
 
@@ -665,6 +677,8 @@ test("smart contact requests resolve remembered and owner phones on the server",
       assert.equal((await response.json()).code, "CROSS_ORIGIN_REQUEST");
     });
   } finally {
+    if (previousSessionSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = previousSessionSecret;
     propertyService.getByNumber = originals.getByNumber;
     subscriptionService.getByProperty = originals.getSubscriptionByProperty;
     firebaseService.createContactRequestWithCooldown = originals.createContactRequestWithCooldown;

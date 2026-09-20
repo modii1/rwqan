@@ -114,6 +114,30 @@ function awaitingBookingFixture(options: {
   } as AwaitingBookingDocument;
 }
 
+function confirmedBookingFixture(options: {
+  requestCode: string;
+  createdAt: Date;
+  customerSubject?: string;
+}): BookingFollowUpDocument {
+  const awaiting = awaitingBookingFixture(options);
+  const confirmedAt = new Date(
+    options.createdAt.getTime() + 60 * 60 * 1_000,
+  ).toISOString();
+  return {
+    ...awaiting,
+    bookingStatus: "confirmed",
+    bookingDecision: "yes",
+    confirmationFacts: {
+      timing: "weekend",
+      bookingDate: { value: "2026-08-30", precision: "day" },
+      pricePaidHalalas: 100_000,
+    },
+    confirmedAt,
+    declinedAt: null,
+    updatedAt: confirmedAt,
+  } as BookingFollowUpDocument;
+}
+
 test("customer subject is stable across phone formatting and secret-bound", () => {
   const previousSecret = process.env.SESSION_SECRET;
   try {
@@ -1032,7 +1056,7 @@ test("customer booking profiles reject a signed session bound to another saved p
   }
 });
 
-test("verified customer phones load only their own currently eligible booking rows", async () => {
+test("verified customer phones load only their own eligible customer-answered booking rows", async () => {
   const previousSecret = process.env.SESSION_SECRET;
   const originals = {
     isEligible: bookingCommissionStore.isBookingCurrentlyFreeEligible,
@@ -1045,17 +1069,22 @@ test("verified customer phones load only their own currently eligible booking ro
     const service = new BookingCommissionService();
     const firstSubject = service.createCustomerSubject("512345678");
     const secondSubject = service.createCustomerSubject("598765432");
-    const firstEligible = awaitingBookingFixture({
+    const firstEligible = confirmedBookingFixture({
       requestCode: "VERIFIED-PHONE-ONE",
       createdAt: new Date("2026-08-25T10:00:00.000Z"),
       customerSubject: firstSubject,
     });
-    const firstIneligible = awaitingBookingFixture({
+    const firstIneligible = confirmedBookingFixture({
       requestCode: "VERIFIED-PHONE-INELIGIBLE",
       createdAt: new Date("2026-08-24T10:00:00.000Z"),
       customerSubject: firstSubject,
     });
-    const secondEligible = awaitingBookingFixture({
+    const firstUntouched = awaitingBookingFixture({
+      requestCode: "VERIFIED-PHONE-UNTOUCHED",
+      createdAt: new Date("2026-08-23T12:00:00.000Z"),
+      customerSubject: firstSubject,
+    });
+    const secondEligible = confirmedBookingFixture({
       requestCode: "VERIFIED-PHONE-TWO",
       createdAt: new Date("2026-08-23T10:00:00.000Z"),
       customerSubject: secondSubject,
@@ -1065,7 +1094,9 @@ test("verified customer phones load only their own currently eligible booking ro
       customerSubject: string,
     ) => {
       seenSubjects.push(customerSubject);
-      if (customerSubject === firstSubject) return [firstEligible, firstIneligible];
+      if (customerSubject === firstSubject) {
+        return [firstEligible, firstIneligible, firstUntouched];
+      }
       if (customerSubject === secondSubject) return [secondEligible];
       return [];
     };

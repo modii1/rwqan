@@ -5,6 +5,10 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
+import {
+  CUSTOMER_SESSION_REVISION_HEADER,
+  customerSessionRevisionSchema,
+} from "../../shared/customer";
 import { firebaseService } from "../firebaseService";
 import { requireSameOrigin } from "./middleware";
 import {
@@ -259,6 +263,18 @@ router.get("/api/customer/bookings", requireSameOrigin, async (req, res) => {
     const contactIdentity = await contactIdentityService.resolve(contactIdentityToken);
     if (!contactIdentity) {
       return rejectCustomerBookingsAccess(res, true);
+    }
+    const expectedRevision = customerSessionRevisionSchema.safeParse(
+      req.get(CUSTOMER_SESSION_REVISION_HEADER),
+    );
+    if (
+      !expectedRevision.success
+      || expectedRevision.data !== contactIdentity.sessionId
+    ) {
+      return res.status(409).json({
+        code: "CUSTOMER_SESSION_CHANGED",
+        error: "تغيّر حساب العميل، يرجى تحديث الصفحة والمحاولة مرة أخرى",
+      });
     }
     if (req.cookies?.[BOOKING_CUSTOMER_SESSION_COOKIE]) {
       res.clearCookie(
