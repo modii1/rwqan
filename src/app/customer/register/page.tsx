@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import CustomerAuthPage from "@/components/customer/customer-auth-page";
+import CustomerAuthPage, { CustomerAuthPageFallback } from "@/components/customer/customer-auth-page";
 
 export const metadata: Metadata = {
   title: "إنشاء حساب عميل | روقان",
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function CustomerRegisterPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<CustomerAuthPageFallback variant="register" />}>
       <CustomerAuthPage variant="register" />
     </Suspense>
   );

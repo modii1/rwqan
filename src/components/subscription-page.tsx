@@ -426,8 +426,8 @@ export default function SubscriptionPage() {
     const isPendingAdminApproval = bankTransferResult?.pendingAdminApproval;
 
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
-        <Card className="max-w-lg w-full p-8 text-center space-y-6">
+      <div className="min-h-screen min-h-[100svh] bg-[#f6f2e8] flex items-center justify-center px-3 py-6 sm:p-6" dir="rtl">
+        <Card className="max-w-lg w-full overflow-hidden border-[#d8c9aa] bg-[#fffdfa] p-5 text-center shadow-[0_24px_70px_-38px_rgba(41,55,47,0.55)] sm:p-8 space-y-6">
           {/* أيقونة النجاح */}
           <div className="flex justify-center">
             <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
@@ -435,21 +435,21 @@ export default function SubscriptionPage() {
                 ? "bg-red-100"
                 : isAutoActivated
                   ? "bg-emerald-100"
-                  : "bg-amber-100"
+                  : "bg-[#f4e8c9]"
             }`}>
               {isVerificationFailed || isPaymentRejected ? (
                 <AlertTriangle className="w-10 h-10 text-red-500" />
               ) : isAutoActivated ? (
                 <CheckCircle2 className="w-10 h-10 text-emerald-500" />
               ) : (
-                <Clock className="w-10 h-10 text-[#c9951d]" />
+                <Clock className="w-10 h-10 text-[#80601B]" />
               )}
             </div>
           </div>
 
           {/* العنوان */}
           <div>
-            <h1 className="text-2xl font-bold text-[#434040] mb-2">
+            <h1 className="text-2xl font-bold text-[#29372F] mb-2">
               {isVerificationFailed || isPaymentRejected
                 ? "تعذر تفعيل الاشتراك"
                 : registrationLoginRequired
@@ -474,15 +474,15 @@ export default function SubscriptionPage() {
           </div>
 
           {/* تفاصيل العقار */}
-          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-muted-foreground flex items-center gap-2">
                 <Home className="w-4 h-4" />
                 رقم العقار
               </span>
               <span className="font-bold text-lg">{registeredPropertyNumber}</span>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-muted-foreground flex items-center gap-2">
                 <Lock className="w-4 h-4" />
                 الرقم السري
@@ -490,9 +490,9 @@ export default function SubscriptionPage() {
               <span className="font-mono text-lg">****</span>
             </div>
             {selectedPackage && (
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-muted-foreground">الباقة</span>
-                <Badge className="bg-[#c9951d] text-white">{selectedPackage.name}</Badge>
+                <Badge className="bg-[#80601B] text-white">{selectedPackage.name}</Badge>
               </div>
             )}
           </div>
@@ -624,7 +624,7 @@ export default function SubscriptionPage() {
                   ? bankTransferResult.nextUrl
                   : '/owner/login'
               )}
-              className="w-full bg-[#434040] hover:bg-[#333]"
+              className="w-full bg-[#29372F] text-white hover:bg-[#1f2a24]"
               data-testid="button-go-login"
             >
               {isPaymentRejected
@@ -651,53 +651,55 @@ export default function SubscriptionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="bg-card border-b border-border shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-[#434040]">اشترك معنا</h1>
-          <p className="text-sm text-muted-foreground">اختر باقة واملأ بيانات عقارك</p>
+    <div className="min-h-screen min-h-[100svh] overflow-x-hidden bg-[#f6f2e8]" dir="rtl">
+      <header className="relative overflow-hidden bg-[#29372F] text-white">
+        <div className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full border border-white/10" aria-hidden="true" />
+        <div className="pointer-events-none absolute -left-10 -top-16 h-40 w-40 rounded-full border border-[#c9a859]/35" aria-hidden="true" />
+        <div className="relative mx-auto max-w-6xl px-4 py-7 sm:px-6 sm:py-9">
+          <h1 className="text-2xl font-bold sm:text-3xl">اشترك معنا</h1>
+          <p className="mt-1 text-sm text-white/75">اختر باقة واملأ بيانات عقارك</p>
         </div>
       </header>
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="mx-auto max-w-6xl px-3 py-5 sm:px-6 sm:py-8">
         {/* Progress Bar - 3 Steps */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between gap-2 mb-4">
+        <div className="mb-5 rounded-2xl border border-[#d8c9aa] bg-[#fffdfa] px-3 py-4 shadow-[0_18px_55px_-42px_rgba(41,55,47,0.65)] sm:mb-8 sm:px-6 sm:py-5">
+          <div className="flex items-start justify-between gap-1 sm:gap-3">
             {/* Step 1 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 1 ? 'bg-[#434040]' : 'bg-muted'}`}>
+            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 1 ? "step" : undefined}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 1 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 {currentStep > 1 ? '✓' : '1'}
               </div>
-              <p className="text-xs mt-2 text-center font-semibold">اختيار الباقة</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">اختيار الباقة</p>
             </div>
 
             {/* Line 1-2 */}
-            <div className={`flex-1 h-1 ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            <div className={`mt-4 h-0.5 min-w-3 flex-1 rounded-full sm:h-1 ${currentStep >= 2 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></div>
 
             {/* Step 2 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 2 ? 'bg-[#434040]' : 'bg-muted'}`}>
+            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 2 ? "step" : undefined}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 2 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 {currentStep > 2 ? '✓' : '2'}
               </div>
-              <p className="text-xs mt-2 text-center font-semibold">بيانات العقار</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">بيانات العقار</p>
             </div>
 
             {/* Line 2-3 */}
-            <div className={`flex-1 h-1 ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}></div>
+            <div className={`mt-4 h-0.5 min-w-3 flex-1 rounded-full sm:h-1 ${currentStep >= 3 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></div>
 
             {/* Step 3 */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-10 h-10 rounded-full font-bold flex items-center justify-center text-white transition ${currentStep >= 3 ? 'bg-[#434040]' : 'bg-muted'}`}>
+            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 3 ? "step" : undefined}>
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 3 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 3
               </div>
-              <p className="text-xs mt-2 text-center font-semibold">طريقة الدفع</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">طريقة الدفع</p>
             </div>
           </div>
         </div>
 
         {/* Step 1: Select Package */}
         {currentStep === 1 && (
-          <Card className="p-8">
-            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
+          <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => {
                 const isExpanded = expandedPackages.has(pkg.id);
@@ -707,27 +709,27 @@ export default function SubscriptionPage() {
                 return (
                 <div
                   key={pkg.id}
-                  className={`p-5 rounded-lg border-2 transition-all ${selectedPackageId === pkg.id
-                    ? 'ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]'
-                    : 'border-border hover:border-[#434040]/50'
+                  className={`rounded-xl border-2 p-4 transition-all sm:p-5 ${selectedPackageId === pkg.id
+                    ? 'border-[#80601B] bg-[#80601B]/5 ring-2 ring-[#80601B]/25'
+                    : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'
                     }`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <h3 className="font-bold">{pkg.name}</h3>
                       {pkg.price === 0 ? (
-                        <p className="text-2xl font-bold text-[#434040]">مجاني</p>
+                        <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
                       ) : (
                         <PriceDisplay amount={pkg.price} size="lg" />
                       )}
                     </div>
                     {selectedPackageId === pkg.id && (
-                      <Badge className="bg-[#434040] text-white">مختار</Badge>
+                      <Badge className="bg-[#29372F] text-white">مختار</Badge>
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
                   {isPremiumSubscriptionType(pkg.type) && (
-                    <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
+                    <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
                   )}
                   
                   {/* Features List */}
@@ -736,7 +738,7 @@ export default function SubscriptionPage() {
                       <ul className="space-y-1">
                         {featuresToShow.map((feature, idx) => (
                           <li key={idx} className="text-xs flex items-start gap-1.5">
-                            <span className="text-[#c9951d] font-bold mt-0.5">•</span>
+                            <span className="text-[#80601B] font-bold mt-0.5">•</span>
                             <span className="text-muted-foreground leading-tight">{feature}</span>
                           </li>
                         ))}
@@ -755,7 +757,7 @@ export default function SubscriptionPage() {
                               return newSet;
                             });
                           }}
-                          className="text-xs text-[#c9951d] font-semibold hover:underline mt-1"
+                          className="text-xs text-[#80601B] font-semibold hover:underline mt-1"
                         >
                           {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
                         </button>
@@ -763,7 +765,7 @@ export default function SubscriptionPage() {
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 min-[390px]:flex-row">
                     <Button
                       type="button"
                       variant="outline"
@@ -780,7 +782,7 @@ export default function SubscriptionPage() {
                         selectPackage(pkg.id);
                         setCurrentStep(2);
                       }}
-                      className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#434040]' : ''}`}
+                      className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#29372F] text-white hover:bg-[#1f2a24]' : 'bg-[#80601B] text-white hover:bg-[#6f5317]'}`}
                     >
                       اختيار
                     </Button>
@@ -788,11 +790,11 @@ export default function SubscriptionPage() {
                 </div>
               );})}
             </div>
-            <div className="flex justify-end pt-6 border-t">
+            <div className="flex justify-end pt-6 border-t border-[#e4d9c1]">
               <Button
                 onClick={() => setCurrentStep(2)}
                 disabled={!selectedPackageId}
-                className="flex-1 md:flex-none"
+                className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317] md:flex-none"
               >
                 التالي: بيانات العقار
               </Button>
@@ -802,8 +804,8 @@ export default function SubscriptionPage() {
 
         {/* Step 2: Property Details */}
         {currentStep === 2 && selectedPackageId && (
-          <Card className="p-8">
-            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 2: بيانات العقار</h2>
+          <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 2: بيانات العقار</h2>
             <form onSubmit={(e) => { 
               e.preventDefault(); 
               if (validateForm()) {
@@ -818,6 +820,9 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="أخر 5 أرقام من جوالك "
                     value={formData.propertyNumber}
+                    inputMode="numeric"
+                    autoComplete="username"
+                    dir="ltr"
                     onChange={(e) => {
                       const result = validatePropertyNumberInput(e.target.value);
                       setFormData({ ...formData, propertyNumber: result.cleaned });
@@ -850,6 +855,9 @@ export default function SubscriptionPage() {
                     type="password"
                     placeholder="اختر رقماً سرياً"
                     value={formData.pin}
+                    inputMode="numeric"
+                    autoComplete="new-password"
+                    dir="ltr"
                     onChange={(e) => {
                       const result = validatePinInput(e.target.value);
                       setFormData({ ...formData, pin: result.cleaned });
@@ -864,6 +872,9 @@ export default function SubscriptionPage() {
                   <Input
                     placeholder="5xxxxxxxx"
                     value={formData.whatsappNumber}
+                    inputMode="tel"
+                    autoComplete="tel"
+                    dir="ltr"
                     onChange={(e) => {
                       const result = validateWhatsAppInput(e.target.value);
                       setFormData({ ...formData, whatsappNumber: result.cleaned });
@@ -876,7 +887,7 @@ export default function SubscriptionPage() {
               </div>
 
               {/* Location */}
-              <div className="border-t pt-6">
+              <div className="border-t border-[#e4d9c1] pt-6">
                 <h3 className="text-lg font-bold mb-4">الموقع</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
@@ -933,9 +944,9 @@ export default function SubscriptionPage() {
               </div>
 
               {/* Prices */}
-              <div className="border-t pt-6">
+              <div className="border-t border-[#e4d9c1] pt-6">
                 <h3 className="text-lg font-bold mb-4">الأسعار {getCurrencyLabel()} *</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 gap-4 min-[380px]:grid-cols-2 md:grid-cols-4">
                   <div>
                     <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
                     <Input type="number" placeholder="500" value={prices.weekday} onChange={(e) => setPrices({ ...prices, weekday: validateNumericInput(e.target.value) })} required />
@@ -956,17 +967,17 @@ export default function SubscriptionPage() {
               </div>
 
               {/* Submit */}
-              <div className="flex gap-3 pt-6 border-t">
+              <div className="flex flex-col-reverse gap-3 border-t border-[#e4d9c1] pt-6 sm:flex-row">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setCurrentStep(1)}
-                  className="gap-2"
+                  className="w-full gap-2 sm:w-auto"
                 >
                   <ChevronRight className="w-4 h-4" />
                   السابق
                 </Button>
-                <Button type="submit" className="flex-1">
+                <Button type="submit" className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]">
                   التالي: طريقة الدفع
                 </Button>
               </div>
@@ -976,34 +987,38 @@ export default function SubscriptionPage() {
 
         {/* Step 3: Payment Method */}
         {currentStep === 3 && selectedPackageId && (
-          <Card className="p-8">
-            <h2 className="text-xl font-bold text-[#434040] mb-6">الخطوة 3: طريقة الدفع</h2>
+          <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 3: طريقة الدفع</h2>
             <form onSubmit={handleSubmit} className="space-y-6">
               {!isFreePackage && (
                 <div>
                   <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
                   <div className="space-y-3">
-                    <div
+                    <button
+                      type="button"
                       onClick={() => setPaymentMethod('online')}
-                      className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'online' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                      aria-pressed={paymentMethod === 'online'}
+                      className={`w-full rounded-xl border-2 p-4 text-right transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#80601B] focus-visible:ring-offset-2 ${paymentMethod === 'online' ? 'border-[#80601B] bg-[#80601B]/5' : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'}`}
                     >
                       <div className="font-semibold">الدفع الإلكتروني</div>
                       <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
-                    </div>
-                    <div
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setPaymentMethod('bank')}
-                      className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === 'bank' ? 'border-[#434040] bg-[#434040]/5' : 'border-border hover:border-[#434040]/50'}`}
+                      aria-pressed={paymentMethod === 'bank'}
+                      className={`w-full rounded-xl border-2 p-4 text-right transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#80601B] focus-visible:ring-offset-2 ${paymentMethod === 'bank' ? 'border-[#80601B] bg-[#80601B]/5' : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'}`}
                     >
                       <div className="font-semibold">تحويل بنكي</div>
                       <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
-                    </div>
+                    </button>
 
                     {/* Discount Code */}
-                    <div className="mt-4 p-4 bg-muted/30 rounded-lg">
+                    <div className="mt-4 rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4">
                       <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
-                      <div className="flex gap-2">
-                        <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
-                        <Button type="button" variant="outline" onClick={validateDiscount}>تحقق</Button>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input className="min-w-0" placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
+                        <Button type="button" variant="outline" onClick={validateDiscount} className="w-full sm:w-auto">تحقق</Button>
                       </div>
                       {validatedDiscount && (
                         <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
@@ -1012,8 +1027,8 @@ export default function SubscriptionPage() {
 
                     {/* Bank Receipt */}
                     {paymentMethod === 'bank' && (
-                      <div className="p-4 bg-muted/30 rounded-lg space-y-3">
-                        <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+                      <div className="rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-3 space-y-3 sm:p-4">
+                        <div className="rounded-xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 space-y-3 sm:p-5">
                           <div className="flex items-center gap-2 mb-3">
                             <CreditCard className="w-6 h-6 text-blue-700" />
                             <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
@@ -1021,28 +1036,28 @@ export default function SubscriptionPage() {
                           <div className="space-y-3">
                             {bankAccount ? (
                               <>
-                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                                  <span className="text-sm font-semibold text-blue-700">البنك</span>
-                                  <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                                <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                  <span className="shrink-0 text-sm font-semibold text-blue-700">البنك</span>
+                                  <span className="min-w-0 break-words text-base font-bold text-blue-900">{bankAccount.bankName}</span>
                                 </div>
-                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                                  <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
-                                  <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                                <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                  <span className="shrink-0 text-sm font-semibold text-blue-700">اسم المستفيد</span>
+                                  <span className="min-w-0 break-words text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
                                 </div>
-                                <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                                  <span className="text-sm font-semibold text-blue-700">IBAN</span>
-                                  <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                                <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                  <span className="shrink-0 text-sm font-semibold text-blue-700">IBAN</span>
+                                  <span className="min-w-0 break-all text-left text-sm font-bold tracking-wide text-blue-900 font-mono sm:text-base" dir="ltr">{bankAccount.iban}</span>
                                 </div>
                                 {bankAccount.accountNumber && (
-                                  <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                                    <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
-                                    <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                                  <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                    <span className="shrink-0 text-sm font-semibold text-blue-700">رقم الحساب</span>
+                                    <span className="min-w-0 break-all text-left text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
                                   </div>
                                 )}
                                 {bankAccount.barcodeUrl && (
                                   <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
                                     <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
-                                    <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
+                                    <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="h-auto w-full max-w-[200px] mx-auto rounded-lg" />
                                   </div>
                                 )}
                                 <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
@@ -1050,7 +1065,7 @@ export default function SubscriptionPage() {
                                   <img 
                                     src="/assets/bank-qr.png" 
                                     alt="QR Code للدفع" 
-                                    className="max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                                    className="h-auto w-full max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
                                     onClick={() => window.open('/assets/bank-qr.png', '_blank')}
                                   />
                                 </div>
@@ -1066,7 +1081,7 @@ export default function SubscriptionPage() {
                         <div>
                           <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
                           <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
-                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
+                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="h-auto min-h-10 w-full whitespace-normal break-all gap-2 border-blue-400 py-2 text-blue-700 hover:bg-blue-50">
                             <Upload className="w-4 h-4" />
                             {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
                           </Button>
@@ -1079,13 +1094,13 @@ export default function SubscriptionPage() {
 
               {/* Free Package Message */}
               {isFreePackage && (
-                <div className="p-4 bg-muted/30 rounded-lg">
+                <div className="rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4">
                   <p className="text-sm font-semibold">هذه باقة مجانية - سيتم إرسال العقار لاعتماد الإدارة بعد اكتمال البيانات</p>
                 </div>
               )}
 
               {requiresFreeCommissionConsent && (
-                <div className="p-4 border border-border rounded-lg">
+                <div className="rounded-xl border border-[#d8c9aa] bg-white/60 p-4">
                   <div className="flex items-start gap-3">
                     <Checkbox
                       id="free-commission-consent"
@@ -1110,12 +1125,12 @@ export default function SubscriptionPage() {
               {/* Visual Captcha */}
               <div>
                 <label className="block text-sm font-semibold mb-2">رمز التحقق</label>
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-center gap-3 mb-2">
                   <canvas
                     ref={captchaCanvasRef}
                     width={220}
                     height={60}
-                    className="rounded-lg border border-border select-none"
+                    className="h-auto w-full max-w-[220px] rounded-lg border border-[#d8c9aa] select-none"
                     style={{ imageRendering: 'auto' }}
                   />
                   <Button type="button" variant="outline" size="icon" onClick={refreshCaptcha} title="تحديث الرمز" className="shrink-0">
@@ -1136,12 +1151,12 @@ export default function SubscriptionPage() {
               </div>
 
               {/* Submit */}
-              <div className="flex gap-3 pt-6 border-t">
+              <div className="flex flex-col-reverse gap-3 border-t border-[#e4d9c1] pt-6 sm:flex-row">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setCurrentStep(2)}
-                  className="gap-2"
+                  className="w-full gap-2 sm:w-auto"
                 >
                   <ChevronRight className="w-4 h-4" />
                   السابق
@@ -1153,7 +1168,7 @@ export default function SubscriptionPage() {
                     (!isFreePackage && !paymentMethod) ||
                     (requiresFreeCommissionConsent && !freeCommissionConsentAccepted)
                   }
-                  className="flex-1"
+                  className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
                 >
                   {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
                 </Button>
@@ -1164,9 +1179,9 @@ export default function SubscriptionPage() {
 
         {/* Package Details Modal */}
         <Dialog open={!!packageToView} onOpenChange={() => setPackageToView(null)}>
-          <DialogContent className="max-w-md" dir="rtl">
+          <DialogContent className="max-h-[90svh] w-[calc(100%_-_1.5rem)] max-w-md overflow-y-auto border-[#d8c9aa] bg-[#fffdfa]" dir="rtl">
             <DialogHeader>
-              <DialogTitle className="text-[#434040]">{packageToView?.name}</DialogTitle>
+              <DialogTitle className="text-[#29372F]">{packageToView?.name}</DialogTitle>
               <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
             </DialogHeader>
             {packageToView && (
@@ -1174,7 +1189,7 @@ export default function SubscriptionPage() {
                 <div>
                   <p className="text-sm text-muted-foreground mb-1">السعر</p>
                   {packageToView.price === 0 ? (
-                    <p className="text-2xl font-bold text-[#434040]">مجاني</p>
+                    <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
                   ) : (
                     <PriceDisplay amount={packageToView.price} size="lg" />
                   )}
@@ -1189,7 +1204,7 @@ export default function SubscriptionPage() {
                     <ul className="space-y-1">
                       {packageToView.features.map((feature, idx) => (
                         <li key={idx} className="text-sm flex items-start gap-2">
-                          <span className="text-[#434040] font-bold mt-0.5">✓</span>
+                          <span className="text-[#29372F] font-bold mt-0.5">✓</span>
                           <span>{feature}</span>
                         </li>
                       ))}
@@ -1197,11 +1212,11 @@ export default function SubscriptionPage() {
                   </div>
                 )}
                 {isPremiumSubscriptionType(packageToView.type) && (
-                  <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] w-fit">
+                  <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] w-fit">
                     مميز
                   </Badge>
                 )}
-                <div className="flex gap-2 pt-4">
+                <div className="flex flex-col-reverse gap-2 pt-4 sm:flex-row">
                   <Button
                     variant="outline"
                     onClick={() => setPackageToView(null)}
@@ -1214,7 +1229,7 @@ export default function SubscriptionPage() {
                       selectPackage(packageToView.id);
                       setPackageToView(null);
                     }}
-                    className="flex-1 bg-[#434040]"
+                    className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
                   >
                     اختيار
                   </Button>

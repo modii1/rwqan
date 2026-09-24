@@ -67,6 +67,7 @@ router.post("/api/owner/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid Credentials" });
 
   await clearCustomerAccessForPrivilegedLogin(req, res);
+  delete (req.session as any).isAdmin;
   (req.session as any).propertyNumber = propertyNumber;
   req.session.save((err: any) => {
     if (err) return res.status(500).json({ error: "Session save failed" });
@@ -134,6 +135,7 @@ router.post("/api/admin/login", async (req, res) => {
     console.error("Admin login rate-limit cleanup error:", error);
   }
   await clearCustomerAccessForPrivilegedLogin(req, res);
+  delete (req.session as any).propertyNumber;
   (req.session as any).isAdmin = true;
   req.session.save((err: any) => {
     if (err) return res.status(500).json({ error: "Session save failed" });

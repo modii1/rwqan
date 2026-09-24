@@ -17,6 +17,12 @@ test("successful owner login clears and revokes dormant customer access", async 
   const originalRevoke = contactIdentityService.revoke;
   const contactToken = "a".repeat(43);
   const revokedTokens: unknown[] = [];
+  const session: Record<string, unknown> = {
+    isAdmin: true,
+    save(callback: (error?: Error) => void) {
+      callback();
+    },
+  };
 
   (authService as any).validateOwnerPin = async () => true;
   (contactIdentityService as any).revoke = async (token: unknown) => {
@@ -27,11 +33,7 @@ test("successful owner login clears and revokes dormant customer access", async 
   app.use(express.json());
   app.use(cookieParser());
   app.use((req, _res, next) => {
-    (req as any).session = {
-      save(callback: (error?: Error) => void) {
-        callback();
-      },
-    };
+    (req as any).session = session;
     next();
   });
   app.use(authRouter);
@@ -61,8 +63,66 @@ test("successful owner login clears and revokes dormant customer access", async 
     assert.match(setCookie, new RegExp(`${BOOKING_CUSTOMER_SESSION_COOKIE}=;`));
     assert.match(setCookie, /HttpOnly/i);
     assert.match(setCookie, /SameSite=Lax/i);
+    assert.equal(session.propertyNumber, "12345");
+    assert.equal("isAdmin" in session, false);
   } finally {
     authService.validateOwnerPin = originalValidateOwnerPin;
+    contactIdentityService.revoke = originalRevoke;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("successful admin login clears an existing owner session", async () => {
+  const originalValidateAdminCredentials = authService.validateAdminCredentials;
+  const originalSharedLimiter = firebaseService.consumeAdminLoginAttemptLimit;
+  const originalDeleteSharedLimit = firebaseService.deleteAdminLoginAttemptLimit;
+  const originalRevoke = contactIdentityService.revoke;
+  const session: Record<string, unknown> = {
+    propertyNumber: "12345",
+    save(callback: (error?: Error) => void) {
+      callback();
+    },
+  };
+
+  (authService as any).validateAdminCredentials = () => true;
+  (firebaseService as any).consumeAdminLoginAttemptLimit = async () => ({
+    allowed: true,
+    retryAfterMs: 0,
+  });
+  (firebaseService as any).deleteAdminLoginAttemptLimit = async () => {};
+  (contactIdentityService as any).revoke = async () => {};
+
+  const app = express();
+  app.use(express.json());
+  app.use(cookieParser());
+  app.use((req, _res, next) => {
+    (req as any).session = session;
+    next();
+  });
+  app.use(authRouter);
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/admin/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "valid-admin", password: "valid-password" }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(session.isAdmin, true);
+    assert.equal("propertyNumber" in session, false);
+  } finally {
+    authService.validateAdminCredentials = originalValidateAdminCredentials;
+    firebaseService.consumeAdminLoginAttemptLimit = originalSharedLimiter;
+    firebaseService.deleteAdminLoginAttemptLimit = originalDeleteSharedLimit;
     contactIdentityService.revoke = originalRevoke;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

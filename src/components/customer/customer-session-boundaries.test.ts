@@ -42,7 +42,7 @@ test("customer auth redirects only from a server-resolved identity", () => {
   );
   assert.match(
     authSource,
-    /if \(!hasResolvedIdentity && \(identity\.isPending \|\| identity\.isFetching\)\)/,
+    /if \(!isHydrated \|\| \(!hasResolvedIdentity && \(identity\.isPending \|\| identity\.isFetching\)\)\)/,
   );
 });
 
