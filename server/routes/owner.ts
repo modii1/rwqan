@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { requireOwner, requireSameOrigin } from "./middleware";
+import { requireOwner, requireOwnerOrAdmin, requireSameOrigin } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import {
   firebaseService,
@@ -65,6 +65,14 @@ import {
   getForwardTrackedPublicRegistration,
   hasValidFreeCommissionConsent,
 } from "../../shared/freeCommissionConsent";
+import { bookingCommissionStore } from "../services/BookingCommissionStore";
+import { buildOwnerInquiryResponse } from "../services/OwnerInquiryService";
+import type { OwnerPropertyOption } from "../../shared/owner-inquiries";
+import { z } from "zod";
+import { ownerInquiryNoteService } from "../services/OwnerInquiryNoteService";
+import { ownerInquiryVisibilityService } from "../services/OwnerInquiryVisibilityService";
+import { calculateOwnerRequestAnalytics } from "../services/OwnerAnalyticsService";
+import { ownerAccountStore } from "../services/OwnerAccountStore";
 
 const router = Router();
 
@@ -141,6 +149,39 @@ function toOwnerPaymentSummary(payment: Payment) {
   };
 }
 
+function toOwnerSafeProperty(property: any): Record<string, unknown> {
+  return {
+    propertyNumber: property.propertyNumber,
+    name: property.name,
+    whatsappNumber: property.whatsappNumber,
+    location: property.location,
+    city: property.city,
+    direction: property.direction,
+    type: property.type,
+    capacity: property.capacity,
+    availabilityNote: property.availabilityNote,
+    facilities: property.facilities,
+    imagesFolderUrl: property.imagesFolderUrl,
+    imagesLink: property.imagesLink,
+    prices: property.prices,
+    subscriptionType: property.subscriptionType,
+    lastUpdate: property.lastUpdate,
+    subscriptionDate: property.subscriptionDate,
+    verificationStatus: property.verificationStatus,
+    muteExpiryNotification: property.muteExpiryNotification,
+    imageUrls: property.imageUrls,
+    lastChanges: property.lastChanges,
+    addedByOwner: property.addedByOwner,
+    pendingApprovalFrom: property.pendingApprovalFrom,
+    linkedProperty: property.linkedProperty,
+    createdAt: property.createdAt,
+    updatedAt: property.updatedAt,
+    smartVerificationPassed: property.smartVerificationPassed,
+    smartVerificationPassedAt: property.smartVerificationPassedAt,
+    smartVerificationSource: property.smartVerificationSource,
+  };
+}
+
 class LinkedPropertyRequestError extends Error {
   constructor(
     message: string,
@@ -153,13 +194,47 @@ class LinkedPropertyRequestError extends Error {
   }
 }
 
+async function assertOwnerAccountTargetMemberships(params: {
+  ownerAccountId?: string;
+  authVersion?: number;
+  propertyNumbers: Array<string | null | undefined>;
+}): Promise<void> {
+  if (!params.ownerAccountId) return;
+  const targets = Array.from(new Set(
+    params.propertyNumbers.map((value) => String(value || "").trim()).filter(Boolean),
+  ));
+  for (const propertyNumber of targets) {
+    const allowed = await ownerAccountStore.validateActiveMembership({
+      ownerAccountId: params.ownerAccountId,
+      authVersion: Number(params.authVersion),
+      propertyNumber,
+    });
+    if (!allowed) {
+      throw new LinkedPropertyRequestError(
+        `العقار ${propertyNumber} يخص مالكاً آخر`,
+        403,
+        "LINKED_PROPERTY_FORBIDDEN",
+      );
+    }
+  }
+}
+
 async function validateRequestedLinkedProperties(params: {
   mainProperty: any;
   currentSubscription?: any;
   requestedPropertyNumbers: string[];
   pkg: any;
+  ownerAccountId?: string;
+  authVersion?: number;
 }): Promise<void> {
-  const { mainProperty, currentSubscription, requestedPropertyNumbers, pkg } = params;
+  const {
+    mainProperty,
+    currentSubscription,
+    requestedPropertyNumbers,
+    pkg,
+    ownerAccountId,
+    authVersion,
+  } = params;
   const maxPropertiesValue = Number(pkg.maxProperties || pkg.propertyCount || 1);
   const maxProperties = Number.isFinite(maxPropertiesValue) && maxPropertiesValue > 0
     ? Math.floor(maxPropertiesValue)
@@ -195,8 +270,19 @@ async function validateRequestedLinkedProperties(params: {
         "LINKED_PROPERTY_NOT_FOUND",
       );
     }
+    const accountMembershipAllowed = ownerAccountId
+      ? await ownerAccountStore.validateActiveMembership({
+          ownerAccountId,
+          authVersion: Number(authVersion),
+          propertyNumber: requestedPropertyNumber,
+        })
+      : null;
     const linkedPin = String(linkedProperty.pin || "").trim();
-    if (!ownerPin || !linkedPin || linkedPin !== ownerPin) {
+    if (
+      ownerAccountId
+        ? !accountMembershipAllowed
+        : (!ownerPin || !linkedPin || linkedPin !== ownerPin)
+    ) {
       throw new LinkedPropertyRequestError(
         `العقار ${requestedPropertyNumber} يخص مالكاً آخر`,
         403,
@@ -268,6 +354,8 @@ async function prepareOwnerSubscriptionPayment(params: {
   requestedPropertyNumber: string;
   action: unknown;
   pkg: any;
+  ownerAccountId?: string;
+  authVersion?: number;
   paymentBody: {
     additionalProperties?: unknown;
     secondPropertyNumber?: unknown;
@@ -277,6 +365,22 @@ async function prepareOwnerSubscriptionPayment(params: {
   const group = await resolveOwnerSubscriptionGroup(
     params.requestedPropertyNumber,
   );
+  if (params.ownerAccountId) {
+    for (const propertyNumber of group.propertyNumbers) {
+      const allowed = await ownerAccountStore.validateActiveMembership({
+        ownerAccountId: params.ownerAccountId,
+        authVersion: Number(params.authVersion),
+        propertyNumber,
+      });
+      if (!allowed) {
+        throw new LinkedPropertyRequestError(
+          `العقار ${propertyNumber} يخص مالكاً آخر`,
+          403,
+          "LINKED_PROPERTY_FORBIDDEN",
+        );
+      }
+    }
+  }
   const submittedPropertyNumbers = normalizeLinkedPropertyNumbers(
     params.paymentBody,
     group.mainPropertyNumber,
@@ -295,30 +399,77 @@ async function prepareOwnerSubscriptionPayment(params: {
       currentSubscription: group.mainSubscription,
       requestedPropertyNumbers: plan.requestedPropertyNumbers,
       pkg: params.pkg,
+      ownerAccountId: params.ownerAccountId,
+      authVersion: params.authVersion,
     });
   }
 
   return { group, plan };
 }
 
-async function getOwnerGroupPayments(propertyNumber: string): Promise<Payment[]> {
+async function getOwnerGroupPayments(
+  propertyNumber: string,
+  ownerAccountId?: string,
+  authVersion?: number,
+): Promise<Payment[]> {
   const group = await resolveOwnerSubscriptionGroup(propertyNumber);
-  const lookupNumbers = Array.from(new Set([
+  let lookupNumbers = Array.from(new Set([
     propertyNumber,
     group.mainPropertyNumber,
   ]));
+  if (ownerAccountId) {
+    const memberships = await ownerAccountStore.listActiveMemberships(ownerAccountId);
+    const allowed = new Set(memberships.map((membership) => membership.propertyNumber));
+    lookupNumbers = lookupNumbers.filter((number) => allowed.has(number));
+  }
   const paymentGroups = await Promise.all(
     lookupNumbers.map((number) => paymentService.getByProperty(number)),
   );
-  return Array.from(new Map(
+  const payments = Array.from(new Map(
     paymentGroups.flat().map((payment) => [payment.id, payment]),
   ).values());
+  if (!ownerAccountId) return payments;
+  const access = await Promise.all(payments.map((payment) =>
+    ownerCanAccessPayment(
+      propertyNumber,
+      payment,
+      ownerAccountId,
+      authVersion,
+    )));
+  return payments.filter((_payment, index) => access[index]);
 }
 
 async function ownerCanAccessPayment(
   propertyNumber: string,
   payment: Payment,
+  ownerAccountId?: string,
+  authVersion?: number,
 ): Promise<boolean> {
+  if (ownerAccountId) {
+    if (payment.ownerAccountId && payment.ownerAccountId !== ownerAccountId) {
+      return false;
+    }
+    const liveSubscription = await firebaseService
+      .getSubscriptionByPropertyNumber(payment.propertyNumber);
+    const targets = new Set<string>([
+      payment.propertyNumber,
+      String(payment.secondPropertyNumber || "").trim(),
+      ...normalizeLinkedPropertyNumbers(payment as any, payment.propertyNumber),
+      ...(payment.fulfillmentPlan?.kept || []),
+      ...(payment.fulfillmentPlan?.unlinked || []),
+      String(liveSubscription?.linkedProperty || "").trim(),
+      ...(liveSubscription?.linkedProperties || []),
+    ].filter(Boolean));
+    for (const targetPropertyNumber of targets) {
+      const allowed = await ownerAccountStore.validateActiveMembership({
+        ownerAccountId,
+        authVersion: Number(authVersion),
+        propertyNumber: targetPropertyNumber,
+      });
+      if (!allowed) return false;
+    }
+    return true;
+  }
   if (payment.propertyNumber === propertyNumber) return true;
   const group = await resolveOwnerSubscriptionGroup(propertyNumber);
   return payment.propertyNumber === group.mainPropertyNumber;
@@ -378,7 +529,7 @@ router.get("/api/owner/property", requireOwner, async (req, res) => {
     });
 
     res.json({
-      ...property,
+      ...toOwnerSafeProperty(property),
       subscriptionType: isPremiumActive ? "مميز" : "عادي",
       subscriptionStatus: subscription?.status || "غير نشط",
       subscriptionEndDate: subscription?.endDate || null,
@@ -394,7 +545,7 @@ router.get("/api/owner/property", requireOwner, async (req, res) => {
 // ======================================================
 // 🔄 PUT /api/owner/property - Update owner property
 // ======================================================
-router.put("/api/owner/property", requireOwner, async (req, res) => {
+router.put("/api/owner/property", requireOwner, requireSameOrigin, async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber;
     if (!propertyNumber) {
@@ -405,12 +556,23 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     // subscription, verification, identifiers, and dotted Firestore paths are
     // server-owned and cannot be changed through this endpoint.
     const rawUpdates = req.body && typeof req.body === "object" ? req.body : {};
+    if (
+      Object.prototype.hasOwnProperty.call(rawUpdates, "whatsappNumber") &&
+      !(req.session as any).ownerAccountId
+    ) {
+      return res.status(403).json({
+        error: "غير مصرح",
+        code: "OWNER_ACCOUNT_REQUIRED",
+      });
+    }
     const ownerEditableFields = new Set([
       "name",
       "location",
       "city",
       "direction",
       "type",
+      "capacity",
+      "availabilityNote",
       "whatsappNumber",
       "prices",
       "facilities",
@@ -418,6 +580,28 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     const updates: Record<string, any> = Object.fromEntries(
       Object.entries(rawUpdates).filter(([key]) => ownerEditableFields.has(key)),
     );
+
+    if (updates.capacity !== undefined) {
+      const capacity = updates.capacity === null || updates.capacity === ""
+        ? null
+        : Number(updates.capacity);
+      if (
+        capacity !== null
+        && (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1000)
+      ) {
+        return res.status(400).json({ error: "السعة يجب أن تكون رقمًا صحيحًا بين 1 و 1000" });
+      }
+      updates.capacity = capacity;
+    }
+    if (updates.availabilityNote !== undefined) {
+      if (typeof updates.availabilityNote !== "string") {
+        return res.status(400).json({ error: "بيان التوفر غير صالح" });
+      }
+      updates.availabilityNote = updates.availabilityNote.trim();
+      if (updates.availabilityNote.length > 120) {
+        return res.status(400).json({ error: "بيان التوفر يجب ألا يتجاوز 120 حرفًا" });
+      }
+    }
 
     // Log property name for debugging
     console.log(`[PROPERTY_UPDATE] Property: ${propertyNumber}, Name: "${updates.name}", Length: ${updates.name?.length || 0}`);
@@ -471,6 +655,17 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     // مقارنة النوع
     if (updates.type && updates.type !== currentProperty.type) {
       changes.push('تغيير النوع');
+    }
+
+    if (updates.capacity !== undefined && updates.capacity !== currentProperty.capacity) {
+      changes.push('تحديث السعة');
+    }
+
+    if (
+      updates.availabilityNote !== undefined
+      && updates.availabilityNote !== (currentProperty.availabilityNote || "")
+    ) {
+      changes.push('تحديث بيان التوفر');
     }
 
     // مقارنة رقم الجوال
@@ -564,7 +759,7 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
       }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
-    res.json(updated);
+    res.json(toOwnerSafeProperty(updated));
   } catch (err: any) {
     console.error("Update property error:", err?.message);
     if (err instanceof CommissionHoldOwnerChangeError) {
@@ -577,30 +772,26 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
 // ======================================================
 // 📊 GET /api/owner/analytics - Owner analytics (full)
 // ======================================================
-router.get("/api/owner/analytics", async (req, res) => {
+router.get("/api/owner/analytics", requireOwner, async (req, res) => {
   try {
     const propertyNumber = req.session.propertyNumber;
     if (!propertyNumber) {
       return res.status(401).json({ error: "NOT_LOGGED_IN" });
     }
 
-    // 1) جلب الطلبات الحقيقية للعقار
-    const requests = await analyticsService.getAllRequests();
+    // 1) جلب الطلبات والعقارات الفعلية لحساب أرقام هذا العقار فقط
+    const [requests, properties] = await Promise.all([
+      analyticsService.getAllRequests(),
+      propertyService.getAll(),
+    ]);
     const propertyRequests = requests.filter(
       (r) => r.propertyNumber === propertyNumber
     );
-
-    // 2) جلب إحصائيات الزوار الفريدة
-    const analytics = await analyticsService.getAnalytics();
-
-    const visitors = analytics?.visitors || 0;
-    const mobile = analytics?.mobile || 0;
-    const desktop = analytics?.desktop || 0;
-    const tablet = analytics?.tablet || 0;
-    const cities = analytics?.cities || "لا توجد بيانات";
-
-    // 3) إجمالي الطلبات
-    const totalRequests = propertyRequests.length;
+    const requestAnalytics = calculateOwnerRequestAnalytics({
+      propertyNumber,
+      requests,
+      properties,
+    });
 
     // 4) أعلى يوم طلب (Top Day)
     let topDay = "لا يوجد";
@@ -613,42 +804,12 @@ router.get("/api/owner/analytics", async (req, res) => {
       topDay = Object.entries(counter).sort((a, b) => b[1] - a[1])[0][0];
     }
 
-    // 5) تحليل آخر 7 أيام لحساب النمو
-    const now = new Date();
-    const last7 = now.getTime() - 7 * 86400000;
-    const last14 = now.getTime() - 14 * 86400000;
-
-    const weekData = { thisWeek: 0, lastWeek: 0 };
-
-    for (const r of propertyRequests) {
-      const t = new Date(r.timestamp).getTime();
-      if (t >= last7) weekData.thisWeek++;
-      else if (t >= last14) weekData.lastWeek++;
-    }
-
-    const growth =
-      weekData.lastWeek === 0
-        ? 100
-        : Math.round(
-            ((weekData.thisWeek - weekData.lastWeek) / weekData.lastWeek) * 100,
-          );
-
-    // 6) حساب نسبة التفاعل
-    const engagement =
-      visitors === 0 ? 0 : Math.min(100, Math.round((totalRequests / visitors) * 100));
-
-    // 7) الرد النهائي
+    // 5) الرد النهائي: لا نخلط تحليلات المنصة العامة ببيانات هذا العقار
     return res.json({
-      visitors,
-      mobile,
-      desktop,
-      tablet,
-      cities,
-      totalRequests,
+      ...requestAnalytics,
       topDay,
-      growth,
-      engagement,
-      lastUpdated: analytics?.lastUpdated || "",
+      growth: requestAnalytics.previousMonthGrowth,
+      lastUpdated: new Date().toISOString(),
     });
   } catch (error) {
     console.error("❌ Owner analytics error:", error);
@@ -662,31 +823,240 @@ router.get("/api/owner/analytics", async (req, res) => {
 router.get("/api/owner/requests", requireOwner, async (req: any, res) => {
   try {
     const propertyNumber = req.propertyNumber;
-    const allRequests = await analyticsService.getAllRequests();
-    const propertyRequests = allRequests
-      .filter(r => r.propertyNumber === propertyNumber)
-      .map(({ clientPhone: _clientPhone, ...request }) => request);
-    res.json(propertyRequests);
+    const [allRequests, bookings, notes, hidden] = await Promise.all([
+      analyticsService.getAllRequests(),
+      bookingCommissionStore.listBookingsForProperty(propertyNumber),
+      ownerInquiryNoteService.listForProperty(propertyNumber),
+      ownerInquiryVisibilityService.listHiddenForProperty(propertyNumber),
+    ]);
+    res.set("Cache-Control", "no-store, private");
+    res.json(buildOwnerInquiryResponse({
+      propertyNumber,
+      requests: allRequests,
+      bookings,
+      notes,
+      hidden,
+    }));
   } catch (err) {
+    console.error("Owner requests error:", err);
     res.status(500).json({ error: "فشل في جلب الطلبات" });
   }
 });
 
+const ownerInquiryNoteInput = z.object({
+  note: z.string().max(1_000),
+}).strict();
+
+router.put(
+  "/api/owner/requests/:inquiryId/note",
+  requireOwner,
+  requireSameOrigin,
+  async (req, res) => {
+    try {
+      const inquiryId = z.string().trim().min(1).max(256).parse(req.params.inquiryId);
+      const { note } = ownerInquiryNoteInput.parse(req.body);
+      const propertyNumber = String((req.session as any).propertyNumber || "");
+      const [requests, bookings] = await Promise.all([
+        analyticsService.getAllRequests(),
+        bookingCommissionStore.listBookingsForProperty(propertyNumber),
+      ]);
+      const belongsToProperty = requests.some((request) =>
+        request.propertyNumber === propertyNumber && request.id === inquiryId
+      ) || bookings.some((booking) =>
+        booking.propertyNumber === propertyNumber && booking.id === inquiryId
+      );
+      if (!belongsToProperty) {
+        return res.status(404).json({ error: "الطلب غير موجود" });
+      }
+      const saved = await ownerInquiryNoteService.save({
+        propertyNumber,
+        inquiryId,
+        note,
+      });
+      res.set("Cache-Control", "no-store, private");
+      return res.json({ note: saved });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "الملاحظة غير صالحة" });
+      }
+      console.error("Owner inquiry note error:", error);
+      return res.status(500).json({ error: "تعذر حفظ الملاحظة" });
+    }
+  },
+);
+
+// ======================================================
+// 🏘️ GET /api/owner/properties - Safe linked-property membership
+// ======================================================
+router.get("/api/owner/properties", requireOwner, async (req, res) => {
+  try {
+    const currentPropertyNumber = (req.session as any).propertyNumber as string;
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    if (ownerAccountId) {
+      const memberships = await ownerAccountStore.listActiveMemberships(
+        ownerAccountId,
+      );
+      const candidates = await Promise.all(memberships.map((membership) =>
+        firebaseService.getPropertyByNumber(membership.propertyNumber)));
+      const properties: OwnerPropertyOption[] = memberships.flatMap(
+        (membership, index) => {
+          const property = candidates[index];
+          if (!property || property.propertyNumber !== membership.propertyNumber) {
+            return [];
+          }
+          return [{
+            propertyNumber: property.propertyNumber,
+            name: property.name || null,
+            city: property.city || null,
+            isCurrent: property.propertyNumber === currentPropertyNumber,
+            isMain: membership.isPrimary,
+          }];
+        },
+      );
+      res.set("Cache-Control", "no-store, private");
+      return res.json({ properties });
+    }
+    const group = await resolveOwnerSubscriptionGroup(currentPropertyNumber);
+    const currentPin = String(group.requestedProperty.pin || "").trim();
+    const candidates = await Promise.all(
+      group.propertyNumbers.map((propertyNumber) =>
+        firebaseService.getPropertyByNumber(propertyNumber),
+      ),
+    );
+    const properties: OwnerPropertyOption[] = candidates
+      .filter((property): property is NonNullable<typeof property> => Boolean(property))
+      .filter((property) =>
+        Boolean(currentPin) && String(property.pin || "").trim() === currentPin
+      )
+      .map((property) => ({
+        propertyNumber: property.propertyNumber,
+        name: property.name || null,
+        city: property.city || null,
+        isCurrent: property.propertyNumber === currentPropertyNumber,
+        isMain: property.propertyNumber === group.mainPropertyNumber,
+      }));
+    res.set("Cache-Control", "no-store, private");
+    res.json({ properties });
+  } catch (error) {
+    if (error instanceof OwnerSubscriptionGroupError) {
+      return res.status(error.status).json({ code: error.code, error: error.message });
+    }
+    console.error("Owner properties error:", error);
+    return res.status(500).json({ error: "فشل في جلب العقارات" });
+  }
+});
+
+// ======================================================
+// 🔁 POST /api/owner/switch-property - Change active linked property
+// ======================================================
+router.post(
+  "/api/owner/switch-property",
+  requireOwner,
+  requireSameOrigin,
+  async (req, res) => {
+    try {
+      const currentPropertyNumber = (req.session as any).propertyNumber as string;
+      const requestedPropertyNumber = String(req.body?.propertyNumber || "").trim();
+      const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+      const authVersion = (req.session as any).authVersion as number | undefined;
+      if (ownerAccountId) {
+        const allowed = Boolean(requestedPropertyNumber) &&
+          await ownerAccountStore.validateActiveMembership({
+            ownerAccountId,
+            authVersion: Number(authVersion),
+            propertyNumber: requestedPropertyNumber,
+          });
+        const requestedProperty = allowed
+          ? await firebaseService.getPropertyByNumber(requestedPropertyNumber)
+          : null;
+        if (!allowed || !requestedProperty) {
+          return res.status(403).json({ error: "لا يمكنك الوصول إلى هذا العقار" });
+        }
+        await new Promise<void>((resolve, reject) => {
+          req.session.regenerate((error) => error ? reject(error) : resolve());
+        });
+        (req.session as any).ownerAccountId = ownerAccountId;
+        (req.session as any).authVersion = authVersion;
+        (req.session as any).propertyNumber = requestedPropertyNumber;
+        await new Promise<void>((resolve, reject) => {
+          req.session.save((error) => error ? reject(error) : resolve());
+        });
+        return res.json({ ok: true, propertyNumber: requestedPropertyNumber });
+      }
+      const group = await resolveOwnerSubscriptionGroup(currentPropertyNumber);
+      if (!requestedPropertyNumber || !group.propertyNumbers.includes(requestedPropertyNumber)) {
+        return res.status(403).json({ error: "لا يمكنك الوصول إلى هذا العقار" });
+      }
+      const [currentProperty, requestedProperty] = await Promise.all([
+        firebaseService.getPropertyByNumber(currentPropertyNumber),
+        firebaseService.getPropertyByNumber(requestedPropertyNumber),
+      ]);
+      const currentPin = String(currentProperty?.pin || "").trim();
+      const requestedPin = String(requestedProperty?.pin || "").trim();
+      if (!currentProperty || !requestedProperty || !currentPin || currentPin !== requestedPin) {
+        return res.status(403).json({ error: "لا يمكنك الوصول إلى هذا العقار" });
+      }
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((error) => error ? reject(error) : resolve());
+      });
+      (req.session as any).propertyNumber = requestedPropertyNumber;
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((error) => error ? reject(error) : resolve());
+      });
+      return res.json({ ok: true, propertyNumber: requestedPropertyNumber });
+    } catch (error) {
+      if (error instanceof OwnerSubscriptionGroupError) {
+        return res.status(error.status).json({ code: error.code, error: error.message });
+      }
+      console.error("Owner property switch error:", error);
+      return res.status(500).json({ error: "تعذر تبديل العقار" });
+    }
+  },
+);
+
 // ======================================================
 // 🗑️ DELETE /api/owner/requests/:id - Delete a request
 // ======================================================
-router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => {
-  try {
-    const propertyNumber = req.propertyNumber;
-    const requestId = req.params.id;
-    
-    await analyticsService.deleteRequest(propertyNumber, requestId);
-    res.json({ success: true, message: "تم حذف الطلب بنجاح" });
-  } catch (err) {
-    console.error("Delete request error:", err);
-    res.status(500).json({ error: "فشل في حذف الطلب" });
-  }
-});
+router.delete(
+  "/api/owner/requests/:id",
+  requireOwner,
+  requireSameOrigin,
+  async (req: any, res) => {
+    try {
+      const propertyNumber = req.propertyNumber;
+      const requestId = req.params.id;
+      const requests = await analyticsService.getAllRequests();
+      const request = requests.find((candidate) =>
+        candidate.propertyNumber === propertyNumber &&
+        (candidate.id === requestId || candidate.requestCode === requestId)
+      );
+      if (!request) {
+        return res.status(404).json({
+          code: "REQUEST_NOT_DELETABLE",
+          error: "فشل في حذف الطلب",
+        });
+      }
+
+      const bookings = await bookingCommissionStore.listBookingsForProperty(
+        propertyNumber,
+      );
+      const booking = bookings.find((candidate) =>
+        candidate.contactRequestId === request.id ||
+        candidate.requestCode === request.requestCode
+      );
+      await ownerInquiryVisibilityService.hide({
+        propertyNumber,
+        inquiryId: request.id,
+        contactRequestId: request.id,
+        bookingId: booking?.id || null,
+      });
+      return res.json({ success: true, message: "تم حذف الطلب بنجاح" });
+    } catch (err) {
+      console.error("Delete request error:", err);
+      return res.status(500).json({ error: "فشل في حذف الطلب" });
+    }
+  },
+);
 
 // ======================================================
 // 📦 GET /api/owner/current-subscription - Owner's current subscription
@@ -694,6 +1064,7 @@ router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => 
 router.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
+    const ownerAccountId = (req.session as any)?.ownerAccountId as string | undefined;
 
     if (!propertyNumber) {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
@@ -719,21 +1090,54 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
       return res.json(defaultSub);
     }
 
+    const accountMemberships = ownerAccountId
+      ? await ownerAccountStore.listActiveMemberships(ownerAccountId)
+      : null;
+    const allowedAccountProperties = accountMemberships
+      ? new Set(accountMemberships.map((membership) => membership.propertyNumber))
+      : null;
+    const safeSubscription = allowedAccountProperties
+      ? {
+          ...subscription,
+          linkedProperty: allowedAccountProperties.has(
+            String(subscription.linkedProperty || ""),
+          )
+            ? subscription.linkedProperty
+            : undefined,
+          linkedProperties: Array.isArray(subscription.linkedProperties)
+            ? subscription.linkedProperties.filter((linkedProperty: string) =>
+                allowedAccountProperties.has(linkedProperty))
+            : subscription.linkedProperties,
+        }
+      : subscription;
+
     let linkedToMain = null;
-    if (subscription.linkedProperty) {
-      const mainProperty = await firebaseService.getPropertyByNumber(subscription.linkedProperty);
-      const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(subscription.linkedProperty);
+    if (
+      safeSubscription.linkedProperty &&
+      (!allowedAccountProperties ||
+        allowedAccountProperties.has(safeSubscription.linkedProperty))
+    ) {
+      const mainProperty = await firebaseService.getPropertyByNumber(safeSubscription.linkedProperty);
+      const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(safeSubscription.linkedProperty);
       linkedToMain = {
-        propertyNumber: subscription.linkedProperty,
-        name: mainProperty?.name || subscription.linkedProperty,
+        propertyNumber: safeSubscription.linkedProperty,
+        name: mainProperty?.name || safeSubscription.linkedProperty,
         city: mainProperty?.city,
         subscriptionStatus: mainSubscription?.status || 'غير نشط'
       };
     }
 
     const group = await resolveOwnerSubscriptionGroup(propertyNumber);
+    const visibleGroupPropertyNumbers = allowedAccountProperties
+      ? group.propertyNumbers.filter((number) => allowedAccountProperties.has(number))
+      : group.propertyNumbers;
+    const visibleMainPropertyNumber = visibleGroupPropertyNumbers.includes(
+      group.mainPropertyNumber,
+    )
+      ? group.mainPropertyNumber
+      : propertyNumber;
     const groupProperties = await Promise.all(
-      group.propertyNumbers.map(async (groupPropertyNumber) => {
+      visibleGroupPropertyNumbers.map(async (groupPropertyNumber) => {
         const groupProperty = groupPropertyNumber === group.requestedPropertyNumber
           ? group.requestedProperty
           : groupPropertyNumber === group.mainPropertyNumber
@@ -742,19 +1146,21 @@ router.get("/api/owner/current-subscription", requireOwner, async (req, res) => 
         return {
           propertyNumber: groupPropertyNumber,
           name: groupProperty?.name || groupPropertyNumber,
-          isMain: groupPropertyNumber === group.mainPropertyNumber,
+          isMain: groupPropertyNumber === visibleMainPropertyNumber,
         };
       }),
     );
 
     res.json({
-      ...subscription,
+      ...safeSubscription,
       linkedToMain,
       linkedGroup: {
-        mainPropertyNumber: group.mainPropertyNumber,
-        propertyNumbers: group.propertyNumbers,
-        linkedPropertyNumbers: group.linkedPropertyNumbers,
-        propertyCount: group.propertyNumbers.length,
+        mainPropertyNumber: visibleMainPropertyNumber,
+        propertyNumbers: visibleGroupPropertyNumbers,
+        linkedPropertyNumbers: visibleGroupPropertyNumbers.filter(
+          (number) => number !== visibleMainPropertyNumber,
+        ),
+        propertyCount: visibleGroupPropertyNumbers.length,
         properties: groupProperties,
       },
     });
@@ -786,7 +1192,11 @@ router.get("/api/owner/payments", requireOwner, async (req, res) => {
       return res.status(401).json({ error: "NOT_AUTHENTICATED" });
     }
 
-    const payments = await getOwnerGroupPayments(propertyNumber);
+    const payments = await getOwnerGroupPayments(
+      propertyNumber,
+      (req.session as any).ownerAccountId,
+      (req.session as any).authVersion,
+    );
 
     res.json(payments.map(toOwnerPaymentSummary));
   } catch (err: any) {
@@ -876,7 +1286,7 @@ router.put("/api/owner/seo", requireOwner, async (req, res) => {
 // 🔬 POST /api/owner/payment/:paymentId/rescan - Re-scan receipt with AI
 // Allows both owners (for their own payments) and admins
 // ======================================================
-router.post("/api/owner/payment/:paymentId/rescan", requireSameOrigin, async (req, res) => {
+router.post("/api/owner/payment/:paymentId/rescan", requireOwnerOrAdmin, requireSameOrigin, async (req, res) => {
   try {
     const { paymentId } = req.params;
     const isAdmin = !!(req.session as any)?.isAdmin;
@@ -895,7 +1305,12 @@ router.post("/api/owner/payment/:paymentId/rescan", requireSameOrigin, async (re
     let payment;
     if (!isAdmin && propertyNumber) {
       const candidate = await paymentService.getById(paymentId);
-      payment = candidate && await ownerCanAccessPayment(propertyNumber, candidate)
+      payment = candidate && await ownerCanAccessPayment(
+        propertyNumber,
+        candidate,
+        (req.session as any).ownerAccountId,
+        (req.session as any).authVersion,
+      )
         ? candidate
         : null;
     } else {
@@ -967,7 +1382,11 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const payments = sortPaymentsNewestFirst(await getOwnerGroupPayments(propertyNumber));
+    const payments = sortPaymentsNewestFirst(await getOwnerGroupPayments(
+      propertyNumber,
+      (req.session as any).ownerAccountId,
+      (req.session as any).authVersion,
+    ));
     const latestPayment = payments[0];
 
     if (
@@ -979,7 +1398,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
         hasPending: false,
         reconciled: true,
         payment: {
-          ...latestPayment,
+          ...toOwnerPaymentSummary(latestPayment),
           status: "مكتمل",
         },
       });
@@ -989,7 +1408,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
       if (latestPayment?.status === "مرفوض") {
         return res.json({
           hasPending: false,
-          payment: latestPayment,
+          payment: toOwnerPaymentSummary(latestPayment),
           errorMessage: latestPayment.notes || "تم رفض الدفع. يرجى مراجعة السبب وإعادة المحاولة.",
           nextAction: latestPayment.notes?.includes("بيانات العقار")
             ? "أكمل بيانات العقار ثم أعد محاولة الدفع."
@@ -1031,7 +1450,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 
     return res.json({
       hasPending: true,
-      payment: pendingPayment,
+      payment: toOwnerPaymentSummary(pendingPayment),
       autoCheckPassed: issues.length === 0,
       issues: issues.length > 0 ? issues : undefined,
       nextAction: pendingPayment.notes?.includes("بيانات العقار")
@@ -1053,7 +1472,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 // 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
 // ======================================================
-router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
+router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin, upload.single("receipt"), async (req, res) => {
   let uploadedReceiptKey: string | null = null;
   try {
     const {
@@ -1120,6 +1539,8 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
           requestedPropertyNumber,
           action,
           pkg,
+          ownerAccountId: (req.session as any).ownerAccountId,
+          authVersion: (req.session as any).authVersion,
           paymentBody: submittedPaymentBody,
         });
     const propertyNumber = prepared?.group.mainPropertyNumber || requestedPropertyNumber;
@@ -1202,6 +1623,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       paymentReference,
+      ownerAccountId: (req.session as any).ownerAccountId || undefined,
     } as any);
     console.log(`[BANK_TRANSFER] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
@@ -1703,7 +2125,7 @@ router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
   }
 });
 
-router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
+router.post("/api/owner/property/activate", requireOwner, requireSameOrigin, async (req, res) => {
   let fulfillmentClaim: { paymentId: string; token: string } | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
@@ -1857,6 +2279,17 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     const isPartialFulfillment =
       !pendingPayment.fulfilledAt &&
       currentSubscriptionForActivation?.paymentId === pendingPayment.id;
+
+    await assertOwnerAccountTargetMemberships({
+      ownerAccountId: (req.session as any).ownerAccountId,
+      authVersion: (req.session as any).authVersion,
+      propertyNumbers: [
+        propertyNumber,
+        (pendingPayment as any).secondPropertyNumber,
+        ...normalizeLinkedPropertyNumbers(pendingPayment as any, propertyNumber),
+        ...(currentSubscriptionForActivation?.linkedProperties || []),
+      ],
+    });
 
     if (pendingPayment.fulfilledAt) {
       if (property.verificationStatus !== "approved") {
@@ -2138,6 +2571,9 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
     if (hasPropertySuspendedCode(err)) {
       return sendPropertySuspendedResponse(res);
     }
+    if (err instanceof LinkedPropertyRequestError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     console.error("Property activation error:", err);
     res.status(500).json({
       success: false,
@@ -2150,7 +2586,7 @@ router.post("/api/owner/property/activate", requireOwner, async (req, res) => {
 // ======================================================
 // 🔍 POST /api/owner/property/run-verification - Owner self-service smart verification
 // ======================================================
-router.post("/api/owner/property/run-verification", requireOwner, async (req, res) => {
+router.post("/api/owner/property/run-verification", requireOwner, requireSameOrigin, async (req, res) => {
   let lockedPropertyNumber: string | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
@@ -2182,6 +2618,38 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
           ? "بيانات العقار معتمدة ولا تحتاج إلى فحص جديد"
           : "تم فحص بيانات العقار مسبقاً والطلب بانتظار اعتماد الإدارة",
       });
+    }
+
+    const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
+    const isNewProperty = !hasPriorSubscription(currentSubscription);
+
+    // Resolve and authorize a pending fulfillment before running verification
+    // or changing any property state. A stale payment can retain linked targets
+    // after those properties move to another verified account.
+    const payments = await paymentService.getByProperty(propertyNumber);
+    const pendingActivationPayment = payments
+      .filter((p) => p.status === ("نجح - قيد التحقق" as any))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+    if (pendingActivationPayment && !await ownerCanAccessPayment(
+      propertyNumber,
+      pendingActivationPayment,
+      (req.session as any).ownerAccountId,
+      (req.session as any).authVersion,
+    )) {
+      return res.status(403).json({ error: "غير مصرح" });
+    }
+    const ownerAccountId = (req.session as any).ownerAccountId as
+      | string
+      | undefined;
+    if (
+      pendingActivationPayment &&
+      ownerAccountId &&
+      !pendingActivationPayment.ownerAccountId
+    ) {
+      await paymentService.update(pendingActivationPayment.id, {
+        ownerAccountId,
+      });
+      pendingActivationPayment.ownerAccountId = ownerAccountId;
     }
 
     if (manualVerificationInFlight.has(propertyNumber)) {
@@ -2216,9 +2684,6 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
       });
     }
 
-    const currentSubscription = await subscriptionService.getByProperty(propertyNumber);
-    const isNewProperty = !hasPriorSubscription(currentSubscription);
-
     if (isNewProperty) {
       await assertPropertyNotSuspended(propertyNumber);
       await firebaseService.updateProperty(propertyNumber, {
@@ -2233,12 +2698,6 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
       await firebaseService.updateVerificationStatus(propertyNumber, "approved");
       console.log(`✅ [Owner Self-Verify] العقار القديم ${propertyNumber} - تم التحقق بنجاح`);
     }
-
-    // فحص: هل يوجد دفعة معلقة مكتملة لكن غير مفعّلة (عقار جديد دفع لكن انتظار يدوياً)
-    const payments = await paymentService.getByProperty(propertyNumber);
-    const pendingActivationPayment = payments
-      .filter((p) => p.status === ("نجح - قيد التحقق" as any))
-      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
 
     let subscriptionActivated = false;
     let pendingAdminApproval = isNewProperty;
@@ -2326,7 +2785,7 @@ router.post("/api/owner/property/run-verification", requireOwner, async (req, re
 });
 
 
-router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
+router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, async (req, res) => {
   let createdPaymentId: string | null = null;
   let paymentIntentionRequestStarted = false;
   let paymentIntentionPersisted = false;
@@ -2386,6 +2845,8 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
       requestedPropertyNumber,
       action,
       pkg,
+      ownerAccountId: (req.session as any).ownerAccountId,
+      authVersion: (req.session as any).authVersion,
       paymentBody: {
         additionalProperties: allAdditionalProps,
         secondPropertyNumber: parsedSecondPropertyNumber,
@@ -2446,6 +2907,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
       secondPropertyNumber: parsedSecondPropertyNumber || undefined,
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
+      ownerAccountId: (req.session as any).ownerAccountId || undefined,
     } as any);
     createdPaymentId = payment.id;
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
@@ -2568,7 +3030,7 @@ router.post("/api/owner/payment/initiate", requireOwner, async (req, res) => {
 });
 
 // POST /api/owner/payment/retry - Retry failed/pending payment
-router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
+router.post("/api/owner/payment/retry", requireOwner, requireSameOrigin, async (req, res) => {
   let retryReservation: { paymentId: string; token: string } | null = null;
   let retryIntentionRequestStarted = false;
   let retryIntentionPersisted = false;
@@ -2590,8 +3052,21 @@ router.post("/api/owner/payment/retry", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "الدفعة غير موجودة" });
     }
 
-    if (!propertyNumber || !await ownerCanAccessPayment(propertyNumber, payment)) {
+    if (!propertyNumber || !await ownerCanAccessPayment(
+      propertyNumber,
+      payment,
+      (req.session as any).ownerAccountId,
+      (req.session as any).authVersion,
+    )) {
       return res.status(403).json({ error: "غير مصرح" });
+    }
+
+    const ownerAccountId = (req.session as any).ownerAccountId as
+      | string
+      | undefined;
+    if (ownerAccountId && !payment.ownerAccountId) {
+      await paymentService.update(payment.id, { ownerAccountId });
+      payment.ownerAccountId = ownerAccountId;
     }
 
     if (["مكتمل", "completed", "نجح", "نجاح", "نجح - قيد التحقق", "قيد التحقق"].includes(payment.status)) {
@@ -2825,7 +3300,7 @@ function checkPropertyUserDataComplete(property: any): { isComplete: boolean; mi
   };
 }
 
-router.post("/api/owner/verify-second-property", requireOwner, async (req, res) => {
+router.post("/api/owner/verify-second-property", requireOwner, requireSameOrigin, async (req, res) => {
   try {
     const ownerPropertyNumber = (req.session as any).propertyNumber;
     const { secondPropertyNumber } = req.body;
@@ -2852,7 +3327,19 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
       return res.status(404).json({ error: "لم يتم العثور على العقار الثاني" });
     }
 
-    if (secondProperty.pin !== ownerProperty.pin) {
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    const accountMembershipAllowed = ownerAccountId
+      ? await ownerAccountStore.validateActiveMembership({
+          ownerAccountId,
+          authVersion: Number((req.session as any).authVersion),
+          propertyNumber: secondPropertyNumber,
+        })
+      : null;
+    if (
+      ownerAccountId
+        ? !accountMembershipAllowed
+        : secondProperty.pin !== ownerProperty.pin
+    ) {
       return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
     }
 
@@ -2904,7 +3391,7 @@ router.post("/api/owner/verify-second-property", requireOwner, async (req, res) 
 // طلب إضافة عقار إضافي (تفعيل تلقائي إذا كان العقار الرئيسي لديه اشتراك نشط)
 // POST /api/owner/request-additional-property
 // ======================================================
-router.post("/api/owner/request-additional-property", requireOwner, async (req, res) => {
+router.post("/api/owner/request-additional-property", requireOwner, requireSameOrigin, async (req, res) => {
   try {
     const ownerPropertyNumber = (req.session as any).propertyNumber;
     const { additionalPropertyNumber } = req.body;
@@ -2927,7 +3414,19 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       return res.status(404).json({ error: "لم يتم العثور على العقار الإضافي" });
     }
 
-    if (additionalProperty.pin !== ownerProperty.pin) {
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    const accountMembershipAllowed = ownerAccountId
+      ? await ownerAccountStore.validateActiveMembership({
+          ownerAccountId,
+          authVersion: Number((req.session as any).authVersion),
+          propertyNumber: additionalPropertyNumber,
+        })
+      : null;
+    if (
+      ownerAccountId
+        ? !accountMembershipAllowed
+        : additionalProperty.pin !== ownerProperty.pin
+    ) {
       return res.status(403).json({ error: "هذا العقار يخص مالك آخر" });
     }
 
@@ -2962,9 +3461,18 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       calculateRemainingDays(ownerSubscription.endDate) < 0
     ) {
       // No active subscription - fall back to pending approval
-      await firebaseService.updateProperty(additionalPropertyNumber, {
-        pendingApprovalFrom: ownerPropertyNumber
-      });
+      if (ownerAccountId) {
+        await firebaseService.setPendingLinkedPropertyApprovalForOwnerAccount({
+          ownerAccountId,
+          authVersion: Number((req.session as any).authVersion),
+          mainPropertyNumber: ownerPropertyNumber,
+          targetPropertyNumber: additionalPropertyNumber,
+        });
+      } else {
+        await firebaseService.updateProperty(additionalPropertyNumber, {
+          pendingApprovalFrom: ownerPropertyNumber
+        });
+      }
       return res.json({
         ok: true,
         message: "تم إرسال طلب إضافة العقار الإضافي. في انتظار موافقة الأدمن.",
@@ -2980,6 +3488,8 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
       mainPropertyNumber: ownerPropertyNumber,
       addPropertyNumbers: [additionalPropertyNumber],
       approveAddedProperties: true,
+      ownerAccountId,
+      ownerAccountAuthVersion: Number((req.session as any).authVersion),
     });
 
     res.json({
@@ -3008,6 +3518,13 @@ router.post("/api/owner/request-additional-property", requireOwner, async (req, 
 router.get("/api/owner/additional-property-requests", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber;
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    const accountMemberships = ownerAccountId
+      ? await ownerAccountStore.listActiveMemberships(ownerAccountId)
+      : null;
+    const allowedAccountProperties = accountMemberships
+      ? new Set(accountMemberships.map((membership) => membership.propertyNumber))
+      : null;
     
     const properties = await firebaseService.getProperties();
     
@@ -3062,12 +3579,14 @@ router.get("/api/owner/additional-property-requests", requireOwner, async (req, 
     
     // Filter pendingRequests to exclude properties that already have subscriptions (are already linked/approved)
     const filteredPendingRequests = pendingRequests.filter((p: any) => 
-      !approvedPropertyNumbers.includes(p.propertyNumber)
+      !approvedPropertyNumbers.includes(p.propertyNumber) &&
+      (!allowedAccountProperties || allowedAccountProperties.has(p.propertyNumber))
     );
     
     // Get the full property details for approved properties
     const approvedProperties = properties.filter((p: any) => 
-      approvedPropertyNumbers.includes(p.propertyNumber)
+      approvedPropertyNumbers.includes(p.propertyNumber) &&
+      (!allowedAccountProperties || allowedAccountProperties.has(p.propertyNumber))
     );
 
     res.json({
@@ -3099,15 +3618,28 @@ router.get("/api/owner/additional-property-requests", requireOwner, async (req, 
 // فصل عقار مرتبط من العقار الرئيسي
 // DELETE /api/owner/subscription/linked-properties/:propertyNumber
 // ======================================================
-router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requireOwner, async (req, res) => {
+router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requireOwner, requireSameOrigin, async (req, res) => {
   try {
     const mainPropertyNumber = (req.session as any).propertyNumber;
     const linkedPropertyNumber = req.params.propertyNumber;
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    if (ownerAccountId) {
+      const allowed = await ownerAccountStore.validateActiveMembership({
+        ownerAccountId,
+        authVersion: Number((req.session as any).authVersion),
+        propertyNumber: linkedPropertyNumber,
+      });
+      if (!allowed) {
+        return res.status(403).json({ error: "لا يمكنك الوصول إلى هذا العقار" });
+      }
+    }
 
     const mainSubscription = await firebaseService.getSubscriptionByPropertyNumber(mainPropertyNumber);
     await firebaseService.unlinkLinkedPropertiesAtomically({
       mainPropertyNumber,
       propertyNumbers: [linkedPropertyNumber],
+      ownerAccountId,
+      ownerAccountAuthVersion: Number((req.session as any).authVersion),
     });
 
     // Log the unlink against the payment record for audit trail
@@ -3150,7 +3682,7 @@ router.delete("/api/owner/subscription/linked-properties/:propertyNumber", requi
 // تحضير معلومات الدفع للترقية/التمديد
 // POST /api/owner/subscription/prepare-payment
 // ======================================================
-router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req, res) => {
+router.post("/api/owner/subscription/prepare-payment", requireOwner, requireSameOrigin, async (req, res) => {
   try {
     const propertyNumber = (req.session as any).propertyNumber;
     const { action, packageId } = req.body;
@@ -3213,7 +3745,7 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, async (req,
 // تأكيد الاشتراك بعد الدفع الناجح
 // POST /api/owner/subscription/confirm
 // ======================================================
-router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) => {
+router.post("/api/owner/subscription/confirm", requireOwner, requireSameOrigin, async (req, res) => {
   let fulfillmentClaim: { paymentId: string; token: string } | null = null;
   try {
     const propertyNumber = (req.session as any).propertyNumber;
@@ -3261,6 +3793,27 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     const subscriptions = await firebaseService.getSubscriptionsByProperty(propertyNumber);
     console.log(`📋 Found ${subscriptions.length} subscriptions for ${propertyNumber}`);
 
+    const currentSubscription = subscriptions.find((s) => isActiveSubscription(s));
+
+    console.log(`📋 [Owner Confirm] Current subscription:`, currentSubscription ?
+      `status=${currentSubscription.status}, endDate=${currentSubscription.endDate}` : 'None');
+
+    const paymentLinkedProperties = normalizeLinkedPropertyNumbers(
+      paymentRecord as any,
+      propertyNumber,
+    );
+    const linkedPropertiesSnapshot = paymentLinkedProperties.length > 0
+      ? paymentLinkedProperties
+      : normalizeLinkedPropertyNumbers(
+          { linkedProperties: currentSubscription?.linkedProperties || [] },
+          propertyNumber,
+        );
+    await assertOwnerAccountTargetMemberships({
+      ownerAccountId: (req.session as any).ownerAccountId,
+      authVersion: (req.session as any).authVersion,
+      propertyNumbers: [propertyNumber, ...linkedPropertiesSnapshot],
+    });
+
     const fulfilledSubscription = subscriptions.find(
       (subscription) => subscription.paymentId === paymentRecord.id,
     );
@@ -3274,11 +3827,6 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
         endDate: effectiveSubscription?.endDate || null,
       });
     }
-
-    const currentSubscription = subscriptions.find((s) => isActiveSubscription(s));
-
-    console.log(`📋 [Owner Confirm] Current subscription:`, currentSubscription ?
-      `status=${currentSubscription.status}, endDate=${currentSubscription.endDate}` : 'None');
 
     const claimResult = await firebaseService.claimPaymentFulfillment(paymentRecord.id);
     if (claimResult.status === "fulfilled") {
@@ -3372,17 +3920,6 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
     );
 
     const isPremium = isPremiumSubscriptionType(newPackage.type) || newPackage.price > 0;
-    const paymentLinkedProperties = normalizeLinkedPropertyNumbers(
-      paymentRecord as any,
-      propertyNumber,
-    );
-    const linkedPropertiesSnapshot = paymentLinkedProperties.length > 0
-      ? paymentLinkedProperties
-      : normalizeLinkedPropertyNumbers(
-          { linkedProperties: currentSubscription?.linkedProperties || [] },
-          propertyNumber,
-        );
-
     // Persist the original group before the first subscription write. A failed
     // partial attempt can then retry without losing children after the main
     // subscription has already been narrowed to the new package limit.
@@ -3501,6 +4038,9 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
         fulfillmentClaim.token,
       ).catch((releaseError) => console.error("Failed to release payment fulfillment claim:", releaseError));
     }
+    if (err instanceof LinkedPropertyRequestError) {
+      return res.status(err.status).json({ error: err.message, code: err.code });
+    }
     console.error("Subscription confirm error:", err);
     res.status(500).json({ error: err?.message || "فشل في التأكيد" });
   }
@@ -3515,6 +4055,23 @@ router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, 
       return res.status(400).json({ error: "رقم العقار غير صحيح" });
     }
 
+    const currentPropertyNumber = String((req.session as any).propertyNumber || "");
+    const ownerAccountId = (req.session as any).ownerAccountId as string | undefined;
+    let canAccess = propertyNumber === currentPropertyNumber;
+    if (!canAccess && ownerAccountId) {
+      canAccess = await ownerAccountStore.validateActiveMembership({
+        ownerAccountId,
+        authVersion: Number((req.session as any).authVersion),
+        propertyNumber,
+      });
+    } else if (!canAccess) {
+      const group = await resolveOwnerSubscriptionGroup(currentPropertyNumber);
+      canAccess = group.propertyNumbers.includes(propertyNumber);
+    }
+    if (!canAccess) {
+      return res.status(403).json({ error: "لا يمكنك الوصول إلى هذا العقار" });
+    }
+
     const subscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
     
     if (!subscription) {
@@ -3526,6 +4083,15 @@ router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, 
     }
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    let linkedProperty = subscription.linkedProperty;
+    if (ownerAccountId && linkedProperty) {
+      const linkedMembershipAllowed = await ownerAccountStore.validateActiveMembership({
+        ownerAccountId,
+        authVersion: Number((req.session as any).authVersion),
+        propertyNumber: linkedProperty,
+      });
+      if (!linkedMembershipAllowed) linkedProperty = undefined;
+    }
     
     res.json({
       found: true,
@@ -3537,7 +4103,7 @@ router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, 
         endDate: subscription.endDate,
         packageId: subscription.packageId,
         propertyCount: subscription.propertyCount,
-        linkedProperty: subscription.linkedProperty,
+        linkedProperty,
       },
       property: property ? {
         name: property.name,

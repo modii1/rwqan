@@ -929,6 +929,9 @@ const filteredProperties = properties.filter(p => {
 | `R2_ENDPOINT` | نقطة نهاية R2 |
 | `ENJAZATIK_URL` | رابط WhatsApp API |
 | `ENJAZATIK_TOKEN` | توكن WhatsApp |
+| `WHATSAPP_DELIVERY_WEBHOOK_SECRET` | سر مستقل لمصادقة إشعارات التسليم القادمة من Enjazatik أو مشغّل وسيط |
+| `META_WHATSAPP_APP_SECRET` | سر تطبيق Meta للتحقق من توقيع `X-Hub-Signature-256` |
+| `META_WHATSAPP_WEBHOOK_VERIFY_TOKEN` | رمز عشوائي مستقل للتحقق من اشتراك رابط Meta webhook |
 
 ### Feature Flags
 

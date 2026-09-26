@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "./config/firebase";
 import {
     DEFAULT_FEATURE_FLAGS,
@@ -147,6 +147,43 @@ function otpDigestMatches(left: unknown, right: unknown): boolean {
     return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
+const OWNER_PASSWORD_RESET_DIGEST_PREFIX = "hmac-sha256:v1:";
+const OWNER_PASSWORD_RESET_PURPOSE = "owner_password_reset";
+const OWNER_PASSWORD_RESET_MAX_ATTEMPTS = 5;
+
+function ownerPasswordResetCodeDigest(
+    propertyNumber: string,
+    code: string,
+): string {
+    const configured = process.env.OWNER_ACCOUNT_HMAC_SECRET ||
+        process.env.SESSION_SECRET || "";
+    const secret = Buffer.from(configured, "utf8");
+    if (secret.length < 32) {
+        throw new Error("Owner account HMAC secret is too short");
+    }
+    const digest = createHmac("sha256", secret)
+        .update("rwqan.owner-password-reset.code.v1\0", "utf8")
+        .update(propertyNumber, "utf8")
+        .update("\0", "utf8")
+        .update(code, "utf8")
+        .digest("hex");
+    return `${OWNER_PASSWORD_RESET_DIGEST_PREFIX}${digest}`;
+}
+
+function ownerPasswordResetCodeMatches(
+    propertyNumber: string,
+    candidate: string,
+    stored: unknown,
+): boolean {
+    if (typeof stored !== "string" || stored.length === 0) return false;
+    const expected = stored.startsWith(OWNER_PASSWORD_RESET_DIGEST_PREFIX)
+        ? ownerPasswordResetCodeDigest(propertyNumber, candidate)
+        : candidate;
+    const left = Buffer.from(stored, "utf8");
+    const right = Buffer.from(expected, "utf8");
+    return left.length === right.length && timingSafeEqual(left, right);
+}
+
 type GuardedPaymentFulfillmentClaimResult =
     | PaymentFulfillmentClaimResult
     | { status: "invalid_status"; currentStatus: string };
@@ -228,6 +265,16 @@ export class PaymentRetryNotAllowedError extends Error {
     }
 }
 
+export class PaymentOwnerAccountConflictError extends Error {
+    readonly status = 409;
+    readonly code = "PAYMENT_OWNER_ACCOUNT_CONFLICT";
+
+    constructor() {
+        super("تغيرت ملكية أحد العقارات المرتبطة بهذه الدفعة، لذلك لا يمكن تنفيذها تلقائياً.");
+        this.name = "PaymentOwnerAccountConflictError";
+    }
+}
+
 export class SuspendedSubscriptionWriteError extends Error {
     readonly status = 423;
     readonly code = "PROPERTY_SUSPENDED";
@@ -281,6 +328,8 @@ type LinkedPropertyGroupMutationParams = {
     replacePropertyNumbers?: string[];
     approveAddedProperties?: boolean;
     cancelRemovedSubscriptions?: boolean;
+    ownerAccountId?: string;
+    ownerAccountAuthVersion?: number;
 };
 
 type LinkedPropertyGroupMutationResult = {
@@ -498,6 +547,107 @@ export class FirebaseService {
         return subscriptions[0] || null;
     }
 
+    private paymentFulfillmentPropertyNumbers(
+        payment: Payment,
+        subscription: Subscription | null,
+    ): string[] {
+        const values = [
+            payment.propertyNumber,
+            payment.secondPropertyNumber,
+            ...this.parsePropertyNumberList(payment.additionalProperties),
+            ...this.parsePropertyNumberList(payment.linkedProperties),
+            ...this.parsePropertyNumberList(payment.fulfillmentPlan?.kept),
+            ...this.parsePropertyNumberList(payment.fulfillmentPlan?.unlinked),
+            subscription?.linkedProperty,
+            ...this.parsePropertyNumberList(subscription?.linkedProperties),
+        ];
+        return Array.from(new Set(
+            values.map((value) => String(value || "").trim()).filter(Boolean),
+        ));
+    }
+
+    /**
+     * A payment created by a verified account may only fulfill properties that
+     * still belong to that account. Legacy payments remain compatible, but a
+     * legacy multi-property payment is blocked once its claimed targets span
+     * different accounts (or its main property is unclaimed while a target is
+     * claimed). This is checked in the same transaction that acquires the
+     * fulfillment claim so delayed provider callbacks cannot bypass routes.
+     */
+    private async assertPaymentFulfillmentOwnerAccountBoundary(
+        transaction: FirebaseFirestore.Transaction,
+        payment: Payment,
+    ): Promise<void> {
+        const subscriptionSnapshot = await transaction.get(
+            this.db
+                .collection("subscriptions")
+                .where("propertyNumber", "==", payment.propertyNumber),
+        );
+        const subscription = this.selectLatestSubscription(
+            subscriptionSnapshot.docs,
+        );
+        const propertyNumbers = this.paymentFulfillmentPropertyNumbers(
+            payment,
+            subscription,
+        );
+        if (!payment.ownerAccountId && propertyNumbers.length <= 1) return;
+
+        const membershipRefs = propertyNumbers.map((propertyNumber) =>
+            this.db.collection("owner_property_memberships").doc(propertyNumber));
+        const membershipSnapshots = await Promise.all(
+            membershipRefs.map((membershipRef) => transaction.get(membershipRef)),
+        );
+        const memberships = membershipSnapshots.map((snapshot, index) => {
+            if (!snapshot.exists) return null;
+            const value = snapshot.data() || {};
+            if (
+                String(value.propertyNumber || "") !== propertyNumbers[index] ||
+                typeof value.ownerAccountId !== "string" ||
+                value.status !== "active"
+            ) {
+                throw new PaymentOwnerAccountConflictError();
+            }
+            return {
+                propertyNumber: propertyNumbers[index],
+                ownerAccountId: value.ownerAccountId as string,
+            };
+        });
+
+        if (payment.ownerAccountId) {
+            const accountSnapshot = await transaction.get(
+                this.db.collection("owner_accounts").doc(payment.ownerAccountId),
+            );
+            const account = accountSnapshot.data() || {};
+            if (
+                !accountSnapshot.exists ||
+                account.id !== payment.ownerAccountId ||
+                account.status !== "active" ||
+                memberships.some((membership) =>
+                    !membership ||
+                    membership.ownerAccountId !== payment.ownerAccountId)
+            ) {
+                throw new PaymentOwnerAccountConflictError();
+            }
+            return;
+        }
+
+        const claimedMemberships = memberships.filter(
+            (membership): membership is NonNullable<typeof membership> =>
+                membership !== null,
+        );
+        if (claimedMemberships.length === 0) return;
+        const mainMembership = memberships[propertyNumbers.indexOf(
+            payment.propertyNumber,
+        )];
+        if (
+            !mainMembership ||
+            claimedMemberships.some((membership) =>
+                membership.ownerAccountId !== mainMembership.ownerAccountId)
+        ) {
+            throw new PaymentOwnerAccountConflictError();
+        }
+    }
+
     /**
      * Final persistence guard for every subscription-like write. Route and
      * service validation provide useful errors, while this guard protects
@@ -552,6 +702,21 @@ export class FirebaseService {
         // Internal rollback metadata must never leak through property APIs.
         const { linkedPropertyRestoreState: _restoreState, ...publicProperty } = raw;
         const p = publicProperty as Property;
+        const rawCapacity = (publicProperty as Record<string, unknown>).capacity;
+        if (rawCapacity === undefined || rawCapacity === null || rawCapacity === "") {
+            p.capacity = null;
+        } else {
+            const capacity = Number(rawCapacity);
+            p.capacity = Number.isSafeInteger(capacity) && capacity >= 1 && capacity <= 1000
+                ? capacity
+                : null;
+        }
+
+        const rawAvailabilityNote = (publicProperty as Record<string, unknown>).availabilityNote;
+        p.availabilityNote = typeof rawAvailabilityNote === "string"
+            ? rawAvailabilityNote.trim().slice(0, 120)
+            : "";
+
         if (p.facilities) {
             if (typeof p.facilities === 'string') {
                 const trimmed = (p.facilities as string).trim();
@@ -658,7 +823,7 @@ export class FirebaseService {
             await ref.update(updatedData);
         }
         const doc = await ref.get();
-        return doc.data() as Property;
+        return this.normaliseProperty(doc.data()!);
     }
 
     async updateVerificationStatus(
@@ -1719,6 +1884,53 @@ export class FirebaseService {
                 .filter((propertyNumber) => !desiredMembers.has(propertyNumber))
                 .sort((left, right) => left.localeCompare(right));
 
+            if (params.ownerAccountId) {
+                const accountSnapshot = await transaction.get(
+                    this.db
+                        .collection("owner_accounts")
+                        .doc(params.ownerAccountId),
+                );
+                const account = accountSnapshot.data() || {};
+                if (
+                    !accountSnapshot.exists ||
+                    account.id !== params.ownerAccountId ||
+                    account.status !== "active" ||
+                    account.authVersion !== params.ownerAccountAuthVersion
+                ) {
+                    throw new LinkedPropertyMutationError(
+                        "غير مصرح",
+                        403,
+                        "OWNER_ACCOUNT_SESSION_INVALID",
+                    );
+                }
+
+                const accountTargets = Array.from(new Set([
+                    mainPropertyNumber,
+                    ...currentMembers,
+                    ...desiredMembers,
+                ])).sort((left, right) => left.localeCompare(right));
+                for (const propertyNumber of accountTargets) {
+                    const membershipSnapshot = await transaction.get(
+                        this.db
+                            .collection("owner_property_memberships")
+                            .doc(propertyNumber),
+                    );
+                    const membership = membershipSnapshot.data() || {};
+                    if (
+                        !membershipSnapshot.exists ||
+                        membership.propertyNumber !== propertyNumber ||
+                        membership.ownerAccountId !== params.ownerAccountId ||
+                        membership.status !== "active"
+                    ) {
+                        throw new LinkedPropertyMutationError(
+                            `العقار ${propertyNumber} يخص مالكاً آخر`,
+                            403,
+                            "LINKED_PROPERTY_FORBIDDEN",
+                        );
+                    }
+                }
+            }
+
             const packageRef = this.db
                 .collection("packages")
                 .doc(mainSubscription.packageId);
@@ -2031,6 +2243,72 @@ export class FirebaseService {
         });
     }
 
+    async setPendingLinkedPropertyApprovalForOwnerAccount(params: {
+        ownerAccountId: string;
+        authVersion: number;
+        mainPropertyNumber: string;
+        targetPropertyNumber: string;
+    }): Promise<void> {
+        await this.db.runTransaction(async (transaction) => {
+            const accountRef = this.db
+                .collection("owner_accounts")
+                .doc(params.ownerAccountId);
+            const mainMembershipRef = this.db
+                .collection("owner_property_memberships")
+                .doc(params.mainPropertyNumber);
+            const targetMembershipRef = this.db
+                .collection("owner_property_memberships")
+                .doc(params.targetPropertyNumber);
+            const targetPropertyRef = this.db
+                .collection("properties")
+                .doc(params.targetPropertyNumber);
+            const [
+                accountSnapshot,
+                mainMembershipSnapshot,
+                targetMembershipSnapshot,
+                targetPropertySnapshot,
+            ] = await Promise.all([
+                transaction.get(accountRef),
+                transaction.get(mainMembershipRef),
+                transaction.get(targetMembershipRef),
+                transaction.get(targetPropertyRef),
+            ]);
+            const account = accountSnapshot.data() || {};
+            const mainMembership = mainMembershipSnapshot.data() || {};
+            const targetMembership = targetMembershipSnapshot.data() || {};
+            if (
+                !accountSnapshot.exists ||
+                account.id !== params.ownerAccountId ||
+                account.status !== "active" ||
+                account.authVersion !== params.authVersion ||
+                !mainMembershipSnapshot.exists ||
+                mainMembership.propertyNumber !== params.mainPropertyNumber ||
+                mainMembership.ownerAccountId !== params.ownerAccountId ||
+                mainMembership.status !== "active" ||
+                !targetMembershipSnapshot.exists ||
+                targetMembership.propertyNumber !== params.targetPropertyNumber ||
+                targetMembership.ownerAccountId !== params.ownerAccountId ||
+                targetMembership.status !== "active"
+            ) {
+                throw new LinkedPropertyMutationError(
+                    `العقار ${params.targetPropertyNumber} يخص مالكاً آخر`,
+                    403,
+                    "LINKED_PROPERTY_FORBIDDEN",
+                );
+            }
+            if (!targetPropertySnapshot.exists) {
+                throw new LinkedPropertyMutationError(
+                    `العقار ${params.targetPropertyNumber} غير موجود`,
+                    404,
+                    "LINKED_PROPERTY_NOT_FOUND",
+                );
+            }
+            transaction.update(targetPropertyRef, {
+                pendingApprovalFrom: params.mainPropertyNumber,
+            });
+        });
+    }
+
     /**
      * Detach linked properties without applying activation, package, suspension,
      * or payment eligibility rules. Unlinking removes membership only: the main
@@ -2040,6 +2318,8 @@ export class FirebaseService {
     async unlinkLinkedPropertiesAtomically(params: {
         mainPropertyNumber: string;
         propertyNumbers: string[];
+        ownerAccountId?: string;
+        ownerAccountAuthVersion?: number;
     }): Promise<{ mainPropertyNumber: string; linkedProperties: string[]; removedProperties: string[] }> {
         const mainPropertyNumber = String(params.mainPropertyNumber || "").trim();
         const propertyNumbers = Array.from(new Set(
@@ -2134,6 +2414,50 @@ export class FirebaseService {
                         409,
                         "LINKED_PROPERTY_NOT_IN_GROUP",
                     );
+                }
+            }
+
+            if (params.ownerAccountId) {
+                const accountSnapshot = await transaction.get(
+                    this.db
+                        .collection("owner_accounts")
+                        .doc(params.ownerAccountId),
+                );
+                const account = accountSnapshot.data() || {};
+                if (
+                    !accountSnapshot.exists ||
+                    account.id !== params.ownerAccountId ||
+                    account.status !== "active" ||
+                    account.authVersion !== params.ownerAccountAuthVersion
+                ) {
+                    throw new LinkedPropertyMutationError(
+                        "غير مصرح",
+                        403,
+                        "OWNER_ACCOUNT_SESSION_INVALID",
+                    );
+                }
+                for (const propertyNumber of [
+                    mainPropertyNumber,
+                    ...propertyNumbers,
+                ]) {
+                    const membershipSnapshot = await transaction.get(
+                        this.db
+                            .collection("owner_property_memberships")
+                            .doc(propertyNumber),
+                    );
+                    const membership = membershipSnapshot.data() || {};
+                    if (
+                        !membershipSnapshot.exists ||
+                        membership.propertyNumber !== propertyNumber ||
+                        membership.ownerAccountId !== params.ownerAccountId ||
+                        membership.status !== "active"
+                    ) {
+                        throw new LinkedPropertyMutationError(
+                            `العقار ${propertyNumber} يخص مالكاً آخر`,
+                            403,
+                            "LINKED_PROPERTY_FORBIDDEN",
+                        );
+                    }
                 }
             }
 
@@ -2986,6 +3310,11 @@ export class FirebaseService {
             ) {
                 return { status: "processing" as const };
             }
+
+            await this.assertPaymentFulfillmentOwnerAccountBoundary(
+                transaction,
+                payment,
+            );
 
             transaction.update(ref, {
                 fulfillmentState: "processing",
@@ -5760,9 +6089,12 @@ export class FirebaseService {
 
     async updateOwnerResetCode(propertyNumber: string, code: string, expireTime: string, lastReset: string): Promise<void> {
         await this.db.collection("owners").doc(propertyNumber).update({
-            resetCode: code,
+            resetCode: ownerPasswordResetCodeDigest(propertyNumber, code),
             resetExpire: expireTime,
-            lastReset: lastReset
+            lastReset: lastReset,
+            resetCodePurpose: OWNER_PASSWORD_RESET_PURPOSE,
+            resetCodeAttempts: 0,
+            resetCodeConsumedAt: "",
         });
     }
 
@@ -5770,7 +6102,9 @@ export class FirebaseService {
         await this.db.collection("owners").doc(propertyNumber).update({
             password: newPassword,
             resetCode: "",
-            resetExpire: ""
+            resetExpire: "",
+            resetCodePurpose: "",
+            resetCodeAttempts: 0,
         });
         // Also update property PIN
         await this.updateProperty(propertyNumber, { pin: newPassword });
@@ -5779,7 +6113,9 @@ export class FirebaseService {
     async clearOwnerResetCode(propertyNumber: string): Promise<void> {
         await this.db.collection("owners").doc(propertyNumber).update({
             resetCode: "",
-            resetExpire: ""
+            resetExpire: "",
+            resetCodePurpose: "",
+            resetCodeAttempts: 0,
         });
     }
 
@@ -5802,22 +6138,62 @@ export class FirebaseService {
     }
 
     async validateResetCode(propertyNumber: string, code: string): Promise<{ valid: boolean; message?: string }> {
-        const owner = await this.getOwnerByPropertyNumber(propertyNumber);
-        if (!owner) return { valid: false, message: "رقم العقار غير موجود" };
-
-        if (!owner.resetCode || owner.resetCode !== code) {
-            return { valid: false, message: "رمز التحقق غير صحيح" };
-        }
-
-        if (owner.resetExpire) {
-            const expireDate = new Date(owner.resetExpire);
-            if (new Date() > expireDate) {
-                await this.clearOwnerResetCode(propertyNumber);
-                return { valid: false, message: "انتهت صلاحية رمز التحقق" };
+        const ownerRef = this.db.collection("owners").doc(propertyNumber);
+        return this.db.runTransaction(async (transaction) => {
+            const ownerSnapshot = await transaction.get(ownerRef);
+            if (!ownerSnapshot.exists) {
+                return { valid: false, message: "رقم العقار غير موجود" };
             }
-        }
+            const owner = ownerSnapshot.data() || {};
+            const storedCode = owner.resetCode;
+            const storedPurpose = String(owner.resetCodePurpose || "");
+            const isLegacyPlaintextCode =
+                typeof storedCode === "string" &&
+                storedCode.length > 0 &&
+                !storedCode.startsWith(OWNER_PASSWORD_RESET_DIGEST_PREFIX);
+            const attempts = Number.isSafeInteger(Number(owner.resetCodeAttempts))
+                ? Math.max(0, Number(owner.resetCodeAttempts))
+                : 0;
+            const clearChallenge = {
+                resetCode: "",
+                resetExpire: "",
+                resetCodePurpose: "",
+            };
 
-        return { valid: true };
+            if (!storedCode || attempts >= OWNER_PASSWORD_RESET_MAX_ATTEMPTS) {
+                if (storedCode) transaction.update(ownerRef, clearChallenge);
+                return { valid: false, message: "رمز التحقق غير صحيح" };
+            }
+
+            if (owner.resetExpire) {
+                const expireTime = new Date(owner.resetExpire).getTime();
+                if (!Number.isFinite(expireTime) || Date.now() > expireTime) {
+                    transaction.update(ownerRef, clearChallenge);
+                    return { valid: false, message: "انتهت صلاحية رمز التحقق" };
+                }
+            }
+
+            if (
+                (!isLegacyPlaintextCode && storedPurpose !== OWNER_PASSWORD_RESET_PURPOSE) ||
+                !ownerPasswordResetCodeMatches(propertyNumber, String(code || ""), storedCode)
+            ) {
+                const nextAttempts = attempts + 1;
+                transaction.update(ownerRef, {
+                    resetCodeAttempts: nextAttempts,
+                    ...(nextAttempts >= OWNER_PASSWORD_RESET_MAX_ATTEMPTS
+                        ? clearChallenge
+                        : {}),
+                });
+                return { valid: false, message: "رمز التحقق غير صحيح" };
+            }
+
+            transaction.update(ownerRef, {
+                ...clearChallenge,
+                resetCodeAttempts: 0,
+                resetCodeConsumedAt: new Date().toISOString(),
+            });
+            return { valid: true };
+        });
     }
 
     // ================== Notification Settings ==================

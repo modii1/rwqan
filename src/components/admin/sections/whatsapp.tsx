@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   BarChart3,
@@ -40,6 +41,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import BookingCommissionSettingsCard from "./booking-commission-settings";
 import { WhatsAppNotificationSettings } from "./settings";
+import {
+  getAdminOperationTarget,
+  getAdminWhatsAppTab,
+  type AdminWhatsAppTab,
+} from "@/lib/admin-operation-target";
+import {
+  generalWhatsAppStatusMeta,
+  summarizeBookingWorkflowNotifications,
+  type BookingWorkflowDashboardPayload,
+  type BookingWorkflowNotificationStats,
+} from "./whatsapp-delivery-presentation";
 
 interface WhatsAppStats {
   today: number;
@@ -55,6 +67,9 @@ interface WhatsAppLog {
   createdAt?: string;
   message?: string;
   ownerPhone?: string;
+  providerDeliveryStatus?: string | null;
+  providerDeliveryError?: string | null;
+  providerFailedAt?: string | null;
 }
 
 interface SmartRequest {
@@ -66,55 +81,10 @@ interface SmartRequest {
   ipAddress?: string;
 }
 
-interface BookingNotificationJob {
-  status?: string | null;
-  providerError?: string | null;
-}
-
-interface BookingWorkflowDashboardPayload {
-  bookings?: Array<{
-    notificationJobs?: BookingNotificationJob[] | null;
-  }>;
-}
-
-interface BookingWorkflowNotificationStats {
-  sent: number;
-  pending: number;
-  failed: number;
-  suppressed: number;
-  deferred: number;
-}
-
 interface ManualSendResponse {
   success?: boolean;
   status?: string;
   message?: string;
-}
-
-function summarizeBookingWorkflowNotifications(
-  payload: BookingWorkflowDashboardPayload,
-): BookingWorkflowNotificationStats {
-  return (payload.bookings || [])
-    .flatMap((booking) => booking.notificationJobs || [])
-    .reduce<BookingWorkflowNotificationStats>(
-      (summary, job) => {
-        const status = String(job.status || "")
-          .trim()
-          .toLowerCase();
-        const providerError = String(job.providerError || "")
-          .trim()
-          .toLowerCase();
-
-      if (providerError === "daily_notification_quota_deferred") {
-        summary.deferred += 1;
-      } else if (status === "sent") summary.sent += 1;
-      else if (status === "failed") summary.failed += 1;
-      else if (status === "suppressed_quota") summary.suppressed += 1;
-      else if (status !== "cancelled") summary.pending += 1;
-      return summary;
-      },
-      { sent: 0, pending: 0, failed: 0, suppressed: 0, deferred: 0 },
-    );
 }
 
 async function fetchWhatsAppDashboardValue<T>(url: string): Promise<T> {
@@ -126,6 +96,10 @@ async function fetchWhatsAppDashboardValue<T>(url: string): Promise<T> {
 }
 
 export default function AdminWhatsAppSection() {
+  const searchParams = useSearchParams();
+  const targetedLogId = getAdminOperationTarget(searchParams, "log");
+  const requestedTab = getAdminWhatsAppTab(searchParams);
+  const [activeTab, setActiveTab] = useState<AdminWhatsAppTab>(requestedTab);
   const [message, setMessage] = useState("");
   const [loadingSend, setLoadingSend] = useState(false);
   const [sendError, setSendError] = useState("");
@@ -174,6 +148,20 @@ export default function AdminWhatsAppSection() {
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
+
+  useEffect(() => {
+    if (!targetedLogId || !logs.some((log) => log.id === targetedLogId)) return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`admin-whatsapp-log-${targetedLogId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [logs, targetedLogId]);
 
   const handleSend = async () => {
     if (!message.trim()) return;
@@ -244,7 +232,11 @@ export default function AdminWhatsAppSection() {
         </Button>
       </div>
 
-      <Tabs defaultValue="workflow" className="min-w-0 max-w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as AdminWhatsAppTab)}
+        className="min-w-0 max-w-full"
+      >
         <div className="max-w-full overflow-x-auto pb-1">
           <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:flex sm:w-max sm:min-w-full sm:justify-start">
             <TabsTrigger
@@ -505,24 +497,20 @@ export default function AdminWhatsAppSection() {
 
                     {logs.map((log, index) => (
                       <Card
+                        id={log.id ? `admin-whatsapp-log-${log.id}` : undefined}
                         key={log.id || index}
-                        className="min-w-0 overflow-hidden p-3"
+                        className={`min-w-0 overflow-hidden p-3 ${
+                          targetedLogId && log.id === targetedLogId
+                            ? "ring-2 ring-[#9a7623] ring-offset-2"
+                            : ""
+                        }`}
                       >
                         <div className="mb-1 flex min-w-0 flex-col gap-2 min-[360px]:flex-row min-[360px]:items-center min-[360px]:justify-between">
                           <span className="min-w-0 break-words text-sm font-semibold">
                             {log.type}
                           </span>
 
-                          <Badge
-                            variant={
-                              log.status === "success"
-                                ? "default"
-                                : "destructive"
-                            }
-                            className="w-fit shrink-0"
-                          >
-                            {log.status === "success" ? "تم الإرسال" : "فشل"}
-                          </Badge>
+                          <WhatsAppLogStatusBadge log={log} />
                         </div>
 
                         <p
@@ -538,6 +526,15 @@ export default function AdminWhatsAppSection() {
                         >
                           {log.message}
                         </p>
+
+                        {log.providerDeliveryError && (
+                          <p
+                            className="mt-2 break-words rounded-lg bg-red-50 p-2 text-xs text-red-800"
+                            dir="auto"
+                          >
+                            {log.providerDeliveryError}
+                          </p>
+                        )}
 
                         {log.ownerPhone && (
                           <a
@@ -860,5 +857,23 @@ function StatCard({ label, value }: { label: string; value: number }) {
         {value}
       </p>
     </Card>
+  );
+}
+
+function WhatsAppLogStatusBadge({ log }: { log: WhatsAppLog }) {
+  const status = generalWhatsAppStatusMeta(log);
+  return (
+    <Badge
+      variant={
+        status.tone === "red"
+          ? "destructive"
+          : status.tone === "green"
+            ? "default"
+            : "outline"
+      }
+      className="w-fit shrink-0"
+    >
+      {status.label}
+    </Badge>
   );
 }

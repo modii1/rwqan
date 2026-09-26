@@ -143,3 +143,76 @@ test("generic property edits cannot mutate top-level or dotted availability or c
     firebaseService.updateProperty = originalUpdateProperty;
   }
 });
+
+test("property comparison fields are normalized before every service update", async () => {
+  const originalGetProperty = firebaseService.getPropertyByNumber;
+  const originalUpdateProperty = firebaseService.updateProperty;
+  let persistedUpdates: Record<string, unknown> = {};
+
+  (firebaseService as any).getPropertyByNumber = async () => ({
+    propertyNumber: "P-COMPARE",
+    facilities: [],
+  });
+  (firebaseService as any).updateProperty = async (
+    propertyNumber: string,
+    updates: Record<string, unknown>,
+  ) => {
+    persistedUpdates = updates;
+    return { propertyNumber, ...updates };
+  };
+
+  try {
+    await new PropertyService().update(
+      "P-COMPARE",
+      {
+        capacity: "24",
+        availabilityNote: "  متاح حسب التاريخ  ",
+      } as any,
+      { skipVerification: true },
+    );
+
+    assert.equal(persistedUpdates.capacity, 24);
+    assert.equal(persistedUpdates.availabilityNote, "متاح حسب التاريخ");
+  } finally {
+    firebaseService.getPropertyByNumber = originalGetProperty;
+    firebaseService.updateProperty = originalUpdateProperty;
+  }
+});
+
+test("property comparison fields reject invalid values before persistence", async () => {
+  const originalGetProperty = firebaseService.getPropertyByNumber;
+  const originalUpdateProperty = firebaseService.updateProperty;
+  let writeCount = 0;
+
+  (firebaseService as any).getPropertyByNumber = async () => ({
+    propertyNumber: "P-COMPARE-INVALID",
+    facilities: [],
+  });
+  (firebaseService as any).updateProperty = async () => {
+    writeCount += 1;
+    throw new Error("must not persist invalid comparison fields");
+  };
+
+  try {
+    await assert.rejects(
+      () => new PropertyService().update(
+        "P-COMPARE-INVALID",
+        { capacity: "not-a-number" } as any,
+        { skipVerification: true },
+      ),
+      RangeError,
+    );
+    await assert.rejects(
+      () => new PropertyService().update(
+        "P-COMPARE-INVALID",
+        { availabilityNote: { invalid: true } } as any,
+        { skipVerification: true },
+      ),
+      RangeError,
+    );
+    assert.equal(writeCount, 0);
+  } finally {
+    firebaseService.getPropertyByNumber = originalGetProperty;
+    firebaseService.updateProperty = originalUpdateProperty;
+  }
+});

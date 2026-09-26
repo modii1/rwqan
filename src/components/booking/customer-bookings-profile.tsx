@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { Property } from "@shared/schema";
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  Download,
   Heart,
   History,
   Home,
@@ -16,12 +17,16 @@ import {
   LogOut,
   Mail,
   MapPin,
+  MessageCircle,
   Pencil,
   Phone,
   RefreshCw,
+  RotateCcw,
   Save,
+  Scale,
   Settings2,
   UserRound,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,7 +35,10 @@ import { Label } from "@/components/ui/label";
 import { PriceDisplay } from "@/components/price-display";
 import {
   StatusBadge,
+  bookingTimingLabel,
+  formatBookingDate,
   formatDateTime,
+  getQuestionnairePrice,
   getBookingStatusMeta,
   getPropertyLabel,
   type BookingDisplayRow,
@@ -57,6 +65,17 @@ import { getPublicPropertyLabel } from "@/lib/public-subscription";
 import { getPrimaryPropertyPriceDisplay } from "@shared/propertyPrice";
 import { PROPERTY_IMAGE_PLACEHOLDER } from "@/lib/property-images";
 import { useToast } from "@/hooks/use-toast";
+import { PropertyComparison } from "@/components/customer/property-comparison";
+import {
+  keepAvailableComparisonProperties,
+  togglePropertyComparison,
+} from "@/components/customer/property-comparison-model";
+import { CustomerBookingReviewAction } from "@/components/customer/customer-booking-review";
+import { getCustomerBookingActions } from "@/components/customer/customer-booking-actions";
+import {
+  buildCustomerBookingSummary,
+  customerBookingSummaryFileName,
+} from "@/components/customer/customer-booking-summary";
 
 interface CustomerHistoryPayload {
   history: BookingDisplayRow[];
@@ -86,6 +105,7 @@ export default function CustomerBookingsProfile() {
   const [section, setSection] = useState<ProfileSection>(() =>
     parseProfileSection(searchParams.get("section")));
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
+  const [comparisonPropertyNumbers, setComparisonPropertyNumbers] = useState<string[]>([]);
   const identityQuery = useContactIdentityQuery();
   const hasResolvedIdentity = hasServerResolvedContactIdentity(identityQuery);
   const customerSessionScope = getCustomerSessionCacheScope(identityQuery);
@@ -116,10 +136,44 @@ export default function CustomerBookingsProfile() {
     staleTime: 60_000,
     enabled: section === "favorites" && favoritePropertyNumbers.length > 0,
   });
+  const markNotBookedMutation = useMutation({
+    mutationFn: (bookingId: string) => bookingApiRequest(
+      `/api/customer/history/${encodeURIComponent(bookingId)}/not-booked`,
+      {
+        method: "POST",
+        headers: customerSessionRequestHeaders(customerSessionScope),
+      },
+    ),
+    onSuccess: () => historyQuery.refetch(),
+  });
+  const reportNoResponseMutation = useMutation({
+    mutationFn: (bookingId: string) => bookingApiRequest(
+      `/api/customer/history/${encodeURIComponent(bookingId)}/no-response`,
+      {
+        method: "POST",
+        headers: customerSessionRequestHeaders(customerSessionScope),
+      },
+    ),
+    onSuccess: () => historyQuery.refetch(),
+  });
 
   useEffect(() => {
     setSection(parseProfileSection(searchParams.get("section")));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!propertiesQuery.data) return;
+    const availablePropertyNumbers = propertiesQuery.data
+      .filter((property) => favoritePropertyNumbers.includes(property.propertyNumber))
+      .map((property) => property.propertyNumber);
+    setComparisonPropertyNumbers((current) => {
+      const next = keepAvailableComparisonProperties(current, availablePropertyNumbers);
+      return next.length === current.length
+        && next.every((propertyNumber, index) => propertyNumber === current[index])
+        ? current
+        : next;
+    });
+  }, [favoritePropertyNumbers, propertiesQuery.data]);
 
   const history = historyQuery.data?.history || [];
   const confirmedBookings = useMemo(
@@ -231,6 +285,51 @@ export default function CustomerBookingsProfile() {
     availableFavoriteProperties.map((property) => property.propertyNumber),
   );
   const unavailableFavoriteIds = favoriteIds.filter((id) => !visibleFavoriteIds.has(id));
+  const comparisonProperties = comparisonPropertyNumbers
+    .map((propertyNumber) => availableFavoriteProperties.find(
+      (property) => property.propertyNumber === propertyNumber,
+    ))
+    .filter((property): property is Property => Boolean(property));
+
+  const toggleComparison = (propertyNumber: string) => {
+    const next = togglePropertyComparison(comparisonPropertyNumbers, propertyNumber);
+    if (next.limitReached) {
+      toast({
+        title: "يمكن مقارنة 3 عقارات كحد أقصى",
+        description: "أزل عقارًا من المقارنة ثم اختر عقارًا آخر.",
+      });
+      return;
+    }
+    setComparisonPropertyNumbers(next.propertyNumbers);
+  };
+
+  const markNotBooked = async (booking: BookingDisplayRow) => {
+    if (!window.confirm("هل تريد تسجيل أن الحجز لم يتم؟")) return;
+    try {
+      await markNotBookedMutation.mutateAsync(booking.id);
+      toast({ title: "تم تسجيل أن الحجز لم يتم" });
+    } catch (error) {
+      toast({
+        title: "تعذر تحديث حالة الحجز",
+        description: error instanceof Error ? error.message : "حاول مرة أخرى.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const reportNoResponse = async (booking: BookingDisplayRow) => {
+    if (!window.confirm("هل تريد إبلاغ روقان بأن المعلن لم يرد؟")) return;
+    try {
+      await reportNoResponseMutation.mutateAsync(booking.id);
+      toast({ title: "تم استلام البلاغ" });
+    } catch (error) {
+      toast({
+        title: "تعذر إرسال البلاغ",
+        description: error instanceof Error ? error.message : "حاول مرة أخرى.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <ProfileCanvas>
@@ -291,7 +390,17 @@ export default function CustomerBookingsProfile() {
                     </Button>
                   </Card>
                 ) : filteredHistory.map((booking) => (
-                  <CustomerBookingCard key={booking.id} booking={booking} />
+                  <CustomerBookingCard
+                    key={booking.id}
+                    booking={booking}
+                    customerSessionScope={customerSessionScope!}
+                    onMarkNotBooked={() => void markNotBooked(booking)}
+                    isMarkingNotBooked={markNotBookedMutation.isPending
+                      && markNotBookedMutation.variables === booking.id}
+                    onReportNoResponse={() => void reportNoResponse(booking)}
+                    isReportingNoResponse={reportNoResponseMutation.isPending
+                      && reportNoResponseMutation.variables === booking.id}
+                  />
                 ))}
               </div>
             </section>
@@ -325,14 +434,51 @@ export default function CustomerBookingsProfile() {
                   <Button asChild className="mt-5"><Link href="/properties">استعراض العقارات</Link></Button>
                 </Card>
               ) : (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {availableFavoriteProperties.map((property) => (
-                    <FavoritePropertyCard key={property.propertyNumber} property={property} />
-                  ))}
-                  {unavailableFavoriteIds.map((propertyNumber) => (
-                    <UnavailableFavoriteCard key={propertyNumber} propertyNumber={propertyNumber} />
-                  ))}
-                </div>
+                <>
+                  {availableFavoriteProperties.length > 1 && (
+                    <div className="mb-4 flex flex-col gap-3 rounded-xl border border-[#d9c48b] bg-[#fff9e9] p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#9a7623] text-white">
+                          <Scale className="h-5 w-5" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-[#493a1d]">اختر عقارين أو ثلاثة للمقارنة</p>
+                          <p className="mt-1 text-xs text-[#6f6249]">تم اختيار {comparisonPropertyNumbers.length} من 3</p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={comparisonPropertyNumbers.length < 2}
+                        onClick={() => document.getElementById("property-comparison")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        className="gap-2 sm:flex-shrink-0"
+                      >
+                        <Scale className="h-4 w-4" aria-hidden="true" />
+                        عرض المقارنة
+                      </Button>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {availableFavoriteProperties.map((property) => (
+                      <FavoritePropertyCard
+                        key={property.propertyNumber}
+                        property={property}
+                        selectedForComparison={comparisonPropertyNumbers.includes(property.propertyNumber)}
+                        onToggleComparison={() => toggleComparison(property.propertyNumber)}
+                      />
+                    ))}
+                    {unavailableFavoriteIds.map((propertyNumber) => (
+                      <UnavailableFavoriteCard key={propertyNumber} propertyNumber={propertyNumber} />
+                    ))}
+                  </div>
+                  <div className="mt-6">
+                    <PropertyComparison
+                      properties={comparisonProperties}
+                      onRemove={toggleComparison}
+                      onClear={() => setComparisonPropertyNumbers([])}
+                    />
+                  </div>
+                </>
               )}
             </section>
           )}
@@ -438,9 +584,57 @@ function ProfileStat({
   );
 }
 
-function CustomerBookingCard({ booking }: { booking: BookingDisplayRow }) {
+function CustomerBookingCard({
+  booking,
+  customerSessionScope,
+  onMarkNotBooked,
+  isMarkingNotBooked,
+  onReportNoResponse,
+  isReportingNoResponse,
+}: {
+  booking: BookingDisplayRow;
+  customerSessionScope: string;
+  onMarkNotBooked: () => void;
+  isMarkingNotBooked: boolean;
+  onReportNoResponse: () => void;
+  isReportingNoResponse: boolean;
+}) {
   const bookingMeta = getBookingStatusMeta(booking.bookingStatus);
   const isContactOnly = normalized(booking.bookingStatus) === "contact_only";
+  const status = normalized(booking.bookingStatus);
+  const followUpPath = typeof booking.followUpPath === "string"
+    ? booking.followUpPath
+    : "";
+  const canMarkNotBooked = booking.canMarkNotBooked === true;
+  const actions = getCustomerBookingActions(status);
+  const questionnaire = booking.questionnaire || booking.confirmationFacts;
+
+  const downloadBookingSummary = () => {
+    const bookingTiming = questionnaire
+      ? bookingTimingLabel(questionnaire.timing || questionnaire.bookingTiming)
+      : null;
+    const bookingDate = questionnaire ? formatBookingDate(questionnaire) : null;
+    const reportedAmount = questionnaire ? getQuestionnairePrice(questionnaire) : null;
+    const summary = buildCustomerBookingSummary({
+      propertyLabel: getPropertyLabel(booking),
+      propertyNumber: booking.propertyNumber,
+      requestCode: booking.requestCode,
+      contactAt: booking.contactAt ? formatDateTime(booking.contactAt) : null,
+      bookingTiming: bookingTiming === "—" ? null : bookingTiming,
+      bookingDate: bookingDate === "—" ? null : bookingDate,
+      reportedAmount: reportedAmount === "—" ? null : reportedAmount,
+    });
+    const objectUrl = URL.createObjectURL(new Blob(["\uFEFF", summary], {
+      type: "text/plain;charset=utf-8",
+    }));
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = customerBookingSummaryFileName(booking.propertyNumber);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  };
 
   return (
     <div className="relative mr-9 sm:mr-11">
@@ -474,9 +668,86 @@ function CustomerBookingCard({ booking }: { booking: BookingDisplayRow }) {
                 <CustomerQuestionnaireFacts questionnaire={booking.questionnaire || booking.confirmationFacts} />
               )}
             </section>
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/property/${encodeURIComponent(booking.propertyNumber)}`}>عرض العقار</Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {followUpPath && (
+                <Button asChild size="sm">
+                  <Link href={followUpPath}>متابعة تأكيد الحجز</Link>
+                </Button>
+              )}
+              {canMarkNotBooked && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onMarkNotBooked}
+                  disabled={isMarkingNotBooked}
+                  className="gap-2 border-slate-300"
+                >
+                  {isMarkingNotBooked
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <XCircle className="h-4 w-4" />}
+                  لم يتم الحجز
+                </Button>
+              )}
+              {booking.canReportNoResponse && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onReportNoResponse}
+                  disabled={isReportingNoResponse}
+                  className="gap-2 border-amber-300 text-amber-800"
+                >
+                  {isReportingNoResponse
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <MessageCircle className="h-4 w-4" />}
+                  الإبلاغ عن عدم الرد
+                </Button>
+              )}
+              {booking.ownerNoResponseReportedAt && (
+                <span className="inline-flex min-h-9 items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-bold text-amber-800">
+                  تم إبلاغ روقان عن عدم الرد
+                </span>
+              )}
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/property/${encodeURIComponent(booking.propertyNumber)}`}>عرض العقار</Link>
+              </Button>
+              {actions.canContactAgain && (
+                <Button asChild variant="outline" size="sm" className="gap-2">
+                  <Link href={`/property/${encodeURIComponent(booking.propertyNumber)}#contact-booking`}>
+                    <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                    التواصل مرة أخرى
+                  </Link>
+                </Button>
+              )}
+              {actions.canBookAgain && (
+                <Button asChild variant="outline" size="sm" className="gap-2">
+                  <Link href={`/property/${encodeURIComponent(booking.propertyNumber)}`}>
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    الحجز مرة أخرى
+                  </Link>
+                </Button>
+              )}
+              {actions.canDownloadSummary && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={downloadBookingSummary}
+                  title="ملخص بيانات الحجز وليس إيصال دفع"
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  تحميل ملخص الحجز
+                </Button>
+              )}
+              {isConfirmedBooking(booking) && (
+                <CustomerBookingReviewAction
+                  bookingId={booking.id}
+                  customerSessionScope={customerSessionScope}
+                />
+              )}
+            </div>
           </div>
         </details>
       </Card>
@@ -484,7 +755,15 @@ function CustomerBookingCard({ booking }: { booking: BookingDisplayRow }) {
   );
 }
 
-function FavoritePropertyCard({ property }: { property: Property }) {
+function FavoritePropertyCard({
+  property,
+  selectedForComparison,
+  onToggleComparison,
+}: {
+  property: Property;
+  selectedForComparison: boolean;
+  onToggleComparison: () => void;
+}) {
   const image = property.imageUrls?.[0] || PROPERTY_IMAGE_PLACEHOLDER;
   return (
     <Card className="group min-w-0 overflow-hidden border-[#ded3bc] bg-white">
@@ -510,6 +789,19 @@ function FavoritePropertyCard({ property }: { property: Property }) {
           </p>
           <div className="mt-3"><PriceDisplay amount={getPrimaryPropertyPriceDisplay(property.prices)} size="sm" /></div>
         </Link>
+        <button
+          type="button"
+          onClick={onToggleComparison}
+          aria-pressed={selectedForComparison}
+          className={`mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border px-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9a7623] focus-visible:ring-offset-2 ${
+            selectedForComparison
+              ? "border-[#9a7623] bg-[#fff4d3] text-[#75591d]"
+              : "border-[#ded3bc] bg-white text-[#62532f] hover:bg-[#fff8e7]"
+          }`}
+        >
+          <Scale className="h-4 w-4" aria-hidden="true" />
+          {selectedForComparison ? "مضاف للمقارنة" : "إضافة للمقارنة"}
+        </button>
       </div>
     </Card>
   );

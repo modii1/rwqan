@@ -6,6 +6,7 @@ import express from "express";
 
 import { CommissionHoldOwnerChangeError } from "../firebaseService";
 import { propertyService } from "../services";
+import { ownerAccountStore } from "../services/OwnerAccountStore";
 import adminPropertiesRouter from "./admin/properties";
 import ownerRouter from "./owner";
 
@@ -31,6 +32,7 @@ test("owner property edits expose the commission-hold transfer guard as 423", as
   const originals = {
     getByNumber: propertyService.getByNumber,
     update: propertyService.update,
+    validateMembership: ownerAccountStore.validateActiveMembership,
   };
   (propertyService as any).getByNumber = async () => ({
     propertyNumber: "PROP-HELD",
@@ -41,11 +43,19 @@ test("owner property edits expose the commission-hold transfer guard as 423", as
   (propertyService as any).update = async () => {
     throw new CommissionHoldOwnerChangeError();
   };
+  (ownerAccountStore as any).validateActiveMembership = async (input: any) =>
+    input.ownerAccountId === "A".repeat(43) &&
+    input.authVersion === 1 &&
+    input.propertyNumber === "PROP-HELD";
 
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).session = { propertyNumber: "PROP-HELD" };
+    (req as any).session = {
+      propertyNumber: "PROP-HELD",
+      ownerAccountId: "A".repeat(43),
+      authVersion: 1,
+    };
     next();
   });
   app.use(ownerRouter);
@@ -65,6 +75,7 @@ test("owner property edits expose the commission-hold transfer guard as 423", as
   } finally {
     propertyService.getByNumber = originals.getByNumber;
     propertyService.update = originals.update;
+    ownerAccountStore.validateActiveMembership = originals.validateMembership;
     await server.close();
   }
 });

@@ -30,6 +30,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     getFirebaseProperty: firebaseService.getPropertyByNumber,
     getSubscription: firebaseService.getSubscriptionByPropertyNumber,
     getLinkedSubscriptions: firebaseService.getSubscriptionsLinkedToProperty,
+    getMultiPropertySubscriptions: firebaseService.getMultiPropertySubscriptions,
     getOwnerSubscription: subscriptionService.getByProperty,
     getPaymentsByProperty: paymentService.getByProperty,
     paymentCreate: paymentService.create,
@@ -94,6 +95,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
   ) => Array.from(subscriptions.values()).filter(
     (subscription) => subscription.linkedProperty === mainPropertyNumber,
   );
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
   (subscriptionService as any).getByProperty = async (propertyNumber: string) => {
     ownerSubscriptionLookups.push(propertyNumber);
     return subscriptions.get(propertyNumber) || null;
@@ -608,6 +610,7 @@ test("public onboarding establishes an owner-bound payment session", async () =>
     (firebaseService as any).getPropertyByNumber = originals.getFirebaseProperty;
     (firebaseService as any).getSubscriptionByPropertyNumber = originals.getSubscription;
     (firebaseService as any).getSubscriptionsLinkedToProperty = originals.getLinkedSubscriptions;
+    (firebaseService as any).getMultiPropertySubscriptions = originals.getMultiPropertySubscriptions;
     (subscriptionService as any).getByProperty = originals.getOwnerSubscription;
     (paymentService as any).getByProperty = originals.getPaymentsByProperty;
     (paymentService as any).create = originals.paymentCreate;

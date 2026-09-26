@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, LogIn } from "lucide-react";
 import { AuthGateway } from "@/components/auth/auth-gateway";
 import CustomerAuthPage, { CustomerAuthPageFallback } from "@/components/customer/customer-auth-page";
+import { OwnerAccountLogin } from "@/components/owner/owner-account-login";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import type { AuthRole } from "@/lib/auth-role";
 import { getSafeOwnerLoginDestination } from "@/lib/owner-login-redirect";
@@ -54,6 +56,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
   const [adminPassword, setAdminPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isCustomerBusy, setIsCustomerBusy] = useState(false);
+  const [isOwnerAccountBusy, setIsOwnerAccountBusy] = useState(false);
+  const [ownerLoginMethod, setOwnerLoginMethod] = useState<"account" | "legacy">("account");
 
   useEffect(() => {
     document.title = authPageTitles[mode];
@@ -169,6 +173,14 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
     }
   };
 
+  const handleOwnerAccountAuthenticated = () => {
+    toast({
+      title: "تم تسجيل الدخول",
+      description: "مرحباً بك في لوحة التحكم",
+    });
+    window.location.href = getSafeOwnerLoginDestination(window.location.search);
+  };
+
   const copy = authCopy[mode];
 
   return (
@@ -178,7 +190,7 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
       heading={copy.heading}
       description={copy.description}
       onRoleChange={handleRoleChange}
-      disabled={isLoading || isCustomerBusy}
+      disabled={isLoading || isCustomerBusy || isOwnerAccountBusy}
       titleTestId="text-login-title"
     >
       {mode === "customer" ? (
@@ -191,76 +203,113 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
         </Suspense>
       ) : mode === "owner" ? (
         <div className="mx-auto w-full max-w-xl" data-testid="auth-panel-owner">
-          <form onSubmit={handleOwnerLogin} className="space-y-5">
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">رقم العقار</label>
-              <Input
-                id="owner-property-number"
-                type="text"
-                placeholder="5 أرقام"
-                value={propertyNumber}
-                onChange={(event) => setPropertyNumber(cleanPropertyNumber(event.target.value))}
-                disabled={isLoading}
-                inputMode="numeric"
-                pattern="[0-9]*"
-                dir="ltr"
-                autoComplete="username"
-                maxLength={5}
-                data-testid="input-property-number"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
-              />
-              {propertyNumber && propertyNumber.length !== 5 && (
-                <p className="mt-1 text-xs text-red-500">يجب أن يكون 5 أرقام</p>
-              )}
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">الرقم السري</label>
-              <Input
-                id="owner-pin"
-                type="password"
-                placeholder="••••••"
-                value={pin}
-                onChange={(event) => setPin(event.target.value)}
-                autoComplete="current-password"
-                dir="ltr"
-                disabled={isLoading}
-                data-testid="input-pin"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              className="h-12 w-full rounded-xl bg-[#29372f] text-base font-bold text-white hover:bg-[#1f2b25]"
-              disabled={isLoading}
-              data-testid="button-login"
+          <Tabs
+            value={ownerLoginMethod}
+            onValueChange={(value) => setOwnerLoginMethod(value as "account" | "legacy")}
+            dir="rtl"
+          >
+            <TabsList
+              aria-label="طريقة دخول مالك العقار"
+              className="mb-6 grid h-auto w-full grid-cols-2 rounded-xl border border-[#ded5c2] bg-[#f0ede5] p-1"
             >
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  جاري تسجيل الدخول...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <LogIn className="h-4 w-4" />
-                  تسجيل الدخول
-                </span>
-              )}
-            </Button>
-
-            <div className="text-center">
-              <Button
-                type="button"
-                variant="link"
-                onClick={() => router.push("/forgot-password")}
-                className="h-auto text-sm text-[#687064] hover:text-[#242822]"
-                data-testid="link-forgot-password"
+              <TabsTrigger
+                value="account"
+                disabled={isLoading || isOwnerAccountBusy}
+                className="min-h-11 rounded-lg font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
+                data-testid="owner-login-method-account"
               >
-                نسيت الرقم السري؟
-              </Button>
-            </div>
-          </form>
+                رقم الجوال
+              </TabsTrigger>
+              <TabsTrigger
+                value="legacy"
+                disabled={isLoading || isOwnerAccountBusy}
+                className="min-h-11 rounded-lg font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
+                data-testid="owner-login-method-legacy"
+              >
+                رقم العقار
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="account" className="mt-0">
+              <OwnerAccountLogin
+                onAuthenticated={handleOwnerAccountAuthenticated}
+                onBusyChange={setIsOwnerAccountBusy}
+              />
+            </TabsContent>
+
+            <TabsContent value="legacy" className="mt-0">
+              <form onSubmit={handleOwnerLogin} className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">رقم العقار</label>
+                  <Input
+                    id="owner-property-number"
+                    type="text"
+                    placeholder="5 أرقام"
+                    value={propertyNumber}
+                    onChange={(event) => setPropertyNumber(cleanPropertyNumber(event.target.value))}
+                    disabled={isLoading}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    dir="ltr"
+                    autoComplete="username"
+                    maxLength={5}
+                    data-testid="input-property-number"
+                    className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                  />
+                  {propertyNumber && propertyNumber.length !== 5 && (
+                    <p className="mt-1 text-xs text-red-500">يجب أن يكون 5 أرقام</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">الرقم السري</label>
+                  <Input
+                    id="owner-pin"
+                    type="password"
+                    placeholder="••••••"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value)}
+                    autoComplete="current-password"
+                    dir="ltr"
+                    disabled={isLoading}
+                    data-testid="input-pin"
+                    className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  className="h-12 w-full rounded-xl bg-[#29372f] text-base font-bold text-white hover:bg-[#1f2b25]"
+                  disabled={isLoading}
+                  data-testid="button-login"
+                >
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      جاري تسجيل الدخول...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <LogIn className="h-4 w-4" />
+                      تسجيل الدخول
+                    </span>
+                  )}
+                </Button>
+
+                <div className="text-center">
+                  <Button
+                    type="button"
+                    variant="link"
+                    onClick={() => router.push("/forgot-password")}
+                    className="h-auto text-sm text-[#687064] hover:text-[#242822]"
+                    data-testid="link-forgot-password"
+                  >
+                    نسيت الرقم السري؟
+                  </Button>
+                </div>
+              </form>
+            </TabsContent>
+          </Tabs>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-1 border-t border-[#e9dfca] pt-5 text-sm text-[#687064]">
             <span>ليس لديك حساب؟</span>

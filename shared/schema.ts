@@ -20,6 +20,8 @@ export const propertySchema = z.object({
   city: z.enum(['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'عيون الجواء', 'رياض الخبراء']),
   direction: z.enum(['شمال', 'جنوب', 'شرق', 'غرب']),
   type: z.enum(['قسم', 'قسمين']),
+  capacity: z.number().int().min(1).max(1000).nullable().optional(),
+  availabilityNote: z.string().trim().max(120).optional(),
   facilities: z.array(z.string()), // 100 مرفق
   imagesFolderUrl: z.string().optional(), // رابط مجلد الصور
   imagesLink: z.string().optional(),  // رابط الصور كما هو في Google Sheet
@@ -325,6 +327,9 @@ export type InsertSuggestion = z.infer<typeof insertSuggestionSchema>;
 export const paymentSchema = z.object({
   id: z.string(),
   propertyNumber: z.string(),
+  // Internal ownership binding for payments initiated by a verified owner
+  // account. It is intentionally omitted from owner-facing payment DTOs.
+  ownerAccountId: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
   packageId: z.string(),
   amount: z.number(), // السعر الأصلي قبل الخصم
   discountCode: z.string().optional(),

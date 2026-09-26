@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FaWhatsapp } from "react-icons/fa";
@@ -99,6 +100,7 @@ import {
   getAdminCustomerWhatsAppRemainingMinutes,
 } from "./booking-customer-whatsapp";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
 interface BookingCommissionSummary {
   total: number;
@@ -292,8 +294,11 @@ function enforcementIssueMessage(value: unknown): string {
 
 export default function BookingCommissionsSection() {
   const isMobile = useIsMobile();
+  const searchParams = useSearchParams();
+  const targetedBookingId = getAdminOperationTarget(searchParams, "booking");
   const mobileSelectionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectionPresentationRef = useRef<BookingCommissionDetailsPresentation | null>(null);
+  const appliedTargetRef = useRef("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -367,6 +372,15 @@ export default function BookingCommissionsSection() {
     setReversalError("");
     setReversalNotice("");
   };
+
+  useEffect(() => {
+    if (!targetedBookingId || appliedTargetRef.current === targetedBookingId) return;
+    appliedTargetRef.current = targetedBookingId;
+    setSearch(targetedBookingId);
+    setStatusFilter("all");
+    selectionPresentationRef.current = getBookingCommissionDetailsPresentation(isMobile);
+    setSelectedId(targetedBookingId);
+  }, [isMobile, targetedBookingId]);
 
   const resolveDispute = async (bookingId: string, resolution: DisputeResolution) => {
     setResolutionPending(resolution);
@@ -1327,7 +1341,10 @@ function AdminNotificationHistory({
             </p>
           )}
           {visibleJobs.map((job, index) => {
-            const status = notificationStatusMeta(job.status);
+            const status = notificationStatusMeta(
+              job.status,
+              job.providerDeliveryStatus,
+            );
             const canResend = [
               "pending",
               "sent",
@@ -1361,6 +1378,10 @@ function AdminNotificationHistory({
                   <AdminFact label="وقت الإرسال" value={formatDateTime(job.sentAt)} />
                   <AdminFact label="وقت الفشل" value={formatDateTime(job.failedAt)} />
                   <AdminFact label="وقت منع الرسالة" value={formatDateTime(job.suppressedAt)} />
+                  <AdminFact label="وقت قبول المزود" value={formatDateTime(job.providerAcceptedAt)} />
+                  <AdminFact label="وقت التسليم" value={formatDateTime(job.providerDeliveredAt)} />
+                  <AdminFact label="وقت القراءة" value={formatDateTime(job.providerReadAt)} />
+                  <AdminFact label="وقت فشل التسليم" value={formatDateTime(job.providerFailedAt)} />
                   <AdminFact label="وقت إنشاء السجل" value={formatDateTime(job.createdAt)} />
                   {job.manualResendRequestedAt && (
                     <AdminFact label="وقت طلب إعادة الإرسال" value={formatDateTime(job.manualResendRequestedAt)} />
@@ -1370,6 +1391,11 @@ function AdminNotificationHistory({
                 {job.providerError && (
                   <p className="mt-3 break-words rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
                     سبب المزود أو سير العمل: {notificationProviderErrorLabel(job.providerError)}
+                  </p>
+                )}
+                {job.providerDeliveryError && (
+                  <p className="mt-3 break-words rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-800">
+                    سبب المزود أو سير العمل: {notificationProviderErrorLabel(job.providerDeliveryError)}
                   </p>
                 )}
                 {canResend && (

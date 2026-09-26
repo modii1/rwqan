@@ -11,6 +11,11 @@ export const customerPropertyNumberSchema = z.string()
   .min(1)
   .max(64);
 
+export const customerBookingIdSchema = z.string()
+  .trim()
+  .min(1)
+  .max(256);
+
 export const customerFullNameSchema = z.string()
   .trim()
   .max(100);
@@ -89,4 +94,8 @@ export type CustomerContactHistoryRow = {
     pricePaidHalalas: number;
   };
   answeredAt: string | null;
+  followUpPath?: string | null;
+  canMarkNotBooked?: boolean;
+  canReportNoResponse?: boolean;
+  ownerNoResponseReportedAt?: string | null;
 };

@@ -268,14 +268,21 @@ function isUnansweredBookingExpired(
       nowMs >= createdAt + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS);
 }
 
-function summarizeNotifications(jobs: BookingNotificationJob[]) {
+export function summarizeNotifications(jobs: BookingNotificationJob[]) {
   return jobs.reduce((summary, job) => {
-    if (job.status === "sent") summary.sent++;
-    else if (job.status === "failed") summary.failed++;
+    if (job.status === "failed" || job.providerDeliveryStatus === "failed") {
+      summary.failed++;
+    } else if (job.status === "sent") {
+      if (
+        job.providerDeliveryStatus === "delivered" ||
+        job.providerDeliveryStatus === "read"
+      ) summary.sent++;
+      else summary.accepted++;
+    }
     else if (job.status === "suppressed_quota") summary.suppressed++;
     else if (job.status !== "cancelled") summary.pending++;
     return summary;
-  }, { sent: 0, failed: 0, pending: 0, suppressed: 0 });
+  }, { sent: 0, accepted: 0, failed: 0, pending: 0, suppressed: 0 });
 }
 
 function publicBaseUrlHealth(): {

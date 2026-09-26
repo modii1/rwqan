@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   CalendarClock,
   ExternalLink,
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
 type SuspendedSubscription = {
   id: string;
@@ -88,6 +90,8 @@ function getPausedDays(value?: string | null): number {
 export default function SuspendedSubscriptionsSection() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const targetedPropertyNumber = getAdminOperationTarget(searchParams, "property");
   const invalidatePropertyAvailabilityQueries = () => {
     for (const queryKey of [
       ["/api/admin/property-availability-holds"],
@@ -101,12 +105,16 @@ export default function SuspendedSubscriptionsSection() {
       void queryClient.invalidateQueries({ queryKey });
     }
   };
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(targetedPropertyNumber);
   const [selectedSubscription, setSelectedSubscription] = useState<SuspendedSubscription | null>(null);
   const [selectedPropertyHold, setSelectedPropertyHold] = useState<PropertyAvailabilityHold | null>(null);
   const [pauseDialogOpen, setPauseDialogOpen] = useState(false);
   const [candidateSearch, setCandidateSearch] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<FreePropertyCandidate | null>(null);
+
+  useEffect(() => {
+    if (targetedPropertyNumber) setSearchQuery(targetedPropertyNumber);
+  }, [targetedPropertyNumber]);
 
   const { data: subscriptions = [], isLoading, isError, refetch, isFetching } = useQuery<SuspendedSubscription[]>({
     queryKey: ["/api/admin/subscriptions"],

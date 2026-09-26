@@ -25,9 +25,24 @@ export function notificationKindLabel(value: unknown): string {
   return labels[kind] || fallback(value);
 }
 
-export function notificationStatusMeta(value: unknown): { label: string; tone: BookingHistoryTone } {
+export function notificationStatusMeta(
+  value: unknown,
+  providerDeliveryStatus?: unknown,
+): { label: string; tone: BookingHistoryTone } {
   const status = normalize(value);
-  if (status === "sent") return { label: "تم الإرسال", tone: "green" };
+  const providerStatus = normalize(providerDeliveryStatus);
+  if (status === "sent") {
+    if (providerStatus === "failed") {
+      return { label: "فشل الإرسال", tone: "red" };
+    }
+    if (providerStatus === "delivered" || providerStatus === "read") {
+      return { label: "تم الإرسال", tone: "green" };
+    }
+    if (providerStatus === "accepted") {
+      return { label: "قيد الإرسال", tone: "blue" };
+    }
+    return { label: "تم الإرسال", tone: "green" };
+  }
   if (status === "failed") return { label: "فشل الإرسال", tone: "red" };
   if (status === "suppressed_quota") return { label: "منعها حد الرسائل", tone: "amber" };
   if (status === "cancelled") return { label: "أُلغيت", tone: "slate" };

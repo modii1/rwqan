@@ -54,7 +54,12 @@ import type {
   BookingFollowUpDocument,
   BookingNotificationJob,
   BookingNotificationKind,
+  BookingNotificationProviderStatus,
 } from "./BookingCommissionTypes";
+import {
+  whatsappProviderDeliveryEventKey,
+  type WhatsAppProviderDeliveryEvent,
+} from "./WhatsAppDeliveryService";
 
 const BOOKINGS_COLLECTION = "booking_followups";
 const NOTIFICATIONS_COLLECTION = "booking_notification_outbox";
@@ -71,6 +76,16 @@ const FREE_WORKFLOW_SETTINGS_AUDIT_COLLECTION =
   "booking_free_workflow_limits_audit";
 const MANUAL_RESEND_AUDIT_COLLECTION =
   "booking_notification_manual_resend_audit";
+
+const PROVIDER_DELIVERY_STATUS_RANK: Record<
+  BookingNotificationProviderStatus,
+  number
+> = {
+  accepted: 1,
+  failed: 2,
+  delivered: 3,
+  read: 4,
+};
 
 function buildCommissionHoldAfterRelease(
   property: Record<string, any>,
@@ -578,6 +593,15 @@ function buildNotificationJob(options: {
     failedAt: null,
     suppressedAt: null,
     providerError: null,
+    providerMessageId: null,
+    providerDeliveryStatus: null,
+    providerAcceptedAt: null,
+    providerDeliveredAt: null,
+    providerReadAt: null,
+    providerFailedAt: null,
+    providerStatusUpdatedAt: null,
+    providerDeliveryError: null,
+    providerDeliveryEventKeys: [],
     createdAt: options.now,
     updatedAt: options.now,
   };
@@ -1885,6 +1909,15 @@ export class BookingCommissionStore {
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
   }
 
+  async listBookingsForProperty(propertyNumber: string): Promise<BookingFollowUpDocument[]> {
+    const snapshot = await this.db.collection(BOOKINGS_COLLECTION)
+      .where("propertyNumber", "==", propertyNumber)
+      .get();
+    return snapshot.docs
+      .map((document) => document.data() as BookingFollowUpDocument)
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  }
+
   async listAllBookings(): Promise<BookingFollowUpDocument[]> {
     const snapshot = await this.db.collection(BOOKINGS_COLLECTION)
       .orderBy("createdAt", "desc")
@@ -1897,6 +1930,72 @@ export class BookingCommissionStore {
       .orderBy("createdAt", "desc")
       .get();
     return snapshot.docs.map((document) => document.data() as BookingNotificationJob);
+  }
+
+  async recordProviderDeliveryEvent(
+    event: WhatsAppProviderDeliveryEvent,
+    now = new Date(),
+  ): Promise<{
+    result: "updated" | "duplicate" | "stale" | "not_found" | "conflict";
+    jobId?: string;
+  }> {
+    if (!Number.isFinite(now.getTime())) throw new RangeError("Invalid delivery update time");
+    const providerMessageId = String(event.providerMessageId || "").trim();
+    if (!providerMessageId || providerMessageId.length > 512) {
+      return { result: "not_found" };
+    }
+    const candidates = await this.db.collection(NOTIFICATIONS_COLLECTION)
+      .where("providerMessageId", "==", providerMessageId)
+      .limit(2)
+      .get();
+    if (candidates.empty) return { result: "not_found" };
+    if (candidates.size !== 1) return { result: "conflict" };
+    const jobRef = candidates.docs[0].ref;
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(jobRef);
+      if (!snapshot.exists) return { result: "not_found" } as const;
+      const job = snapshot.data() as BookingNotificationJob;
+      if (job.providerMessageId !== providerMessageId) {
+        return { result: "not_found" } as const;
+      }
+
+      const key = whatsappProviderDeliveryEventKey(event);
+      const priorKeys = Array.isArray(job.providerDeliveryEventKeys)
+        ? job.providerDeliveryEventKeys.filter((value) => typeof value === "string")
+        : [];
+      if (priorKeys.includes(key) || job.providerDeliveryStatus === event.status) {
+        return { result: "duplicate", jobId: job.id } as const;
+      }
+      const currentRank = job.providerDeliveryStatus
+        ? PROVIDER_DELIVERY_STATUS_RANK[job.providerDeliveryStatus]
+        : 0;
+      if (PROVIDER_DELIVERY_STATUS_RANK[event.status] < currentRank) {
+        return { result: "stale", jobId: job.id } as const;
+      }
+
+      const receivedAt = now.toISOString();
+      const occurredAt = Number.isFinite(Date.parse(event.occurredAt))
+        ? new Date(event.occurredAt).toISOString()
+        : receivedAt;
+      const timestampField = event.status === "accepted"
+        ? { providerAcceptedAt: occurredAt }
+        : event.status === "delivered"
+          ? { providerDeliveredAt: occurredAt }
+          : event.status === "read"
+            ? { providerReadAt: occurredAt }
+            : { providerFailedAt: occurredAt };
+      transaction.update(jobRef, {
+        providerDeliveryStatus: event.status,
+        providerStatusUpdatedAt: occurredAt,
+        providerDeliveryError: event.status === "failed"
+          ? String(event.error || "provider_failed").slice(0, 500)
+          : null,
+        providerDeliveryEventKeys: [...priorKeys.slice(-19), key],
+        ...timestampField,
+        updatedAt: receivedAt,
+      });
+      return { result: "updated", jobId: job.id } as const;
+    });
   }
 
   async scheduleManualNotificationResend(options: {
@@ -2339,6 +2438,51 @@ export class BookingCommissionStore {
     });
     if (!result) throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
     return result;
+  }
+
+  async reportOwnerNoResponse(
+    id: string,
+    customerSubject: string,
+    now = new Date(),
+  ): Promise<BookingFollowUpDocument> {
+    const ref = this.db.collection(BOOKINGS_COLLECTION).doc(id);
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) {
+        throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
+      }
+      const booking = snapshot.data() as BookingFollowUpDocument;
+      coreBookingRecord(booking);
+      if (booking.customerSubject !== customerSubject) {
+        throw new BookingWorkflowError("BOOKING_NOT_FOUND", "Booking not found", 404);
+      }
+      if (booking.bookingStatus !== "awaiting_response") {
+        throw new BookingWorkflowError(
+          "BOOKING_NOT_ACTIONABLE",
+          "Booking is no longer awaiting a response",
+        );
+      }
+      if (customerResponseExpired(booking, now)) {
+        throw new BookingWorkflowError(
+          "BOOKING_RESPONSE_EXPIRED",
+          "Booking response window expired",
+          410,
+        );
+      }
+      if (booking.customerOwnerNoResponseReportedAt) return booking;
+
+      const at = now.toISOString();
+      const updates = {
+        customerOwnerNoResponseReportedAt: at,
+        updatedAt: at,
+        events: appendEvent(booking.events, {
+          type: "customer_reported_owner_no_response" as const,
+          at,
+        }),
+      };
+      transaction.update(ref, updates);
+      return { ...booking, ...updates };
+    });
   }
 
   async confirmBooking(
@@ -5584,10 +5728,28 @@ export class BookingCommissionStore {
     leaseToken: string;
     success: boolean;
     error?: string;
+    providerMessageId?: string;
     now?: Date;
   }): Promise<boolean> {
     const now = options.now || new Date();
     const timestamp = now.toISOString();
+    const providerMessageId = String(options.providerMessageId || "").trim();
+    const storedProviderMessageId = providerMessageId.length <= 512
+      ? providerMessageId
+      : "";
+    const providerAcceptanceUpdates = options.success
+      ? {
+          providerMessageId: storedProviderMessageId || null,
+          providerDeliveryStatus: "accepted" as const,
+          providerAcceptedAt: timestamp,
+          providerDeliveredAt: null,
+          providerReadAt: null,
+          providerFailedAt: null,
+          providerStatusUpdatedAt: timestamp,
+          providerDeliveryError: null,
+          providerDeliveryEventKeys: [],
+        }
+      : {};
     const jobRef = this.db.collection(NOTIFICATIONS_COLLECTION).doc(options.jobId);
     return this.db.runTransaction(async (transaction) => {
       const jobSnapshot = await transaction.get(jobRef);
@@ -5628,6 +5790,7 @@ export class BookingCommissionStore {
             sentAt: timestamp,
             failedAt: null,
             providerError: null,
+            ...providerAcceptanceUpdates,
             leaseToken: null,
             leaseExpiresAt: null,
             updatedAt: timestamp,
@@ -5960,6 +6123,7 @@ export class BookingCommissionStore {
         sentAt: options.success ? timestamp : null,
         failedAt: options.success || retryOwnerCommissionNotice ? null : timestamp,
         providerError: options.success ? null : String(options.error || "send_failed").slice(0, 500),
+        ...providerAcceptanceUpdates,
         leaseToken: null,
         leaseExpiresAt: null,
         updatedAt: timestamp,

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireOwner } from "../middleware";
+import { requireOwner, requireSameOrigin } from "../middleware";
 import { firebaseService } from "../../firebaseService";
 import { addOnService, paymentService, propertyService } from "../../services";
 import { PaymobIntentionError, paymobService } from "../../integrations/paymob";
@@ -398,7 +398,7 @@ router.get("/api/owner/property-addons", requireOwner, async (req, res) => {
 // =======================================
 // OWNER – Pay Add-On (Paymob) - موحد مع التحويل البنكي
 // =======================================
-router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
+router.post("/api/owner/addons/pay", requireOwner, requireSameOrigin, async (req, res) => {
   let createdPaymentId: string | null = null;
   let createdAddOnId: string | null = null;
   let paymentIntentionRequestStarted = false;
@@ -457,6 +457,7 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
       pendingPrice: addon.price,
       merchantAttemptKey,
       intentionState: "creating",
+      ownerAccountId: (req.session as any).ownerAccountId || undefined,
     });
     createdPaymentId = paymentId;
 
@@ -589,7 +590,7 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
 // =======================================
 // OWNER – Bank Transfer for Add-On
 // =======================================
-router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('receipt'), async (req, res) => {
+router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, upload.single('receipt'), async (req, res) => {
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
     const { addOnPackageId, amount, discountCode } = req.body;
@@ -654,6 +655,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('rece
       pendingEndDate: undefined,
       pendingSubscriptionType: undefined,
       pendingPrice: addon.price,
+      ownerAccountId: (req.session as any).ownerAccountId || undefined,
     });
 
     await firebaseService.createPropertyAddOn({

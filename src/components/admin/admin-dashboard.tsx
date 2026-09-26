@@ -43,6 +43,8 @@ import {
   MousePointerClick,
   PauseCircle,
   ReceiptText,
+  ListChecks,
+  Star,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -71,11 +73,14 @@ import ContactAnalyticsSection from "./sections/contact-analytics";
 import SuspendedSubscriptionsSection from "./sections/suspended-subscriptions";
 import BookingCommissionsSection from "./sections/booking-commissions";
 import CustomersSection from "./sections/customers";
+import AdminOperationsInbox from "./sections/operations-inbox";
+import PropertyReviewsSection from "./sections/property-reviews";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
 export type AdminSection =
   | ""
+  | "operations"
   | "properties"
   | "linked-properties"
   | "subscriptions"
@@ -87,6 +92,7 @@ export type AdminSection =
   | "contact-analytics"
   | "booking-commissions"
   | "customers"
+  | "property-reviews"
   | "payments"
   | "analytics"
   | "verification"
@@ -121,6 +127,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
 
   // إعادة التوجيه إذا لم يكن أدمن - في useEffect لتجنب تحديث الحالة أثناء الـ render
   const router = useRouter();
+  const navigateSection = (section: AdminSection) => {
+    setActiveSection(section);
+    router.push(section ? `/admin/${section}` : "/admin");
+  };
+  useEffect(() => {
+    setActiveSection(initialSection || "");
+  }, [initialSection]);
   useEffect(() => {
     if (isLoading) return;
     if (!adminSession?.isAdmin) {
@@ -160,7 +173,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         </div>
         {/* أيقونة التنبيهات مع العداد */}
         <button
-          onClick={() => setActiveSection("")}
+          onClick={() => navigateSection("")}
           className="relative p-2 rounded-lg hover:bg-muted/50 transition"
           data-testid="button-alerts-mobile"
         >
@@ -185,7 +198,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           </div>
           {/* أيقونة التنبيهات في السايدبار */}
           <button
-            onClick={() => setActiveSection("")}
+            onClick={() => navigateSection("")}
             className="relative p-1.5 rounded-lg hover:bg-muted/50 transition"
             data-testid="button-alerts-desktop"
           >
@@ -199,94 +212,108 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         </div>
 
         <SidebarButton
+          icon={<ListChecks className="w-4 h-4 text-[#8b6b25]" />}
+          label="صندوق العمليات"
+          active={activeSection === "operations"}
+          onClick={() => navigateSection("operations")}
+        />
+
+        <SidebarButton
           icon={<Home className="w-4 h-4" />}
           label="العقارات"
           active={activeSection === "properties"}
-          onClick={() => setActiveSection("properties")}
+          onClick={() => navigateSection("properties")}
         />
 
         <SidebarButton
           icon={<Link className="w-4 h-4 text-amber-600" />}
           label="العقارات المضافة"
           active={activeSection === "linked-properties"}
-          onClick={() => setActiveSection("linked-properties")}
+          onClick={() => navigateSection("linked-properties")}
         />
 
         <SidebarButton
           icon={<CreditCard className="w-4 h-4" />}
           label="الاشتراكات"
           active={activeSection === "subscriptions"}
-          onClick={() => setActiveSection("subscriptions")}
+          onClick={() => navigateSection("subscriptions")}
         />
 
         <SidebarButton
           icon={<PauseCircle className="w-4 h-4 text-slate-600" />}
           label="الاشتراكات الموقوفة"
           active={activeSection === "suspended-subscriptions"}
-          onClick={() => setActiveSection("suspended-subscriptions")}
+          onClick={() => navigateSection("suspended-subscriptions")}
         />
 
         <SidebarButton
           icon={<DollarSign className="w-4 h-4" />}
           label="المدفوعات"
           active={activeSection === "payments"}
-          onClick={() => setActiveSection("payments")}
+          onClick={() => navigateSection("payments")}
         />
 
         <SidebarButton
           icon={<Gift className="w-4 h-4" />}
           label="الباقات"
           active={activeSection === "packages"}
-          onClick={() => setActiveSection("packages")}
+          onClick={() => navigateSection("packages")}
         />
 
         <SidebarButton
           icon={<Gift className="w-4 h-4" />}
           label="الخصومات"
           active={activeSection === "discounts"}
-          onClick={() => setActiveSection("discounts")}
+          onClick={() => navigateSection("discounts")}
         />
 
         <SidebarButton
           icon={<Zap className="w-4 h-4 text-violet-600" />}
           label="الإضافات"
           active={activeSection === "addons"}
-          onClick={() => setActiveSection("addons")}
+          onClick={() => navigateSection("addons")}
         />
 
         <SidebarButton
           icon={<Inbox className="w-4 h-4" />}
           label="الطلبات"
           active={activeSection === "requests"}
-          onClick={() => setActiveSection("requests")}
+          onClick={() => navigateSection("requests")}
         />
 
         <SidebarButton
           icon={<MousePointerClick className="w-4 h-4 text-green-700" />}
           label="تحليلات التواصل"
           active={activeSection === "contact-analytics"}
-          onClick={() => setActiveSection("contact-analytics")}
+          onClick={() => navigateSection("contact-analytics")}
         />
 
         <SidebarButton
           icon={<ReceiptText className="w-4 h-4 text-[#8b6b25]" />}
           label="الحجوزات والعمولات"
           active={activeSection === "booking-commissions"}
-          onClick={() => setActiveSection("booking-commissions")}
+          onClick={() => navigateSection("booking-commissions")}
         />
 
         <SidebarButton
           icon={<Users className="w-4 h-4 text-emerald-700" />}
           label="العملاء"
           active={activeSection === "customers"}
-          onClick={() => setActiveSection("customers")}
+          onClick={() => navigateSection("customers")}
+        />
+
+        <SidebarButton
+          icon={<Star className="w-4 h-4 text-amber-600" />}
+          label="تقييمات العملاء"
+          active={activeSection === "property-reviews"}
+          onClick={() => navigateSection("property-reviews")}
         />
 
         <SidebarButton
           icon={<BarChart3 className="w-4 h-4" />}
           label="إحصائيات"
           active={activeSection === "analytics"}
-          onClick={() => setActiveSection("analytics")}
+          onClick={() => navigateSection("analytics")}
         />
 
         {/*  - زر نظام الواتساب */}
@@ -294,21 +321,21 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           icon={<MessageCircle className="w-4 h-4 text-green-600" />}
           label="نظام الواتساب"
           active={activeSection === "whatsapp"}
-          onClick={() => setActiveSection("whatsapp")}
+          onClick={() => navigateSection("whatsapp")}
         />
 
         <SidebarButton
           icon={<Clock className="w-4 h-4" />}
           label="نظام التحقق"
           active={activeSection === "verification"}
-          onClick={() => setActiveSection("verification")}
+          onClick={() => navigateSection("verification")}
         />
 
         <SidebarButton
           icon={<BarChart3 className="w-4 h-4 text-orange-500" />}
           label="سجل التحقق"
           active={activeSection === "verification-logs"}
-          onClick={() => setActiveSection("verification-logs")}
+          onClick={() => navigateSection("verification-logs")}
         />
 
         <div className="hidden md:block h-px bg-border my-2" />
@@ -317,14 +344,14 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           icon={<HardDrive className="w-4 h-4" />}
           label="النسخ الاحتياطية"
           active={activeSection === "backup"}
-          onClick={() => setActiveSection("backup")}
+          onClick={() => navigateSection("backup")}
         />
 
         <SidebarButton
           icon={<Code2 className="w-4 h-4" />}
           label="نسخ الأكواس"
           active={activeSection === "code-backup"}
-          onClick={() => setActiveSection("code-backup")}
+          onClick={() => navigateSection("code-backup")}
         />
 
         <div className="hidden md:block h-px bg-border my-2" />
@@ -333,49 +360,49 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           icon={<Bell className="w-4 h-4" />}
           label="الإعدادات"
           active={activeSection === "settings"}
-          onClick={() => setActiveSection("settings")}
+          onClick={() => navigateSection("settings")}
         />
 
         <SidebarButton
           icon={<Wallet className="w-4 h-4 text-emerald-600" />}
           label="أرباح الشريك"
           active={activeSection === "partner-profits"}
-          onClick={() => setActiveSection("partner-profits")}
+          onClick={() => navigateSection("partner-profits")}
         />
 
         <SidebarButton
           icon={<Settings2 className="w-4 h-4 text-amber-600" />}
           label="إعدادات الرسوم"
           active={activeSection === "fee-configs"}
-          onClick={() => setActiveSection("fee-configs")}
+          onClick={() => navigateSection("fee-configs")}
         />
 
         <SidebarButton
           icon={<Building2 className="w-4 h-4 text-blue-600" />}
           label="الحسابات البنكية"
           active={activeSection === "bank-accounts"}
-          onClick={() => setActiveSection("bank-accounts")}
+          onClick={() => navigateSection("bank-accounts")}
         />
 
         <SidebarButton
           icon={<Flag className="w-4 h-4 text-purple-600" />}
           label="أعلام الميزات"
           active={activeSection === "feature-flags"}
-          onClick={() => setActiveSection("feature-flags")}
+          onClick={() => navigateSection("feature-flags")}
         />
 
         <SidebarButton
           icon={<Calendar className="w-4 h-4 text-amber-600" />}
           label="المناسبات"
           active={activeSection === "occasions"}
-          onClick={() => setActiveSection("occasions")}
+          onClick={() => navigateSection("occasions")}
         />
 
         <SidebarButton
           icon={<FileText className="w-4 h-4 text-teal-600" />}
           label="المدونة"
           active={activeSection === "blog"}
-          onClick={() => setActiveSection("blog")}
+          onClick={() => navigateSection("blog")}
         />
 
         <div className="hidden md:block h-px bg-border my-2" />
@@ -393,7 +420,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {/* زر الرجوع */}
         {activeSection !== "" && (
           <button
-            onClick={() => setActiveSection("")}
+            onClick={() => navigateSection("")}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/10 text-primary border border-primary/30 rounded-lg hover:bg-primary/20 mb-4 transition"
             data-testid="button-back"
           >
@@ -404,6 +431,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
 
         {activeSection === "" && <AlertsDashboard />}
 
+        {activeSection === "operations" && <AdminOperationsInbox />}
         {activeSection === "properties" && <PropertiesSection />}
         {activeSection === "linked-properties" && <AdminLinkedPropertiesSection />}
         {activeSection === "subscriptions" && <AdminSubscriptionsSection />}
@@ -416,6 +444,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "contact-analytics" && <ContactAnalyticsSection />}
         {activeSection === "booking-commissions" && <BookingCommissionsSection />}
         {activeSection === "customers" && <CustomersSection />}
+        {activeSection === "property-reviews" && <PropertyReviewsSection />}
         {activeSection === "analytics" && <AnalyticsContent />}
         {activeSection === "backup" && <AdminBackup />}
         {activeSection === "code-backup" && <AdminCodeBackup />}
@@ -440,13 +469,13 @@ function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`flex-shrink-0 flex items-center justify-center md:justify-start gap-2 px-2 md:px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm whitespace-nowrap md:whitespace-normal border transition ${active
+      className={`flex-shrink-0 flex items-center justify-start gap-2 px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm whitespace-nowrap md:whitespace-normal border transition ${active
         ? "bg-primary/10 text-primary border-primary/40"
         : "bg-transparent text-muted-foreground hover:bg-muted/50 border-transparent hover:text-foreground"
         }`}
     >
       {icon}
-      <span className="hidden md:inline">{label}</span>
+      <span>{label}</span>
     </button>
   );
 }

@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const { generateKeyPairSync } = require("node:crypto");
 const { existsSync, readFileSync } = require("node:fs");
 const { createConnection, createServer } = require("node:net");
 const { resolve } = require("node:path");
@@ -112,14 +113,23 @@ async function main() {
     }
   }
   for (const variable of EXTERNAL_SERVICE_VARIABLES) env[variable] = "";
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const firebaseServiceAccount = JSON.stringify({
+    project_id: "rwqan-startup-smoke",
+    client_email: "server@rwqan-startup-smoke.iam.gserviceaccount.com",
+    private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+  });
   Object.assign(env, {
     ADMIN_CODE: "startup-smoke-admin",
     ADMIN_PASSWORD: "startup-smoke-password",
+    FIREBASE_SERVICE_ACCOUNT: firebaseServiceAccount,
     NEXT_TELEMETRY_DISABLED: "1",
     NODE_ENV: "production",
     PAYMOB_HMAC_SECRET: "startup-smoke-paymob-hmac-secret",
     PORT: String(port),
-    SESSION_SECRET: "startup-smoke-session-secret",
+    SESSION_SECRET: "startup-smoke-session-secret-at-least-32-bytes",
+    WHATSAPP_DELIVERY_WEBHOOK_SECRET:
+      "startup-smoke-whatsapp-delivery-webhook-secret",
   });
 
   const child = spawn(process.execPath, [resolve("dist/server/index.js")], {

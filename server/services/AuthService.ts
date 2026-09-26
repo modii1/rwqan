@@ -4,7 +4,7 @@
  * and PIN management.
  */
 
-import { timingSafeEqual } from "node:crypto";
+import { randomInt, timingSafeEqual } from "node:crypto";
 import { firebaseService } from "../firebaseService";
 
 const ADMIN_CODE = process.env.ADMIN_CODE;
@@ -55,7 +55,7 @@ export class AuthService {
       );
     }
 
-    const resetCode = Math.floor(100_000 + Math.random() * 900_000).toString();
+    const resetCode = randomInt(100_000, 1_000_000).toString();
     const expireTime = new Date(Date.now() + 10 * 60 * 1000);
 
     await firebaseService.updateOwnerResetCode(

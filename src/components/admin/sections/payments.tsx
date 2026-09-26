@@ -1,6 +1,7 @@
 "use client";
 // client/src/pages/admin/sections/payments.tsx
-import { useState, Fragment, useMemo, useRef } from "react";
+import { useState, Fragment, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/admin-action-response";
 import { useToast } from "@/hooks/use-toast";
 import { getAdminPaymentsRefetchInterval } from "@/lib/workflow-query-refresh";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -167,6 +169,9 @@ function formatDate(dateStr: string) {
 
 export default function PaymentsSection() {
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const targetedPaymentId = getAdminOperationTarget(searchParams, "payment");
+  const appliedTargetRef = useRef("");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   // Query refreshes never clear these; only a deliberate retry/success does.
   const [paymentActionErrors, setPaymentActionErrors] = useState<
@@ -328,6 +333,23 @@ export default function PaymentsSection() {
     queryKey: ["/api/owner/addons"],
   });
 
+  useEffect(() => {
+    if (
+      !targetedPaymentId
+      || !data
+      || appliedTargetRef.current === targetedPaymentId
+    ) return;
+    appliedTargetRef.current = targetedPaymentId;
+    setSearchQuery(targetedPaymentId);
+    setStatusFilter("all");
+    setMethodFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    if (data.some((payment) => payment.id === targetedPaymentId)) {
+      setExpandedRow(targetedPaymentId);
+    }
+  }, [data, targetedPaymentId]);
+
   // استخراج القيم الفريدة للفلاتر
   const uniqueStatuses = useMemo(() => {
     const statuses = new Set((data || []).map(p => p.status));
@@ -347,6 +369,7 @@ export default function PaymentsSection() {
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       filtered = filtered.filter(p =>
+        p.id.toLowerCase().includes(q) ||
         p.propertyNumber.toLowerCase().includes(q) ||
         (p.propertyName || "").toLowerCase().includes(q)
       );

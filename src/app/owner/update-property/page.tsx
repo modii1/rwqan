@@ -67,6 +67,8 @@ export default function UpdatePropertyPage() {
         city: "",
         direction: "",
         type: "",
+        capacity: "",
+        availabilityNote: "",
         whatsappNumber: "",
         prices: {
             weekday: "",
@@ -99,6 +101,8 @@ export default function UpdatePropertyPage() {
                 city: property.city || "",
                 direction: property.direction || "",
                 type: property.type || "",
+                capacity: property.capacity ? String(property.capacity) : "",
+                availabilityNote: property.availabilityNote || "",
                 whatsappNumber: property.whatsappNumber || "",
                 prices: {
                     weekday: property.prices?.weekday || "",
@@ -333,6 +337,35 @@ export default function UpdatePropertyPage() {
                                         {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold mb-2">السعة القصوى</label>
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={1000}
+                                    value={form.capacity}
+                                    onChange={(e) => setForm({
+                                        ...form,
+                                        capacity: validateNumericInput(e.target.value),
+                                    })}
+                                    placeholder="مثال: 20"
+                                    inputMode="numeric"
+                                    data-testid="input-capacity"
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-semibold mb-2">بيان التوفر</label>
+                                <Input
+                                    value={form.availabilityNote}
+                                    onChange={(e) => setForm({
+                                        ...form,
+                                        availabilityNote: e.target.value.slice(0, 120),
+                                    })}
+                                    placeholder="مثال: التوفر يتغير حسب التاريخ"
+                                    maxLength={120}
+                                    data-testid="input-availability-note"
+                                />
                             </div>
                         </div>
                     </Card>

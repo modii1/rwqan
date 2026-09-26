@@ -75,3 +75,20 @@ test("preserves the existing paid subscription resume route and copy", () => {
   assert.match(source, /المدة المتبقية محفوظة ولا تنقص حتى استئناف الاشتراك\./);
   assert.match(source, />\s*استئناف الاشتراك\s*</);
 });
+
+test("consumes operations inbox property deep links in the mobile-safe search field", () => {
+  assert.match(source, /const searchParams = useSearchParams\(\)/);
+  assert.match(
+    source,
+    /getAdminOperationTarget\(searchParams, "property"\)/,
+  );
+  assert.match(
+    source,
+    /const \[searchQuery, setSearchQuery\] = useState\(targetedPropertyNumber\)/,
+  );
+  assert.match(
+    source,
+    /if \(targetedPropertyNumber\) setSearchQuery\(targetedPropertyNumber\)/,
+  );
+  assert.match(source, /<div className="relative max-w-xl">/);
+});

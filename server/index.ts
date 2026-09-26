@@ -12,7 +12,13 @@ import { startBookingCommissionWorker } from "./services/BookingNotificationWork
 import next from "next";
 import cookieParser from "cookie-parser";
 import { randomBytes } from "node:crypto";
-import { assertProductionSecurityEnvironment } from "./config/runtimeEnvironment";
+import {
+  assertProductionFirestoreAvailable,
+  assertProductionSecurityEnvironment,
+} from "./config/runtimeEnvironment";
+import { db } from "./config/firebase";
+import { FirestoreSessionStore } from "./services/FirestoreSessionStore";
+import { captureWhatsAppWebhookRawBody } from "./routes/whatsapp-delivery-webhook";
 
 
 const app = express();
@@ -27,6 +33,7 @@ const handle = nextApp.getRequestHandler();
   console.log("🚀 [Server] Entering main startup IIFE...");
   try {
     assertProductionSecurityEnvironment();
+    assertProductionFirestoreAvailable(db);
     await nextApp.prepare();
     console.log("✅ [Server] Next.js prepared successfully.");
 
@@ -48,7 +55,10 @@ const handle = nextApp.getRequestHandler();
     }
 
     // JSON settings
-    app.use(express.json({ limit: "10mb" }));
+    app.use(express.json({
+      limit: "10mb",
+      verify: captureWhatsAppWebhookRawBody,
+    }));
     app.use(express.urlencoded({ extended: true }));
     app.use(cookieParser());
 
@@ -65,9 +75,9 @@ const handle = nextApp.getRequestHandler();
     // ====================================
     // 🚀 SESSION SETTINGS
     // ====================================
-    const memoryStore = new (MemoryStore(session))({
-      checkPeriod: 86400000,
-    });
+    const sessionStore = db
+      ? new FirestoreSessionStore(db)
+      : new (MemoryStore(session))({ checkPeriod: 86400000 });
 
     app.set("trust proxy", 1);
 
@@ -79,7 +89,7 @@ const handle = nextApp.getRequestHandler();
         secret: sessionSecret,
         resave: false,
         saveUninitialized: false,
-        store: memoryStore,
+        store: sessionStore,
         cookie: {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",

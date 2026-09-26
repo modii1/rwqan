@@ -311,6 +311,15 @@ test("initial workflow schedules one customer follow-up exactly 24 hours later",
     failedAt: null,
     suppressedAt: null,
     providerError: null,
+    providerMessageId: null,
+    providerDeliveryStatus: null,
+    providerAcceptedAt: null,
+    providerDeliveredAt: null,
+    providerReadAt: null,
+    providerFailedAt: null,
+    providerStatusUpdatedAt: null,
+    providerDeliveryError: null,
+    providerDeliveryEventKeys: [],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   });
@@ -386,12 +395,28 @@ test("a one-message sequence starts and finishes as the final reminder", async (
     jobId: finalJobId,
     leaseToken: claims[0]!.leaseToken,
     success: true,
+    providerMessageId: "wamid.accepted-sequence-one",
     now: dueAt,
   }), true);
 
   assert.equal(
     database.read("booking_notification_outbox", finalJobId)?.status,
     "sent",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", finalJobId)
+      ?.providerDeliveryStatus,
+    "accepted",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", finalJobId)
+      ?.providerMessageId,
+    "wamid.accepted-sequence-one",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", finalJobId)
+      ?.providerAcceptedAt,
+    dueAt.toISOString(),
   );
   assert.equal(
     database.read("booking_followups", bookingId)
@@ -411,6 +436,92 @@ test("a one-message sequence starts and finishes as the final reminder", async (
     database.entries("booking_notification_outbox").map(([id]) => id),
     [finalJobId],
   );
+});
+
+test("provider delivery receipts are persisted monotonically and deduplicated", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-PROVIDER-STATUS", 3, 90);
+  const jobId = workflow.customerNotification.id;
+  database.seed("booking_notification_outbox", jobId, {
+    ...workflow.customerNotification,
+    status: "sent",
+    sentAt: "2026-08-15T12:00:00.000Z",
+    providerMessageId: "wamid.provider-status-1",
+    providerDeliveryStatus: "accepted",
+    providerAcceptedAt: "2026-08-15T12:00:00.000Z",
+    providerStatusUpdatedAt: "2026-08-15T12:00:00.000Z",
+    providerDeliveryEventKeys: [],
+  });
+  const store = new BookingCommissionStore(database as any);
+
+  assert.deepEqual(await store.recordProviderDeliveryEvent({
+    providerMessageId: "wamid.provider-status-1",
+    status: "delivered",
+    occurredAt: "2026-08-15T12:01:00.000Z",
+    eventId: "delivery-event-1",
+  }, new Date("2026-08-15T12:01:01.000Z")), {
+    result: "updated",
+    jobId,
+  });
+  assert.equal(
+    database.read("booking_notification_outbox", jobId)?.providerDeliveryStatus,
+    "delivered",
+  );
+  assert.equal(
+    database.read("booking_notification_outbox", jobId)?.providerDeliveredAt,
+    "2026-08-15T12:01:00.000Z",
+  );
+
+  assert.deepEqual(await store.recordProviderDeliveryEvent({
+    providerMessageId: "wamid.provider-status-1",
+    status: "delivered",
+    occurredAt: "2026-08-15T12:01:00.000Z",
+    eventId: "delivery-event-1",
+  }), { result: "duplicate", jobId });
+  assert.deepEqual(await store.recordProviderDeliveryEvent({
+    providerMessageId: "wamid.provider-status-1",
+    status: "failed",
+    occurredAt: "2026-08-15T12:00:30.000Z",
+    error: "late failure callback",
+  }), { result: "stale", jobId });
+
+  assert.deepEqual(await store.recordProviderDeliveryEvent({
+    providerMessageId: "wamid.provider-status-1",
+    status: "read",
+    occurredAt: "2026-08-15T12:02:00.000Z",
+  }), { result: "updated", jobId });
+  const readJob = database.read("booking_notification_outbox", jobId);
+  assert.equal(readJob?.providerDeliveryStatus, "read");
+  assert.equal(readJob?.providerReadAt, "2026-08-15T12:02:00.000Z");
+  assert.equal(readJob?.providerDeliveryError, null);
+});
+
+test("provider failure receipt is distinct from accepted outbox transport", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-PROVIDER-FAILURE", 3, 90);
+  const jobId = workflow.customerNotification.id;
+  database.seed("booking_notification_outbox", jobId, {
+    ...workflow.customerNotification,
+    status: "sent",
+    providerMessageId: "wamid.provider-failure-1",
+    providerDeliveryStatus: "accepted",
+    providerAcceptedAt: "2026-08-15T12:00:00.000Z",
+    providerDeliveryEventKeys: [],
+  });
+
+  const result = await new BookingCommissionStore(database as any)
+    .recordProviderDeliveryEvent({
+      providerMessageId: "wamid.provider-failure-1",
+      status: "failed",
+      occurredAt: "2026-08-15T12:01:00.000Z",
+      error: "destination unavailable",
+    });
+  assert.deepEqual(result, { result: "updated", jobId });
+  const failedJob = database.read("booking_notification_outbox", jobId);
+  assert.equal(failedJob?.status, "sent");
+  assert.equal(failedJob?.providerDeliveryStatus, "failed");
+  assert.equal(failedJob?.providerFailedAt, "2026-08-15T12:01:00.000Z");
+  assert.equal(failedJob?.providerDeliveryError, "destination unavailable");
 });
 
 test("a three-message sequence sends exactly two ordinary follow-ups and one final reminder", async () => {
@@ -659,6 +770,75 @@ test("questionnaire start, decline, and confirmation each cancel the active cust
       null,
     );
   }
+});
+
+test("customer no-response reports are owner-visible, idempotent, and customer-scoped", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-NO-OWNER-RESPONSE", 2, 60);
+  const booking = {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-NO-OWNER-RESPONSE",
+  };
+  database.seed("booking_followups", booking.id, booking);
+  const store = new BookingCommissionStore(database as any);
+  const reportedAt = new Date(now.getTime() + 1_000);
+
+  const first = await store.reportOwnerNoResponse(
+    booking.id,
+    booking.customerSubject,
+    reportedAt,
+  );
+  const repeated = await store.reportOwnerNoResponse(
+    booking.id,
+    booking.customerSubject,
+    new Date(reportedAt.getTime() + 1_000),
+  );
+
+  assert.equal(first.customerOwnerNoResponseReportedAt, reportedAt.toISOString());
+  assert.equal(repeated.customerOwnerNoResponseReportedAt, reportedAt.toISOString());
+  assert.equal(
+    database.read("booking_followups", booking.id)?.events.filter(
+      (event: { type: string }) =>
+        event.type === "customer_reported_owner_no_response",
+    ).length,
+    1,
+  );
+  await assert.rejects(
+    () => store.reportOwnerNoResponse(booking.id, "another-customer", reportedAt),
+    (error: unknown) => error instanceof BookingWorkflowError
+      && error.code === "BOOKING_NOT_FOUND"
+      && error.status === 404,
+  );
+});
+
+test("customer no-response reports are rejected after the response window expires", async () => {
+  const database = new FakeFirestore();
+  const workflow = buildSequencedWorkflow("REQ-NO-RESPONSE-EXPIRED", 2, 60);
+  const booking = {
+    ...workflow.followUp,
+    contactRequestId: "CONTACT-NO-RESPONSE-EXPIRED",
+  };
+  database.seed("booking_followups", booking.id, booking);
+  const store = new BookingCommissionStore(database as any);
+  const expiredAt = new Date(
+    Date.parse(booking.createdAt) + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+  );
+
+  await assert.rejects(
+    () => store.reportOwnerNoResponse(
+      booking.id,
+      booking.customerSubject,
+      expiredAt,
+    ),
+    (error: unknown) => error instanceof BookingWorkflowError
+      && error.code === "BOOKING_RESPONSE_EXPIRED"
+      && error.status === 410,
+  );
+  assert.equal(
+    database.read("booking_followups", booking.id)
+      ?.customerOwnerNoResponseReportedAt,
+    undefined,
+  );
 });
 
 test("a final reminder cannot be claimed after the customer has begun answering", async () => {

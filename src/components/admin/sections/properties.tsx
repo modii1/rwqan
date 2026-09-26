@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Pencil, Plus, Trash2, Image, BellOff, Bell, Link, Home, Check, X, Clock, Unlink, Eye, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FACILITIES } from "@shared/schema";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
@@ -24,8 +24,9 @@ import {
   getAdminActionErrorMessage,
   readAdminActionResponse,
 } from "@/lib/admin-action-response";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
-const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'رياض الخبراء'] as const;
+const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب', 'البدائع', 'الأسياح', 'عيون الجواء', 'رياض الخبراء'] as const;
 const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'] as const;
 const TYPES = ['قسم', 'قسمين'] as const;
 
@@ -36,6 +37,8 @@ interface PropertyData {
   city: string;
   direction: string;
   type: string;
+  capacity?: number | null;
+  availabilityNote?: string;
   location?: string;
   whatsappNumber: string;
   facilities: string[] | string;
@@ -64,6 +67,8 @@ const FIELD_LABELS: Record<string, string> = {
   city: "المدينة",
   direction: "الاتجاه",
   type: "النوع",
+  capacity: "السعة القصوى",
+  availabilityNote: "بيان التوفر",
   location: "الموقع / الحي",
   whatsappNumber: "رقم الواتساب",
   facilities: "المرافق",
@@ -187,16 +192,18 @@ export default function PropertiesSection() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetedPropertyNumber = getAdminOperationTarget(searchParams, "property");
 
   const [editing, setEditing] = useState<PropertyData | null>(null);
   const [isNew, setIsNew] = useState(false);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState(targetedPropertyNumber);
   const [facilitySearch, setFacilitySearch] = useState("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [prices, setPrices] = useState({ weekday: "", weekend: "", overnight: "", holidays: "" });
   const [deleteConfirm, setDeleteConfirm] = useState<PropertyData | null>(null);
   const [linkedPropertyView, setLinkedPropertyView] = useState<{ propertyNumber: string; subscription: any } | null>(null);
-  const [showAdditionalRequests, setShowAdditionalRequests] = useState(false);
+  const [showAdditionalRequests, setShowAdditionalRequests] = useState(Boolean(targetedPropertyNumber));
   const [viewMode, setViewMode] = useState<'all' | 'linked'>('all');
   const [linkedPropertiesList, setLinkedPropertiesList] = useState<{ propertyNumber: string; data: any[]; loading?: boolean } | null>(null);
   const [additionalApprovalErrors, setAdditionalApprovalErrors] = useState<
@@ -215,6 +222,23 @@ export default function PropertiesSection() {
     },
     enabled: showAdditionalRequests,
   });
+
+  useEffect(() => {
+    if (!targetedPropertyNumber) return;
+    setViewMode("all");
+    setFilter(targetedPropertyNumber);
+    setShowAdditionalRequests(true);
+  }, [targetedPropertyNumber]);
+
+  useEffect(() => {
+    if (!targetedPropertyNumber) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`admin-additional-property-${targetedPropertyNumber}`)
+        || document.getElementById(`admin-property-${targetedPropertyNumber}`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [additionalRequests, targetedPropertyNumber]);
 
   // Query for all linked properties relationships
   const { data: linkedPropertiesData } = useQuery<any>({
@@ -323,6 +347,8 @@ export default function PropertiesSection() {
         city: payload.city,
         direction: payload.direction,
         type: payload.type,
+        capacity: payload.capacity ?? null,
+        availabilityNote: payload.availabilityNote || "",
         facilities: facilitiesArr,
         subscriptionDate: payload.subscriptionDate || "",
         pin: payload.pin || "",
@@ -441,6 +467,8 @@ export default function PropertiesSection() {
       city: "",
       direction: "",
       type: "",
+      capacity: null,
+      availabilityNote: "",
       location: "",
       whatsappNumber: "",
       facilities: [],
@@ -548,7 +576,13 @@ export default function PropertiesSection() {
           ) : additionalRequests && additionalRequests.length > 0 ? (
             <div className="space-y-3">
               {additionalRequests.map((req: any) => (
-                <div key={req.propertyNumber} className="bg-white p-3 rounded-lg border border-blue-200">
+                <div
+                  id={`admin-additional-property-${req.propertyNumber}`}
+                  key={req.propertyNumber}
+                  className={`bg-white p-3 rounded-lg border border-blue-200 ${
+                    targetedPropertyNumber === req.propertyNumber ? "ring-2 ring-[#9a7623] ring-offset-2" : ""
+                  }`}
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div>
@@ -639,7 +673,13 @@ export default function PropertiesSection() {
             </thead>
             <tbody>
               {items.map((p) => (
-                <tr key={p.propertyNumber} className="border-t hover:bg-muted/40">
+                <tr
+                  id={`admin-property-${p.propertyNumber}`}
+                  key={p.propertyNumber}
+                  className={`border-t hover:bg-muted/40 ${
+                    targetedPropertyNumber === p.propertyNumber ? "bg-amber-50" : ""
+                  }`}
+                >
                   <Td>{p.propertyNumber}</Td>
                   <Td>{p.name}</Td>
                   <Td>{p.city}</Td>
@@ -911,6 +951,41 @@ export default function PropertiesSection() {
                       onChange={(e) => setEditing({ ...editing, location: e.target.value })}
                       placeholder="اسم الحي أو الموقع"
                       data-testid="input-location"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                      {FIELD_LABELS.capacity}
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={editing.capacity ?? ""}
+                      onChange={(e) => setEditing({
+                        ...editing,
+                        capacity: e.target.value ? Number(e.target.value) : null,
+                      })}
+                      placeholder="مثال: 20"
+                      inputMode="numeric"
+                      data-testid="input-capacity"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-semibold text-muted-foreground mb-1 block">
+                      {FIELD_LABELS.availabilityNote}
+                    </label>
+                    <Input
+                      value={editing.availabilityNote || ""}
+                      onChange={(e) => setEditing({
+                        ...editing,
+                        availabilityNote: e.target.value.slice(0, 120),
+                      })}
+                      placeholder="مثال: التوفر يتغير حسب التاريخ"
+                      maxLength={120}
+                      data-testid="input-availability-note"
                     />
                   </div>
 

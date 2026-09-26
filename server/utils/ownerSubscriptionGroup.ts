@@ -1,4 +1,9 @@
-import type { Property, Subscription } from "../../shared/schema";
+import type {
+  MultiPropertySubscription,
+  Property,
+  Subscription,
+} from "../../shared/schema";
+import { isSubscriptionStatusActive } from "../../shared/subscriptionType";
 import { firebaseService } from "../firebaseService";
 
 export type OwnerSubscriptionGroup = {
@@ -17,7 +22,7 @@ type GroupReader = Pick<
   | "getPropertyByNumber"
   | "getSubscriptionByPropertyNumber"
   | "getSubscriptionsLinkedToProperty"
->;
+> & Partial<Pick<typeof firebaseService, "getMultiPropertySubscriptions">>;
 
 export class OwnerSubscriptionGroupError extends Error {
   readonly status = 409;
@@ -31,6 +36,28 @@ export class OwnerSubscriptionGroupError extends Error {
 
 function normalizePropertyNumber(value: unknown): string {
   return String(value || "").trim();
+}
+
+function multiPropertyMembers(
+  record: MultiPropertySubscription,
+): Set<string> {
+  return new Set([
+    record.propertyNumber1,
+    record.propertyNumber2,
+    ...(record.additionalProperties || []),
+    ...(record.linkedProperties || []),
+  ].map(normalizePropertyNumber).filter(Boolean));
+}
+
+function isCurrentMultiPropertyMembership(
+  record: MultiPropertySubscription,
+  nowMs: number,
+): boolean {
+  const endTime = Date.parse(String(record.endDate || ""));
+  return isSubscriptionStatusActive(
+    record.status,
+    !Number.isFinite(endTime) || endTime < nowMs,
+  );
 }
 
 /**
@@ -50,10 +77,33 @@ export async function resolveOwnerSubscriptionGroup(
 
   const requestedSubscription =
     await reader.getSubscriptionByPropertyNumber(requestedNumber);
+  const multiPropertySubscriptions = reader.getMultiPropertySubscriptions
+    ? await reader.getMultiPropertySubscriptions()
+    : [];
+  const currentMultiGroups = multiPropertySubscriptions.filter((record) =>
+    isCurrentMultiPropertyMembership(record, Date.now()) &&
+    multiPropertyMembers(record).has(requestedNumber)
+  );
+  const multiGroupRoots = new Set(
+    currentMultiGroups
+      .map((record) => normalizePropertyNumber(record.propertyNumber1))
+      .filter(Boolean),
+  );
+  if (multiGroupRoots.size > 1) {
+    throw new OwnerSubscriptionGroupError(
+      "بيانات ربط العقار لا تتطابق مع المالك الحالي",
+    );
+  }
   const declaredParent = normalizePropertyNumber(
     requestedSubscription?.linkedProperty || requestedProperty.linkedProperty,
   );
-  const mainPropertyNumber = declaredParent || requestedNumber;
+  const multiGroupRoot = Array.from(multiGroupRoots)[0] || "";
+  if (declaredParent && multiGroupRoot && declaredParent !== multiGroupRoot) {
+    throw new OwnerSubscriptionGroupError(
+      "بيانات ربط العقار لا تتطابق مع المالك الحالي",
+    );
+  }
+  const mainPropertyNumber = declaredParent || multiGroupRoot || requestedNumber;
   const mainProperty = mainPropertyNumber === requestedNumber
     ? requestedProperty
     : await reader.getPropertyByNumber(mainPropertyNumber);
@@ -94,6 +144,31 @@ export async function resolveOwnerSubscriptionGroup(
       normalizePropertyNumber(subscription.linkedProperty) === mainPropertyNumber
     ) {
       linked.add(normalized);
+    }
+  }
+  const relevantMultiGroups = multiPropertySubscriptions.filter((record) => {
+    if (!isCurrentMultiPropertyMembership(record, Date.now())) return false;
+    const members = multiPropertyMembers(record);
+    return members.has(requestedNumber) || members.has(mainPropertyNumber);
+  });
+  for (const record of relevantMultiGroups) {
+    if (normalizePropertyNumber(record.propertyNumber1) !== mainPropertyNumber) {
+      throw new OwnerSubscriptionGroupError(
+        "بيانات ربط العقار لا تتطابق مع المالك الحالي",
+      );
+    }
+    for (const propertyNumber of multiPropertyMembers(record)) {
+      if (propertyNumber === mainPropertyNumber) continue;
+      const memberProperty = propertyNumber === requestedNumber
+        ? requestedProperty
+        : await reader.getPropertyByNumber(propertyNumber);
+      const memberPin = normalizePropertyNumber(memberProperty?.pin);
+      if (!memberProperty || !requestedPin || memberPin !== requestedPin) {
+        throw new OwnerSubscriptionGroupError(
+          "بيانات ربط العقار لا تتطابق مع المالك الحالي",
+        );
+      }
+      linked.add(propertyNumber);
     }
   }
   if (mainPropertyNumber !== requestedNumber) linked.add(requestedNumber);

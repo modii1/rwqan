@@ -20,6 +20,27 @@ import {
 } from "../shared/subscriptionType";
 import { calculateRemainingDays } from "./utils/dateUtils";
 import { shouldStartScheduledBackgroundWork } from "./config/schedulerStartup";
+import {
+  type DistributedJobLease,
+  fixedWindowKey,
+  riyadhDayKey,
+  runDistributedScheduledJob,
+} from "./services/DistributedScheduledJob";
+
+function assertScheduledLeaseActive(lease?: DistributedJobLease): void {
+  lease?.throwIfLeaseLost();
+}
+
+export function runScheduledTaskSafely(
+  task: () => Promise<unknown>,
+  onError: (error: unknown) => void = console.error,
+): void {
+  try {
+    void task().catch(onError);
+  } catch (error) {
+    onError(error);
+  }
+}
 
 
 
@@ -46,10 +67,14 @@ function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
  * [0] id, [1] propertyNumber, [2] propertyName, [3] ownerPhone,
  * [4] type, [5] message, [6] status, [7] response, [8] createdAt
  */
-async function getTodaysSentNotifications(): Promise<Set<string>> {
+async function getTodaysSentNotifications(
+  lease?: DistributedJobLease,
+): Promise<Set<string>> {
   const sentToday = new Set<string>();
   try {
+    assertScheduledLeaseActive(lease);
     const logs = await firebaseService.getWhatsAppLogs();
+    assertScheduledLeaseActive(lease);
     const todayStr = new Date().toISOString().split('T')[0];
     
     for (const log of logs) {
@@ -64,24 +89,29 @@ async function getTodaysSentNotifications(): Promise<Set<string>> {
     }
     console.log(`📋 [Scheduler] إشعارات انتهاء مُرسلة اليوم: ${sentToday.size} عقار`);
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [Scheduler] خطأ في قراءة إشعارات اليوم:", error);
   }
   return sentToday;
 }
 
 // تحديث الأيام المتبقية في الشيت + إرسال إشعارات
-async function updateRemainingDaysInSheet() {
+async function updateRemainingDaysInSheet(lease?: DistributedJobLease) {
   try {
+    assertScheduledLeaseActive(lease);
     console.log("📅 [Scheduler] بدء تحديث الأيام المتبقية...");
     
     const subscriptions = await storage.getSubscriptions();
+    assertScheduledLeaseActive(lease);
     const properties = await storage.getProperties();
+    assertScheduledLeaseActive(lease);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
     
     // جلب الإشعارات المُرسلة اليوم من Google Sheets (للتأكد حتى بعد إعادة تشغيل السيرفر)
-    const sentToday = await getTodaysSentNotifications();
+    const sentToday = await getTodaysSentNotifications(lease);
+    assertScheduledLeaseActive(lease);
     
     let expired = 0;
     let expiringSoon = 0;
@@ -91,6 +121,7 @@ async function updateRemainingDaysInSheet() {
     const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
     
     for (const sub of subscriptions) {
+      assertScheduledLeaseActive(lease);
       if (isSubscriptionStatusSuspended(sub.status)) continue;
       if (!sub.endDate || !sub.propertyNumber) continue;
       
@@ -122,23 +153,28 @@ async function updateRemainingDaysInSheet() {
             try {
               console.log(`📤 [Scheduler] إرسال إشعار انتهاء للعقار ${sub.propertyNumber} (يوم ${daysSinceExpiry} منذ الانتهاء)`);
               // إشعار للأدمن
+              assertScheduledLeaseActive(lease);
               const result = await notifySubscriptionExpired({
                 propertyNumber: sub.propertyNumber,
                 propertyName: property.name || "",
                 ownerPhone: property.whatsappNumber || "",
               });
+              assertScheduledLeaseActive(lease);
               
               // إشعار للمالك عبر Enjazatik (بنمط 3/3 مثل الأدمين)
               if (property.whatsappNumber) {
                 try {
                   // إرسال للمالك
+                  assertScheduledLeaseActive(lease);
                   await notifyOwnerSubscriptionExpired({
                     ownerPhone: property.whatsappNumber,
                     propertyNumber: sub.propertyNumber,
                     propertyName: property.name || "",
                   });
+                  assertScheduledLeaseActive(lease);
                   console.log(`📱 [Scheduler] تم إرسال إشعار للمالك - انتهاء اشتراك: ${sub.propertyNumber}`);
                 } catch (ownerErr) {
+                  assertScheduledLeaseActive(lease);
                   console.error(`❌ [Scheduler] فشل إرسال إشعار المالك لـ ${sub.propertyNumber}:`, ownerErr);
                 }
               }
@@ -151,6 +187,7 @@ async function updateRemainingDaysInSheet() {
                 console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
               }
             } catch (err) {
+              assertScheduledLeaseActive(lease);
               console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
             }
           }
@@ -161,14 +198,17 @@ async function updateRemainingDaysInSheet() {
           if (property && property.whatsappNumber) {
             try {
               // إرسال للمالك
+              assertScheduledLeaseActive(lease);
               await notifyOwnerSubscriptionExpiringSoon({
                 ownerPhone: property.whatsappNumber,
                 propertyNumber: sub.propertyNumber,
                 propertyName: property.name || "",
                 daysLeft: 3,
               });
+              assertScheduledLeaseActive(lease);
               console.log(`📱 [Scheduler] تم إرسال تنبيه للمالك - 3 أيام متبقية: ${sub.propertyNumber}`);
             } catch (err) {
+              assertScheduledLeaseActive(lease);
               console.error(`❌ [Scheduler] فشل إرسال تنبيه المالك لـ ${sub.propertyNumber}:`, err);
             }
           }
@@ -176,12 +216,15 @@ async function updateRemainingDaysInSheet() {
           expiringSoon++;
         }
       } catch (err) {
+        assertScheduledLeaseActive(lease);
         console.error(`❌ [Scheduler] خطأ في معالجة ${sub.propertyNumber}:`, err);
       }
     }
     
     // تنفيذ تحديث الأيام المتبقية دفعة واحدة (يقرأ الجدول مرة واحدة فقط)
+    assertScheduledLeaseActive(lease);
     const updated = await storage.updateAllSubscriptionsRemainingDays(batchUpdates);
+    assertScheduledLeaseActive(lease);
     
     console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
     console.log(`   - منتهي: ${expired}`);
@@ -194,9 +237,12 @@ async function updateRemainingDaysInSheet() {
     // =====================
     let expiredAddons = 0;
     try {
+      assertScheduledLeaseActive(lease);
       expiredAddons = await firebaseService.updateExpiredAddOns();
+      assertScheduledLeaseActive(lease);
       console.log(`📦 [Scheduler] تم تحديث ${expiredAddons} إضافة منتهية`);
     } catch (addOnError) {
+      assertScheduledLeaseActive(lease);
       console.error("❌ [Scheduler] خطأ في تحديث الإضافات:", addOnError);
     }
 
@@ -204,11 +250,14 @@ async function updateRemainingDaysInSheet() {
     // Active sessions are also checked lazily on every request, while this
     // daily cleanup covers browsers whose cookies were cleared or abandoned.
     try {
+      assertScheduledLeaseActive(lease);
       const deletedSecurityRows = await firebaseService.deleteExpiredEphemeralSecurityData();
+      assertScheduledLeaseActive(lease);
       if (deletedSecurityRows > 0) {
         console.log(`🧹 [Scheduler] Removed ${deletedSecurityRows} expired security rows`);
       }
     } catch (contactIdentityCleanupError) {
+      assertScheduledLeaseActive(lease);
       console.error("❌ [Scheduler] Contact identity cleanup error:", contactIdentityCleanupError);
     }
     
@@ -217,14 +266,18 @@ async function updateRemainingDaysInSheet() {
     // =====================
     let expiredPayments = 0;
     try {
-      expiredPayments = await expireOldPendingPayments();
+      assertScheduledLeaseActive(lease);
+      expiredPayments = await expireOldPendingPayments(lease);
+      assertScheduledLeaseActive(lease);
       console.log(`💳 [Scheduler] تم إلغاء ${expiredPayments} دفعة منتهية الصلاحية`);
     } catch (paymentError) {
+      assertScheduledLeaseActive(lease);
       console.error("❌ [Scheduler] خطأ في إلغاء الدفعات المعلقة:", paymentError);
     }
     
     return { updated, expired, expiringSoon, notificationsSent, expiredAddons, expiredPayments };
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [Scheduler] خطأ في تحديث الأيام المتبقية:", error);
     throw error;
   }
@@ -236,10 +289,14 @@ async function updateRemainingDaysInSheet() {
  * - التحويل البنكي: 72 ساعة بدون موافقة = منتهي الصلاحية
  * - يتم التحكم بها عبر FEATURE_TIMEOUTS
  */
-async function expireOldPendingPayments(): Promise<number> {
+async function expireOldPendingPayments(
+  lease?: DistributedJobLease,
+): Promise<number> {
   try {
+    assertScheduledLeaseActive(lease);
     // التحقق من حالة FEATURE_TIMEOUTS
     const isTimeoutsEnabled = await firebaseService.getFeatureFlag("FEATURE_TIMEOUTS");
+    assertScheduledLeaseActive(lease);
     if (!isTimeoutsEnabled) {
       console.log(
         "⏸️ [Scheduler] ميزة المهلات الزمنية معطلة؛ تستمر مطابقة Paymob دون إلغاء أي دفعة",
@@ -247,6 +304,7 @@ async function expireOldPendingPayments(): Promise<number> {
     }
     
     const payments = await firebaseService.getPayments();
+    assertScheduledLeaseActive(lease);
     const now = Date.now();
     let expiredCount = 0;
     
@@ -274,6 +332,7 @@ async function expireOldPendingPayments(): Promise<number> {
     const bankCutoffMs = now - BANK_TIMEOUT_MS;
 
     for (const payment of payments) {
+      assertScheduledLeaseActive(lease);
       const normalizedMethod = String(payment.paymentMethod || "")
         .trim()
         .toLowerCase();
@@ -339,6 +398,7 @@ async function expireOldPendingPayments(): Promise<number> {
         }
         try {
           const checkedAt = new Date(now).toISOString();
+          assertScheduledLeaseActive(lease);
           const claim = await firebaseService.claimPaymentProviderReconciliation(
             payment,
             {
@@ -350,8 +410,10 @@ async function expireOldPendingPayments(): Promise<number> {
               minIntervalMs: PAYMOB_RECONCILIATION_INTERVAL_MS,
             },
           );
+          assertScheduledLeaseActive(lease);
           if (!claim.claimed) continue;
 
+          assertScheduledLeaseActive(lease);
           const reconciliation = claim.payment.action === "addon"
             ? await paymentService.reconcilePaymobAddonIntention(
                 claim.payment.id,
@@ -359,6 +421,7 @@ async function expireOldPendingPayments(): Promise<number> {
             : await paymentService.reconcilePaymobIntention(
                 claim.payment.id,
               );
+          assertScheduledLeaseActive(lease);
           if (reconciliation.status === "paid") {
             const outcome = "activation" in reconciliation
               ? reconciliation.activation
@@ -376,12 +439,14 @@ async function expireOldPendingPayments(): Promise<number> {
             // but it is not treated as terminal abandonment. Provider identity
             // stays intact so a late signed success can still be reconciled;
             // properties remain independently editable.
+            assertScheduledLeaseActive(lease);
             const expired = await firebaseService.expirePendingPaymentIfEligible(
               claim.payment,
               "card",
               cardCutoffMs,
               { providerUnpaidClaimToken: claim.token },
             );
+            assertScheduledLeaseActive(lease);
             if (expired) {
               console.log(
                 `⏰ [Scheduler] إلغاء دفعة بطاقة غير مدفوعة بعد التحقق: ${payment.id}`,
@@ -390,6 +455,7 @@ async function expireOldPendingPayments(): Promise<number> {
             }
           }
         } catch (error) {
+          assertScheduledLeaseActive(lease);
           // A provider outage or ambiguous response is never evidence of
           // non-payment. Leave the attempt unchanged for the next callback/run.
           console.error(
@@ -417,11 +483,13 @@ async function expireOldPendingPayments(): Promise<number> {
         payment.status === "قيد المراجعة" &&
         legacyCardMethods.has(normalizedMethod)
       ) {
+        assertScheduledLeaseActive(lease);
         const expired = await firebaseService.expirePendingPaymentIfEligible(
           payment,
           "card",
           cardCutoffMs,
         );
+        assertScheduledLeaseActive(lease);
         if (expired) {
           console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);
           expiredCount++;
@@ -433,11 +501,13 @@ async function expireOldPendingPayments(): Promise<number> {
         payment.status === "قيد التحقق" &&
         String(payment.paymentMethod || "").trim() === "تحويل بنكي"
       ) {
+        assertScheduledLeaseActive(lease);
         const expired = await firebaseService.expirePendingPaymentIfEligible(
           payment,
           "bank",
           bankCutoffMs,
         );
+        assertScheduledLeaseActive(lease);
         if (expired) {
           console.log(`⏰ [Scheduler] انتهاء صلاحية تحويل بنكي: ${payment.id}`);
           expiredCount++;
@@ -447,6 +517,7 @@ async function expireOldPendingPayments(): Promise<number> {
     
     return expiredCount;
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [Scheduler] خطأ في التحقق من الدفعات المعلقة:", error);
     return 0;
   }
@@ -490,14 +561,24 @@ export function startScheduler() {
   // جدولة التحديث الأول للساعة 12 ظهراً
   setTimeout(() => {
     console.log(`🕐 [Scheduler] تشغيل التحديث اليومي في الموعد المحدد`);
-    updateRemainingDaysInSheet().catch(console.error);
+    runDistributedScheduledJob({
+      jobName: "legacy-daily-subscription-maintenance",
+      windowKey: riyadhDayKey(),
+      leaseMs: 6 * 60 * 60 * 1_000,
+      task: updateRemainingDaysInSheet,
+    }).catch(console.error);
     
     // بعد التحديث الأول، جدول التحديثات المتكررة كل 24 ساعة
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
     setInterval(() => {
       const now = new Date();
       console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })}`);
-      updateRemainingDaysInSheet().catch(console.error);
+      runDistributedScheduledJob({
+        jobName: "legacy-daily-subscription-maintenance",
+        windowKey: riyadhDayKey(now),
+        leaseMs: 6 * 60 * 60 * 1_000,
+        task: updateRemainingDaysInSheet,
+      }).catch(console.error);
     }, TWENTY_FOUR_HOURS);
   }, delayMs);
   
@@ -506,21 +587,34 @@ export function startScheduler() {
   
   // تشغيل المطابقة التلقائية والتحقق من المهلات كل 15 دقيقة
   const FIFTEEN_MINUTES = 15 * 60 * 1000;
-  setInterval(async () => {
-    console.log("🔄 [Scheduler] تشغيل فحص الدفعات...");
-    
-    // التحقق من المهلات الزمنية
-    const expiredCount = await expireOldPendingPayments();
-    if (expiredCount > 0) {
-      console.log(`⏰ [Scheduler] تم إلغاء/انتهاء ${expiredCount} دفعة`);
-    }
-    
-    // تشغيل المطابقة التلقائية
-    try {
-      await runAutoMatch();
-    } catch (error) {
-      console.error("❌ [Scheduler] خطأ في المطابقة التلقائية:", error);
-    }
+  setInterval(() => {
+    const now = new Date();
+    runScheduledTaskSafely(() =>
+      runDistributedScheduledJob({
+        jobName: "payment-expiry-and-auto-match",
+        windowKey: fixedWindowKey(now, FIFTEEN_MINUTES),
+        now,
+        leaseMs: 30 * 60 * 1_000,
+        task: async (lease) => {
+          console.log("🔄 [Scheduler] تشغيل فحص الدفعات...");
+          assertScheduledLeaseActive(lease);
+          const expiredCount = await expireOldPendingPayments(lease);
+          assertScheduledLeaseActive(lease);
+          if (expiredCount > 0) {
+            console.log(`⏰ [Scheduler] تم إلغاء/انتهاء ${expiredCount} دفعة`);
+          }
+          try {
+            assertScheduledLeaseActive(lease);
+            await runAutoMatch();
+            assertScheduledLeaseActive(lease);
+          } catch (error) {
+            assertScheduledLeaseActive(lease);
+            console.error("❌ [Scheduler] خطأ في المطابقة التلقائية:", error);
+            throw error;
+          }
+        },
+      }),
+    );
   }, FIFTEEN_MINUTES);
   
   console.log("🔄 [Scheduler] فحص الدفعات كل 15 دقيقة");
@@ -529,12 +623,26 @@ export function startScheduler() {
   const THIRTY_MINUTES = 30 * 60 * 1000;
   setInterval(() => {
     console.log("⬇️ [Scheduler] فحص الاشتراكات المنتهية...");
-    downgradeExpiredSubscriptions().catch(console.error);
+    const now = new Date();
+    runDistributedScheduledJob({
+      jobName: "downgrade-expired-subscriptions",
+      windowKey: fixedWindowKey(now, THIRTY_MINUTES),
+      now,
+      leaseMs: 45 * 60 * 1_000,
+      task: downgradeExpiredSubscriptions,
+    }).catch(console.error);
   }, THIRTY_MINUTES);
 
   // تشغيل فوري عند البدء
   setTimeout(() => {
-    downgradeExpiredSubscriptions().catch(console.error);
+    const now = new Date();
+    runDistributedScheduledJob({
+      jobName: "downgrade-expired-subscriptions",
+      windowKey: fixedWindowKey(now, THIRTY_MINUTES),
+      now,
+      leaseMs: 45 * 60 * 1_000,
+      task: downgradeExpiredSubscriptions,
+    }).catch(console.error);
   }, 5000);
 
   console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
@@ -543,12 +651,17 @@ export function startScheduler() {
 // تحديث الاشتراكات المنتهية وإزالة الصفة المميزة من سجل الاشتراك والعقار.
 // Group-aware: when a main property's subscription expires/cancels, all linked properties
 // follow the same state (same endDate, same status) so parent + children never drift.
-async function downgradeExpiredSubscriptions(): Promise<number> {
+async function downgradeExpiredSubscriptions(
+  lease?: DistributedJobLease,
+): Promise<number> {
   try {
+    assertScheduledLeaseActive(lease);
     const subscriptions = await firebaseService.getSubscriptions();
+    assertScheduledLeaseActive(lease);
     let downgraded = 0;
 
     for (const sub of subscriptions) {
+      assertScheduledLeaseActive(lease);
       if (isSubscriptionStatusSuspended(sub.status)) continue;
 
       const isPremiumType = isPremiumSubscriptionType(sub.subscriptionType);
@@ -560,7 +673,9 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
       const isDateExpired = calculateRemainingDays(sub.endDate) < 0;
 
       if (isCancelled || isDateExpired) {
+        assertScheduledLeaseActive(lease);
         const expired = await firebaseService.expireSubscriptionIfNeeded(sub.id);
+        assertScheduledLeaseActive(lease);
         if (expired) {
           console.log(`⬇️ [Scheduler] تم تحديث حالة اشتراك ${sub.propertyNumber} إلى منتهي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
           downgraded++;
@@ -573,6 +688,7 @@ async function downgradeExpiredSubscriptions(): Promise<number> {
     }
     return downgraded;
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [Scheduler] خطأ في تخفيض الاشتراكات:", error);
     return 0;
   }

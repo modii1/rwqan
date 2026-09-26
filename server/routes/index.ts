@@ -15,13 +15,16 @@ import whatsappRoutes from "../integrations/whatsapp";
 
 // Route modules
 import authRoutes from "./auth";
+import ownerAccountRoutes from "./owner-accounts";
 import ownerRoutes from "./owner";
 import propertiesRoutes from "./properties";
 import publicRoutes from "./public";
 import trackingRoutes from "./tracking";
 import contactIdentityRoutes from "./contactIdentity";
 import customerRoutes from "./customer";
+import propertyReviewRoutes from "./property-reviews";
 import webhookRoutes from "./webhooks";
+import whatsappDeliveryWebhookRoutes from "./whatsapp-delivery-webhook";
 import bookingRoutes from "./bookings";
 import { requireAdmin, requireSameOrigin } from "./middleware";
 
@@ -42,6 +45,7 @@ import adminLinkedPropertiesRoutes from "./admin/linked-properties";
 import adminOccasionsRoutes from "./admin/occasions";
 import adminBookingsRoutes from "./admin/bookings";
 import adminBookingPaymentsRoutes from "./admin/booking-payments";
+import adminOperationsRoutes from "./admin/operations";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for cookies
@@ -81,11 +85,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes (login, logout, session, password reset)
   app.use(authRoutes);
 
+  // Additive verified owner accounts; legacy property-number/PIN login remains.
+  app.use(ownerAccountRoutes);
+
   // Remembered public-client contact phone (separate from owner/admin auth)
   app.use(contactIdentityRoutes);
 
   // Verified customer account, profile, favorites, and complete contact history.
   app.use(customerRoutes);
+
+  // Verified-stay reviews: public summaries plus authenticated customer/admin actions.
+  app.use(propertyReviewRoutes);
 
   // Tracking routes (smart requests, pageview)
   app.use(trackingRoutes);
@@ -101,6 +111,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Webhook routes (Paymob)
   app.use(webhookRoutes);
+
+  // Authenticated WhatsApp provider delivery receipts.
+  app.use(whatsappDeliveryWebhookRoutes);
 
   // Central privileged boundary. Admin login/session routes are intentionally
   // registered above; every modular /api/admin handler below requires a session.
@@ -123,6 +136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(adminOccasionsRoutes);
   app.use(adminBookingsRoutes);
   app.use(adminBookingPaymentsRoutes);
+  app.use(adminOperationsRoutes);
 
   return createServer(app);
 }

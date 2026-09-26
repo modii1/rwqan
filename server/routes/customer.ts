@@ -86,6 +86,40 @@ router.get(
   },
 );
 
+router.post(
+  "/api/customer/history/:bookingId/not-booked",
+  requireSameOrigin,
+  requireCustomer,
+  async (req, res) => {
+    try {
+      const booking = await customerAccountService.markBookingNotBooked(
+        verifiedCustomerPhone(req),
+        req.params.bookingId,
+      );
+      return res.json({ booking });
+    } catch (error) {
+      return respondWithCustomerError(res, error);
+    }
+  },
+);
+
+router.post(
+  "/api/customer/history/:bookingId/no-response",
+  requireSameOrigin,
+  requireCustomer,
+  async (req, res) => {
+    try {
+      const booking = await customerAccountService.reportOwnerNoResponse(
+        verifiedCustomerPhone(req),
+        req.params.bookingId,
+      );
+      return res.json({ booking });
+    } catch (error) {
+      return respondWithCustomerError(res, error);
+    }
+  },
+);
+
 router.get(
   "/api/customer/favorites",
   requireSameOrigin,

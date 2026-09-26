@@ -16,11 +16,13 @@ import whatsappRouter, {
   notifyOwnerSubscriptionActivated,
   notifyOwnerSubscriptionExpired,
   notifyOwnerSubscriptionExpiringSoon,
+  extractWhatsAppProviderMessageId,
 } from "./whatsapp";
 import {
   DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
   type OwnerSubscriptionWhatsAppTemplates,
 } from "../../shared/subscription-whatsapp";
+import { whatsAppPendingDeliveryStore } from "../services/WhatsAppPendingDeliveryStore";
 
 function withOwnerMessageEnvironment<T>(
   values: {
@@ -78,7 +80,7 @@ test("Enjazatik sender makes exactly one provider request after immediate accept
 
   assert.deepEqual(
     await sender("050 123 4567", "follow-up test", 2),
-    { success: true },
+    { success: true, providerStatus: "accepted" },
   );
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "https://provider.example/api/v1/send-message");
@@ -91,6 +93,91 @@ test("Enjazatik sender makes exactly one provider request after immediate accept
     number: "966501234567",
     message: "follow-up test",
   });
+});
+
+test("Enjazatik sender records a provider message id without claiming delivery", async () => {
+  const sender = createEnjazatikWhatsAppSender({
+    url: "https://provider.example/api/v1/send-message",
+    token: "provider-test-token",
+    request: async () => new Response(JSON.stringify({
+      success: true,
+      data: { message_id: "wamid.ENJAZATIK-123" },
+    }), { status: 202 }),
+    delay: async () => undefined,
+  });
+
+  assert.deepEqual(await sender("0501234567", "test", 0), {
+    success: true,
+    providerStatus: "accepted",
+    providerMessageId: "wamid.ENJAZATIK-123",
+  });
+});
+
+test("Enjazatik sender does not accept explicit application failures in HTTP 2xx responses", async (t) => {
+  for (const [name, payload] of [
+    ["success false", { success: false, message: "not sent" }],
+    ["status false", { status: false, data: { id: "not-a-sent-message" } }],
+  ] as const) {
+    await t.test(name, async () => {
+      let requests = 0;
+      const delays: number[] = [];
+      const sender = createEnjazatikWhatsAppSender({
+        url: "https://provider.example/api/v1/send-message",
+        token: "provider-test-token",
+        request: async () => {
+          requests += 1;
+          return new Response(JSON.stringify(payload), { status: 200 });
+        },
+        delay: async (milliseconds) => {
+          delays.push(milliseconds);
+        },
+      });
+
+      assert.deepEqual(await sender("0501234567", "test", 2), {
+        success: false,
+        error: "فشل في إرسال الرسالة بعد عدة محاولات",
+      });
+      assert.equal(requests, 3);
+      assert.deepEqual(delays, [5_000, 10_000]);
+    });
+  }
+});
+
+test("provider message id parser supports common and Meta response envelopes", () => {
+  assert.equal(
+    extractWhatsAppProviderMessageId({ result: { id: "enjaz-message-1" } }),
+    "enjaz-message-1",
+  );
+  assert.equal(
+    extractWhatsAppProviderMessageId({ messages: [{ id: "wamid.meta-1" }] }),
+    "wamid.meta-1",
+  );
+  assert.equal(
+    extractWhatsAppProviderMessageId({ id: "top-level-message-id", status: true }),
+    "top-level-message-id",
+  );
+  assert.equal(
+    extractWhatsAppProviderMessageId({ id: "request-id-only", status: "request_received" }),
+    null,
+  );
+  assert.equal(
+    extractWhatsAppProviderMessageId({
+      success: true,
+      data: {
+        id: "request-container-id",
+        response: { message_id: "explicit-provider-message-id" },
+      },
+    }),
+    "explicit-provider-message-id",
+  );
+  assert.equal(
+    extractWhatsAppProviderMessageId({
+      success: true,
+      data: { id: "request-container-id" },
+      result: { message: { whatsapp_message_id: "explicit-sibling-message-id" } },
+    }),
+    "explicit-sibling-message-id",
+  );
 });
 
 test("free contact-limit message tells the owner to upgrade through the short route", () => {
@@ -384,6 +471,64 @@ test("property owner sender can succeed after a guarded retry", async () => {
   assert.deepEqual(delays, [5000]);
 });
 
+test("property owner sends write one callback-ready general WhatsApp log", async () => {
+  const records: any[] = [];
+  const send = createPropertyOwnerWhatsAppSender({
+    isSuspended: async () => false,
+    send: async () => ({
+      success: true,
+      providerStatus: "accepted",
+      providerMessageId: "wamid.owner-general-1",
+    }),
+    delay: async () => undefined,
+    record: async (input) => {
+      records.push(input);
+    },
+  });
+
+  assert.deepEqual(await send({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+    message: "test",
+    logType: "admin_manual_owner",
+  }), {
+    success: true,
+    providerStatus: "accepted",
+    providerMessageId: "wamid.owner-general-1",
+  });
+  assert.deepEqual(records, [{
+    type: "admin_manual_owner",
+    message: "test",
+    phone: "0500000000",
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    propertyName: "Test property",
+    status: "success",
+    response: "",
+    source: "property_owner",
+    providerMessageId: "wamid.owner-general-1",
+    providerStatus: "accepted",
+  }]);
+});
+
+test("property owner send result is not changed when audit logging fails", async () => {
+  const send = createPropertyOwnerWhatsAppSender({
+    isSuspended: async () => false,
+    send: async () => ({ success: true, providerStatus: "accepted" }),
+    delay: async () => undefined,
+    record: async () => {
+      throw new Error("temporary log failure");
+    },
+  });
+
+  assert.deepEqual(await send({
+    ownerPhone: "0500000000",
+    propertyNumber: "10001",
+    message: "test",
+  }), { success: true, providerStatus: "accepted" });
+});
+
 test("every subscription-owner notification wrapper uses the suspension guard", async () => {
   const originalGetSubscriptionByPropertyNumber =
     firebaseService.getSubscriptionByPropertyNumber;
@@ -507,6 +652,78 @@ test("WhatsApp HTTP routes require same-origin admin access without intercepting
     assert.deepEqual(await publicRoute.json(), { ok: true });
   } finally {
     firebaseService.getRequests = originalGetRequests;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("manual admin messages persist provider acceptance and message identity", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalAddWhatsAppLog = firebaseService.addWhatsAppLog;
+  const originalReconcile = whatsAppPendingDeliveryStore.reconcile;
+  const logs: any[] = [];
+  const sequence: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.startsWith("https://graph.facebook.com/")) {
+      return new Response(JSON.stringify({
+        messages: [{ id: "wamid.meta-admin-1" }],
+      }), { status: 200 });
+    }
+    return originalFetch(input, init);
+  };
+  (firebaseService as any).addWhatsAppLog = async (log: unknown) => {
+    sequence.push("persist");
+    logs.push(log);
+  };
+  (whatsAppPendingDeliveryStore as any).reconcile = async (
+    providerMessageId: string,
+    target: unknown,
+  ) => {
+    assert.equal(providerMessageId, "wamid.meta-admin-1");
+    assert.ok(target);
+    assert.equal(logs.length, 1);
+    sequence.push("reconcile");
+    return [];
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = { isAdmin: true };
+    next();
+  });
+  app.use("/api/whatsapp", whatsappRouter);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const response = await originalFetch(
+      `http://127.0.0.1:${port}/api/whatsapp/send`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "manual test" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].status, "success");
+    assert.equal(logs[0].providerMessageId, "wamid.meta-admin-1");
+    assert.equal(logs[0].providerDeliveryStatus, "accepted");
+    assert.equal(typeof logs[0].providerAcceptedAt, "string");
+    assert.equal(logs[0].providerDeliveredAt, null);
+    assert.deepEqual(logs[0].providerDeliveryEventKeys, []);
+    assert.deepEqual(sequence, ["persist", "reconcile"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    firebaseService.addWhatsAppLog = originalAddWhatsAppLog;
+    whatsAppPendingDeliveryStore.reconcile = originalReconcile;
     await new Promise<void>((resolve, reject) => {
       server.close((error?: Error) => (error ? reject(error) : resolve()));
     });

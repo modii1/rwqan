@@ -7,6 +7,7 @@ export const metadata: Metadata = {
 };
 
 const validSections: AdminSection[] = [
+  "operations",
   "properties",
   "linked-properties",
   "subscriptions",
@@ -18,6 +19,7 @@ const validSections: AdminSection[] = [
   "contact-analytics",
   "booking-commissions",
   "customers",
+  "property-reviews",
   "payments",
   "analytics",
   "verification",

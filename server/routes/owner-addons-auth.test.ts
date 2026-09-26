@@ -8,6 +8,9 @@ import addonsRouter from "./admin/addons";
 import { firebaseService } from "../firebaseService";
 import { PaymobIntentionError, paymobService } from "../integrations/paymob";
 import { addOnService, paymentService, propertyService } from "../services";
+import { ownerAccountStore } from "../services/OwnerAccountStore";
+
+const OWNER_ACCOUNT_ID = "A".repeat(43);
 
 test("owner add-on routes bind every property operation to the authenticated session", async () => {
   const originals = {
@@ -21,6 +24,7 @@ test("owner add-on routes bind every property operation to the authenticated ses
     cancelRejectedAddOnIntentionCreation:
       firebaseService.cancelRejectedAddOnIntentionCreation,
     initiateAddOnPayment: paymobService.initiateAddOnPayment,
+    validateMembership: ownerAccountStore.validateActiveMembership,
   };
   const propertyReads: string[] = [];
   const addOnReads: string[] = [];
@@ -85,6 +89,10 @@ test("owner add-on routes bind every property operation to the authenticated ses
     paymobCalls.push(args);
     return paymobImplementation(...args);
   };
+  (ownerAccountStore as any).validateActiveMembership = async (input: any) =>
+    input.ownerAccountId === OWNER_ACCOUNT_ID &&
+    input.authVersion === 1 &&
+    input.propertyNumber === "PROP-OWNER";
 
   const app = express();
   app.use(express.json());
@@ -97,6 +105,10 @@ test("owner add-on routes bind every property operation to the authenticated ses
   app.use((req, _res, next) => {
     const propertyNumber = req.get("x-test-owner-property");
     if (propertyNumber) req.session.propertyNumber = propertyNumber;
+    if (req.get("x-test-owner-account") === "true") {
+      (req.session as any).ownerAccountId = OWNER_ACCOUNT_ID;
+      (req.session as any).authVersion = 1;
+    }
     next();
   });
   app.use(addonsRouter);
@@ -140,6 +152,7 @@ test("owner add-on routes bind every property operation to the authenticated ses
       headers: {
         "content-type": "application/json",
         "x-test-owner-property": "PROP-OWNER",
+        "x-test-owner-account": "true",
       },
       body: JSON.stringify({
         propertyNumber: "PROP-VICTIM",
@@ -150,6 +163,7 @@ test("owner add-on routes bind every property operation to the authenticated ses
     assert.deepEqual(propertyReads, ["PROP-OWNER"]);
     assert.equal(createdPayments.length, 1);
     assert.equal(createdPayments[0].propertyNumber, "PROP-OWNER");
+    assert.equal(createdPayments[0].ownerAccountId, OWNER_ACCOUNT_ID);
     assert.ok(createdPayments[0].merchantAttemptKey);
     assert.equal(createdPayments[0].intentionState, "creating");
     assert.equal(createdAddOns.length, 1);
@@ -175,6 +189,7 @@ test("owner add-on routes bind every property operation to the authenticated ses
       headers: {
         "content-type": "application/json",
         "x-test-owner-property": "PROP-OWNER",
+        "x-test-owner-account": "true",
       },
       body: JSON.stringify({ addOnPackageId: "ADDON-PACKAGE" }),
     });
@@ -272,6 +287,7 @@ test("owner add-on routes bind every property operation to the authenticated ses
     (firebaseService as any).cancelRejectedAddOnIntentionCreation =
       originals.cancelRejectedAddOnIntentionCreation;
     (paymobService as any).initiateAddOnPayment = originals.initiateAddOnPayment;
+    ownerAccountStore.validateActiveMembership = originals.validateMembership;
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
