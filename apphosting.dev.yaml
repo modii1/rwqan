@@ -1,0 +1,33 @@
+# DEV App Hosting configuration for the isolated backend `rwqan-dev-backend`.
+#
+# HOW THIS FILE IS SELECTED (important): App Hosting chooses an environment
+# specific override from the BACKEND's "Environment name" setting, which is set
+# in the Firebase Console — it is NOT referenced from firebase.json or from this
+# file. To activate this file, set rwqan-dev-backend's Environment name to `dev`
+# in the Console; App Hosting then merges `apphosting.dev.yaml` OVER the base
+# `apphosting.yaml` for THAT backend only. Keep the production backend on a
+# different / no environment name so these DEV values never reach it.
+#
+# DEV ONLY. No secrets and no production values belong here.
+#
+# NOTE ON SOURCE IDENTITY: this file deliberately does NOT inject a commit SHA.
+# App Hosting records the built commit itself (`Build.source.codebase.hash`), and
+# that value is the ONLY trusted source-identity proof — see
+# `server/services/DeployBuildSourceService.ts`. A per-deploy env value would go
+# stale and could not be trusted, so it is not used.
+
+env:
+  # The deployed App Hosting runtime is always a production build/runtime, so the
+  # local Git fallback in GET /api/deploy-version stays disabled there and the
+  # endpoint reports no commit unless one is provided by Firebase itself.
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - RUNTIME
+  # MUST be the DEV backend's own host. If left at the production value the DEV
+  # app would emit production links. Replace before the first rollout.
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://REPLACE-WITH-DEV-BACKEND-HOST
+    availability:
+      - BUILD
+      - RUNTIME

@@ -1,0 +1,21 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "outDir": "dist",
+        "target": "es2020",
+        "downlevelIteration": true,
+        "noEmit": false
+    },
+    "include": [
+        "server/**/*",
+        "shared/**/*"
+    ],
+    "exclude": [
+        "server/replit_integrations",
+        "server/_legacy",
+        "server/**/*.test.ts",
+        "shared/**/*.test.ts"
+    ]
+}

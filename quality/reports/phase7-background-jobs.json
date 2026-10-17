@@ -1,0 +1,73 @@
+{
+  "phase": 7,
+  "scope": "background jobs / schedulers / workers — DEV only",
+  "generatedAt": "2026-10-15T07:35:01.248Z",
+  "summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "blocked": 0,
+    "na": 0
+  },
+  "notes": [
+    "FEATURE_TIMEOUTS=true",
+    "updateRemainingDaysInSheet sent 0 notifications in DEV (external services disabled).",
+    "Observation: FirebaseStorage.updateAllSubscriptionsRemainingDays delegates to updateSubscriptionRemainingDays, which updates only `status` (via getSubscriptionByPropertyNumber) and does not persist a `remainingDays` field. The parallel firebaseService.updateAllSubscriptionsRemainingDays (which does persist `remainingDays`) is not used by the scheduler path."
+  ],
+  "results": [
+    {
+      "id": "ISOL-001",
+      "name": "schedulers + worker OFF by default in DEV, start only on exact opt-in",
+      "status": "PASS",
+      "detail": "schedulersDev=false schedulersOptIn=true workerDev=false workerOptIn=true project=rwqan-sa-dev bucket=rwqan-sa-dev externalServices=false"
+    },
+    {
+      "id": "ISOL-002",
+      "name": "internal booking-worker endpoint rejects unauthenticated callers",
+      "status": "PASS",
+      "detail": "status=401 (expected 401/403 without worker secret)"
+    },
+    {
+      "id": "SUB-001",
+      "name": "expired premium subscription is downgraded (status + premium type removed)",
+      "status": "PASS",
+      "detail": "run1=1 subStatus=منتهي subType=عادي propType=عادي"
+    },
+    {
+      "id": "SUB-002",
+      "name": "re-running the downgrade job is a no-op (no duplicate effect)",
+      "status": "PASS",
+      "detail": "run2=0 subStatus=منتهي"
+    },
+    {
+      "id": "PAY-001",
+      "name": "pending card payment is not activated without payment proof",
+      "status": "PASS",
+      "detail": "timeoutsEnabled=true paymentStatus=ملغي - انتهت المهلة subscriptionCreated=false"
+    },
+    {
+      "id": "PAY-002",
+      "name": "re-running the payment-expiry job does not change a settled status",
+      "status": "PASS",
+      "detail": "runExpired=0 statusBefore=ملغي - انتهت المهلة statusAfter=ملغي - انتهت المهلة"
+    },
+    {
+      "id": "PAY-003",
+      "name": "two concurrent expiry runs settle the same payment exactly once",
+      "status": "PASS",
+      "detail": "runA=1 runB=0 finalStatus=ملغي - انتهت المهلة"
+    },
+    {
+      "id": "PAY-004",
+      "name": "pending bank transfer is not auto-approved / activated",
+      "status": "PASS",
+      "detail": "paymentStatus=منتهي الصلاحية subscriptionCreated=false"
+    },
+    {
+      "id": "REMIND-001",
+      "name": "remaining-days job runs on DEV but sends nothing (external services off)",
+      "status": "PASS",
+      "detail": "result={\"updated\":4,\"expired\":2,\"expiringSoon\":0,\"notificationsSent\":0,\"expiredAddons\":0,\"expiredPayments\":0} activeSubStatus=نشط"
+    }
+  ]
+}

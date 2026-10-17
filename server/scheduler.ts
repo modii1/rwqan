@@ -1,0 +1,582 @@
+/**
+ * 📅 مهام مجدولة - تحديث الاشتراكات والإضافات يومياً
+ * - تحديث الأيام المتبقية في Firebase
+ * - تحديث حالة الإضافات المنتهية
+ * - إرسال إشعارات للاشتراكات المنتهية (3 أيام متتالية، ثم توقف 4 أيام، ثم تكرار)
+ */
+
+import { storage } from "./storage";
+import { 
+  notifySubscriptionExpired, 
+  notifyOwnerSubscriptionExpired,
+  notifyOwnerSubscriptionExpiringSoon
+} from "./integrations/whatsapp";
+import { firebaseService } from "./firebaseService";
+import { runAutoMatch } from "./autoMatchService";
+import { paymentService } from "./services/PaymentService";
+import {
+  isPremiumSubscriptionType,
+  isSubscriptionStatusSuspended,
+} from "../shared/subscriptionType";
+import { calculateRemainingDays } from "./utils/dateUtils";
+import { shouldStartScheduledBackgroundWork } from "./config/schedulerStartup";
+
+
+
+/**
+ * التحقق من أن اليوم يقع ضمن أيام الإرسال
+ * النمط: 3 أيام إرسال، 3 أيام توقف، تكرار
+ * أيام 1-3: إرسال | أيام 4-6: توقف | أيام 7-9: إرسال | أيام 10-12: توقف ...
+ */
+function shouldSendNotificationToday(daysSinceExpiry: number): boolean {
+  if (daysSinceExpiry <= 0) return false;
+  
+  // حساب الموقع في الدورة (كل دورة 6 أيام)
+  const positionInCycle = ((daysSinceExpiry - 1) % 6) + 1;
+  
+  // إرسال في أول 3 أيام من كل دورة
+  return positionInCycle <= 3;
+}
+
+/**
+ * جلب الإشعارات المُرسلة اليوم من جدول "تنبيهات الواتساب"
+ * للتأكد من عدم إرسال إشعار مكرر حتى لو أُعيد تشغيل السيرفر
+ * 
+ * هيكل الجدول:
+ * [0] id, [1] propertyNumber, [2] propertyName, [3] ownerPhone,
+ * [4] type, [5] message, [6] status, [7] response, [8] createdAt
+ */
+async function getTodaysSentNotifications(): Promise<Set<string>> {
+  const sentToday = new Set<string>();
+  try {
+    const logs = await firebaseService.getWhatsAppLogs();
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    for (const log of logs) {
+      const propertyNumber = log.propertyNumber || "";
+      const notificationType = log.type || "";
+      const createdAt = log.createdAt || "";
+      
+      // البحث عن إشعارات "انتهاء اشتراك" المُرسلة اليوم
+      if (notificationType.includes("انتهاء") && createdAt.includes(todayStr)) {
+        sentToday.add(propertyNumber);
+      }
+    }
+    console.log(`📋 [Scheduler] إشعارات انتهاء مُرسلة اليوم: ${sentToday.size} عقار`);
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في قراءة إشعارات اليوم:", error);
+  }
+  return sentToday;
+}
+
+// تحديث الأيام المتبقية في الشيت + إرسال إشعارات
+async function updateRemainingDaysInSheet() {
+  try {
+    console.log("📅 [Scheduler] بدء تحديث الأيام المتبقية...");
+    
+    const subscriptions = await storage.getSubscriptions();
+    const properties = await storage.getProperties();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // جلب الإشعارات المُرسلة اليوم من Google Sheets (للتأكد حتى بعد إعادة تشغيل السيرفر)
+    const sentToday = await getTodaysSentNotifications();
+    
+    let expired = 0;
+    let expiringSoon = 0;
+    let notificationsSent = 0;
+    
+    // تجميع كل التحديثات للتنفيذ دفعة واحدة (batch update)
+    const batchUpdates: Array<{ propertyNumber: string; remainingDays: number }> = [];
+    
+    for (const sub of subscriptions) {
+      if (isSubscriptionStatusSuspended(sub.status)) continue;
+      if (!sub.endDate || !sub.propertyNumber) continue;
+      
+      try {
+        const endDate = new Date(sub.endDate);
+        endDate.setHours(0, 0, 0, 0);
+        
+        const diffTime = endDate.getTime() - today.getTime();
+        const remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        // تجميع التحديث بدلاً من التنفيذ المباشر
+        batchUpdates.push({ propertyNumber: sub.propertyNumber, remainingDays: Math.max(0, remainingDays) });
+        
+        if (remainingDays < 0) {
+          expired++;
+          
+          const daysSinceExpiry = Math.abs(remainingDays);
+          const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+          
+          // التحقق من:
+          // 1. العقار موجود
+          // 2. اليوم ضمن أيام الإرسال (3 أيام كل أسبوع)
+          // 3. لم يُرسل إشعار لهذا العقار اليوم (من Google Sheets)
+          // 4. إشعارات الانتهاء غير موقوفة لهذا العقار
+          const alreadySentToday = sentToday.has(sub.propertyNumber);
+          const isMuted = (property as any)?.muteExpiryNotification === true;
+          
+          if (property && shouldSendNotificationToday(daysSinceExpiry) && !alreadySentToday && !isMuted) {
+            try {
+              console.log(`📤 [Scheduler] إرسال إشعار انتهاء للعقار ${sub.propertyNumber} (يوم ${daysSinceExpiry} منذ الانتهاء)`);
+              // إشعار للأدمن
+              const result = await notifySubscriptionExpired({
+                propertyNumber: sub.propertyNumber,
+                propertyName: property.name || "",
+                ownerPhone: property.whatsappNumber || "",
+              });
+              
+              // إشعار للمالك عبر Enjazatik (بنمط 3/3 مثل الأدمين)
+              if (property.whatsappNumber) {
+                try {
+                  // إرسال للمالك
+                  await notifyOwnerSubscriptionExpired({
+                    ownerPhone: property.whatsappNumber,
+                    propertyNumber: sub.propertyNumber,
+                    propertyName: property.name || "",
+                  });
+                  console.log(`📱 [Scheduler] تم إرسال إشعار للمالك - انتهاء اشتراك: ${sub.propertyNumber}`);
+                } catch (ownerErr) {
+                  console.error(`❌ [Scheduler] فشل إرسال إشعار المالك لـ ${sub.propertyNumber}:`, ownerErr);
+                }
+              }
+              
+              if (result.status === "success") {
+                notificationsSent++;
+                sentToday.add(sub.propertyNumber); // إضافة للذاكرة المؤقتة لتجنب التكرار في نفس الدورة
+                console.log(`✅ [Scheduler] تم إرسال إشعار انتهاء اشتراك: ${sub.propertyNumber}`);
+              } else {
+                console.log(`⚠️ [Scheduler] إشعار ${sub.propertyNumber}: ${result.status} - ${result.response}`);
+              }
+            } catch (err) {
+              console.error(`❌ [Scheduler] فشل إرسال إشعار لـ ${sub.propertyNumber}:`, err);
+            }
+          }
+        } else if (remainingDays === 3) {
+          // إشعار للمالك قبل 3 أيام من انتهاء الاشتراك
+          expiringSoon++;
+          const property = properties.find(p => p.propertyNumber === sub.propertyNumber);
+          if (property && property.whatsappNumber) {
+            try {
+              // إرسال للمالك
+              await notifyOwnerSubscriptionExpiringSoon({
+                ownerPhone: property.whatsappNumber,
+                propertyNumber: sub.propertyNumber,
+                propertyName: property.name || "",
+                daysLeft: 3,
+              });
+              console.log(`📱 [Scheduler] تم إرسال تنبيه للمالك - 3 أيام متبقية: ${sub.propertyNumber}`);
+            } catch (err) {
+              console.error(`❌ [Scheduler] فشل إرسال تنبيه المالك لـ ${sub.propertyNumber}:`, err);
+            }
+          }
+        } else if (remainingDays >= 0 && remainingDays <= 7 && remainingDays !== 3) {
+          expiringSoon++;
+        }
+      } catch (err) {
+        console.error(`❌ [Scheduler] خطأ في معالجة ${sub.propertyNumber}:`, err);
+      }
+    }
+    
+    // تنفيذ تحديث الأيام المتبقية دفعة واحدة (يقرأ الجدول مرة واحدة فقط)
+    const updated = await storage.updateAllSubscriptionsRemainingDays(batchUpdates);
+    
+    console.log(`✅ [Scheduler] تم تحديث ${updated} اشتراك`);
+    console.log(`   - منتهي: ${expired}`);
+    console.log(`   - ينتهي قريباً: ${expiringSoon}`);
+    console.log(`   - إشعارات مُرسلة: ${notificationsSent}`);
+    console.log(`   - التاريخ الحالي: ${todayStr}`);
+    
+    // =====================
+    // تحديث حالة الإضافات المنتهية
+    // =====================
+    let expiredAddons = 0;
+    try {
+      expiredAddons = await firebaseService.updateExpiredAddOns();
+      console.log(`📦 [Scheduler] تم تحديث ${expiredAddons} إضافة منتهية`);
+    } catch (addOnError) {
+      console.error("❌ [Scheduler] خطأ في تحديث الإضافات:", addOnError);
+    }
+
+    // Remove abandoned remembered-contact sessions and short-lived security counters.
+    // Active sessions are also checked lazily on every request, while this
+    // daily cleanup covers browsers whose cookies were cleared or abandoned.
+    try {
+      const deletedSecurityRows = await firebaseService.deleteExpiredEphemeralSecurityData();
+      if (deletedSecurityRows > 0) {
+        console.log(`🧹 [Scheduler] Removed ${deletedSecurityRows} expired security rows`);
+      }
+    } catch (contactIdentityCleanupError) {
+      console.error("❌ [Scheduler] Contact identity cleanup error:", contactIdentityCleanupError);
+    }
+    
+    // =====================
+    // إلغاء الدفعات المعلقة المنتهية الصلاحية
+    // =====================
+    let expiredPayments = 0;
+    try {
+      expiredPayments = await expireOldPendingPayments();
+      console.log(`💳 [Scheduler] تم إلغاء ${expiredPayments} دفعة منتهية الصلاحية`);
+    } catch (paymentError) {
+      console.error("❌ [Scheduler] خطأ في إلغاء الدفعات المعلقة:", paymentError);
+    }
+    
+    return { updated, expired, expiringSoon, notificationsSent, expiredAddons, expiredPayments };
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في تحديث الأيام المتبقية:", error);
+    throw error;
+  }
+}
+
+/**
+ * إلغاء الدفعات المعلقة المنتهية الصلاحية
+ * - البطاقة: 30 دقيقة بدون webhook = ملغي
+ * - التحويل البنكي: 72 ساعة بدون موافقة = منتهي الصلاحية
+ * - يتم التحكم بها عبر FEATURE_TIMEOUTS
+ */
+async function expireOldPendingPayments(): Promise<number> {
+  try {
+    // التحقق من حالة FEATURE_TIMEOUTS
+    const isTimeoutsEnabled = await firebaseService.getFeatureFlag("FEATURE_TIMEOUTS");
+    if (!isTimeoutsEnabled) {
+      console.log(
+        "⏸️ [Scheduler] ميزة المهلات الزمنية معطلة؛ تستمر مطابقة Paymob دون إلغاء أي دفعة",
+      );
+    }
+    
+    const payments = await firebaseService.getPayments();
+    const now = Date.now();
+    let expiredCount = 0;
+    
+    // المهلة الزمنية
+    const CARD_TIMEOUT_MS = 30 * 60 * 1000; // 30 دقيقة للبطاقات
+    const BANK_TIMEOUT_MS = 72 * 60 * 60 * 1000; // 72 ساعة للتحويل البنكي
+    const PAYMOB_RECONCILIATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+    const PAYMOB_RECONCILIATION_INTERVAL_MS = 60 * 60 * 1000;
+    const PAYMOB_OLD_CATCH_UP_WINDOW_MS = 24 * 60 * 60 * 1000;
+    
+    // This list is intentionally limited to identity-free legacy attempts.
+    // Modern Paymob attempts are selected by their persisted provider
+    // capability below, regardless of whether the confirmed subtype is VISA,
+    // MADA, MASTERCARD, APPLE_PAY, or another exact provider value.
+    const legacyCardMethods = new Set([
+      "بطاقة",
+      "apple pay",
+      "apple_pay",
+      "applepay",
+      "paymob",
+      "card",
+      "cards",
+    ]);
+    const cardCutoffMs = now - CARD_TIMEOUT_MS;
+    const bankCutoffMs = now - BANK_TIMEOUT_MS;
+
+    for (const payment of payments) {
+      const normalizedMethod = String(payment.paymentMethod || "")
+        .trim()
+        .toLowerCase();
+
+      const paymentDateMs = Date.parse(String(payment.createdAt || ""));
+      const isOldEnoughForCardReconciliation =
+        Number.isFinite(paymentDateMs) && paymentDateMs < cardCutoffMs;
+      const isInsideCardReconciliationWindow =
+        Number.isFinite(paymentDateMs) &&
+        paymentDateMs >= now - PAYMOB_RECONCILIATION_WINDOW_MS;
+      const providerCatchUpStartedMs = Date.parse(
+        String(payment.providerReconciliationStartedAt || ""),
+      );
+      const isInsideOldProviderCatchUpWindow =
+        !isInsideCardReconciliationWindow &&
+        (
+          !Number.isFinite(providerCatchUpStartedMs) ||
+          providerCatchUpStartedMs >= now - PAYMOB_OLD_CATCH_UP_WINDOW_MS
+        );
+      const isAddonPayment = payment.action === "addon";
+      const hasRetrievablePaymobIntention = Boolean(
+        String(payment.merchantAttemptKey || "").trim() &&
+        String(payment.paymentReference || "").trim() &&
+        String(payment.paymentCheckoutUrl || "").trim() &&
+        (
+          !isAddonPayment ||
+          (
+            String(payment.paymobOrderId || "").trim() &&
+            payment.intentionState === "created"
+          )
+        ),
+      );
+      // A complete Paymob capability is authoritative even if an older or
+      // corrupt display label says "bank transfer". Identity-free real bank
+      // rows never satisfy this predicate.
+      const isRetrievableElectronicProviderAttempt =
+        hasRetrievablePaymobIntention;
+      const paymentStatus = String(payment.status || "").trim();
+      const isRecoverableCardStatus = (
+        isAddonPayment && paymentStatus === "قيد الدفع"
+      ) || new Set([
+        "قيد المراجعة",
+        "فشل",
+        "ملغي - انتهت المهلة",
+        "نجح - قيد التحقق",
+      ]).has(paymentStatus);
+
+      if (
+        isRetrievableElectronicProviderAttempt &&
+        isRecoverableCardStatus &&
+        isOldEnoughForCardReconciliation &&
+        hasRetrievablePaymobIntention &&
+        (!isAddonPayment || !payment.completedAt)
+      ) {
+        if (
+          !isInsideCardReconciliationWindow &&
+          !isInsideOldProviderCatchUpWindow
+        ) {
+          // The signed Paymob callback remains valid indefinitely, but polling
+          // old checkout capabilities forever would create unbounded provider
+          // traffic on every web instance.
+          continue;
+        }
+        try {
+          const checkedAt = new Date(now).toISOString();
+          const claim = await firebaseService.claimPaymentProviderReconciliation(
+            payment,
+            {
+              checkedAt,
+              createdBeforeMs: cardCutoffMs,
+              createdAfterMs: isInsideOldProviderCatchUpWindow
+                ? 0
+                : now - PAYMOB_RECONCILIATION_WINDOW_MS,
+              minIntervalMs: PAYMOB_RECONCILIATION_INTERVAL_MS,
+            },
+          );
+          if (!claim.claimed) continue;
+
+          const reconciliation = claim.payment.action === "addon"
+            ? await paymentService.reconcilePaymobAddonIntention(
+                claim.payment.id,
+              )
+            : await paymentService.reconcilePaymobIntention(
+                claim.payment.id,
+              );
+          if (reconciliation.status === "paid") {
+            const outcome = "activation" in reconciliation
+              ? reconciliation.activation
+              : "addon_pending_review";
+            console.log(
+              `✅ [Scheduler] تمت مطابقة دفعة Paymob وتحديثها: ${payment.id} (${outcome})`,
+            );
+          } else if (
+            isTimeoutsEnabled &&
+            reconciliation.status === "unpaid" &&
+            claim.payment.action !== "addon" &&
+            claim.payment.status === "قيد المراجعة"
+          ) {
+            // paid=false is enough for the requested 30-minute display timeout,
+            // but it is not treated as terminal abandonment. Provider identity
+            // stays intact so a late signed success can still be reconciled;
+            // properties remain independently editable.
+            const expired = await firebaseService.expirePendingPaymentIfEligible(
+              claim.payment,
+              "card",
+              cardCutoffMs,
+              { providerUnpaidClaimToken: claim.token },
+            );
+            if (expired) {
+              console.log(
+                `⏰ [Scheduler] إلغاء دفعة بطاقة غير مدفوعة بعد التحقق: ${payment.id}`,
+              );
+              expiredCount++;
+            }
+          }
+        } catch (error) {
+          // A provider outage or ambiguous response is never evidence of
+          // non-payment. Leave the attempt unchanged for the next callback/run.
+          console.error(
+            `❌ [Scheduler] تعذر التحقق من دفعة Paymob ${payment.id}:`,
+            error,
+          );
+        }
+        continue;
+      }
+
+      // An add-on with incomplete or ambiguous provider identity cannot be
+      // settled or timed out safely. Leave it untouched for an exact signed
+      // callback or manual investigation; never route it through subscription
+      // fulfillment or a legacy card timeout.
+      if (
+        isAddonPayment &&
+        normalizedMethod !== "تحويل بنكي"
+      ) continue;
+
+      // The final decision is an atomic Firestore compare-and-set. In
+      // particular, a known/ambiguous Paymob attempt is never cancelled merely
+      // because its webhook has not arrived yet.
+      if (
+        isTimeoutsEnabled &&
+        payment.status === "قيد المراجعة" &&
+        legacyCardMethods.has(normalizedMethod)
+      ) {
+        const expired = await firebaseService.expirePendingPaymentIfEligible(
+          payment,
+          "card",
+          cardCutoffMs,
+        );
+        if (expired) {
+          console.log(`⏰ [Scheduler] إلغاء دفعة بطاقة منتهية: ${payment.id}`);
+          expiredCount++;
+        }
+      }
+
+      if (
+        isTimeoutsEnabled &&
+        payment.status === "قيد التحقق" &&
+        String(payment.paymentMethod || "").trim() === "تحويل بنكي"
+      ) {
+        const expired = await firebaseService.expirePendingPaymentIfEligible(
+          payment,
+          "bank",
+          bankCutoffMs,
+        );
+        if (expired) {
+          console.log(`⏰ [Scheduler] انتهاء صلاحية تحويل بنكي: ${payment.id}`);
+          expiredCount++;
+        }
+      }
+    }
+    
+    return expiredCount;
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في التحقق من الدفعات المعلقة:", error);
+    return 0;
+  }
+}
+
+// حساب الوقت التالي للساعة 12 ظهراً بتوقيت السعودية (UTC+3)
+function getNextNoonTime(): { nextNoon: Date; delayMs: number } {
+  const now = new Date();
+  
+  // تحويل الوقت الحالي إلى توقيت السعودية (UTC+3)
+  const saudiTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
+  
+  // إنشاء وقت الظهيرة (12:00) لليوم الحالي بتوقيت السعودية
+  const nextNoon = new Date(saudiTime);
+  nextNoon.setHours(12, 0, 0, 0);
+  
+  // إذا مضى وقت الظهيرة اليوم، انتقل إلى غداً
+  if (saudiTime >= nextNoon) {
+    nextNoon.setDate(nextNoon.getDate() + 1);
+  }
+  
+  // حساب الفرق بالميلي ثانية
+  const delayMs = nextNoon.getTime() - saudiTime.getTime();
+  
+  return { nextNoon, delayMs };
+}
+
+// تشغيل المهام المجدولة
+export function startScheduler() {
+  if (!shouldStartScheduledBackgroundWork()) return;
+
+  console.log("🕐 [Scheduler] بدء تشغيل المهام المجدولة...");
+  
+  const { nextNoon, delayMs } = getNextNoonTime();
+  const hoursUntilNoon = (delayMs / (1000 * 60 * 60)).toFixed(2);
+  
+  console.log(`⏰ [Scheduler] وقت التنفيذ المقبل: 12:00 ظهراً بتوقيت السعودية`);
+  console.log(`⏳ [Scheduler] سيتم التحديث بعد ${hoursUntilNoon} ساعة`);
+  console.log(`📅 [Scheduler] التاريخ والوقت: ${nextNoon.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })}`);
+  
+  // جدولة التحديث الأول للساعة 12 ظهراً
+  setTimeout(() => {
+    console.log(`🕐 [Scheduler] تشغيل التحديث اليومي في الموعد المحدد`);
+    updateRemainingDaysInSheet().catch(console.error);
+    
+    // بعد التحديث الأول، جدول التحديثات المتكررة كل 24 ساعة
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    setInterval(() => {
+      const now = new Date();
+      console.log(`🕐 [Scheduler] تشغيل التحديث اليومي - ${now.toLocaleString('en-US', { timeZone: 'Asia/Riyadh' })}`);
+      updateRemainingDaysInSheet().catch(console.error);
+    }, TWENTY_FOUR_HOURS);
+  }, delayMs);
+  
+  console.log("✅ [Scheduler] المهام المجدولة تعمل - تحديث يومي الساعة 12 ظهراً");
+  console.log("📋 [Scheduler] يتم التحقق من إشعارات اليوم من Firebase لمنع التكرار");
+  
+  // تشغيل المطابقة التلقائية والتحقق من المهلات كل 15 دقيقة
+  const FIFTEEN_MINUTES = 15 * 60 * 1000;
+  setInterval(async () => {
+    console.log("🔄 [Scheduler] تشغيل فحص الدفعات...");
+    
+    // التحقق من المهلات الزمنية
+    const expiredCount = await expireOldPendingPayments();
+    if (expiredCount > 0) {
+      console.log(`⏰ [Scheduler] تم إلغاء/انتهاء ${expiredCount} دفعة`);
+    }
+    
+    // تشغيل المطابقة التلقائية
+    try {
+      await runAutoMatch();
+    } catch (error) {
+      console.error("❌ [Scheduler] خطأ في المطابقة التلقائية:", error);
+    }
+  }, FIFTEEN_MINUTES);
+  
+  console.log("🔄 [Scheduler] فحص الدفعات كل 15 دقيقة");
+
+  // تشغيل فحص تخفيض الاشتراكات المنتهية كل 30 دقيقة
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  setInterval(() => {
+    console.log("⬇️ [Scheduler] فحص الاشتراكات المنتهية...");
+    downgradeExpiredSubscriptions().catch(console.error);
+  }, THIRTY_MINUTES);
+
+  // تشغيل فوري عند البدء
+  setTimeout(() => {
+    downgradeExpiredSubscriptions().catch(console.error);
+  }, 5000);
+
+  console.log("⬇️ [Scheduler] فحص تخفيض الاشتراكات كل 30 دقيقة");
+}
+
+// تحديث الاشتراكات المنتهية وإزالة الصفة المميزة من سجل الاشتراك والعقار.
+// Group-aware: when a main property's subscription expires/cancels, all linked properties
+// follow the same state (same endDate, same status) so parent + children never drift.
+async function downgradeExpiredSubscriptions(): Promise<number> {
+  try {
+    const subscriptions = await firebaseService.getSubscriptions();
+    let downgraded = 0;
+
+    for (const sub of subscriptions) {
+      if (isSubscriptionStatusSuspended(sub.status)) continue;
+
+      const isPremiumType = isPremiumSubscriptionType(sub.subscriptionType);
+      if (!isPremiumType) continue;
+
+      // A stored `منتهي` value without cancellation metadata is not enough:
+      // an activation may have replaced the dates after this list was read.
+      const isCancelled = Boolean((sub as any).cancelledAt);
+      const isDateExpired = calculateRemainingDays(sub.endDate) < 0;
+
+      if (isCancelled || isDateExpired) {
+        const expired = await firebaseService.expireSubscriptionIfNeeded(sub.id);
+        if (expired) {
+          console.log(`⬇️ [Scheduler] تم تحديث حالة اشتراك ${sub.propertyNumber} إلى منتهي (${isCancelled ? 'ملغى' : 'منتهي التاريخ'})`);
+          downgraded++;
+        }
+      }
+    }
+
+    if (downgraded > 0) {
+      console.log(`⬇️ [Scheduler] تم تخفيض ${downgraded} اشتراك منتهي`);
+    }
+    return downgraded;
+  } catch (error) {
+    console.error("❌ [Scheduler] خطأ في تخفيض الاشتراكات:", error);
+    return 0;
+  }
+}
+
+// تصدير الدوال للاستخدام اليدوي (API endpoint)
+export { updateRemainingDaysInSheet, expireOldPendingPayments, downgradeExpiredSubscriptions };

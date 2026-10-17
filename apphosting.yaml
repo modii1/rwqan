@@ -1,0 +1,42 @@
+# Settings for Backend (on Cloud Run).
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+runConfig:
+  minInstances: 0
+  maxInstances: 100
+  concurrency: 80
+  cpu: 2
+  memoryMiB: 2048
+
+# Bypass the Firebase Next.js adapter (which breaks Next.js 16)
+scripts:
+  buildCommand: npm run build
+  runCommand: node dist/server/index.js
+
+# Include all necessary build output
+outputFiles:
+  serverApp:
+    include: [.]
+
+# Environment variables and secrets.
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - RUNTIME
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://rwqan.sa
+    availability:
+      - BUILD
+      - RUNTIME
+  # Configure environment variables.
+  # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
+  # - variable: MESSAGE
+  #   value: Hello world!
+  #   availability:
+  #     - BUILD
+  #     - RUNTIME
+
+  # Grant access to secrets in Cloud Secret Manager.
+  # See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
+  # - variable: MY_SECRET
+  #   secret: mySecretRef

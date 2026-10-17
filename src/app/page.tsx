@@ -1,0 +1,33 @@
+import { Suspense } from "react";
+import { serverFetch, serverFetchImages, ActiveOccasion } from "@/lib/server-fetch";
+import { Property } from "@shared/schema";
+import HomeClient from "@/components/home-client";
+import { isPublicPropertyPremium } from "@/lib/public-subscription";
+
+export default async function HomePage() {
+    const [properties, occasion] = await Promise.all([
+        serverFetch<Property[]>("/api/properties"),
+        serverFetch<ActiveOccasion | null>("/api/occasions/active"),
+    ]);
+
+    const allProperties = properties ?? [];
+
+    const premiumPropNumbers = allProperties
+        .filter((property) => isPublicPropertyPremium(property))
+        .map(p => p.propertyNumber);
+
+    const occasionPropNumbers = occasion
+        ? occasion.properties.map(op => op.propertyNumber)
+        : [];
+
+    const neededImageIds = [...new Set([...premiumPropNumbers, ...occasionPropNumbers])];
+    const initialImages = neededImageIds.length > 0
+        ? await serverFetchImages(neededImageIds)
+        : {};
+
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-[#6b6b6b] text-lg">جاري التحميل...</p></div>}>
+            <HomeClient initialProperties={allProperties} initialOccasion={occasion} initialImages={initialImages} />
+        </Suspense>
+    );
+}

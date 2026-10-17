@@ -1,0 +1,60 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "booking_notification_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "booking_notification_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "leaseExpiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "booking_followups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "commissionStatus", "order": "ASCENDING" },
+        { "fieldPath": "commissionDueAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "contact_identity_sessions",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "customer_phone_otp_challenges",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "customer_phone_otp_issue_limits",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "booking_notification_quotas",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "booking_short_links",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    }
+  ]
+}
