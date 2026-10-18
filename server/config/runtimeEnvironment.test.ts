@@ -671,6 +671,9 @@ test("guard never echoes key values in its error messages", () => {
       }),
     (error: unknown) =>
       error instanceof Error && !error.message.includes("SUPERSECRETVALUE"),
+  );
+});
+
 test("production rejects malformed Firebase service-account JSON", () => {
   assert.throws(
     () => assertProductionSecurityEnvironment({

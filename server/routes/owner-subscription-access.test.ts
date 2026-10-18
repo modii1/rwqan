@@ -10,6 +10,8 @@ import { firebaseService } from "../firebaseService";
 test("owner subscription endpoint is scoped to the session property and its linked group", async () => {
   const originalGetSubscription = firebaseService.getSubscriptionByPropertyNumber;
   const originalGetProperty = firebaseService.getPropertyByNumber;
+  const originalGetLinked = firebaseService.getSubscriptionsLinkedToProperty;
+  const originalGetMulti = firebaseService.getMultiPropertySubscriptions;
 
   const subscriptions = new Map<string, any>([
     [
@@ -38,7 +40,11 @@ test("owner subscription endpoint is scoped to the session property and its link
     propertyNumber: string,
   ) => subscriptions.get(propertyNumber) || null;
   (firebaseService as any).getPropertyByNumber = async (propertyNumber: string) =>
-    subscriptions.has(propertyNumber) ? { name: "Property", city: "Riyadh" } : null;
+    subscriptions.has(propertyNumber)
+      ? { name: "Property", city: "Riyadh", pin: "PIN-12345" }
+      : null;
+  (firebaseService as any).getSubscriptionsLinkedToProperty = async () => [];
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
 
   const app = express();
   app.use(
@@ -109,5 +115,7 @@ test("owner subscription endpoint is scoped to the session property and its link
     server.close();
     (firebaseService as any).getSubscriptionByPropertyNumber = originalGetSubscription;
     (firebaseService as any).getPropertyByNumber = originalGetProperty;
+    (firebaseService as any).getSubscriptionsLinkedToProperty = originalGetLinked;
+    (firebaseService as any).getMultiPropertySubscriptions = originalGetMulti;
   }
 });

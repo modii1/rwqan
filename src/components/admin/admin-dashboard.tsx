@@ -412,7 +412,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           icon={<Rocket className="w-4 h-4 text-indigo-600" />}
           label="نظام النشر"
           active={activeSection === "deploy"}
-          onClick={() => setActiveSection("deploy")}
+          onClick={() => navigateSection("deploy")}
         />
 
         <div className="hidden md:block h-px bg-border my-2" />
