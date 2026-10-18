@@ -6,6 +6,7 @@ import {
   bookingQuestionnaireRouteSchema,
   normalizeQuestionnaireBookingDate,
   selectAdminPaymentAttempt,
+  summarizeNotifications,
 } from "./BookingCommissionService";
 import {
   BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
@@ -30,6 +31,24 @@ const usableBankAccount = {
   isActive: true,
   isDefault: true,
 };
+
+test("notification summaries do not count provider acceptance as delivery", () => {
+  const summary = summarizeNotifications([
+    { status: "sent", providerDeliveryStatus: "accepted" },
+    { status: "sent", providerDeliveryStatus: null },
+    { status: "sent", providerDeliveryStatus: "delivered" },
+    { status: "sent", providerDeliveryStatus: "read" },
+    { status: "sent", providerDeliveryStatus: "failed" },
+  ] as any);
+
+  assert.deepEqual(summary, {
+    sent: 2,
+    accepted: 2,
+    failed: 1,
+    pending: 0,
+    suppressed: 0,
+  });
+});
 
 test("questionnaire dates keep legacy days while the server derives Hijri month boundaries", () => {
   assert.deepEqual(normalizeQuestionnaireBookingDate({

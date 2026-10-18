@@ -83,6 +83,36 @@ class MemoryCustomerAccountStore {
     return structuredClone(this.bookings);
   }
 
+  async declineBooking(id: string) {
+    const index = this.bookings.findIndex((booking) => booking.id === id);
+    if (index < 0) throw new Error("missing booking");
+    const current = this.bookings[index] as BookingFollowUpDocument;
+    const declined = {
+      ...current,
+      bookingStatus: "declined" as const,
+      bookingDecision: null,
+      questionnaireStartedAt: null,
+      declinedAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    } as BookingFollowUpDocument;
+    this.bookings[index] = declined;
+    return structuredClone(declined);
+  }
+
+  async reportOwnerNoResponse(id: string, customerSubject: string) {
+    const index = this.bookings.findIndex((booking) =>
+      booking.id === id && booking.customerSubject === customerSubject);
+    if (index < 0) throw new Error("missing booking");
+    const current = this.bookings[index] as BookingFollowUpDocument;
+    const reported = {
+      ...current,
+      customerOwnerNoResponseReportedAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    } as BookingFollowUpDocument;
+    this.bookings[index] = reported;
+    return structuredClone(reported);
+  }
+
   async getPropertyByNumber(propertyNumber: string) {
     return structuredClone(this.properties.get(propertyNumber) || null);
   }
@@ -344,5 +374,153 @@ test("unmatched same-subject workflows require explicit customer response eviden
     assert.equal(
       JSON.stringify(history).includes("REQ-LEGACY-AWAITING"),
       false,
+    );
+  }));
+
+test("history exposes safe actions only for a current booking owned by the customer", () =>
+  withSecret(async () => {
+    const store = new MemoryCustomerAccountStore();
+    const service = new CustomerAccountService(store, {
+      now: () => NOW,
+      issueCustomerResponseToken: () => "customer-action-token",
+    });
+    const { customerSubject } = service.subjectForPhone(PHONE);
+    store.requests = [{
+      id: "request-awaiting",
+      propertyNumber: "10004",
+      requestCode: "REQ-AWAITING",
+      timestamp: "2026-09-20T11:00:00.000Z",
+      clientPhone: PHONE,
+      ipAddress: "127.0.0.1",
+      deviceType: "mobile",
+      dayOfWeek: "الأحد",
+      hourOfDay: 14,
+    }];
+    store.bookings = [{
+      id: "booking-awaiting",
+      contactRequestId: "request-awaiting",
+      requestCode: "REQ-AWAITING",
+      propertyNumber: "10004",
+      propertyName: "Awaiting property",
+      listedPriceOptionsHalalas: [100_000],
+      customerSubject,
+      customerPhone: PHONE,
+      ownerPhone: "598765432",
+      followUpDueAt: "2026-09-20T13:00:00.000Z",
+      createdAt: "2026-09-20T11:00:00.000Z",
+      updatedAt: "2026-09-20T11:00:00.000Z",
+      bookingStatus: "awaiting_response",
+      bookingDecision: null,
+      confirmationFacts: null,
+      confirmedAt: null,
+      declinedAt: null,
+    } as BookingFollowUpDocument];
+
+    const [historyRow] = await service.getHistory(PHONE);
+    assert.equal(historyRow.followUpPath, "/booking/customer-action-token");
+    assert.equal(historyRow.canMarkNotBooked, true);
+    assert.equal(historyRow.canReportNoResponse, true);
+
+    const reported = await service.reportOwnerNoResponse(PHONE, "booking-awaiting");
+    assert.equal(reported.canReportNoResponse, false);
+    assert.equal(reported.ownerNoResponseReportedAt, NOW.toISOString());
+
+    const declined = await service.markBookingNotBooked(PHONE, "booking-awaiting");
+    assert.equal(declined.bookingStatus, "declined");
+    assert.equal(declined.followUpPath, null);
+    assert.equal(declined.canMarkNotBooked, false);
+  }));
+
+test("customer booking actions fail closed for another customer's workflow", () =>
+  withSecret(async () => {
+    const store = new MemoryCustomerAccountStore();
+    const service = new CustomerAccountService(store, { now: () => NOW });
+    store.bookings = [{
+      id: "foreign-booking",
+      contactRequestId: "foreign-request",
+      requestCode: "REQ-FOREIGN",
+      propertyNumber: "10005",
+      propertyName: "Foreign property",
+      customerSubject: "f".repeat(64),
+      customerPhone: "599999999",
+      ownerPhone: "598765432",
+      followUpDueAt: "2026-09-20T13:00:00.000Z",
+      createdAt: "2026-09-20T11:00:00.000Z",
+      updatedAt: "2026-09-20T11:00:00.000Z",
+      bookingStatus: "awaiting_response",
+      bookingDecision: null,
+      confirmationFacts: null,
+      confirmedAt: null,
+      declinedAt: null,
+    } as BookingFollowUpDocument];
+
+    await assert.rejects(
+      () => service.markBookingNotBooked(PHONE, "foreign-booking"),
+      (error: unknown) => error instanceof CustomerAccountError
+        && error.code === "CUSTOMER_BOOKING_NOT_FOUND"
+        && error.status === 404,
+    );
+    await assert.rejects(
+      () => service.reportOwnerNoResponse(PHONE, "foreign-booking"),
+      (error: unknown) => error instanceof CustomerAccountError
+        && error.code === "CUSTOMER_BOOKING_NOT_FOUND"
+        && error.status === 404,
+    );
+  }));
+
+test("expired customer workflows do not expose or accept booking actions", () =>
+  withSecret(async () => {
+    const store = new MemoryCustomerAccountStore();
+    const service = new CustomerAccountService(store, {
+      now: () => NOW,
+      issueCustomerResponseToken: () => "must-not-be-exposed",
+    });
+    const { customerSubject } = service.subjectForPhone(PHONE);
+    store.requests = [{
+      id: "request-expired",
+      propertyNumber: "10006",
+      requestCode: "REQ-EXPIRED",
+      timestamp: "2026-09-10T10:00:00.000Z",
+      clientPhone: PHONE,
+      ipAddress: "127.0.0.1",
+      deviceType: "mobile",
+      dayOfWeek: "الخميس",
+      hourOfDay: 13,
+    }];
+    store.bookings = [{
+      id: "booking-expired",
+      contactRequestId: "request-expired",
+      requestCode: "REQ-EXPIRED",
+      propertyNumber: "10006",
+      propertyName: "Expired property",
+      customerSubject,
+      customerPhone: PHONE,
+      ownerPhone: "598765432",
+      followUpDueAt: "2026-09-10T11:00:00.000Z",
+      createdAt: "2026-09-10T10:00:00.000Z",
+      updatedAt: "2026-09-10T10:00:00.000Z",
+      bookingStatus: "awaiting_response",
+      bookingDecision: null,
+      confirmationFacts: null,
+      confirmedAt: null,
+      declinedAt: null,
+    } as BookingFollowUpDocument];
+
+    const [historyRow] = await service.getHistory(PHONE);
+    assert.equal(historyRow.bookingStatus, "expired");
+    assert.equal(historyRow.followUpPath, null);
+    assert.equal(historyRow.canMarkNotBooked, false);
+    assert.equal(historyRow.canReportNoResponse, false);
+    await assert.rejects(
+      () => service.markBookingNotBooked(PHONE, "booking-expired"),
+      (error: unknown) => error instanceof CustomerAccountError
+        && error.code === "CUSTOMER_BOOKING_NOT_ACTIONABLE"
+        && error.status === 409,
+    );
+    await assert.rejects(
+      () => service.reportOwnerNoResponse(PHONE, "booking-expired"),
+      (error: unknown) => error instanceof CustomerAccountError
+        && error.code === "CUSTOMER_BOOKING_NOT_ACTIONABLE"
+        && error.status === 409,
     );
   }));

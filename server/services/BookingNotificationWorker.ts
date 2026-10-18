@@ -34,6 +34,7 @@ import {
   formatCanonicalDayNumeric,
 } from "../../shared/booking-calendar";
 import { shouldStartScheduledBackgroundWork } from "../config/schedulerStartup";
+import { whatsAppPendingDeliveryStore } from "./WhatsAppPendingDeliveryStore";
 
 const ENFORCEMENT_RETRY_MS = 30 * 60 * 1000;
 
@@ -333,12 +334,25 @@ async function dispatchClaim(
     message,
     providerRetries,
   );
-  await bookingCommissionStore.finishNotificationJob({
+  const persisted = await bookingCommissionStore.finishNotificationJob({
     jobId: job.id,
     leaseToken: job.leaseToken,
     success: result.success,
     error: result.error,
+    ...(result.providerMessageId
+      ? { providerMessageId: result.providerMessageId }
+      : {}),
   });
+  if (persisted && result.providerMessageId) {
+    try {
+      await whatsAppPendingDeliveryStore.reconcile(
+        result.providerMessageId,
+        bookingCommissionStore,
+      );
+    } catch (error) {
+      console.error("Pending WhatsApp delivery reconciliation failed:", error);
+    }
+  }
   return result.success;
 }
 

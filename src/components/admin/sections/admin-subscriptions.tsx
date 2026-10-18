@@ -1,5 +1,6 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import {
   getStatusInfo,
 } from "@/lib/subscription-utils";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
 // Override formatDate to always show English numbers
 function formatDate(dateStr: any): string {
@@ -93,7 +95,9 @@ function toEditableSubscriptionStatus(status: AdminSubscription["status"]): stri
 
 export default function AdminSubscriptionsSection() {
   const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState("");
+  const searchParams = useSearchParams();
+  const targetedPropertyNumber = getAdminOperationTarget(searchParams, "property");
+  const [searchQuery, setSearchQuery] = useState(targetedPropertyNumber);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -114,6 +118,10 @@ export default function AdminSubscriptionsSection() {
   const [customMessage, setCustomMessage] = useState("");
   const [bulkNotifyDialogOpen, setBulkNotifyDialogOpen] = useState(false);
   const [bulkNotifyType, setBulkNotifyType] = useState<"all" | "expired" | "expiring_soon">("all");
+
+  useEffect(() => {
+    if (targetedPropertyNumber) setSearchQuery(targetedPropertyNumber);
+  }, [targetedPropertyNumber]);
 
   const { data: subscriptions = [], isLoading, refetch } = useQuery<AdminSubscription[]>({
     queryKey: ["/api/admin/subscriptions"],

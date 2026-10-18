@@ -50,8 +50,13 @@
    - Path: `/api/internal/booking-worker`
    - Header: `Authorization: Bearer <BOOKING_WORKER_SECRET>`
 6. Confirm the Enjazatik WhatsApp sender and Paymob production credentials/callback are healthy.
-7. Configure R2 receipt storage and verify at least one active bank account has a bank name, beneficiary name, and valid Saudi IBAN. Selecting a default account clears the prior default; inactive accounts are never offered for a new receipt.
-8. Keep both new feature flags disabled at deploy time:
+7. Configure WhatsApp delivery receipts at `https://<production-origin>/api/webhooks/whatsapp/delivery`:
+   - Set `META_WHATSAPP_APP_SECRET` to the Meta app secret. Meta POST callbacks must include a valid `X-Hub-Signature-256` over the exact request bytes.
+   - Set `META_WHATSAPP_WEBHOOK_VERIFY_TOKEN` to a separate random value of at least 32 bytes, and enter the same value in Meta when subscribing the callback URL. Meta's GET challenge is rejected unless this token matches.
+   - Keep `WHATSAPP_DELIVERY_WEBHOOK_SECRET` as a separate random value of at least 32 bytes for Enjazatik or another trusted relay. Relay callbacks must continue to use the existing Bearer or supported secret header; it is not a substitute for Meta's signed callback.
+   - Subscribe the WhatsApp Business Account `messages` webhook field, then confirm a real provider message progresses from API acceptance to delivered/read or failed in the admin audit.
+8. Configure R2 receipt storage and verify at least one active bank account has a bank name, beneficiary name, and valid Saudi IBAN. Selecting a default account clears the prior default; inactive accounts are never offered for a new receipt.
+9. Keep both new feature flags disabled at deploy time:
    - `FEATURE_BOOKING_FOLLOWUP`
    - `FEATURE_BOOKING_COMMISSION_ENFORCEMENT`
 
@@ -113,7 +118,7 @@ Monitor these values daily during rollout:
 - owner-identity changes, premium-tier eligibility closures, and expired response links;
 - Paymob creation uncertainty, reconciliation deferrals, duplicate payments, refunds, voids, and other reversals.
 
-The current WhatsApp integration records API acceptance/failure, not handset-level delivery or read receipts; it has no inbound delivery-status webhook. Admin wording and operational decisions must use that distinction.
+The WhatsApp integration records outbound API acceptance separately from provider delivery, read, and failure receipts. A successful send response is not handset delivery. Delivery state advances only through an authenticated callback: Meta uses `X-Hub-Signature-256`, while an Enjazatik-compatible relay uses the separate callback secret. Keep provider callback subscriptions and the unmatched-receipt retry metric healthy before using delivery state operationally.
 
 The initial owner commission notice has three bounded delivery attempts. If all fail, the property is not paused and the obligation requires operator follow-up before collection can continue.
 

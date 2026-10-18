@@ -575,6 +575,148 @@ test("concurrent additions cannot overflow package capacity or lose the winner",
   );
 });
 
+test("account-bound group mutation rejects a stale child transferred to another account", async () => {
+  const database = new FakeFirestore();
+  const accountA = "A".repeat(43);
+  const accountB = "B".repeat(43);
+  seedPackage(database, 4);
+  for (const propertyNumber of ["PROP-A", "PROP-B", "PROP-C"]) {
+    seedProperty(database, propertyNumber);
+  }
+  database.set("subscriptions", "SUB-PROP-A", activeSubscription("PROP-A", {
+    linkedProperties: ["PROP-B"],
+    propertyCount: 2,
+  }));
+  database.set("subscriptions", "SUB-PROP-B", activeSubscription("PROP-B", {
+    linkedProperty: "PROP-A",
+  }));
+  database.set("owner_accounts", accountA, {
+    id: accountA,
+    status: "active",
+    authVersion: 7,
+  });
+  for (const [propertyNumber, ownerAccountId] of [
+    ["PROP-A", accountA],
+    ["PROP-B", accountB],
+    ["PROP-C", accountA],
+  ]) {
+    database.set("owner_property_memberships", propertyNumber, {
+      propertyNumber,
+      ownerAccountId,
+      status: "active",
+    });
+  }
+
+  await assert.rejects(
+    () => createService(database).mutateLinkedPropertyGroupAtomically({
+      mainPropertyNumber: "PROP-A",
+      addPropertyNumbers: ["PROP-C"],
+      approveAddedProperties: true,
+      ownerAccountId: accountA,
+      ownerAccountAuthVersion: 7,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof LinkedPropertyMutationError);
+      assert.equal(error.code, "LINKED_PROPERTY_FORBIDDEN");
+      return true;
+    },
+  );
+  assert.deepEqual(
+    database.get("subscriptions", "SUB-PROP-A")?.linkedProperties,
+    ["PROP-B"],
+  );
+  assert.equal(database.get("subscriptions", "SUB-PROP-C"), undefined);
+  assert.equal(database.get("properties", "PROP-C")?.linkedProperty, undefined);
+});
+
+test("account-bound pending approval rechecks transferred and revoked memberships atomically", async () => {
+  const database = new FakeFirestore();
+  const accountA = "A".repeat(43);
+  const accountB = "B".repeat(43);
+  for (const propertyNumber of ["PROP-A", "PROP-B"]) {
+    seedProperty(database, propertyNumber);
+  }
+  database.set("owner_accounts", accountA, {
+    id: accountA,
+    status: "active",
+    authVersion: 7,
+  });
+  database.set("owner_property_memberships", "PROP-A", {
+    propertyNumber: "PROP-A",
+    ownerAccountId: accountA,
+    status: "active",
+  });
+  database.set("owner_property_memberships", "PROP-B", {
+    propertyNumber: "PROP-B",
+    ownerAccountId: accountB,
+    status: "active",
+  });
+  const service = createService(database);
+  const updatePending = () => service.setPendingLinkedPropertyApprovalForOwnerAccount({
+    ownerAccountId: accountA,
+    authVersion: 7,
+    mainPropertyNumber: "PROP-A",
+    targetPropertyNumber: "PROP-B",
+  });
+
+  await assert.rejects(updatePending, LinkedPropertyMutationError);
+  database.update("owner_property_memberships", "PROP-B", {
+    ownerAccountId: accountA,
+    status: "revoked",
+  });
+  await assert.rejects(updatePending, LinkedPropertyMutationError);
+  assert.equal(database.get("properties", "PROP-B")?.pendingApprovalFrom, undefined);
+});
+
+test("account-bound unlink rejects a transferred removal target inside the transaction", async () => {
+  const database = new FakeFirestore();
+  const accountA = "A".repeat(43);
+  const accountB = "B".repeat(43);
+  for (const propertyNumber of ["PROP-A", "PROP-B"]) {
+    seedProperty(database, propertyNumber);
+  }
+  database.set("subscriptions", "SUB-PROP-A", activeSubscription("PROP-A", {
+    linkedProperties: ["PROP-B"],
+    propertyCount: 2,
+  }));
+  database.set("subscriptions", "SUB-PROP-B", activeSubscription("PROP-B", {
+    linkedProperty: "PROP-A",
+  }));
+  database.set("owner_accounts", accountA, {
+    id: accountA,
+    status: "active",
+    authVersion: 7,
+  });
+  database.set("owner_property_memberships", "PROP-A", {
+    propertyNumber: "PROP-A",
+    ownerAccountId: accountA,
+    status: "active",
+  });
+  database.set("owner_property_memberships", "PROP-B", {
+    propertyNumber: "PROP-B",
+    ownerAccountId: accountB,
+    status: "active",
+  });
+
+  await assert.rejects(
+    () => createService(database).unlinkLinkedPropertiesAtomically({
+      mainPropertyNumber: "PROP-A",
+      propertyNumbers: ["PROP-B"],
+      ownerAccountId: accountA,
+      ownerAccountAuthVersion: 7,
+    }),
+    LinkedPropertyMutationError,
+  );
+  assert.deepEqual(
+    database.get("subscriptions", "SUB-PROP-A")?.linkedProperties,
+    ["PROP-B"],
+  );
+  assert.equal(
+    database.get("subscriptions", "SUB-PROP-B")?.linkedProperty,
+    "PROP-A",
+  );
+});
+
 test("a legacy processing payment lock does not block adding an affected child", async () => {
   const database = new FakeFirestore();
   seedPackage(database, 3);

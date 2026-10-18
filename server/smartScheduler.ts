@@ -17,6 +17,11 @@ import { firebaseService } from "./firebaseService";
 import { runAutoMatch } from "./autoMatchService";
 import { isSubscriptionStatusSuspended } from "../shared/subscriptionType";
 import { shouldStartScheduledBackgroundWork } from "./config/schedulerStartup";
+import {
+  type DistributedJobLease,
+  DistributedScheduledJobLeaseLostError,
+  runDistributedScheduledJob,
+} from "./services/DistributedScheduledJob";
 
 
 // ─── Configuration (mirrors Firebase settings shape) ─────────────────────────
@@ -82,8 +87,35 @@ function getNextTargetDate(config: SmartScheduleConfig): Date | null {
   return null;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function assertScheduledLeaseActive(lease?: DistributedJobLease): void {
+  lease?.throwIfLeaseLost();
+}
+
+function delay(ms: number, lease?: DistributedJobLease): Promise<void> {
+  assertScheduledLeaseActive(lease);
+  if (!lease) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      lease.signal.removeEventListener("abort", onAbort);
+      try {
+        lease.throwIfLeaseLost();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      reject(new DistributedScheduledJobLeaseLostError());
+    };
+    const timeout = setTimeout(() => {
+      lease.signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    lease.signal.addEventListener("abort", onAbort, { once: true });
+    if (lease.signal.aborted) onAbort();
+  });
 }
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -110,10 +142,13 @@ interface ExpiredSubscriptionEntry {
  */
 async function sendStaggeredNotifications(
   entries: ExpiredSubscriptionEntry[],
-  config: SmartScheduleConfig
+  config: SmartScheduleConfig,
+  lease?: DistributedJobLease,
 ): Promise<number> {
+  assertScheduledLeaseActive(lease);
   let sentToday = 0;
-  const sentAlready = await getTodaysSentNotifications();
+  const sentAlready = await getTodaysSentNotifications(lease);
+  assertScheduledLeaseActive(lease);
 
   const shuffled = shuffleArray(entries);
   const batches: ExpiredSubscriptionEntry[][] = [];
@@ -123,10 +158,12 @@ async function sendStaggeredNotifications(
   }
 
   for (let b = 0; b < batches.length; b++) {
+    assertScheduledLeaseActive(lease);
     const batch = batches[b];
     console.log(`✈️ [SmartScheduler] Sending batch ${b + 1}/${batches.length} (${batch.length} items)`);
 
     for (const entry of batch) {
+      assertScheduledLeaseActive(lease);
       if (sentToday >= config.dailyMaxRecipients) {
         console.log(`   ⛔ [SmartScheduler] Daily max (${config.dailyMaxRecipients}) reached. Stopping.`);
         return sentToday;
@@ -136,23 +173,28 @@ async function sendStaggeredNotifications(
       }
 
       try {
+        assertScheduledLeaseActive(lease);
         await notifySubscriptionExpired({
           propertyNumber: entry.propertyNumber,
           propertyName: entry.propertyName,
           ownerPhone: entry.ownerPhone,
         });
+        assertScheduledLeaseActive(lease);
 
           if (entry.ownerPhone) {
+            assertScheduledLeaseActive(lease);
             await notifyOwnerSubscriptionExpired({
               ownerPhone: entry.ownerPhone,
               propertyNumber: entry.propertyNumber,
               propertyName: entry.propertyName,
             });
+            assertScheduledLeaseActive(lease);
           }
 
         sentToday++;
         sentAlready.add(entry.propertyNumber);
       } catch (err) {
+        assertScheduledLeaseActive(lease);
         console.error(`❌ [SmartScheduler] Failed for ${entry.propertyNumber}:`, err);
       }
     }
@@ -162,7 +204,8 @@ async function sendStaggeredNotifications(
       const jitter = Math.floor(Math.random() * 15_000); // 0-15s extra randomness between batches
       const waitTime = config.slotIntervalMinutes * 60_000 + jitter;
       console.log(`   ⏳ [SmartScheduler] Waiting ${Math.round(waitTime / 1000)}s before next batch...`);
-      await delay(waitTime);
+      await delay(waitTime, lease);
+      assertScheduledLeaseActive(lease);
     }
   }
 
@@ -171,13 +214,18 @@ async function sendStaggeredNotifications(
 
 // ─── Firebase Settings Integration ─────────────────────────────────────────────
 
-async function getSmartScheduleConfig(): Promise<SmartScheduleConfig> {
+async function getSmartScheduleConfig(
+  lease?: DistributedJobLease,
+): Promise<SmartScheduleConfig> {
   try {
+    assertScheduledLeaseActive(lease);
     const ns = await firebaseService.getNotificationSettings();
+    assertScheduledLeaseActive(lease);
     if (ns.smartSchedule) {
       return { ...DEFAULT_CONFIG, ...ns.smartSchedule } as SmartScheduleConfig;
     }
   } catch (err) {
+    assertScheduledLeaseActive(lease);
     console.warn("[SmartScheduler] Could not load smartSchedule from Firebase:", err);
   }
   return DEFAULT_CONFIG;
@@ -199,22 +247,29 @@ export async function updateSmartScheduleConfig(config: Partial<SmartScheduleCon
  * Scans subscriptions and dispatches notifications for the ones that are expired.
  * This is the entry-point called by the scheduler loop.
  */
-export async function dispatchExpiredSubscriptionReminders() {
+export async function dispatchExpiredSubscriptionReminders(
+  lease?: DistributedJobLease,
+) {
   try {
-    const config = await getSmartScheduleConfig();
+    assertScheduledLeaseActive(lease);
+    const config = await getSmartScheduleConfig(lease);
+    assertScheduledLeaseActive(lease);
     if (!config.enabled) {
       console.log("⛔ [SmartScheduler] Notifications disabled.");
       return;
     }
 
     const subscriptions = await storage.getSubscriptions();
+    assertScheduledLeaseActive(lease);
     const properties = await storage.getProperties();
+    assertScheduledLeaseActive(lease);
     const today = getRiyadhNow();
     today.setHours(0, 0, 0, 0);
 
     const expiredEntries: ExpiredSubscriptionEntry[] = [];
 
     for (const sub of subscriptions) {
+      assertScheduledLeaseActive(lease);
       if (isSubscriptionStatusSuspended(sub.status)) continue;
       if (!sub.endDate || !sub.propertyNumber) continue;
       const endDate = new Date(sub.endDate);
@@ -242,19 +297,36 @@ export async function dispatchExpiredSubscriptionReminders() {
     }
 
     console.log(`📬 [SmartScheduler] Found ${expiredEntries.length} expired subscriptions. Dispatching...`);
-    await sendStaggeredNotifications(expiredEntries, config);
+    await sendStaggeredNotifications(expiredEntries, config, lease);
+    assertScheduledLeaseActive(lease);
     console.log("✅ [SmartScheduler] Dispatch cycle complete.");
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [SmartScheduler] Error dispatching reminders:", error);
+    throw error;
   }
+}
+
+async function dispatchScheduledExpiredSubscriptionReminders(target: Date) {
+  return runDistributedScheduledJob({
+    jobName: "smart-expired-subscription-reminders",
+    windowKey: target.toISOString(),
+    now: getRiyadhNow(),
+    leaseMs: 18 * 60 * 60 * 1_000,
+    task: (lease) => dispatchExpiredSubscriptionReminders(lease),
+  });
 }
 
 // ─── Existing Legacy Helpers (kept for compatibility) ────────────────────────
 
-async function getTodaysSentNotifications(): Promise<Set<string>> {
+async function getTodaysSentNotifications(
+  lease?: DistributedJobLease,
+): Promise<Set<string>> {
   const sentToday = new Set<string>();
   try {
+    assertScheduledLeaseActive(lease);
     const logs = await firebaseService.getWhatsAppLogs();
+    assertScheduledLeaseActive(lease);
     const todayStr = new Date().toISOString().split("T")[0];
     for (const log of logs) {
       const propertyNumber = log.propertyNumber || "";
@@ -265,6 +337,7 @@ async function getTodaysSentNotifications(): Promise<Set<string>> {
       }
     }
   } catch (error) {
+    assertScheduledLeaseActive(lease);
     console.error("❌ [SmartScheduler] Error reading logs:", error);
   }
   return sentToday;
@@ -298,7 +371,7 @@ async function tick() {
     // If we are within 30 minutes of the target dispatch time → run
     if (diffMs <= 30 * 60 * 1000 && diffMs > -30 * 60_000) {
       console.log(`🚀 [SmartScheduler] Triggering dispatch for ${nextTarget.toLocaleString()}`);
-      await dispatchExpiredSubscriptionReminders();
+      await dispatchScheduledExpiredSubscriptionReminders(nextTarget);
     }
 
     scheduleNextTick();
@@ -375,7 +448,7 @@ async function checkMissedDispatch() {
   if (alreadySent.size > 0) return;
 
   console.log("🔄 [SmartScheduler] Missed dispatch detected for today, running catch-up...");
-  await dispatchExpiredSubscriptionReminders();
+  await dispatchScheduledExpiredSubscriptionReminders(targetToday);
 }
 
 // ─── Legacy Remainder (kept for imports that still rely on old functions) ─────

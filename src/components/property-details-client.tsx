@@ -34,6 +34,7 @@ import {
 import { PropertyDetailsSkeleton } from "@/components/property-details-skeleton";
 import { ContactPhoneDialog } from "@/components/contact/contact-phone-dialog";
 import { PropertyFavoriteButton } from "@/components/customer/property-favorite-button";
+import { PropertyReviews } from "@/components/customer/property-reviews";
 
 const DEFAULT_WHATSAPP = "966533220646";
 
@@ -174,11 +175,6 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
         otpWhatsAppTabRef.current = null;
     }, []);
 
-    // ✅ التمرير للأعلى عند فتح صفحة التفاصيل
-    useEffect(() => {
-        window.scrollTo({ top: 0, behavior: "instant" });
-    }, [propertyId]);
-
     // جلب بيانات العقار مباشرة من الخادم (أسرع من Google Apps Script)
     const {
         data: property,
@@ -238,6 +234,19 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
         refetchOnWindowFocus: false,
         initialData: initialProperty ?? undefined,
     });
+
+    // ✅ التمرير للأعلى عند فتح صفحة التفاصيل أو إلى قسم التواصل عند طلبه مباشرة
+    useEffect(() => {
+        if (!property) return;
+        if (window.location.hash === "#contact-booking") {
+            window.requestAnimationFrame(() => {
+                contactButtonRef.current?.scrollIntoView({ block: "center" });
+                contactButtonRef.current?.focus({ preventScroll: true });
+            });
+            return;
+        }
+        window.scrollTo({ top: 0, behavior: "instant" });
+    }, [property, propertyId]);
 
     // جلب بيانات SEO المخصصة للعقار
     const { data: seoData } = useQuery<{
@@ -981,7 +990,7 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                     </section>
 
                     <aside dir="rtl" className="min-w-0 space-y-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:sticky lg:top-24 lg:self-start">
-                        <section className="rounded-lg border border-[#d8d1bf] bg-[#fffdf8] p-4 sm:p-5">
+                        <section id="contact-booking" className="scroll-mt-24 rounded-lg border border-[#d8d1bf] bg-[#fffdf8] p-4 sm:p-5">
                             <div className="mb-4 flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                     <p className="text-xs font-semibold text-[#8b7140]">التواصل والحجز</p>
@@ -1138,6 +1147,8 @@ export default function PropertyDetailsClient({ propertyId, initialProperty, ini
                                 )}
                             </section>
                         )}
+
+                        <PropertyReviews propertyNumber={property.propertyNumber} />
 
                         {premium && seoData?.seoDescription && (
                             <section className="rounded-lg border border-[#e0c98b] bg-[#fffaf0] p-4 sm:p-5 md:p-7">

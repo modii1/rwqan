@@ -45,6 +45,24 @@
       "indexes": []
     },
     {
+      "collectionGroup": "owner_account_otp_challenges",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "owner_account_otp_issue_limits",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "owner_login_attempt_limits",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "booking_notification_quotas",
       "fieldPath": "expiresAtTtl",
       "ttl": true,
@@ -52,6 +70,24 @@
     },
     {
       "collectionGroup": "booking_short_links",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "server_sessions",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "scheduled_job_runs",
+      "fieldPath": "expiresAtTtl",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "whatsapp_pending_delivery_receipts",
       "fieldPath": "expiresAtTtl",
       "ttl": true,
       "indexes": []

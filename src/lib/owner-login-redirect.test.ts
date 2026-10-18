@@ -14,6 +14,14 @@ test("owner login preserves the subscription upgrade destination", () => {
     getSafeOwnerLoginDestination("?next=%2Fowner%2Fsubscription"),
     "/owner/subscription",
   );
+  assert.equal(
+    getOwnerLoginUrl("/owner/requests"),
+    "/owner/login?next=%2Fowner%2Frequests",
+  );
+  assert.equal(
+    getSafeOwnerLoginDestination("?next=%2Fowner%2Frequests"),
+    "/owner/requests",
+  );
 });
 
 test("owner login rejects unapproved and external destinations", () => {

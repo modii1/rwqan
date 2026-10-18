@@ -1,5 +1,6 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ import {
   type VerificationLevel,
 } from "./verification-status";
 import { getAdminVerificationRefetchInterval } from "@/lib/workflow-query-refresh";
+import { getAdminOperationTarget } from "@/lib/admin-operation-target";
 
 type FilterType =
   | VerificationLevel
@@ -52,7 +54,9 @@ type VerificationProperty = Property & {
 };
 
 export default function AdminVerificationSection() {
-  const [search, setSearch] = useState("");
+  const searchParams = useSearchParams();
+  const targetedPropertyNumber = getAdminOperationTarget(searchParams, "property");
+  const [search, setSearch] = useState(targetedPropertyNumber);
   const [filter, setFilter] = useState<FilterType>("all");
   const [loadingApprove, setLoadingApprove] = useState<string | null>(null);
   const [loadingReject, setLoadingReject] = useState<string | null>(null);
@@ -316,6 +320,22 @@ export default function AdminVerificationSection() {
       );
     });
   }, [propertiesWithStatus, search, filter]);
+
+  useEffect(() => {
+    if (!targetedPropertyNumber) return;
+    setSearch(targetedPropertyNumber);
+    setFilter("all");
+  }, [targetedPropertyNumber]);
+
+  useEffect(() => {
+    if (!targetedPropertyNumber || filtered.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`admin-verification-property-${targetedPropertyNumber}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [filtered.length, targetedPropertyNumber]);
 
   const stats = useMemo(() => {
     const total = propertiesWithStatus.length;
@@ -589,8 +609,11 @@ export default function AdminVerificationSection() {
             imageCount,
           }) => (
             <Card
+              id={`admin-verification-property-${property.propertyNumber}`}
               key={property.propertyNumber}
-              className="flex min-w-0 max-w-full flex-col gap-2 overflow-hidden p-3"
+              className={`flex min-w-0 max-w-full flex-col gap-2 overflow-hidden p-3 ${
+                targetedPropertyNumber === property.propertyNumber ? "ring-2 ring-[#9a7623] ring-offset-2" : ""
+              }`}
             >
               {/* ———————————— معلومات العقار ———————————— */}
               <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

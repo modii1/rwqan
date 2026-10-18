@@ -19,6 +19,10 @@ test("admin notification history localizes kinds and recipients", () => {
 
 test("admin notification history distinguishes terminal and queued states", () => {
   assert.deepEqual(notificationStatusMeta("sent"), { label: "تم الإرسال", tone: "green" });
+  assert.deepEqual(notificationStatusMeta("sent", "accepted"), { label: "قيد الإرسال", tone: "blue" });
+  assert.deepEqual(notificationStatusMeta("sent", "delivered"), { label: "تم الإرسال", tone: "green" });
+  assert.deepEqual(notificationStatusMeta("sent", "read"), { label: "تم الإرسال", tone: "green" });
+  assert.deepEqual(notificationStatusMeta("sent", "failed"), { label: "فشل الإرسال", tone: "red" });
   assert.deepEqual(notificationStatusMeta("suppressed_quota"), { label: "منعها حد الرسائل", tone: "amber" });
   assert.deepEqual(notificationStatusMeta("pending"), { label: "مجدولة", tone: "blue" });
 });

@@ -15,6 +15,42 @@ import { countR2Images } from "../utils/r2";
 import { isActivePremiumSubscription, isPremiumSubscriptionType } from "../../shared/subscriptionType";
 import { normalizePropertyFacilitySelection } from "../../shared/propertyFacilityFilter";
 
+function normalizePropertyComparisonFields<T extends Partial<Property>>(
+  input: T,
+): T {
+  const normalized = { ...input } as T & Record<string, unknown>;
+
+  if (Object.prototype.hasOwnProperty.call(input, "capacity")) {
+    const rawCapacity = (input as Record<string, unknown>).capacity;
+    if (rawCapacity === undefined || rawCapacity === null || rawCapacity === "") {
+      normalized.capacity = null;
+    } else {
+      const capacity = Number(rawCapacity);
+      if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1000) {
+        throw new RangeError("Invalid property capacity");
+      }
+      normalized.capacity = capacity;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "availabilityNote")) {
+    const rawAvailabilityNote = (input as Record<string, unknown>).availabilityNote;
+    if (rawAvailabilityNote === undefined || rawAvailabilityNote === null) {
+      normalized.availabilityNote = "";
+    } else if (typeof rawAvailabilityNote !== "string") {
+      throw new RangeError("Invalid property availability note");
+    } else {
+      const availabilityNote = rawAvailabilityNote.trim();
+      if (availabilityNote.length > 120) {
+        throw new RangeError("Invalid property availability note");
+      }
+      normalized.availabilityNote = availabilityNote;
+    }
+  }
+
+  return normalized;
+}
+
 export class PropertyService {
   // ─── Read ───────────────────────────────────────────────────────────────────
 
@@ -30,11 +66,11 @@ export class PropertyService {
 
   async create(data: InsertProperty): Promise<Property> {
     // Premium is granted by an activated subscription, never by property creation alone.
-    return firebaseService.createProperty({
+    return firebaseService.createProperty(normalizePropertyComparisonFields({
       ...data,
       facilities: normalizePropertyFacilitySelection(data.facilities),
       subscriptionType: "عادي",
-    });
+    }));
   }
 
   // ─── Update ─────────────────────────────────────────────────────────────────
@@ -75,7 +111,7 @@ export class PropertyService {
         key !== "commissionHoldOverride" &&
         !key.startsWith("commissionHoldOverride.")),
     ) as Partial<Property>;
-    const persistedUpdates: Partial<Property> = { ...allowedUpdates };
+    const persistedUpdates = normalizePropertyComparisonFields(allowedUpdates);
     if (updates.facilities !== undefined) {
       persistedUpdates.facilities = normalizePropertyFacilitySelection(updates.facilities);
     }

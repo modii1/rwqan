@@ -23,10 +23,14 @@ test("customer account routes enforce identity isolation and return safe contrac
     getProfile: customerAccountService.getProfile,
     updateProfile: customerAccountService.updateProfile,
     getHistory: customerAccountService.getHistory,
+    markBookingNotBooked: customerAccountService.markBookingNotBooked,
+    reportOwnerNoResponse: customerAccountService.reportOwnerNoResponse,
     getFavorites: customerAccountService.getFavoritePropertyNumbers,
     setFavorite: customerAccountService.setFavorite,
   };
   const favoriteCalls: Array<{ propertyNumber: unknown; selected: boolean }> = [];
+  const notBookedCalls: Array<{ phone: string; bookingId: unknown }> = [];
+  const noResponseCalls: Array<{ phone: string; bookingId: unknown }> = [];
 
   (contactIdentityService as any).resolve = async (token: unknown) => token === TOKEN
     ? {
@@ -62,6 +66,44 @@ test("customer account routes enforce identity isolation and return safe contrac
     answeredAt: null,
   }];
   (customerAccountService as any).getFavoritePropertyNumbers = async () => ["10001"];
+  (customerAccountService as any).markBookingNotBooked = async (
+    phone: string,
+    bookingId: unknown,
+  ) => {
+    notBookedCalls.push({ phone, bookingId });
+    return {
+      id: String(bookingId),
+      propertyNumber: "10001",
+      propertyName: null,
+      requestCode: "REQ-1",
+      contactAt: "2026-09-20T10:00:00.000Z",
+      bookingStatus: "declined",
+      listedPriceOptionsHalalas: [],
+      questionnaire: null,
+      answeredAt: "2026-09-20T11:00:00.000Z",
+      followUpPath: null,
+      canMarkNotBooked: false,
+    };
+  };
+  (customerAccountService as any).reportOwnerNoResponse = async (
+    phone: string,
+    bookingId: unknown,
+  ) => {
+    noResponseCalls.push({ phone, bookingId });
+    return {
+      id: String(bookingId),
+      propertyNumber: "10001",
+      propertyName: null,
+      requestCode: "REQ-1",
+      contactAt: "2026-09-20T10:00:00.000Z",
+      bookingStatus: "awaiting_response",
+      listedPriceOptionsHalalas: [],
+      questionnaire: null,
+      answeredAt: null,
+      canReportNoResponse: false,
+      ownerNoResponseReportedAt: "2026-09-20T11:00:00.000Z",
+    };
+  };
   (customerAccountService as any).setFavorite = async (
     _phone: string,
     propertyNumber: unknown,
@@ -225,12 +267,30 @@ test("customer account routes enforce identity isolation and return safe contrac
         { propertyNumber: "20002", selected: true },
         { propertyNumber: "20002", selected: false },
       ]);
+
+      const notBooked = await fetch(
+        `${baseUrl}/api/customer/history/booking-1/not-booked`,
+        { method: "POST", headers: authHeaders },
+      );
+      assert.equal(notBooked.status, 200);
+      assert.equal((await notBooked.json()).booking.bookingStatus, "declined");
+      assert.deepEqual(notBookedCalls, [{ phone: PHONE, bookingId: "booking-1" }]);
+
+      const noResponse = await fetch(
+        `${baseUrl}/api/customer/history/booking-2/no-response`,
+        { method: "POST", headers: authHeaders },
+      );
+      assert.equal(noResponse.status, 200);
+      assert.equal((await noResponse.json()).booking.canReportNoResponse, false);
+      assert.deepEqual(noResponseCalls, [{ phone: PHONE, bookingId: "booking-2" }]);
     });
   } finally {
     contactIdentityService.resolve = originals.resolve;
     customerAccountService.getProfile = originals.getProfile;
     customerAccountService.updateProfile = originals.updateProfile;
     customerAccountService.getHistory = originals.getHistory;
+    customerAccountService.markBookingNotBooked = originals.markBookingNotBooked;
+    customerAccountService.reportOwnerNoResponse = originals.reportOwnerNoResponse;
     customerAccountService.getFavoritePropertyNumbers = originals.getFavorites;
     customerAccountService.setFavorite = originals.setFavorite;
     if (server?.listening) {

@@ -18,14 +18,17 @@ import {
   assertDevOnlyAdminCredentialsIsolation,
   assertFirebaseDevIsolation,
   assertPaymobKeyEnvironmentMatch,
+  assertProductionFirestoreAvailable,
   assertProductionSecurityEnvironment,
 } from "./config/runtimeEnvironment";
 import { captureWhatsAppWebhookRawBody } from "./routes/whatsapp-delivery-webhook";
 import {
+  activeFirestore,
   getActiveDataEnvironment,
   getActiveFirestoreProjectId,
 } from "./config/dataEnvironment";
 import { syncR2Environment } from "./utils/r2";
+import { FirestoreSessionStore } from "./services/FirestoreSessionStore";
 
 
 const app = express();
@@ -46,6 +49,7 @@ const handle = nextApp.getRequestHandler();
     assertPaymobKeyEnvironmentMatch();
     assertR2DevIsolation();
     syncR2Environment();
+    assertProductionFirestoreAvailable(activeFirestore);
     console.log(
       `[RWQAN] بيئة البيانات النشطة: ${getActiveDataEnvironment()} · مشروع Firestore الفعلي: ${getActiveFirestoreProjectId() ?? "غير محدد"}`,
     );
@@ -90,9 +94,9 @@ const handle = nextApp.getRequestHandler();
     // ====================================
     // 🚀 SESSION SETTINGS
     // ====================================
-    const memoryStore = new (MemoryStore(session))({
-      checkPeriod: 86400000,
-    });
+    const sessionStore = dev
+      ? new (MemoryStore(session))({ checkPeriod: 86400000 })
+      : new FirestoreSessionStore(activeFirestore);
 
     app.set("trust proxy", 1);
 
@@ -104,7 +108,7 @@ const handle = nextApp.getRequestHandler();
         secret: sessionSecret,
         resave: false,
         saveUninitialized: false,
-        store: memoryStore,
+        store: sessionStore,
         cookie: {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",

@@ -108,6 +108,8 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
           ownerPhone,
           propertyNumber,
           message: customMessage,
+          logType: "admin_manual_owner",
+          propertyName: property.name || propertyNumber,
         });
         messageType = "رسالة مخصصة";
         break;

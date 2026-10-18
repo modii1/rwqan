@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { firebaseService } from "./firebaseService";
-import { expireOldPendingPayments } from "./scheduler";
+import {
+  downgradeExpiredSubscriptions,
+  expireOldPendingPayments,
+  runScheduledTaskSafely,
+} from "./scheduler";
 import { paymentService } from "./services/PaymentService";
+import { DistributedScheduledJobLeaseLostError } from "./services/DistributedScheduledJob";
 
 const providerPayment = (overrides: Record<string, unknown>) => ({
   id: "PAY-PROVIDER",
@@ -23,6 +28,111 @@ const providerPayment = (overrides: Record<string, unknown>) => ({
   paymentCheckoutUrl:
     "https://ksa.paymob.com/unifiedcheckout/?publicKey=pk&clientSecret=secret",
   ...overrides,
+});
+
+test("scheduled task failures are observed instead of becoming unhandled rejections", async () => {
+  const expectedError = new Error("scheduled task failed");
+  const reportedErrors: unknown[] = [];
+
+  runScheduledTaskSafely(
+    async () => {
+      throw expectedError;
+    },
+    (error) => reportedErrors.push(error),
+  );
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(reportedErrors, [expectedError]);
+});
+
+test("payment expiry stops before mutations when its scheduler lease is lost", async () => {
+  const originals = {
+    getFeatureFlag: firebaseService.getFeatureFlag,
+    getPayments: firebaseService.getPayments,
+    claimReconciliation: firebaseService.claimPaymentProviderReconciliation,
+    expirePending: firebaseService.expirePendingPaymentIfEligible,
+  };
+  const controller = new AbortController();
+  let mutations = 0;
+
+  try {
+    (firebaseService as any).getFeatureFlag = async () => true;
+    (firebaseService as any).getPayments = async () => {
+      controller.abort();
+      return [providerPayment({})];
+    };
+    (firebaseService as any).claimPaymentProviderReconciliation = async () => {
+      mutations += 1;
+      return { claimed: false };
+    };
+    (firebaseService as any).expirePendingPaymentIfEligible = async () => {
+      mutations += 1;
+      return true;
+    };
+
+    await assert.rejects(
+      () => expireOldPendingPayments({
+        signal: controller.signal,
+        throwIfLeaseLost: () => {
+          if (controller.signal.aborted) {
+            throw new DistributedScheduledJobLeaseLostError();
+          }
+        },
+      }),
+      DistributedScheduledJobLeaseLostError,
+    );
+    assert.equal(mutations, 0);
+  } finally {
+    (firebaseService as any).getFeatureFlag = originals.getFeatureFlag;
+    (firebaseService as any).getPayments = originals.getPayments;
+    (firebaseService as any).claimPaymentProviderReconciliation =
+      originals.claimReconciliation;
+    (firebaseService as any).expirePendingPaymentIfEligible =
+      originals.expirePending;
+  }
+});
+
+test("subscription downgrade stops before writes when its scheduler lease is lost", async () => {
+  const originals = {
+    getSubscriptions: firebaseService.getSubscriptions,
+    expireSubscription: firebaseService.expireSubscriptionIfNeeded,
+  };
+  const controller = new AbortController();
+  let writes = 0;
+
+  try {
+    (firebaseService as any).getSubscriptions = async () => {
+      controller.abort();
+      return [{
+        id: "SUB-1",
+        propertyNumber: "PROP-1",
+        subscriptionType: "ذهبية",
+        status: "نشط",
+        endDate: "2026-01-01",
+      }];
+    };
+    (firebaseService as any).expireSubscriptionIfNeeded = async () => {
+      writes += 1;
+      return true;
+    };
+
+    await assert.rejects(
+      () => downgradeExpiredSubscriptions({
+        signal: controller.signal,
+        throwIfLeaseLost: () => {
+          if (controller.signal.aborted) {
+            throw new DistributedScheduledJobLeaseLostError();
+          }
+        },
+      }),
+      DistributedScheduledJobLeaseLostError,
+    );
+    assert.equal(writes, 0);
+  } finally {
+    (firebaseService as any).getSubscriptions = originals.getSubscriptions;
+    (firebaseService as any).expireSubscriptionIfNeeded =
+      originals.expireSubscription;
+  }
 });
 
 test("payment expiry reconciles Paymob atomically, throttles polling, and keeps late success recoverable", async () => {

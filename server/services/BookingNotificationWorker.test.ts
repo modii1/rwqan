@@ -11,6 +11,7 @@ import type {
   BookingNotificationJob,
   BookingNotificationKind,
 } from "./BookingCommissionTypes";
+import { whatsAppPendingDeliveryStore } from "./WhatsAppPendingDeliveryStore";
 
 const previousSecret = process.env.SESSION_SECRET;
 const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
@@ -1144,6 +1145,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
     finish: store.finishNotificationJob,
     followUpFlag: service.isFollowUpEnabled,
     commissionFlag: service.isCommissionEnforcementEnabled,
+    reconcile: whatsAppPendingDeliveryStore.reconcile,
     fetch: globalThis.fetch,
   };
   const booking = observeOnlyBooking();
@@ -1163,6 +1165,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
   const finalizations: unknown[] = [];
   let claimCalls = 0;
   let settingsReads = 0;
+  const reconciliationCalls: string[] = [];
 
   try {
     store.recoverExpiredNotificationClaims = async () => 0;
@@ -1188,6 +1191,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
     };
     store.finishNotificationJob = async (input: unknown) => {
       finalizations.push(input);
+      return true;
     };
     service.isFollowUpEnabled = async () => true;
     service.isCommissionEnforcementEnabled = async () => true;
@@ -1196,7 +1200,17 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
         url: String(url),
         body: JSON.parse(String(init?.body)),
       });
-      return new Response("{}", { status: 200 });
+      return new Response(JSON.stringify({
+        data: { message_id: "wamid.booking-worker-1" },
+      }), { status: 200 });
+    };
+    (whatsAppPendingDeliveryStore as any).reconcile = async (
+      providerMessageId: string,
+      target: unknown,
+    ) => {
+      assert.equal(target, store);
+      reconciliationCalls.push(providerMessageId);
+      return [];
     };
 
     assert.deepEqual(
@@ -1220,7 +1234,9 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
       leaseToken: "dispatch-lease",
       success: true,
       error: undefined,
+      providerMessageId: "wamid.booking-worker-1",
     }]);
+    assert.deepEqual(reconciliationCalls, ["wamid.booking-worker-1"]);
   } finally {
     store.recoverExpiredNotificationClaims = originals.recover;
     store.claimDueNotificationJobs = originals.claim;
@@ -1229,6 +1245,7 @@ test("dispatch fetches the persisted template, sends its rendered body once, and
     store.finishNotificationJob = originals.finish;
     service.isFollowUpEnabled = originals.followUpFlag;
     service.isCommissionEnforcementEnabled = originals.commissionFlag;
+    whatsAppPendingDeliveryStore.reconcile = originals.reconcile;
     globalThis.fetch = originals.fetch;
   }
 });

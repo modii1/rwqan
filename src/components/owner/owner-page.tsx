@@ -3,17 +3,22 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   CreditCard,
   Home,
   Image as ImageIcon,
   Loader2,
+  MessageCircle,
   PencilLine,
   type LucideIcon,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import type { OwnerPropertyOption } from "@shared/owner-inquiries";
+import { OwnerAccountManager } from "@/components/owner/owner-account-manager";
 
 export const ownerPanelClass = "rounded-lg border border-[#dfe2dc] bg-white shadow-sm shadow-black/[0.03]";
 export const ownerSoftPanelClass = "rounded-lg border border-[#e2e5df] bg-[#f8f9f7]";
@@ -25,6 +30,7 @@ const ownerNavigation: Array<{
   icon: LucideIcon;
 }> = [
   { href: "/owner/dashboard", label: "لوحة التحكم", shortLabel: "الرئيسية", icon: Home },
+  { href: "/owner/requests", label: "طلبات العملاء", shortLabel: "الطلبات", icon: MessageCircle },
   { href: "/owner/update-property", label: "بيانات العقار", shortLabel: "البيانات", icon: PencilLine },
   { href: "/owner/images", label: "صور العقار", shortLabel: "الصور", icon: ImageIcon },
   { href: "/owner/subscription", label: "الاشتراك", shortLabel: "الاشتراك", icon: CreditCard },
@@ -70,7 +76,7 @@ export function OwnerMobileNavigation() {
       aria-label="صفحات المالك"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-[#dfe2dc] bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden"
     >
-      <div className="mx-auto grid max-w-lg grid-cols-4 gap-1">
+      <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
         {ownerNavigation.map(({ href, shortLabel, icon: Icon }) => {
           const active = isActivePath(pathname, href);
           return (
@@ -90,6 +96,65 @@ export function OwnerMobileNavigation() {
         })}
       </div>
     </nav>
+  );
+}
+
+function OwnerPropertySwitcher() {
+  const { toast } = useToast();
+  const { data } = useQuery<{ properties: OwnerPropertyOption[] }>({
+    queryKey: ["/api/owner/properties"],
+    queryFn: async () => {
+      const response = await fetch("/api/owner/properties", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return { properties: [] };
+      return response.json();
+    },
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const properties = data?.properties || [];
+  const current = properties.find((property) => property.isCurrent);
+  if (properties.length < 2 || !current) return null;
+
+  const switchProperty = async (propertyNumber: string) => {
+    if (!propertyNumber || propertyNumber === current.propertyNumber) return;
+    try {
+      const response = await fetch("/api/owner/switch-property", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyNumber }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "تعذر تبديل العقار");
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "تعذر تبديل العقار",
+        description: error instanceof Error ? error.message : "حاول مرة أخرى",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <label className="relative flex-none">
+      <span className="sr-only">تبديل العقار</span>
+      <select
+        aria-label="تبديل العقار"
+        value={current.propertyNumber}
+        onChange={(event) => void switchProperty(event.target.value)}
+        className="h-10 max-w-[7.5rem] rounded-lg border border-[#dfe2dc] bg-white px-2 text-xs font-bold text-[#242822] outline-none focus-visible:ring-2 focus-visible:ring-[#80621d] sm:max-w-[11rem] sm:text-sm"
+      >
+        {properties.map((property) => (
+          <option key={property.propertyNumber} value={property.propertyNumber}>
+            {property.name || `عقار ${property.propertyNumber}`}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -132,6 +197,8 @@ export function OwnerPageHeader({
           {description && <p className="mt-0.5 truncate text-xs text-[#687064] sm:text-sm">{description}</p>}
         </div>
 
+        <OwnerPropertySwitcher />
+        <OwnerAccountManager />
         {actions && <div className="flex flex-none items-center gap-1">{actions}</div>}
         <OwnerDesktopNavigation />
       </div>

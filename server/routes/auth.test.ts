@@ -11,20 +11,36 @@ import {
   contactIdentityService,
 } from "../services/ContactIdentityService";
 import { BOOKING_CUSTOMER_SESSION_COOKIE } from "../services/BookingCommissionService";
+import { ownerLoginRateLimiter } from "../services/OwnerLoginRateLimiter";
 
 test("successful owner login clears and revokes dormant customer access", async () => {
   const originalValidateOwnerPin = authService.validateOwnerPin;
   const originalRevoke = contactIdentityService.revoke;
+  const originalConsumeOwnerLimit = ownerLoginRateLimiter.consume;
+  const originalClearOwnerLimit = ownerLoginRateLimiter.clear;
   const contactToken = "a".repeat(43);
   const revokedTokens: unknown[] = [];
+  let regenerateCalls = 0;
   const session: Record<string, unknown> = {
     isAdmin: true,
+    regenerate(callback: (error?: Error) => void) {
+      regenerateCalls += 1;
+      delete session.isAdmin;
+      delete session.propertyNumber;
+      callback();
+      return session;
+    },
     save(callback: (error?: Error) => void) {
       callback();
     },
   };
 
   (authService as any).validateOwnerPin = async () => true;
+  (ownerLoginRateLimiter as any).consume = async () => ({
+    allowed: true,
+    retryAfterMs: 0,
+  });
+  (ownerLoginRateLimiter as any).clear = async () => {};
   (contactIdentityService as any).revoke = async (token: unknown) => {
     revokedTokens.push(token);
   };
@@ -65,8 +81,11 @@ test("successful owner login clears and revokes dormant customer access", async 
     assert.match(setCookie, /SameSite=Lax/i);
     assert.equal(session.propertyNumber, "12345");
     assert.equal("isAdmin" in session, false);
+    assert.equal(regenerateCalls, 1);
   } finally {
     authService.validateOwnerPin = originalValidateOwnerPin;
+    ownerLoginRateLimiter.consume = originalConsumeOwnerLimit;
+    ownerLoginRateLimiter.clear = originalClearOwnerLimit;
     contactIdentityService.revoke = originalRevoke;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -77,8 +96,16 @@ test("successful admin login clears an existing owner session", async () => {
   const originalSharedLimiter = firebaseService.consumeAdminLoginAttemptLimit;
   const originalDeleteSharedLimit = firebaseService.deleteAdminLoginAttemptLimit;
   const originalRevoke = contactIdentityService.revoke;
+  let regenerateCalls = 0;
   const session: Record<string, unknown> = {
     propertyNumber: "12345",
+    regenerate(callback: (error?: Error) => void) {
+      regenerateCalls += 1;
+      delete session.isAdmin;
+      delete session.propertyNumber;
+      callback();
+      return session;
+    },
     save(callback: (error?: Error) => void) {
       callback();
     },
@@ -119,11 +146,53 @@ test("successful admin login clears an existing owner session", async () => {
     assert.deepEqual(await response.json(), { ok: true });
     assert.equal(session.isAdmin, true);
     assert.equal("propertyNumber" in session, false);
+    assert.equal(regenerateCalls, 1);
   } finally {
     authService.validateAdminCredentials = originalValidateAdminCredentials;
     firebaseService.consumeAdminLoginAttemptLimit = originalSharedLimiter;
     firebaseService.deleteAdminLoginAttemptLimit = originalDeleteSharedLimit;
     contactIdentityService.revoke = originalRevoke;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("legacy owner login returns a bounded 429 before PIN verification", async () => {
+  const originalConsume = ownerLoginRateLimiter.consume;
+  const originalValidate = authService.validateOwnerPin;
+  let validationCalls = 0;
+  (ownerLoginRateLimiter as any).consume = async () => ({
+    allowed: false,
+    retryAfterMs: 61_000,
+  });
+  (authService as any).validateOwnerPin = async () => {
+    validationCalls += 1;
+    return false;
+  };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = {};
+    next();
+  });
+  app.use(authRouter);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  try {
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/owner/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ propertyNumber: "12345", pin: "wrong" }),
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("retry-after"), "61");
+    assert.equal(validationCalls, 0);
+  } finally {
+    ownerLoginRateLimiter.consume = originalConsume;
+    authService.validateOwnerPin = originalValidate;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
@@ -186,6 +255,133 @@ test("admin login endpoint throttles repeated invalid attempts", async () => {
     assert.equal(sharedLimiterCalls, 5);
   } finally {
     firebaseService.consumeAdminLoginAttemptLimit = originalSharedLimiter;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("owner password reset rejects cross-origin and rate-limited attempts before auth work", async () => {
+  const originals = {
+    consume: ownerLoginRateLimiter.consume,
+    sendResetCode: authService.sendResetCode,
+    setNewPassword: authService.setNewPassword,
+  };
+  let limiterCalls = 0;
+  let sendCalls = 0;
+  let passwordCalls = 0;
+  (ownerLoginRateLimiter as any).consume = async () => {
+    limiterCalls += 1;
+    return { allowed: false, retryAfterMs: 31_000 };
+  };
+  (authService as any).sendResetCode = async () => {
+    sendCalls += 1;
+    return { maskedPhone: "*******1234", expiresIn: 10 };
+  };
+  (authService as any).setNewPassword = async () => {
+    passwordCalls += 1;
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = {};
+    next();
+  });
+  app.use(authRouter);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  try {
+    for (const [path, body] of [
+      ["/api/auth/send-reset-code", { ownerId: "12345" }],
+      ["/api/auth/set-new-password", {
+        ownerId: "12345",
+        resetCode: "123456",
+        newPassword: "5678",
+      }],
+    ] as const) {
+      const crossOrigin = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://evil.example",
+        },
+        body: JSON.stringify(body),
+      });
+      assert.equal(crossOrigin.status, 403);
+
+      const throttled = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      assert.equal(throttled.status, 429);
+      assert.equal(throttled.headers.get("retry-after"), "31");
+    }
+
+    assert.equal(limiterCalls, 2);
+    assert.equal(sendCalls, 0);
+    assert.equal(passwordCalls, 0);
+  } finally {
+    ownerLoginRateLimiter.consume = originals.consume;
+    authService.sendResetCode = originals.sendResetCode;
+    authService.setNewPassword = originals.setNewPassword;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("successful password reset clears the property limiter after consuming the code", async () => {
+  const originals = {
+    consume: ownerLoginRateLimiter.consume,
+    clear: ownerLoginRateLimiter.clear,
+    setNewPassword: authService.setNewPassword,
+  };
+  const cleared: Array<{ ipAddress: unknown; propertyNumber: unknown }> = [];
+  (ownerLoginRateLimiter as any).consume = async () => ({
+    allowed: true,
+    retryAfterMs: 0,
+  });
+  (ownerLoginRateLimiter as any).clear = async (input: any) => {
+    cleared.push(input);
+  };
+  (authService as any).setNewPassword = async () => {};
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).session = {};
+    next();
+  });
+  app.use(authRouter);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  try {
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/auth/set-new-password`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ownerId: "12345",
+          resetCode: "123456",
+          newPassword: "5678",
+        }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(cleared.length, 1);
+    assert.equal(cleared[0].propertyNumber, "12345");
+  } finally {
+    ownerLoginRateLimiter.consume = originals.consume;
+    ownerLoginRateLimiter.clear = originals.clear;
+    authService.setNewPassword = originals.setNewPassword;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

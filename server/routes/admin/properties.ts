@@ -59,11 +59,40 @@ function withoutCommissionHoldUpdates(
   );
 }
 
+function normalizePropertyComparisonFields(
+  value: Record<string, any>,
+): string | null {
+  if (value.capacity !== undefined) {
+    const capacity = value.capacity === null || value.capacity === ""
+      ? null
+      : Number(value.capacity);
+    if (
+      capacity !== null
+      && (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1000)
+    ) return "السعة يجب أن تكون رقمًا صحيحًا بين 1 و 1000";
+    value.capacity = capacity;
+  }
+  if (value.availabilityNote !== undefined) {
+    if (typeof value.availabilityNote !== "string") {
+      return "بيان التوفر غير صالح";
+    }
+    value.availabilityNote = value.availabilityNote.trim();
+    if (value.availabilityNote.length > 120) {
+      return "بيان التوفر يجب ألا يتجاوز 120 حرفًا";
+    }
+  }
+  return null;
+}
+
 // 🔧 endpoint مؤقت لتحديث بيانات العقار (للاختبار)
 router.put("/api/admin/property/:propertyNumber", async (req, res) => {
   try {
     const { propertyNumber } = req.params;
     const updates = withoutCommissionHoldUpdates(req.body);
+    const comparisonFieldError = normalizePropertyComparisonFields(updates);
+    if (comparisonFieldError) {
+      return res.status(400).json({ error: comparisonFieldError });
+    }
     // skipVerification: admin edits should not push property back to 'pending'
     const updated = await propertyService.update(propertyNumber, updates, { skipVerification: true });
     res.json({ success: true, property: updated });
@@ -198,6 +227,8 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
         city: prop?.city || '',
         direction: prop?.direction || '',
         type: prop?.type || '',
+        capacity: prop?.capacity ?? null,
+        availabilityNote: prop?.availabilityNote || '',
         whatsappNumber: prop?.whatsappNumber || '',
         location: prop?.location || '',
         facilities: prop?.facilities || [],
@@ -247,6 +278,10 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
         // Try direct key (includes 'pin', 'priceWeekday', etc.)
         updates[key] = value;
       }
+    }
+    const comparisonFieldError = normalizePropertyComparisonFields(updates);
+    if (comparisonFieldError) {
+      return res.status(400).json({ error: comparisonFieldError });
     }
     console.log(
       `[ADMIN_PROPERTY_UPDATE] Processed update fields: ${Object.keys(updates).join(", ")}`,
@@ -371,6 +406,10 @@ router.post("/api/admin/properties", async (req, res) => {
       } else {
         data[key] = value;
       }
+    }
+    const comparisonFieldError = normalizePropertyComparisonFields(data);
+    if (comparisonFieldError) {
+      return res.status(400).json({ error: comparisonFieldError });
     }
 
     // Validate and normalize phone number

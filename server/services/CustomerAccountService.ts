@@ -1,5 +1,6 @@
 import {
   CUSTOMER_FAVORITES_MAX,
+  customerBookingIdSchema,
   customerProfileUpdateSchema,
   customerPropertyNumberSchema,
   type CustomerAccount,
@@ -13,18 +14,26 @@ import { hasActivePropertyHold } from "../../shared/propertyAvailability";
 import { isSubscriptionStatusSuspended } from "../../shared/subscriptionType";
 import { firebaseService } from "../firebaseService";
 import { createCustomerSubject } from "../utils/customerSubject";
-import { bookingCommissionStore } from "./BookingCommissionStore";
 import {
+  BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS,
+  bookingCommissionService,
   hasExplicitCustomerBookingResponse,
   toCustomerBookingPublicRow,
 } from "./BookingCommissionService";
+import {
+  BOOKING_CUSTOMER_RESPONSE_WINDOW_MS,
+  BookingWorkflowError,
+  bookingCommissionStore,
+} from "./BookingCommissionStore";
 import type { BookingFollowUpDocument } from "./BookingCommissionTypes";
 import { maskContactPhone } from "./ContactIdentityService";
 
 export type CustomerAccountErrorCode =
   | "CUSTOMER_FAVORITES_LIMIT"
   | "PROPERTY_NOT_AVAILABLE"
-  | "PROPERTY_NOT_FOUND";
+  | "PROPERTY_NOT_FOUND"
+  | "CUSTOMER_BOOKING_NOT_FOUND"
+  | "CUSTOMER_BOOKING_NOT_ACTIONABLE";
 
 export class CustomerAccountError extends Error {
   constructor(
@@ -59,6 +68,11 @@ export interface CustomerAccountStore {
   listCustomerBookingFollowUps(
     customerSubject: string,
   ): Promise<BookingFollowUpDocument[]>;
+  declineBooking(id: string): Promise<BookingFollowUpDocument>;
+  reportOwnerNoResponse(
+    id: string,
+    customerSubject: string,
+  ): Promise<BookingFollowUpDocument>;
   getPropertyByNumber(
     propertyNumber: string,
   ): Promise<Pick<
@@ -74,7 +88,19 @@ export interface CustomerAccountStore {
 
 type CustomerAccountServiceOptions = {
   now?: () => Date;
+  issueCustomerResponseToken?: (booking: BookingFollowUpDocument) => string;
 };
+
+function customerBookingResponseIsActionable(
+  booking: BookingFollowUpDocument,
+  nowMs: number,
+): boolean {
+  const createdAt = Date.parse(booking.createdAt);
+  return booking.bookingStatus === "awaiting_response"
+    && Number.isFinite(createdAt)
+    && nowMs < createdAt + BOOKING_CUSTOMER_RESPONSE_WINDOW_MS
+    && nowMs < createdAt + BOOKING_CUSTOMER_TOKEN_MAX_AGE_MS;
+}
 
 function contactAt(value: unknown): string {
   const raw = String(value || "").trim();
@@ -113,12 +139,17 @@ function profileDto(account: CustomerAccount): CustomerProfileDto {
 
 export class CustomerAccountService {
   private readonly now: () => Date;
+  private readonly issueCustomerResponseToken: (
+    booking: BookingFollowUpDocument,
+  ) => string;
 
   constructor(
     private readonly store: CustomerAccountStore,
     options: CustomerAccountServiceOptions = {},
   ) {
     this.now = options.now || (() => new Date());
+    this.issueCustomerResponseToken = options.issueCustomerResponseToken
+      || ((booking) => bookingCommissionService.issueCustomerResponseToken(booking));
   }
 
   subjectForPhone(value: unknown): { phone: string; customerSubject: string } {
@@ -226,6 +257,7 @@ export class CustomerAccountService {
 
   async getHistory(value: unknown): Promise<CustomerContactHistoryRow[]> {
     const account = await this.ensureForVerifiedPhone(value);
+    const nowMs = this.currentDate().getTime();
     const [requests, bookings] = await Promise.all([
       this.store.getCustomerRequests(account.id),
       this.store.listCustomerBookingFollowUps(account.id),
@@ -239,7 +271,7 @@ export class CustomerAccountService {
       const booking = bookingByRequestId.get(request.id);
       if (!booking) return contactOnlyRow(request);
       usedBookingIds.add(booking.id);
-      return toCustomerBookingPublicRow(booking);
+      return this.customerHistoryRow(account.id, booking, nowMs);
     });
 
     for (const booking of bookings) {
@@ -247,7 +279,7 @@ export class CustomerAccountService {
         !usedBookingIds.has(booking.id) &&
         hasExplicitCustomerBookingResponse(booking)
       ) {
-        history.push(toCustomerBookingPublicRow(booking));
+        history.push(this.customerHistoryRow(account.id, booking, nowMs));
       }
     }
 
@@ -259,12 +291,130 @@ export class CustomerAccountService {
     });
   }
 
-  private currentTimestamp(): string {
+  async markBookingNotBooked(
+    value: unknown,
+    rawBookingId: unknown,
+  ): Promise<CustomerContactHistoryRow> {
+    const bookingId = customerBookingIdSchema.parse(rawBookingId);
+    const account = await this.ensureForVerifiedPhone(value);
+    const bookings = await this.store.listCustomerBookingFollowUps(account.id);
+    const booking = bookings.find((candidate) =>
+      candidate.id === bookingId && candidate.customerSubject === account.id);
+    if (!booking) {
+      throw new CustomerAccountError(
+        "CUSTOMER_BOOKING_NOT_FOUND",
+        404,
+        "طلب الحجز غير موجود",
+      );
+    }
+    if (!customerBookingResponseIsActionable(booking, this.currentDate().getTime())) {
+      throw new CustomerAccountError(
+        "CUSTOMER_BOOKING_NOT_ACTIONABLE",
+        409,
+        "لم يعد من الممكن تعديل نتيجة هذا الحجز",
+      );
+    }
+
+    try {
+      const declined = await this.store.declineBooking(booking.id);
+      return {
+        ...toCustomerBookingPublicRow(declined),
+        followUpPath: null,
+        canMarkNotBooked: false,
+      };
+    } catch (error) {
+      if (error instanceof BookingWorkflowError) {
+        throw new CustomerAccountError(
+          "CUSTOMER_BOOKING_NOT_ACTIONABLE",
+          error.status,
+          "لم يعد من الممكن تعديل نتيجة هذا الحجز",
+        );
+      }
+      throw error;
+    }
+  }
+
+  async reportOwnerNoResponse(
+    value: unknown,
+    rawBookingId: unknown,
+  ): Promise<CustomerContactHistoryRow> {
+    const bookingId = customerBookingIdSchema.parse(rawBookingId);
+    const account = await this.ensureForVerifiedPhone(value);
+    const bookings = await this.store.listCustomerBookingFollowUps(account.id);
+    const booking = bookings.find((candidate) =>
+      candidate.id === bookingId && candidate.customerSubject === account.id);
+    if (!booking) {
+      throw new CustomerAccountError(
+        "CUSTOMER_BOOKING_NOT_FOUND",
+        404,
+        "طلب الحجز غير موجود",
+      );
+    }
+    if (!customerBookingResponseIsActionable(booking, this.currentDate().getTime())) {
+      throw new CustomerAccountError(
+        "CUSTOMER_BOOKING_NOT_ACTIONABLE",
+        409,
+        "لم يعد من الممكن الإبلاغ عن عدم الرد لهذا الطلب",
+      );
+    }
+
+    try {
+      const reported = await this.store.reportOwnerNoResponse(
+        booking.id,
+        account.id,
+      );
+      return this.customerHistoryRow(
+        account.id,
+        reported,
+        this.currentDate().getTime(),
+      );
+    } catch (error) {
+      if (error instanceof BookingWorkflowError) {
+        throw new CustomerAccountError(
+          error.code === "BOOKING_NOT_FOUND"
+            ? "CUSTOMER_BOOKING_NOT_FOUND"
+            : "CUSTOMER_BOOKING_NOT_ACTIONABLE",
+          error.status,
+          error.code === "BOOKING_NOT_FOUND"
+            ? "طلب الحجز غير موجود"
+            : "لم يعد من الممكن الإبلاغ عن عدم الرد لهذا الطلب",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private customerHistoryRow(
+    customerSubject: string,
+    booking: BookingFollowUpDocument,
+    nowMs: number,
+  ): CustomerContactHistoryRow {
+    const row = toCustomerBookingPublicRow(booking);
+    const actionable = booking.customerSubject === customerSubject
+      && customerBookingResponseIsActionable(booking, nowMs);
+    return {
+      ...row,
+      followUpPath: actionable
+        ? `/booking/${encodeURIComponent(this.issueCustomerResponseToken(booking))}`
+        : null,
+      canMarkNotBooked: actionable,
+      canReportNoResponse: actionable
+        && !booking.customerOwnerNoResponseReportedAt,
+      ownerNoResponseReportedAt:
+        booking.customerOwnerNoResponseReportedAt || null,
+    };
+  }
+
+  private currentDate(): Date {
     const date = this.now();
     if (!(date instanceof Date) || !Number.isFinite(date.getTime())) {
       throw new TypeError("Customer account clock returned an invalid time");
     }
-    return date.toISOString();
+    return date;
+  }
+
+  private currentTimestamp(): string {
+    return this.currentDate().toISOString();
   }
 }
 
@@ -280,6 +430,9 @@ const defaultCustomerAccountStore: CustomerAccountStore = {
     firebaseService.getCustomerRequests(customerSubject),
   listCustomerBookingFollowUps: (customerSubject) =>
     bookingCommissionStore.listBookingsForCustomer(customerSubject),
+  declineBooking: (id) => bookingCommissionStore.declineBooking(id),
+  reportOwnerNoResponse: (id, customerSubject) =>
+    bookingCommissionStore.reportOwnerNoResponse(id, customerSubject),
   getPropertyByNumber: (propertyNumber) =>
     firebaseService.getPropertyByNumber(propertyNumber),
   getPropertySubscriptionStatus: async (propertyNumber) =>

@@ -1006,15 +1006,28 @@ export default function OwnerDashboard() {
 
     // 🔥 هنا مكان peakPeriod الصحيح
     const peakPeriod = getPeakPeriod(allRequests);
+    const analyticsMonthlyRequests = Number(analytics?.monthlyRequests);
+    const analyticsDailyAverage = Number(analytics?.dailyAverage);
+    const analyticsGrowth = Number(analytics?.previousMonthGrowth);
+    const analyticsTotalProperties = Number(analytics?.totalProperties);
+    const analyticsRank = Number(analytics?.rank);
 
     return {
-      monthlyRequests,
-      dailyAverage,
-      highestDemandDay,
-      previousMonthGrowth: 0,
-      totalProperties: 1,
+      monthlyRequests: Number.isSafeInteger(analyticsMonthlyRequests) && analyticsMonthlyRequests >= 0
+        ? analyticsMonthlyRequests
+        : monthlyRequests,
+      dailyAverage: Number.isFinite(analyticsDailyAverage) && analyticsDailyAverage >= 0
+        ? analyticsDailyAverage
+        : dailyAverage,
+      highestDemandDay: typeof analytics?.highestDemandDay === "string" && analytics.highestDemandDay.trim()
+        ? analytics.highestDemandDay
+        : highestDemandDay,
+      previousMonthGrowth: Number.isFinite(analyticsGrowth) ? analyticsGrowth : 0,
+      totalProperties: Number.isSafeInteger(analyticsTotalProperties) && analyticsTotalProperties > 0
+        ? analyticsTotalProperties
+        : 0,
       peakPeriod,
-      rank: 1,
+      rank: Number.isSafeInteger(analyticsRank) && analyticsRank > 0 ? analyticsRank : 0,
     };
   };
 
@@ -1421,6 +1434,65 @@ export default function OwnerDashboard() {
               onAction={() => router.push("/owner/subscription")}
             />
           )}
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+          <Card className={`${ownerPanelClass} overflow-hidden`}>
+            <div className="flex flex-col gap-3 border-b border-[#edf0eb] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#eef0eb] text-[#80621d]">
+                  <MessageCircle className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="font-bold text-[#242822]">طلبات العملاء</h2>
+                  <p className="mt-0.5 text-xs text-[#687064]">متابعة التواصل ونتيجة الحجز والعمولة</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                className="h-10 rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+                onClick={() => router.push("/owner/requests")}
+              >
+                عرض كل الطلبات
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-x-reverse divide-y border-[#edf0eb] sm:grid-cols-4 sm:divide-y-0">
+              <OwnerRequestMetric label="كل الطلبات" value={requestsData?.summary?.total || 0} />
+              <OwnerRequestMetric label="بانتظار الرد" value={requestsData?.summary?.awaitingResponse || 0} />
+              <OwnerRequestMetric label="حجوزات مؤكدة" value={requestsData?.summary?.confirmed || 0} />
+              <OwnerRequestMetric label="عمولات للمتابعة" value={requestsData?.summary?.commissionAttention || 0} attention={(requestsData?.summary?.commissionAttention || 0) > 0} />
+            </div>
+          </Card>
+
+          <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#eef0eb] text-[#80621d]">
+                <BarChart2 className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="font-bold text-[#242822]">ملخص الطلبات</h2>
+                <p className="mt-0.5 text-xs text-[#687064]">بيانات هذا العقار فقط</p>
+              </div>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <div>
+                <dt className="text-xs text-[#687064]">هذا الشهر</dt>
+                <dd className="mt-1 font-bold text-[#242822]">{stats.monthlyRequests}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[#687064]">المتوسط اليومي</dt>
+                <dd className="mt-1 font-bold text-[#242822]">{stats.dailyAverage}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[#687064]">اليوم الأعلى</dt>
+                <dd className="mt-1 font-bold text-[#242822]">{stats.highestDemandDay}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[#687064]">فترة الذروة</dt>
+                <dd className="mt-1 font-bold text-[#242822]">{stats.peakPeriod}</dd>
+              </div>
+            </dl>
+          </Card>
         </section>
 
         <section className="hidden">
@@ -2319,7 +2391,7 @@ export default function OwnerDashboard() {
         {/* ===== معلومات العقار + أداء العقار ===== */}
         <div className="space-y-4">
           {/* معلومات العقار */}
-          <Card className={`hidden ${ownerPanelClass} p-6`}>
+          <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
             <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
               معلومات العقار
             </h2>
@@ -2424,7 +2496,7 @@ export default function OwnerDashboard() {
           )}
 
           {/* ===== أداء العقار ===== */}
-          <Card className={`hidden ${ownerPanelClass} p-6`}>
+          <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-[#2f2a1f]">أداء العقار</h2>
               <Badge variant="outline" className="flex items-center gap-1">
@@ -2433,13 +2505,15 @@ export default function OwnerDashboard() {
               </Badge>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {/* معدل التفاعل */}
-              <StatCard
-                label="معدل التفاعل"
-                value={analytics?.engagementRate || "متوسط"}
-                icon={<Activity className="w-4 h-4" />}
-              />
+              <div className="hidden">
+                <StatCard
+                  label="معدل التفاعل"
+                  value={analytics?.engagementRate || "متوسط"}
+                  icon={<Activity className="w-4 h-4" />}
+                />
+              </div>
 
               {/* فترة الذروة: يوم + ساعة */}
               <StatCard
@@ -2451,7 +2525,9 @@ export default function OwnerDashboard() {
               {/* نسبة النمو */}
               <StatCard
                 label="النمو الشهري"
-                value={`+${analytics?.previousMonthGrowth || 0}%`}
+                value={stats.previousMonthGrowth >= 0
+                  ? `+${stats.previousMonthGrowth}%`
+                  : `${stats.previousMonthGrowth}%`}
                 icon={<TrendingUpIcon />}
               />
 
@@ -2461,7 +2537,7 @@ export default function OwnerDashboard() {
                 value={
                   isVip
                     ? "ظهور بارز"
-                    : analytics?.visibilityStatus || "ظهور عادي"
+                    : "ظهور عادي"
                 }
                 icon={<Eye className="w-4 h-4" />}
               />
@@ -2470,7 +2546,7 @@ export default function OwnerDashboard() {
         </div>
 
         {/* ===== تحليلات وملخص ===== */}
-        <Card className={`hidden ${ownerPanelClass} p-6`}>
+        <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#2f2a1f]">تحليلات وملخص</h2>
             <Badge variant="outline" className="text-xs">
@@ -2482,7 +2558,9 @@ export default function OwnerDashboard() {
             <AnalyticsBox
               label="طلبات واتساب هذا الشهر"
               value={String(stats.monthlyRequests)}
-              note={`نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`}
+              note={stats.previousMonthGrowth >= 0
+                ? `نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`
+                : undefined}
             />
 
             <AnalyticsBox
@@ -2499,7 +2577,7 @@ export default function OwnerDashboard() {
 
             <AnalyticsBox
               label="ترتيبك بين العقارات"
-              value={`#${stats.rank || 1}`}
+              value={stats.rank > 0 ? `#${stats.rank}` : "—"}
               note={`من أصل ${stats.totalProperties} عقار`}
             />
           </div>
@@ -2731,6 +2809,23 @@ function DashboardHeroMetric({ label, value }: { label: string; value: React.Rea
     <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-3">
       <p className="text-[11px] font-semibold text-[#d7bd76]">{label}</p>
       <p className="mt-1 truncate text-lg font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+function OwnerRequestMetric({
+  label,
+  value,
+  attention = false,
+}: {
+  label: string;
+  value: number;
+  attention?: boolean;
+}) {
+  return (
+    <div className="min-w-0 p-4 sm:p-5">
+      <p className={`text-2xl font-bold tabular-nums ${attention ? "text-[#a66317]" : "text-[#242822]"}`}>{value}</p>
+      <p className="mt-1 text-xs font-semibold leading-5 text-[#687064]">{label}</p>
     </div>
   );
 }
@@ -3683,13 +3778,15 @@ function RequestsStatsModal({
                           {formatLiveSaudiTime(req.timestamp)}
                         </td>
                         <td className="p-3">
-                          <button
-                            onClick={() => onDeleteRequest?.(req.id || req.requestCode)}
-                            className="text-red-500 text-sm"
-                            title="حذف"
-                          >
-                            🗑️
-                          </button>
+                          {req.canDelete && req.contactRequestId && (
+                            <button
+                              onClick={() => onDeleteRequest?.(req.contactRequestId)}
+                              className="text-red-500 text-sm"
+                              title="حذف"
+                            >
+                              🗑️
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

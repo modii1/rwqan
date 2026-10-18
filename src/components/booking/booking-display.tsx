@@ -39,6 +39,7 @@ export interface BookingQuestionnaire {
 export interface NotificationSummary {
   sent?: number;
   delivered?: number;
+  accepted?: number;
   failed?: number;
   suppressed?: number;
   suppressedQuota?: number;
@@ -79,6 +80,14 @@ export interface BookingAdminNotificationJob {
   failedAt?: string | null;
   suppressedAt?: string | null;
   providerError?: string | null;
+  providerMessageId?: string | null;
+  providerDeliveryStatus?: "accepted" | "failed" | "delivered" | "read" | string | null;
+  providerAcceptedAt?: string | null;
+  providerDeliveredAt?: string | null;
+  providerReadAt?: string | null;
+  providerFailedAt?: string | null;
+  providerStatusUpdatedAt?: string | null;
+  providerDeliveryError?: string | null;
   manualResendOfJobId?: string | null;
   manualResendRequestedAt?: string | null;
   createdAt?: string | null;
@@ -135,6 +144,10 @@ export interface BookingDisplayRow {
   questionnaire?: BookingQuestionnaire | null;
   confirmationFacts?: BookingQuestionnaire | null;
   answeredAt?: string | null;
+  followUpPath?: string | null;
+  canMarkNotBooked?: boolean;
+  canReportNoResponse?: boolean;
+  ownerNoResponseReportedAt?: string | null;
   confirmedAt?: string | null;
   declinedAt?: string | null;
   followUpDueAt?: string | null;
@@ -394,17 +407,19 @@ function readCount(summary: NotificationSummary | null | undefined, keys: string
 
 export function NotificationSummaryView({ summary }: { summary?: NotificationSummary | null }) {
   const sent = readCount(summary, ["sent", "delivered"]);
+  const accepted = readCount(summary, ["accepted"]);
   const failed = readCount(summary, ["failed"]);
   const suppressed = readCount(summary, ["suppressed", "suppressedQuota"]);
   const queued = readCount(summary, ["pending", "queued"]);
 
-  if (!summary || sent + failed + suppressed + queued === 0) {
+  if (!summary || sent + accepted + failed + suppressed + queued === 0) {
     return <span className="text-xs text-muted-foreground">لا توجد رسائل مسجلة.</span>;
   }
 
   return (
     <div className="flex flex-wrap gap-1.5 text-xs">
       {sent > 0 && <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">مرسلة: {sent}</span>}
+      {accepted > 0 && <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">قيد الإرسال: {accepted}</span>}
       {queued > 0 && <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">مجدولة: {queued}</span>}
       {failed > 0 && <span className="rounded-full bg-red-50 px-2 py-1 font-semibold text-red-700">فشلت: {failed}</span>}
       {suppressed > 0 && <span className="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">محدودة: {suppressed}</span>}
