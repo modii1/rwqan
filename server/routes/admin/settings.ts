@@ -134,11 +134,11 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
       });
     }
 
-    console.log(`📱 [Manual Notification] Sent ${notificationType} to ${ownerPhone} for property ${propertyNumber}`);
+    console.log(`📱 [Manual Notification] Sent ${notificationType} for property ${propertyNumber}`);
 
     res.json({
       success: true,
-      message: `تم إرسال إشعار "${messageType}" بنجاح للرقم ${ownerPhone}`,
+      message: `تم إرسال إشعار "${messageType}" بنجاح`,
       ownerPhone,
       notificationType,
       result,
@@ -156,7 +156,6 @@ router.post("/api/admin/send-owner-notification", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "فشل في إرسال الإشعار",
-      details: err instanceof Error ? err.message : String(err)
     });
   }
 });

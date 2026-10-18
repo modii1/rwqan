@@ -9,6 +9,8 @@ import {
   PaymobService,
 } from "./paymob";
 
+(process.env as Record<string, string | undefined>).NODE_ENV = "production";
+
 const intentionArgs = [
   100,
   "PROP-1",
@@ -578,5 +580,81 @@ test("Paymob webhook verification fails closed for missing fields, secrets, and 
   } finally {
     if (previousSecret === undefined) delete process.env.PAYMOB_HMAC_SECRET;
     else process.env.PAYMOB_HMAC_SECRET = previousSecret;
+  }
+});
+
+test("Paymob uses configured callback endpoints in development", async () => {
+  const env = process.env as Record<string, string | undefined>;
+  const originalFetch = globalThis.fetch;
+  const originalNodeEnv = env.NODE_ENV;
+  const originalAllow = env.PAYMOB_ALLOW_IN_DEVELOPMENT;
+  const originalNotification = env.PAYMOB_DEV_NOTIFICATION_URL;
+  const originalRedirect = env.PAYMOB_DEV_REDIRECT_URL;
+  let requestBody: any;
+  globalThis.fetch = (async (_url: any, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      id: "INT-DEV",
+      client_secret: "secret-dev",
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    env.NODE_ENV = "development";
+    env.PAYMOB_ALLOW_IN_DEVELOPMENT = "true";
+    env.PAYMOB_DEV_NOTIFICATION_URL =
+      "https://dev-tunnel.example.test/api/paymob/webhook";
+    env.PAYMOB_DEV_REDIRECT_URL =
+      "https://dev-tunnel.example.test/api/paymob/webhook";
+
+    await new PaymobService().createIntention(...intentionArgs);
+
+    assert.equal(
+      requestBody.notification_url,
+      "https://dev-tunnel.example.test/api/paymob/webhook",
+    );
+    assert.equal(
+      requestBody.billing_data.redirect_url,
+      "https://dev-tunnel.example.test/api/paymob/webhook",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalNodeEnv === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = originalNodeEnv;
+    if (originalAllow === undefined) delete env.PAYMOB_ALLOW_IN_DEVELOPMENT;
+    else env.PAYMOB_ALLOW_IN_DEVELOPMENT = originalAllow;
+    if (originalNotification === undefined) delete env.PAYMOB_DEV_NOTIFICATION_URL;
+    else env.PAYMOB_DEV_NOTIFICATION_URL = originalNotification;
+    if (originalRedirect === undefined) delete env.PAYMOB_DEV_REDIRECT_URL;
+    else env.PAYMOB_DEV_REDIRECT_URL = originalRedirect;
+  }
+});
+
+test("Paymob refuses a production callback endpoint in development", async () => {
+  const env = process.env as Record<string, string | undefined>;
+  const originalNodeEnv = env.NODE_ENV;
+  const originalAllow = env.PAYMOB_ALLOW_IN_DEVELOPMENT;
+  const originalNotification = env.PAYMOB_DEV_NOTIFICATION_URL;
+  const originalRedirect = env.PAYMOB_DEV_REDIRECT_URL;
+
+  try {
+    env.NODE_ENV = "development";
+    env.PAYMOB_ALLOW_IN_DEVELOPMENT = "true";
+    delete env.PAYMOB_DEV_NOTIFICATION_URL;
+    delete env.PAYMOB_DEV_REDIRECT_URL;
+
+    await assert.rejects(
+      () => new PaymobService().createIntention(...intentionArgs),
+      /Refusing to start a Paymob payment in development/,
+    );
+  } finally {
+    if (originalNodeEnv === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = originalNodeEnv;
+    if (originalAllow === undefined) delete env.PAYMOB_ALLOW_IN_DEVELOPMENT;
+    else env.PAYMOB_ALLOW_IN_DEVELOPMENT = originalAllow;
+    if (originalNotification === undefined) delete env.PAYMOB_DEV_NOTIFICATION_URL;
+    else env.PAYMOB_DEV_NOTIFICATION_URL = originalNotification;
+    if (originalRedirect === undefined) delete env.PAYMOB_DEV_REDIRECT_URL;
+    else env.PAYMOB_DEV_REDIRECT_URL = originalRedirect;
   }
 });

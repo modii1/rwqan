@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+﻿import { Router, type Response } from "express";
 import { requireOwner, requireSameOrigin } from "./middleware";
 import { propertyService, subscriptionService, paymentService, addOnService, discountService, contentService, analyticsService, occasionService } from "../services";
 import {
@@ -11,10 +11,10 @@ import {
   SuspendedSubscriptionWriteError,
 } from "../firebaseService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL, countR2Images } from "../utils/r2";
-import { upload, uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber } from "../utils/helpers";
+import { uploadImages, detectDeviceType, SHEET_MAP, normalizePhoneNumber, parseReceiptUpload } from "../utils/helpers";
 import multer from "multer";
 import { checkPropertyDataComplete } from "../utils/verification";
-import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { calculateSubscriptionEndDate, calculateExtensionEndDate, calculateRemainingDays, getStartOfDayRiyadh, formatDateRiyadh } from "../utils/dateUtils";
 import { storage } from "../storage";
 import {
@@ -27,6 +27,7 @@ import {
 } from "../integrations/whatsapp";
 import { PaymobIntentionError, paymobService } from "../integrations/paymob";
 import { scanReceiptWithAI } from "../integrations/aiReceiptScanner";
+import { detectBookingCommissionReceiptContentType } from "../services/BookingCommissionReceiptService";
 import {
   activateVerifiedPaymentSubscription,
   calculateActionDates,
@@ -432,7 +433,7 @@ router.put("/api/owner/property", requireOwner, async (req, res) => {
     if (updates.whatsappNumber) {
       try {
         updates.whatsappNumber = normalizePhoneNumber(updates.whatsappNumber);
-        console.log(`[PROPERTY_UPDATE] Phone normalized to: ${updates.whatsappNumber}`);
+        console.log(`[PROPERTY_UPDATE] Phone normalized`);
       } catch (err: any) {
         console.log(`[PROPERTY_UPDATE] Phone validation failed: ${err.message}`);
         return res.status(400).json({ error: err.message });
@@ -680,6 +681,11 @@ router.delete("/api/owner/requests/:id", requireOwner, async (req: any, res) => 
     const propertyNumber = req.propertyNumber;
     const requestId = req.params.id;
     
+    const requests = await analyticsService.getAllRequests();
+    const reqToDelete = requests.find(r => (r.id === requestId || r.requestCode === requestId) && r.propertyNumber === propertyNumber);
+    if (!reqToDelete) {
+      return res.status(403).json({ error: "غير مصرح لك بحذف هذا الطلب" });
+    }
     await analyticsService.deleteRequest(propertyNumber, requestId);
     res.json({ success: true, message: "تم حذف الطلب بنجاح" });
   } catch (err) {
@@ -953,7 +959,7 @@ router.post("/api/owner/payment/:paymentId/rescan", requireSameOrigin, async (re
     });
   } catch (err: any) {
     console.error("AI Scanner error:", err);
-    res.status(500).json({ error: err.message || "خطأ في فحص الإيصال" });
+    res.status(500).json({ error: "خطأ في فحص الإيصال" });
   }
 });
 
@@ -1053,7 +1059,7 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 // 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
 // ======================================================
-router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("receipt"), async (req, res) => {
+router.post("/api/owner/payment/bank-transfer", requireOwner, parseReceiptUpload, async (req, res) => {
   let uploadedReceiptKey: string | null = null;
   try {
     const {
@@ -1078,6 +1084,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
 
     if (!req.file) {
       return res.status(400).json({ error: "الإيصال مطلوب" });
+    }
+
+    const detectedReceiptType = detectBookingCommissionReceiptContentType(req.file.buffer);
+    if (!detectedReceiptType) {
+      return res.status(415).json({ error: "محتوى الإيصال لا يطابق صيغة الملف" });
     }
 
     const pkg = await firebaseService.getPurchasablePackageById(packageId);
@@ -1161,16 +1172,20 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, upload.single("rec
     // Upload receipt to R2
     let receiptUrl = "";
     if (req.file && R2_BUCKET && r2) {
-      const isPdf = req.file.mimetype === 'application/pdf';
-      const ext = isPdf ? 'pdf' : 'jpg';
-      const contentType = isPdf ? 'application/pdf' : 'image/jpeg';
+      const ext = detectedReceiptType === 'application/pdf'
+        ? 'pdf'
+        : detectedReceiptType === 'image/png'
+          ? 'png'
+          : detectedReceiptType === 'image/webp'
+            ? 'webp'
+            : 'jpg';
       const receiptKey = `receipts/${propertyNumber}-${Date.now()}.${ext}`;
       await r2.send(
         new PutObjectCommand({
           Bucket: R2_BUCKET,
           Key: receiptKey,
           Body: req.file.buffer,
-          ContentType: contentType,
+          ContentType: detectedReceiptType,
         })
       );
       uploadedReceiptKey = receiptKey;
@@ -1582,23 +1597,85 @@ router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
       })
     );
 
-    const count = list.Contents?.length || 0;
+    const keys = (list.Contents || [])
+      .map(obj => obj.Key)
+      .filter((key): key is string => Boolean(key))
+      .filter(key => /\.(jpe?g|png|webp)$/i.test(key));
 
-    let images =
-      list.Contents?.map(obj => `${R2_PUBLIC_URL}/${obj.Key}`) || [];
-
-    images.sort((a, b) => {
-      const aParts = a.split("/").pop() || "";
-      const bParts = b.split("/").pop() || "";
-      const na = parseInt(aParts.replace(".jpg", "")) || 0;
-      const nb = parseInt(bParts.replace(".jpg", "")) || 0;
+    keys.sort((a, b) => {
+      const na = parseInt(a.split("/").pop()?.replace(/\.\w+$/, "") || "0") || 0;
+      const nb = parseInt(b.split("/").pop()?.replace(/\.\w+$/, "") || "0") || 0;
       return na - nb;
     });
+
+    // In the isolated DEV target the bucket is private and R2_PUBLIC_URL is a
+    // placeholder, so images are served through the owner-authenticated proxy
+    // below. Production URLs are unchanged.
+    const serveViaProxy = process.env.NODE_ENV === "development";
+    const images = keys.map(key =>
+      serveViaProxy
+        ? `/api/owner/r2-image?key=${encodeURIComponent(key)}`
+        : `${R2_PUBLIC_URL}/${key}`,
+    );
 
     res.json({ images });
 
   } catch (err: any) {
     res.json({ images: [] });
+  }
+});
+
+// ======================================================
+// 🖼️ GET /api/owner/r2-image - Serve a private R2 image to the owner
+// (DEV-only display path; the bucket itself stays private)
+// ======================================================
+router.get("/api/owner/r2-image", requireOwner, async (req, res) => {
+  try {
+    const propertyNumber = (req.session as any).propertyNumber || "";
+    const key = req.query.key;
+
+    if (!propertyNumber || typeof key !== "string" || !key) {
+      return res.status(400).json({ error: "key غير صحيحة" });
+    }
+    if (!r2 || !R2_BUCKET) {
+      return res.status(503).json({ error: "R2 bucket not configured" });
+    }
+    if (!key.startsWith(`${propertyNumber}/`)) {
+      return res.status(403).json({ error: "غير مسموح بالوصول" });
+    }
+    if (!/\.(jpe?g|png|webp)$/i.test(key)) {
+      return res.status(403).json({ error: "غير مسموح بالوصول" });
+    }
+
+    const output = await r2.send(
+      new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }),
+    );
+    const body = output.Body;
+    if (!body) {
+      return res.status(404).json({ error: "الصورة غير موجودة" });
+    }
+
+    if (output.ContentType) res.setHeader("Content-Type", output.ContentType);
+    else if (/\.png$/i.test(key)) res.setHeader("Content-Type", "image/png");
+    else if (/\.webp$/i.test(key)) res.setHeader("Content-Type", "image/webp");
+    else res.setHeader("Content-Type", "image/jpeg");
+    if (output.ContentLength !== undefined) {
+      res.setHeader("Content-Length", String(output.ContentLength));
+    }
+    res.setHeader("Cache-Control", "private, max-age=86400");
+
+    const stream = body as any;
+    if (typeof stream.pipe === "function") {
+      stream.pipe(res);
+    } else {
+      res.send(Buffer.isBuffer(body) ? body : Buffer.from(body as any));
+    }
+  } catch (err: any) {
+    const status = err?.$metadata?.httpStatusCode;
+    if (status === 404 || err?.name === "NoSuchKey") {
+      return res.status(404).json({ error: "الصورة غير موجودة" });
+    }
+    res.status(500).json({ error: "تعذر تحميل الصورة" });
   }
 });
 
@@ -1626,9 +1703,22 @@ router.post("/api/owner/images", requireOwner, uploadImages.array("images"), asy
     const uploadedKeys: string[] = [];
     const timestamp = Date.now();
 
+    const detectedImageTypes: (string | null)[] = files.map((file: any) =>
+      detectBookingCommissionReceiptContentType(file.buffer),
+    );
+    if (detectedImageTypes.some((type) => !type || type === "application/pdf")) {
+      return res.status(415).json({ error: "صيغة الصورة غير مدعومة" });
+    }
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const key = `${propertyNumber}/${timestamp}-${i}.jpg`;
+      const detectedType = detectedImageTypes[i] as string;
+      const ext = detectedType === "image/png"
+        ? "png"
+        : detectedType === "image/webp"
+          ? "webp"
+          : "jpg";
+      const key = `${propertyNumber}/${timestamp}-${i}.${ext}`;
 
       if (r2) {
         await r2.send(
@@ -1636,15 +1726,19 @@ router.post("/api/owner/images", requireOwner, uploadImages.array("images"), asy
             Bucket: R2_BUCKET,
             Key: key,
             Body: file.buffer,
-            ContentType: "image/jpeg",
-            ACL: "public-read",
+            ContentType: detectedType,
           })
         );
       }
       uploadedKeys.push(key);
     }
 
-    const uploadedUrls = uploadedKeys.map(key => `${R2_PUBLIC_URL}/${key}`);
+    const serveViaProxy = process.env.NODE_ENV === "development";
+    const uploadedUrls = uploadedKeys.map(key =>
+      serveViaProxy
+        ? `/api/owner/r2-image?key=${encodeURIComponent(key)}`
+        : `${R2_PUBLIC_URL}/${key}`,
+    );
 
     const changeNote = `إضافة ${files.length} صورة جديدة`;
     await storage.updateProperty(propertyNumber, { lastChanges: changeNote });
@@ -1686,7 +1780,18 @@ router.post("/api/owner/images/delete", requireOwner, async (req, res) => {
       return res.status(400).json({ error: "URL مطلوبة" });
     }
 
-    const key = `${propertyNumber}/${imageUrlToDelete.split("/").pop()}`;
+    // The gallery may submit either a proxy URL (/api/owner/r2-image?key=...)
+    // in DEV or a public URL (https://<public>/90001/...jpg). Derive the key.
+    const proxyKeyMatch = String(imageUrlToDelete).match(/[?&]key=([^&]+)/);
+    let keyCandidate = proxyKeyMatch
+      ? decodeURIComponent(proxyKeyMatch[1])
+      : String(imageUrlToDelete);
+    try {
+      keyCandidate = decodeURIComponent(keyCandidate);
+    } catch {
+      /* already decoded */
+    }
+    const key = `${propertyNumber}/${keyCandidate.split("/").pop()}`;
 
     if (r2) {
       await r2.send(
@@ -3506,13 +3611,37 @@ router.post("/api/owner/subscription/confirm", requireOwner, async (req, res) =>
   }
 });
 
-// GET /api/owner/subscription/:propertyNumber - Get subscription data for any property
+// GET /api/owner/subscription/:propertyNumber - Get subscription data for an owned or linked property
 router.get("/api/owner/subscription/:propertyNumber", requireOwner, async (req, res) => {
   try {
     const { propertyNumber } = req.params;
     
     if (!propertyNumber || propertyNumber.length !== 5) {
       return res.status(400).json({ error: "رقم العقار غير صحيح" });
+    }
+
+    const sessionPropertyNumber = String(
+      (req.session as { propertyNumber?: string }).propertyNumber || "",
+    ).trim();
+
+    if (propertyNumber !== sessionPropertyNumber) {
+      const sessionSubscription = await firebaseService.getSubscriptionByPropertyNumber(
+        sessionPropertyNumber,
+      );
+      const allowed = new Set<string>([sessionPropertyNumber]);
+      if (sessionSubscription) {
+        if (typeof sessionSubscription.linkedProperty === "string") {
+          allowed.add(sessionSubscription.linkedProperty);
+        }
+        if (Array.isArray(sessionSubscription.linkedProperties)) {
+          for (const linked of sessionSubscription.linkedProperties) {
+            allowed.add(String(linked));
+          }
+        }
+      }
+      if (!allowed.has(propertyNumber)) {
+        return res.status(403).json({ error: "غير مصرح بالاطلاع على اشتراك هذا العقار" });
+      }
     }
 
     const subscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);

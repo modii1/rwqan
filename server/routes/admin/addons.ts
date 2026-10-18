@@ -4,7 +4,8 @@ import { firebaseService } from "../../firebaseService";
 import { addOnService, paymentService, propertyService } from "../../services";
 import { PaymobIntentionError, paymobService } from "../../integrations/paymob";
 import { sendWhatsAppNotification } from "../../integrations/whatsapp";
-import { upload } from "../../utils/helpers";
+import { parseReceiptUpload } from "../../utils/helpers";
+import { detectBookingCommissionReceiptContentType } from "../../services/BookingCommissionReceiptService";
 import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { scanReceiptWithAI } from "../../integrations/aiReceiptScanner";
@@ -589,7 +590,7 @@ router.post("/api/owner/addons/pay", requireOwner, async (req, res) => {
 // =======================================
 // OWNER – Bank Transfer for Add-On
 // =======================================
-router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('receipt'), async (req, res) => {
+router.post("/api/owner/addons/bank-transfer", requireOwner, parseReceiptUpload, async (req, res) => {
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
     const { addOnPackageId, amount, discountCode } = req.body;
@@ -597,6 +598,11 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('rece
 
     if (!propertyNumber || !addOnPackageId || !receiptFile) {
       return res.status(400).json({ error: "بيانات ناقصة" });
+    }
+
+    const detectedReceiptType = detectBookingCommissionReceiptContentType(receiptFile.buffer);
+    if (!detectedReceiptType) {
+      return res.status(415).json({ error: "محتوى الإيصال لا يطابق صيغة الملف" });
     }
 
     // التحقق من وجود الإضافة
@@ -614,16 +620,20 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, upload.single('rece
     // رفع الإيصال للتخزين (صور و PDF)
     let receiptUrl = "";
     if (r2 && R2_BUCKET) {
-      const isPdf = receiptFile.mimetype === 'application/pdf';
-      const ext = isPdf ? 'pdf' : 'jpg';
-      const contentType = isPdf ? 'application/pdf' : 'image/jpeg';
+      const ext = detectedReceiptType === 'application/pdf'
+        ? 'pdf'
+        : detectedReceiptType === 'image/png'
+          ? 'png'
+          : detectedReceiptType === 'image/webp'
+            ? 'webp'
+            : 'jpg';
       const receiptKey = `addon-receipts/${propertyNumber}-${Date.now()}.${ext}`;
       await r2.send(
         new PutObjectCommand({
           Bucket: R2_BUCKET,
           Key: receiptKey,
           Body: receiptFile.buffer,
-          ContentType: contentType,
+          ContentType: detectedReceiptType,
         })
       );
       receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;

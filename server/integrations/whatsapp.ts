@@ -13,7 +13,14 @@ import {
 } from "../../shared/subscription-whatsapp";
 import { requireAdmin, requireSameOrigin } from "../routes/middleware";
 import { isPropertySuspended } from "../services/propertySuspension";
+import {
+  buildGeneralWhatsAppLog,
+  type GeneralWhatsAppLogInput,
+  whatsAppLogDeliveryStore,
+} from "../services/WhatsAppLogDeliveryStore";
+import { whatsAppPendingDeliveryStore } from "../services/WhatsAppPendingDeliveryStore";
 import { formatDateRiyadh } from "../utils/dateUtils";
+import { externalServicesEnabled } from "../config/runtimeEnvironment";
 
 const router = express.Router();
 
@@ -28,7 +35,19 @@ const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID || "";
 const META_NOTIFY_NUMBER = process.env.META_NOTIFY_NUMBER || "";
 
 // رقم واتساب المدير (يُستخدم من المتغير البيئي الجديد)
-const ADMIN_WHATSAPP = META_NOTIFY_NUMBER || process.env.ADMIN_WHATSAPP || "966533220646";
+const PRODUCTION_ADMIN_WHATSAPP_FALLBACK = "966533220646";
+
+export function resolveAdminWhatsAppNumber(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const explicit =
+    environment.META_NOTIFY_NUMBER || environment.ADMIN_WHATSAPP || "";
+  if (explicit) return explicit;
+  if (environment.NODE_ENV !== "production") return "";
+  return PRODUCTION_ADMIN_WHATSAPP_FALLBACK;
+}
+
+const ADMIN_WHATSAPP = resolveAdminWhatsAppNumber(process.env);
 
 // إعدادات Meta WhatsApp Cloud API
 const WHATSAPP_PHONE_NUMBER_ID = META_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || "";
@@ -61,6 +80,33 @@ export function clearSettingsCache() {
   settingsCacheTime = 0;
 }
 
+async function persistBuiltGeneralWhatsAppLog(
+  log: ReturnType<typeof buildGeneralWhatsAppLog>,
+): Promise<void> {
+  try {
+    await firebaseService.addWhatsAppLog(log);
+  } catch (error) {
+    console.error("❌ addWhatsAppLog error:", error);
+    return;
+  }
+  if (log.providerMessageId) {
+    try {
+      await whatsAppPendingDeliveryStore.reconcile(
+        log.providerMessageId,
+        whatsAppLogDeliveryStore,
+      );
+    } catch (error) {
+      console.error("❌ Pending WhatsApp delivery reconciliation error:", error);
+    }
+  }
+}
+
+async function persistGeneralWhatsAppLog(
+  input: GeneralWhatsAppLogInput,
+): Promise<void> {
+  await persistBuiltGeneralWhatsAppLog(buildGeneralWhatsAppLog(input));
+}
+
 /**
  * دالة مساعدة: إرسال رسالة واتساب للمدير + حفظها في Google Sheet
  */
@@ -79,6 +125,13 @@ async function sendAdminWhatsAppNotification(options: {
   ownerPhone?: string; // رقم المالك (اختياري)
 }) {
   const { type, text, propertyNumber, propertyName, ownerPhone } = options;
+
+  if (!externalServicesEnabled()) {
+    console.warn(
+      "📵 WhatsApp admin notifications are disabled in development (DEV → OFF by default).",
+    );
+    return { status: "disabled", response: "الإشعارات معطلة في بيئة التطوير" };
+  }
 
   // بناء نص الرسالة
   let body = `تنبيه جديد من نظام روقـان ✅\n\n`;
@@ -105,6 +158,7 @@ async function sendAdminWhatsAppNotification(options: {
 
   let status = "pending";
   let responseText = "";
+  let providerMessageId: string | null = null;
 
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -112,8 +166,8 @@ async function sendAdminWhatsAppNotification(options: {
       if (attempt === 0) {
         console.log("📲 WhatsApp API call - URL:", url);
         console.log("📲 WhatsApp API call - Phone ID:", WHATSAPP_PHONE_NUMBER_ID ? "present" : "MISSING");
-        console.log("📲 WhatsApp API call - Token:", WHATSAPP_ACCESS_TOKEN ? `present (${WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...)` : "MISSING");
-        console.log("📲 WhatsApp API call - Admin:", ADMIN_WHATSAPP);
+        console.log("📲 WhatsApp API call - Token:", WHATSAPP_ACCESS_TOKEN ? "present" : "MISSING");
+        console.log("📲 WhatsApp API call - Admin:", ADMIN_WHATSAPP ? "configured" : "MISSING");
       } else {
         console.log(`📲 WhatsApp API retry attempt ${attempt + 1}/${maxRetries + 1}...`);
       }
@@ -146,6 +200,9 @@ async function sendAdminWhatsAppNotification(options: {
       const data = await resp.json().catch(() => ({}));
       status = resp.ok ? "success" : "error";
       responseText = JSON.stringify(data).slice(0, 1000);
+      providerMessageId = resp.ok
+        ? extractWhatsAppProviderMessageId(data)
+        : null;
 
       console.log("📲 WhatsApp API response:", status, responseText);
       
@@ -177,24 +234,21 @@ async function sendAdminWhatsAppNotification(options: {
   }
 
   // حفظ السجل في Firebase
-  const log = {
-    id: `WA-${Date.now()}`,
+  const log = buildGeneralWhatsAppLog({
     type,
     message: body,
     phone: ADMIN_WHATSAPP,
-    status,
+    status: status === "success" ? "success" : "error",
     response: responseText,
-    createdAt: new Date().toISOString(),
     propertyNumber,
     propertyName,
     ownerPhone,
-  };
+    source: "admin_notification",
+    ...(providerMessageId ? { providerMessageId } : {}),
+    ...(status === "success" ? { providerStatus: "accepted" as const } : {}),
+  });
 
-  try {
-    await firebaseService.addWhatsAppLog(log);
-  } catch (err) {
-    console.error("❌ addWhatsAppLog error:", err);
-  }
+  await persistBuiltGeneralWhatsAppLog(log);
 
   return { status, response: responseText };
 }
@@ -571,6 +625,170 @@ interface EnjazatikWhatsAppDependencies {
   delay: (milliseconds: number) => Promise<void>;
 }
 
+export interface EnjazatikWhatsAppResult {
+  success: boolean;
+  error?: string;
+  providerMessageId?: string;
+  /** A successful HTTP response only proves provider acceptance. */
+  providerStatus?: "accepted";
+}
+
+const PROVIDER_MESSAGE_ID_KEYS = [
+  "messageId",
+  "message_id",
+  "messageID",
+  "whatsappMessageId",
+  "whatsapp_message_id",
+  "wamid",
+  "messageUuid",
+  "message_uuid",
+  "msgId",
+  "msg_id",
+] as const;
+
+function cleanProviderMessageId(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const normalized = String(value).trim();
+  return normalized && normalized.length <= 512 ? normalized : null;
+}
+
+/**
+ * Enjazatik installations have returned more than one response envelope over
+ * time. Keep extraction deliberately narrow, but accept the common envelopes
+ * and Meta's `messages[0].id` shape.
+ */
+export function extractWhatsAppProviderMessageId(payload: unknown): string | null {
+  const envelopeKeys = [
+    "data",
+    "result",
+    "message",
+    "response",
+    "payload",
+    "key",
+  ] as const;
+  const explicitSeen = new Set<object>();
+  const findExplicit = (value: unknown, depth: number): string | null => {
+    if (!value || typeof value !== "object" || depth > 5) return null;
+    if (explicitSeen.has(value)) return null;
+    explicitSeen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const candidate = findExplicit(item, depth + 1);
+        if (candidate) return candidate;
+      }
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    for (const key of PROVIDER_MESSAGE_ID_KEYS) {
+      const candidate = cleanProviderMessageId(record[key]);
+      if (candidate) return candidate;
+    }
+
+    if (Array.isArray(record.messages)) {
+      for (const message of record.messages) {
+        if (!message || typeof message !== "object") continue;
+        const candidate = cleanProviderMessageId(
+          (message as Record<string, unknown>).id,
+        );
+        if (candidate) return candidate;
+      }
+    }
+
+    for (const key of envelopeKeys) {
+      const candidate = findExplicit(record[key], depth + 1);
+      if (candidate) return candidate;
+    }
+    return null;
+  };
+
+  const explicit = findExplicit(payload, 0);
+  if (explicit) return explicit;
+
+  const genericSeen = new Set<object>();
+  const findGeneric = (value: unknown, depth: number): string | null => {
+    if (!value || typeof value !== "object" || depth > 5) return null;
+    if (genericSeen.has(value)) return null;
+    genericSeen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const candidate = findGeneric(item, depth + 1);
+        if (candidate) return candidate;
+      }
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    // A plain `id` is only accepted inside a known provider envelope so a
+    // top-level request/event identifier is not mistaken for a message id.
+    if (depth > 0) {
+      const nestedId = cleanProviderMessageId(record.id);
+      if (nestedId) return nestedId;
+    }
+
+    if (
+      depth === 0 &&
+      (
+        record.success === true ||
+        record.status === true ||
+        ["accepted", "queued", "sent", "success"].includes(
+          String(record.status || "").trim().toLowerCase(),
+        )
+      )
+    ) {
+      const acceptedResponseId = cleanProviderMessageId(record.id);
+      if (acceptedResponseId) return acceptedResponseId;
+    }
+
+    for (const key of envelopeKeys) {
+      const candidate = findGeneric(record[key], depth + 1);
+      if (candidate) return candidate;
+    }
+    return null;
+  };
+
+  return findGeneric(payload, 0);
+}
+
+/**
+ * Some Enjazatik-compatible endpoints report an application failure inside an
+ * HTTP 2xx response. That response is not provider acceptance and must remain
+ * retryable. Only explicit failure markers are rejected so legacy empty and
+ * non-JSON success responses keep their established behavior.
+ */
+function hasExplicitWhatsAppProviderRejection(payload: unknown): boolean {
+  const seen = new Set<object>();
+  const visit = (value: unknown, depth: number): boolean => {
+    if (!value || typeof value !== "object" || depth > 5) return false;
+    if (seen.has(value)) return false;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return value.some((item) => visit(item, depth + 1));
+    }
+
+    const record = value as Record<string, unknown>;
+    if (record.success === false || record.status === false || record.ok === false) {
+      return true;
+    }
+    if (
+      typeof record.status === "string" &&
+      ["error", "failed", "failure", "rejected"].includes(
+        record.status.trim().toLowerCase(),
+      )
+    ) {
+      return true;
+    }
+
+    return ["data", "result", "response", "payload"]
+      .some((key) => visit(record[key], depth + 1));
+  };
+
+  return visit(payload, 0);
+}
+
 /**
  * دالة أساسية لإرسال رسالة WhatsApp للمالك عبر Enjazatik
  * مع إعادة المحاولة في حال الفشل
@@ -582,7 +800,7 @@ export function createEnjazatikWhatsAppSender(
     phone: string,
     message: string,
     retries = 2,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<EnjazatikWhatsAppResult> {
     if (!dependencies.url || !dependencies.token) {
       console.error("❌ Missing Enjazatik credentials");
       return { success: false, error: "إعدادات الإرسال غير مكتملة" };
@@ -612,8 +830,33 @@ export function createEnjazatikWhatsAppSender(
         });
 
         if (response.ok) {
-          console.log(`✅ Owner notification sent to ${cleanPhone.substring(0, 6)}**** (attempt ${attempt + 1})`);
-          return { success: true };
+          let responsePayload: unknown = null;
+          try {
+            const responseText = await response.text();
+            if (responseText.trim()) responsePayload = JSON.parse(responseText);
+          } catch {
+            // Acceptance is still valid when the provider returns an empty or
+            // non-JSON response; only delivery callbacks prove delivery/read.
+          }
+          if (hasExplicitWhatsAppProviderRejection(responsePayload)) {
+            console.error(
+              `❌ Enjazatik send rejected in response body (attempt ${attempt + 1}/${retries + 1})`,
+            );
+            if (attempt < retries) {
+              const backoff = 5000 * (attempt + 1);
+              await dependencies.delay(backoff);
+            }
+            continue;
+          }
+          const providerMessageId = extractWhatsAppProviderMessageId(
+            responsePayload,
+          );
+          console.log(`✅ Owner notification accepted by provider for ${cleanPhone.substring(0, 6)}**** (attempt ${attempt + 1})`);
+          return {
+            success: true,
+            providerStatus: "accepted",
+            ...(providerMessageId ? { providerMessageId } : {}),
+          };
         }
 
         console.error(`❌ Enjazatik send failed (attempt ${attempt + 1}/${retries + 1}):`, response.status);
@@ -645,13 +888,21 @@ export async function sendOwnerWhatsApp(
   phone: string,
   message: string,
   retries = 2,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<EnjazatikWhatsAppResult> {
+  if (!externalServicesEnabled()) {
+    console.warn(
+      "📵 Owner WhatsApp (Enjazatik) is disabled in development (DEV → OFF by default).",
+    );
+    return { success: false, error: "الرسائل معطلة في بيئة التطوير" };
+  }
   return sendOwnerWhatsAppWithDefaults(phone, message, retries);
 }
 
 export interface PropertyOwnerWhatsAppResult {
   success: boolean;
   error?: string;
+  providerMessageId?: string;
+  providerStatus?: "accepted";
   suppressed?: boolean;
   code?: "PROPERTY_SUSPENDED" | "SUSPENSION_LOOKUP_FAILED";
 }
@@ -662,8 +913,9 @@ interface PropertyOwnerWhatsAppDependencies {
     phone: string,
     message: string,
     retries: number,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<EnjazatikWhatsAppResult>;
   delay: (milliseconds: number) => Promise<void>;
+  record?: (input: GeneralWhatsAppLogInput) => Promise<void>;
 }
 
 export function createPropertyOwnerWhatsAppSender(
@@ -674,12 +926,48 @@ export function createPropertyOwnerWhatsAppSender(
     propertyNumber: string;
     message: string;
     retries?: number;
+    logType?: string;
+    propertyName?: string;
   }): Promise<PropertyOwnerWhatsAppResult> {
     const requestedRetries = options.retries ?? 2;
     const retries = Number.isFinite(requestedRetries)
       ? Math.max(0, Math.floor(requestedRetries))
       : 2;
     let lastError = "فشل في إرسال الرسالة بعد عدة محاولات";
+    let providerAttempted = false;
+
+    const finish = async (
+      result: PropertyOwnerWhatsAppResult,
+    ): Promise<PropertyOwnerWhatsAppResult> => {
+      if (dependencies.record && providerAttempted) {
+        try {
+          await dependencies.record({
+            type: options.logType || "owner_property_message",
+            message: options.message,
+            phone: options.ownerPhone,
+            ownerPhone: options.ownerPhone,
+            propertyNumber: options.propertyNumber,
+            propertyName: options.propertyName,
+            status: result.success
+              ? "success"
+              : result.suppressed
+                ? "blocked"
+                : "error",
+            response: result.error || "",
+            source: "property_owner",
+            ...(result.providerMessageId
+              ? { providerMessageId: result.providerMessageId }
+              : {}),
+            ...(result.success && result.providerStatus === "accepted"
+              ? { providerStatus: "accepted" as const }
+              : {}),
+          });
+        } catch (error) {
+          console.error("❌ addWhatsAppLog error:", error);
+        }
+      }
+      return result;
+    };
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -687,32 +975,33 @@ export function createPropertyOwnerWhatsAppSender(
           console.log(
             `🔒 Owner notification suppressed for suspended property ${options.propertyNumber}`,
           );
-          return {
+          return finish({
             success: false,
             suppressed: true,
             code: "PROPERTY_SUSPENDED",
             error: "العقار موقوف مؤقتاً ولن تصله إشعارات حتى إعادة التفعيل",
-          };
+          });
         }
       } catch (error) {
         console.error(
           `❌ Could not verify suspension status for ${options.propertyNumber}; owner notification suppressed:`,
           error,
         );
-        return {
+        return finish({
           success: false,
           suppressed: true,
           code: "SUSPENSION_LOOKUP_FAILED",
           error: "تعذر التحقق من حالة إيقاف العقار، لذلك لم يتم إرسال الإشعار",
-        };
+        });
       }
 
+      providerAttempted = true;
       const result = await dependencies.send(
         options.ownerPhone,
         options.message,
         0,
       );
-      if (result.success) return { success: true };
+      if (result.success) return finish(result);
 
       lastError = result.error || lastError;
       if (lastError === "إعدادات الإرسال غير مكتملة") break;
@@ -722,7 +1011,7 @@ export function createPropertyOwnerWhatsAppSender(
       }
     }
 
-    return { success: false, error: lastError };
+    return finish({ success: false, error: lastError });
   };
 }
 
@@ -731,6 +1020,7 @@ const sendPropertyOwnerWhatsAppWithDefaults = createPropertyOwnerWhatsAppSender(
   send: sendOwnerWhatsApp,
   delay: (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  record: persistGeneralWhatsAppLog,
 });
 
 export async function sendPropertyOwnerWhatsApp(options: {
@@ -738,6 +1028,8 @@ export async function sendPropertyOwnerWhatsApp(options: {
   propertyNumber: string;
   message: string;
   retries?: number;
+  logType?: string;
+  propertyName?: string;
 }): Promise<PropertyOwnerWhatsAppResult> {
   return sendPropertyOwnerWhatsAppWithDefaults(options);
 }
@@ -794,6 +1086,7 @@ export async function notifyOwnerFreeContactLimitReached(data: {
     ownerPhone: data.ownerPhone,
     propertyNumber: data.propertyNumber,
     message: buildOwnerFreeContactLimitReachedMessage(data),
+    logType: "owner_free_contact_limit",
   });
 }
 
@@ -881,6 +1174,8 @@ export function createOwnerSubscriptionWhatsAppNotifier(
         ownerPhone: data.ownerPhone,
         propertyNumber: data.propertyNumber,
         message,
+        logType: "owner_subscription_activated",
+        propertyName: data.propertyName,
       });
     },
 
@@ -893,6 +1188,8 @@ export function createOwnerSubscriptionWhatsAppNotifier(
           data,
           templates.expiringSoon,
         ),
+        logType: "owner_subscription_expiring_soon",
+        propertyName: data.propertyName,
       });
     },
 
@@ -902,6 +1199,8 @@ export function createOwnerSubscriptionWhatsAppNotifier(
         ownerPhone: data.ownerPhone,
         propertyNumber: data.propertyNumber,
         message: buildOwnerSubscriptionExpiredMessage(data, templates.expired),
+        logType: "owner_subscription_expired",
+        propertyName: data.propertyName,
       });
     },
   };

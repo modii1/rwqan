@@ -1,0 +1,264 @@
+{
+  "startedAt": "2026-10-10T16:09:32.894Z",
+  "endedAt": "2026-10-10T16:09:33.600Z",
+  "suites": [
+    {
+      "name": "business-logic",
+      "summary": {
+        "total": 10,
+        "pass": 8,
+        "fail": 2,
+        "blocked": 0,
+        "notRun": 0
+      },
+      "results": [
+        {
+          "id": "BL-001",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "constants",
+          "expected": "MAX_ACTIVE=90, RENEWAL_WINDOW=10, MAX_REMAINING=100",
+          "actual": "constants_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-002",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "duration-normalize",
+          "expected": "positive int ok, non-int/string invalid",
+          "actual": "normalize_ok",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-003",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "duration-allowed-active",
+          "expected": "active allows <=90, >90 blocked",
+          "actual": "inactive30",
+          "status": "FAIL",
+          "severity": "HIGH",
+          "evidence": [
+            {
+              "title": "Exception during test execution",
+              "description": "inactive30"
+            }
+          ],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-004",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "purchasable",
+          "expected": "active+valid duration purchasable",
+          "actual": "purchasable_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-005",
+          "feature": "subscriptionPricing",
+          "flow": "calculate-basic",
+          "expected": "base + extras computed correctly",
+          "actual": "{\"basePrice\":100,\"includedPropertyCount\":1,\"additionalPropertyPrice\":25,\"billedPropertyCount\":3,\"additionalPropertyCount\":2,\"total\":150}",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-006",
+          "feature": "subscriptionPricing",
+          "flow": "legacy-vip",
+          "expected": "legacy vip semantics preserved",
+          "actual": "base",
+          "status": "FAIL",
+          "severity": "MEDIUM",
+          "evidence": [
+            {
+              "title": "Exception during test execution",
+              "description": "base"
+            }
+          ],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.895Z"
+        },
+        {
+          "id": "BL-007",
+          "feature": "dateUtils",
+          "flow": "end-date-capping",
+          "expected": "end date capped at MAX from today",
+          "actual": "2026-07-20T20:59:59.999Z",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.895Z",
+          "endedAt": "2026-10-10T16:09:32.908Z"
+        },
+        {
+          "id": "BL-008",
+          "feature": "dateUtils",
+          "flow": "remaining-days",
+          "expected": ">=0 logic",
+          "actual": "1",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.908Z",
+          "endedAt": "2026-10-10T16:09:32.908Z"
+        },
+        {
+          "id": "BL-009",
+          "feature": "subscriptionType",
+          "flow": "normalize",
+          "expected": "premium/normal mapped",
+          "actual": "ok",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.908Z",
+          "endedAt": "2026-10-10T16:09:32.908Z"
+        },
+        {
+          "id": "BL-010",
+          "feature": "paymentScenarioFlow",
+          "flow": "isActiveSubscription",
+          "expected": "checks endDate and status",
+          "actual": "ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.908Z",
+          "endedAt": "2026-10-10T16:09:32.908Z"
+        }
+      ],
+      "startedAt": "2026-10-10T16:09:32.895Z",
+      "endedAt": "2026-10-10T16:09:32.908Z",
+      "notes": "In-process business logic tests using REAL modules only. No business-logic changes."
+    },
+    {
+      "name": "live-api",
+      "summary": {
+        "total": 3,
+        "pass": 2,
+        "fail": 1,
+        "blocked": 0,
+        "notRun": 0
+      },
+      "results": [
+        {
+          "id": "API-001",
+          "feature": "api/packages",
+          "flow": "get",
+          "expected": "200 OK, JSON array or structure",
+          "actual": "status=200 count=0",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:32.908Z",
+          "endedAt": "2026-10-10T16:09:33.333Z"
+        },
+        {
+          "id": "API-002",
+          "feature": "api/payment/calculate",
+          "flow": "post-pure-compute",
+          "expected": "200 OK with pricing breakdown (no money movement)",
+          "actual": "status=404",
+          "status": "FAIL",
+          "severity": "HIGH",
+          "evidence": [
+            {
+              "title": "Exception during test execution",
+              "description": "status=404"
+            }
+          ],
+          "startedAt": "2026-10-10T16:09:33.333Z",
+          "endedAt": "2026-10-10T16:09:33.560Z"
+        },
+        {
+          "id": "API-003",
+          "feature": "home",
+          "flow": "get",
+          "expected": "200 OK",
+          "actual": "status=200",
+          "status": "PASS",
+          "severity": "LOW",
+          "evidence": [],
+          "startedAt": "2026-10-10T16:09:33.560Z",
+          "endedAt": "2026-10-10T16:09:33.600Z"
+        }
+      ],
+      "startedAt": "2026-10-10T16:09:32.908Z",
+      "endedAt": "2026-10-10T16:09:33.600Z",
+      "notes": "Live API tests against localhost:5001. Safe, read-only or pure compute. No destructive writes."
+    },
+    {
+      "name": "browser-e2e",
+      "summary": {
+        "total": 2,
+        "pass": 0,
+        "fail": 0,
+        "blocked": 0,
+        "notRun": 2
+      },
+      "results": [
+        {
+          "id": "E2E-001",
+          "feature": "navigation",
+          "flow": "home-loads",
+          "expected": "home page loads with expected title",
+          "actual": "require is not defined",
+          "status": "NOT_RUN",
+          "severity": "MEDIUM",
+          "evidence": [
+            {
+              "title": "browser-not-run",
+              "description": "require is not defined"
+            }
+          ],
+          "startedAt": "2026-10-10T16:09:33.600Z",
+          "endedAt": "2026-10-10T16:09:33.600Z"
+        },
+        {
+          "id": "E2E-002",
+          "feature": "navigation",
+          "flow": "properties-list",
+          "expected": "properties page responds",
+          "actual": "require is not defined",
+          "status": "NOT_RUN",
+          "severity": "MEDIUM",
+          "evidence": [
+            {
+              "title": "browser-not-run",
+              "description": "require is not defined"
+            }
+          ],
+          "startedAt": "2026-10-10T16:09:33.600Z",
+          "endedAt": "2026-10-10T16:09:33.600Z"
+        }
+      ],
+      "startedAt": "2026-10-10T16:09:33.600Z",
+      "endedAt": "2026-10-10T16:09:33.600Z",
+      "notes": "Playwright E2E - headless chromium. If browser not available, mark as BLOCKED/NOT_RUN. No destructive actions."
+    }
+  ],
+  "summary": {
+    "total": 15,
+    "pass": 10,
+    "fail": 3,
+    "blocked": 0,
+    "notRun": 2,
+    "criticalFailures": 0
+  }
+}

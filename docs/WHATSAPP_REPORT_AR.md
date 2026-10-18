@@ -25,13 +25,12 @@
 
 #### إعدادات البيئة (من .env):
 
-```
-META_WHATSAPP_TOKEN=EAAJ3e0mj7xABQxNQijjoECZAbDxYgj0clJK...
-META_PHONE_NUMBER_ID=602477526273771
-META_NOTIFY_NUMBER=966533220646
-ENJAZATIK_URL=https://business.enjazatik.com/api/v1/send-message
-ENJAZATIK_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+المتغيّرات المطلوبة (القيم محجوبة لأسباب أمنية):
+- `META_WHATSAPP_TOKEN`
+- `META_PHONE_NUMBER_ID`
+- `META_NOTIFY_NUMBER`
+- `ENJAZATIK_URL`
+- `ENJAZATIK_TOKEN`
 
 ---
 
@@ -289,3 +288,68 @@ interface WhatsAppLog {
 - **تاريخ التقرير**: 2026-04-14
 - **نظام**: rwqan.sa
 - **قاعدة البيانات**: Firebase Firestore (rwqan-757)
+
+---
+
+# ملحق: المرحلة الخامسة — جعل تكامل WhatsApp قابلًا للاختبار في بيئة DEV
+
+## الهدف
+
+إصلاح العيوب الآمنة في مسار WhatsApp (الربط، معالجة الأخطاء، منع الإرسال المزدوج) وإضافة
+اختبارات للنجاح/الرفض/الفشل/استلام حالات التسليم (Delivery)/تكرار الـ Webhook/الإعدادات الناقصة،
+**دون** تعديل منطق الرسائل أو القوالب أو الصلاحيات، و**دون** إرسال أي رسالة حقيقية.
+
+## العيب المُكتشف والمُصلَح
+
+- **الملف**: `server/index.ts`
+- **المشكلة**: كان وسيط `express.json` يفتقد خيار `verify`، لذا كان `req.rawBody` يبقى دائمًا
+  غير معرّف، وهذا يُبطل التحقق من توقيع Meta (`X-Hub-Signature-*`) على مسار استلام حالات التسليم.
+- **الإصلاح**: إضافة `captureWhatsAppWebhookRawBody` كخيار `verify` إلى `express.json`
+  (تعديل جراحي، سطران).
+
+## نقل «glue» ربط حالات التسليم (Delivery)
+
+تمت إضافة منطق ربط التسليم إلى `server/integrations/whatsapp.ts` مع الحفاظ على بوابة الإنتاج:
+
+- التقاط معرّف رسالة المزوّد (`providerMessageId`) من ردود Meta Cloud API و Enjazatik.
+- `extractWhatsAppProviderMessageId` لدعم مغلّفات الاستجابة الشائعة و `messages[0].id` الخاصة بـ Meta.
+- كشف حالات الفشل التطبيقي داخل استجابات HTTP 2xx (`hasExplicitWhatsAppProviderRejection`)
+  وإبقاؤها قابلة لإعادة المحاولة بدلًا من اعتبارها نجاحًا.
+- `EnjazatikWhatsAppResult` مع `providerStatus: "accepted"` (القبول من المزوّد لا يعني التسليم).
+- تسجيل رسائل المالك عبر `buildGeneralWhatsAppLog`/`whatsAppLogDeliveryStore` وإعادة مطابقة
+  الإشعارات المعلّقة (`whatsAppPendingDeliveryStore.reconcile`).
+- إضافة `logType`/`propertyName` لمغلّفات إشعارات المالك وأنواع السجل
+  (`owner_free_contact_limit`, `owner_subscription_activated`, `owner_subscription_expiring_soon`,
+  `owner_subscription_expired`).
+
+## الحفاظ على عزل بيئة DEV
+
+- `externalServicesEnabled()` تبقى تتحكم بالإرسال: في `NODE_ENV=development` يكون الإرسال
+  الخارجي **معطّلًا افتراضيًا** ما لم يُضبط `ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT="true"`.
+- `resolveAdminWhatsAppNumber` يعيد سلسلة فارغة خارج الإنتاج (لا رقم احتياطي إنتاجي).
+- لا يُطبع أي رمز/سر في السجلات (القيم تُظهر كـ `configured`/`MISSING`).
+
+## نتائج التحقق
+
+| البند | الأمر | النتيجة |
+|-------|-------|---------|
+| فحص الأنواع | `npx tsc --noEmit` | 0 أخطاء |
+| اختبارات WhatsApp | `node --import tsx --test server/integrations/whatsapp.test.ts` | 21/21 نجحت |
+| اختبارات حالات التسليم | `whatsapp-delivery-webhook.test.ts` + `WhatsAppLogDeliveryStore.test.ts` + `WhatsAppPendingDeliveryStore.test.ts` | 20/20 نجحت |
+
+تم تشغيل اختبارات WhatsApp ناجحة في كل من الوضع الافتراضي و `NODE_ENV=development`.
+
+## القيود والقواعد المتبعة
+
+- لم يُجرَ أي إرسال WhatsApp حقيقي (كل مسارات الإرسال إما معطّلة في DEV أو تستخدم مزوّدًا مُحاكى في الاختبارات).
+- لم تُعدّل القوالب أو منطق الرسائل أو الصلاحيات.
+- لم يُلتزَم أي تغيير إلى Git ولم يُنشَر أي شيء.
+- ما زال التكامل الخارجي الحقيقي ومسح حالات تسليم Meta مُحجوبين لعدم توفّر بيئة إرسال معتمدة
+  (ملاحظة مرجعية تخصّ المرحلة الرابعة).
+
+## الملفات المتأثرة
+
+- `server/index.ts` — إضافة `verify` لالتقاط الجسم الخام لتوقيع Meta.
+- `server/integrations/whatsapp.ts` — نقل glue التسليم مع الحفاظ على بوابة DEV.
+- `server/integrations/whatsapp.test.ts` — إضافة اختبارات المزوّد/المُحلِّل/إعادة المحاولة/السجل/مسار الأدمن.
+- `server/routes/whatsapp-delivery-webhook.ts` و `server/services/{WhatsAppDeliveryService,WhatsAppLogDeliveryStore,WhatsAppPendingDeliveryStore}.ts` — ملفات/اختبارات التسليم.

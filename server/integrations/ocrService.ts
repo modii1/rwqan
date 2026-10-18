@@ -244,7 +244,7 @@ function parseReceiptText(text: string, paymentId: string): OcrResult {
       if (beneficiary.length > 4) {
         result.extractedBeneficiaryName = beneficiary;
         result.confidence = (result.confidence || 0) + 20;
-        console.log(`📷 [OCR] اسم المستفيد المستخرج: ${beneficiary}`);
+        console.log("📷 [OCR] تم استخراج اسم المستفيد");
         break;
       }
     }
@@ -258,7 +258,7 @@ function parseReceiptText(text: string, paymentId: string): OcrResult {
   if (ibanMatch) {
     result.extractedIban = ibanMatch[0].toUpperCase();
     result.confidence = (result.confidence || 0) + 10;
-    console.log(`📷 [OCR] IBAN المستخرج: ${result.extractedIban}`);
+    console.log("📷 [OCR] تم استخراج IBAN");
   }
 
   // ======================================
@@ -276,7 +276,7 @@ function parseReceiptText(text: string, paymentId: string): OcrResult {
         const accountNumber = match[1] || match[0];
         result.extractedAccountNumber = accountNumber;
         result.confidence = (result.confidence || 0) + 10;
-        console.log(`📷 [OCR] رقم الحساب المستخرج: ${accountNumber}`);
+        console.log("📷 [OCR] تم استخراج رقم الحساب");
         break;
       }
     }
@@ -404,9 +404,9 @@ export async function matchOcrWithPayment(
     amount: ocrResult.extractedAmount,
     reference: ocrResult.extractedReference,
     bankName: ocrResult.extractedBankName,
-    beneficiary: ocrResult.extractedBeneficiaryName,
-    iban: ocrResult.extractedIban,
-    accountNumber: ocrResult.extractedAccountNumber,
+    hasBeneficiary: Boolean(ocrResult.extractedBeneficiaryName),
+    hasIban: Boolean(ocrResult.extractedIban),
+    hasAccountNumber: Boolean(ocrResult.extractedAccountNumber),
   });
 
   // ======================================

@@ -7,6 +7,8 @@ import {
   type BookingCommissionIntentionInput,
 } from "./paymob";
 
+(process.env as Record<string, string | undefined>).NODE_ENV = "production";
+
 const commissionInput: BookingCommissionIntentionInput = {
   amountCents: 12_345,
   bookingId: "BOOKING-1",

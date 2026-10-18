@@ -43,6 +43,7 @@ import {
   MousePointerClick,
   PauseCircle,
   ReceiptText,
+  Rocket,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -71,6 +72,7 @@ import ContactAnalyticsSection from "./sections/contact-analytics";
 import SuspendedSubscriptionsSection from "./sections/suspended-subscriptions";
 import BookingCommissionsSection from "./sections/booking-commissions";
 import CustomersSection from "./sections/customers";
+import DeploySection from "./sections/deploy";
 import { formatDateGMT3, formatFullDate } from "@/lib/dateUtils";
 
 
@@ -100,7 +102,8 @@ export type AdminSection =
   | "bank-accounts"
   | "feature-flags"
   | "blog"
-  | "occasions";
+  | "occasions"
+  | "deploy";
 
 
 export default function AdminDashboard({ initialSection }: { initialSection?: AdminSection } = {}) {
@@ -378,6 +381,13 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
           onClick={() => setActiveSection("blog")}
         />
 
+        <SidebarButton
+          icon={<Rocket className="w-4 h-4 text-indigo-600" />}
+          label="نظام النشر"
+          active={activeSection === "deploy"}
+          onClick={() => setActiveSection("deploy")}
+        />
+
         <div className="hidden md:block h-px bg-border my-2" />
 
         <SidebarButton
@@ -429,6 +439,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
         {activeSection === "feature-flags" && <FeatureFlagsSection />}
         {activeSection === "blog" && <AdminBlogSection />}
         {activeSection === "occasions" && <AdminOccasionsSection />}
+        {activeSection === "deploy" && <DeploySection />}
       </main>
     </div>
   );

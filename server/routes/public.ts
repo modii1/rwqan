@@ -5,8 +5,11 @@ import { propertyService, subscriptionService, discountService, notificationServ
 import { firebaseService } from "../firebaseService";
 import {
   R2ImageStorageUnavailableError,
+  r2,
+  R2_BUCKET,
   listR2PropertyImagesStrict,
 } from "../utils/r2";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { insertSuggestionSchema, type InsertProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
 import { hasActivePropertyHold } from "../../shared/propertyAvailability";
@@ -282,6 +285,19 @@ export function createPublicPropertyImagesHandler(
   return async (req, res) => {
     try {
       const images = await listImages(req.params.propertyNumber);
+      if (process.env.NODE_ENV === "development") {
+        // DEV only: R2_PUBLIC_URL is a placeholder domain (no DNS). Mirror the
+        // production public-URL semantics by streaming images through the
+        // private bucket read-through proxy below (bucket stays private).
+        const origin = `${req.protocol}://${req.get("host")}`;
+        const propertyNumber = req.params.propertyNumber;
+        const devImages = images.map((url) => {
+          const file = (url.split("/").pop() || "").trim();
+          if (!file) return url;
+          return `${origin}/api/public/r2-image?key=${encodeURIComponent(`${propertyNumber}/${file}`)}`;
+        });
+        return res.json({ images: devImages });
+      }
       res.json({ images });
     } catch (err) {
       console.error(`[R2 IMAGES] ERROR for property ${req.params.propertyNumber}:`, err);
@@ -304,6 +320,9 @@ router.get(
       if (hasActivePropertyHold(property)) {
         return res.status(423).json({ error: "هذا العقار غير متاح حالياً" });
       }
+      if (property && property.verificationStatus && property.verificationStatus !== "approved") {
+        return res.status(403).json({ error: "هذا العقار غير متاح حالياً" });
+      }
       next();
     } catch (error) {
       console.error("Public property image availability check failed:", error);
@@ -312,6 +331,49 @@ router.get(
   },
   createPublicPropertyImagesHandler(),
 );
+
+// Read-through proxy for public property images (used in DEV where
+// R2_PUBLIC_URL is a placeholder domain). Bucket stays private: only image
+// objects under a numeric property-prefix directory are eligible, matching
+// exactly what the public listing endpoint above already exposes.
+const PUBLIC_R2_IMAGE_KEY_PATTERN = /^[0-9]{4,8}\/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpe?g|png|webp)$/i;
+
+router.get("/api/public/r2-image", async (req, res) => {
+  try {
+    const key = typeof req.query.key === "string" ? req.query.key.trim() : "";
+    if (!key) {
+      return res.status(400).json({ error: "معرّف الصورة مطلوب" });
+    }
+    if (!PUBLIC_R2_IMAGE_KEY_PATTERN.test(key)) {
+      return res.status(403).json({ error: "معرّف الصورة غير صالح" });
+    }
+    if (!r2 || !R2_BUCKET) {
+      return res.status(503).json({ error: "تخزين الصور غير متاح" });
+    }
+    const output = await r2.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    const body = output.Body;
+    if (!body) {
+      return res.status(404).json({ error: "الصورة غير موجودة" });
+    }
+    const stream = body as any;
+    res.setHeader("Content-Type", output.ContentType || "image/jpeg");
+    if (output.ContentLength !== undefined) {
+      res.setHeader("Content-Length", String(output.ContentLength));
+    }
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    if (typeof stream.pipe === "function") {
+      return stream.pipe(res);
+    }
+    return res.send(Buffer.isBuffer(body) ? body : Buffer.from(body as any));
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    if (status === 404 || (error as { name?: string })?.name === "NoSuchKey") {
+      return res.status(404).json({ error: "الصورة غير موجودة" });
+    }
+    console.error("[PUBLIC R2 IMAGE] error:", error);
+    return res.status(500).json({ error: "تعذر تحميل الصورة" });
+  }
+});
 
 // ======================
 // 💳 PAYMENT CALCULATION

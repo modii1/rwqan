@@ -15,14 +15,19 @@ import whatsappRoutes from "../integrations/whatsapp";
 
 // Route modules
 import authRoutes from "./auth";
+import ownerAccountRoutes from "./owner-accounts";
 import ownerRoutes from "./owner";
 import propertiesRoutes from "./properties";
 import publicRoutes from "./public";
+import deployVersionRoutes from "./deploy-version";
 import trackingRoutes from "./tracking";
 import contactIdentityRoutes from "./contactIdentity";
 import customerRoutes from "./customer";
+import propertyReviewRoutes from "./property-reviews";
 import webhookRoutes from "./webhooks";
+import whatsappDeliveryWebhookRoutes from "./whatsapp-delivery-webhook";
 import bookingRoutes from "./bookings";
+import adminLiveDataRoutes from "./admin/live";
 import { requireAdmin, requireSameOrigin } from "./middleware";
 
 // Admin route modules
@@ -42,8 +47,16 @@ import adminLinkedPropertiesRoutes from "./admin/linked-properties";
 import adminOccasionsRoutes from "./admin/occasions";
 import adminBookingsRoutes from "./admin/bookings";
 import adminBookingPaymentsRoutes from "./admin/booking-payments";
+import adminOperationsRoutes from "./admin/operations";
+import adminDeployRoutes from "./admin/deploy";
+import { setDeploySystemStoreFactory } from "../services/DeploySystemStore";
+import { createFirestoreDeploySystemStore } from "../services/FirestoreDeploySystemStore";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // RWQAN DEPLOY: bind the DEV-only durable release registry. The factory fails
+  // closed if the isolated DEV project cannot be proven (see the resolver).
+  setDeploySystemStoreFactory(createFirestoreDeploySystemStore);
+
   // Middleware for cookies
   app.use(cookieParser());
 
@@ -78,14 +91,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Public routes (sitemap, developer-guide, packages, suggestions, etc.)
   app.use(publicRoutes);
 
+  // RWQAN DEPLOY: public read-only running-version probe for the DEV backend.
+  // Serves only on the isolated DEV project (404 elsewhere, incl. production).
+  app.use(deployVersionRoutes);
+
   // Auth routes (login, logout, session, password reset)
   app.use(authRoutes);
+
+  // Additive verified owner accounts; legacy property-number/PIN login remains.
+  app.use(ownerAccountRoutes);
 
   // Remembered public-client contact phone (separate from owner/admin auth)
   app.use(contactIdentityRoutes);
 
   // Verified customer account, profile, favorites, and complete contact history.
   app.use(customerRoutes);
+
+  // Verified-stay reviews: public summaries plus authenticated customer/admin actions.
+  app.use(propertyReviewRoutes);
 
   // Tracking routes (smart requests, pageview)
   app.use(trackingRoutes);
@@ -101,6 +124,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Webhook routes (Paymob)
   app.use(webhookRoutes);
+
+  // Authenticated WhatsApp provider delivery receipts.
+  app.use(whatsappDeliveryWebhookRoutes);
 
   // Central privileged boundary. Admin login/session routes are intentionally
   // registered above; every modular /api/admin handler below requires a session.
@@ -123,6 +149,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(adminOccasionsRoutes);
   app.use(adminBookingsRoutes);
   app.use(adminBookingPaymentsRoutes);
+  app.use(adminOperationsRoutes);
+
+  // RWQAN DEPLOY (DEV-only prototype). Guarded by the central /api/admin
+  // boundary above plus its own requireSameOrigin/requireAdmin/DEV gate.
+  app.use(adminDeployRoutes);
+
+  // RWQAN LIVE DATA (DEV-only, read-only preview). Guarded by the central
+  // /api/admin boundary plus its own requireSameOrigin/requireAdmin/DEV gate.
+  app.use(adminLiveDataRoutes);
 
   return createServer(app);
 }

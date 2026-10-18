@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./config/loadEnv";
 import express, { type ErrorRequestHandler } from "express";
 import session from "express-session";
 import cors from "cors";
@@ -9,10 +9,23 @@ import MemoryStore from "memorystore";
 import { startSmartScheduler } from "./smartScheduler";
 import { startScheduler } from "./scheduler";
 import { startBookingCommissionWorker } from "./services/BookingNotificationWorker";
+import { assertR2DevIsolation } from "./utils/r2";
 import next from "next";
 import cookieParser from "cookie-parser";
 import { randomBytes } from "node:crypto";
-import { assertProductionSecurityEnvironment } from "./config/runtimeEnvironment";
+import {
+  assertDevelopmentIsolation,
+  assertDevOnlyAdminCredentialsIsolation,
+  assertFirebaseDevIsolation,
+  assertPaymobKeyEnvironmentMatch,
+  assertProductionSecurityEnvironment,
+} from "./config/runtimeEnvironment";
+import { captureWhatsAppWebhookRawBody } from "./routes/whatsapp-delivery-webhook";
+import {
+  getActiveDataEnvironment,
+  getActiveFirestoreProjectId,
+} from "./config/dataEnvironment";
+import { syncR2Environment } from "./utils/r2";
 
 
 const app = express();
@@ -27,6 +40,15 @@ const handle = nextApp.getRequestHandler();
   console.log("🚀 [Server] Entering main startup IIFE...");
   try {
     assertProductionSecurityEnvironment();
+    assertDevelopmentIsolation();
+    assertFirebaseDevIsolation();
+    assertDevOnlyAdminCredentialsIsolation();
+    assertPaymobKeyEnvironmentMatch();
+    assertR2DevIsolation();
+    syncR2Environment();
+    console.log(
+      `[RWQAN] بيئة البيانات النشطة: ${getActiveDataEnvironment()} · مشروع Firestore الفعلي: ${getActiveFirestoreProjectId() ?? "غير محدد"}`,
+    );
     await nextApp.prepare();
     console.log("✅ [Server] Next.js prepared successfully.");
 
@@ -48,7 +70,10 @@ const handle = nextApp.getRequestHandler();
     }
 
     // JSON settings
-    app.use(express.json({ limit: "10mb" }));
+    app.use(express.json({
+      limit: "10mb",
+      verify: captureWhatsAppWebhookRawBody,
+    }));
     app.use(express.urlencoded({ extended: true }));
     app.use(cookieParser());
 
@@ -104,6 +129,18 @@ const handle = nextApp.getRequestHandler();
 
     // Error Handler
     const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+      // Multer file-upload errors (e.g. exceeding the size cap) are thrown by
+      // route middleware and never reach the route handler's own try/catch.
+      // Surface them as an explicit 4xx instead of an opaque 500.
+      if (err && (err as { name?: string }).name === "MulterError") {
+        const isTooLarge = (err as { code?: string }).code === "LIMIT_FILE_SIZE";
+        res.status(isTooLarge ? 413 : 400).json({
+          error: isTooLarge
+            ? "حجم الملف كبير جداً. الحجم الأقصى المسموح به هو 2 ميجابايت"
+            : "حدث خطأ أثناء رفع الملف. يرجى التحقق من الملف والمحاولة مرة أخرى",
+        });
+        return;
+      }
       console.error("❌ SERVER ERROR:", err);
       res.status(500).json({ message: "Server Error" });
     };

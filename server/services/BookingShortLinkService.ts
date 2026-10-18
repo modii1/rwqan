@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
-import { db as configuredDb } from "../config/firebase";
+import { activeFirestore as configuredDb } from "../config/dataEnvironment";
 import { BookingTokenService } from "./BookingTokenService";
 
 const SHORT_LINKS_COLLECTION = "booking_short_links";

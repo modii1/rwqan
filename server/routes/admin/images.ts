@@ -9,6 +9,7 @@ import {
   r2,
 } from "../../utils/r2";
 import { uploadImages } from "../../utils/helpers";
+import { detectBookingCommissionReceiptContentType } from "../../services/BookingCommissionReceiptService";
 import {
   PutObjectCommand,
   DeleteObjectCommand,
@@ -16,6 +17,14 @@ import {
 } from "@aws-sdk/client-s3";
 
 const router = Router();
+
+const PROPERTY_NUMBER_PATTERN = /^[0-9]{4,8}$/;
+const R2_IMAGE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpe?g|png|webp)$/i;
+
+function parsePropertyNumberParam(value: unknown): string | null {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return PROPERTY_NUMBER_PATTERN.test(candidate) ? candidate : null;
+}
 
 router.get("/api/admin/r2-images-count", async (req, res) => {
     try {
@@ -63,8 +72,8 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
   // جلب جميع صور عقار من R2
   router.get("/api/admin/r2-images/:propertyNumber", async (req, res) => {
     try {
-      const propertyNumber = req.params.propertyNumber;
-      if (!propertyNumber || !propertyNumber.trim()) {
+      const propertyNumber = parsePropertyNumberParam(req.params.propertyNumber);
+      if (!propertyNumber) {
         return res.json({ images: [] });
       }
       if (!r2) {
@@ -106,7 +115,10 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
     uploadImages.array("images"),
     async (req, res) => {
       try {
-        const propertyNumber = req.params.propertyNumber;
+        const propertyNumber = parsePropertyNumberParam(req.params.propertyNumber);
+        if (!propertyNumber) {
+          return res.status(400).json({ error: "رقم العقار غير صحيح" });
+        }
         if (!r2 || !R2_BUCKET) return res.json({ success: true, count: 0 });
 
         // عد الصور الحالية لتحديد البداية
@@ -120,13 +132,34 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
         let index = (list.Contents?.length || 0) + 1;
 
         const files = Array.isArray(req.files) ? req.files : [];
-        for (const file of files) {
+        if (files.length === 0) {
+          return res.status(400).json({ error: "لا توجد صور تم رفعها" });
+        }
+
+        // Match the owner upload path: reject anything that is not a real
+        // image (magic-byte check), and store the detected type instead of
+        // blindly labelling every upload as image/jpeg.
+        const detectedTypes = files.map((file) =>
+          detectBookingCommissionReceiptContentType(file.buffer),
+        );
+        if (detectedTypes.some((type) => !type || type === "application/pdf")) {
+          return res.status(415).json({ error: "صيغة الصورة غير مدعومة" });
+        }
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const detectedType = detectedTypes[i] as string;
+          const extension = detectedType === "image/png"
+            ? "png"
+            : detectedType === "image/webp"
+              ? "webp"
+              : "jpg";
           await r2.send(
             new PutObjectCommand({
               Bucket: R2_BUCKET || "",
-              Key: `${propertyNumber}/${index}.jpg`,
+              Key: `${propertyNumber}/${index}.${extension}`,
               Body: file.buffer,
-              ContentType: "image/jpeg",
+              ContentType: detectedType,
             })
           );
           index++;
@@ -142,8 +175,12 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
   // حذف صورة من R2 باستخدام URL (نفس طريقة المالك)
   router.post("/api/admin/r2-images/:propertyNumber/delete", async (req, res) => {
     try {
-      const { propertyNumber } = req.params;
+      const propertyNumber = parsePropertyNumberParam(req.params.propertyNumber);
       const { url } = req.body;
+
+      if (!propertyNumber) {
+        return res.status(400).json({ error: "رقم العقار غير صحيح" });
+      }
 
       if (!url) {
         return res.status(400).json({ error: "URL مطلوبة" });
@@ -151,6 +188,9 @@ router.get("/api/admin/r2-images-count", async (req, res) => {
 
       // استخراج الـ key من URL: https://.../{propertyNumber}/{fileName}
       const fileName = url.split("/").pop();
+      if (!fileName || !R2_IMAGE_FILE_PATTERN.test(fileName)) {
+        return res.status(400).json({ error: "رابط الصورة غير صحيح" });
+      }
       const key = `${propertyNumber}/${fileName}`;
       if (!r2 || !R2_BUCKET) return res.json({ ok: true });
 

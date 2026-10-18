@@ -455,3 +455,52 @@ test("invalid inputs and weak secret configuration fail with typed errors", asyn
     CustomerPhoneOtpConfigurationError,
   );
 });
+
+test("the DEV console sink succeeds and prints the real code without WhatsApp", async () => {
+  const database = new FakeFirestore();
+  const store = createFirebaseStore(database);
+  const snapshot = { ...process.env };
+  const logged: string[] = [];
+  const originalLog = console.log;
+  const env = process.env as Record<string, string | undefined>;
+  env.NODE_ENV = "development";
+  env.DEV_CUSTOMER_OTP_SINK = "console";
+  env.FIREBASE_SERVICE_ACCOUNT = JSON.stringify({
+    type: "service_account",
+    project_id: "rwqan-sa-dev",
+    private_key: "not-a-real-key",
+  });
+  delete env.ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT;
+  console.log = (message?: unknown) => {
+    logged.push(String(message));
+  };
+  try {
+    // No sender injected: the service falls back to the DEV-aware default.
+    const service = createCustomerPhoneOtpService({
+      store,
+      secret: SECRET,
+      now: () => Date.UTC(2026, 7, 26, 12, 0, 0),
+      createCode: () => VALID_CODE,
+      createChallengeId: () => challengeId(1),
+    });
+
+    const issued = await service.issue({ phone: VALID_PHONE, ipAddress: VALID_IP });
+    assert.match(issued.challengeId, /^[A-Za-z0-9_-]{43}$/);
+    assert.ok(
+      logged.some((line) => line.includes("[DEV OTP]") && line.includes(VALID_CODE)),
+      "expected the DEV sink to print the OTP",
+    );
+    assert.ok(database.read("customer_phone_otp_challenges", issued.challengeId));
+
+    const verified = await service.verify({
+      challengeId: issued.challengeId,
+      phone: VALID_PHONE,
+      code: VALID_CODE,
+    });
+    assert.equal(verified.verified, true);
+  } finally {
+    console.log = originalLog;
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, snapshot);
+  }
+});

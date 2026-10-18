@@ -4,14 +4,27 @@
  * and PIN management.
  */
 
-import { timingSafeEqual } from "node:crypto";
+import { randomInt, timingSafeEqual } from "node:crypto";
 import { firebaseService } from "../firebaseService";
+import { detectPasswordFormat, hashPassword, verifyPassword } from "../utils/password";
 
 const ADMIN_CODE = process.env.ADMIN_CODE;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 const ENJAZATIK_URL = process.env.ENJAZATIK_URL;
 const ENJAZATIK_TOKEN = process.env.ENJAZATIK_TOKEN;
+
+function authHashMigrationEnabled(): boolean {
+  if (process.env.AUTH_HASH_MIGRATION_ENABLED === "false") return false;
+  if (process.env.NODE_ENV !== "production") return true;
+  return process.env.AUTH_HASH_MIGRATION_ENABLED === "true";
+}
+
+function authEnforceHashedOnly(): boolean {
+  if (process.env.AUTH_ENFORCE_HASHED_ONLY === "false") return false;
+  if (process.env.NODE_ENV !== "production") return true;
+  return process.env.AUTH_ENFORCE_HASHED_ONLY === "true";
+}
 
 export class AuthService {
   // ─── Admin Auth ─────────────────────────────────────────────────────────────
@@ -26,8 +39,50 @@ export class AuthService {
   // ─── Owner Auth ─────────────────────────────────────────────────────────────
 
   async validateOwnerPin(propertyNumber: string, pin: string): Promise<boolean> {
+    const owner = await firebaseService.getOwnerByPropertyNumber(propertyNumber);
+    if (owner && typeof owner.password === "string" && owner.password.trim().length > 0) {
+      const format = detectPasswordFormat(owner.password);
+      if (format === "hashed") {
+        if (await verifyPassword(owner.password, pin)) {
+          return true;
+        }
+        return false;
+      }
+      if (format === "plaintext") {
+        if (authEnforceHashedOnly()) {
+          return false;
+        }
+        if (this._safeCredentialMatch(pin, owner.password)) {
+          if (authHashMigrationEnabled()) {
+            try {
+              const hashed = await hashPassword(pin);
+              await firebaseService.updateOwnerPassword(propertyNumber, hashed);
+            } catch (err) {
+              console.error("Password migration failed");
+            }
+          }
+          return true;
+        }
+        return false;
+      }
+    }
+
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    return Boolean(property && property.pin === pin);
+    if (property && this._safeCredentialMatch(pin, property.pin)) {
+      if (authEnforceHashedOnly()) {
+        return false;
+      }
+      if (authHashMigrationEnabled()) {
+        try {
+          const hashed = await hashPassword(pin);
+          await firebaseService.updateOwnerPassword(propertyNumber, hashed);
+        } catch (err) {
+          console.error("Password migration failed");
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   // ─── Password Reset ──────────────────────────────────────────────────────────
@@ -55,7 +110,7 @@ export class AuthService {
       );
     }
 
-    const resetCode = Math.floor(100_000 + Math.random() * 900_000).toString();
+    const resetCode = randomInt(100_000, 1_000_000).toString();
     const expireTime = new Date(Date.now() + 10 * 60 * 1000);
 
     await firebaseService.updateOwnerResetCode(
@@ -108,7 +163,7 @@ export class AuthService {
       throw Object.assign(new Error(validation.message), { code: 400 });
     }
 
-    await firebaseService.updateOwnerPassword(ownerId, newPassword);
+    await firebaseService.updateOwnerPassword(ownerId, await hashPassword(newPassword));
   }
 
   /**
@@ -127,15 +182,39 @@ export class AuthService {
     const owner = await firebaseService.getOwnerByPropertyNumber(propertyNumber);
 
     if (!owner) throw Object.assign(new Error("بيانات المالك غير موجودة"), { code: 404 });
-    if (owner.password !== currentPassword) {
+    if (!(await this._verifyOwnerCredential(propertyNumber, owner, currentPassword))) {
       throw Object.assign(new Error("الرقم السري الحالي غير صحيح"), { code: 400 });
     }
 
-    await firebaseService.updateOwnerPassword(propertyNumber, newPassword);
+    await firebaseService.updateOwnerPassword(propertyNumber, await hashPassword(newPassword));
     await firebaseService.clearOwnerResetCode(propertyNumber);
   }
 
   // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  private async _verifyOwnerCredential(
+    propertyNumber: string,
+    owner: { password?: string },
+    candidate: string
+  ): Promise<boolean> {
+    const storedPassword =
+      typeof owner.password === "string" && owner.password.trim().length > 0
+        ? owner.password
+        : "";
+    if (storedPassword) {
+      const format = detectPasswordFormat(storedPassword);
+      if (format === "hashed") {
+        return verifyPassword(storedPassword, candidate);
+      }
+      if (format === "plaintext") {
+        if (authEnforceHashedOnly()) return false;
+        return this._safeCredentialMatch(candidate, storedPassword);
+      }
+    }
+    if (authEnforceHashedOnly()) return false;
+    const property = await firebaseService.getPropertyByNumber(propertyNumber);
+    return Boolean(property && this._safeCredentialMatch(candidate, property.pin));
+  }
 
   private _normalizePhone(raw: string): string {
     let phone = raw.replace(/\D/g, "");
@@ -157,3 +236,5 @@ export class AuthService {
 }
 
 export const authService = new AuthService();
+
+

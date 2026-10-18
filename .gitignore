@@ -25,7 +25,15 @@ yarn-error.log*
 
 # local env files
 .env*.local
+# RWQAN DEPLOY — isolated real-restore output (Phase D); never tracked.
+.deploy-restore/
+
+# Env files
 .env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
 
 # vercel
 .vercel

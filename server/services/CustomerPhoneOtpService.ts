@@ -16,6 +16,7 @@ import {
   type VerifyCustomerPhoneOtpChallengeResult,
 } from "../firebaseService";
 import { sendOwnerWhatsApp } from "../integrations/whatsapp";
+import { devCustomerOtpSinkEnabled } from "../config/runtimeEnvironment";
 
 export const CUSTOMER_PHONE_OTP_TTL_MS = 10 * 60 * 1000;
 export const CUSTOMER_PHONE_OTP_MAX_ATTEMPTS = 5;
@@ -180,6 +181,25 @@ function maskSaudiPhone(phone: string): string {
   return `${localPhone.slice(0, 2)}••••${localPhone.slice(-4)}`;
 }
 
+/**
+ * Default OTP transport. In an isolated DEV run with the console sink enabled
+ * (see devCustomerOtpSinkEnabled), the freshly generated code is written to the
+ * server console so the real sign-in ceremony can be exercised locally. This
+ * only substitutes the transport; the code is still random, hashed, and verified
+ * normally. Every other environment uses the real WhatsApp sender.
+ */
+const defaultCustomerPhoneOtpSender: CustomerPhoneOtpSender = async (
+  phone,
+  message,
+  retries,
+) => {
+  if (devCustomerOtpSinkEnabled()) {
+    console.log(`[DEV OTP] to=${maskSaudiPhone(phone)} :: ${message}`);
+    return { success: true };
+  }
+  return sendOwnerWhatsApp(phone, message, retries);
+};
+
 export class CustomerPhoneOtpService {
   private readonly configuredSecret: Buffer | undefined;
   private readonly now: () => number;
@@ -201,7 +221,7 @@ export class CustomerPhoneOtpService {
       .padStart(6, "0"));
     this.createChallengeId = options.createChallengeId || (() =>
       randomBytes(32).toString("base64url"));
-    this.sender = options.sender || sendOwnerWhatsApp;
+    this.sender = options.sender || defaultCustomerPhoneOtpSender;
     this.issueWindowMs = requirePositiveSafeInteger(
       options.issueWindowMs ?? CUSTOMER_PHONE_OTP_ISSUE_WINDOW_MS,
       "Customer phone OTP issue window",

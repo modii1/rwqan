@@ -13,6 +13,7 @@ import { isActivePremiumSubscription } from "../../shared/subscriptionType";
 import {
   CONTACT_IDENTITY_COOKIE_NAME,
   contactIdentityService,
+  getContactAnalyticsSecret,
   getContactIdentityClearCookieOptions,
   maskContactPhone,
 } from "../services/ContactIdentityService";
@@ -68,19 +69,19 @@ function createVisitorKey(req: any, ipAddress: string): string {
     : actor === "admin"
       ? "admin"
       : `anonymous:${ipAddress}`;
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret).update(source).digest("hex").slice(0, 24);
 }
 
 function createCooldownKey(visitorKey: string, propertyNumber: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`contact-cooldown:${visitorKey}:${propertyNumber}`)
     .digest("hex");
 }
 
 function createRememberedVisitorKey(visitorId: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`remembered-contact:${visitorId}`)
     .digest("hex")
@@ -88,21 +89,21 @@ function createRememberedVisitorKey(visitorId: string): string {
 }
 
 function createIpAbuseLimitKey(ipAddress: string, propertyNumber: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`contact-ip-limit:${ipAddress}:${propertyNumber}`)
     .digest("hex");
 }
 
 function createContactAttemptLimitKey(ipAddress: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`contact-attempt-limit:${ipAddress}`)
     .digest("hex");
 }
 
 function createFreePropertyDailyLimitKey(propertyNumber: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`free-property-daily-contact-limit:${propertyNumber}`)
     .digest("hex");

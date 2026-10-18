@@ -2,6 +2,7 @@
  * Shared constants and helpers for routes
  */
 import multer from "multer";
+import type { NextFunction, Request, Response } from "express";
 import { normalizePhoneDigits, normalizeSaudiMobilePhone } from "../../shared/phone";
 
 export const upload = multer({
@@ -12,6 +13,49 @@ export const uploadImages = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
 });
+
+// Bank-transfer receipts: images or PDF, cap the size and reject non-document
+// parts before they ever reach a handler. Magic-byte validation is still
+// performed by the route after parsing (see detectReceiptContentType).
+export const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+const RECEIPT_ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+]);
+export const RECEIPT_INVALID_TYPE_ERROR = "INVALID_RECEIPT_TYPE";
+
+export const uploadReceipt = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: RECEIPT_MAX_BYTES, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!RECEIPT_ALLOWED_MIME_TYPES.has(String(file.mimetype || "").toLowerCase())) {
+      callback(new Error(RECEIPT_INVALID_TYPE_ERROR));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+export function parseReceiptUpload(req: Request, res: Response, next: NextFunction): void {
+  uploadReceipt.single("receipt")(req, res, (error: unknown) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      res.status(413).json({ error: "حجم الإيصال يتجاوز الحد المسموح (5 ميجابايت)" });
+      return;
+    }
+    if (error instanceof Error && error.message === RECEIPT_INVALID_TYPE_ERROR) {
+      res.status(415).json({ error: "صيغة الإيصال غير مدعومة" });
+      return;
+    }
+    res.status(400).json({ error: "تعذر قراءة ملف الإيصال" });
+  });
+}
 
 // Google Sheet column mapping (legacy, still used for admin property update translations)
 export const SHEET_MAP: Record<string, string> = {

@@ -9,6 +9,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { firebaseService } from "../firebaseService";
+import { externalServicesEnabled } from "../config/runtimeEnvironment";
 import {
   canAutoActivateReceipt,
   isReceiptAmountExact,
@@ -132,6 +133,12 @@ export async function scanReceiptWithAI(
   expectedBeneficiary?: string
 ): Promise<AIScanResult | null> {
   try {
+    if (!externalServicesEnabled()) {
+      console.warn(
+        "🔬 [AI Scanner] Gemini is disabled in development (DEV → OFF by default).",
+      );
+      return null;
+    }
     // AI Scanner always runs now
     // const ocrEnabled = await firebaseService.getFeatureFlag("FEATURE_OCR_ENABLED");
     // if (!ocrEnabled) {

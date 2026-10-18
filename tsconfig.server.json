@@ -14,6 +14,8 @@
     ],
     "exclude": [
         "server/replit_integrations",
-        "server/_legacy"
+        "server/_legacy",
+        "server/**/*.test.ts",
+        "shared/**/*.test.ts"
     ]
 }

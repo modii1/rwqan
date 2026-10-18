@@ -1,4 +1,9 @@
 import crypto from 'crypto';
+import {
+  assertDevPaymobEndpointsAreIsolated,
+  resolvePaymobEndpoints,
+} from "../config/paymobEndpoints";
+import { paymobEnabled } from "../config/runtimeEnvironment";
 
 const SECRET_KEY = process.env.PAYMOB_API_KEY!;
 const PUBLIC_KEY = process.env.PAYMOB_PUBLIC_KEY!;
@@ -185,6 +190,15 @@ export class PaymobIntentionError extends Error {
 
 export class PaymobService {
 
+  private assertPaymobReachable(): void {
+    if (!paymobEnabled()) {
+      throw new Error(
+        'Paymob is disabled in development (DEV → OFF by default); ' +
+        'set PAYMOB_ALLOW_IN_DEVELOPMENT="true" to enable explicit opt-in.',
+      );
+    }
+  }
+
   /**
    * Read the current provider state for an intention using the same scoped
    * public-key/client-secret pair that Unified Checkout uses. This is a
@@ -195,6 +209,7 @@ export class PaymobService {
   async retrieveIntention(
     checkoutUrl: string,
   ): Promise<PaymobIntentionLookup> {
+    this.assertPaymobReachable();
     let checkout: URL;
     try {
       checkout = new URL(String(checkoutUrl || ""));
@@ -267,9 +282,10 @@ export class PaymobService {
     let signedTransaction: PaymobIntentionSnapshot["signedTransaction"];
     try {
       const redirect = new URL(String(data?.redirection_url || ""));
+      const expectedRedirect = new URL(resolvePaymobEndpoints().redirectUrl);
       if (
-        redirect.origin === "https://rwqan.sa" &&
-        redirect.pathname === "/api/paymob/webhook"
+        redirect.origin === expectedRedirect.origin &&
+        redirect.pathname === expectedRedirect.pathname
       ) {
         const redirectData = Object.fromEntries(redirect.searchParams.entries());
         const redirectHmac = redirect.searchParams.get("hmac") || "";
@@ -352,6 +368,9 @@ export class PaymobService {
     paymentMethod: 'cards' | 'applepay' = 'cards',
     attempt?: { merchantAttemptKey?: string; paymentId?: string },
   ) {
+    this.assertPaymobReachable();
+    assertDevPaymobEndpointsAreIsolated();
+    const { notificationUrl, redirectUrl } = resolvePaymobEndpoints();
     const integrationId = paymentMethod === 'applepay'
       ? INTEGRATION_ID_APPLEPAY
       : INTEGRATION_ID_CARDS;
@@ -368,7 +387,7 @@ export class PaymobService {
       currency: 'SAR',
       // Paymob's server-to-server callback. The redirect URL below is browser
       // UX only and must not be relied on for settlement.
-      notification_url: "https://rwqan.sa/api/paymob/webhook",
+      notification_url: notificationUrl,
       payment_methods: [integrationId],
       items: [{
         name: itemName,
@@ -383,7 +402,7 @@ export class PaymobService {
         phone_number: phone,
         country: 'KSA',
         // ⭐⭐⭐ إعادة التوجيه بعد الدفع
-        redirect_url: "https://rwqan.sa/api/paymob/webhook",
+        redirect_url: redirectUrl,
       },
       customer: {
         first_name: propertyName || 'عميل',
@@ -492,6 +511,9 @@ export class PaymobService {
     intentionId: string;
     orderId: string;
   }> {
+    this.assertPaymobReachable();
+    assertDevPaymobEndpointsAreIsolated();
+    const { notificationUrl, redirectUrl } = resolvePaymobEndpoints();
     const amountCents = input?.amountCents;
     const bookingId = String(input?.bookingId || "").trim();
     const attemptId = String(input?.attemptId || "").trim();
@@ -529,7 +551,7 @@ export class PaymobService {
     const payload = {
       amount: amountCents,
       currency: 'SAR',
-      notification_url: "https://rwqan.sa/api/paymob/webhook",
+      notification_url: notificationUrl,
       payment_methods: [integrationId],
       items: [{
         name: itemName,
@@ -543,7 +565,7 @@ export class PaymobService {
         email: `${ownerPhone}@example.com`,
         phone_number: ownerPhone,
         country: 'KSA',
-        redirect_url: "https://rwqan.sa/api/paymob/webhook",
+        redirect_url: redirectUrl,
       },
       customer: {
         first_name: propertyName,
@@ -704,6 +726,9 @@ export class PaymobService {
     paymentMethod: 'cards' | 'applepay' = 'cards',
     attempt: { merchantAttemptKey: string; paymentId: string },
   ) {
+    this.assertPaymobReachable();
+    assertDevPaymobEndpointsAreIsolated();
+    const { notificationUrl, redirectUrl } = resolvePaymobEndpoints();
     const merchantAttemptKey = String(
       attempt?.merchantAttemptKey || "",
     ).trim();
@@ -733,7 +758,7 @@ export class PaymobService {
       currency: 'SAR',
       // This endpoint is enabled only for add-on intentions backed by a
       // stable local payment id and merchant attempt key.
-      notification_url: "https://rwqan.sa/api/paymob/webhook",
+      notification_url: notificationUrl,
       payment_methods: [integrationId],
       items: [{
         name: itemName,
@@ -747,7 +772,7 @@ export class PaymobService {
         email: `${phone}@example.com`,
         phone_number: phone,
         country: 'KSA',
-        redirect_url: "https://rwqan.sa/api/paymob/webhook",
+        redirect_url: redirectUrl,
       },
       customer: {
         first_name: propertyName || 'عميل',
@@ -934,6 +959,7 @@ export class PaymobService {
          4. اضغط "View" وانسخ القيمة
   =========================================================== */
   async getAuthToken(): Promise<string | null> {
+    this.assertPaymobReachable();
     try {
       console.log("🔐 Getting Paymob auth token...");
       
@@ -1001,6 +1027,7 @@ export class PaymobService {
     order_id?: string;
     merchant_order_id?: string;
   }) {
+    this.assertPaymobReachable();
     try {
       console.log("📡 Calling Transaction Inquiry API...");
       console.log("   Request body:", JSON.stringify(body));

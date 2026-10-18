@@ -9,10 +9,13 @@
     "smoke:start": "node scripts/smoke-built-server.cjs",
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "lint": "next lint",
+    "security:scan": "tsx security/src/cli.ts",
+    "security:scan:ci": "tsx security/src/cli.ts --ci --no-network true",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.972.0",
+    "@aws-sdk/s3-request-presigner": "^3.1149.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
     "@internationalized/date": "^3.12.3",
@@ -60,6 +63,7 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
+    "argon2": "^0.45.1",
     "autoprefixer": "^10.4.20",
     "aws-sdk": "^2.1693.0",
     "cheerio": "^1.1.2",
@@ -118,6 +122,7 @@
     "bufferutil": "^4.0.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@types/jsonwebtoken": "^9.0.10",
     "cross-env": "^10.1.0",
     "eslint": "^9.39.2",

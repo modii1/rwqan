@@ -1,0 +1,110 @@
+{
+  "startedAt": "2026-10-15T07:35:49.508Z",
+  "target": {
+    "projectId": "rwqan-sa-dev",
+    "r2Bucket": "rwqan-sa-dev"
+  },
+  "total": 16,
+  "pass": 15,
+  "fail": 0,
+  "blocked": 0,
+  "na": 1,
+  "cases": [
+    {
+      "id": "R2-UP-001",
+      "name": "owner uploads property image (real R2 write)",
+      "status": "PASS",
+      "detail": "status=200 key=90001/1792049735661-0.png"
+    },
+    {
+      "id": "R2-URL-001",
+      "name": "served image URL is a real same-origin proxy (no fake domain)",
+      "status": "PASS",
+      "detail": "/api/owner/r2-image?key=90001%2F1792049735661-0.png"
+    },
+    {
+      "id": "R2-RD-001",
+      "name": "owner reads own private image (content matches upload)",
+      "status": "PASS",
+      "detail": "status=200 content-type=image/png bytes=70"
+    },
+    {
+      "id": "R2-RD-002",
+      "name": "image persists after reload (fresh session)",
+      "status": "PASS",
+      "detail": "status=200 bytes=70"
+    },
+    {
+      "id": "R2-UX-001",
+      "name": "uploaded image renders in owner gallery UI",
+      "status": "PASS",
+      "detail": "naturalWidth=1"
+    },
+    {
+      "id": "R2-UX-002",
+      "name": "image still renders after page reload",
+      "status": "PASS",
+      "detail": "naturalWidth=1"
+    },
+    {
+      "id": "R2-VAL-001",
+      "name": "reject non-image content (magic-byte validation)",
+      "status": "PASS",
+      "detail": "status=415"
+    },
+    {
+      "id": "R2-VAL-002",
+      "name": "reject image over 2MB size cap",
+      "status": "PASS",
+      "detail": "status=413 error=حجم الملف كبير جداً. الحجم الأقصى المسموح به هو 2 ميجابايت"
+    },
+    {
+      "id": "R2-AUTH-001",
+      "name": "unauthenticated read of private image is rejected",
+      "status": "PASS",
+      "detail": "status=401 (expected 401)"
+    },
+    {
+      "id": "R2-AUTH-002",
+      "name": "cross-owner read is rejected (key outside session property)",
+      "status": "PASS",
+      "detail": "status=403 (expected 403)"
+    },
+    {
+      "id": "R2-PRIV-001",
+      "name": "receipt stored privately, not served/listed publicly",
+      "status": "PASS",
+      "detail": "public_proxy=403 stored=true listed=false"
+    },
+    {
+      "id": "R2-ADMIN-001",
+      "name": "admin rejects non-image content (magic-byte validation)",
+      "status": "PASS",
+      "detail": "status=415 (expected 415)"
+    },
+    {
+      "id": "R2-ADMIN-002",
+      "name": "admin uploads a valid image with detected content-type",
+      "status": "PASS",
+      "detail": "status=200 body={\"ok\":true} newKeys=[\"90003/1.png\"]"
+    },
+    {
+      "id": "R2-PUB-001",
+      "name": "public image listing blocked for non-approved property, allowed for approved",
+      "status": "PASS",
+      "detail": "pending=403 (expected 403), restored=200 (expected 200)"
+    },
+    {
+      "id": "R2-PUB-002",
+      "name": "public image listing for unknown property returns empty list (no leakage)",
+      "status": "PASS",
+      "detail": "status=200 body={\"images\":[]}"
+    },
+    {
+      "id": "R2-SIGNED-001",
+      "name": "temporary/signed URL validity + expiry",
+      "status": "NA",
+      "detail": "Codebase issues no presigned URLs; DEV serves private images via authenticated read-through proxies (no expiring links)."
+    }
+  ]
+}

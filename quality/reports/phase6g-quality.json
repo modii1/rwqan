@@ -1,0 +1,400 @@
+{
+  "startedAt": "2026-10-13T11:51:25.324Z",
+  "endedAt": "2026-10-13T11:52:55.903Z",
+  "suites": [
+    {
+      "name": "business-logic",
+      "summary": {
+        "total": 10,
+        "pass": 10,
+        "fail": 0,
+        "blocked": 0,
+        "notRun": 0
+      },
+      "results": [
+        {
+          "id": "BL-001",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "constants",
+          "expected": "MAX_ACTIVE=90, RENEWAL_WINDOW=10, MAX_REMAINING=100",
+          "actual": "constants_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-002",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "duration-normalize",
+          "expected": "positive int ok, non-int/string invalid",
+          "actual": "normalize_ok",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-003",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "duration-allowed-active",
+          "expected": "active allows <=90, >90 blocked; inactive allowed regardless of duration",
+          "actual": "duration_allowed_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-004",
+          "feature": "subscriptionPackagePolicy",
+          "flow": "purchasable",
+          "expected": "active+valid duration purchasable",
+          "actual": "purchasable_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-005",
+          "feature": "subscriptionPricing",
+          "flow": "calculate-basic",
+          "expected": "base + extras computed correctly",
+          "actual": "{\"basePrice\":100,\"includedPropertyCount\":1,\"additionalPropertyPrice\":25,\"billedPropertyCount\":3,\"additionalPropertyCount\":2,\"total\":150}",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-006",
+          "feature": "subscriptionPricing",
+          "flow": "legacy-vip",
+          "expected": "legacy vip semantics preserved",
+          "actual": "inc=2 base=50",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.325Z"
+        },
+        {
+          "id": "BL-007",
+          "feature": "dateUtils",
+          "flow": "end-date-capping",
+          "expected": "end date capped at MAX from today",
+          "actual": "2026-07-20T20:59:59.999Z",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.325Z",
+          "endedAt": "2026-10-13T11:51:25.343Z"
+        },
+        {
+          "id": "BL-008",
+          "feature": "dateUtils",
+          "flow": "remaining-days",
+          "expected": ">=0 logic",
+          "actual": "1",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.343Z",
+          "endedAt": "2026-10-13T11:51:25.343Z"
+        },
+        {
+          "id": "BL-009",
+          "feature": "subscriptionType",
+          "flow": "normalize",
+          "expected": "premium/normal mapped",
+          "actual": "ok",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.343Z",
+          "endedAt": "2026-10-13T11:51:25.343Z"
+        },
+        {
+          "id": "BL-010",
+          "feature": "paymentScenarioFlow",
+          "flow": "isActiveSubscription",
+          "expected": "checks endDate and status",
+          "actual": "ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.343Z",
+          "endedAt": "2026-10-13T11:51:25.344Z"
+        }
+      ],
+      "startedAt": "2026-10-13T11:51:25.325Z",
+      "endedAt": "2026-10-13T11:51:25.344Z",
+      "notes": "In-process business logic tests using REAL modules only. No business-logic changes."
+    },
+    {
+      "name": "live-api",
+      "summary": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "blocked": 0,
+        "notRun": 0
+      },
+      "results": [
+        {
+          "id": "API-001",
+          "feature": "api/packages",
+          "flow": "get",
+          "expected": "200 OK, JSON array or structure",
+          "actual": "status=200 count=3",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.344Z",
+          "endedAt": "2026-10-13T11:51:25.774Z"
+        },
+        {
+          "id": "API-002",
+          "feature": "api/payment/calculate",
+          "flow": "post-pure-compute",
+          "expected": "200 OK with pricing breakdown (no money movement)",
+          "actual": "status=200 packageId=E2E_TEST_PKG_1PROP has_pricing",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:25.774Z",
+          "endedAt": "2026-10-13T11:51:26.568Z"
+        },
+        {
+          "id": "API-003",
+          "feature": "home",
+          "flow": "get",
+          "expected": "200 OK",
+          "actual": "status=200",
+          "status": "PASS",
+          "severity": "LOW",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:26.568Z",
+          "endedAt": "2026-10-13T11:51:27.665Z"
+        }
+      ],
+      "startedAt": "2026-10-13T11:51:25.344Z",
+      "endedAt": "2026-10-13T11:51:27.665Z",
+      "notes": "Live API tests against localhost:5001. Safe, read-only or pure compute. No destructive writes."
+    },
+    {
+      "name": "browser-e2e",
+      "summary": {
+        "total": 15,
+        "pass": 14,
+        "fail": 0,
+        "blocked": 1,
+        "notRun": 0
+      },
+      "results": [
+        {
+          "id": "E2E-AUTH-001",
+          "feature": "auth",
+          "flow": "owner-login-ui",
+          "expected": "owner logs in through the real form and reaches an authenticated owner page",
+          "actual": "logged_in path=/owner/dashboard",
+          "status": "PASS",
+          "severity": "CRITICAL",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:27.665Z",
+          "endedAt": "2026-10-13T11:51:38.784Z"
+        },
+        {
+          "id": "E2E-AUTH-002",
+          "feature": "auth",
+          "flow": "owner-logout-ui",
+          "expected": "logout clears the owner session",
+          "actual": "isLoggedIn=false",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:38.784Z",
+          "endedAt": "2026-10-13T11:51:43.350Z"
+        },
+        {
+          "id": "E2E-AUTH-003",
+          "feature": "auth",
+          "flow": "admin-login-ui",
+          "expected": "admin logs in through the real form and reaches /admin",
+          "actual": "admin_logged_in path=/admin",
+          "status": "PASS",
+          "severity": "CRITICAL",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:43.350Z",
+          "endedAt": "2026-10-13T11:51:48.219Z"
+        },
+        {
+          "id": "E2E-AUTH-004",
+          "feature": "auth",
+          "flow": "unauthenticated-protected-apis",
+          "expected": "protected owner/admin APIs reject unauthenticated callers (401)",
+          "actual": "owner=401 admin=401",
+          "status": "PASS",
+          "severity": "CRITICAL",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:48.219Z",
+          "endedAt": "2026-10-13T11:51:48.742Z"
+        },
+        {
+          "id": "E2E-AUTH-005",
+          "feature": "auth",
+          "flow": "customer-otp-boundary",
+          "expected": "customer OTP challenge is refused cleanly because SMS/WhatsApp is disabled in DEV",
+          "actual": "challenge_status=429 (external WhatsApp disabled / rate-limited — expected in DEV)",
+          "status": "BLOCKED",
+          "severity": "MEDIUM",
+          "evidence": [
+            {
+              "title": "external-dependency",
+              "description": "Customer OTP delivery needs WhatsApp; disabled in DEV."
+            }
+          ],
+          "startedAt": "2026-10-13T11:51:48.742Z",
+          "endedAt": "2026-10-13T11:51:50.251Z"
+        },
+        {
+          "id": "E2E-OWN-001",
+          "feature": "owner",
+          "flow": "dashboard-loads",
+          "expected": "authenticated owner dashboard renders without runtime errors",
+          "actual": "dashboard_rendered chars=14180",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:50.252Z",
+          "endedAt": "2026-10-13T11:51:55.775Z"
+        },
+        {
+          "id": "E2E-OWN-002",
+          "feature": "owner",
+          "flow": "property-update-persists",
+          "expected": "owner updates the property, reloads, and the new value persists",
+          "actual": "persisted name=E2E-EDIT-20881",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:51:55.775Z",
+          "endedAt": "2026-10-13T11:52:06.581Z"
+        },
+        {
+          "id": "E2E-CUST-001",
+          "feature": "customer",
+          "flow": "browse-and-detail",
+          "expected": "public properties list shows the synthetic properties and detail page renders",
+          "actual": "api_count=3 list_ok detail_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:06.581Z",
+          "endedAt": "2026-10-13T11:52:12.283Z"
+        },
+        {
+          "id": "E2E-SUB-001",
+          "feature": "subscriptions",
+          "flow": "packages-render-ui",
+          "expected": "the subscription page lists the synthetic DEV packages",
+          "actual": "packages_rendered",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:12.283Z",
+          "endedAt": "2026-10-13T11:52:14.898Z"
+        },
+        {
+          "id": "E2E-SUB-002",
+          "feature": "subscriptions",
+          "flow": "payment-calculation",
+          "expected": "payment/calculate returns correct pricing and applies a percentage discount",
+          "actual": "base=100 afterDiscount=90 total=92.25",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:14.898Z",
+          "endedAt": "2026-10-13T11:52:16.107Z"
+        },
+        {
+          "id": "E2E-ADM-001",
+          "feature": "admin",
+          "flow": "admin-boundary",
+          "expected": "admin APIs require an admin session; owner session is rejected",
+          "actual": "owner_as_admin_status=401",
+          "status": "PASS",
+          "severity": "CRITICAL",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:16.107Z",
+          "endedAt": "2026-10-13T11:52:22.190Z"
+        },
+        {
+          "id": "E2E-ADM-002",
+          "feature": "admin",
+          "flow": "admin-dashboard-and-data",
+          "expected": "admin session can load the dashboard and see the synthetic properties",
+          "actual": "admin_properties_ok dashboard_ok",
+          "status": "PASS",
+          "severity": "HIGH",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:22.190Z",
+          "endedAt": "2026-10-13T11:52:42.499Z"
+        },
+        {
+          "id": "E2E-FILE-001",
+          "feature": "files",
+          "flow": "public-image-upload",
+          "expected": "owner uploads a synthetic public property image and it is accepted",
+          "actual": "upload_status=200",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:42.499Z",
+          "endedAt": "2026-10-13T11:52:48.918Z"
+        },
+        {
+          "id": "E2E-UX-001",
+          "feature": "responsive",
+          "flow": "mobile-rtl",
+          "expected": "mobile viewport is RTL, has no horizontal overflow, and renders content",
+          "actual": "dir=rtl width=390",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:48.918Z",
+          "endedAt": "2026-10-13T11:52:50.510Z"
+        },
+        {
+          "id": "E2E-UX-002",
+          "feature": "responsive",
+          "flow": "tablet-and-desktop",
+          "expected": "tablet (768) and desktop (1440) viewports render without horizontal overflow",
+          "actual": "768ok,1440ok",
+          "status": "PASS",
+          "severity": "MEDIUM",
+          "evidence": [],
+          "startedAt": "2026-10-13T11:52:50.510Z",
+          "endedAt": "2026-10-13T11:52:55.903Z"
+        }
+      ],
+      "startedAt": "2026-10-13T11:51:27.665Z",
+      "endedAt": "2026-10-13T11:52:55.903Z",
+      "notes": "Playwright E2E, headless chromium, DEV server on :5001 + E2E_TEST_ synthetic data. BLOCKED = requires a safe precondition unavailable in DEV (e.g. external provider)."
+    }
+  ],
+  "summary": {
+    "total": 28,
+    "pass": 27,
+    "fail": 0,
+    "blocked": 1,
+    "notRun": 0,
+    "criticalFailures": 0
+  }
+}

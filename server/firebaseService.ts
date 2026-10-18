@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { db } from "./config/firebase";
+import { getActiveFirestore } from "./config/dataEnvironment";
+import { hashPassword } from "./utils/password";
 import {
     DEFAULT_FEATURE_FLAGS,
     customerPhoneOtpChallengeSchema,
@@ -361,8 +362,7 @@ function restoreLinkedPropertyFields(
 
 export class FirebaseService {
     private get db() {
-        if (!db) throw new Error("Firebase not initialized");
-        return db;
+        return getActiveFirestore();
     }
 
     private getDateMillis(value: any): number {
@@ -5748,7 +5748,7 @@ export class FirebaseService {
             const newOwner = {
                 ownerId: propertyNumber,
                 phone: property.whatsappNumber || "",
-                password: property.pin || "",
+                password: property.pin ? await hashPassword(property.pin) : "",
                 resetCode: "",
                 resetExpire: "",
                 lastReset: "",
@@ -6494,3 +6494,5 @@ export class FirebaseService {
 }
 
 export const firebaseService = new FirebaseService();
+
+

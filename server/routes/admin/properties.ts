@@ -273,8 +273,9 @@ router.put("/api/admin/properties/:propertyNumber", async (req, res) => {
         updates.whatsappNumber = normalizePhoneNumber(updates.whatsappNumber);
         console.log(`[ADMIN UPDATE] Phone normalized for property ${propertyNumber}`);
       } catch (err: any) {
-        console.log(`[ADMIN UPDATE] Phone validation failed: ${err.message}`);
-        return res.status(400).json({ error: err.message });
+        const phoneError = err instanceof Error && err.message ? err.message : "رقم الجوال غير صحيح";
+        console.log(`[ADMIN UPDATE] Phone validation failed: ${phoneError}`);
+        return res.status(400).json({ error: phoneError });
       }
     }
 
@@ -378,8 +379,9 @@ router.post("/api/admin/properties", async (req, res) => {
         data.whatsappNumber = normalizePhoneNumber(data.whatsappNumber);
         console.log("[ADMIN_PROPERTY_CREATE] Phone normalized");
       } catch (err: any) {
-        console.log(`[ADMIN_PROPERTY_CREATE] Phone validation failed: ${err.message}`);
-        return res.status(400).json({ error: err.message });
+        const phoneError = err instanceof Error && err.message ? err.message : "رقم الجوال غير صحيح";
+        console.log(`[ADMIN_PROPERTY_CREATE] Phone validation failed: ${phoneError}`);
+        return res.status(400).json({ error: phoneError });
       }
     }
 

@@ -46,10 +46,36 @@ export class ContactIdentityRateLimitError extends Error {
 }
 
 export function createContactIdentityIssueLimitKey(value: string): string {
-  const secret = process.env.SESSION_SECRET || "rwqan-contact-analytics";
+  const secret = getContactAnalyticsSecret();
   return createHmac("sha256", secret)
     .update(`contact-identity-issue:${value}`)
     .digest("hex");
+}
+
+let cachedDevContactAnalyticsSecret: string | null = null;
+
+/**
+ * Secret used to derive contact analytics/identity HMAC keys.
+ *
+ * Production must always use the configured SESSION_SECRET (enforced at boot by
+ * assertProductionSecurityEnvironment). Outside production a missing
+ * SESSION_SECRET falls back to a per-process random value, so the derived keys
+ * are never predictable from a hardcoded constant.
+ */
+export function getContactAnalyticsSecret(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = environment.SESSION_SECRET;
+  if (configured && configured.trim().length > 0) return configured;
+
+  if (environment.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is required for contact analytics");
+  }
+
+  if (!cachedDevContactAnalyticsSecret) {
+    cachedDevContactAnalyticsSecret = randomBytes(32).toString("hex");
+  }
+  return cachedDevContactAnalyticsSecret;
 }
 
 export function getContactIdentityCookieOptions() {

@@ -166,7 +166,7 @@ router.post("/api/admin/test-enjazatik", async (req, res) => {
     const { sendOwnerWhatsApp } = await import("../../integrations/whatsapp");
     const result = await sendOwnerWhatsApp(targetPhone, testMessage);
 
-    console.log(`📱 [Test] Enjazatik test to ${targetPhone}:`, result);
+    console.log(`📱 [Test] Enjazatik test: success=${result.success}`);
 
     res.json({
       success: result.success,

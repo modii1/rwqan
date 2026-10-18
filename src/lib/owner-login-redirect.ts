@@ -1,5 +1,8 @@
 const DEFAULT_OWNER_DESTINATION = "/owner/dashboard";
-const ALLOWED_OWNER_DESTINATIONS = new Set(["/owner/subscription"]);
+const ALLOWED_OWNER_DESTINATIONS = new Set([
+  "/owner/subscription",
+  "/owner/requests",
+]);
 
 export function getSafeOwnerLoginDestination(search: string): string {
   const destination = new URLSearchParams(search).get("next") || "";

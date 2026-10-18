@@ -20,6 +20,7 @@ export type BookingEventType =
   | "customer_opened"
   | "admin_customer_whatsapp_opened"
   | "customer_declined"
+  | "customer_reported_owner_no_response"
   | "booking_confirmed"
   | "owner_notification_sent"
   | "owner_notification_failed"
@@ -87,6 +88,8 @@ export type BookingFollowUpDocument = BookingFollowUpRecord & {
   activeCustomerNotificationJobId?: string | null;
   /** Last successful admin handoff to this customer's WhatsApp. */
   adminCustomerWhatsAppLastOpenedAt?: string | null;
+  /** One-time customer report that the property owner did not respond. */
+  customerOwnerNoResponseReportedAt?: string | null;
 };
 
 export type BookingNotificationKind =
@@ -108,6 +111,17 @@ export type BookingNotificationStatus =
   | "failed"
   | "cancelled"
   | "suppressed_quota";
+
+/**
+ * Delivery state reported by the WhatsApp provider. The outbox `status` keeps
+ * its historical meaning (the provider accepted or rejected our HTTP request),
+ * while this field records what happened after that hand-off.
+ */
+export type BookingNotificationProviderStatus =
+  | "accepted"
+  | "failed"
+  | "delivered"
+  | "read";
 
 export type BookingNotificationJob = {
   id: string;
@@ -140,6 +154,18 @@ export type BookingNotificationJob = {
   failedAt: string | null;
   suppressedAt: string | null;
   providerError: string | null;
+  /** Provider-assigned message identity used to match delivery callbacks. */
+  providerMessageId?: string | null;
+  /** Distinct from the transport-level outbox status above. */
+  providerDeliveryStatus?: BookingNotificationProviderStatus | null;
+  providerAcceptedAt?: string | null;
+  providerDeliveredAt?: string | null;
+  providerReadAt?: string | null;
+  providerFailedAt?: string | null;
+  providerStatusUpdatedAt?: string | null;
+  providerDeliveryError?: string | null;
+  /** Small bounded set used to make provider callback processing idempotent. */
+  providerDeliveryEventKeys?: string[];
   /** Present only on an additional send explicitly requested by an admin. */
   manualResendOfJobId?: string | null;
   manualResendRequestedAt?: string | null;

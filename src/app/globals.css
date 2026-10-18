@@ -790,3 +790,35 @@ input:focus-visible {
 .blog-content-preview em {
   font-style: italic;
 }
+
+/* ========== RWQAN DEPLOY (development-only) ========== */
+/* The global deploy bar offsets the layout only while active. Scoped to
+   html.rwqan-deploy-active so production styles are never touched. */
+html.rwqan-deploy-active body {
+  padding-top: var(--rwqan-deploy-bar-height, 40px);
+}
+
+html.rwqan-deploy-active .header-glass.sticky,
+html.rwqan-deploy-active header.sticky.top-0,
+html.rwqan-deploy-active [data-sticky-top="true"] {
+  top: var(--rwqan-deploy-bar-height, 40px);
+}
+
+/* ========== RWQAN DEPLOY development-only deploy bar ==========
+   Nothing here applies unless <html> has the .rwqan-deploy-active class, which
+   is added at runtime ONLY in a development build by an authorized admin. The
+   class is never present in production, so production layout is unchanged.
+   - body padding-top reserves the bar's height so content is never covered.
+   - top sticky headers are pushed below the bar so they never overlap it. */
+html.rwqan-deploy-active {
+  --rwqan-deploy-bar-height: 40px;
+}
+
+html.rwqan-deploy-active body {
+  padding-top: var(--rwqan-deploy-bar-height);
+}
+
+html.rwqan-deploy-active .header-glass.sticky,
+html.rwqan-deploy-active header.sticky.top-0 {
+  top: var(--rwqan-deploy-bar-height);
+}

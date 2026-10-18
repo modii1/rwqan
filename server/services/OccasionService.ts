@@ -3,7 +3,7 @@
  * Manages occasions (Eid, National Day, etc.) and their property assignments.
  */
 
-import { db } from "../config/firebase";
+import { activeFirestore as db } from "../config/dataEnvironment";
 import type { Occasion, InsertOccasion, OccasionProperty, InsertOccasionProperty } from "../../shared/schema";
 import { getNowInRiyadh, toRiyadhISO } from "../utils/dateUtils";
 

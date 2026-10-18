@@ -32,6 +32,7 @@ const validSections: AdminSection[] = [
   "feature-flags",
   "blog",
   "occasions",
+  "deploy",
 ];
 
 export default async function AdminSectionPage({

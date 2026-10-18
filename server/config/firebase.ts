@@ -32,3 +32,40 @@ function initializeFirebase() {
 
 export const db = initializeFirebase();
 export default admin;
+
+/** The isolated DEV Firestore (default app). NULL until initialized. */
+export function getDevFirestore() {
+  return db;
+}
+
+const LIVE_APP_NAME = "rwqan-live";
+
+/**
+ * Build (once) the named production Firestore app from a DEDICATED service
+ * account. Kept separate from the default DEV app so both can coexist in the
+ * same process while the environment switch selects which one is active.
+ */
+export function getOrCreateLiveFirestore(
+  serviceAccount: Record<string, unknown>,
+) {
+  const existing = admin.apps.find((app) => app?.name === LIVE_APP_NAME);
+  const app =
+    existing ??
+    admin.initializeApp(
+      { credential: admin.credential.cert(serviceAccount as never) },
+      LIVE_APP_NAME,
+    );
+  const firestore = admin.firestore(app);
+  try {
+    firestore.settings({ ignoreUndefinedProperties: true });
+  } catch {
+    // Already started — settings can only be applied once per instance.
+  }
+  return firestore;
+}
+
+export function releaseLiveFirestore() {
+  const existing = admin.apps.find((app) => app?.name === LIVE_APP_NAME);
+  if (existing) return existing.delete();
+  return Promise.resolve();
+}

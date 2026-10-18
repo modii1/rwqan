@@ -422,31 +422,48 @@ router.get("/api/currency/rate", async (req, res) => {
   }
 });
 
+const ISO_CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
+
+function normalizeCurrencyCode(value: unknown, fallback: string): string {
+  const code = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return ISO_CURRENCY_CODE_PATTERN.test(code) ? code : fallback;
+}
+
 // تحويل مبلغ من USD إلى SAR
 router.post("/api/currency/convert", async (req, res) => {
   try {
-    const { amount, from = 'USD', to = 'SAR' } = req.body;
+    const { amount } = req.body;
+    const baseCurrency = typeof req.body.from === "string"
+      ? req.body.from.trim().toUpperCase()
+      : "USD";
+    const quoteCurrency = typeof req.body.to === "string"
+      ? req.body.to.trim().toUpperCase()
+      : "SAR";
 
     if (!amount || isNaN(parseFloat(amount))) {
       return res.status(400).json({ error: "المبلغ مطلوب ويجب أن يكون رقماً" });
     }
 
+    if (!ISO_CURRENCY_CODE_PATTERN.test(baseCurrency) || !ISO_CURRENCY_CODE_PATTERN.test(quoteCurrency)) {
+      return res.status(400).json({ error: "رمز العملة غير صحيح" });
+    }
+
     // استخدام Frankfurter API
-    const response = await fetch(`https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`);
+    const response = await fetch(`https://api.frankfurter.dev/v1/latest?base=${baseCurrency}&symbols=${quoteCurrency}`);
     let rate = 3.75; // سعر احتياطي
 
     if (response.ok) {
       const data = await response.json();
-      rate = data.rates?.[to] || 3.75;
+      rate = data.rates?.[quoteCurrency] || 3.75;
     }
 
     const convertedAmount = parseFloat(amount) * rate;
 
     res.json({
       originalAmount: parseFloat(amount),
-      originalCurrency: from,
+      originalCurrency: baseCurrency,
       convertedAmount: Math.round(convertedAmount * 100) / 100,
-      targetCurrency: to,
+      targetCurrency: quoteCurrency,
       rate,
       date: new Date().toISOString().split('T')[0]
     });
@@ -456,9 +473,9 @@ router.post("/api/currency/convert", async (req, res) => {
     const amount = parseFloat(req.body.amount) || 0;
     res.json({
       originalAmount: amount,
-      originalCurrency: req.body.from || 'USD',
+      originalCurrency: normalizeCurrencyCode(req.body.from, 'USD'),
       convertedAmount: Math.round(amount * 3.75 * 100) / 100,
-      targetCurrency: req.body.to || 'SAR',
+      targetCurrency: normalizeCurrencyCode(req.body.to, 'SAR'),
       rate: 3.75,
       date: new Date().toISOString().split('T')[0],
       source: 'fallback'
