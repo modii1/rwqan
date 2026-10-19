@@ -43,6 +43,10 @@ export interface LiveDataStatus {
   liveProjectId: string | null;
   /** ACTUAL project id of the currently-resolved data source (runtime proof). */
   activeProjectId: string | null;
+  /** TRUE when the LIVE image store (read-only production R2) is configured. */
+  liveImagesAvailable: boolean;
+  /** Non-secret explanation when the LIVE image store is not configured. */
+  liveImagesUnavailableReason: string;
   /** LIVE write policy (read-only by default). */
   writeMode: LiveWriteMode;
   /** TRUE when LIVE is active in read-only mode and writes are rejected. */
@@ -74,6 +78,18 @@ export const LIVE_DATA_UNAVAILABLE_BODY = {
   code: "LIVE_DATA_UNAVAILABLE",
   error:
     "تعذّر تأكيد اتصال آمن بالإنتاج — أُوقف تبديل بيئة البيانات (فشل مغلق).",
+} as const;
+
+/**
+ * Refused when LIVE is requested but its required image-storage configuration is
+ * missing. Switching would otherwise point the whole app at production data with
+ * no production image store, showing broken/empty images instead of failing
+ * closed. TEST storage is never substituted for LIVE images.
+ */
+export const LIVE_IMAGES_UNAVAILABLE_BODY = {
+  code: "LIVE_IMAGES_UNAVAILABLE",
+  error:
+    "تعذّر تفعيل LIVE: مخزن صور الإنتاج غير مُهيَّأ — أُوقف التبديل (فشل مغلق).",
 } as const;
 
 export const LIVE_DATA_MAX_ITEMS = 200;

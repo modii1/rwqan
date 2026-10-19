@@ -75,6 +75,18 @@ test("the bar exposes ONE permanent two-option LIVE|TEST switch (never a single 
   assert.doesNotMatch(source, /liveUnavailableReason/);
 });
 
+test("the LIVE switch is refused with an explanation when production images are unconfigured", () => {
+  const source = read("./deploy-bar.tsx");
+  // The guard uses ONLY the non-secret availability flag, never the technical reason.
+  assert.match(source, /dataEnvironment\.liveImagesAvailable/);
+  assert.match(source, /صور الإنتاج غير مُهيَّأة/);
+  assert.doesNotMatch(source, /liveImagesUnavailableReason/);
+  // The refusal runs BEFORE the confirmation that leads to the switch.
+  const guard = source.indexOf("liveImagesAvailable");
+  const confirm = source.indexOf("تبديل بيئة البيانات إلى LIVE");
+  assert.ok(guard > 0 && confirm > 0 && guard < confirm);
+});
+
 test("the environment switch wires data AND the real deploy target together", () => {
   const source = read("./deploy-bar.tsx");
   // One selection must move BOTH stores so publish/restore never drift.

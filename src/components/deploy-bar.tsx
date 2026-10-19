@@ -308,6 +308,17 @@ export function DeployBar() {
         });
         return;
       }
+      // A half-configured LIVE (Firestore only) would show production data with
+      // no images. Explain and refuse instead of switching into a broken state.
+      if (!dataEnvironment.liveImagesAvailable) {
+        toast({
+          title: "تعذّر تفعيل LIVE",
+          description:
+            "صور الإنتاج غير مُهيَّأة — لن يتم التبديل إلى LIVE حتى يُضبط تخزين صور الإنتاج (قراءة فقط).",
+          variant: "destructive",
+        });
+        return;
+      }
       const confirmed = window.confirm(
         "تبديل بيئة البيانات إلى LIVE (الإنتاج)؟\n\n" +
           "سيقرأ التطبيق بيانات الإنتاج الحقيقية عبر اتصال خادمي مخصّص.\n" +

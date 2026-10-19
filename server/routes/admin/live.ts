@@ -4,6 +4,7 @@ import {
   liveDataToolEnabled,
   readLiveDataConfig,
   liveWriteMode,
+  LIVE_IMAGES_UNAVAILABLE_REASON,
 } from "../../config/liveDataEnvironment";
 import {
   dataEnvironmentStore,
@@ -19,6 +20,7 @@ import {
   LIVE_DATA_DISABLED_BODY,
   LIVE_DATA_MAX_ITEMS,
   LIVE_DATA_UNAVAILABLE_BODY,
+  LIVE_IMAGES_UNAVAILABLE_BODY,
   type DataEnvironment,
   type LiveDataStatus,
 } from "../../../shared/liveData";
@@ -74,6 +76,7 @@ export function createAdminLiveDataRouter(options: LiveDataRouterOptions = {}) {
     const { config, reason } = readLiveDataConfig();
     const environment = store.get();
     const liveAvailable = config !== null;
+    const liveImagesAvailable = config?.r2 != null;
     const liveProjectId = config?.firebase.projectId ?? null;
     const writeMode = liveWriteMode();
     const usingLive = environment === "LIVE" && liveAvailable;
@@ -82,6 +85,10 @@ export function createAdminLiveDataRouter(options: LiveDataRouterOptions = {}) {
       environment,
       liveAvailable,
       liveUnavailableReason: liveAvailable ? "" : reason,
+      liveImagesAvailable,
+      liveImagesUnavailableReason: liveImagesAvailable
+        ? ""
+        : LIVE_IMAGES_UNAVAILABLE_REASON,
       liveProjectId,
       activeProjectId: getActiveFirestoreProjectId(store),
       writeMode,
@@ -161,6 +168,15 @@ export function createAdminLiveDataRouter(options: LiveDataRouterOptions = {}) {
         res.status(503).json({
           ...LIVE_DATA_UNAVAILABLE_BODY,
           reason: result.reason,
+        });
+        return;
+      }
+      // A half-configured LIVE (Firestore only) would load production data whose
+      // images cannot be served. Refuse instead of switching into a broken state.
+      if (!result.config.r2) {
+        res.status(503).json({
+          ...LIVE_IMAGES_UNAVAILABLE_BODY,
+          reason: LIVE_IMAGES_UNAVAILABLE_REASON,
         });
         return;
       }

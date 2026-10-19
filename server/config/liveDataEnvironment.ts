@@ -214,3 +214,21 @@ export function liveDataConfigAvailable(
 ): boolean {
   return readLiveDataConfig(environment).config !== null;
 }
+
+/**
+ * Non-secret explanation used when LIVE is configured for Firestore but its
+ * read-only production image store (R2) is missing. Names variables only — never
+ * a key, token, or service-account body.
+ */
+export const LIVE_IMAGES_UNAVAILABLE_REASON = `متطلَّب: ${LIVE_R2_ENDPOINT_KEY}, ${LIVE_R2_ACCESS_KEY_ID_KEY}, ${LIVE_R2_SECRET_ACCESS_KEY_KEY}, ${LIVE_R2_BUCKET_NAME_KEY}, ${LIVE_R2_PUBLIC_URL_KEY} (مخزن صور الإنتاج، قراءة فقط).`;
+
+/**
+ * TRUE when a complete LIVE configuration exists AND its production image store
+ * is configured. A Firestore-only LIVE configuration is intentionally rejected
+ * so the DEV app never switches into a state whose images cannot load.
+ */
+export function liveImagesConfigAvailable(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return readLiveDataConfig(environment).config?.r2 != null;
+}

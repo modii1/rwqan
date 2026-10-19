@@ -13,19 +13,36 @@ const LIVE_ENV_KEYS = [
   "LIVE_DATA_READONLY_ACK",
   "LIVE_FIREBASE_PROJECT_ID",
   "LIVE_FIREBASE_READONLY_SERVICE_ACCOUNT",
+  "LIVE_R2_ENDPOINT",
+  "LIVE_R2_ACCESS_KEY_ID",
+  "LIVE_R2_SECRET_ACCESS_KEY",
+  "LIVE_R2_BUCKET_NAME",
+  "LIVE_R2_PUBLIC_URL",
+  "LIVE_R2_REGION",
 ] as const;
 
 function clearLiveEnv(): void {
   for (const key of LIVE_ENV_KEYS) delete process.env[key];
 }
 
-function setLiveEnv(): void {
+/** Firestore-only LIVE config: enough to switch, but the image store is absent. */
+function setLiveFirebaseEnv(): void {
   process.env.LIVE_DATA_READONLY_ACK = "read-only";
   process.env.LIVE_FIREBASE_PROJECT_ID = "rwqan-sa";
   process.env.LIVE_FIREBASE_READONLY_SERVICE_ACCOUNT = JSON.stringify({
     type: "service_account",
     project_id: "rwqan-sa",
   });
+}
+
+/** Complete LIVE config: Firestore + read-only production image store. */
+function setLiveEnv(): void {
+  setLiveFirebaseEnv();
+  process.env.LIVE_R2_ENDPOINT = "https://account.r2.cloudflarestorage.com";
+  process.env.LIVE_R2_ACCESS_KEY_ID = "live-test-key";
+  process.env.LIVE_R2_SECRET_ACCESS_KEY = "live-test-secret";
+  process.env.LIVE_R2_BUCKET_NAME = "rwqan-live";
+  process.env.LIVE_R2_PUBLIC_URL = "https://pub-live.r2.dev";
 }
 
 interface BuildOptions {
@@ -131,6 +148,37 @@ test("TEST is the default and the switch to LIVE fails closed without config", a
   });
 });
 
+test("LIVE is refused when the production image store is unconfigured (fail closed)", async () => {
+  clearLiveEnv();
+  setLiveFirebaseEnv();
+  try {
+    const { app, store } = buildApp();
+    await withServer(app, async (base) => {
+      const status = await (
+        await fetch(`${base}/api/admin/live/status`, { headers: ADMIN_HEADERS })
+      ).json();
+      assert.equal(status.status.liveAvailable, true);
+      assert.equal(status.status.liveImagesAvailable, false);
+      assert.ok(status.status.liveImagesUnavailableReason.length > 0);
+
+      const switchAttempt = await fetch(`${base}/api/admin/live/environment`, {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify({ environment: "LIVE" }),
+      });
+      assert.equal(switchAttempt.status, 503);
+      assert.equal((await switchAttempt.json()).code, "LIVE_IMAGES_UNAVAILABLE");
+      assert.equal(
+        store.get(),
+        "TEST",
+        "a half-configured LIVE must not switch into a broken image state",
+      );
+    });
+  } finally {
+    clearLiveEnv();
+  }
+});
+
 test("LIVE properties are read from the PUBLIC production API (read-only)", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -203,6 +251,9 @@ test("with config, LIVE switches the whole app and TEST switches it back", async
       assert.equal(liveStatus.activeProjectId, "rwqan-sa");
       assert.equal(liveStatus.writeMode, "read-only");
       assert.equal(liveStatus.writeBlocked, true);
+      assert.equal(liveStatus.liveImagesAvailable, true);
+      assert.equal(liveStatus.liveImagesUnavailableReason, "");
+      assert.match(liveStatus.dataSources.images, /rwqan-live/);
       assert.equal(store.get(), "LIVE");
 
       const switchToTest = await fetch(`${base}/api/admin/live/environment`, {

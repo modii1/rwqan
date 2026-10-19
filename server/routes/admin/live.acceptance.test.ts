@@ -33,13 +33,20 @@ const LIVE_ENV_KEYS = [
   "LIVE_FIREBASE_PROJECT_ID",
   "LIVE_FIREBASE_READONLY_SERVICE_ACCOUNT",
   "LIVE_WRITE_MODE",
+  "LIVE_R2_ENDPOINT",
+  "LIVE_R2_ACCESS_KEY_ID",
+  "LIVE_R2_SECRET_ACCESS_KEY",
+  "LIVE_R2_BUCKET_NAME",
+  "LIVE_R2_PUBLIC_URL",
+  "LIVE_R2_REGION",
 ] as const;
 
 function clearLiveEnv(): void {
   for (const key of LIVE_ENV_KEYS) delete process.env[key];
 }
 
-function setLiveEnv(): void {
+/** Firestore-only LIVE config: enough to switch, but the image store is absent. */
+function setLiveFirebaseEnv(): void {
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
   process.env.LIVE_DATA_READONLY_ACK = "read-only";
@@ -54,6 +61,16 @@ function setLiveEnv(): void {
     auth_uri: "https://accounts.google.com/o/oauth2/auth",
     token_uri: "https://oauth2.googleapis.com/token",
   });
+}
+
+/** Complete LIVE config: Firestore + read-only production image store. */
+function setLiveEnv(): void {
+  setLiveFirebaseEnv();
+  process.env.LIVE_R2_ENDPOINT = "https://account.r2.cloudflarestorage.com";
+  process.env.LIVE_R2_ACCESS_KEY_ID = "live-test-key";
+  process.env.LIVE_R2_SECRET_ACCESS_KEY = "live-test-secret";
+  process.env.LIVE_R2_BUCKET_NAME = "rwqan-live";
+  process.env.LIVE_R2_PUBLIC_URL = "https://pub-live.r2.dev";
 }
 
 function buildApp(store: DataEnvironmentStore) {
@@ -133,6 +150,33 @@ test("AC2 — LIVE without production credentials is refused (fail closed)", asy
   // BLOCKED: switching to LIVE cannot succeed until a production read-only
   // service account + project id are supplied as LIVE_* env vars.
   assert.equal(readLiveDataConfig().config, null);
+});
+
+test("AC2c — LIVE is refused when the production image store is unconfigured", async () => {
+  clearLiveEnv();
+  setLiveFirebaseEnv();
+  const store = createDataEnvironmentStore("TEST");
+  const app = buildApp(store);
+  await withServer(app, async (base) => {
+    const status = await (
+      await fetch(`${base}/api/admin/live/status`, { headers: ADMIN })
+    ).json();
+    assert.equal(status.status.liveAvailable, true);
+    assert.equal(status.status.liveImagesAvailable, false);
+
+    const res = await fetch(`${base}/api/admin/live/environment`, {
+      method: "POST",
+      headers: ADMIN,
+      body: JSON.stringify({ environment: "LIVE" }),
+    });
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).code, "LIVE_IMAGES_UNAVAILABLE");
+    assert.equal(
+      store.get(),
+      "TEST",
+      "must not switch without the production image store",
+    );
+  });
 });
 
 test("AC2b — LIVE read guard is real (writes rejected in-process)", async () => {

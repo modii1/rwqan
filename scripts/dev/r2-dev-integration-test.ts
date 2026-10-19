@@ -275,6 +275,67 @@ async function main(): Promise<void> {
         record("R2-ADMIN-002", "admin uploads a valid image with detected content-type",
           good.status() === 200 && goodBody?.ok === true && newKeys.length === 1 ? "PASS" : "FAIL",
           `status=${good.status()} body=${JSON.stringify(goodBody)} newKeys=${JSON.stringify(newKeys)}`);
+
+        const adminUploadKey = newKeys[0] || "";
+
+        // ---- R2-ADMIN-003: admin listing emits same-origin proxy URLs ------
+        const adminListRes = await adminCtx.request.get(`${BASE}/api/admin/r2-images/90003`);
+        const adminListBody: any = await adminListRes.json().catch(() => ({}));
+        const adminImages: string[] = Array.isArray(adminListBody?.images) ? adminListBody.images : [];
+        const allProxy = adminImages.length > 0
+          && adminImages.every((u) => /\/api\/admin\/r2-image\?key=/.test(u));
+        const noFakeDomain = adminImages.every((u) => !/\.example/i.test(u));
+        record("R2-ADMIN-003", "admin image listing returns same-origin proxy URLs (no fake domain)",
+          allProxy && noFakeDomain ? "PASS" : "FAIL",
+          `count=${adminImages.length} sample=${adminImages[0] ?? ""}`);
+
+        // ---- R2-ADMIN-004: admin proxy serves the uploaded image bytes ------
+        if (adminUploadKey) {
+          const proxied = await adminCtx.request.get(
+            `${BASE}/api/admin/r2-image?key=${encodeURIComponent(adminUploadKey)}`,
+          );
+          const ct = proxied.headers()["content-type"] || "";
+          const bytes = await readBytes(proxied);
+          const ok = proxied.status() === 200 && /^image\//.test(ct) && bytes.compare(pngBuffer()) === 0;
+          record("R2-ADMIN-004", "admin proxy serves the private image (content matches)", ok ? "PASS" : "FAIL",
+            `status=${proxied.status()} content-type=${ct} bytes=${bytes.length}`);
+        }
+
+        // ---- R2-ADMIN-005: thumbnail renders in the admin gallery UI --------
+        if (adminUploadKey) {
+          const page = await adminCtx.newPage();
+          const selector = `img[src*="${encodeURIComponent(adminUploadKey)}"]`;
+          try {
+            await page.goto(`${BASE}/admin/images/90003`, { waitUntil: "domcontentloaded", timeout: 60000 });
+            await page.waitForSelector(selector, { timeout: 60000 });
+            await page.waitForFunction((sel) => {
+              const img = document.querySelector(sel) as HTMLImageElement | null;
+              return !!img && img.complete && img.naturalWidth > 0;
+            }, selector, { timeout: 30000 });
+            const w = await page.evaluate((sel) => (document.querySelector(sel) as HTMLImageElement).naturalWidth, selector);
+            record("R2-ADMIN-005", "admin image thumbnail renders in the gallery UI", w > 0 ? "PASS" : "FAIL", `naturalWidth=${w}`);
+          } catch (error) {
+            record("R2-ADMIN-005", "admin image thumbnail renders in the gallery UI", "FAIL", (error as Error).message);
+          } finally {
+            await page.close();
+          }
+        }
+
+        // ---- R2-ADMIN-006: admin proxy stays admin-only and key-scoped -----
+        {
+          const receipt = await adminCtx.request.get(
+            `${BASE}/api/admin/r2-image?key=${encodeURIComponent("receipts/secret.png")}`,
+          );
+          const anon = await browser.newContext();
+          const anonRes = await anon.request.get(
+            `${BASE}/api/admin/r2-image?key=${encodeURIComponent("90003/1.png")}`,
+          );
+          await anon.close();
+          record("R2-ADMIN-006", "admin proxy rejects receipts key and anonymous access",
+            receipt.status() === 403 && anonRes.status() === 401 ? "PASS" : "FAIL",
+            `receipts=${receipt.status()} (expected 403) anonymous=${anonRes.status()} (expected 401)`);
+        }
+
         await adminCtx.close();
       }
     }

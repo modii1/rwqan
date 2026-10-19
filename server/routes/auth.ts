@@ -18,6 +18,7 @@ import {
 } from "../utils/privilegedSession";
 import { ownerLoginRateLimiter } from "../services/OwnerLoginRateLimiter";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
+import { LiveWriteBlockedError } from "../config/dataEnvironment";
 import { requireOwner, requireSameOrigin } from "./middleware";
 
 const router = Router();
@@ -31,6 +32,17 @@ function adminLoginClientKey(req: Request): string {
   return createHmac("sha256", adminLoginKeySecret)
     .update(`admin-login:${clientAddress}`)
     .digest("hex");
+}
+
+/**
+ * TRUE only for the expected read-only-LIVE rejection. In LIVE read-only mode
+ * the shared Firestore attempt counter cannot be written by design, so the
+ * bounded in-process `adminLoginRateLimiter` (consumed before this point) is the
+ * effective brute-force bound. Every other failure stays a hard 503 — errors are
+ * never broadly swallowed.
+ */
+function isReadOnlyLiveWrite(error: unknown): boolean {
+  return error instanceof LiveWriteBlockedError;
 }
 
 // ======================
@@ -121,8 +133,12 @@ router.post("/api/admin/login", async (req, res) => {
       return res.status(429).json({ error: "Too Many Login Attempts" });
     }
   } catch (error) {
-    console.error("Admin login rate-limit service error:", error);
-    return res.status(503).json({ error: "Admin Login Temporarily Unavailable" });
+    if (!isReadOnlyLiveWrite(error)) {
+      console.error("Admin login rate-limit service error:", error);
+      return res.status(503).json({ error: "Admin Login Temporarily Unavailable" });
+    }
+    // Read-only LIVE: the shared counter is intentionally unwritable. Continue
+    // with the in-process bound already enforced above.
   }
 
   const { code, password } = req.body || {};
@@ -133,7 +149,11 @@ router.post("/api/admin/login", async (req, res) => {
   try {
     await firebaseService.deleteAdminLoginAttemptLimit(clientKey);
   } catch (error) {
-    console.error("Admin login rate-limit cleanup error:", error);
+    // Read-only LIVE cannot delete the shared counter; that is expected and the
+    // in-process limiter was already cleared above. Anything else is an error.
+    if (!isReadOnlyLiveWrite(error)) {
+      console.error("Admin login rate-limit cleanup error:", error);
+    }
   }
   await clearCustomerAccessForPrivilegedLogin(req, res);
   try {
