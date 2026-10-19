@@ -84,3 +84,5 @@ attached_assets/
 *.png
 !public/**/*.png
 !attached_assets/**/*.png
+# Service-account / private key JSON files (never commit)
+server/modi-bot-*.json
