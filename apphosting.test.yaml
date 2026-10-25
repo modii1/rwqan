@@ -1,0 +1,36 @@
+# TEST App Hosting configuration for the isolated backend `rwqan-backend`.
+#
+# HOW THIS FILE IS SELECTED (important): App Hosting chooses an environment
+# specific override from the BACKEND's "Environment name" setting, which is set
+# in the Firebase Console — it is NOT referenced from firebase.json or from this
+# file. To activate this file, set `rwqan-backend`'s Environment name to `test`
+# in the Console; App Hosting then merges `apphosting.test.yaml` OVER the base
+# `apphosting.yaml` for THAT backend only. Keep the production backend on a
+# different / no environment name so these TEST values never reach it.
+#
+# TEST ONLY. No secrets and no production values belong here. The base
+# `apphosting.yaml` remains the source of the required secret references.
+
+env:
+  # The deployed App Hosting runtime is always a production build/runtime, so
+  # NODE_ENV stays `production` (inherited from the base file). APP_ENV is the
+  # explicit deployment-environment marker that scopes this override.
+  - variable: APP_ENV
+    value: test
+    availability:
+      - RUNTIME
+  # Must be the TEST backend's own host. It also proves non-production identity:
+  # the webhook opt-out below is ignored when this URL is the production origin.
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://rwqan-backend--rwqan-757.europe-west4.hosted.app
+    availability:
+      - BUILD
+      - RUNTIME
+  # Explicit, temporary opt-out of WhatsApp delivery webhook receipt. The route
+  # `/api/webhooks/whatsapp/delivery` returns 404 while this is set, and the
+  # production credential check is skipped for this runtime only. Removing this
+  # variable (or APP_ENV/NEXT_PUBLIC_BASE_URL) restores the mandatory check.
+  - variable: WHATSAPP_DELIVERY_WEBHOOK_DISABLED
+    value: "true"
+    availability:
+      - RUNTIME

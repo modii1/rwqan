@@ -341,6 +341,65 @@ test("delivery webhook rejects missing or invalid authentication", async () => {
   });
 });
 
+test("disabled delivery webhook is closed on GET and POST and never records events", async () => {
+  let calls = 0;
+  const router = createWhatsAppDeliveryWebhookRouter({
+    enabled: false,
+    secret: WEBHOOK_SECRET,
+    metaAppSecret: META_APP_SECRET,
+    metaVerifyToken: META_VERIFY_TOKEN,
+    store: {
+      async recordProviderDeliveryEvent() {
+        calls++;
+        return { result: "updated" };
+      },
+    },
+  });
+  await withServer(router, async (baseUrl) => {
+    const query = new URLSearchParams({
+      "hub.mode": "subscribe",
+      "hub.verify_token": META_VERIFY_TOKEN,
+      "hub.challenge": "challenge-1",
+    });
+    const verification = await fetch(
+      `${baseUrl}/api/webhooks/whatsapp/delivery?${query}`,
+    );
+    assert.equal(verification.status, 404);
+
+    const receipt = await fetch(`${baseUrl}/api/webhooks/whatsapp/delivery`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${WEBHOOK_SECRET}`,
+      },
+      body: JSON.stringify({
+        message_id: "enjaz-disabled-1",
+        status: "delivered",
+      }),
+    });
+    assert.equal(receipt.status, 404);
+
+    const metaReceipt = await fetch(
+      `${baseUrl}/api/webhooks/whatsapp/delivery`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-hub-signature-256": metaSignature(
+            JSON.stringify({ message_id: "enjaz-disabled-2", status: "read" }),
+          ),
+        },
+        body: JSON.stringify({
+          message_id: "enjaz-disabled-2",
+          status: "read",
+        }),
+      },
+    );
+    assert.equal(metaReceipt.status, 404);
+    assert.equal(calls, 0);
+  });
+});
+
 test("delivery webhook accepts bearer auth and summarizes idempotent outcomes", async () => {
   const received: WhatsAppProviderDeliveryEvent[] = [];
   const router = createWhatsAppDeliveryWebhookRouter({

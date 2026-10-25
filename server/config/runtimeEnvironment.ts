@@ -25,6 +25,71 @@ const ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT_KEY =
   "ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT";
 
 /**
+ * Explicit deployment-environment marker. It is intentionally NOT NODE_ENV:
+ * every App Hosting runtime is built and run with NODE_ENV=production, so
+ * NODE_ENV cannot distinguish the isolated test backend from production.
+ *
+ * Only `APP_ENV=test` is treated as the test environment; anything else
+ * (including a missing value) is treated as production for the webhook opt-out
+ * below, so an ambiguous runtime can never disable a production control.
+ */
+export const APP_ENV_KEY = "APP_ENV";
+export const APP_ENV_TEST = "test";
+
+/**
+ * Explicit opt-out for the WhatsApp provider delivery webhook.
+ *
+ * Honoured only when ALL hold:
+ *   1. WHATSAPP_DELIVERY_WEBHOOK_DISABLED=true,
+ *   2. APP_ENV=test,
+ *   3. NEXT_PUBLIC_BASE_URL is a valid origin that is NOT the production site.
+ *
+ * Any other combination keeps the webhook enabled and keeps the production
+ * credential check mandatory (current behaviour).
+ */
+export const WHATSAPP_DELIVERY_WEBHOOK_DISABLED_KEY =
+  "WHATSAPP_DELIVERY_WEBHOOK_DISABLED";
+const PRODUCTION_PUBLIC_ORIGIN = "https://rwqan.sa";
+
+function publicOriginOf(environment: NodeJS.ProcessEnv): string {
+  const raw = environment.NEXT_PUBLIC_BASE_URL?.trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * True only for a runtime that is provably the isolated test backend. Fails
+ * closed: a missing/invalid public URL, the production origin, an unset
+ * APP_ENV, or an absent flag all keep the webhook enabled.
+ */
+export function whatsappDeliveryWebhookDisabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (
+    environment[WHATSAPP_DELIVERY_WEBHOOK_DISABLED_KEY]?.trim().toLowerCase() !==
+    "true"
+  ) {
+    return false;
+  }
+  if (environment[APP_ENV_KEY]?.trim().toLowerCase() !== APP_ENV_TEST) {
+    return false;
+  }
+  const origin = publicOriginOf(environment);
+  if (!origin) return false;
+  return origin !== PRODUCTION_PUBLIC_ORIGIN;
+}
+
+export function whatsappDeliveryWebhookEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return !whatsappDeliveryWebhookDisabled(environment);
+}
+
+/**
  * Paymob-only development opt-in. Deliberately independent from
  * ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT so a DEV Paymob test cannot enable
  * WhatsApp, Gemini, OCR, or disable the DEV customer OTP console sink.
@@ -184,47 +249,54 @@ export function assertProductionSecurityEnvironment(
     );
   }
 
-  const relaySecret = environment.WHATSAPP_DELIVERY_WEBHOOK_SECRET?.trim() || "";
-  const metaAppSecret = environment.META_WHATSAPP_APP_SECRET?.trim() || "";
-  const metaVerifyToken =
-    environment.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim() || "";
-  const relayConfigured = relaySecret.length > 0;
-  const metaAppSecretConfigured = metaAppSecret.length > 0;
-  const metaVerifyTokenConfigured = metaVerifyToken.length > 0;
+  // The delivery webhook is mounted on every runtime, so production must prove
+  // it can authenticate callbacks. The only exception is the isolated test
+  // backend, which must be provably non-production (APP_ENV=test, a non-production
+  // public origin) and must opt out explicitly; the route is then closed.
+  if (whatsappDeliveryWebhookEnabled(environment)) {
+    const relaySecret =
+      environment.WHATSAPP_DELIVERY_WEBHOOK_SECRET?.trim() || "";
+    const metaAppSecret = environment.META_WHATSAPP_APP_SECRET?.trim() || "";
+    const metaVerifyToken =
+      environment.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim() || "";
+    const relayConfigured = relaySecret.length > 0;
+    const metaAppSecretConfigured = metaAppSecret.length > 0;
+    const metaVerifyTokenConfigured = metaVerifyToken.length > 0;
 
-  if (metaAppSecretConfigured !== metaVerifyTokenConfigured) {
-    throw new Error(
-      "META_WHATSAPP_APP_SECRET and META_WHATSAPP_WEBHOOK_VERIFY_TOKEN must be configured together in production",
-    );
-  }
-  if (!relayConfigured && !metaAppSecretConfigured) {
-    throw new Error(
-      "Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials in production",
-    );
-  }
+    if (metaAppSecretConfigured !== metaVerifyTokenConfigured) {
+      throw new Error(
+        "META_WHATSAPP_APP_SECRET and META_WHATSAPP_WEBHOOK_VERIFY_TOKEN must be configured together in production",
+      );
+    }
+    if (!relayConfigured && !metaAppSecretConfigured) {
+      throw new Error(
+        "Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials in production",
+      );
+    }
 
-  if (relayConfigured && Buffer.byteLength(relaySecret, "utf8") < 32) {
-    throw new Error(
-      "WHATSAPP_DELIVERY_WEBHOOK_SECRET must be at least 32 bytes in production",
-    );
-  }
+    if (relayConfigured && Buffer.byteLength(relaySecret, "utf8") < 32) {
+      throw new Error(
+        "WHATSAPP_DELIVERY_WEBHOOK_SECRET must be at least 32 bytes in production",
+      );
+    }
 
-  if (
-    metaAppSecretConfigured &&
-    Buffer.byteLength(metaAppSecret, "utf8") < 32
-  ) {
-    throw new Error(
-      "META_WHATSAPP_APP_SECRET must be at least 32 bytes in production",
-    );
-  }
+    if (
+      metaAppSecretConfigured &&
+      Buffer.byteLength(metaAppSecret, "utf8") < 32
+    ) {
+      throw new Error(
+        "META_WHATSAPP_APP_SECRET must be at least 32 bytes in production",
+      );
+    }
 
-  if (
-    metaVerifyTokenConfigured &&
-    Buffer.byteLength(metaVerifyToken, "utf8") < 32
-  ) {
-    throw new Error(
-      "META_WHATSAPP_WEBHOOK_VERIFY_TOKEN must be at least 32 bytes in production",
-    );
+    if (
+      metaVerifyTokenConfigured &&
+      Buffer.byteLength(metaVerifyToken, "utf8") < 32
+    ) {
+      throw new Error(
+        "META_WHATSAPP_WEBHOOK_VERIFY_TOKEN must be at least 32 bytes in production",
+      );
+    }
   }
 }
 

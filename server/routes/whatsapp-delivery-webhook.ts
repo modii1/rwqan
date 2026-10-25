@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import { whatsappDeliveryWebhookEnabled } from "../config/runtimeEnvironment";
 import { bookingCommissionStore } from "../services/BookingCommissionStore";
 import {
   parseWhatsAppProviderDeliveryEvents,
@@ -93,8 +94,20 @@ export function createWhatsAppDeliveryWebhookRouter(options: {
   store?: WhatsAppDeliveryReceiptStore;
   pendingStore?: WhatsAppPendingDeliveryStoreContract;
   now?: () => Date;
+  /**
+   * When false the endpoint is closed: both GET (verification) and POST
+   * (delivery receipts) return 404 and never touch the receipt stores. Only
+   * the isolated test backend disables it; production keeps it enabled.
+   */
+  enabled?: boolean;
 } = {}): Router {
   const router = Router();
+  if (options.enabled === false) {
+    router.all(WHATSAPP_DELIVERY_WEBHOOK_PATH, (_req, res) => {
+      res.status(404).json({ ok: false, error: "Not found" });
+    });
+    return router;
+  }
   const store = options.store || createRoutingWhatsAppDeliveryReceiptStore({
     bookingStore: bookingCommissionStore,
     generalLogStore: whatsAppLogDeliveryStore,
@@ -238,4 +251,6 @@ export function createWhatsAppDeliveryWebhookRouter(options: {
   return router;
 }
 
-export default createWhatsAppDeliveryWebhookRouter();
+export default createWhatsAppDeliveryWebhookRouter({
+  enabled: whatsappDeliveryWebhookEnabled(),
+});

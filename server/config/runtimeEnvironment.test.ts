@@ -10,6 +10,8 @@ import {
   classifyPaymobKeyMode,
   devCustomerOtpSinkEnabled,
   paymobEnabled,
+  whatsappDeliveryWebhookDisabled,
+  whatsappDeliveryWebhookEnabled,
 } from "./runtimeEnvironment";
 
 const FIREBASE_SERVICE_ACCOUNT = JSON.stringify({
@@ -20,6 +22,18 @@ const FIREBASE_SERVICE_ACCOUNT = JSON.stringify({
 const META_WHATSAPP_APP_SECRET = "configured-meta-app-secret-123456789";
 const META_WHATSAPP_WEBHOOK_VERIFY_TOKEN =
   "configured-meta-verify-token-123456789";
+const TEST_BACKEND_ORIGIN =
+  "https://rwqan-backend--rwqan-757.europe-west4.hosted.app";
+const PRODUCTION_PUBLIC_ORIGIN = "https://rwqan.sa";
+
+const PRODUCTION_BASE_CREDENTIALS = {
+  NODE_ENV: "production",
+  ADMIN_CODE: "configured-code",
+  ADMIN_PASSWORD: "configured-password",
+  SESSION_SECRET: "configured-session-secret-value-123456789",
+  PAYMOB_HMAC_SECRET: "configured-paymob-hmac",
+  FIREBASE_SERVICE_ACCOUNT,
+} as const;
 
 test("production requires credentials, persistent storage, a session secret, and Paymob HMAC", () => {
   assert.throws(
@@ -84,6 +98,106 @@ test("production requires one webhook authentication mode", () => {
       FIREBASE_SERVICE_ACCOUNT,
     }),
     /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
+  );
+});
+
+test("isolated test backend may disable the delivery webhook explicitly", () => {
+  const environment = {
+    ...PRODUCTION_BASE_CREDENTIALS,
+    APP_ENV: "test",
+    WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+    NEXT_PUBLIC_BASE_URL: TEST_BACKEND_ORIGIN,
+  } as const;
+  assert.equal(whatsappDeliveryWebhookDisabled(environment), true);
+  assert.equal(whatsappDeliveryWebhookEnabled(environment), false);
+  assert.doesNotThrow(() => assertProductionSecurityEnvironment(environment));
+});
+
+test("production backend cannot disable the delivery webhook even with the flag", () => {
+  const environment = {
+    ...PRODUCTION_BASE_CREDENTIALS,
+    APP_ENV: "production",
+    WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+    NEXT_PUBLIC_BASE_URL: PRODUCTION_PUBLIC_ORIGIN,
+  } as const;
+  assert.equal(whatsappDeliveryWebhookDisabled(environment), false);
+  assert.throws(
+    () => assertProductionSecurityEnvironment(environment),
+    /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
+  );
+});
+
+test("the disable flag without APP_ENV=test keeps the production check mandatory", () => {
+  assert.throws(
+    () => assertProductionSecurityEnvironment({
+      ...PRODUCTION_BASE_CREDENTIALS,
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+      NEXT_PUBLIC_BASE_URL: TEST_BACKEND_ORIGIN,
+    } as const),
+    /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
+  );
+});
+
+test("APP_ENV=test cannot disable the webhook on the production public origin", () => {
+  assert.throws(
+    () => assertProductionSecurityEnvironment({
+      ...PRODUCTION_BASE_CREDENTIALS,
+      APP_ENV: "test",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+      NEXT_PUBLIC_BASE_URL: PRODUCTION_PUBLIC_ORIGIN,
+    } as const),
+    /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
+  );
+});
+
+test("APP_ENV=test without a public origin fails closed and keeps the webhook mandated", () => {
+  assert.throws(
+    () => assertProductionSecurityEnvironment({
+      ...PRODUCTION_BASE_CREDENTIALS,
+      APP_ENV: "test",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+    } as const),
+    /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
+  );
+});
+
+test("the webhook stays enabled unless every opt-out condition holds", () => {
+  const enabledBase = {
+    NODE_ENV: "production",
+    NEXT_PUBLIC_BASE_URL: TEST_BACKEND_ORIGIN,
+  } as const;
+  assert.equal(
+    whatsappDeliveryWebhookEnabled({
+      ...enabledBase,
+      APP_ENV: "test",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "false",
+    } as const),
+    true,
+  );
+  assert.equal(
+    whatsappDeliveryWebhookEnabled({
+      ...enabledBase,
+      APP_ENV: "staging",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+    } as const),
+    true,
+  );
+  assert.equal(
+    whatsappDeliveryWebhookEnabled({
+      ...enabledBase,
+      NEXT_PUBLIC_BASE_URL: "not-a-url",
+      APP_ENV: "test",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "true",
+    } as const),
+    true,
+  );
+  assert.equal(
+    whatsappDeliveryWebhookEnabled({
+      ...enabledBase,
+      APP_ENV: "test",
+      WHATSAPP_DELIVERY_WEBHOOK_DISABLED: "TRUE",
+    } as const),
+    false,
   );
 });
 
