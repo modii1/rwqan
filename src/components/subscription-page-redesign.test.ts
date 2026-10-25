@@ -9,18 +9,18 @@ const source = readFileSync(
 
 test("owner signup retains its three steps and all existing account fields", () => {
   for (const copy of [
-    "╪د╪«╪ز┘è╪د╪▒ ╪د┘╪ذ╪د┘é╪ر",
-    "╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒",
-    "╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣",
-    "╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ (5 ╪ث╪▒┘é╪د┘à) *",
-    "╪د╪│┘à ╪د┘╪╣┘é╪د╪▒ *",
-    "╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è *",
-    "╪▒┘é┘à ╪د┘┘ê╪د╪ز╪│╪د╪ذ *",
-    "╪د┘┘à┘ê┘é╪╣ / ╪د┘╪ص┘è",
-    "┘ê╪│╪╖ ╪د┘╪ث╪│╪ذ┘ê╪╣",
-    "┘┘ç╪د┘è╪ر ╪د┘╪ث╪│╪ذ┘ê╪╣",
-    "┘à╪ذ┘è╪ز",
-    "╪ح╪ش╪د╪▓╪د╪ز",
+    "اختيار الباقة",
+    "بيانات العقار",
+    "طريقة الدفع",
+    "رقم العقار (5 أرقام) *",
+    "اسم العقار *",
+    "الرقم السري *",
+    "رقم الواتساب *",
+    "الموقع / الحي",
+    "وسط الأسبوع",
+    "نهاية الأسبوع",
+    "مبيت",
+    "إجازات",
   ]) {
     assert.ok(source.includes(copy), `missing owner signup copy: ${copy}`);
   }
@@ -32,13 +32,13 @@ test("owner signup retains its three steps and all existing account fields", () 
 test("owner signup keeps both payment methods as keyboard-accessible choices", () => {
   assert.match(
     source,
-    /<button[\s\S]*?type="button"[\s\S]*?setPaymentMethod\('online'\)[\s\S]*?aria-pressed=\{paymentMethod === 'online'\}[\s\S]*?╪د┘╪»┘╪╣ ╪د┘╪ح┘┘â╪ز╪▒┘ê┘┘è/,
+    /<button[\s\S]*?type="button"[\s\S]*?setPaymentMethod\('online'\)[\s\S]*?aria-pressed=\{paymentMethod === 'online'\}[\s\S]*?الدفع الإلكتروني/,
   );
   assert.match(
     source,
-    /<button[\s\S]*?type="button"[\s\S]*?setPaymentMethod\('bank'\)[\s\S]*?aria-pressed=\{paymentMethod === 'bank'\}[\s\S]*?╪ز╪ص┘ê┘è┘ ╪ذ┘┘â┘è/,
+    /<button[\s\S]*?type="button"[\s\S]*?setPaymentMethod\('bank'\)[\s\S]*?aria-pressed=\{paymentMethod === 'bank'\}[\s\S]*?تحويل بنكي/,
   );
-  assert.ok(source.includes("╪ذ╪╖╪د┘é╪ر ╪د╪خ╪ز┘à╪د┘ ╪ث┘ê Apple Pay"));
-  assert.ok(source.includes("┘à╪╣ ╪ز╪ص┘à┘è┘ ╪ح┘è╪╡╪د┘ ╪د┘╪ز╪ص┘ê┘è┘"));
+  assert.ok(source.includes("بطاقة ائتمان أو Apple Pay"));
+  assert.ok(source.includes("مع تحميل إيصال التحويل"));
   assert.ok(source.includes("FREE_COMMISSION_CONSENT_TEXT"));
 });

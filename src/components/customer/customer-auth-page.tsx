@@ -46,18 +46,18 @@ type CustomerAuthErrorField = "fullName" | "email" | "phone" | "code" | null;
 function customerAuthCopy(variant: CustomerAuthPageProps["variant"]) {
   return variant === "register"
     ? {
-        heading: "╪ح┘╪┤╪د╪ة ╪ص╪│╪د╪ذ ╪ش╪»┘è╪»",
-        description: "╪ث┘╪┤╪خ ╪ص╪│╪د╪ذ┘â ╪ذ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘ ┘╪ص┘╪╕ ╪د┘┘à┘╪╢┘╪ر ┘ê┘à╪ز╪د╪ذ╪╣╪ر ╪╖┘╪ذ╪د╪ز ╪د┘╪ز┘ê╪د╪╡┘ ┘ê╪د┘╪ص╪ش┘ê╪▓╪د╪ز.",
+        heading: "إنشاء حساب جديد",
+        description: "أنشئ حسابك برقم الجوال لحفظ المفضلة ومتابعة طلبات التواصل والحجوزات.",
       }
     : {
-        heading: "╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-        description: "╪د╪»╪«┘ ╪ذ╪▒┘é┘à ╪ش┘ê╪د┘┘â ╪د┘┘à┘ê╪س┘é ┘┘┘ê╪╡┘ê┘ ╪ح┘┘ë ╪ص╪│╪د╪ذ┘â ┘ê┘à┘╪╢┘ّ┘╪ز┘â ┘ê╪│╪ش┘ ╪ص╪ش┘ê╪▓╪د╪ز┘â.",
+        heading: "تسجيل الدخول",
+        description: "ادخل برقم جوالك الموثق للوصول إلى حسابك ومفضّلتك وسجل حجوزاتك.",
       };
 }
 
 function CustomerAuthLoading() {
   return (
-    <div className="flex min-h-[320px] items-center justify-center" role="status" aria-label="╪ش╪د╪▒┘è ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪د┘╪ص╪│╪د╪ذ">
+    <div className="flex min-h-[320px] items-center justify-center" role="status" aria-label="جاري التحقق من الحساب">
       <Loader2 className="h-7 w-7 animate-spin text-[#9a7623]" />
     </div>
   );
@@ -72,7 +72,7 @@ export function CustomerAuthPageFallback({
   return (
     <AuthGateway
       activeRole="customer"
-      contextLabel="╪ص╪│╪د╪ذ ╪د┘╪╣┘à┘è┘"
+      contextLabel="حساب العميل"
       heading={copy.heading}
       description={copy.description}
       onRoleChange={() => undefined}
@@ -138,7 +138,7 @@ export default function CustomerAuthPage({
   const present = (content: React.ReactNode) => embedded ? content : (
     <AuthGateway
       activeRole="customer"
-      contextLabel="╪ص╪│╪د╪ذ ╪د┘╪╣┘à┘è┘"
+      contextLabel="حساب العميل"
       heading={heading}
       description={description}
       onRoleChange={handleRoleChange}
@@ -160,7 +160,7 @@ export default function CustomerAuthPage({
         authenticatedIdentity,
       );
       if (!customerSessionScope) {
-        throw new Error("╪ز╪╣╪░╪▒ ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪ش┘╪│╪ر ╪د┘╪╣┘à┘è┘. ╪ص╪د┘ê┘ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ┘à╪▒╪ر ╪ث╪«╪▒┘ë.");
+        throw new Error("تعذر التحقق من جلسة العميل. حاول تسجيل الدخول مرة أخرى.");
       }
       if (isRegister && applyRegistrationDetails) {
         await updateCustomerProfile({
@@ -177,10 +177,10 @@ export default function CustomerAuthPage({
           );
         } catch (favoriteError) {
           toast({
-            title: "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘╪î ┘ê╪ز╪╣╪░╪▒ ╪ص┘╪╕ ╪د┘╪╣┘é╪د╪▒",
+            title: "تم تسجيل الدخول، وتعذر حفظ العقار",
             description: favoriteError instanceof Error
               ? favoriteError.message
-              : "╪ص╪د┘ê┘ ╪ح╪╢╪د┘╪ز┘ç ╪ح┘┘ë ╪د┘┘à┘╪╢┘╪ر ┘à╪▒╪ر ╪ث╪«╪▒┘ë.",
+              : "حاول إضافته إلى المفضلة مرة أخرى.",
             variant: "destructive",
           });
         }
@@ -195,7 +195,7 @@ export default function CustomerAuthPage({
       setError(
         completionError instanceof Error
           ? completionError.message
-          : "╪ز╪╣╪░╪▒ ╪ح┘â┘à╪د┘ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘. ╪ص╪د┘ê┘ ┘à╪▒╪ر ╪ث╪«╪▒┘ë.",
+          : "تعذر إكمال تسجيل الدخول. حاول مرة أخرى.",
       );
     } finally {
       setIsCompleting(false);
@@ -217,12 +217,12 @@ export default function CustomerAuthPage({
     if (!isRegister) return true;
     if (fullName.trim().length < 2) {
       setErrorField("fullName");
-      setError("╪ث╪»╪«┘ ╪د┘╪د╪│┘à ╪د┘┘â╪د┘à┘.");
+      setError("أدخل الاسم الكامل.");
       return false;
     }
     if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) {
       setErrorField("email");
-      setError("╪ث╪»╪«┘ ╪ذ╪▒┘è╪»┘ï╪د ╪ح┘┘â╪ز╪▒┘ê┘┘è┘ï╪د ╪╡╪ص┘è╪ص┘ï╪د.");
+      setError("أدخل بريدًا إلكترونيًا صحيحًا.");
       return false;
     }
     return true;
@@ -234,7 +234,7 @@ export default function CustomerAuthPage({
     const validated = validateContactPhone(phone);
     if (!validated.phone) {
       setErrorField("phone");
-      setError(validated.error || "╪▒┘é┘à ╪د┘╪ش┘ê╪د┘ ╪║┘è╪▒ ╪╡╪ص┘è╪ص");
+      setError(validated.error || "رقم الجوال غير صحيح");
       return;
     }
     setErrorField(null);
@@ -252,7 +252,7 @@ export default function CustomerAuthPage({
     } catch (requestError) {
       authFlowStartedRef.current = false;
       setErrorField("phone");
-      setError(requestError instanceof Error ? requestError.message : "╪ز╪╣╪░╪▒ ╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é");
+      setError(requestError instanceof Error ? requestError.message : "تعذر إرسال رمز التحقق");
     }
   };
 
@@ -262,7 +262,7 @@ export default function CustomerAuthPage({
     const validated = validateContactVerificationCode(code);
     if (!validated.code) {
       setErrorField("code");
-      setError(validated.error || "╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é ╪║┘è╪▒ ╪╡╪ص┘è╪ص");
+      setError(validated.error || "رمز التحقق غير صحيح");
       return;
     }
     setErrorField(null);
@@ -279,7 +279,7 @@ export default function CustomerAuthPage({
       setError(
         verificationError instanceof Error
           ? verificationError.message
-          : "╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é ╪║┘è╪▒ ╪╡╪ص┘è╪ص ╪ث┘ê ┘à┘╪ز┘ç┘è",
+          : "رمز التحقق غير صحيح أو منتهي",
       );
     }
   };
@@ -295,10 +295,10 @@ export default function CustomerAuthPage({
           {privilegedSession ? (
             <div className="text-center">
               <LockKeyhole className="mx-auto h-10 w-10 text-[#9a7623]" />
-              <p className="mt-4 font-bold text-[#2f2a1f]">╪ث┘╪ز ┘à╪│╪ش┘ ╪د┘╪»╪«┘ê┘ ╪ذ╪ص╪│╪د╪ذ ╪ح╪»╪د╪▒┘è ╪ث┘ê ╪ص╪│╪د╪ذ ┘à╪د┘┘â</p>
-              <p className="mt-2 text-sm leading-6 text-[#6f6249]">╪│╪ش┘ّ┘ ╪د┘╪«╪▒┘ê╪ش ┘à┘┘ç ╪ث┘ê┘╪د┘ï ┘é╪ذ┘ ╪د┘╪»╪«┘ê┘ ╪ذ╪ص╪│╪د╪ذ ╪╣┘à┘è┘.</p>
+              <p className="mt-4 font-bold text-[#2f2a1f]">أنت مسجل الدخول بحساب إداري أو حساب مالك</p>
+              <p className="mt-2 text-sm leading-6 text-[#6f6249]">سجّل الخروج منه أولاً قبل الدخول بحساب عميل.</p>
               <Button asChild variant="outline" className="mt-5">
-                <Link href="/">╪د┘╪╣┘ê╪»╪ر ┘┘╪▒╪خ┘è╪│┘è╪ر</Link>
+                <Link href="/">العودة للرئيسية</Link>
               </Button>
             </div>
           ) : !isCodeStep ? (
@@ -306,7 +306,7 @@ export default function CustomerAuthPage({
               {isRegister && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2 sm:col-span-2">
-                    <Label htmlFor="customer-full-name">╪د┘╪د╪│┘à ╪د┘┘â╪د┘à┘</Label>
+                    <Label htmlFor="customer-full-name">الاسم الكامل</Label>
                     <Input
                       id="customer-full-name"
                       value={fullName}
@@ -318,7 +318,7 @@ export default function CustomerAuthPage({
                     />
                   </div>
                   <div className="space-y-2 sm:col-span-2">
-                    <Label htmlFor="customer-email">╪د┘╪ذ╪▒┘è╪» ╪د┘╪ح┘┘â╪ز╪▒┘ê┘┘è (╪د╪«╪ز┘è╪د╪▒┘è)</Label>
+                    <Label htmlFor="customer-email">البريد الإلكتروني (اختياري)</Label>
                     <Input
                       id="customer-email"
                       type="email"
@@ -335,7 +335,7 @@ export default function CustomerAuthPage({
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="customer-phone">╪▒┘é┘à ╪د┘╪ش┘ê╪د┘</Label>
+                <Label htmlFor="customer-phone">رقم الجوال</Label>
                 <div className="relative">
                   <Phone className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b7140]" aria-hidden="true" />
                   <Input
@@ -353,23 +353,23 @@ export default function CustomerAuthPage({
                     aria-describedby={errorField === "phone" ? "customer-auth-error" : undefined}
                   />
                 </div>
-                <p className="text-xs leading-5 text-[#7a705f]">╪│┘╪▒╪│┘ ╪▒┘à╪▓ ╪ز╪ص┘é┘é ╪ح┘┘ë ┘ê╪د╪ز╪│╪د╪ذ ┘┘╪ز╪ث┘â╪» ┘à┘ ┘à┘┘â┘è╪ر ╪د┘╪▒┘é┘à.</p>
+                <p className="text-xs leading-5 text-[#7a705f]">سنرسل رمز تحقق إلى واتساب للتأكد من ملكية الرقم.</p>
               </div>
 
               {error && <p id="customer-auth-error" role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
 
-              <Button type="submit" className="h-12 w-full bg-[#80601b] text-white hover:bg-[#6f5519]" disabled={isBusy} aria-label={isBusy ? "╪ش╪د╪▒┘è ╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é" : undefined}>
-                {isBusy ? <><Loader2 className="h-5 w-5 animate-spin" /><span className="sr-only">╪ش╪د╪▒┘è ╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é</span></> : "╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é"}
+              <Button type="submit" className="h-12 w-full bg-[#80601b] text-white hover:bg-[#6f5519]" disabled={isBusy} aria-label={isBusy ? "جاري إرسال رمز التحقق" : undefined}>
+                {isBusy ? <><Loader2 className="h-5 w-5 animate-spin" /><span className="sr-only">جاري إرسال رمز التحقق</span></> : "إرسال رمز التحقق"}
               </Button>
             </form>
           ) : (
             <form onSubmit={handleCodeSubmit} className="space-y-5" noValidate>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800">
                 <CheckCircle2 className="mb-2 h-5 w-5" aria-hidden="true" />
-                ╪ث╪▒╪│┘┘╪د ╪╣╪ذ╪▒ ┘ê╪د╪ز╪│╪د╪ذ ╪▒┘à╪▓ ╪ز╪ص┘é┘é ┘à┘ 6 ╪ث╪▒┘é╪د┘à ╪ح┘┘ë ╪د┘╪▒┘é┘à <span dir="ltr" className="font-bold">{challenge?.maskedPhone}</span>.
+                أرسلنا عبر واتساب رمز تحقق من 6 أرقام إلى الرقم <span dir="ltr" className="font-bold">{challenge?.maskedPhone}</span>.
               </div>
               <div className="space-y-2">
-                <Label htmlFor="customer-code">╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é</Label>
+                <Label htmlFor="customer-code">رمز التحقق</Label>
                 <Input
                   id="customer-code"
                   value={code}
@@ -398,10 +398,10 @@ export default function CustomerAuthPage({
                 }}
                 disabled={isBusy}
               >
-                ╪ح╪╣╪د╪»╪ر ╪ح╪▒╪│╪د┘ ╪د┘╪▒┘à╪▓ ╪ث┘ê ╪ز╪║┘è┘è╪▒ ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘
+                إعادة إرسال الرمز أو تغيير رقم الجوال
               </button>
-              <Button type="submit" className="h-12 w-full bg-[#128c47] text-white hover:bg-[#0f783d]" disabled={isBusy} aria-label={isBusy ? "╪ش╪د╪▒┘è ╪ز╪ث┘â┘è╪» ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘" : undefined}>
-                {isBusy ? <><Loader2 className="h-5 w-5 animate-spin" /><span className="sr-only">╪ش╪د╪▒┘è ╪ز╪ث┘â┘è╪» ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘</span></> : "╪ز╪ث┘â┘è╪» ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘"}
+              <Button type="submit" className="h-12 w-full bg-[#128c47] text-white hover:bg-[#0f783d]" disabled={isBusy} aria-label={isBusy ? "جاري تأكيد رقم الجوال" : undefined}>
+                {isBusy ? <><Loader2 className="h-5 w-5 animate-spin" /><span className="sr-only">جاري تأكيد رقم الجوال</span></> : "تأكيد رقم الجوال"}
               </Button>
             </form>
           )}
@@ -412,11 +412,11 @@ export default function CustomerAuthPage({
                 href={switchHref}
                 className="font-bold text-[#80601b] underline-offset-4 hover:underline"
               >
-                {isRegister ? "┘╪»┘è┘â ╪ص╪│╪د╪ذ╪ا ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘" : "┘à╪│╪ز╪«╪»┘à ╪ش╪»┘è╪»╪ا ╪ح┘╪┤╪د╪ة ╪ص╪│╪د╪ذ"}
+                {isRegister ? "لديك حساب؟ تسجيل الدخول" : "مستخدم جديد؟ إنشاء حساب"}
               </Link>
               {!embedded && (
                 <Link href={ownerLoginRoleHref("owner", searchParams.toString())} className="inline-flex items-center gap-1 font-semibold hover:text-[#80601b]">
-                  ╪»╪«┘ê┘ ╪د┘┘à┘╪د┘â
+                  دخول الملاك
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
               )}

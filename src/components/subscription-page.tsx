@@ -78,9 +78,9 @@ function drawCaptcha(canvas: HTMLCanvasElement, text: string) {
   ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.strokeRect(0,0,w,h);
 }
 
-const CITIES = ['╪ذ╪▒┘è╪»╪ر', '╪╣┘┘è╪▓╪ر', '╪د┘╪▒╪│', '╪د┘╪ذ┘â┘è╪▒┘è╪ر', '╪د┘┘à╪░┘╪ذ'];
-const DIRECTIONS = ['╪┤┘à╪د┘', '╪ش┘┘ê╪ذ', '╪┤╪▒┘é', '╪║╪▒╪ذ'];
-const TYPES = ['┘é╪│┘à', '┘é╪│┘à┘è┘'];
+const CITIES = ['بريدة', 'عنيزة', 'الرس', 'البكيرية', 'المذنب'];
+const DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب'];
+const TYPES = ['قسم', 'قسمين'];
 
 export default function SubscriptionPage() {
   const router = useRouter();
@@ -137,45 +137,45 @@ export default function SubscriptionPage() {
     
     const propNum = validatePropertyNumber(formData.propertyNumber);
     if (!propNum.valid) {
-      newErrors.propertyNumber = propNum.error || "╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ╪║┘è╪▒ ╪╡╪د┘╪ص";
+      newErrors.propertyNumber = propNum.error || "رقم العقار غير صالح";
     }
     
     const name = cleanName(formData.name);
     if (!name || name.length < 2) {
-      newErrors.name = "╪د╪│┘à ╪د┘╪╣┘é╪د╪▒ ┘à╪╖┘┘ê╪ذ";
+      newErrors.name = "اسم العقار مطلوب";
     }
     
     const pin = validatePin(formData.pin);
     if (!pin.valid) {
-      newErrors.pin = pin.error || "╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ╪║┘è╪▒ ╪╡╪د┘╪ص";
+      newErrors.pin = pin.error || "الرقم السري غير صالح";
     }
     
     const phone = validatePhoneNumber(formData.whatsappNumber);
     if (!phone.valid) {
-      newErrors.whatsappNumber = phone.error || "╪▒┘é┘à ╪د┘┘ê╪د╪ز╪│╪د╪ذ ╪║┘è╪▒ ╪╡╪د┘╪ص";
+      newErrors.whatsappNumber = phone.error || "رقم الواتساب غير صالح";
     }
     
     if (!formData.city) {
-      newErrors.city = "╪د┘┘à╪»┘è┘╪ر ┘à╪╖┘┘ê╪ذ╪ر";
+      newErrors.city = "المدينة مطلوبة";
     }
     if (!formData.direction) {
-      newErrors.direction = "╪د┘╪د╪ز╪ش╪د┘ç ┘à╪╖┘┘ê╪ذ";
+      newErrors.direction = "الاتجاه مطلوب";
     }
     if (!formData.type) {
-      newErrors.type = "╪د┘┘┘ê╪╣ ┘à╪╖┘┘ê╪ذ";
+      newErrors.type = "النوع مطلوب";
     }
     
     if (!prices.weekday || parseInt(prices.weekday) < 1) {
-      newErrors.weekday = "╪│╪╣╪▒ ┘ê╪│╪╖ ╪د┘╪ث╪│╪ذ┘ê╪╣ ┘à╪╖┘┘ê╪ذ";
+      newErrors.weekday = "سعر وسط الأسبوع مطلوب";
     }
     if (!prices.weekend || parseInt(prices.weekend) < 1) {
-      newErrors.weekend = "╪│╪╣╪▒ ┘┘ç╪د┘è╪ر ╪د┘╪ث╪│╪ذ┘ê╪╣ ┘à╪╖┘┘ê╪ذ";
+      newErrors.weekend = "سعر نهاية الأسبوع مطلوب";
     }
     if (!prices.overnight || parseInt(prices.overnight) < 1) {
-      newErrors.overnight = "╪│╪╣╪▒ ╪د┘┘à╪ذ┘è╪ز ┘à╪╖┘┘ê╪ذ";
+      newErrors.overnight = "سعر المبيت مطلوب";
     }
     if (!prices.holidays || parseInt(prices.holidays) < 1) {
-      newErrors.holidays = "╪│╪╣╪▒ ╪د┘╪ح╪ش╪د╪▓╪د╪ز ┘à╪╖┘┘ê╪ذ";
+      newErrors.holidays = "سعر الإجازات مطلوب";
     }
     
     setErrors(newErrors);
@@ -228,8 +228,8 @@ export default function SubscriptionPage() {
     queryKey: ['/api/packages'],
   });
 
-  // ╪د┘╪ز╪ث┘â╪» ┘à┘ ╪╣╪»┘à ╪ز┘â╪▒╪د╪▒ ╪د┘╪ذ╪د┘é╪د╪ز (╪ص┘ ┘┘à╪┤┘â┘╪ر Duplicate Keys)
-  // Hide ╪ذ╪د┘é╪ر ╪د┘┘╪«╪ذ╪ر packages on initial signup (only available for upgrades)
+  // التأكد من عدم تكرار الباقات (حل لمشكلة Duplicate Keys)
+  // Hide باقة النخبة packages on initial signup (only available for upgrades)
   const ELITE_PACKAGE_IDS = ['pkg-2properties', 'pkg-month-2properties', 'pkg-month-2prop'];
   const packages = Array.from(new Map(rawPackages.map(pkg => [pkg.id, pkg])).values())
     .filter(pkg => !ELITE_PACKAGE_IDS.includes(pkg.id));
@@ -250,12 +250,12 @@ export default function SubscriptionPage() {
       const data = await response.json();
       setValidatedDiscount(data);
       toast({
-        title: "┘â┘ê╪» ╪د┘╪«╪╡┘à ╪╡╪د┘╪ص",
-        description: `╪│┘è╪ز┘à ╪«╪╡┘à ${formatDiscount(data.value, data.type)}`,
+        title: "كود الخصم صالح",
+        description: `سيتم خصم ${formatDiscount(data.value, data.type)}`,
       });
     } catch (error: any) {
       toast({
-        title: "┘â┘ê╪» ╪د┘╪«╪╡┘à ╪║┘è╪▒ ╪╡╪د┘╪ص",
+        title: "كود الخصم غير صالح",
         description: error.message,
         variant: "destructive",
       });
@@ -273,8 +273,8 @@ export default function SubscriptionPage() {
     const expected = captchaTextRef.current.trim();
     if (userInput !== expected) {
       toast({
-        title: "╪«╪╖╪ث ┘┘è ╪د┘╪ز╪ص┘é┘é",
-        description: `╪د┘╪▒┘à╪▓ ╪د┘┘à╪»╪«┘ ╪║┘è╪▒ ╪╡╪ص┘è╪ص╪î ╪ص╪د┘ê┘ ┘à╪▒╪ر ╪ث╪«╪▒┘ë`,
+        title: "خطأ في التحقق",
+        description: `الرمز المدخل غير صحيح، حاول مرة أخرى`,
         variant: "destructive",
       });
       refreshCaptcha();
@@ -306,17 +306,17 @@ export default function SubscriptionPage() {
         setRegistrationLoginRequired(true);
         setRegistrationSuccess(true);
         toast({
-          title: "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪╣┘é╪د╪▒ ╪ذ┘╪ش╪د╪ص",
+          title: "تم تسجيل العقار بنجاح",
           description:
             registrationData.message ||
-            "╪│╪ش┘ّ┘ ╪د┘╪»╪«┘ê┘ ╪ذ╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ┘ê╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ┘╪ح┘â┘à╪د┘ ╪د┘╪د╪┤╪ز╪▒╪د┘â.",
+            "سجّل الدخول برقم العقار والرقم السري لإكمال الاشتراك.",
         });
         return;
       }
 
       toast({
-        title: "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪╣┘é╪د╪▒ ╪ذ┘╪ش╪د╪ص",
-        description: "╪ش╪د╪▒┘è ╪ح┘â┘à╪د┘ ╪╣┘à┘┘è╪ر ╪د┘╪د╪┤╪ز╪▒╪د┘â...",
+        title: "تم تسجيل العقار بنجاح",
+        description: "جاري إكمال عملية الاشتراك...",
       });
 
       if (isFreePackage) {
@@ -336,8 +336,8 @@ export default function SubscriptionPage() {
             
             if (paymentData.redirectUrl) {
               toast({
-                title: "╪ش╪د╪▒┘è ╪ز┘ê╪ش┘è┘ç┘â ┘┘╪»┘╪╣",
-                description: "╪│┘è╪ز┘à ┘╪ز╪ص ╪╡┘╪ص╪ر ╪د┘╪»┘╪╣ ┘┘è ┘╪د┘╪░╪ر ╪ش╪»┘è╪»╪ر",
+                title: "جاري توجيهك للدفع",
+                description: "سيتم فتح صفحة الدفع في نافذة جديدة",
               });
               const paymentWindow = window.open(paymentData.redirectUrl, '_blank');
               if (!paymentWindow) {
@@ -345,20 +345,20 @@ export default function SubscriptionPage() {
               }
             } else if (paymentData.checkoutUrl) {
               toast({
-                title: "╪ش╪د╪▒┘è ╪ز┘ê╪ش┘è┘ç┘â ┘┘╪»┘╪╣",
-                description: "╪│┘è╪ز┘à ┘╪ز╪ص ╪╡┘╪ص╪ر ╪د┘╪»┘╪╣ ┘┘è ┘╪د┘╪░╪ر ╪ش╪»┘è╪»╪ر",
+                title: "جاري توجيهك للدفع",
+                description: "سيتم فتح صفحة الدفع في نافذة جديدة",
               });
               const paymentWindow = window.open(paymentData.checkoutUrl, '_blank');
               if (!paymentWindow) {
                 window.location.href = paymentData.checkoutUrl;
               }
             } else {
-              throw new Error("┘┘à ┘è╪ز┘à ╪د┘╪ص╪╡┘ê┘ ╪╣┘┘ë ╪▒╪د╪ذ╪╖ ╪د┘╪»┘╪╣");
+              throw new Error("لم يتم الحصول على رابط الدفع");
             }
           } catch (err: any) {
             toast({
-              title: "╪«╪╖╪ث ┘┘è ╪د┘╪»┘╪╣ ╪د┘╪ح┘┘â╪ز╪▒┘ê┘┘è",
-              description: err.message || "┘è╪▒╪ش┘ë ╪د╪│╪ز╪«╪»╪د┘à ╪د┘╪ز╪ص┘ê┘è┘ ╪د┘╪ذ┘┘â┘è ╪ذ╪»┘╪د┘ï ┘à┘ ╪░┘┘â ╪ث┘ê ╪ح╪╣╪د╪»╪ر ╪د┘┘à╪ص╪د┘ê┘╪ر ┘╪د╪ص┘é╪د┘ï",
+              title: "خطأ في الدفع الإلكتروني",
+              description: err.message || "يرجى استخدام التحويل البنكي بدلاً من ذلك أو إعادة المحاولة لاحقاً",
               variant: "destructive",
             });
             setPaymentMethod(null);
@@ -378,7 +378,7 @@ export default function SubscriptionPage() {
           });
           const bankData = await bankResponse.json();
           if (!bankResponse.ok) {
-            throw new Error(bankData.error || "┘╪┤┘ ╪ح╪▒╪│╪د┘ ╪د┘╪ز╪ص┘ê┘è┘ ╪د┘╪ذ┘┘â┘è");
+            throw new Error(bankData.error || "فشل إرسال التحويل البنكي");
           }
           if (bankData.aiScan) {
             setAiScanResult(bankData.aiScan);
@@ -399,7 +399,7 @@ export default function SubscriptionPage() {
         }
       }
     } catch (error: any) {
-      let errorMessage = error.message || "╪ص╪»╪س ╪«╪╖╪ث ╪║┘è╪▒ ┘à╪ز┘ê┘é╪╣";
+      let errorMessage = error.message || "حدث خطأ غير متوقع";
       try {
         const jsonPart = errorMessage.substring(errorMessage.indexOf('{'));
         if (jsonPart) {
@@ -408,7 +408,7 @@ export default function SubscriptionPage() {
         }
       } catch { /* keep original message */ }
       toast({
-        title: "╪«╪╖╪ث",
+        title: "خطأ",
         description: errorMessage,
         variant: "destructive",
       });
@@ -417,7 +417,7 @@ export default function SubscriptionPage() {
     }
   };
 
-  // ╪╣╪▒╪╢ ╪╡┘╪ص╪ر ╪د┘┘╪ش╪د╪ص "┘é┘è╪» ╪د┘┘à╪▒╪د╪ش╪╣╪ر"
+  // عرض صفحة النجاح "قيد المراجعة"
   if (registrationSuccess) {
     const isAutoActivated = bankTransferResult?.autoActivated;
     const isVerificationFailed = bankTransferResult?.verificationFailed;
@@ -428,7 +428,7 @@ export default function SubscriptionPage() {
     return (
       <div className="min-h-screen min-h-[100svh] bg-[#f6f2e8] flex items-center justify-center px-3 py-6 sm:p-6" dir="rtl">
         <Card className="max-w-lg w-full overflow-hidden border-[#d8c9aa] bg-[#fffdfa] p-5 text-center shadow-[0_24px_70px_-38px_rgba(41,55,47,0.55)] sm:p-8 space-y-6">
-          {/* ╪ث┘è┘é┘ê┘╪ر ╪د┘┘╪ش╪د╪ص */}
+          {/* أيقونة النجاح */}
           <div className="flex justify-center">
             <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
               isVerificationFailed || isPaymentRejected
@@ -447,57 +447,57 @@ export default function SubscriptionPage() {
             </div>
           </div>
 
-          {/* ╪د┘╪╣┘┘ê╪د┘ */}
+          {/* العنوان */}
           <div>
             <h1 className="text-2xl font-bold text-[#29372F] mb-2">
               {isVerificationFailed || isPaymentRejected
-                ? "╪ز╪╣╪░╪▒ ╪ز┘╪╣┘è┘ ╪د┘╪د╪┤╪ز╪▒╪د┘â"
+                ? "تعذر تفعيل الاشتراك"
                 : registrationLoginRequired
-                  ? "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪╣┘é╪د╪▒ ╪ذ┘╪ش╪د╪ص"
+                  ? "تم تسجيل العقار بنجاح"
                 : isAutoActivated
-                  ? "╪ز┘à ╪ز┘╪╣┘è┘ ╪د╪┤╪ز╪▒╪د┘â┘â ╪ذ┘╪ش╪د╪ص!"
-                  : "╪ز┘à ╪د╪│╪ز┘╪د┘à ╪╖┘╪ذ┘â ╪ذ┘╪ش╪د╪ص!"}
+                  ? "تم تفعيل اشتراكك بنجاح!"
+                  : "تم استلام طلبك بنجاح!"}
             </h1>
             <p className="text-muted-foreground">
               {isVerificationFailed || isPaymentRejected
-                ? (bankTransferResult?.message || "┘è╪▒╪ش┘ë ┘à╪▒╪د╪ش╪╣╪ر ╪│╪ذ╪ذ ╪د┘╪▒┘╪╢ ╪ذ╪د┘╪ث╪│┘┘.")
+                ? (bankTransferResult?.message || "يرجى مراجعة سبب الرفض بالأسفل.")
                 : registrationLoginRequired
-                  ? "╪ز╪╣╪░╪▒ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ╪ز┘┘é╪د╪خ┘è╪د┘ï╪î ┘ê┘┘à ╪ز╪ذ╪»╪ث ╪╣┘à┘┘è╪ر ╪د┘╪»┘╪╣ ╪ذ╪╣╪»."
+                  ? "تعذر تسجيل الدخول تلقائياً، ولم تبدأ عملية الدفع بعد."
                 : isAutoActivated
-                  ? "╪ز┘à ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪د┘╪»┘╪╣ ┘ê╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒ ╪ز┘┘é╪د╪خ┘è╪د┘ï"
+                  ? "تم التحقق من الدفع وبيانات العقار تلقائياً"
                   : isPendingManualReview
-                    ? "╪د┘╪ح┘è╪╡╪د┘ ┘è╪ص╪ز╪د╪ش ┘à╪▒╪د╪ش╪╣╪ر ┘è╪»┘ê┘è╪ر ┘à┘ ╪د┘╪ح╪»╪د╪▒╪ر"
+                    ? "الإيصال يحتاج مراجعة يدوية من الإدارة"
                     : isPendingAdminApproval
-                      ? (bankTransferResult?.message || "╪ز┘à ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪د┘╪»┘╪╣ ┘ê╪د┘╪ذ┘è╪د┘╪د╪ز╪î ┘ê╪ذ┘é┘è ╪د╪╣╪ز┘à╪د╪» ╪د┘╪ح╪»╪د╪▒╪ر")
-                      : "╪╣┘é╪د╪▒┘â ┘é┘è╪» ╪د┘┘à╪▒╪د╪ش╪╣╪ر ┘à┘ ┘╪▒┘è┘é┘╪د"}
+                      ? (bankTransferResult?.message || "تم التحقق من الدفع والبيانات، وبقي اعتماد الإدارة")
+                      : "عقارك قيد المراجعة من فريقنا"}
             </p>
           </div>
 
-          {/* ╪ز┘╪د╪╡┘è┘ ╪د┘╪╣┘é╪د╪▒ */}
+          {/* تفاصيل العقار */}
           <div className="rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-muted-foreground flex items-center gap-2">
                 <Home className="w-4 h-4" />
-                ╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒
+                رقم العقار
               </span>
               <span className="font-bold text-lg">{registeredPropertyNumber}</span>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-muted-foreground flex items-center gap-2">
                 <Lock className="w-4 h-4" />
-                ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è
+                الرقم السري
               </span>
               <span className="font-mono text-lg">****</span>
             </div>
             {selectedPackage && (
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground">╪د┘╪ذ╪د┘é╪ر</span>
+                <span className="text-muted-foreground">الباقة</span>
                 <Badge className="bg-[#80601B] text-white">{selectedPackage.name}</Badge>
               </div>
             )}
           </div>
 
-          {/* ╪▒╪│╪د┘╪ر ╪د┘┘à╪▒╪د╪ش╪╣╪ر */}
+          {/* رسالة المراجعة */}
           <div className={`border rounded-lg p-4 ${
             isVerificationFailed || isPaymentRejected
               ? "bg-red-50 border-red-200"
@@ -520,12 +520,12 @@ export default function SubscriptionPage() {
                       : "text-amber-800"
                 }`}>
                   {isVerificationFailed || isPaymentRejected
-                    ? "┘à╪╖┘┘ê╪ذ ╪ح╪ش╪▒╪د╪ة ┘à┘ ╪د┘┘à╪د┘┘â"
+                    ? "مطلوب إجراء من المالك"
                     : registrationLoginRequired
-                      ? "┘à╪╖┘┘ê╪ذ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘"
+                      ? "مطلوب تسجيل الدخول"
                     : isAutoActivated
-                      ? "╪د┘╪د╪┤╪ز╪▒╪د┘â ┘╪┤╪╖ ╪د┘╪ت┘"
-                      : "┘é┘è╪» ╪د┘┘à╪▒╪د╪ش╪╣╪ر"}
+                      ? "الاشتراك نشط الآن"
+                      : "قيد المراجعة"}
                 </p>
                 <p className={`text-sm ${
                   isVerificationFailed || isPaymentRejected
@@ -535,20 +535,20 @@ export default function SubscriptionPage() {
                       : "text-amber-700"
                 }`}>
                   {isVerificationFailed
-                    ? `┘è╪▒╪ش┘ë ╪د╪│╪ز┘â┘à╪د┘ ╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒: ${bankTransferResult?.missingFields?.join("╪î ") || "╪ذ┘è╪د┘╪د╪ز ┘╪د┘é╪╡╪ر"}`
+                    ? `يرجى استكمال بيانات العقار: ${bankTransferResult?.missingFields?.join("، ") || "بيانات ناقصة"}`
                     : isPaymentRejected
-                      ? (bankTransferResult?.nextAction || "┘è╪▒╪ش┘ë ╪▒┘╪╣ ╪ح┘è╪╡╪د┘ ╪ز╪ص┘ê┘è┘ ╪╡╪ص┘è╪ص ┘ê╪ح╪╣╪د╪»╪ر ╪د┘┘à╪ص╪د┘ê┘╪ر.")
+                      ? (bankTransferResult?.nextAction || "يرجى رفع إيصال تحويل صحيح وإعادة المحاولة.")
                       : registrationLoginRequired
-                        ? "╪│╪ش┘ّ┘ ╪د┘╪»╪«┘ê┘ ╪ذ╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ┘ê╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ╪د┘┘╪░┘è┘ ╪ث╪»╪«┘╪ز┘ç┘à╪د╪î ╪س┘à ╪ث┘â┘à┘ ╪د╪«╪ز┘è╪د╪▒ ╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣ ┘à┘ ┘┘ê╪ص╪ر ╪د┘┘à╪د┘┘â."
+                        ? "سجّل الدخول برقم العقار والرقم السري اللذين أدخلتهما، ثم أكمل اختيار طريقة الدفع من لوحة المالك."
                       : isAutoActivated
-                        ? "┘è┘à┘â┘┘â ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ╪د┘╪ت┘ ┘ê┘à╪ز╪د╪ذ╪╣╪ر ╪ذ┘è╪د┘╪د╪ز ╪د╪┤╪ز╪▒╪د┘â┘â ┘à┘ ┘┘ê╪ص╪ر ╪د┘╪ز╪ص┘â┘à."
+                        ? "يمكنك تسجيل الدخول الآن ومتابعة بيانات اشتراكك من لوحة التحكم."
                         : isPendingManualReview
-                          ? (bankTransferResult?.nextAction || "╪ز╪╣╪░╪▒ ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪د┘╪ح┘è╪╡╪د┘ ╪ز┘┘é╪د╪خ┘è╪د┘ï. ╪│┘è╪ز┘à ┘à╪▒╪د╪ش╪╣╪ز┘ç ┘à┘ ┘é╪ذ┘ ╪د┘╪ح╪»╪د╪▒╪ر ╪«┘╪د┘ 24 ╪│╪د╪╣╪ر.")
+                          ? (bankTransferResult?.nextAction || "تعذر التحقق من الإيصال تلقائياً. سيتم مراجعته من قبل الإدارة خلال 24 ساعة.")
                           : isPendingAdminApproval
-                            ? "┘╪د ┘è┘╪▓┘à┘â ╪ح╪ش╪▒╪د╪ة ╪ح╪╢╪د┘┘è ╪د┘╪ت┘. ╪│┘è╪ز┘à ╪ز┘╪╣┘è┘ ╪د┘╪د╪┤╪ز╪▒╪د┘â ╪ذ╪╣╪» ╪د╪╣╪ز┘à╪د╪» ╪د┘╪ح╪»╪د╪▒╪ر ┘┘╪╣┘é╪د╪▒ ╪د┘╪ش╪»┘è╪»."
+                            ? "لا يلزمك إجراء إضافي الآن. سيتم تفعيل الاشتراك بعد اعتماد الإدارة للعقار الجديد."
                           : isFreePackage
-                    ? "╪│┘è╪ز┘à ┘à╪▒╪د╪ش╪╣╪ر ╪╣┘é╪د╪▒┘â ┘à┘ ┘é╪ذ┘ ╪د┘╪ح╪»╪د╪▒╪ر ╪«┘╪د┘ 24 ╪│╪د╪╣╪ر. ╪│╪ز╪ز┘à┘â┘ ┘à┘ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ┘┘ê╪▒ ┘é╪ذ┘ê┘ ╪د┘╪╣┘é╪د╪▒."
-                    : "╪ز┘à ╪د╪│╪ز┘╪د┘à ╪ح┘è╪╡╪د┘ ╪د┘╪»┘╪╣. ╪│┘è╪ز┘à ╪ز┘╪╣┘è┘ ╪د┘╪د╪┤╪ز╪▒╪د┘â ╪ذ╪╣╪» ╪د┘╪ز╪ص┘é┘é ┘à┘ ╪د┘╪ز╪ص┘ê┘è┘ ╪د┘╪ذ┘┘â┘è ╪«┘╪د┘ 24 ╪│╪د╪╣╪ر."
+                    ? "سيتم مراجعة عقارك من قبل الإدارة خلال 24 ساعة. ستتمكن من تسجيل الدخول فور قبول العقار."
+                    : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."
                   }
                 </p>
               </div>
@@ -558,38 +558,38 @@ export default function SubscriptionPage() {
           {/* AI Scan Results */}
           {aiScanResult && (
             <div className={`p-4 rounded-lg border ${
-              aiScanResult.recommendation === '╪ز┘╪╣┘è┘_╪ز┘┘é╪د╪خ┘è' 
+              aiScanResult.recommendation === 'تفعيل_تلقائي'
                 ? 'bg-emerald-50 border-emerald-300' 
-                : aiScanResult.recommendation === '╪▒┘╪╢'
+                : aiScanResult.recommendation === 'رفض'
                 ? 'bg-red-50 border-red-300'
                 : 'bg-amber-50 border-amber-300'
             }`}>
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-bold text-sm">┘╪ز┘è╪ش╪ر ╪د┘┘╪ص╪╡ ╪د┘╪░┘â┘è</h4>
+                <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
                 <Badge variant="outline" className={
-                  aiScanResult.recommendation === '╪ز┘╪╣┘è┘_╪ز┘┘é╪د╪خ┘è' 
+                  aiScanResult.recommendation === 'تفعيل_تلقائي'
                     ? 'border-emerald-500 text-emerald-600' 
-                    : aiScanResult.recommendation === '╪▒┘╪╢'
+                    : aiScanResult.recommendation === 'رفض'
                     ? 'border-red-500 text-red-600'
                     : 'border-amber-500 text-amber-600'
                 }>
-                  {aiScanResult.recommendation === '╪ز┘╪╣┘è┘_╪ز┘┘é╪د╪خ┘è' && '┘à╪╖╪د╪ذ┘é - ╪ش╪د┘ç╪▓ ┘┘╪ز┘╪╣┘è┘'}
-                  {aiScanResult.recommendation === '┘à╪▒╪د╪ش╪╣╪ر_┘è╪»┘ê┘è╪ر' && '┘è╪ص╪ز╪د╪ش ┘à╪▒╪د╪ش╪╣╪ر'}
-                  {aiScanResult.recommendation === '╪▒┘╪╢' && '╪║┘è╪▒ ┘à╪╖╪د╪ذ┘é'}
+                  {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
+                  {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
+                  {aiScanResult.recommendation === 'رفض' && 'غير مطابق'}
                 </Badge>
               </div>
               
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">┘╪│╪ذ╪ر ╪د┘╪ث╪╡╪د┘╪ر</span>
+                    <span className="text-muted-foreground">نسبة الأصالة</span>
                     <span className="font-bold">{aiScanResult.authenticityScore}%</span>
                   </div>
                   <Progress value={aiScanResult.authenticityScore} className="h-2" />
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">┘╪│╪ذ╪ر ╪د┘╪ز╪╖╪د╪ذ┘é</span>
+                    <span className="text-muted-foreground">نسبة التطابق</span>
                     <span className="font-bold">{aiScanResult.matchScore}%</span>
                   </div>
                   <Progress value={aiScanResult.matchScore} className="h-2" />
@@ -603,20 +603,20 @@ export default function SubscriptionPage() {
               )}
 
               <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
-                ┘à╪│╪ز┘ê┘ë ╪د┘╪س┘é╪ر: {aiScanResult.confidence}%
+                مستوى الثقة: {aiScanResult.confidence}%
               </div>
             </div>
           )}
 
-          {/* ┘à╪╣┘┘ê┘à╪د╪ز ╪د┘╪ز┘ê╪د╪╡┘ */}
+          {/* معلومات التواصل */}
           <div className="text-sm text-muted-foreground">
             <p className="flex items-center justify-center gap-2">
               <Phone className="w-4 h-4" />
-              ┘┘╪د╪│╪ز┘╪│╪د╪▒: 0533220646
+              للاستفسار: 0533220646
             </p>
           </div>
 
-          {/* ╪د┘╪ث╪▓╪▒╪د╪▒ */}
+          {/* الأزرار */}
           <div className="flex flex-col gap-3">
             <Button
               onClick={() => router.push(
@@ -628,12 +628,12 @@ export default function SubscriptionPage() {
               data-testid="button-go-login"
             >
               {isPaymentRejected
-                ? (bankTransferResult?.actionLabel || "╪ح╪╣╪د╪»╪ر ╪د┘┘à╪ص╪د┘ê┘╪ر")
+                ? (bankTransferResult?.actionLabel || "إعادة المحاولة")
                 : isPendingManualReview || isPendingAdminApproval
-                  ? (bankTransferResult?.actionLabel || "┘à╪ز╪د╪ذ╪╣╪ر ╪د┘╪ص╪د┘╪ر")
+                  ? (bankTransferResult?.actionLabel || "متابعة الحالة")
                   : isVerificationFailed
-                    ? "╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ┘╪ز╪╣╪»┘è┘ ╪د┘╪ذ┘è╪د┘╪د╪ز"
-                    : "╪د┘╪░┘ç╪د╪ذ ┘╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘"}
+                    ? "تسجيل الدخول لتعديل البيانات"
+                    : "الذهاب لتسجيل الدخول"}
             </Button>
             <Button
               variant="outline"
@@ -642,7 +642,7 @@ export default function SubscriptionPage() {
               data-testid="button-go-home"
             >
               <ArrowLeft className="w-4 h-4 ml-2" />
-              ╪د┘╪╣┘ê╪»╪ر ┘┘╪▒╪خ┘è╪│┘è╪ر
+              العودة للرئيسية
             </Button>
           </div>
         </Card>
@@ -656,8 +656,8 @@ export default function SubscriptionPage() {
         <div className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full border border-white/10" aria-hidden="true" />
         <div className="pointer-events-none absolute -left-10 -top-16 h-40 w-40 rounded-full border border-[#c9a859]/35" aria-hidden="true" />
         <div className="relative mx-auto max-w-6xl px-4 py-7 sm:px-6 sm:py-9">
-          <h1 className="text-2xl font-bold sm:text-3xl">╪د╪┤╪ز╪▒┘â ┘à╪╣┘╪د</h1>
-          <p className="mt-1 text-sm text-white/75">╪د╪«╪ز╪▒ ╪ذ╪د┘é╪ر ┘ê╪د┘à┘╪ث ╪ذ┘è╪د┘╪د╪ز ╪╣┘é╪د╪▒┘â</p>
+          <h1 className="text-2xl font-bold sm:text-3xl">اشترك معنا</h1>
+          <p className="mt-1 text-sm text-white/75">اختر باقة واملأ بيانات عقارك</p>
         </div>
       </header>
       <div className="mx-auto max-w-6xl px-3 py-5 sm:px-6 sm:py-8">
@@ -667,9 +667,9 @@ export default function SubscriptionPage() {
             {/* Step 1 */}
             <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 1 ? "step" : undefined}>
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 1 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
-                {currentStep > 1 ? 'ظ£ô' : '1'}
+                {currentStep > 1 ? '✓' : '1'}
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">╪د╪«╪ز┘è╪د╪▒ ╪د┘╪ذ╪د┘é╪ر</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">اختيار الباقة</p>
             </div>
 
             {/* Line 1-2 */}
@@ -678,9 +678,9 @@ export default function SubscriptionPage() {
             {/* Step 2 */}
             <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 2 ? "step" : undefined}>
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 2 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
-                {currentStep > 2 ? 'ظ£ô' : '2'}
+                {currentStep > 2 ? '✓' : '2'}
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">بيانات العقار</p>
             </div>
 
             {/* Line 2-3 */}
@@ -691,7 +691,7 @@ export default function SubscriptionPage() {
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 3 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 3
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣</p>
+              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">طريقة الدفع</p>
             </div>
           </div>
         </div>
@@ -699,7 +699,7 @@ export default function SubscriptionPage() {
         {/* Step 1: Select Package */}
         {currentStep === 1 && (
           <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
-            <h2 className="text-xl font-bold text-[#29372F] mb-6">╪د┘╪«╪╖┘ê╪ر 1: ╪د╪«╪ز╪▒ ╪ذ╪د┘é╪ر ╪د┘╪د╪┤╪ز╪▒╪د┘â</h2>
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => {
                 const isExpanded = expandedPackages.has(pkg.id);
@@ -718,18 +718,18 @@ export default function SubscriptionPage() {
                     <div>
                       <h3 className="font-bold">{pkg.name}</h3>
                       {pkg.price === 0 ? (
-                        <p className="text-2xl font-bold text-[#29372F]">┘à╪ش╪د┘┘è</p>
+                        <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
                       ) : (
                         <PriceDisplay amount={pkg.price} size="lg" />
                       )}
                     </div>
                     {selectedPackageId === pkg.id && (
-                      <Badge className="bg-[#29372F] text-white">┘à╪«╪ز╪د╪▒</Badge>
+                      <Badge className="bg-[#29372F] text-white">مختار</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mb-3">{pkg.duration} ┘è┘ê┘à</p>
+                  <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
                   {isPremiumSubscriptionType(pkg.type) && (
-                    <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] mb-3">┘à┘à┘è╪▓</Badge>
+                    <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
                   )}
                   
                   {/* Features List */}
@@ -738,7 +738,7 @@ export default function SubscriptionPage() {
                       <ul className="space-y-1">
                         {featuresToShow.map((feature, idx) => (
                           <li key={idx} className="text-xs flex items-start gap-1.5">
-                            <span className="text-[#80601B] font-bold mt-0.5">ظت</span>
+                            <span className="text-[#80601B] font-bold mt-0.5">•</span>
                             <span className="text-muted-foreground leading-tight">{feature}</span>
                           </li>
                         ))}
@@ -759,7 +759,7 @@ export default function SubscriptionPage() {
                           }}
                           className="text-xs text-[#80601B] font-semibold hover:underline mt-1"
                         >
-                          {isExpanded ? '╪╣╪▒╪╢ ╪ث┘é┘' : `╪╣╪▒╪╢ ╪د┘┘à╪▓┘è╪» (${pkg.features.length - 4}+)`}
+                          {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
                         </button>
                       )}
                     </div>
@@ -773,7 +773,7 @@ export default function SubscriptionPage() {
                       onClick={() => setPackageToView(pkg)}
                       className="flex-1"
                     >
-                      ╪د┘╪ز┘╪د╪╡┘è┘
+                      التفاصيل
                     </Button>
                     <Button
                       type="button"
@@ -784,7 +784,7 @@ export default function SubscriptionPage() {
                       }}
                       className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#29372F] text-white hover:bg-[#1f2a24]' : 'bg-[#80601B] text-white hover:bg-[#6f5317]'}`}
                     >
-                      ╪د╪«╪ز┘è╪د╪▒
+                      اختيار
                     </Button>
                   </div>
                 </div>
@@ -796,7 +796,7 @@ export default function SubscriptionPage() {
                 disabled={!selectedPackageId}
                 className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317] md:flex-none"
               >
-                ╪د┘╪ز╪د┘┘è: ╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒
+                التالي: بيانات العقار
               </Button>
             </div>
           </Card>
@@ -805,7 +805,7 @@ export default function SubscriptionPage() {
         {/* Step 2: Property Details */}
         {currentStep === 2 && selectedPackageId && (
           <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
-            <h2 className="text-xl font-bold text-[#29372F] mb-6">╪د┘╪«╪╖┘ê╪ر 2: ╪ذ┘è╪د┘╪د╪ز ╪د┘╪╣┘é╪د╪▒</h2>
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 2: بيانات العقار</h2>
             <form onSubmit={(e) => { 
               e.preventDefault(); 
               if (validateForm()) {
@@ -816,9 +816,9 @@ export default function SubscriptionPage() {
               {/* Property Info */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold mb-2">╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ (5 ╪ث╪▒┘é╪د┘à) *</label>
+                  <label className="block text-sm font-semibold mb-2">رقم العقار (5 أرقام) *</label>
                   <Input
-                    placeholder="╪ث╪«╪▒ 5 ╪ث╪▒┘é╪د┘à ┘à┘ ╪ش┘ê╪د┘┘â "
+                    placeholder="أخر 5 أرقام من جوالك "
                     value={formData.propertyNumber}
                     inputMode="numeric"
                     autoComplete="username"
@@ -834,9 +834,9 @@ export default function SubscriptionPage() {
                   {errors.propertyNumber && <p className="text-xs text-red-500 mt-1">{errors.propertyNumber}</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">╪د╪│┘à ╪د┘╪╣┘é╪د╪▒ *</label>
+                  <label className="block text-sm font-semibold mb-2">اسم العقار *</label>
                   <Input
-                    placeholder="╪┤╪د┘┘è╪ر ┘à┘ê╪»┘è"
+                    placeholder="شالية مودي"
                     value={formData.name}
                     maxLength={30}
                     onChange={(e) => {
@@ -847,13 +847,13 @@ export default function SubscriptionPage() {
                     className={errors.name ? "border-red-500" : ""}
                   />
                   {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
-                  <p className="text-xs text-muted-foreground mt-1">{formData.name.length}/30 ╪ص╪▒┘</p>
+                  <p className="text-xs text-muted-foreground mt-1">{formData.name.length}/30 حرف</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è *</label>
+                  <label className="block text-sm font-semibold mb-2">الرقم السري *</label>
                   <Input
                     type="password"
-                    placeholder="╪د╪«╪ز╪▒ ╪▒┘é┘à╪د┘ï ╪│╪▒┘è╪د┘ï"
+                    placeholder="اختر رقماً سرياً"
                     value={formData.pin}
                     inputMode="numeric"
                     autoComplete="new-password"
@@ -868,7 +868,7 @@ export default function SubscriptionPage() {
                   {errors.pin && <p className="text-xs text-red-500 mt-1">{errors.pin}</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">╪▒┘é┘à ╪د┘┘ê╪د╪ز╪│╪د╪ذ *</label>
+                  <label className="block text-sm font-semibold mb-2">رقم الواتساب *</label>
                   <Input
                     placeholder="5xxxxxxxx"
                     value={formData.whatsappNumber}
@@ -888,13 +888,13 @@ export default function SubscriptionPage() {
 
               {/* Location */}
               <div className="border-t border-[#e4d9c1] pt-6">
-                <h3 className="text-lg font-bold mb-4">╪د┘┘à┘ê┘é╪╣</h3>
+                <h3 className="text-lg font-bold mb-4">الموقع</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold mb-2">╪د┘┘à╪»┘è┘╪ر *</label>
+                    <label className="block text-sm font-semibold mb-2">المدينة *</label>
                     <Select value={formData.city || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, city: value }); }}>
                       <SelectTrigger>
-                        <SelectValue placeholder="╪د╪«╪ز╪▒" />
+                        <SelectValue placeholder="اختر" />
                       </SelectTrigger>
                       <SelectContent>
                         {CITIES.map(city => (
@@ -904,10 +904,10 @@ export default function SubscriptionPage() {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">╪د┘╪د╪ز╪ش╪د┘ç *</label>
+                    <label className="block text-sm font-semibold mb-2">الاتجاه *</label>
                     <Select value={formData.direction || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, direction: value }); }}>
                       <SelectTrigger>
-                        <SelectValue placeholder="╪د╪«╪ز╪▒" />
+                        <SelectValue placeholder="اختر" />
                       </SelectTrigger>
                       <SelectContent>
                         {DIRECTIONS.map(d => (
@@ -917,10 +917,10 @@ export default function SubscriptionPage() {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">╪د┘┘┘ê╪╣ *</label>
+                    <label className="block text-sm font-semibold mb-2">النوع *</label>
                     <Select value={formData.type || ""} onValueChange={(value) => { if (value) setFormData({ ...formData, type: value }); }}>
                       <SelectTrigger>
-                        <SelectValue placeholder="╪د╪«╪ز╪▒" />
+                        <SelectValue placeholder="اختر" />
                       </SelectTrigger>
                       <SelectContent>
                         {TYPES.map(type => (
@@ -931,9 +931,9 @@ export default function SubscriptionPage() {
                   </div>
                 </div>
                 <div className="mt-4">
-                  <label className="block text-sm font-semibold mb-2">╪د┘┘à┘ê┘é╪╣ / ╪د┘╪ص┘è</label>
+                  <label className="block text-sm font-semibold mb-2">الموقع / الحي</label>
                   <Input
-                    placeholder="╪د┘â╪ز╪ذ ╪د╪│┘à ╪د┘╪ص┘è ╪ث┘ê ╪د┘┘à┘ê┘é╪╣"
+                    placeholder="اكتب اسم الحي أو الموقع"
                     value={formData.location}
                     onChange={(e) => {
                       const cleaned = validateTextInput(e.target.value);
@@ -945,22 +945,22 @@ export default function SubscriptionPage() {
 
               {/* Prices */}
               <div className="border-t border-[#e4d9c1] pt-6">
-                <h3 className="text-lg font-bold mb-4">╪د┘╪ث╪│╪╣╪د╪▒ {getCurrencyLabel()} *</h3>
+                <h3 className="text-lg font-bold mb-4">الأسعار {getCurrencyLabel()} *</h3>
                 <div className="grid grid-cols-1 gap-4 min-[380px]:grid-cols-2 md:grid-cols-4">
                   <div>
-                    <label className="block text-sm font-semibold mb-2">┘ê╪│╪╖ ╪د┘╪ث╪│╪ذ┘ê╪╣</label>
+                    <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
                     <Input type="number" placeholder="500" value={prices.weekday} onChange={(e) => setPrices({ ...prices, weekday: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">┘┘ç╪د┘è╪ر ╪د┘╪ث╪│╪ذ┘ê╪╣</label>
+                    <label className="block text-sm font-semibold mb-2">نهاية الأسبوع</label>
                     <Input type="number" placeholder="800" value={prices.weekend} onChange={(e) => setPrices({ ...prices, weekend: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">┘à╪ذ┘è╪ز</label>
+                    <label className="block text-sm font-semibold mb-2">مبيت</label>
                     <Input type="number" placeholder="1200" value={prices.overnight} onChange={(e) => setPrices({ ...prices, overnight: validateNumericInput(e.target.value) })} required />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">╪ح╪ش╪د╪▓╪د╪ز</label>
+                    <label className="block text-sm font-semibold mb-2">إجازات</label>
                     <Input type="number" placeholder="1000" value={prices.holidays} onChange={(e) => setPrices({ ...prices, holidays: validateNumericInput(e.target.value) })} required />
                   </div>
                 </div>
@@ -975,10 +975,10 @@ export default function SubscriptionPage() {
                   className="w-full gap-2 sm:w-auto"
                 >
                   <ChevronRight className="w-4 h-4" />
-                  ╪د┘╪│╪د╪ذ┘é
+                  السابق
                 </Button>
                 <Button type="submit" className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]">
-                  ╪د┘╪ز╪د┘┘è: ╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣
+                  التالي: طريقة الدفع
                 </Button>
               </div>
             </form>
@@ -988,11 +988,11 @@ export default function SubscriptionPage() {
         {/* Step 3: Payment Method */}
         {currentStep === 3 && selectedPackageId && (
           <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
-            <h2 className="text-xl font-bold text-[#29372F] mb-6">╪د┘╪«╪╖┘ê╪ر 3: ╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣</h2>
+            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 3: طريقة الدفع</h2>
             <form onSubmit={handleSubmit} className="space-y-6">
               {!isFreePackage && (
                 <div>
-                  <h3 className="text-lg font-bold mb-4">╪د╪«╪ز╪▒ ╪╖╪▒┘è┘é╪ر ╪د┘╪»┘╪╣</h3>
+                  <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
                   <div className="space-y-3">
                     <button
                       type="button"
@@ -1000,8 +1000,8 @@ export default function SubscriptionPage() {
                       aria-pressed={paymentMethod === 'online'}
                       className={`w-full rounded-xl border-2 p-4 text-right transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#80601B] focus-visible:ring-offset-2 ${paymentMethod === 'online' ? 'border-[#80601B] bg-[#80601B]/5' : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'}`}
                     >
-                      <div className="font-semibold">╪د┘╪»┘╪╣ ╪د┘╪ح┘┘â╪ز╪▒┘ê┘┘è</div>
-                      <p className="text-sm text-muted-foreground">╪ذ╪╖╪د┘é╪ر ╪د╪خ╪ز┘à╪د┘ ╪ث┘ê Apple Pay</p>
+                      <div className="font-semibold">الدفع الإلكتروني</div>
+                      <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay</p>
                     </button>
                     <button
                       type="button"
@@ -1009,19 +1009,19 @@ export default function SubscriptionPage() {
                       aria-pressed={paymentMethod === 'bank'}
                       className={`w-full rounded-xl border-2 p-4 text-right transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#80601B] focus-visible:ring-offset-2 ${paymentMethod === 'bank' ? 'border-[#80601B] bg-[#80601B]/5' : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'}`}
                     >
-                      <div className="font-semibold">╪ز╪ص┘ê┘è┘ ╪ذ┘┘â┘è</div>
-                      <p className="text-sm text-muted-foreground">┘à╪╣ ╪ز╪ص┘à┘è┘ ╪ح┘è╪╡╪د┘ ╪د┘╪ز╪ص┘ê┘è┘</p>
+                      <div className="font-semibold">تحويل بنكي</div>
+                      <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل</p>
                     </button>
 
                     {/* Discount Code */}
                     <div className="mt-4 rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4">
-                      <label className="block text-sm font-semibold mb-2">┘â┘ê╪» ╪«╪╡┘à (╪د╪«╪ز┘è╪د╪▒┘è)</label>
+                      <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
                       <div className="flex flex-col gap-2 sm:flex-row">
-                        <Input className="min-w-0" placeholder="╪ث╪»╪«┘ ┘â┘ê╪» ╪د┘╪«╪╡┘à" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
-                        <Button type="button" variant="outline" onClick={validateDiscount} className="w-full sm:w-auto">╪ز╪ص┘é┘é</Button>
+                        <Input className="min-w-0" placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
+                        <Button type="button" variant="outline" onClick={validateDiscount} className="w-full sm:w-auto">تحقق</Button>
                       </div>
                       {validatedDiscount && (
-                        <p className="text-sm text-green-600 mt-2">ظ£ô ╪│┘è╪ز┘à ╪«╪╡┘à {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
+                        <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
                       )}
                     </div>
 
@@ -1031,17 +1031,17 @@ export default function SubscriptionPage() {
                         <div className="rounded-xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 space-y-3 sm:p-5">
                           <div className="flex items-center gap-2 mb-3">
                             <CreditCard className="w-6 h-6 text-blue-700" />
-                            <p className="font-bold text-lg text-blue-800">┘à╪╣┘┘ê┘à╪د╪ز ╪د┘╪ز╪ص┘ê┘è┘ ╪د┘╪ذ┘┘â┘è</p>
+                            <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
                           </div>
                           <div className="space-y-3">
                             {bankAccount ? (
                               <>
                                 <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                                  <span className="shrink-0 text-sm font-semibold text-blue-700">╪د┘╪ذ┘┘â</span>
+                                  <span className="shrink-0 text-sm font-semibold text-blue-700">البنك</span>
                                   <span className="min-w-0 break-words text-base font-bold text-blue-900">{bankAccount.bankName}</span>
                                 </div>
                                 <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                                  <span className="shrink-0 text-sm font-semibold text-blue-700">╪د╪│┘à ╪د┘┘à╪│╪ز┘┘è╪»</span>
+                                  <span className="shrink-0 text-sm font-semibold text-blue-700">اسم المستفيد</span>
                                   <span className="min-w-0 break-words text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
                                 </div>
                                 <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -1050,40 +1050,40 @@ export default function SubscriptionPage() {
                                 </div>
                                 {bankAccount.accountNumber && (
                                   <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                                    <span className="shrink-0 text-sm font-semibold text-blue-700">╪▒┘é┘à ╪د┘╪ص╪│╪د╪ذ</span>
+                                    <span className="shrink-0 text-sm font-semibold text-blue-700">رقم الحساب</span>
                                     <span className="min-w-0 break-all text-left text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
                                   </div>
                                 )}
                                 {bankAccount.barcodeUrl && (
                                   <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                                    <p className="text-sm font-semibold text-blue-700 mb-2">╪ذ╪د╪▒┘â┘ê╪» ╪د┘╪ص╪│╪د╪ذ ╪د┘╪ذ┘┘â┘è</p>
-                                    <img src={bankAccount.barcodeUrl} alt="╪ذ╪د╪▒┘â┘ê╪» ╪د┘╪ص╪│╪د╪ذ ╪د┘╪ذ┘┘â┘è" className="h-auto w-full max-w-[200px] mx-auto rounded-lg" />
+                                    <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                                    <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="h-auto w-full max-w-[200px] mx-auto rounded-lg" />
                                   </div>
                                 )}
                                 <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                                  <p className="text-sm font-semibold text-blue-700 mb-2">QR Code ┘┘╪»┘╪╣</p>
+                                  <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
                                   <img 
                                     src="/assets/bank-qr.png" 
-                                    alt="QR Code ┘┘╪»┘╪╣" 
+                                    alt="QR Code للدفع"
                                     className="h-auto w-full max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
                                     onClick={() => window.open('/assets/bank-qr.png', '_blank')}
                                   />
                                 </div>
                               </>
                             ) : (
-                              <p className="text-blue-600 text-center py-4">╪ش╪د╪▒┘è ╪ز╪ص┘à┘è┘ ╪ذ┘è╪د┘╪د╪ز ╪د┘╪ص╪│╪د╪ذ...</p>
+                              <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
                             )}
                           </div>
                           <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
-                            <p className="text-sm font-semibold text-amber-800">ظأب ┘è╪▒╪ش┘ë ┘â╪ز╪د╪ذ╪ر ╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ┘┘è ┘à┘╪د╪ص╪╕╪د╪ز ╪د┘╪ز╪ص┘ê┘è┘</p>
+                            <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة رقم العقار في ملاحظات التحويل</p>
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold mb-2">╪ح┘è╪╡╪د┘ ╪د┘╪ز╪ص┘ê┘è┘</label>
+                          <label className="block text-sm font-semibold mb-2">إيصال التحويل</label>
                           <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => setReceiptFile(e.target.files?.[0] || null)} className="hidden" />
                           <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="h-auto min-h-10 w-full whitespace-normal break-all gap-2 border-blue-400 py-2 text-blue-700 hover:bg-blue-50">
                             <Upload className="w-4 h-4" />
-                            {receiptFile ? receiptFile.name : '╪د╪«╪ز╪▒ ╪╡┘ê╪▒╪ر ╪د┘╪ح┘è╪╡╪د┘'}
+                            {receiptFile ? receiptFile.name : 'اختر صورة الإيصال'}
                           </Button>
                         </div>
                       </div>
@@ -1095,7 +1095,7 @@ export default function SubscriptionPage() {
               {/* Free Package Message */}
               {isFreePackage && (
                 <div className="rounded-xl border border-[#e4d9c1] bg-[#f9f5eb] p-4">
-                  <p className="text-sm font-semibold">┘ç╪░┘ç ╪ذ╪د┘é╪ر ┘à╪ش╪د┘┘è╪ر - ╪│┘è╪ز┘à ╪ح╪▒╪│╪د┘ ╪د┘╪╣┘é╪د╪▒ ┘╪د╪╣╪ز┘à╪د╪» ╪د┘╪ح╪»╪د╪▒╪ر ╪ذ╪╣╪» ╪د┘â╪ز┘à╪د┘ ╪د┘╪ذ┘è╪د┘╪د╪ز</p>
+                  <p className="text-sm font-semibold">هذه باقة مجانية - سيتم إرسال العقار لاعتماد الإدارة بعد اكتمال البيانات</p>
                 </div>
               )}
 
@@ -1124,7 +1124,7 @@ export default function SubscriptionPage() {
 
               {/* Visual Captcha */}
               <div>
-                <label className="block text-sm font-semibold mb-2">╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é</label>
+                <label className="block text-sm font-semibold mb-2">رمز التحقق</label>
                 <div className="flex flex-wrap items-center gap-3 mb-2">
                   <canvas
                     ref={captchaCanvasRef}
@@ -1133,12 +1133,12 @@ export default function SubscriptionPage() {
                     className="h-auto w-full max-w-[220px] rounded-lg border border-[#d8c9aa] select-none"
                     style={{ imageRendering: 'auto' }}
                   />
-                  <Button type="button" variant="outline" size="icon" onClick={refreshCaptcha} title="╪ز╪ص╪»┘è╪س ╪د┘╪▒┘à╪▓" className="shrink-0">
+                  <Button type="button" variant="outline" size="icon" onClick={refreshCaptcha} title="تحديث الرمز" className="shrink-0">
                     <RefreshCw className="h-4 w-4" />
                   </Button>
                 </div>
                 <Input
-                  placeholder="╪ث╪»╪«┘ ╪د┘╪ث╪ص╪▒┘ ╪د┘╪╕╪د┘ç╪▒╪ر ╪ث╪╣┘╪د┘ç"
+                  placeholder="أدخل الأحرف الظاهرة أعلاه"
                   value={captchaInput}
                   onChange={(e) => setCaptchaInput(e.target.value)}
                   maxLength={5}
@@ -1147,7 +1147,7 @@ export default function SubscriptionPage() {
                   spellCheck={false}
                   required
                 />
-                <p className="text-xs text-muted-foreground mt-1">╪ث╪»╪«┘ ╪د┘╪ث╪ص╪▒┘ ┘ê╪د┘╪ث╪▒┘é╪د┘à ┘â┘à╪د ╪ز╪╕┘ç╪▒ ┘┘è ╪د┘╪╡┘ê╪▒╪ر (┘╪د ┘è┘┘╪▒┘ّ┘é ╪ذ┘è┘ ╪د┘╪ص╪▒┘ê┘ ╪د┘┘â╪ذ┘è╪▒╪ر ┘ê╪د┘╪╡╪║┘è╪▒╪ر)</p>
+                <p className="text-xs text-muted-foreground mt-1">أدخل الأحرف والأرقام كما تظهر في الصورة (لا يُفرّق بين الحروف الكبيرة والصغيرة)</p>
               </div>
 
               {/* Submit */}
@@ -1159,7 +1159,7 @@ export default function SubscriptionPage() {
                   className="w-full gap-2 sm:w-auto"
                 >
                   <ChevronRight className="w-4 h-4" />
-                  ╪د┘╪│╪د╪ذ┘é
+                  السابق
                 </Button>
                 <Button
                   type="submit"
@@ -1170,7 +1170,7 @@ export default function SubscriptionPage() {
                   }
                   className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
                 >
-                  {isSubmitting ? '╪ش╪د╪▒┘è ╪د┘┘à╪╣╪د┘╪ش╪ر...' : isFreePackage ? '╪ح┘┘ç╪د╪ة ╪د┘╪ز╪│╪ش┘è┘' : '┘à╪ز╪د╪ذ╪╣╪ر ╪د┘╪»┘╪╣'}
+                  {isSubmitting ? 'جاري المعالجة...' : isFreePackage ? 'إنهاء التسجيل' : 'متابعة الدفع'}
                 </Button>
               </div>
             </form>
@@ -1182,29 +1182,29 @@ export default function SubscriptionPage() {
           <DialogContent className="max-h-[90svh] w-[calc(100%_-_1.5rem)] max-w-md overflow-y-auto border-[#d8c9aa] bg-[#fffdfa]" dir="rtl">
             <DialogHeader>
               <DialogTitle className="text-[#29372F]">{packageToView?.name}</DialogTitle>
-              <DialogDescription>╪ز┘╪د╪╡┘è┘ ╪د┘╪ذ╪د┘é╪ر ╪د┘┘â╪د┘à┘╪ر</DialogDescription>
+              <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
             </DialogHeader>
             {packageToView && (
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm text-muted-foreground mb-1">╪د┘╪│╪╣╪▒</p>
+                  <p className="text-sm text-muted-foreground mb-1">السعر</p>
                   {packageToView.price === 0 ? (
-                    <p className="text-2xl font-bold text-[#29372F]">┘à╪ش╪د┘┘è</p>
+                    <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
                   ) : (
                     <PriceDisplay amount={packageToView.price} size="lg" />
                   )}
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground mb-1">┘à╪»╪ر ╪د┘╪د╪┤╪ز╪▒╪د┘â</p>
-                  <p className="font-semibold">{packageToView.duration} ┘è┘ê┘à</p>
+                  <p className="text-sm text-muted-foreground mb-1">مدة الاشتراك</p>
+                  <p className="font-semibold">{packageToView.duration} يوم</p>
                 </div>
                 {packageToView.features && packageToView.features.length > 0 && (
                   <div>
-                    <p className="text-sm text-muted-foreground mb-2">╪د┘┘à┘è╪▓╪د╪ز:</p>
+                    <p className="text-sm text-muted-foreground mb-2">الميزات:</p>
                     <ul className="space-y-1">
                       {packageToView.features.map((feature, idx) => (
                         <li key={idx} className="text-sm flex items-start gap-2">
-                          <span className="text-[#29372F] font-bold mt-0.5">ظ£ô</span>
+                          <span className="text-[#29372F] font-bold mt-0.5">✓</span>
                           <span>{feature}</span>
                         </li>
                       ))}
@@ -1213,7 +1213,7 @@ export default function SubscriptionPage() {
                 )}
                 {isPremiumSubscriptionType(packageToView.type) && (
                   <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] w-fit">
-                    ┘à┘à┘è╪▓
+                    مميز
                   </Badge>
                 )}
                 <div className="flex flex-col-reverse gap-2 pt-4 sm:flex-row">
@@ -1222,7 +1222,7 @@ export default function SubscriptionPage() {
                     onClick={() => setPackageToView(null)}
                     className="flex-1"
                   >
-                    ╪ح╪║┘╪د┘é
+                    إغلاق
                   </Button>
                   <Button
                     onClick={() => {
@@ -1231,7 +1231,7 @@ export default function SubscriptionPage() {
                     }}
                     className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
                   >
-                    ╪د╪«╪ز┘è╪د╪▒
+                    اختيار
                   </Button>
                 </div>
               </div>
