@@ -34,3 +34,29 @@ env:
     value: "true"
     availability:
       - RUNTIME
+  # TEST-OVERRIDE secret bindings.
+  # Overriding the base `apphosting.yaml` secret references is what isolates
+  # this backend from PRODUCTION: these point to TEST secrets that live in
+  # project `rwqan-757` (names begin with `rwqan-test-`), NOT to the production
+  # secrets in `projects/rwqan-production-v2/secrets/...`. Values live only in
+  # Secret Manager; nothing here stores or reveals a secret value.
+  - variable: FIREBASE_SERVICE_ACCOUNT
+    secret: projects/rwqan-757/secrets/rwqan-test-firebase-sa
+    availability:
+      - RUNTIME
+  - variable: ADMIN_CODE
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-code
+    availability:
+      - RUNTIME
+  - variable: ADMIN_PASSWORD
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-password
+    availability:
+      - RUNTIME
+  - variable: SESSION_SECRET
+    secret: projects/rwqan-757/secrets/rwqan-test-session-secret
+    availability:
+      - RUNTIME
+  - variable: PAYMOB_HMAC_SECRET
+    secret: projects/rwqan-757/secrets/rwqan-test-paymob-hmac-secret
+    availability:
+      - RUNTIME
