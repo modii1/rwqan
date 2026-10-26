@@ -39,24 +39,27 @@ env:
   # this backend from PRODUCTION: these point to TEST secrets that live in
   # project `rwqan-757` (names begin with `rwqan-test-`), NOT to the production
   # secrets in `projects/rwqan-production-v2/secrets/...`. Values live only in
-  # Secret Manager; nothing here stores or reveals a secret value.
+  # Secret Manager; nothing here stores or reveals a secret value. Versions are
+  # pinned (documented App Hosting syntax) because unpinned `latest` references
+  # require `secretmanager.versions.get` at build time; a pinned version does
+  # not. All five secrets currently have an enabled version 1.
   - variable: FIREBASE_SERVICE_ACCOUNT
-    secret: projects/rwqan-757/secrets/rwqan-test-firebase-sa
+    secret: projects/rwqan-757/secrets/rwqan-test-firebase-sa/versions/1
     availability:
       - RUNTIME
   - variable: ADMIN_CODE
-    secret: projects/rwqan-757/secrets/rwqan-test-admin-code
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-code/versions/1
     availability:
       - RUNTIME
   - variable: ADMIN_PASSWORD
-    secret: projects/rwqan-757/secrets/rwqan-test-admin-password
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-password/versions/1
     availability:
       - RUNTIME
   - variable: SESSION_SECRET
-    secret: projects/rwqan-757/secrets/rwqan-test-session-secret
+    secret: projects/rwqan-757/secrets/rwqan-test-session-secret/versions/1
     availability:
       - RUNTIME
   - variable: PAYMOB_HMAC_SECRET
-    secret: projects/rwqan-757/secrets/rwqan-test-paymob-hmac-secret
+    secret: projects/rwqan-757/secrets/rwqan-test-paymob-hmac-secret/versions/1
     availability:
       - RUNTIME
