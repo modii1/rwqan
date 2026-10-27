@@ -76,10 +76,12 @@ test("arabic integrity: no garbled CP1256/box-drawing characters in source files
   for (const rel of SOURCE_FILES) {
     const text = readSource(rel);
     const garbled = findGarbled(text);
-    assert.deepStrictEqual(garbled, [], {
-      message: `Garbled characters found in ${rel}: ` +
+    assert.deepStrictEqual(
+      garbled,
+      [],
+      `Garbled characters found in ${rel}: ` +
         garbled.map(g => `L${g.line}:${g.col} ${g.code} ${g.ch}`).join(", "),
-    });
+    );
   }
 });
 

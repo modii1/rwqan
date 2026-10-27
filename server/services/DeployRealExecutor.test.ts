@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEPLOY_DEV_BACKEND_ID,
+  DEPLOY_DEV_BASE_URL,
   DEPLOY_DEV_PROJECT_ID,
   DEPLOY_PROD_BACKEND_ID,
   DEPLOY_PROD_PROJECT_ID,
@@ -13,8 +14,10 @@ import type {
 } from "../../shared/deploySystem";
 import {
   RealDeployExecutor,
+  createRealDeployDependencies,
   type RealDeployDependencies,
 } from "./DeployRealExecutor";
+import { resolveFirebaseCommand } from "./DeployToolsService";
 
 const COMMIT = "c".repeat(40);
 const LOCATION = "us-central1";
@@ -30,7 +33,7 @@ function devTarget(overrides: Partial<DeployTarget> = {}): DeployTarget {
   return {
     projectId: DEPLOY_DEV_PROJECT_ID,
     backendId: DEPLOY_DEV_BACKEND_ID,
-    baseUrl: "https://dev.example.com",
+    baseUrl: DEPLOY_DEV_BASE_URL,
     location: LOCATION,
     ...overrides,
   };
@@ -219,7 +222,9 @@ test("a disabled real deploy is blocked at approval before any command runs", as
 
 test("a production or unknown target is refused before any command runs", async () => {
   const { deps, calls } = fakeDeps();
-  const production = await executor(deps, devTarget({ projectId: "rwqan-757" })).publish({
+  // TEST's fixed target shares the project id with production, so a production
+  // target is recognised by the PRODUCTION backend (`rwqan`), never `rwqan-backend`.
+  const production = await executor(deps, devTarget({ backendId: DEPLOY_PROD_BACKEND_ID })).publish({
     gitCommit: COMMIT,
     checks: CHECKS,
     approval: true,
@@ -246,7 +251,9 @@ test("a client-confirmed target that does not match the DEV target is refused", 
     checks: CHECKS,
     approval: true,
     worktree: "clean",
-    requestedTarget: "rwqan-757",
+    // The fixed TEST target IS project `rwqan-757`, so a client-confirmed value
+    // that does NOT match it is any other id (here: the LIVE backend name).
+    requestedTarget: "rwqan",
   });
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "target");
@@ -310,8 +317,8 @@ test("a mismatched control-plane build source is never reported as deployed", as
   assert.equal(getProbeCalls(), 0);
 });
 
-test("a proven source with no base url fails the reachability step", async () => {
-  const { deps, getProbeCalls } = fakeDeps();
+test("a target with no base url is refused at the target gate before any command runs", async () => {
+  const { deps, calls, getProbeCalls } = fakeDeps();
   const outcome = await executor(deps, devTarget({ baseUrl: null })).publish({
     gitCommit: COMMIT,
     checks: CHECKS,
@@ -319,8 +326,10 @@ test("a proven source with no base url fails the reachability step", async () =>
     worktree: "clean",
   });
   assert.equal(outcome.deployed, false);
-  assert.equal(outcome.stage, "verify");
-  assert.equal(outcome.buildSource?.ok, true);
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "target");
+  // No command runs and the app is never probed.
+  assert.equal(calls.length, 0);
   assert.equal(getProbeCalls(), 0);
 });
 
@@ -421,3 +430,29 @@ test("restore requires approval and a full sha before any command runs", async (
   assert.equal(shortSha.blocked, true);
   assert.equal(calls.length, 0);
 });
+
+// Real end-to-end proof, WITHOUT any deploy: the default runner must launch
+// the installed firebase CLI successfully — through the resolved JS entry on
+// Windows — using argv only (no shell, no command string). Skipped on machines
+// where the firebase-tools entry cannot be resolved.
+const REAL_ENTRY_RESOLVED =
+  process.platform === "win32" && resolveFirebaseCommand().prefixArgs.length > 0;
+
+test(
+  "default runCommand launches firebase without a shell (real CLI --version)",
+  {
+    skip: REAL_ENTRY_RESOLVED
+      ? false
+      : "firebase-tools entry not resolvable on this machine",
+  },
+  async () => {
+    const result = await createRealDeployDependencies().runCommand({
+      stage: "deploy",
+      file: "firebase",
+      args: ["--version"],
+      cwd: process.cwd(),
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /\d+\.\d+\.\d+/);
+  },
+);

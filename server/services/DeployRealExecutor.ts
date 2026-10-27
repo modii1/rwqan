@@ -44,6 +44,7 @@ import {
   type DeployTargetEnvironment,
 } from "../config/deployTarget";
 import { probeDeployHealth } from "./DeployHealthService";
+import { resolveFirebaseCommand } from "./DeployToolsService";
 import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
@@ -495,14 +496,24 @@ export class RealDeployExecutor {
 /**
  * Default real dependencies: `execFile` (no shell) for the deploy commands and
  * the HTTP health probe. Used only when a real deploy is explicitly enabled.
+ *
+ * Windows: `firebase` exists only as a `.cmd` shim that Node refuses to spawn
+ * directly, so the launch helper runs firebase-tools' JS entry through
+ * `process.execPath` instead — still no shell, still a plain argv array. An
+ * unresolvable entry falls back to the plain `firebase` spawn, preserving
+ * every existing fail-closed failure path.
  */
 export function createRealDeployDependencies(): RealDeployDependencies {
   return {
     runCommand(spec) {
       return new Promise<DeployCommandResult>((resolve) => {
+        const launch =
+          spec.file === "firebase"
+            ? resolveFirebaseCommand()
+            : { file: spec.file, prefixArgs: [] as string[] };
         execFile(
-          spec.file,
-          spec.args,
+          launch.file,
+          [...launch.prefixArgs, ...spec.args],
           {
             cwd: spec.cwd,
             windowsHide: true,
