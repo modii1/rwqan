@@ -28,15 +28,15 @@ const customerRegisterPageSource = readFileSync(
 );
 
 test("the auth gateway exposes customer, owner, and admin as one accessible role selector", () => {
-  assert.match(gatewaySource, /id: "customer", label: "╪د┘╪╣┘à┘è┘"/);
-  assert.match(gatewaySource, /id: "owner", label: "┘à╪د┘┘â ╪د┘╪╣┘é╪د╪▒"/);
-  assert.match(gatewaySource, /id: "admin", label: "╪د┘┘à╪│╪ج┘ê┘"/);
+  assert.match(gatewaySource, /id: "customer", label: "العميل"/);
+  assert.match(gatewaySource, /id: "owner", label: "مالك العقار"/);
+  assert.match(gatewaySource, /id: "admin", label: "المسؤول"/);
   assert.match(gatewaySource, /<Tabs[\s\S]*?value=\{activeRole\}/);
   assert.match(
     gatewaySource,
     /onValueChange=\{\(value\) => onRoleChange\(value as AuthRole\)\}/,
   );
-  assert.match(gatewaySource, /aria-label="╪د╪«╪ز┘è╪د╪▒ ┘┘ê╪╣ ╪د┘╪ص╪│╪د╪ذ"/);
+  assert.match(gatewaySource, /aria-label="اختيار نوع الحساب"/);
   assert.match(gatewaySource, /data-testid=\{`auth-role-\$\{role\.id\}`\}/);
   assert.doesNotMatch(gatewaySource, /<main(?:\s|>)/);
 });
@@ -87,24 +87,24 @@ test("dedicated customer login and registration keep their distinct existing flo
 
 test("the redesign retains the existing account fields and supporting actions", () => {
   for (const copy of [
-    "╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒",
-    "╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è",
-    "┘╪│┘è╪ز ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è╪ا",
-    "┘┘è╪│ ┘╪»┘è┘â ╪ص╪│╪د╪ذ╪ا",
-    "╪│╪ش┘ ┘à╪╣┘╪د ╪د┘╪ت┘",
-    "┘â┘ê╪» ╪د┘┘à╪│╪ج┘ê┘",
-    "┘â┘┘à╪ر ╪د┘┘à╪▒┘ê╪▒",
+    "رقم العقار",
+    "الرقم السري",
+    "نسيت الرقم السري؟",
+    "ليس لديك حساب؟",
+    "سجل معنا الآن",
+    "كود المسؤول",
+    "كلمة المرور",
   ]) {
     assert.ok(ownerLoginSource.includes(copy), `missing owner/admin copy: ${copy}`);
   }
 
   for (const copy of [
-    "╪د┘╪د╪│┘à ╪د┘┘â╪د┘à┘",
-    "╪د┘╪ذ╪▒┘è╪» ╪د┘╪ح┘┘â╪ز╪▒┘ê┘┘è (╪د╪«╪ز┘è╪د╪▒┘è)",
-    "╪▒┘é┘à ╪د┘╪ش┘ê╪د┘",
-    "╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é",
-    "╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é",
-    "╪ز╪ث┘â┘è╪» ╪▒┘é┘à ╪د┘╪ش┘ê╪د┘",
+    "الاسم الكامل",
+    "البريد الإلكتروني (اختياري)",
+    "رقم الجوال",
+    "إرسال رمز التحقق",
+    "رمز التحقق",
+    "تأكيد رقم الجوال",
   ]) {
     assert.ok(customerAuthSource.includes(copy), `missing customer copy: ${copy}`);
   }

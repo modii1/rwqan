@@ -9,9 +9,9 @@ const roles: Array<{
   label: string;
   icon: typeof UserRound;
 }> = [
-  { id: "customer", label: "╪د┘╪╣┘à┘è┘", icon: UserRound },
-  { id: "owner", label: "┘à╪د┘┘â ╪د┘╪╣┘é╪د╪▒", icon: Building2 },
-  { id: "admin", label: "╪د┘┘à╪│╪ج┘ê┘", icon: ShieldCheck },
+  { id: "customer", label: "العميل", icon: UserRound },
+  { id: "owner", label: "مالك العقار", icon: Building2 },
+  { id: "admin", label: "المسؤول", icon: ShieldCheck },
 ];
 
 interface AuthGatewayProps {
@@ -43,7 +43,7 @@ export function AuthGateway({
         <aside className="relative hidden overflow-hidden bg-[#29372f] p-10 text-[#fffdf8] lg:flex lg:flex-col lg:justify-between">
           <div className="pointer-events-none absolute -left-24 top-24 h-96 w-72 rounded-t-full border border-[#ccb46f]/25" aria-hidden="true" />
           <div className="pointer-events-none absolute -left-10 top-36 h-80 w-56 rounded-t-full border border-[#ccb46f]/15" aria-hidden="true" />
-          <img src="/assets/logo-icon.png" alt="╪▒┘ê┘é╪د┘" className="relative h-20 w-20 object-contain" />
+          <img src="/assets/logo-icon.png" alt="روقان" className="relative h-20 w-20 object-contain" />
           <div className="relative max-w-xs">
             <p className="text-sm font-bold text-[#d8bf76]">{contextLabel}</p>
             <p className="mt-3 text-3xl font-bold leading-[1.45]" aria-hidden="true">
@@ -53,7 +53,7 @@ export function AuthGateway({
           </div>
           <div className="relative flex items-center gap-3 border-t border-white/15 pt-5 text-xs text-[#c8cfc9]">
             <span className="h-2 w-2 rounded-full bg-[#d2b766]" aria-hidden="true" />
-            <span>╪ث╪»╪«┘ ╪ذ┘è╪د┘╪د╪ز ╪ص╪│╪د╪ذ┘â ┘┘┘à╪ز╪د╪ذ╪╣╪ر</span>
+            <span>أدخل بيانات حسابك للمتابعة</span>
           </div>
         </aside>
 
@@ -64,7 +64,7 @@ export function AuthGateway({
           className="min-w-0 bg-[#fffdf8] px-4 py-5 sm:px-8 sm:py-8 lg:px-10 lg:py-10"
         >
           <div className="mb-6 flex items-center gap-3 border-b border-[#e9dfca] pb-5 lg:hidden">
-            <img src="/assets/logo-icon.png" alt="╪▒┘ê┘é╪د┘" className="h-12 w-12 flex-none object-contain" />
+            <img src="/assets/logo-icon.png" alt="روقان" className="h-12 w-12 flex-none object-contain" />
             <div className="min-w-0">
               <p className="text-xs font-bold text-[#8b6b25]">{contextLabel}</p>
               <p className="mt-1 truncate text-xl font-bold text-[#293129]" aria-hidden="true">
@@ -74,7 +74,7 @@ export function AuthGateway({
           </div>
 
           <TabsList
-            aria-label="╪د╪«╪ز┘è╪د╪▒ ┘┘ê╪╣ ╪د┘╪ص╪│╪د╪ذ"
+            aria-label="اختيار نوع الحساب"
             className="grid h-auto w-full grid-cols-3 gap-1 rounded-2xl border border-[#ded5c2] bg-[#f0ede5] p-1.5"
           >
             {roles.map((role) => {

@@ -89,7 +89,7 @@ test("the profile is identity-gated and exposes the existing phone-change dialog
     /queryKey: customerHistoryQueryKey\(customerSessionScope\),[\s\S]*?enabled: isCustomer/,
   );
   assert.match(profileSource, /!hasResolvedIdentity\s+\|\| !isCustomer/);
-  assert.match(profileSource, />\s*╪ز╪║┘è┘è╪▒ ╪▒┘é┘à ╪د┘╪ز┘ê╪د╪╡┘\s*<\/Button>/);
+  assert.match(profileSource, />\s*تغيير رقم التواصل\s*<\/Button>/);
   assert.match(profileSource, /mode="change"/);
   assert.match(profileSource, /currentMaskedPhone=\{profile\.maskedPhone\}/);
   assert.match(
@@ -128,7 +128,7 @@ test("the customer header uses the saved name and links every dashboard section"
   );
   assert.match(
     contactMenuSource,
-    /\{displayName \|\| identity\.maskedPhone \|\| "╪▒┘é┘à ┘à╪ص┘┘ê╪╕"\}/,
+    /\{displayName \|\| identity\.maskedPhone \|\| "رقم محفوظ"\}/,
   );
   assert.match(contactMenuSource, /href="\/profile"/);
   assert.match(contactMenuSource, /href="\/profile\?section=favorites"/);

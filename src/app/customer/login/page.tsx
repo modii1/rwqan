@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import CustomerAuthPage, { CustomerAuthPageFallback } from "@/components/customer/customer-auth-page";
 
 export const metadata: Metadata = {
-  title: "╪ز╪│╪ش┘è┘ ╪»╪«┘ê┘ ╪د┘╪╣┘à┘è┘ | ╪▒┘ê┘é╪د┘",
+  title: "تسجيل دخول العميل | روقان",
   robots: { index: false, follow: false },
 };
 

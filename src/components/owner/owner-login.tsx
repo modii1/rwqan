@@ -22,26 +22,26 @@ const authCopy: Record<AuthRole, {
   description: string;
 }> = {
   customer: {
-    contextLabel: "╪ص╪│╪د╪ذ ╪د┘╪╣┘à┘è┘",
-    heading: "╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-    description: "╪د╪»╪«┘ ╪ذ╪▒┘é┘à ╪ش┘ê╪د┘┘â ╪د┘┘à┘ê╪س┘é ┘┘┘ê╪╡┘ê┘ ╪ح┘┘ë ╪ص╪│╪د╪ذ┘â ┘ê┘à┘╪╢┘ّ┘╪ز┘â ┘ê╪│╪ش┘ ╪ص╪ش┘ê╪▓╪د╪ز┘â.",
+    contextLabel: "حساب العميل",
+    heading: "تسجيل الدخول",
+    description: "ادخل برقم جوالك الموثق للوصول إلى حسابك ومفضّلتك وسجل حجوزاتك.",
   },
   owner: {
-    contextLabel: "┘à╪د┘┘â ╪د┘╪╣┘é╪د╪▒",
-    heading: "╪»╪«┘ê┘ ┘à╪د┘┘â ╪د┘╪╣┘é╪د╪▒",
-    description: "╪ث╪»╪«┘ ╪ذ┘è╪د┘╪د╪ز ╪ص╪│╪د╪ذ┘â ┘┘┘à╪ز╪د╪ذ╪╣╪ر",
+    contextLabel: "مالك العقار",
+    heading: "دخول مالك العقار",
+    description: "أدخل بيانات حسابك للمتابعة",
   },
   admin: {
-    contextLabel: "╪د┘┘à╪│╪ج┘ê┘",
-    heading: "╪»╪«┘ê┘ ╪د┘┘à╪│╪ج┘ê┘",
-    description: "╪ث╪»╪«┘ ╪ذ┘è╪د┘╪د╪ز ╪ص╪│╪د╪ذ┘â ┘┘┘à╪ز╪د╪ذ╪╣╪ر",
+    contextLabel: "المسؤول",
+    heading: "دخول المسؤول",
+    description: "أدخل بيانات حسابك للمتابعة",
   },
 };
 
 const authPageTitles: Record<AuthRole, string> = {
-  customer: "╪ز╪│╪ش┘è┘ ╪»╪«┘ê┘ ╪د┘╪╣┘à┘è┘ | ╪▒┘ê┘é╪د┘",
-  owner: "╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ | ┘à╪د┘┘â ╪د┘╪╣┘é╪د╪▒",
-  admin: "╪»╪«┘ê┘ ╪د┘┘à╪│╪ج┘ê┘ | ╪▒┘ê┘é╪د┘",
+  customer: "تسجيل دخول العميل | روقان",
+  owner: "تسجيل الدخول | مالك العقار",
+  admin: "دخول المسؤول | روقان",
 };
 
 export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
@@ -72,8 +72,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
 
     if (!propertyNumber || !pin) {
       toast({
-        title: "╪«╪╖╪ث",
-        description: "╪د┘╪▒╪ش╪د╪ة ╪ح╪»╪«╪د┘ ╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ┘ê╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è",
+        title: "خطأ",
+        description: "الرجاء إدخال رقم العقار والرقم السري",
         variant: "destructive",
       });
       return;
@@ -93,8 +93,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
 
       if (!response.ok) {
         toast({
-          title: "┘╪┤┘ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-          description: data.error || "╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ╪ث┘ê ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ╪║┘è╪▒ ╪╡╪ص┘è╪ص",
+          title: "فشل تسجيل الدخول",
+          description: data.error || "رقم العقار أو الرقم السري غير صحيح",
           variant: "destructive",
         });
         setIsLoading(false);
@@ -102,16 +102,16 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
       }
 
       toast({
-        title: "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-        description: "┘à╪▒╪ص╪ذ╪د┘ï ╪ذ┘â ┘┘è ┘┘ê╪ص╪ر ╪د┘╪ز╪ص┘â┘à",
+        title: "تم تسجيل الدخول",
+        description: "مرحباً بك في لوحة التحكم",
       });
 
       window.location.href = getSafeOwnerLoginDestination(window.location.search);
     } catch (error) {
       console.error("Login error:", error);
       toast({
-        title: "╪«╪╖╪ث ╪║┘è╪▒ ┘à╪ز┘ê┘é╪╣",
-        description: "╪ز╪╣╪░╪▒ ╪د┘╪د╪ز╪╡╪د┘ ╪ذ╪د┘╪«╪د╪»┘à",
+        title: "خطأ غير متوقع",
+        description: "تعذر الاتصال بالخادم",
         variant: "destructive",
       });
       setIsLoading(false);
@@ -123,8 +123,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
 
     if (!adminCode || !adminPassword) {
       toast({
-        title: "╪«╪╖╪ث",
-        description: "╪د┘╪▒╪ش╪د╪ة ╪ح╪»╪«╪د┘ ┘â┘ê╪» ╪د┘╪ث╪»┘à┘ ┘ê┘â┘┘à╪ر ╪د┘┘à╪▒┘ê╪▒",
+        title: "خطأ",
+        description: "الرجاء إدخال كود الأدمن وكلمة المرور",
         variant: "destructive",
       });
       return;
@@ -144,8 +144,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
 
       if (!response.ok) {
         toast({
-          title: "┘╪┤┘ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-          description: data.error || "┘â┘ê╪» ╪د┘╪ث╪»┘à┘ ╪ث┘ê ┘â┘┘à╪ر ╪د┘┘à╪▒┘ê╪▒ ╪║┘è╪▒ ╪╡╪ص┘è╪ص╪ر",
+          title: "فشل تسجيل الدخول",
+          description: data.error || "كود الأدمن أو كلمة المرور غير صحيحة",
           variant: "destructive",
         });
         setIsLoading(false);
@@ -153,16 +153,16 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
       }
 
       toast({
-        title: "╪ز┘à ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘",
-        description: "┘à╪▒╪ص╪ذ╪د┘ï ╪ذ┘â ┘┘è ┘┘ê╪ص╪ر ╪د┘╪ح╪»╪د╪▒╪ر",
+        title: "تم تسجيل الدخول",
+        description: "مرحباً بك في لوحة الإدارة",
       });
 
       window.location.href = "/admin";
     } catch (error) {
       console.error("Admin login error:", error);
       toast({
-        title: "╪«╪╖╪ث ╪║┘è╪▒ ┘à╪ز┘ê┘é╪╣",
-        description: "╪ز╪╣╪░╪▒ ╪د┘╪د╪ز╪╡╪د┘ ╪ذ╪د┘╪«╪د╪»┘à",
+        title: "خطأ غير متوقع",
+        description: "تعذر الاتصال بالخادم",
         variant: "destructive",
       });
       setIsLoading(false);
@@ -193,11 +193,11 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
         <div className="mx-auto w-full max-w-xl" data-testid="auth-panel-owner">
           <form onSubmit={handleOwnerLogin} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒</label>
+              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">رقم العقار</label>
               <Input
                 id="owner-property-number"
                 type="text"
-                placeholder="5 ╪ث╪▒┘é╪د┘à"
+                placeholder="5 أرقام"
                 value={propertyNumber}
                 onChange={(event) => setPropertyNumber(cleanPropertyNumber(event.target.value))}
                 disabled={isLoading}
@@ -210,16 +210,16 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                 className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
               />
               {propertyNumber && propertyNumber.length !== 5 && (
-                <p className="mt-1 text-xs text-red-500">┘è╪ش╪ذ ╪ث┘ ┘è┘â┘ê┘ 5 ╪ث╪▒┘é╪د┘à</p>
+                <p className="mt-1 text-xs text-red-500">يجب أن يكون 5 أرقام</p>
               )}
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è</label>
+              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">الرقم السري</label>
               <Input
                 id="owner-pin"
                 type="password"
-                placeholder="ظتظتظتظتظتظت"
+                placeholder="••••••"
                 value={pin}
                 onChange={(event) => setPin(event.target.value)}
                 autoComplete="current-password"
@@ -239,12 +239,12 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  ╪ش╪د╪▒┘è ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘...
+                  جاري تسجيل الدخول...
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <LogIn className="h-4 w-4" />
-                  ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘
+                  تسجيل الدخول
                 </span>
               )}
             </Button>
@@ -257,20 +257,20 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                 className="h-auto text-sm text-[#687064] hover:text-[#242822]"
                 data-testid="link-forgot-password"
               >
-                ┘╪│┘è╪ز ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è╪ا
+                نسيت الرقم السري؟
               </Button>
             </div>
           </form>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-1 border-t border-[#e9dfca] pt-5 text-sm text-[#687064]">
-            <span>┘┘è╪│ ┘╪»┘è┘â ╪ص╪│╪د╪ذ╪ا</span>
+            <span>ليس لديك حساب؟</span>
             <Button
               variant="link"
               onClick={() => router.push("/subscription")}
               className="h-auto gap-1 px-1 font-bold text-[#80621d]"
               data-testid="link-register"
             >
-              ╪│╪ش┘ ┘à╪╣┘╪د ╪د┘╪ت┘
+              سجل معنا الآن
               <ArrowLeft className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -279,11 +279,11 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
         <div className="mx-auto w-full max-w-xl" data-testid="auth-panel-admin">
           <form onSubmit={handleAdminLogin} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-code">┘â┘ê╪» ╪د┘┘à╪│╪ج┘ê┘</label>
+              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-code">كود المسؤول</label>
               <Input
                 id="admin-code"
                 type="text"
-                placeholder="╪ث╪»╪«┘ ┘â┘ê╪» ╪د┘┘à╪│╪ج┘ê┘"
+                placeholder="أدخل كود المسؤول"
                 value={adminCode}
                 onChange={(event) => setAdminCode(event.target.value)}
                 autoComplete="username"
@@ -295,11 +295,11 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-password">┘â┘┘à╪ر ╪د┘┘à╪▒┘ê╪▒</label>
+              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-password">كلمة المرور</label>
               <Input
                 id="admin-password"
                 type="password"
-                placeholder="ظتظتظتظتظتظت"
+                placeholder="••••••"
                 value={adminPassword}
                 onChange={(event) => setAdminPassword(event.target.value)}
                 autoComplete="current-password"
@@ -319,12 +319,12 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  ╪ش╪د╪▒┘è ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘...
+                  جاري تسجيل الدخول...
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <LogIn className="h-4 w-4" />
-                  ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘
+                  تسجيل الدخول
                 </span>
               )}
             </Button>
