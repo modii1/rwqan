@@ -17,7 +17,7 @@
  */
 
 /** Which data source the whole DEV application reads/writes. */
-export type DataEnvironment = "TEST" | "LIVE";
+export type DataEnvironment = "TEST" | "LIVE" | "LOCAL";
 
 /** LIVE write policy. */
 export type LiveWriteMode = "read-only" | "enabled";
@@ -60,6 +60,7 @@ export interface LiveDataStatus {
 export const DATA_ENVIRONMENT_NOTICE: Record<DataEnvironment, string> = {
   TEST: "بيئة الاختبار: جميع مصادر البيانات والخدمات تستخدم موارد التطوير المعزولة (rwqan-sa-dev). لا اتصال بالإنتاج.",
   LIVE: "بيئة الإنتاج (LIVE): التطبيق يعمل على بيانات وخدمات الإنتاج الحقيقية عبر اتصال خادمي مخصّص.",
+  LOCAL: "بيئة محلية: النشر والاستعادة يستهدفان الموارد المحلية فقط.",
 };
 
 export const LIVE_READONLY_NOTICE =

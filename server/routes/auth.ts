@@ -82,7 +82,7 @@ router.post("/api/owner/logout", (req, res) => {
       return res.status(500).json({ error: "Logout failed" });
     }
     res.clearCookie("connect.sid");
-    console.log("ظ£à Logout successful");
+    console.log("✅ Logout successful");
     res.json({ ok: true });
   });
 });
@@ -162,55 +162,55 @@ router.get("/api/admin/session", (req, res) => {
 router.post("/api/auth/send-reset-code", async (req, res) => {
   try {
     const { ownerId } = req.body;
-    if (!ownerId) return res.status(400).json({ success: false, message: "╪▒┘é┘à ╪د┘╪╣┘é╪د╪▒ ┘à╪╖┘┘ê╪ذ" });
+    if (!ownerId) return res.status(400).json({ success: false, message: "رقم العقار مطلوب" });
 
     try {
       const { maskedPhone, expiresIn } = await authService.sendResetCode(ownerId);
-      return res.json({ success: true, message: `╪ز┘à ╪ح╪▒╪│╪د┘ ╪▒┘à╪▓ ╪د┘╪ز╪ص┘é┘é ╪ح┘┘ë ${maskedPhone}`, expiresIn });
+      return res.json({ success: true, message: `تم إرسال رمز التحقق إلى ${maskedPhone}`, expiresIn });
     } catch (err: any) {
       const status = err.code || 500;
-      return res.status(status).json({ success: false, message: err.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+      return res.status(status).json({ success: false, message: err.message || "خطأ في النظام" });
     }
   } catch (error: any) {
     console.error("Send reset code error:", error);
-    return res.status(500).json({ success: false, message: error.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
   }
 });
 
 router.post("/api/auth/set-new-password", async (req, res) => {
   try {
     const { ownerId, resetCode, newPassword } = req.body;
-    if (!ownerId || !resetCode || !newPassword) return res.status(400).json({ success: false, message: "╪د┘╪ذ┘è╪د┘╪د╪ز ╪║┘è╪▒ ┘à┘â╪ز┘à┘╪ر" });
+    if (!ownerId || !resetCode || !newPassword) return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
 
     try {
       await authService.setNewPassword(ownerId, resetCode, newPassword);
-      return res.json({ success: true, message: "╪ز┘à ╪ز╪║┘è┘è╪▒ ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ╪ذ┘╪ش╪د╪ص" });
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
     } catch (err: any) {
-      return res.status(err.code || 400).json({ success: false, message: err.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+      return res.status(err.code || 400).json({ success: false, message: err.message || "خطأ في النظام" });
     }
   } catch (error: any) {
     console.error("Set new password error:", error);
-    return res.status(500).json({ success: false, message: error.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
   }
 });
 
 router.post("/api/owner/change-password", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
-    if (!propertyNumber) return res.status(401).json({ success: false, message: "┘è╪ش╪ذ ╪ز╪│╪ش┘è┘ ╪د┘╪»╪«┘ê┘ ╪ث┘ê┘╪د┘ï" });
+    if (!propertyNumber) return res.status(401).json({ success: false, message: "يجب تسجيل الدخول أولاً" });
 
     const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) return res.status(400).json({ success: false, message: "╪د┘╪ذ┘è╪د┘╪د╪ز ╪║┘è╪▒ ┘à┘â╪ز┘à┘╪ر" });
+    if (!currentPassword || !newPassword) return res.status(400).json({ success: false, message: "البيانات غير مكتملة" });
 
     try {
       await authService.changePassword(propertyNumber, currentPassword, newPassword);
-      return res.json({ success: true, message: "╪ز┘à ╪ز╪║┘è┘è╪▒ ╪د┘╪▒┘é┘à ╪د┘╪│╪▒┘è ╪ذ┘╪ش╪د╪ص" });
+      return res.json({ success: true, message: "تم تغيير الرقم السري بنجاح" });
     } catch (err: any) {
-      return res.status(err.code || 400).json({ success: false, message: err.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+      return res.status(err.code || 400).json({ success: false, message: err.message || "خطأ في النظام" });
     }
   } catch (error: any) {
     console.error("Change password error:", error);
-    return res.status(500).json({ success: false, message: error.message || "╪«╪╖╪ث ┘┘è ╪د┘┘╪╕╪د┘à" });
+    return res.status(500).json({ success: false, message: error.message || "خطأ في النظام" });
   }
 });
 

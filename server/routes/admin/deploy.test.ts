@@ -17,7 +17,13 @@ import type {
   DeployPostDeployVerification,
   DeployRelease,
   DeployRestorePreview,
+  DeployToolsInfo,
 } from "../../../shared/deploySystem";
+import {
+  DEPLOY_DEV_BACKEND_ID,
+  DEPLOY_DEV_BASE_URL,
+  DEPLOY_DEV_PROJECT_ID,
+} from "../../config/deployTarget";
 
 const PASSING_CHECKS: DeployChecks = {
   typescript: "NOT_RUN",
@@ -104,6 +110,8 @@ function buildApp(
       context: DeployRestoreContext,
     ) => Promise<DeployRestorePreview>;
     resolveStableRelease?: (cwd: string) => Promise<DeployRelease | null>;
+    /** Test seam: inject the deploy-tools availability (never a real probe). */
+    readTools?: () => Promise<DeployToolsInfo>;
   } = {},
 ) {
   const app = express();
@@ -125,6 +133,14 @@ function buildApp(
       restorePreview: options.restorePreview,
       // Deterministic by default: tests opt into a stable release explicitly.
       resolveStableRelease: options.resolveStableRelease ?? (async () => null),
+      // Deterministic tools: explicit availability without any CLI dependence.
+      readTools:
+        options.readTools ??
+        (async () => ({
+          firebaseCliAvailable: true,
+          firebaseCliVersion: "15.34.0",
+          readAt: "2026-10-26T00:00:00.000Z",
+        })),
     }),
   );
   return app;
@@ -1291,6 +1307,163 @@ test("a real publish whose post-deploy verification fails is never recorded as d
     assert.equal((await store.listReleases()).length, 0);
     assert.equal((await store.listAudit())[0]?.action, "publish_failed");
     assert.equal((await store.listAudit())[0]?.result, "rejected");
+  });
+});
+
+test("state exposes the gate, target location/expectedDomain, data environment and tools", async () => {
+  const app = buildApp(new InMemoryDeploySystemStore({ seed: true }), {
+    // DEFAULT BY BUILDAPP: `readTools` resolves before the state snapshot is
+    // built, so no test needs a real CLI.
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/state`, {
+      headers: { "sec-fetch-site": "same-origin", "x-test-admin": "1" },
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as any;
+    const state = body.state;
+
+    // The fixed TEST target now carries the region + EXPECTED domain. Without a
+    // configured DEPLOY_APP_HOSTING_LOCATION the expected domain stays null —
+    // the gate must show غير متحقق, never a guessed host.
+    assert.equal(state.deployTarget.projectId, DEPLOY_DEV_PROJECT_ID);
+    assert.equal(state.deployTarget.backendId, DEPLOY_DEV_BACKEND_ID);
+    assert.equal(state.deployTarget.location, "europe-west4");
+    assert.equal(state.deployTarget.expectedDomain, DEPLOY_DEV_BASE_URL);
+
+    // The data environment (TEST default) flows into the state.
+    assert.equal(state.dataEnvironment, "TEST");
+
+    // The three-verdict gate is present with all 12 items.
+    assert.ok(
+      ["ready_for_review", "blocked_by_failed_check", "unverified_missing_info"].includes(
+        state.gate?.status,
+      ),
+    );
+    const keys = (state.gate?.items ?? []).map((entry: { key: string }) => entry.key);
+    for (const key of [
+      "admin_permissions",
+      "git_worktree",
+      "commit_sha",
+      "release_checks",
+      "target_config",
+      "real_deploy_opt_in",
+      "production_opt_in",
+      "apphosting_location",
+      "verify_url",
+      "build_source_verify",
+      "firebase_cli",
+      "data_isolation",
+    ]) {
+      assert.ok(keys.includes(key), `gate item ${key} expected`);
+    }
+    assert.equal(
+      (state.gate?.items ?? []).find(
+        (entry: { key: string }) => entry.key === "apphosting_location",
+      )?.state,
+      "ok",
+    );
+    assert.equal(
+      (state.gate?.items ?? []).find(
+        (entry: { key: string }) => entry.key === "data_isolation",
+      )?.state,
+      "ok",
+    );
+
+    // The tools probe result (injected) is exposed read-only.
+    assert.equal(state.tools?.firebaseCliAvailable, true);
+    assert.equal(state.tools?.firebaseCliVersion, "15.34.0");
+  });
+});
+
+test("with a configured location the expected domain follows the proven convention", async () => {
+  const app = buildApp(new InMemoryDeploySystemStore({ seed: true }));
+  // The location comes from env; the convention is pure code, so asserting it
+  // end-to-end here proves state+gate wiring without any cloud call.
+  process.env.DEPLOY_APP_HOSTING_LOCATION = "europe-west1";
+  try {
+    await withServer(app, async (base) => {
+      const res = await fetch(`${base}/api/admin/deploy/state`, {
+        headers: { "sec-fetch-site": "same-origin", "x-test-admin": "1" },
+      });
+      assert.equal(res.status, 200);
+      const state = ((await res.json()) as any).state;
+      assert.equal(
+        state.deployTarget.expectedDomain,
+        "https://rwqan-backend--rwqan-757.europe-west1.hosted.app",
+      );
+      assert.equal(
+        (state.gate?.items ?? []).find(
+          (entry: { key: string }) => entry.key === "apphosting_location",
+        )?.state,
+        "ok",
+      );
+    });
+  } finally {
+    delete process.env.DEPLOY_APP_HOSTING_LOCATION;
+  }
+});
+
+test("a second concurrent publish is refused with 409 DEPLOY_PUBLISH_IN_PROGRESS", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let publishGateResolve: (() => void) | null = null;
+  const firstPublishGate = new Promise<void>((resolve) => {
+    publishGateResolve = resolve;
+  });
+  let publishCalls = 0;
+  const executor: DeployExecutor = {
+    publish: async () => {
+      publishCalls += 1;
+      await firstPublishGate;
+      return {
+        deployed: true,
+        savedToGit: false,
+        detail: "نشر حقيقي متحقَّق منه.",
+        blocked: false,
+        stage: null,
+        target: "rwqan-sa-dev",
+        releaseRef: "rwqan-dev-backend:abc",
+        verify: okVerification(),
+        buildSource: {
+          attempted: true,
+          ok: true,
+          backend: "rwqan-dev-backend",
+          expectedCommit: "server123",
+          reportedCommit: "server123",
+          sourceKind: "codebase",
+          verifiedAt: "2026-01-01T00:00:00.000Z",
+        },
+      };
+    },
+    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
+  };
+  const app = buildApp(store, { executor });
+
+  await withServer(app, async (base) => {
+    const url = `${base}/api/admin/deploy/releases`;
+    const first = fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ approve: true, version: "p1" }),
+    });
+    // The first request holds the single-flight lock while its executor pends.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const second = await fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ approve: true, version: "p2" }),
+    });
+    assert.equal(second.status, 409);
+    assert.equal(
+      ((await second.json()) as { code: string }).code,
+      "DEPLOY_PUBLISH_IN_PROGRESS",
+    );
+    // Release the first publish and verify it succeeds once, exactly once.
+    publishGateResolve?.();
+    const firstRes = await first;
+    assert.equal(firstRes.status, 201);
+    assert.equal(publishCalls, 1);
   });
 });
 

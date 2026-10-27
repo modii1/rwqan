@@ -48,8 +48,10 @@ import {
   type DeployPostDeployVerification,
   type DeployRelease,
   type DeployRestorePreview,
+  type DeployToolsInfo,
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
+import { readDeployToolsInfo } from "../../services/DeployToolsService";
 
 /**
  * RWQAN DEPLOY — admin release registry (Phase C).
@@ -96,6 +98,12 @@ export interface DeployRouterOptions {
    * Defaults to the real, read-only Git verification (fail closed to null).
    */
   resolveStableRelease?: (cwd: string) => Promise<DeployRelease | null>;
+  /**
+   * Test seam: read-only deploy-tools availability (`firebase --version` probe,
+   * cached). Defaults to the real probe; tests inject a stub so no test ever
+   * needs the CLI on the machine.
+   */
+  readTools?: () => Promise<DeployToolsInfo>;
 }
 
 /** DEV root + observed working-tree state + target environment for a restore. */
@@ -109,7 +117,7 @@ export interface DeployRestoreContext {
 }
 
 function isDeployEnvironment(value: unknown): value is DeployEnvironment {
-  return value === "TEST" || value === "LIVE";
+  return value === "TEST" || value === "LIVE" || value === "LOCAL";
 }
 
 function boundedString(value: unknown, maximumLength: number): string | null {
@@ -161,10 +169,18 @@ export function createAdminDeployRouter(
       }));
   const resolveStable =
     options.resolveStableRelease ?? ((cwd: string) => resolveStableRelease({ cwd }));
+  const readTools = options.readTools ?? (() => readDeployToolsInfo());
   const getStore = (): DeploySystemStoreContract =>
     storeOverride ?? getDeploySystemStore();
   /** Single-flight guard: a second real restore is refused while one runs. */
   let restoreInFlight = false;
+  /**
+   * Single-flight guard for publishes (mirrors the restore guard): a second
+   * REAL publish is refused with 409 while one runs, so concurrent requests
+   * cannot double-create rollouts or present misleading state. The flag is set
+   * synchronously before any await and cleared in `finally` on every path.
+   */
+  let publishInFlight = false;
 
   /**
    * Read-only Git/GitHub context. Local Git is read always; the GitHub remote
@@ -175,18 +191,22 @@ export function createAdminDeployRouter(
     git: DeployGitInfo | null;
     github: DeployGitHubInfo | null;
     stableRelease: DeployRelease | null;
+    tools: DeployToolsInfo | null;
   }> => {
     // Verified only when the commit exists AND is reachable locally (read-only).
     const stableRelease = await resolveStable(process.cwd()).catch(() => null);
+    // The tools probe is cached and local-only; a failure is never an error,
+    // just "could not be adjudged" (the gate renders غير متحقق).
+    const tools = await readTools().catch(() => null);
     const git = await readDeployGitInfo(process.cwd()).catch(() => null);
-    if (!git) return { git: null, github: null, stableRelease };
+    if (!git) return { git: null, github: null, stableRelease, tools };
     const github = await readDeployGitHubInfo({
       cwd: process.cwd(),
       localSha: git.commitSha,
       branch: git.branch,
       allowLsRemote: githubLsRemoteEnabled(),
     }).catch(() => null);
-    return { git, github, stableRelease };
+    return { git, github, stableRelease, tools };
   };
 
   const router = Router();
@@ -281,6 +301,16 @@ export function createAdminDeployRouter(
 
   router.post("/api/admin/deploy/releases", async (req, res) => {
     res.set("Cache-Control", "no-store, private");
+    // Single-flight: refuse a second publish while one is running (checked and
+    // set synchronously BEFORE any await, so overlapping requests are excluded).
+    if (publishInFlight) {
+      res.status(409).json({
+        code: "DEPLOY_PUBLISH_IN_PROGRESS",
+        error: "عملية نشر قيد التنفيذ بالفعل — انتظر انتهاءها قبل المحاولة مجددًا.",
+      });
+      return;
+    }
+    publishInFlight = true;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const explicitVersion = boundedString(body.version, VERSION_MAX_LENGTH);
     let version = explicitVersion ?? DEPLOY_SYSTEM_PROTOTYPE_VERSION;
@@ -466,6 +496,8 @@ export function createAdminDeployRouter(
       if (!handleStoreFailure(res, error)) {
         res.status(500).json({ code: "DEPLOY_PUBLISH_FAILED", error: "تعذّر تسجيل الإصدار." });
       }
+    } finally {
+      publishInFlight = false;
     }
   });
 

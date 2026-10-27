@@ -18,16 +18,29 @@
  * (TEST/LIVE data-environment switch), and استعادة (isolated restore).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { UploadCloud, RotateCcw, Loader2, X } from "lucide-react";
 import {
+  ShieldCheck,
+  UploadCloud,
+  RotateCcw,
+  Loader2,
+  X,
+} from "lucide-react";
+import {
+  DEPLOY_GATE_ITEM_STATE_LABELS,
+  DEPLOY_GATE_LABELS,
   DEPLOY_STATE_DESCRIPTORS,
   isFullGitSha,
+  type DeployCheckResult,
+  type DeployCheckRun,
+  type DeployGateItem,
+  type DeployGateItemState,
+  type DeployGateStatus,
   type DeployRelease,
   type DeployReleaseStatus,
   type DeployRestorePreview,
@@ -64,30 +77,142 @@ function isRestorable(release: DeployRelease): boolean {
   return isFullGitSha(release.gitCommit) && !NON_RESTORABLE.includes(release.status);
 }
 
+/** Visual meta for the gate item states (server labels remain the truth). */
+const GATE_ITEM_STATE_META: Record<
+  DeployGateItemState,
+  { symbol: string; className: string; badgeVariant: "default" | "destructive" | "outline" }
+> = {
+  ok: { symbol: "✓", className: "text-green-700", badgeVariant: "default" },
+  blocked: { symbol: "✕", className: "text-red-700", badgeVariant: "destructive" },
+  unverified: { symbol: "؟", className: "text-amber-700", badgeVariant: "outline" },
+};
+
+/** Tailwind classes for the three (and only three) gate verdicts. */
+const GATE_STATUS_CLASS: Record<DeployGateStatus, string> = {
+  ready_for_review: "bg-green-700 text-white border-green-700",
+  blocked_by_failed_check: "bg-red-700 text-white border-red-700",
+  unverified_missing_info: "bg-amber-100 text-amber-900 border-amber-400",
+};
+
+const CHECK_RESULT_LABEL: Record<DeployCheckResult, string> = {
+  PASS: "ناجح",
+  FAIL: "فاشل",
+  BLOCKED: "حاجِب",
+  NOT_RUN: "لم يُشغَّل",
+};
+
+const WORKTREE_LABEL: Record<string, string> = {
+  clean: "نظيفة",
+  dirty: "تحتوي تعديلات",
+  unknown: "غير معروفة",
+};
+
+const GITHUB_MATCH_LABEL: Record<string, string> = {
+  match: "مطابق",
+  mismatch: "غير مطابق (HEAD أقدم)",
+  unavailable: "غير متاح",
+};
+
+const UNVERIFIED = "غير متحقق";
+
+function GateVerdictBadge({ status }: { status: DeployGateStatus }) {
+  return (
+    <span
+      data-testid="deploy-gate-status"
+      dir="rtl"
+      className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${GATE_STATUS_CLASS[status]}`}
+    >
+      {DEPLOY_GATE_LABELS[status]}
+    </span>
+  );
+}
+
+function GateItemsList({ items }: { items: DeployGateItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        البوابة غير محسوبة في هذه اللقطة.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-1" data-testid="deploy-gate-items">
+      {items.map((item) => {
+        const meta = GATE_ITEM_STATE_META[item.state];
+        return (
+          <li
+            key={item.key}
+            data-testid={`gate-item-${item.key}`}
+            className="flex items-start gap-1.5 text-[11px] leading-5"
+          >
+            <span className={`mt-0.5 shrink-0 font-bold ${meta.className}`}>
+              {meta.symbol}
+            </span>
+            <span className="min-w-0">
+              <span className="font-medium">
+                {item.label}
+                {" — "}
+                <span dir="ltr">{DEPLOY_GATE_ITEM_STATE_LABELS[item.state]}</span>
+              </span>
+              {item.reason ? (
+                <span className="block text-muted-foreground">{item.reason}</span>
+              ) : null}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function InfoRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-[11px] font-medium">{children}</span>
+    </div>
+  );
+}
+
 export function DeployBar() {
   const { toast } = useToast();
   // MUST come from the provider: the app is wrapped by QueryProvider, whose
   // client is NOT the singleton in @/lib/queryClient. Invalidating the wrong
   // client silently no-ops and the bar never reflects a real switch.
   const queryClient = useQueryClient();
-  const isDevelopment = process.env.NODE_ENV === "development";
+  // يُعرض الشريط فقط عندما نعرف بيقين أن البيئة ليست إنتاجًا.
+  // على App Hosting، NODE_ENV تكون "production" دائمًا حتى على TEST، لذا لا
+  // يمكن الاعتماد عليها وحدها. NEXT_PUBLIC_BASE_URL متاح للعميل عبر Next.js
+  // ويشير إلى رابط الاختبار أو الإنتاج أو localhost، وهو مؤشر آمن للتمييز.
+  // الفشل مغلق: إذا كان المتغير مفقودًا أو فارغًا أو غير معروف، لا يظهر الشريط.
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "";
+  const isProductionOrigin = baseUrl === "https://rwqan.sa";
+  const hasKnownBaseUrl = baseUrl.length > 0;
+  const isDevOrTest = hasKnownBaseUrl && !isProductionOrigin;
   const [open, setOpen] = useState(false);
 
   const { data } = useQuery<{ prototypeVersion: string; state: DeployState }>({
     queryKey: ["/api/admin/deploy/state"],
-    enabled: isDevelopment,
+    enabled: isDevOrTest,
   });
 
   const state = data?.state;
   const visible = Boolean(state);
 
-  // Data-environment toggle (TEST/LIVE). This switches the WHOLE application's
-  // data sources and services between the isolated DEV project and real
-  // production. It never publishes code or enables payments. LIVE defaults to
-  // read-only; writes are rejected unless LIVE_WRITE_MODE=enabled.
+  // Data-environment toggle (LOCAL/TEST/LIVE). This switches the WHOLE
+  // application's data sources and services between local resources, isolated
+  // DEV project, and real production. It never publishes code or enables
+  // payments. LIVE defaults to read-only; writes are rejected unless
+  // LIVE_WRITE_MODE=enabled.
   const { data: liveDataStatus } = useQuery<{ status: LiveDataStatus }>({
     queryKey: ["/api/admin/live/status"],
-    enabled: isDevelopment,
+    enabled: isDevOrTest,
   });
   const dataEnvironment = liveDataStatus?.status;
 
@@ -139,6 +264,41 @@ export function DeployBar() {
       toast({
         title: "تعذّر النشر",
         description: "لم يكتمل النشر. تحقّق من الاتصال وحاول مرة أخرى.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Real, explicit release checks (POST /api/admin/deploy/checks): runs the
+  // DEV-safe local checks (tsc --noEmit + secret scan) on the SERVER and stores
+  // them. Nothing is built/deployed; no production connection is made.
+  const checksMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/deploy/checks", {});
+      return res.json() as Promise<{ checkRun?: DeployCheckRun }>;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+      const checks = result.checkRun?.checks;
+      // Mirrors the route's failing predicate exactly:
+      // secretScan !== "PASS" || typescript === "FAIL".
+      const failed =
+        !checks ||
+        checks.secretScan !== "PASS" ||
+        checks.typescript === "FAIL";
+      toast({
+        title: failed
+          ? "فحوصات ما قبل النشر: فشل"
+          : "فحوصات ما قبل النشر انتهت",
+        description: failed
+          ? "فحص فاشل يمنع أي نشر — راجع بطاقة الحالة."
+          : "نتائج الفحص محفوظة في سجل الإصدارات.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "تعذّر تشغيل الفحوصات",
+        description: "لم تُسجَّل نتائج. حاول مرة أخرى.",
         variant: "destructive",
       });
     },
@@ -272,6 +432,8 @@ export function DeployBar() {
         description:
           environment === "LIVE"
             ? "البيئة النشطة: LIVE — بيانات الإنتاج الحقيقية (rwqan.sa)، والنشر والاستعادة يستهدفان الإنتاج."
+            : environment === "LOCAL"
+            ? "البيئة النشطة: LOCAL — الموارد المحلية فقط، لا اتصال بالتطوير المعزول أو بالإنتاج."
             : "البيئة النشطة: TEST — موارد التطوير المعزولة (rwqan-sa-dev) فقط.",
       });
     },
@@ -279,8 +441,14 @@ export function DeployBar() {
       // Brief, non-technical failure only: never surface server/credential
       // internals. The environment is NOT changed locally, so the previous one
       // stays active and the control never sticks in a loading state.
+      const title =
+        target === "LIVE"
+          ? "تعذّر تفعيل LIVE"
+          : target === "LOCAL"
+          ? "تعذّر التبديل إلى LOCAL"
+          : "تعذّر التبديل إلى TEST";
       toast({
-        title: target === "LIVE" ? "تعذّر تفعيل LIVE" : "تعذّر التبديل إلى TEST",
+        title,
         description: "تعذّر الاتصال بالبيئة المطلوبة. حاول مرة أخرى.",
         variant: "destructive",
       });
@@ -328,6 +496,7 @@ export function DeployBar() {
       );
       if (!confirmed) return;
     }
+    // LOCAL و TEST لا تتطلب تأكيدًا خارجيًا — كلاهما معزول عن الإنتاج.
     environmentMutation.mutate(target);
   };
 
@@ -372,10 +541,12 @@ export function DeployBar() {
             data-testid="deploy-bar-environment"
             className="flex shrink-0 items-stretch overflow-hidden rounded-md border border-amber-300 text-xs font-semibold"
           >
-            {/* PERMANENT two-option switch: BOTH environments are always shown and
-                the active one is highlighted. Selecting the OTHER option performs
-                the real switch. Never a single button whose text changes. */}
-            {(["LIVE", "TEST"] as const).map((option) => {
+            {/* PERMANENT three-option switch: LOCAL, TEST, and LIVE are always
+                shown and the active one is highlighted. Selecting a different
+                option performs the real switch. Never a single button whose text
+                changes. TEST never targets LIVE, and LOCAL never targets any
+                remote backend. */}
+            {(["LOCAL", "TEST", "LIVE"] as const).map((option) => {
               const active = dataEnvironment?.environment === option;
               const disabled = environmentMutation.isPending || !dataEnvironment;
               return (
@@ -391,7 +562,9 @@ export function DeployBar() {
                     active
                       ? option === "LIVE"
                         ? "bg-red-600 text-white"
-                        : "bg-amber-600 text-white"
+                        : option === "TEST"
+                        ? "bg-amber-600 text-white"
+                        : "bg-emerald-600 text-white"
                       : "bg-white text-amber-900 hover:bg-amber-100"
                   }`}
                 >
@@ -421,7 +594,7 @@ export function DeployBar() {
         <div
           data-testid="deploy-bar-panel"
           dir="rtl"
-          className="fixed left-2 right-2 top-[40px] z-[100] max-h-[70vh] overflow-y-auto rounded-b-lg border border-amber-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-[460px]"
+          className="fixed left-2 right-2 top-[40px] z-[100] max-h-[70vh] overflow-y-auto rounded-b-lg border border-amber-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-[520px]"
         >
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-bold text-amber-950">استعادة</h3>
@@ -435,6 +608,174 @@ export function DeployBar() {
             >
               <X className="h-4 w-4" />
             </Button>
+          </div>
+
+          {/* STATUS CARD: the pre-deploy gate + target + Git identity +
+              check results. All values come straight from the server snapshot;
+              the gate is presentation of already-enforced rules, never a new
+              permission source. */}
+          <div
+            data-testid="deploy-bar-status"
+            className="mb-3 rounded-md border border-amber-200 bg-amber-50/60 p-2.5"
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-amber-700" />
+                <span className="text-xs font-bold">بوابة ما قبل النشر</span>
+              </div>
+              <GateVerdictBadge
+                status={state.gate?.status ?? "unverified_missing_info"}
+              />
+            </div>
+
+            <div className="mb-2">
+              <GateItemsList items={state.gate?.items ?? []} />
+            </div>
+
+            {/* Checks: the REAL stored run + the wired button that runs it. */}
+            <div className="mb-2 rounded border border-amber-200 bg-white/70 p-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 shrink-0 px-2 text-[11px]"
+                  onClick={() => checksMutation.mutate()}
+                  disabled={checksMutation.isPending}
+                  data-testid="deploy-bar-checks"
+                >
+                  {checksMutation.isPending ? (
+                    <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="ml-1 h-3 w-3" />
+                  )}
+                  فحص ما قبل النشر
+                </Button>
+                {state.latestCheckRun ? (
+                  <>
+                    <Badge
+                      data-testid="deploy-check-typescript"
+                      variant={
+                        state.latestCheckRun.checks.typescript === "FAIL"
+                          ? "destructive"
+                          : "outline"
+                      }
+                      className="text-[10px]"
+                    >
+                      TypeScript: {CHECK_RESULT_LABEL[state.latestCheckRun.checks.typescript]}
+                    </Badge>
+                    <Badge
+                      data-testid="deploy-check-secret-scan"
+                      variant={
+                        state.latestCheckRun.checks.secretScan === "FAIL" ||
+                        state.latestCheckRun.checks.secretScan === "BLOCKED"
+                          ? "destructive"
+                          : "outline"
+                      }
+                      className="text-[10px]"
+                    >
+                      فحص الأسرار: {CHECK_RESULT_LABEL[state.latestCheckRun.checks.secretScan]}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">
+                      {state.latestCheckRun.ranAt?.slice(11, 19)} UTC
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">
+                    لم تُشغَّل فحوص محفوظة بعد.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Deploy target: fixed server-side (never client-chosen). */}
+            <div className="space-y-0.5 border-t border-amber-200 pt-2">
+              <InfoRow label="بيئة النشر الحالية">{state.environment}</InfoRow>
+              <InfoRow label="المشروع المستهدف">
+                <span dir="ltr" className="font-mono">
+                  {state.deployTarget?.projectId ?? UNVERIFIED}
+                </span>
+              </InfoRow>
+              <InfoRow label="Backend">
+                <span dir="ltr" className="font-mono">
+                  {state.deployTarget?.backendId ?? UNVERIFIED}
+                </span>
+              </InfoRow>
+              <InfoRow label="المنطقة">
+                <span dir="ltr" className="font-mono">
+                  {state.deployTarget?.location ?? UNVERIFIED}
+                </span>
+              </InfoRow>
+              <InfoRow label="الدومين المتوقع (توقّع، لا إثبات)">
+                <span
+                  dir="ltr"
+                  className="font-mono"
+                  data-testid="deploy-bar-expected-domain"
+                >
+                  {state.deployTarget?.expectedDomain ?? UNVERIFIED}
+                </span>
+              </InfoRow>
+            </div>
+
+            {/* Git identity + capabilities. */}
+            <div className="mt-2 space-y-0.5 border-t border-amber-200 pt-2">
+              <InfoRow label="commit الحالي (كامل)">
+                <span dir="ltr" className="font-mono" data-testid="deploy-bar-commit">
+                  {state.git?.commitSha ?? UNVERIFIED}
+                </span>
+              </InfoRow>
+              <InfoRow label="الفرع">
+                {state.git?.branch ?? UNVERIFIED}
+              </InfoRow>
+              <InfoRow label="شجرة العمل">
+                {state.git
+                  ? WORKTREE_LABEL[state.git.worktree] ?? state.git.worktree
+                  : UNVERIFIED}
+              </InfoRow>
+              <InfoRow label="تطابق GitHub">
+                {state.github?.match
+                  ? GITHUB_MATCH_LABEL[state.github.match] ?? state.github.match
+                  : UNVERIFIED}
+              </InfoRow>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-1 border-t border-amber-200 pt-2">
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid="deploy-bar-cap-real-deploy"
+              >
+                النشر الحقيقي: {state.realDeployEnabled ? "مفعَّل" : "معطَّل"}
+              </Badge>
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid="deploy-bar-cap-production"
+              >
+                الإنتاج: {state.productionDeployEnabled ? "مفعَّل" : "مغلق"}
+              </Badge>
+              <Badge variant="outline" className="text-[10px]">
+                المخزن: {state.persistent ? "مستقر" : "مؤقت (ذاكرة)"}
+              </Badge>
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid="deploy-bar-cap-data-environment"
+              >
+                بيانات التشغيل: {state.dataEnvironment ?? UNVERIFIED}
+              </Badge>
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid="deploy-bar-cap-tools"
+              >
+                Firebase CLI:{" "}
+                {state.tools === null || state.tools === undefined
+                  ? UNVERIFIED
+                  : state.tools.firebaseCliAvailable
+                    ? `${state.tools.firebaseCliVersion ?? "متاح"}`
+                    : "غير متاح"}
+              </Badge>
+            </div>
           </div>
 
           <ul className="space-y-1.5">
@@ -477,6 +818,15 @@ export function DeployBar() {
                     >
                       {release.environment}
                     </Badge>
+                    {release.deployed && !release.simulated && release.postDeploy?.ok === true ? (
+                      <Badge
+                        variant="default"
+                        className="text-[10px] bg-green-700 text-white"
+                        data-testid={`deploy-bar-postdeploy-${release.releaseId}`}
+                      >
+                        تحقق بعد النشر: ناجح
+                      </Badge>
+                    ) : null}
                   </div>
                   <Button
                     size="sm"
@@ -500,7 +850,7 @@ export function DeployBar() {
 
           <p className="mt-2 text-[11px] text-muted-foreground">
             {state.realDeployEnabled
-              ? `النشر الحقيقي مُفعَّل نحو: ${state.deployTarget?.projectId ?? "rwqan-sa-dev"} — ولا يُسجَّل الإصدار كمنشور إلا بعد نجاح التحقق بعد النشر. `
+              ? `النشر الحقيقي مُفعَّل نحو: ${state.deployTarget?.projectId ?? "rwqan-local"} — ولا يُسجَّل الإصدار كمنشور إلا بعد نجاح التحقق بعد النشر. `
               : "مسار النشر مُعطَّل حتى تُضبط بيانات الاعتماد صراحةً. "}
             الاستعادة تنفّذ rollout حقيقيًا من الـcommit الثابت بعد التحقق من المصدر والوصول.
           </p>
