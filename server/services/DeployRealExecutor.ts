@@ -206,17 +206,11 @@ function sanitizeDeployError(
   // Redact URL credentials first.
   combined = redactUrlCredentials(combined);
 
-  // Extract and redact only the secret-bearing fragments. When secrets are
-  // present, never emit raw non-secret CLI text — we cannot guarantee the
-  // surrounding text is free of sensitive information. When no secrets are
-  // found, the output is treated as a diagnostic message and shown (capped).
-  const sanitizedFragments: string[] = [];
-  let hadSecrets = false;
+  // Extract and redact potential secret patterns — keep the rest of the
+  // diagnostic text so Firebase CLI error messages are not hidden behind a
+  // generic fallback. Secrets are redacted but surrounding text is retained.
   for (const pattern of DEPLOY_ERROR_SECRET_PATTERNS) {
     combined = combined.replace(pattern, (match) => {
-      hadSecrets = true;
-      // Keep only the first 4 chars of the matched secret for traceability.
-      sanitizedFragments.push(match.slice(0, 4) + "***REDACTED***");
       return match.slice(0, 4) + "***REDACTED***";
     });
   }
@@ -230,16 +224,6 @@ function sanitizeDeployError(
     return capped;
   };
 
-  if (hadSecrets) {
-    // Show only the redacted secret fragments, never raw surrounding text.
-    let result = cap(sanitizedFragments.join(" "));
-    if (!result || result.length < 3) {
-      return `${reason} (رمز الخروج: ${exitCode})`;
-    }
-    return `${reason} — ${result} (رمز الخروج: ${exitCode})`;
-  }
-
-  // No secrets found — show the diagnostic output (capped).
   let result = cap(combined);
   if (!result || result.length < 3) {
     return `${reason} (رمز الخروج: ${exitCode})`;

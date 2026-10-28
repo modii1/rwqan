@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DEPLOY_ALLOW_PRODUCTION_ENV_KEY,
   DEPLOY_APP_HOSTING_LOCATION_ENV_KEY,
@@ -264,4 +267,14 @@ test("resolveAppHostingHost fails closed without a verified location", () => {
     }),
     null,
   );
+});
+
+test("firebase.dev.json backendId matches the approved TEST target", () => {
+  const configPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../firebase.dev.json",
+  );
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const backend = config.apphosting?.[0]?.backendId;
+  assert.equal(backend, DEPLOY_DEV_BACKEND_ID, "firebase.dev.json must target the approved TEST backend");
 });

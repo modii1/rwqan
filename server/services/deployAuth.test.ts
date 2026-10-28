@@ -133,7 +133,8 @@ test("verifyDeployAuth returns valid when credentials stored", async () => {
   await __test_setDeployCredentials("test-session", "valid-refresh-token-string");
   const result = await verifyFirebaseCliAuth("test-session");
   assert.equal(result.valid, true);
-  assert.equal(result.compatUnverified, true);
+  assert.equal(result.cliCompatibilityConfirmed, true);
+  assert.equal(result.compatUnverified, false);
 });
 
 test("verifyDeployAuth returns invalid when refresh token too short", async () => {

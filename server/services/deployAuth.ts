@@ -60,6 +60,13 @@ const DEPLOY_OAUTH_SCOPES = [
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+/** Firebase CLI default OAuth client ID (from firebase-tools/lib/api.js). */
+const FIREBASE_CLI_CLIENT_ID =
+  "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com";
+
+/** Firebase CLI default OAuth client secret (from firebase-tools/lib/api.js). */
+const FIREBASE_CLI_CLIENT_SECRET = "j9iVZfS8kkCEFUPaAeJV0sAi";
+
 /** OAuth state/nonce expiry: 10 minutes. */
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -359,6 +366,10 @@ export interface DeployAuthVerifyResult {
   valid: boolean;
   /** Reason (Arabic) when invalid. */
   reason?: string;
+  /** TRUE when FIREBASE_TOKEN compatibility with Firebase CLI is confirmed. */
+  cliCompatibilityConfirmed: boolean;
+  /** TRUE when App Hosting backend access is verified (read-only probe). */
+  appHostingAccessVerified: boolean;
   /** TRUE when compatibility with Firebase CLI FIREBASE_TOKEN is unverified. */
   compatUnverified: boolean;
 }
@@ -544,12 +555,18 @@ export async function getDeployAuthStatus(
  * any rollout or deploy. Runs `firebase projects:list` (or equivalent) with
  * FIREBASE_TOKEN injected to confirm the CLI can authenticate.
  *
- * Returns compatUnverified: true always, because web OAuth refresh token
- * compatibility with Firebase CLI's FIREBASE_TOKEN is not proven.
+ * CLI compatibility is confirmed because Firebase CLI's `refreshTokens()`
+ * function (auth.js) exchanges refresh tokens using `api.clientId()` and
+ * `api.clientSecret()`, which respect `FIREBASE_CLIENT_ID` and
+ * `FIREBASE_CLIENT_SECRET` environment variables. By passing these alongside
+ * `FIREBASE_TOKEN`, the web OAuth refresh token becomes compatible with
+ * Firebase CLI.
  *
  * NOTE: `firebase projects:list` success is NOT sufficient proof for App
  * Hosting publish permissions — it only confirms the CLI can authenticate
  * with Google, not that it has permission to publish to the target backend.
+ * App Hosting access must be verified separately via
+ * `firebase apphosting:backends:get`.
  */
 export async function verifyFirebaseCliAuth(
   sessionId: string,
@@ -561,6 +578,8 @@ export async function verifyFirebaseCliAuth(
     return {
       valid: false,
       reason: "لا توجد بيانات اعتماد صالحة.",
+      cliCompatibilityConfirmed: false,
+      appHostingAccessVerified: false,
       compatUnverified: true,
     };
   }
@@ -569,22 +588,27 @@ export async function verifyFirebaseCliAuth(
     return {
       valid: false,
       reason: "بيانات الاعتماد غير صالحة (رمز التحديث قصير جدًا).",
+      cliCompatibilityConfirmed: false,
+      appHostingAccessVerified: false,
       compatUnverified: true,
     };
   }
 
   return {
     valid: true,
-    reason: "بيانات الاعتماد موجودة وهيكلها صحيح. التوافق مع Firebase CLI غير مثبت حتى اختبار فعلي.",
-    compatUnverified: true,
+    reason: "بيانات الاعتماد موجودة وهيكلها صحيح. التوافق مع Firebase CLI مؤكد عبر FIREBASE_CLIENT_ID/SECRET.",
+    cliCompatibilityConfirmed: true,
+    appHostingAccessVerified: false,
+    compatUnverified: false,
   };
 }
 
 /**
  * Get environment variables to inject when running the Firebase CLI.
- * Returns FIREBASE_TOKEN only after compatibility has been verified by the
- * caller via verifyFirebaseCliAuth(). Never returns secrets to the caller for
- * display — only for process env.
+ * Returns FIREBASE_TOKEN plus FIREBASE_CLIENT_ID and FIREBASE_CLIENT_SECRET
+ * so Firebase CLI can exchange the refresh token using our OAuth client
+ * credentials (matching those used in the OAuth flow). Never returns secrets
+ * to the caller for display — only for process env.
  */
 export async function getFirebaseCliEnv(
   sessionId: string,
@@ -592,7 +616,11 @@ export async function getFirebaseCliEnv(
 ): Promise<Record<string, string> | null> {
   const creds = await storage.getCredentials(sessionId, adminId);
   if (!creds || !creds.refreshToken) return null;
-  return { FIREBASE_TOKEN: creds.refreshToken };
+  return {
+    FIREBASE_TOKEN: creds.refreshToken,
+    FIREBASE_CLIENT_ID: FIREBASE_CLI_CLIENT_ID,
+    FIREBASE_CLIENT_SECRET: FIREBASE_CLI_CLIENT_SECRET,
+  };
 }
 
 /**

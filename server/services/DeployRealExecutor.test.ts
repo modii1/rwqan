@@ -164,6 +164,9 @@ test("a controlled rollout succeeds only after a control-plane source proof", as
   assert.ok(rollout!.args.includes(DEPLOY_DEV_PROJECT_ID));
   assert.ok(rollout!.args.includes("--config"));
   assert.ok(rollout!.args.includes("firebase.dev.json"));
+  // The backend passed to the CLI MUST match the fixed TEST target
+  // (rwqan-backend), never the legacy rwqan-dev-backend from firebase.dev.json.
+  assert.ok(!rollout!.args.includes("rwqan-dev-backend"), "rollout must not target rwqan-dev-backend");
   // The app probe is reachability-only because the proof is mandatory elsewhere.
   assert.equal(getProbeCalls(), 1);
 });
@@ -493,6 +496,29 @@ test("publish failure truncates long stderr output", async () => {
   assert.ok(outcome.detail.includes("…"), "should show truncation marker");
 });
 
+test("publish failure retains diagnostic stderr after secret redaction", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 1,
+    rolloutStderr: "Error: Failed to create rollout: backend rwqan-backend not found in project rwqan-757. Token: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890.",
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.stage, "deploy");
+  assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
+  assert.ok(outcome.detail.includes("رمز الخروج: 1"), "should include exit code");
+  // Diagnostic text should be retained (not hidden behind generic fallback):
+  assert.ok(outcome.detail.includes("Failed to create rollout"), "should retain Firebase diagnostic");
+  assert.ok(outcome.detail.includes("backend rwqan-backend not found"), "should retain backend context");
+  // Secret should be redacted:
+  assert.ok(outcome.detail.includes("***REDACTED***"), "secrets should be redacted");
+  assert.ok(!outcome.detail.includes("AIzaSy"), "raw AIza key should not leak");
+});
+
 test("publish failure with empty stderr uses fallback message with exit code", async () => {
   const { deps } = fakeDeps({
     rolloutExit: 2,
@@ -511,7 +537,7 @@ test("publish failure with empty stderr uses fallback message with exit code", a
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
 });
 
-test("publish failure does not leak raw CLI output in detail", async () => {
+test("publish failure does not leak raw secrets in detail", async () => {
   const { deps } = fakeDeps({
     rolloutExit: 1,
     rolloutStderr: "raw sensitive line that should not appear verbatim AIzaSyRawKey123456789012345678901234567890",
@@ -522,8 +548,14 @@ test("publish failure does not leak raw CLI output in detail", async () => {
     approval: true,
     worktree: "clean",
   });
-  assert.ok(!outcome.detail.includes("raw sensitive line that should not appear verbatim"), "raw output should not leak");
-  assert.ok(outcome.detail.includes("***REDACTED***"), "should show redacted marker instead");
+  // Diagnostic text is retained (not hidden behind generic fallback):
+  assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
+  assert.ok(outcome.detail.includes("رمز الخروج: 1"), "should include exit code");
+  assert.ok(outcome.detail.includes("raw sensitive line"), "diagnostic text should be retained");
+  // Secret should be redacted:
+  assert.ok(outcome.detail.includes("***REDACTED***"), "secrets should be redacted");
+  assert.ok(!outcome.detail.includes("AIzaSy"), "raw AIza key should not leak");
+  assert.ok(!outcome.detail.includes("RawKey123456789012345678901234567890"), "raw secret value should not leak");
 });
 
 test("publish failure with missing stderr and stdout uses fallback message", async () => {
