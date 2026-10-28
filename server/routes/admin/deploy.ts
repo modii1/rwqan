@@ -55,6 +55,7 @@ import { readDeployToolsInfo } from "../../services/DeployToolsService";
 import {
   getDeployAuthStatus,
   startDeployAuthFlow,
+  getAndDeletePendingPublish,
   type DeployAuthStartResult,
 } from "../../services/deployAuth";
 
@@ -404,9 +405,22 @@ export function createAdminDeployRouter(
         const adminId = sessionId; // Session ID is the admin-scoped identifier.
         const authStatus = await getDeployAuthStatus(sessionId, adminId);
         if (!authStatus.authenticated) {
+          // Store the pending publish intent for automatic resume after OAuth.
+          // Single-use: deleted after retrieval via getAndDeletePendingPublish.
+          const pendingPublish = {
+            gitCommit: report.git?.commit ?? "",
+            environment: environment as string,
+            approval: approval === true,
+            requestedTarget,
+            worktree: (context.git?.worktree ?? "unknown") as string,
+            sessionId,
+            adminId,
+            createdAt: Date.now(),
+          };
           const authStart: DeployAuthStartResult = startDeployAuthFlow(
             sessionId,
             adminId,
+            pendingPublish,
           );
           if (authStart.status === "not_configured") {
             await store.recordAudit({

@@ -49,7 +49,9 @@ import {
   clearDeployAuth,
   getDeployAuthStatus,
   getFirebaseCliEnv,
+  startDeployAuthFlow,
   verifyFirebaseCliAuth,
+  nowMs,
   type DeployAuthStatus,
   type DeployAuthVerifyResult,
 } from "./deployAuth";
@@ -315,6 +317,17 @@ export class RealDeployExecutor {
     sessionId?: string;
     /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
     adminId?: string;
+    /** Pending publish intent to store for automatic resume after OAuth. */
+    pendingPublish?: {
+      gitCommit: string;
+      environment: string;
+      approval: boolean;
+      requestedTarget?: string | null;
+      worktree?: string;
+      sessionId: string;
+      adminId?: string;
+      createdAt: number;
+    };
   }): Promise<DeployPublishOutcome> {
     const environment = input.environment ?? "TEST";
     const preflight = this.preflight(environment, "target");
@@ -391,6 +404,18 @@ export class RealDeployExecutor {
         input.adminId,
       );
       if (!authStatus.authenticated) {
+        // Store the pending publish intent for automatic resume after OAuth.
+        // Single-use: deleted after retrieval via getAndDeletePendingPublish.
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
         return {
           deployed: false,
           savedToGit: false,
@@ -409,6 +434,16 @@ export class RealDeployExecutor {
         cwd,
       );
       if (!verified.valid) {
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
         return {
           deployed: false,
           savedToGit: false,
@@ -423,7 +458,16 @@ export class RealDeployExecutor {
       }
       cliEnv = (await getFirebaseCliEnv(input.sessionId, input.adminId)) ?? undefined;
       if (!cliEnv) {
-        // Auth status said ok but no token found — treat as not authenticated.
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
         return {
           deployed: false,
           savedToGit: false,
@@ -450,6 +494,15 @@ export class RealDeployExecutor {
         env: cliEnv,
       });
       if (cliProbe.exitCode !== 0) {
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(
+            input.sessionId,
+            input.adminId,
+            input.pendingPublish,
+          );
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
         return {
           deployed: false,
           savedToGit: false,

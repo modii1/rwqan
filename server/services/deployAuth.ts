@@ -10,6 +10,12 @@
  * with Google, and the resulting refresh token is stored SERVER-SIDE only
  * (never in the browser, never in localStorage, never in logs).
  *
+ * Automatic resume: when a publish is blocked due to missing/expired Firebase
+ * CLI credentials, the publish intent (gitCommit, environment, approval, etc.)
+ * is stored server-side as a single-use pending intent. After OAuth completes
+ * successfully and credential verification passes, the pending intent is
+ * resumed automatically ONCE — the user does not need to click "Publish" again.
+ *
  * SECURITY NOTE (UNVERIFIED): Whether a Google OAuth2 refresh token obtained
  * via a web OAuth client works as `FIREBASE_TOKEN` with Firebase CLI is NOT
  * proven. Firebase CLI documents `FIREBASE_TOKEN` as the output of
@@ -17,20 +23,30 @@
  * as `FIREBASE_TOKEN` for real deploy commands until compatibility is verified.
  * Instead, `verifyFirebaseCliAuth()` performs a read-only Firebase CLI probe
  * (e.g. `firebase projects:list`) to confirm the credentials work before any
- * rollout command runs.
+ * rollout command runs. NOTE: `firebase projects:list` success is NOT sufficient
+ * proof for App Hosting publish permissions — it only confirms the CLI can
+ * authenticate with Google.
  *
  * REQUIRED SETUP (not in code — must be provided via environment):
  *   GOOGLE_OAUTH_CLIENT_ID     — Google Cloud OAuth Client ID
  *   GOOGLE_OAUTH_CLIENT_SECRET — Google Cloud OAuth Client Secret
  *   DEPLOY_AUTH_REDIRECT_URI   — OAuth redirect URI, e.g.
  *                                https://<host>/api/admin/deploy/auth/callback
+ *   DEPLOY_AUTH_ENCRYPTION_KEY — independent encryption key (base64, 32 bytes)
+ *                                for AES-256-GCM credential storage.
  *
  * If these are missing, the auth flow returns AUTH_NOT_CONFIGURED and the
  * publish path is refused (fail closed). No fake or hardcoded credentials.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createCipheriv, createDecipheriv, randomFillSync } from "node:crypto";
+import {
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+  randomFillSync,
+  createCipheriv,
+  createDecipheriv,
+} from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -46,6 +62,18 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
 /** OAuth state/nonce expiry: 10 minutes. */
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+/** Pending publish intent expiry: 30 minutes. */
+const PENDING_PUBLISH_TTL_MS = 30 * 60 * 1000;
+
+/** AES-256-GCM key length in bytes. */
+const GCM_KEY_LENGTH = 32;
+
+/** AES-256-GCM nonce length in bytes. */
+const GCM_NONCE_LENGTH = 12;
+
+/** AES-256-GCM auth tag length in bytes. */
+const GCM_TAG_LENGTH = 16;
 
 /** Stored OAuth state (single-use, short-lived). */
 interface PendingOAuthState {
@@ -64,6 +92,19 @@ interface DeployAuthCredentials {
   adminId?: string;
 }
 
+/** A single-use pending publish intent stored before OAuth, to be resumed
+ *  automatically after successful authentication. */
+export interface PendingPublishIntent {
+  gitCommit: string;
+  environment: string;
+  approval: boolean;
+  requestedTarget?: string | null;
+  worktree?: string;
+  sessionId: string;
+  adminId?: string;
+  createdAt: number;
+}
+
 /** Dependency seam for credential storage — allows production to use durable
  *  storage (e.g. Firestore) instead of local file storage. */
 export interface DeployAuthStorage {
@@ -74,35 +115,62 @@ export interface DeployAuthStorage {
   setCredentials(sessionId: string, creds: DeployAuthCredentials): Promise<void>;
   deleteCredentials(sessionId: string): Promise<void>;
   clearAllCredentials?(): Promise<void>;
+  /** Pending publish intent storage (single-use). */
+  getPendingPublish(sessionId: string): Promise<PendingPublishIntent | null>;
+  setPendingPublish(sessionId: string, intent: PendingPublishIntent): Promise<void>;
+  deletePendingPublish(sessionId: string): Promise<void>;
 }
 
-/** Encryption key derivation: uses SESSION_SECRET if available, otherwise a
- *  deterministic development-only fallback. Never used for production secrets
- *  without an explicit SESSION_SECRET. */
+/** Encryption key derivation: uses DEPLOY_AUTH_ENCRYPTION_KEY if available,
+ *  otherwise derives from SESSION_SECRET for development. Never hardcoded. */
 function deriveEncryptionKey(): Buffer {
+  const envKey = process.env.DEPLOY_AUTH_ENCRYPTION_KEY;
+  if (envKey) {
+    const decoded = Buffer.from(envKey, "base64");
+    if (decoded.length === GCM_KEY_LENGTH) {
+      return decoded;
+    }
+    // Fall through to hash-based derivation if env key is malformed.
+  }
   const secret = process.env.SESSION_SECRET ?? "rwqan-deploy-auth-dev-only-do-not-use-in-production";
-  const key = createHmac("sha256", secret).update("rwqan-deploy-auth-encryption").digest();
-  return key;
+  return createHmac("sha256", secret).update("rwqan-deploy-auth-encryption").digest();
 }
 
-/** Encrypt a value using AES-256-CBC with a random IV. */
+/** Encrypt a value using AES-256-GCM with a random nonce. Returns
+ *  `nonce:ciphertext:tag` in base64. */
 function encryptValue(plaintext: string): string {
   const key = deriveEncryptionKey();
-  const iv = randomFillSync(Buffer.alloc(16));
-  const cipher = createCipheriv("aes-256-cbc", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  return iv.toString("base64") + ":" + encrypted.toString("base64");
+  const nonce = randomFillSync(Buffer.alloc(GCM_NONCE_LENGTH));
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return (
+    nonce.toString("base64") +
+    ":" +
+    encrypted.toString("base64") +
+    ":" +
+    tag.toString("base64")
+  );
 }
 
-/** Decrypt an encrypted value. */
+/** Decrypt an AES-256-GCM encrypted value. Returns null on tampering or error. */
 function decryptValue(ciphertext: string): string | null {
   try {
     const key = deriveEncryptionKey();
-    const [ivB64, dataB64] = ciphertext.split(":");
-    if (!ivB64 || !dataB64) return null;
-    const iv = Buffer.from(ivB64, "base64");
+    const parts = ciphertext.split(":");
+    if (parts.length !== 3) return null;
+    const [nonceB64, dataB64, tagB64] = parts;
+    const nonce = Buffer.from(nonceB64, "base64");
     const data = Buffer.from(dataB64, "base64");
-    const decipher = createDecipheriv("aes-256-cbc", key, iv);
+    const tag = Buffer.from(tagB64, "base64");
+    if (nonce.length !== GCM_NONCE_LENGTH || tag.length !== GCM_TAG_LENGTH) {
+      return null;
+    }
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+    decipher.setAuthTag(tag);
     const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
     return decrypted.toString("utf8");
   } catch {
@@ -121,6 +189,7 @@ const CREDENTIAL_STORE_PATH = path.join(
 class LocalFileDeployAuthStorage implements DeployAuthStorage {
   private readonly states = new Map<string, PendingOAuthState>();
   private readonly creds = new Map<string, DeployAuthCredentials>();
+  private readonly pendingPublish = new Map<string, PendingPublishIntent>();
   private readonly filePath: string;
 
   constructor(filePath: string = CREDENTIAL_STORE_PATH) {
@@ -141,6 +210,14 @@ class LocalFileDeployAuthStorage implements DeployAuthStorage {
           }
         }
       }
+      if (data.pendingPublish) {
+        for (const [sessionId, encrypted] of Object.entries(data.pendingPublish)) {
+          const decrypted = decryptValue(encrypted as string);
+          if (decrypted) {
+            this.pendingPublish.set(sessionId, JSON.parse(decrypted));
+          }
+        }
+      }
     } catch {
       // Ignore load errors; start with empty store.
     }
@@ -148,9 +225,15 @@ class LocalFileDeployAuthStorage implements DeployAuthStorage {
 
   private saveToFile(): void {
     try {
-      const data: { creds: Record<string, string> } = { creds: {} };
+      const data: {
+        creds: Record<string, string>;
+        pendingPublish: Record<string, string>;
+      } = { creds: {}, pendingPublish: {} };
       for (const [sessionId, creds] of this.creds.entries()) {
         data.creds[sessionId] = encryptValue(JSON.stringify(creds));
+      }
+      for (const [sessionId, intent] of this.pendingPublish.entries()) {
+        data.pendingPublish[sessionId] = encryptValue(JSON.stringify(intent));
       }
       const dir = path.dirname(this.filePath);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -184,6 +267,24 @@ class LocalFileDeployAuthStorage implements DeployAuthStorage {
     this.creds.clear();
     this.saveToFile();
   }
+  async getPendingPublish(sessionId: string): Promise<PendingPublishIntent | null> {
+    const intent = this.pendingPublish.get(sessionId);
+    if (!intent) return null;
+    if (nowMs() - intent.createdAt > PENDING_PUBLISH_TTL_MS) {
+      this.pendingPublish.delete(sessionId);
+      this.saveToFile();
+      return null;
+    }
+    return intent;
+  }
+  async setPendingPublish(sessionId: string, intent: PendingPublishIntent): Promise<void> {
+    this.pendingPublish.set(sessionId, intent);
+    this.saveToFile();
+  }
+  async deletePendingPublish(sessionId: string): Promise<void> {
+    this.pendingPublish.delete(sessionId);
+    this.saveToFile();
+  }
 }
 
 /** Default storage: local file-based encrypted store for DEV. */
@@ -192,6 +293,8 @@ const storage: DeployAuthStorage = new LocalFileDeployAuthStorage();
 function nowMs(): number {
   return Date.now();
 }
+
+export { nowMs };
 
 function isExpired(createdAt: number): boolean {
   return nowMs() - createdAt > OAUTH_STATE_TTL_MS;
@@ -232,6 +335,12 @@ export interface DeployAuthStartResult {
 export interface DeployAuthCompleteResult {
   status: "ok" | "invalid_state" | "expired_state" | "token_error";
   reason?: string;
+  /** Session id associated with the completed OAuth flow (for resume). */
+  sessionId?: string;
+  /** Admin id associated with the completed OAuth flow (for resume). */
+  adminId?: string;
+  /** Pending publish intent to resume automatically after OAuth (single-use). */
+  pendingPublish?: PendingPublishIntent;
 }
 
 export interface DeployAuthStatus {
@@ -254,13 +363,27 @@ export interface DeployAuthVerifyResult {
   compatUnverified: boolean;
 }
 
+/** A resumed publish result returned after OAuth completes and the pending
+ *  intent is re-executed. */
+export interface ResumedPublishResult {
+  /** TRUE when the resumed publish completed successfully. */
+  resumed: boolean;
+  /** The publish outcome from the executor (if resumed). */
+  outcome?: Record<string, unknown>;
+  /** Reason (Arabic) when resume was not possible. */
+  reason?: string;
+}
+
 /**
  * Start the OAuth flow. Requires an admin session (caller must enforce).
+ * Optionally stores a pending publish intent to be resumed automatically
+ * after successful OAuth + credential verification.
  * Returns the Google authorization URL to open in the browser.
  */
 export function startDeployAuthFlow(
   sessionId: string,
   adminId?: string,
+  pendingPublish?: PendingPublishIntent,
 ): DeployAuthStartResult {
   const config = readOAuthConfig();
   if (!config.clientId || !config.clientSecret || !config.redirectUri) {
@@ -276,6 +399,14 @@ export function startDeployAuthFlow(
   const nonce = randomToken(24);
   const pending: PendingOAuthState = { nonce, createdAt: nowMs(), sessionId, adminId };
   void storage.setPendingState(state, pending);
+
+  // Store the pending publish intent for automatic resume after OAuth.
+  if (pendingPublish) {
+    void storage.setPendingPublish(sessionId, {
+      ...pendingPublish,
+      createdAt: nowMs(),
+    });
+  }
 
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -360,7 +491,16 @@ export async function completeDeployAuthFlow(
       adminId: pending.adminId,
     });
 
-    return { status: "ok" };
+    // Retrieve and delete the pending publish intent for automatic resume.
+    // Single-use: deleted after retrieval.
+    const pendingPublish = await getAndDeletePendingPublish(pending.sessionId);
+
+    return {
+      status: "ok",
+      sessionId: pending.sessionId,
+      adminId: pending.adminId,
+      pendingPublish: pendingPublish ?? undefined,
+    };
   } catch {
     return { status: "token_error", reason: "حدث خطأ أثناء إكمال المصادقة." };
   }
@@ -406,6 +546,10 @@ export async function getDeployAuthStatus(
  *
  * Returns compatUnverified: true always, because web OAuth refresh token
  * compatibility with Firebase CLI's FIREBASE_TOKEN is not proven.
+ *
+ * NOTE: `firebase projects:list` success is NOT sufficient proof for App
+ * Hosting publish permissions — it only confirms the CLI can authenticate
+ * with Google, not that it has permission to publish to the target backend.
  */
 export async function verifyFirebaseCliAuth(
   sessionId: string,
@@ -429,11 +573,6 @@ export async function verifyFirebaseCliAuth(
     };
   }
 
-  // Read-only probe: `firebase projects:list` requires no project selection and
-  // creates no rollout. If it succeeds, the CLI can authenticate with the token.
-  // We run this through the executor's runCommand seam if available; here we
-  // return structural validity only and mark compat as unverified.
-  // The actual CLI probe is performed in DeployRealExecutor before any rollout.
   return {
     valid: true,
     reason: "بيانات الاعتماد موجودة وهيكلها صحيح. التوافق مع Firebase CLI غير مثبت حتى اختبار فعلي.",
@@ -468,6 +607,27 @@ export async function clearDeployAuth(sessionId: string): Promise<void> {
  */
 export async function cleanupExpiredStates(): Promise<void> {
   // Local file storage: states are checked on use; no background cleanup needed.
+}
+
+/**
+ * Get a pending publish intent for automatic resume after OAuth.
+ * Single-use: deleted after retrieval.
+ */
+export async function getAndDeletePendingPublish(
+  sessionId: string,
+): Promise<PendingPublishIntent | null> {
+  const intent = await storage.getPendingPublish(sessionId);
+  if (intent) {
+    await storage.deletePendingPublish(sessionId);
+  }
+  return intent;
+}
+
+/**
+ * Delete a pending publish intent (TEST-ONLY helper).
+ */
+export async function __test_deletePendingPublish(sessionId: string): Promise<void> {
+  await storage.deletePendingPublish(sessionId);
 }
 
 /**

@@ -19,8 +19,10 @@ import {
   completeDeployAuthFlow,
   getDeployAuthStatus,
   clearDeployAuth,
+  getAndDeletePendingPublish,
   type DeployAuthStartResult,
   type DeployAuthCompleteResult,
+  type PendingPublishIntent,
 } from "../../services/deployAuth";
 
 const router = Router();
@@ -80,11 +82,20 @@ router.get("/api/admin/deploy/auth/callback", async (req: Request, res: Response
     return;
   }
 
-  // Success: inform the browser that auth completed. The page should close
-  // the popup/tab and signal the opener to retry the deploy.
+  // Retrieve the pending publish intent for automatic resume (single-use).
+  const pendingPublish = result.pendingPublish;
+
+  // Success: inform the browser that auth completed.
+  // If there is a pending publish intent, include it so the client can
+  // automatically resume the original publish request once.
   res.json({
     status: "ok",
-    notice: "تمت المصادقة بنجاح. يمكنك العودة إلى التطبيق ومتابعة النشر.",
+    sessionId: result.sessionId ?? null,
+    adminId: result.adminId ?? null,
+    notice: pendingPublish
+      ? "تمت المصادقة بنجاح. سيُستأنف طلب النشر تلقائيًا."
+      : "تمت المصادقة بنجاح. يمكنك العودة إلى التطبيق ومتابعة النشر.",
+    pendingPublish: pendingPublish ?? null,
   });
 });
 

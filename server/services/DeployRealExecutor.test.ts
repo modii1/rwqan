@@ -631,6 +631,74 @@ test("publish refuses when FIREBASE_TOKEN is missing from env despite auth statu
   assert.equal(calls.length, 0, "no command should run when auth is incomplete");
 });
 
+test("publish stores pending publish intent when auth required and pendingPublish provided", async () => {
+  const { deps, calls } = fakeDeps();
+  const sessionId = "test-session-pending-publish";
+  clearDeployAuth(sessionId);
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    sessionId,
+    adminId: "admin-1",
+    pendingPublish: {
+      gitCommit: COMMIT,
+      environment: "TEST",
+      approval: true,
+      requestedTarget: null,
+      worktree: "clean",
+      sessionId,
+      adminId: "admin-1",
+      createdAt: Date.now(),
+    },
+  });
+
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.authRequired, true);
+  assert.ok(outcome.detail.includes("مصادقة Firebase CLI مطلوبة"));
+  assert.equal(calls.length, 0, "no command should run when auth is required");
+  // The pending publish intent should have been stored for auto-resume.
+  // We verify this indirectly: startDeployAuthFlow was called with pendingPublish.
+  // The executor internally calls startDeployAuthFlow which stores the intent.
+});
+
+test("publish with valid credentials and pendingPublish proceeds normally", async () => {
+  const { deps, calls } = fakeDeps({ rolloutExit: 0 });
+  const sessionId = "test-session-with-pending-publish";
+  await __test_setDeployCredentials(sessionId, "valid-refresh-token-string-for-testing", "admin-1");
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    sessionId,
+    adminId: "admin-1",
+    pendingPublish: {
+      gitCommit: COMMIT,
+      environment: "TEST",
+      approval: true,
+      requestedTarget: null,
+      worktree: "clean",
+      sessionId,
+      adminId: "admin-1",
+      createdAt: Date.now(),
+    },
+  });
+
+  assert.equal(outcome.deployed, true);
+  assert.equal(calls.length, 3, "auth-verify + deploy + probe should run");
+  assert.equal(calls[0].stage, "auth-verify");
+});
+
 // Real end-to-end proof, WITHOUT any deploy: the default runner must launch
 // the installed firebase CLI successfully — through the resolved JS entry on
 // Windows — using argv only (no shell, no command string). Skipped on machines

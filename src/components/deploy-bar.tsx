@@ -282,6 +282,7 @@ export function DeployBar() {
 
   const [authPending, setAuthPending] = useState(false);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [autoResumePending, setAutoResumePending] = useState<boolean>(false);
 
   const publishMutation = useMutation({
     mutationFn: async (approval: boolean) => {
@@ -294,6 +295,7 @@ export function DeployBar() {
     },
     onSuccess: (result) => {
       setAuthUrl(null);
+      setAutoResumePending(false);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       const release = result.release;
       // Success is claimed ONLY after the route recorded a real deploy AND the
@@ -323,13 +325,19 @@ export function DeployBar() {
                 code?: string;
                 error?: string;
                 authUrl?: string | null;
+                pendingPublish?: boolean;
               };
               if (body.code === "DEPLOY_AUTH_REQUIRED" && body.authUrl) {
                 setAuthUrl(body.authUrl);
+                // Mark that we are waiting for OAuth to complete before
+                // automatic resume. The publish will be retried once after
+                // successful authentication.
+                setAutoResumePending(!!body.pendingPublish);
                 toast({
                   title: "مصادقة Firebase مطلوبة",
-                  description:
-                    "يرجى تسجيل الدخول إلى Google للمصادقة مع Firebase CLI، ثم انقر نشر مرة أخرى.",
+                  description: body.pendingPublish
+                    ? "سيتم فتح صفحة مصادقة Google. بعد الانتهاء، سيُستأنف النشر تلقائيًا."
+                    : "يرجى تسجيل الدخول إلى Google للمصادقة مع Firebase CLI، ثم انقر نشر مرة أخرى.",
                   variant: "destructive",
                 });
                 return;
@@ -388,18 +396,73 @@ export function DeployBar() {
 
   const handlePublish = () => {
     if (!state) return;
-    // If Firebase CLI authentication is required, show the auth URL and refuse
-    // to publish until the user completes OAuth. No auto-retry after OAuth.
+    // If Firebase CLI authentication is required, open Google OAuth in a
+    // popup window. When autoResumePending is true, poll for auth completion
+    // and automatically resume the original publish once after success.
     if (authUrl) {
       setAuthPending(true);
-      // Open Google OAuth page in a new tab. The user completes consent there,
-      // then returns via callback to retry the publish.
-      window.open(authUrl, "_blank");
-      toast({
-        title: "افتح صفحة مصادقة Google",
-        description:
-          "تم فتح صفحة مصادقة Google في علامة تبويب جديدة. بعد إتمام المصادقة، ارجع إلى هذا الصفحة وانقر نشر مرة أخرى.",
-      });
+      const popup = window.open(authUrl, "_blank", "width=600,height=700");
+      if (!popup) {
+        // Fallback: open in new tab if popup is blocked.
+        window.open(authUrl, "_blank");
+        toast({
+          title: "افتح صفحة مصادقة Google",
+          description:
+            "تم فتح صفحة مصادقة Google في علامة تبويب جديدة. بعد إتمام المصادقة، ارجع إلى هذه الصفحة وانقر نشر مرة أخرى.",
+        });
+        setAuthPending(false);
+        return;
+      }
+      // Poll the auth status endpoint to detect when OAuth completes.
+      // Auto-resume only once when autoResumePending is true.
+      let pollCount = 0;
+      const maxPolls = 60; // ~60 seconds at 1s intervals
+      const pollInterval = setInterval(async () => {
+        pollCount++;
+        try {
+          const statusRes = await fetch("/api/admin/deploy/auth/status", {
+            method: "GET",
+            headers: {
+              "content-type": "application/json",
+              "sec-fetch-site": "same-origin",
+            },
+          });
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.authenticated) {
+              clearInterval(pollInterval);
+              setAuthPending(false);
+              setAuthUrl(null);
+              if (autoResumePending) {
+                setAutoResumePending(false);
+                // Automatically resume the original publish once.
+                publishMutation.mutate(true);
+              } else {
+                toast({
+                  title: "تمت المصادقة بنجاح",
+                  description:
+                    "يمكنك الآن النقر على زر نشر لمتابعة عملية النشر.",
+                });
+              }
+              return;
+            }
+          }
+        } catch {
+          // Ignore poll errors; keep polling.
+        }
+        if (popup.closed || pollCount >= maxPolls) {
+          clearInterval(pollInterval);
+          setAuthPending(false);
+          if (popup.closed && pollCount < maxPolls) {
+            // User closed the popup before completing OAuth.
+            toast({
+              title: "تم إغلاق صفحة المصادقة",
+              description: "لم يتم استكمال المصادقة مع Google. لم يُنفّذ أي نشر.",
+              variant: "destructive",
+            });
+          }
+        }
+      }, 1000);
       return;
     }
     if (!state.realDeployEnabled) {
