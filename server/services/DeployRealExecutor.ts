@@ -128,16 +128,131 @@ function blockedPublish(
   };
 }
 
+/**
+ * Maximum characters kept from a Firebase CLI error stream before truncation.
+ * Keeps the message useful for diagnosis while avoiding large raw dumps.
+ */
+const DEPLOY_ERROR_MAX_CHARS = 500;
+
+/**
+ * Maximum number of lines kept from a Firebase CLI error stream.
+ */
+const DEPLOY_ERROR_MAX_LINES = 5;
+
+/**
+ * Patterns that may indicate secrets, tokens, keys, or credentials in CLI
+ * output. These are redacted before any error text leaves the server.
+ */
+const DEPLOY_ERROR_SECRET_PATTERNS: RegExp[] = [
+  /(AIza[0-9A-Za-z_\-]{35,})/g,
+  /(sk-[A-Za-z0-9]{20,})/g,
+  /(ghp_[A-Za-z0-9]{20,})/g,
+  /(gho_[A-Za-z0-9]{20,})/g,
+  /(ghu_[A-Za-z0-9]{20,})/g,
+  /(ghs_[A-Za-z0-9]{20,})/g,
+  /(xox[baprs]-[A-Za-z0-9-]{10,})/g,
+  /(eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,})/g,
+  /(password|passwd|secret|token|api[_-]?key|private[_-]?key)\s*[:=]\s*\S+/gi,
+];
+
+/**
+ * Redacts potential credentials embedded in a URL (user:pass@host).
+ */
+function redactUrlCredentials(text: string): string {
+  return text.replace(
+    /(https?:\/\/)[^@\/]+(:[^@\/]+)?@/gi,
+    "$1redacted@",
+  );
+}
+
+/**
+ * Sanitize a Firebase CLI error stream before it leaves the server.
+ *
+ * - Redacts potential secrets/tokens/keys/credentials.
+ * - Redacts URL-embedded credentials.
+ * - Caps total characters and line count.
+ * - If sanitization cannot be guaranteed, returns a safe fallback that names
+ *   only the exit code and a generic reason.
+ *
+ * Never returns raw CLI output to the browser or audit log.
+ */
+function sanitizeDeployError(
+  reason: string,
+  stderr: string | undefined | null,
+  stdout: string | undefined | null,
+  exitCode: number,
+): string {
+  const rawParts: string[] = [];
+  if (stderr && stderr.trim().length > 0) rawParts.push(stderr.trim());
+  if (stdout && stdout.trim().length > 0) rawParts.push(stdout.trim());
+
+  let combined = rawParts.join("\n").trim();
+
+  // If there is no CLI output at all, the reason + exit code is the safest message.
+  if (!combined) {
+    return `${reason} (رمز الخروج: ${exitCode})`;
+  }
+
+  // Redact URL credentials first.
+  combined = redactUrlCredentials(combined);
+
+  // Extract and redact only the secret-bearing fragments. When secrets are
+  // present, never emit raw non-secret CLI text — we cannot guarantee the
+  // surrounding text is free of sensitive information. When no secrets are
+  // found, the output is treated as a diagnostic message and shown (capped).
+  const sanitizedFragments: string[] = [];
+  let hadSecrets = false;
+  for (const pattern of DEPLOY_ERROR_SECRET_PATTERNS) {
+    combined = combined.replace(pattern, (match) => {
+      hadSecrets = true;
+      // Keep only the first 4 chars of the matched secret for traceability.
+      sanitizedFragments.push(match.slice(0, 4) + "***REDACTED***");
+      return match.slice(0, 4) + "***REDACTED***";
+    });
+  }
+
+  const cap = (text: string): string => {
+    const lines = text.split(/\r?\n/).slice(0, DEPLOY_ERROR_MAX_LINES);
+    let capped = lines.join(" ");
+    if (capped.length > DEPLOY_ERROR_MAX_CHARS) {
+      capped = capped.slice(0, DEPLOY_ERROR_MAX_CHARS) + "…";
+    }
+    return capped;
+  };
+
+  if (hadSecrets) {
+    // Show only the redacted secret fragments, never raw surrounding text.
+    let result = cap(sanitizedFragments.join(" "));
+    if (!result || result.length < 3) {
+      return `${reason} (رمز الخروج: ${exitCode})`;
+    }
+    return `${reason} — ${result} (رمز الخروج: ${exitCode})`;
+  }
+
+  // No secrets found — show the diagnostic output (capped).
+  let result = cap(combined);
+  if (!result || result.length < 3) {
+    return `${reason} (رمز الخروج: ${exitCode})`;
+  }
+  return `${reason} — ${result} (رمز الخروج: ${exitCode})`;
+}
+
 function failedPublish(
   target: DeployTarget,
   stage: DeployPublishStage,
+  result: DeployCommandResult | null,
   reason: string,
-  exitCode: number,
 ): DeployPublishOutcome {
+  const exitCode = result?.exitCode ?? 1;
   return {
     deployed: false,
     savedToGit: false,
-    detail: `${reason} (رمز الخروج: ${exitCode})`,
+    detail: sanitizeDeployError(
+      reason,
+      result?.stderr ?? undefined,
+      result?.stdout ?? undefined,
+      exitCode,
+    ),
     blocked: false,
     stage,
     target: target.projectId,
@@ -275,8 +390,8 @@ export class RealDeployExecutor {
       return failedPublish(
         target,
         "deploy",
+        rollout,
         `فشل إنشاء rollout للـcommit المحدد على هدف ${environmentLabel(environment)}.`,
-        rollout.exitCode,
       );
     }
 
@@ -433,7 +548,12 @@ export class RealDeployExecutor {
     if (rollout.exitCode !== 0) {
       return {
         restored: false,
-        detail: `فشل إنشاء rollout للاستعادة على ${target.backendId} (رمز الخروج: ${rollout.exitCode}).`,
+        detail: sanitizeDeployError(
+          `فشل إنشاء rollout للاستعادة على ${target.backendId}.`,
+          rollout.stderr ?? undefined,
+          rollout.stdout ?? undefined,
+          rollout.exitCode,
+        ),
         blocked: false,
         stage: "deploy",
         target: target.projectId,

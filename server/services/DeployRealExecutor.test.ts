@@ -59,6 +59,8 @@ function verification(ok: boolean): DeployPostDeployVerification {
 
 interface FakeOptions {
   rolloutExit?: number;
+  rolloutStdout?: string;
+  rolloutStderr?: string;
   buildSource?: "ok" | "mismatch" | "absent";
   reachable?: boolean;
 }
@@ -76,7 +78,11 @@ function fakeDeps(options: FakeOptions = {}) {
   const deps: RealDeployDependencies = {
     runCommand: async (spec) => {
       calls.push({ stage: spec.stage, file: spec.file, args: spec.args, env: spec.env });
-      return { exitCode: options.rolloutExit ?? 0, stdout: "", stderr: "" };
+      return {
+        exitCode: options.rolloutExit ?? 0,
+        stdout: options.rolloutStdout ?? "",
+        stderr: options.rolloutStderr ?? "",
+      };
     },
     ...(buildSourceMode === "absent"
       ? {}
@@ -429,6 +435,104 @@ test("restore requires approval and a full sha before any command runs", async (
   });
   assert.equal(shortSha.blocked, true);
   assert.equal(calls.length, 0);
+});
+
+test("publish failure shows sanitized Firebase error message with exit code", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 1,
+    rolloutStderr: "Error: Failed to get backend: rwqan-backend. Please check the parameters you have provided.",
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.stage, "deploy");
+  assert.equal(outcome.blocked, false);
+  assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
+  assert.ok(outcome.detail.includes("رمز الخروج: 1"), "should include exit code");
+  assert.ok(outcome.detail.includes("Failed to get backend"), "should include sanitized Firebase message");
+  assert.equal(outcome.target, DEPLOY_DEV_PROJECT_ID, "target should remain TEST project");
+});
+
+test("publish failure redacts potential secrets and tokens from stderr", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 1,
+    rolloutStderr: "Error: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890 invalid, ghp_abcdefghijklmnopqrstuvwxyz1234567890 denied",
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.ok(outcome.detail.includes("***REDACTED***"), "secrets should be redacted");
+  assert.ok(!outcome.detail.includes("AIzaSy"), "raw AIza key should not leak");
+  assert.ok(!outcome.detail.includes("ghp_abcdef"), "raw ghp_ token should not leak");
+});
+
+test("publish failure truncates long stderr output", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 1,
+    rolloutStderr: "x".repeat(2000),
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.ok(outcome.detail.length < 1000, "detail should be truncated");
+  assert.ok(outcome.detail.includes("…"), "should show truncation marker");
+});
+
+test("publish failure with empty stderr uses fallback message with exit code", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 2,
+    rolloutStderr: "",
+    rolloutStdout: "",
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.stage, "deploy");
+  assert.ok(outcome.detail.includes("رمز الخروج: 2"), "should include exit code");
+  assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
+});
+
+test("publish failure does not leak raw CLI output in detail", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 1,
+    rolloutStderr: "raw sensitive line that should not appear verbatim AIzaSyRawKey123456789012345678901234567890",
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.ok(!outcome.detail.includes("raw sensitive line that should not appear verbatim"), "raw output should not leak");
+  assert.ok(outcome.detail.includes("***REDACTED***"), "should show redacted marker instead");
+});
+
+test("publish failure with missing stderr and stdout uses fallback message", async () => {
+  const { deps } = fakeDeps({
+    rolloutExit: 3,
+  });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+  });
+  assert.ok(outcome.detail.includes("رمز الخروج: 3"), "should include exit code");
+  assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
 });
 
 // Real end-to-end proof, WITHOUT any deploy: the default runner must launch
