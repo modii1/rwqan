@@ -46,12 +46,20 @@ import {
 import { probeDeployHealth } from "./DeployHealthService";
 import { resolveFirebaseCommand } from "./DeployToolsService";
 import {
+  clearDeployAuth,
+  getDeployAuthStatus,
+  getFirebaseCliEnv,
+  verifyFirebaseCliAuth,
+  type DeployAuthStatus,
+  type DeployAuthVerifyResult,
+} from "./deployAuth";
+import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
 
 export interface DeployCommandSpec {
-  stage: "deploy" | "restore";
+  stage: "deploy" | "restore" | "auth-verify";
   file: string;
   args: string[];
   cwd: string;
@@ -303,6 +311,10 @@ export class RealDeployExecutor {
     requestedTarget?: string | null;
     worktree?: "clean" | "dirty" | "unknown";
     environment?: DeployTargetEnvironment;
+    /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+    sessionId?: string;
+    /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+    adminId?: string;
   }): Promise<DeployPublishOutcome> {
     const environment = input.environment ?? "TEST";
     const preflight = this.preflight(environment, "target");
@@ -368,6 +380,90 @@ export class RealDeployExecutor {
 
     const cwd = dependencies.cwd();
 
+    // Firebase CLI authentication is required to run apphosting commands.
+    // Resolve FIREBASE_TOKEN from the server-side session credentials and
+    // inject it into the command environment. Never return the token to the
+    // caller or log it.
+    let cliEnv: Record<string, string> | undefined;
+    if (input.sessionId) {
+      const authStatus: DeployAuthStatus = await getDeployAuthStatus(
+        input.sessionId,
+        input.adminId,
+      );
+      if (!authStatus.authenticated) {
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "مصادقة Firebase CLI مطلوبة قبل النشر. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+      const verified: DeployAuthVerifyResult = await verifyFirebaseCliAuth(
+        input.sessionId,
+        input.adminId,
+        cwd,
+      );
+      if (!verified.valid) {
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "بيانات اعتماد Firebase CLI غير صالحة أو منتهية. يُرجى تسجيل الدخول عبر Google مرة أخرى.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+      cliEnv = (await getFirebaseCliEnv(input.sessionId, input.adminId)) ?? undefined;
+      if (!cliEnv) {
+        // Auth status said ok but no token found — treat as not authenticated.
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "بيانات اعتماد Firebase CLI غير متوفرة. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+
+      // Pre-flight read-only check: confirm the Firebase CLI can authenticate
+      // with the stored credentials BEFORE creating any rollout. This runs
+      // `firebase projects:list` which requires no project selection and creates
+      // no rollout or deploy. If this fails, refuse the publish with a clear
+      // message instead of creating a rollout that will fail.
+      const cliProbe = await dependencies.runCommand({
+        stage: "auth-verify",
+        file: "firebase",
+        args: ["projects:list", "--format=json"],
+        cwd,
+        env: cliEnv,
+      });
+      if (cliProbe.exitCode !== 0) {
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "تعذّر المصادقة مع Firebase CLI باستخدام بيانات الاعتماد المخزّنة. يُرجى تسجيل الدخول عبر Google مرة أخرى أو التحقق من صلاحيات الحساب.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+    }
+
     // Create a rollout from the EXACT commit on the GitHub-connected backend.
     const rollout = await dependencies.runCommand({
       stage: "deploy",
@@ -385,6 +481,7 @@ export class RealDeployExecutor {
         firebaseConfigFor(environment),
       ],
       cwd,
+      env: cliEnv ?? undefined,
     });
     if (rollout.exitCode !== 0) {
       return failedPublish(
@@ -472,6 +569,10 @@ export class RealDeployExecutor {
     approval?: boolean;
     requestedTarget?: string | null;
     environment?: DeployTargetEnvironment;
+    /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+    sessionId?: string;
+    /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+    adminId?: string;
   }): Promise<DeployRestoreOutcome> {
     const environment = input.environment ?? "TEST";
     const preflight = this.preflight(environment, "target");
@@ -528,6 +629,53 @@ export class RealDeployExecutor {
       };
     }
 
+    const rolloutEnv = (() => {
+      if (!input.sessionId) return undefined;
+      return undefined; // resolved asynchronously below
+    })();
+    let cliEnvRestore: Record<string, string> | undefined;
+    if (input.sessionId) {
+      const authStatus = await getDeployAuthStatus(
+        input.sessionId,
+        input.adminId,
+      );
+      if (authStatus.authenticated) {
+        const verified = await verifyFirebaseCliAuth(
+          input.sessionId,
+          input.adminId,
+          dependencies.cwd(),
+        );
+        if (verified.valid) {
+          cliEnvRestore = (await getFirebaseCliEnv(
+            input.sessionId,
+            input.adminId,
+          )) ?? undefined;
+        }
+      }
+    }
+
+    // Pre-flight read-only check for restore: confirm the Firebase CLI can
+    // authenticate before creating any rollout.
+    if (cliEnvRestore) {
+      const cliProbe = await dependencies.runCommand({
+        stage: "auth-verify",
+        file: "firebase",
+        args: ["projects:list", "--format=json"],
+        cwd: dependencies.cwd(),
+        env: cliEnvRestore,
+      });
+      if (cliProbe.exitCode !== 0) {
+        return {
+          restored: false,
+          detail:
+            "تعذّر المصادقة مع Firebase CLI باستخدام بيانات الاعتماد المخزّنة. يُرجى تسجيل الدخول عبر Google مرة أخرى أو التحقق من صلاحيات الحساب.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+        };
+      }
+    }
+
     const rollout = await dependencies.runCommand({
       stage: "restore",
       file: "firebase",
@@ -544,6 +692,7 @@ export class RealDeployExecutor {
         firebaseConfigFor(environment),
       ],
       cwd: dependencies.cwd(),
+      env: cliEnvRestore ?? undefined,
     });
     if (rollout.exitCode !== 0) {
       return {

@@ -52,6 +52,11 @@ import {
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
 import { readDeployToolsInfo } from "../../services/DeployToolsService";
+import {
+  getDeployAuthStatus,
+  startDeployAuthFlow,
+  type DeployAuthStartResult,
+} from "../../services/deployAuth";
 
 /**
  * RWQAN DEPLOY — admin release registry (Phase C).
@@ -393,6 +398,43 @@ export function createAdminDeployRouter(
       let postDeploy: DeployPostDeployVerification | null = null;
       let deployDetail = DEPLOY_PUBLISH_NOTICE;
       if (!failedChecks) {
+        // Firebase CLI authentication is required before any rollout command
+        // can run. Check server-side session credentials first (fail closed).
+        const sessionId = (req.sessionID ?? "") as string;
+        const adminId = sessionId; // Session ID is the admin-scoped identifier.
+        const authStatus = await getDeployAuthStatus(sessionId, adminId);
+        if (!authStatus.authenticated) {
+          const authStart: DeployAuthStartResult = startDeployAuthFlow(
+            sessionId,
+            adminId,
+          );
+          if (authStart.status === "not_configured") {
+            await store.recordAudit({
+              action: "publish_failed",
+              environment,
+              result: "rejected",
+              reason: "إعدادات OAuth غير مهيأة على الخادم — لا يمكن إنشاء rollout.",
+            });
+            res.status(503).json({
+              code: "DEPLOY_AUTH_NOT_CONFIGURED",
+              error: authStart.reason,
+            });
+            return;
+          }
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: "مصادقة Firebase CLI مطلوبة قبل النشر.",
+          });
+          res.status(403).json({
+            code: "DEPLOY_AUTH_REQUIRED",
+            error: "مصادقة Firebase CLI مطلوبة قبل النشر. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+            authUrl: authStart.authUrl ?? null,
+          });
+          return;
+        }
+
         let outcome: DeployPublishOutcome;
         try {
           outcome = await executor.publish({
@@ -402,6 +444,8 @@ export function createAdminDeployRouter(
             requestedTarget,
             worktree: context.git?.worktree ?? "unknown",
             environment,
+            sessionId,
+            adminId,
           });
         } catch (error) {
           await store.recordAudit({
@@ -430,6 +474,20 @@ export function createAdminDeployRouter(
             error: outcome.detail,
             stage: outcome.stage ?? null,
             target: outcome.target ?? null,
+          });
+          return;
+        }
+        if (outcome.authRequired === true) {
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: outcome.detail,
+          });
+          res.status(403).json({
+            code: "DEPLOY_AUTH_REQUIRED",
+            error: outcome.detail,
+            authUrl: outcome.authUrl ?? null,
           });
           return;
         }
@@ -711,6 +769,8 @@ export function createAdminDeployRouter(
         gitCommit: release.gitCommit,
         approval: true,
         environment,
+        sessionId: (req.sessionID ?? "") as string,
+        adminId: (req.sessionID ?? "") as string,
       });
 
       if (restore.blocked === true) {

@@ -280,6 +280,9 @@ export function DeployBar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  const [authPending, setAuthPending] = useState(false);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+
   const publishMutation = useMutation({
     mutationFn: async (approval: boolean) => {
       if (!state) throw new Error("لا توجد حالة نشر جاهزة للخادم.");
@@ -290,6 +293,7 @@ export function DeployBar() {
       return res.json() as Promise<{ release?: DeployRelease }>;
     },
     onSuccess: (result) => {
+      setAuthUrl(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       const release = result.release;
       // Success is claimed ONLY after the route recorded a real deploy AND the
@@ -309,6 +313,33 @@ export function DeployBar() {
       });
     },
     onError: (error: unknown) => {
+      if (error instanceof Error) {
+        const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
+        if (match) {
+          const status = Number(match[1]);
+          if (status === 403) {
+            try {
+              const body = JSON.parse(match[2]) as {
+                code?: string;
+                error?: string;
+                authUrl?: string | null;
+              };
+              if (body.code === "DEPLOY_AUTH_REQUIRED" && body.authUrl) {
+                setAuthUrl(body.authUrl);
+                toast({
+                  title: "مصادقة Firebase مطلوبة",
+                  description:
+                    "يرجى تسجيل الدخول إلى Google للمصادقة مع Firebase CLI، ثم انقر نشر مرة أخرى.",
+                  variant: "destructive",
+                });
+                return;
+              }
+            } catch {
+              // Not JSON — fall through to default handling.
+            }
+          }
+        }
+      }
       // رسالة error مأخوذة من استجابة الخادم الفعلية (رمز الحالة + نص الخطأ
       // بالعربية)، أو خطأ اتصال للشبكة فقط. لا تُعرض تفاصيل داخلية أو أسرار.
       // لا إعادة محاولة تلقائية: قد تكون العملية قد بدأت بالفعل على الخادم.
@@ -357,6 +388,20 @@ export function DeployBar() {
 
   const handlePublish = () => {
     if (!state) return;
+    // If Firebase CLI authentication is required, show the auth URL and refuse
+    // to publish until the user completes OAuth. No auto-retry after OAuth.
+    if (authUrl) {
+      setAuthPending(true);
+      // Open Google OAuth page in a new tab. The user completes consent there,
+      // then returns via callback to retry the publish.
+      window.open(authUrl, "_blank");
+      toast({
+        title: "افتح صفحة مصادقة Google",
+        description:
+          "تم فتح صفحة مصادقة Google في علامة تبويب جديدة. بعد إتمام المصادقة، ارجع إلى هذا الصفحة وانقر نشر مرة أخرى.",
+      });
+      return;
+    }
     if (!state.realDeployEnabled) {
       publishMutation.mutate(false);
       return;
@@ -581,6 +626,30 @@ export function DeployBar() {
         style={{ height: DEPLOY_BAR_HEIGHT_PX }}
       >
         <div className="mx-auto flex h-full max-w-7xl items-center gap-2 overflow-x-auto px-2 sm:gap-3 sm:px-4">
+          {authUrl && (
+            <div
+              data-testid="deploy-bar-auth-required"
+              className="flex shrink-0 items-center gap-2 px-3 py-1.5 rounded-md border border-orange-300 bg-orange-50/90 text-orange-900 text-xs font-medium"
+            >
+              <span>مصادقة Firebase مطلوبة —</span>
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => {
+                  setAuthPending(true);
+                  window.open(authUrl, "_blank");
+                }}
+                disabled={authPending}
+                data-testid="deploy-bar-open-auth"
+              >
+                {authPending ? (
+                  <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                ) : (
+                  "تسجيل الدخول إلى Google"
+                )}
+              </Button>
+            </div>
+          )}
           <Button
             size="sm"
             variant="default"

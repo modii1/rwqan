@@ -24,6 +24,10 @@ import {
   DEPLOY_DEV_BASE_URL,
   DEPLOY_DEV_PROJECT_ID,
 } from "../../config/deployTarget";
+import {
+  __test_setDeployCredentials,
+  __test_clearAllDeployCredentials,
+} from "../../services/deployAuth";
 
 const PASSING_CHECKS: DeployChecks = {
   typescript: "NOT_RUN",
@@ -32,6 +36,19 @@ const PASSING_CHECKS: DeployChecks = {
   secretScan: "PASS",
   postDeployHealth: "NOT_RUN",
 };
+
+// OAuth env vars required by deploy auth check; tests that need a real
+// publish path set credentials via deployAuth or skip auth by not passing
+// sessionId (the route only checks auth when the executor is asked with a
+// sessionId, and the route always passes req.sessionID).
+process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+// Store Firebase CLI credentials for the empty session ID used by the test
+// fake middleware (req.sessionID is not set), so the auth check passes and
+// publish tests can proceed to the executor.
+__test_setDeployCredentials("", "test-refresh-token");
 
 const GIT: DeployGitSource = {
   commit: "server123",
@@ -1503,5 +1520,33 @@ test("publish refuses a client-supplied environment that conflicts with the serv
       body: JSON.stringify({ version: "7.7.7" }),
     });
     assert.equal(omitted.status, 201);
+  });
+});
+
+test("publish returns 403 DEPLOY_AUTH_REQUIRED with authUrl when no Firebase CLI credentials", async () => {
+  // Clear the globally-set credentials so this test simulates no auth.
+  await __test_clearAllDeployCredentials();
+
+  const store = new InMemoryDeploySystemStore({ seed: true });
+  const app = buildApp(store, {
+    collectChecks: async () => passingReport(),
+  });
+
+  await withServer(app, async (base) => {
+    const url = `${base}/api/admin/deploy/releases`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "auth-test", approve: true }),
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_AUTH_REQUIRED");
+    assert.ok(body.authUrl);
+    assert.ok(body.authUrl.includes("accounts.google.com/o/oauth2/v2/auth"));
+    assert.ok(
+      body.error.includes("مصادقة Firebase CLI مطلوبة"),
+      "error should be in Arabic",
+    );
   });
 });

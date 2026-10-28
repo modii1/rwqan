@@ -18,6 +18,11 @@ import {
   type RealDeployDependencies,
 } from "./DeployRealExecutor";
 import { resolveFirebaseCommand } from "./DeployToolsService";
+import {
+  getDeployAuthStatus,
+  clearDeployAuth,
+  __test_setDeployCredentials,
+} from "./deployAuth";
 
 const COMMIT = "c".repeat(40);
 const LOCATION = "us-central1";
@@ -533,6 +538,97 @@ test("publish failure with missing stderr and stdout uses fallback message", asy
   });
   assert.ok(outcome.detail.includes("رمز الخروج: 3"), "should include exit code");
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
+});
+
+test("publish returns authRequired when sessionId provided but no Firebase CLI credentials", async () => {
+  const { deps, calls } = fakeDeps();
+  const sessionId = "test-session-no-auth";
+  clearDeployAuth(sessionId);
+  // Ensure OAuth env is present so getDeployAuthStatus doesn't return not_configured.
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    sessionId,
+  });
+
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.authRequired, true);
+  assert.ok(outcome.detail.includes("مصادقة Firebase CLI مطلوبة"));
+  assert.equal(calls.length, 0, "no command should run when auth is required");
+});
+
+test("publish skips auth check when no sessionId is provided", async () => {
+  const { deps, calls } = fakeDeps({ rolloutExit: 0 });
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    // No sessionId — auth check is skipped, executor proceeds to runCommand.
+  });
+
+  assert.equal(outcome.deployed, true);
+  assert.equal(calls.length, 2, "rollout command + probe should run when no sessionId provided");
+  assert.equal(calls[0].stage, "deploy", "first call should be the deploy rollout");
+});
+
+test("publish runs auth-verify before deploy when sessionId has credentials", async () => {
+  const { deps, calls } = fakeDeps({ rolloutExit: 0 });
+  const sessionId = "test-session-with-auth";
+  await __test_setDeployCredentials(sessionId, "valid-refresh-token-string-for-testing", "admin-1");
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    sessionId,
+    adminId: "admin-1",
+  });
+
+  assert.equal(outcome.deployed, true);
+  // auth-verify should run before deploy
+  assert.equal(calls.length, 3, "auth-verify + deploy + probe should run");
+  assert.equal(calls[0].stage, "auth-verify", "first call should be auth verification");
+  assert.equal(calls[1].stage, "deploy", "second call should be deploy rollout");
+  assert.equal(calls[2].stage, "probe", "third call should be health probe");
+  // FIREBASE_TOKEN should be injected into the deploy command env
+  const deployCall = calls.find((c) => c.stage === "deploy");
+  assert.ok(deployCall);
+  assert.ok(deployCall!.env);
+  assert.equal(deployCall!.env!["FIREBASE_TOKEN"], "valid-refresh-token-string-for-testing");
+});
+
+test("publish refuses when FIREBASE_TOKEN is missing from env despite auth status", async () => {
+  const { deps, calls } = fakeDeps({ rolloutExit: 0 });
+  const sessionId = "test-session-no-token";
+  // Set auth status but no actual token (simulate storage inconsistency)
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
+
+  const outcome = await executor(deps).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    sessionId,
+    adminId: "admin-1",
+  });
+
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.authRequired, true);
+  assert.ok(outcome.detail.includes("مصادقة Firebase CLI مطلوبة"));
+  assert.equal(calls.length, 0, "no command should run when auth is incomplete");
 });
 
 // Real end-to-end proof, WITHOUT any deploy: the default runner must launch
