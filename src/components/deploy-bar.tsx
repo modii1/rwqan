@@ -115,6 +115,53 @@ const GITHUB_MATCH_LABEL: Record<string, string> = {
 
 const UNVERIFIED = "غير متحقق";
 
+/**
+ * يستخرج رسالة خطأ بالعربية من خطأ خطأ apiRequest.
+ * apiRequest يرمي خطأً على الشكل "<status>: <body>"؛ إذا كان الجسم JSONًا
+ *ويحوي حقل error تُعاد قيمته (عربية وآمنة للعرض). أخطاء الشبكة تُعاد برسالة
+ *اتصال مناسبة. لا تُعرض أي أسرار أو تفاصيل تقنية للعميل.
+ */
+function deployErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
+    if (match) {
+      const status = Number(match[1]);
+      const bodyText = match[2];
+      try {
+        const body = JSON.parse(bodyText) as { error?: string };
+        if (typeof body.error === "string" && body.error.length > 0) {
+          return body.error;
+        }
+      } catch {
+        // الجسم ليس JSON — استخدم رسالة افتراضية حسب رمز الحالة أدناه.
+      }
+      switch (status) {
+        case 400:
+          return "طلب غير صالح. تأكد من بيانات الطلب وحاول مرة أخرى.";
+        case 401:
+          return "انتهت جلسة المسؤول أو غير صالحة. يُرجى تسجيل الدخول مجددًا.";
+        case 403:
+          return "تم رفض الطلب. تأكد من صلاحية المسؤول وأن الطلب من نفس المصدر.";
+        case 404:
+          return "مسار النشر غير متاح في هذه البيئة.";
+        case 409:
+          return "تعارض في حالة النشر. تأكد من البيئة وحاول مرة أخرى.";
+        case 502:
+          return "فشل تنفيذ النشر على الخادم. لم يتم أي نشر.";
+        case 503:
+          return "خدمة النشر غير متاحة حاليًا. حاول مرة أخرى لاحقًا.";
+        case 500:
+          return "خطأ داخلي في الخادم. لم يتم أي نشر.";
+        default:
+          return `تعذّر إكمال النشر (${status}).`;
+      }
+    }
+    // خطأ شبكة أو خطأ غير منiformed من fetch (لا رمز حالة)
+    return "تعذّر الاتصال بالخادم. تحقّق من اتصالك وحاول مرة أخرى.";
+  }
+  return "تعذّر إكمال النشر.";
+}
+
 function GateVerdictBadge({ status }: { status: DeployGateStatus }) {
   return (
     <span
@@ -235,8 +282,10 @@ export function DeployBar() {
 
   const publishMutation = useMutation({
     mutationFn: async (approval: boolean) => {
+      if (!state) throw new Error("لا توجد حالة نشر جاهزة للخادم.");
       const res = await apiRequest("POST", "/api/admin/deploy/releases", {
         approve: approval,
+        environment: state.environment,
       });
       return res.json() as Promise<{ release?: DeployRelease }>;
     },
@@ -259,11 +308,13 @@ export function DeployBar() {
           : "لم يُسجَّل أي إصدار منشور.",
       });
     },
-    onError: () => {
-      // Brief, non-technical failure: never surface server/credential internals.
+    onError: (error: unknown) => {
+      // رسالة error مأخوذة من استجابة الخادم الفعلية (رمز الحالة + نص الخطأ
+      // بالعربية)، أو خطأ اتصال للشبكة فقط. لا تُعرض تفاصيل داخلية أو أسرار.
+      // لا إعادة محاولة تلقائية: قد تكون العملية قد بدأت بالفعل على الخادم.
       toast({
         title: "تعذّر النشر",
-        description: "لم يكتمل النشر. تحقّق من الاتصال وحاول مرة أخرى.",
+        description: deployErrorMessage(error),
         variant: "destructive",
       });
     },
@@ -311,6 +362,15 @@ export function DeployBar() {
       return;
     }
     const target = state.deployTarget;
+    const project = target?.projectId ?? "rwqan-757";
+    const backend =
+      target?.backendId ?? (state.environment === "LIVE" ? "rwqan" : "rwqan-backend");
+    const region = target?.location ?? "europe-west4";
+    const domain =
+      target?.expectedDomain ??
+      (state.environment === "LIVE"
+        ? "https://rwqan.sa"
+        : "https://rwqan-backend--rwqan-757.europe-west4.hosted.app/");
     // LIVE publishes to production and needs a SECOND server-side opt-in; without
     // it the executor fails closed, so refuse before asking for confirmation.
     if (state.environment === "LIVE") {
@@ -324,19 +384,22 @@ export function DeployBar() {
         return;
       }
       const confirmed = window.confirm(
-        "نشر حقيقي إلى بيئة الإنتاج (rwqan.sa)؟\n\n" +
-          `المشروع: ${target?.projectId ?? "rwqan-757"}\n` +
-          `الخدمة: ${target?.backendId ?? "rwqan-backend"}\n\n` +
-          "سيُنشأ rollout من الـcommit الحالي، ولن يُسجَّل الإصدار كمنشور إلا بعد إثبات هوية مصدر البناء ونجاح فحص ما بعد النشر.",
+        `نشر حقيقي إلى بيئة الإنتاج (${domain})؟\n\n` +
+          `المشروع: ${project}\n` +
+          `الخدمة: ${backend}\n` +
+          `المنطقة: ${region}\n\n` +
+          "سيُنشأ rollout من الـcommit الحالي على خدمة الإنتاج، ولن يُسجَّل الإصدار كمنشور إلا بعد إثبات هوية مصدر البناء ونجاح فحص ما بعد النشر.",
       );
       if (!confirmed) return;
       publishMutation.mutate(true);
       return;
     }
     const confirmed = window.confirm(
-      "نشر حقيقي إلى بيئة التطوير المعزولة؟\n\n" +
-        `المشروع: ${target?.projectId ?? "rwqan-sa-dev"}\n` +
-        `الخدمة: ${target?.backendId ?? "rwqan-dev-backend"}\n\n` +
+      `نشر حقيقي إلى بيئة TEST المعزولة؟\n\n` +
+        `المشروع: ${project}\n` +
+        `الخدمة: ${backend}\n` +
+        `المنطقة: ${region}\n` +
+        `الدومين: ${domain}\n\n` +
         "لن يتم أي اتصال بالإنتاج. يُسجَّل الإصدار كمنشور فقط بعد نجاح التحقق بعد النشر.",
     );
     if (!confirmed) return;

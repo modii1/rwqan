@@ -1467,3 +1467,41 @@ test("a second concurrent publish is refused with 409 DEPLOY_PUBLISH_IN_PROGRESS
   });
 });
 
+test("publish refuses a client-supplied environment that conflicts with the server state", async () => {
+  const store = new InMemoryDeploySystemStore(); // active environment defaults to TEST
+  const app = buildApp(store, { executor: deployingExecutor() });
+
+  await withServer(app, async (base) => {
+    const url = `${base}/api/admin/deploy/releases`;
+
+    // Client says LIVE while server state is TEST -> refused before any work.
+    const mismatch = await fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "5.5.5", environment: "LIVE" }),
+    });
+    assert.equal(mismatch.status, 409);
+    assert.equal(
+      (await mismatch.json()).code,
+      "DEPLOY_ENVIRONMENT_MISMATCH",
+    );
+    assert.equal(await store.getEnvironment(), "TEST");
+
+    // Matching client-supplied environment proceeds.
+    const match = await fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "6.6.6", environment: "TEST" }),
+    });
+    assert.equal(match.status, 201);
+    assert.equal((await match.json()).release.environment, "TEST");
+
+    // Omitting the environment keeps using the store's active environment.
+    const omitted = await fetch(url, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "7.7.7" }),
+    });
+    assert.equal(omitted.status, 201);
+  });
+});

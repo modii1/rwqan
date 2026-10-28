@@ -326,7 +326,36 @@ export function createAdminDeployRouter(
         res.status(503).json(DEPLOY_STORE_UNAVAILABLE_BODY);
         return;
       }
-      const environment = await store.getEnvironment();
+      const storeEnvironment = await store.getEnvironment();
+      // The UI environment selector is the client's expression of intent; the
+      // server-side store is the source of truth. If the client sends an
+      // environment it must match the store's active environment — otherwise
+      // the two are out of sync and the publish is refused (fail closed). If
+      // the client omits it, the store's active environment is used.
+      const bodyEnvironment =
+        typeof body.environment === "string" ? body.environment : null;
+      if (bodyEnvironment !== null && !isDeployEnvironment(bodyEnvironment)) {
+        res.status(400).json({
+          code: "INVALID_ENVIRONMENT",
+          error: "قيمة البيئة غير صالحة (TEST أو LIVE).",
+        });
+        return;
+      }
+      const environment = bodyEnvironment ?? storeEnvironment;
+      if (bodyEnvironment !== null && bodyEnvironment !== storeEnvironment) {
+        await store.recordAudit({
+          action: "publish_failed",
+          environment: storeEnvironment,
+          result: "rejected",
+          reason:
+            "تضارب بين البيئة المختارة في الواجهة وحالة الخادم — لم يُنفَّذ أي نشر.",
+        });
+        res.status(409).json({
+          code: "DEPLOY_ENVIRONMENT_MISMATCH",
+          error: "تضارب بين البيئة المختارة في الواجهة وحالة الخادم.",
+        });
+        return;
+      }
       const context = await readGitContext();
       const report = await collectChecks();
       // Use the latest explicitly-run checks (real results + run times) where

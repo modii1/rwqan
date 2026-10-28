@@ -103,13 +103,19 @@
   `NODE_ENV=development` ولجلسة مسؤول تُقرّها حالة `/api/admin/deploy/state`
   (الحراسة خادمية: `requireSameOrigin + requireAdmin + بوابة DEV`). إخفاؤه في
   الواجهة ليس حارسًا — كل النقاط تُحرس على الخادم.
-- **TEST (وجهة النشر المعزولة):** `rwqan-sa-dev` / `rwqan-dev-backend`، ثابتة على
-  الخادم (`resolveDeployTarget`)، لا تأتي من المتصفح أبدًا. أي مشروع إنتاجي في
+- **TEST (وجهة النشر المعزولة):** `rwqan-757` / `rwqan-backend`، ثابتة على
+  الخادم (`resolveDeployTarget`)، لا تأتي من المتصفح أبدًا. المنطقة:
+  `europe-west4`، الدومين المتوقع:
+  `https://rwqan-backend--rwqan-757.europe-west4.hosted.app/` (مُثبت من
+  `deployTarget.ts:35-37`؛ أي إدخال من العميل غير معتمد). أي مشروع إنتاجي في
   طلب TEST مرفوض (`deployTargetBlockers`).
-- **LIVE:** `rwqan-757` / `rwqan-backend` / `rwqan.sa` — لا يبدأ إلا بتفعيلين
+- **LIVE:** `rwqan-757` / `rwqan` / `https://rwqan.sa` — لا يبدأ إلا بتفعيلين
   صريحين منفصلين (`DEPLOY_REAL_DEPLOY=enabled` ثم `DEPLOY_ALLOW_PRODUCTION=enabled`)
   مع `NODE_ENV=development`، ويبقى النشر الحي مشروطًا بموافقة إدارية صريحة، ومراجعة
   الدومين المتأثر، وإثبات مصدر البناء من لوحة التحكم، ومسبار الوصول.
+  **اختلاف TEST/LIVE:** كلا الهدفين يُنفّذان على مشروع `rwqan-757`؛ العزل بينهما
+  على مستوى الـbackend فقط (`rwqan-backend` لـTEST، `rwqan` لـLIVE) — وليس على
+  مستوى المشروع.
 
 الفروقة الدلالية التي يعرضها الشريط الآن بأسمائها التقنية كما هي: `TEST`/`LIVE`
 لبيئة الهدف، و`dataEnvironment` لبيانات التشغيل (تبديل في-الذاكرة يُرجَع إلى TEST
@@ -119,23 +125,30 @@
 
 ## 6) عزل TEST عن LIVE — ما ثبت وما بقي غير متحقق
 
-**الثبت خارجيًا (قراءة فقط عبر Firebase CLI، `info@rwqan.sa`) في 2026-10-26:**
-- الإنتاج الحقيقي: المشروع `rwqan-757` (رقم `371865284292`) يضم backend فعليين في
-  `europe-west4`:
-  - `rwqan-backend` — دومينه `rwqan-backend--rwqan-757.europe-west4.hosted.app`
-    وهو **بالضبط** الدومين الذي يذكره المستخدم → إذَن هذا الدومين **إنتاجي وليس
-    TEST**، وقد أُثبت ذلك من لوحة التحكم (اتصال GitHub `modii1-rwqan`، آخر تحديث
-    2026-10-25 23:05Z).
-  - `rwqan` — متصل بـ`iheeb1/rwqan-sa` (يطابق `firebase.json`).
+**الثبت كوديًا (من المصدر الفعلي `deployTarget.ts`):**
+- TEST → المشروع `rwqan-757`، backend `rwqan-backend`، المنطقة `europe-west4`،
+  الدومين `https://rwqan-backend--rwqan-757.europe-west4.hosted.app/`
+  (`deployTarget.ts:35-37`).
+- LIVE → المشروع `rwqan-757`، backend `rwqan`، الدومين `https://rwqan.sa`
+  (`deployTarget.ts:40-41`).
+- TEST وLIVE **يشتركان في نفس المشروع `rwqan-757`**; العزل بينهما على مستوى
+  الـ*backend* فقط (`rwqan-backend` مقابل `rwqan`) وليس على مستوى المشروع.
+- تحقُّق خارجي سابق (قراءة فقط): الدومين
+  `rwqan-backend--rwqan-757.europe-west4.hosted.app` يُعيد HTTP 200، بينما
+  quello نفسه في `us-central1` يُعيد 404 — confirming أن `europe-west4` هي
+  المنطقة المضبوطة لهذا الخلفية.
 
-**غير متحقق (صادقون حتى جديد الأدلة):**
+**غير متحقق (لا دليل من إعدادات الاستضافة الفعلية بعد):**
 | المورد | التصنيف | ما يلزم |
 | --- | --- | --- |
-| مشروع `rwqan-sa-dev` | غير ظاهر في `projects:list` (رفض 403 على استعلامه) | منح الحساب `serviceusage.serviceUsageConsumer` + قراءة App Hosting على الأقل |
-| Backend الـDEV `rwqan-dev-backend` | بلا أدلة | قراءة لوحة تحكم App Hosting لمشروع DEV |
-| منطقة Backend الـDEV (التوثيق القديم يدّعي `me-central2` — لم يُثبت) | غير متحقق | نفس الاستعلام |
-| Firestore/Storage/Secrets في `rwqan-sa-dev` | غير متحقق | جرد قراءة-فقط بعد منح الصلاحيات |
-| القيم في `.env.development.local` (المنطقة/الرابط/الأعلام) | غير مقروءة عمدًا (سياسة عدم قراءة الأسرار) | التطبيق يُقرأ في وقت التشغيل (الواجهة تعرض `غير متحقق` حيثما ينقص) |
+| Environment name=`test` للbackend `rwqan-backend` في Firebase Console | غير متحقق | قراءة لوحة تحكم App Hosting (إعدادات الخلفية) |
+| سر TEST `rwqan-test-firebase-sa/versions/1` في مشروع `rwqan-757` → project_id | غير متحقق | `gcloud secrets versions access` (مصادقة gcloud منتهية الصلاحية في هذه الجلسة) |
+| إعدادات LIVE الفعلية للbackend `rwqan` (أي secret يُستخدم، وهل محدود READ-ONLY في IAM) | غير متحقق | قراءة وحدة التحكم / IAM لمشروع `rwqan-757` |
+| عزل فعلي TEST↔LIVE في الاستضافة (أي مشروع، أي Firestore Database لكل backend) | **UNVERIFIED** | دليل من إعدادات الاستضافة الفعلية (الشرط الإلزامي) |
+
+**ملحوظة:** PROJECT `rwqan-sa-dev` / Backend `rwqan-dev-backend` الواردة في نسخ أقدم
+من هذا التوثيق تشير إلى تصميم سابق؛ الهدف الحالي لـTEST في الكود هو
+`rwqan-757` / `rwqan-backend` conforme لـ`deployTarget.ts`.
 
 لا تُستخدم بيانات LIVE في أي اختبار؛ كل الاختبارات أعلاه in-memory وغير متصلة.
 
@@ -143,9 +156,9 @@
 
 ## 7) الوجهة المستقبلية لنشر TEST (وبأي أدلة)
 
-الوجهة في الكود: **`rwqan-sa-dev` / `rwqan-dev-backend`**
-(`deployTarget.ts:33-34`). الدومين المتوقع عند ضبط المنطقة (توقّع، لا إثبات):
-`https://rwqan-dev-backend--rwqan-sa-dev.<region>.hosted.app`.
+الوجهة في الكود: **`rwqan-757` / `rwqan-backend`**
+(`deployTarget.ts:35-37`). الدومين المتوقع (توقّع، لا إثبات):
+`https://rwqan-backend--rwqan-757.europe-west4.hosted.app/`.
 **بلا أدوات إثبات خارجية، لا يزال نشر TEST غير «جاهز فعليًا»** — هذا التوثيق لا يدّعي
 غير ذلك. التسلسل المستقبلي الصحيح:
 
@@ -170,7 +183,7 @@
 - الاستعادة محصورة في بيئة النشر المستهدفة نفسها، ولا تمس قواعد البيانات أبدًا،
   ولا يمكنها استهداف Backend آخر (كل الاستعادات تكوّن rollout للهدف الثابت).
 - **عناصر تنتظر موافقتك الصريحة المنفصلة (لم يُنفَّذ أي منها):**
-  1. منح صلاحيات IAM على `rwqan-sa-dev` (قراءة).
+  1. منح صلاحيات IAM على `rwqan-757` (قراءة) والتحقق من عزل backends TEST (`rwqan-backend`) عن LIVE (`rwqan`) في وحدة التحكم.
   2. إنشاء/تأكيد Backend DEV وضبط منطقته.
   3. أي نشر حقيقي إلى TEST أو LIVE.
   4. أي تغيير IAM/Secrets/دومينات/ربط `rwqan.sa`.
