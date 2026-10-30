@@ -48,8 +48,16 @@ import {
   type DeployPostDeployVerification,
   type DeployRelease,
   type DeployRestorePreview,
+  type DeployToolsInfo,
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
+import { readDeployToolsInfo } from "../../services/DeployToolsService";
+import {
+  getDeployAuthStatus,
+  startDeployAuthFlow,
+  getAndDeletePendingPublish,
+  type DeployAuthStartResult,
+} from "../../services/deployAuth";
 
 /**
  * RWQAN DEPLOY — admin release registry (Phase C).
@@ -96,6 +104,12 @@ export interface DeployRouterOptions {
    * Defaults to the real, read-only Git verification (fail closed to null).
    */
   resolveStableRelease?: (cwd: string) => Promise<DeployRelease | null>;
+  /**
+   * Test seam: read-only deploy-tools availability (`firebase --version` probe,
+   * cached). Defaults to the real probe; tests inject a stub so no test ever
+   * needs the CLI on the machine.
+   */
+  readTools?: () => Promise<DeployToolsInfo>;
 }
 
 /** DEV root + observed working-tree state + target environment for a restore. */
@@ -109,7 +123,7 @@ export interface DeployRestoreContext {
 }
 
 function isDeployEnvironment(value: unknown): value is DeployEnvironment {
-  return value === "TEST" || value === "LIVE";
+  return value === "TEST" || value === "LIVE" || value === "LOCAL";
 }
 
 function boundedString(value: unknown, maximumLength: number): string | null {
@@ -161,10 +175,18 @@ export function createAdminDeployRouter(
       }));
   const resolveStable =
     options.resolveStableRelease ?? ((cwd: string) => resolveStableRelease({ cwd }));
+  const readTools = options.readTools ?? (() => readDeployToolsInfo());
   const getStore = (): DeploySystemStoreContract =>
     storeOverride ?? getDeploySystemStore();
   /** Single-flight guard: a second real restore is refused while one runs. */
   let restoreInFlight = false;
+  /**
+   * Single-flight guard for publishes (mirrors the restore guard): a second
+   * REAL publish is refused with 409 while one runs, so concurrent requests
+   * cannot double-create rollouts or present misleading state. The flag is set
+   * synchronously before any await and cleared in `finally` on every path.
+   */
+  let publishInFlight = false;
 
   /**
    * Read-only Git/GitHub context. Local Git is read always; the GitHub remote
@@ -175,18 +197,22 @@ export function createAdminDeployRouter(
     git: DeployGitInfo | null;
     github: DeployGitHubInfo | null;
     stableRelease: DeployRelease | null;
+    tools: DeployToolsInfo | null;
   }> => {
     // Verified only when the commit exists AND is reachable locally (read-only).
     const stableRelease = await resolveStable(process.cwd()).catch(() => null);
+    // The tools probe is cached and local-only; a failure is never an error,
+    // just "could not be adjudged" (the gate renders غير متحقق).
+    const tools = await readTools().catch(() => null);
     const git = await readDeployGitInfo(process.cwd()).catch(() => null);
-    if (!git) return { git: null, github: null, stableRelease };
+    if (!git) return { git: null, github: null, stableRelease, tools };
     const github = await readDeployGitHubInfo({
       cwd: process.cwd(),
       localSha: git.commitSha,
       branch: git.branch,
       allowLsRemote: githubLsRemoteEnabled(),
     }).catch(() => null);
-    return { git, github, stableRelease };
+    return { git, github, stableRelease, tools };
   };
 
   const router = Router();
@@ -281,6 +307,16 @@ export function createAdminDeployRouter(
 
   router.post("/api/admin/deploy/releases", async (req, res) => {
     res.set("Cache-Control", "no-store, private");
+    // Single-flight: refuse a second publish while one is running (checked and
+    // set synchronously BEFORE any await, so overlapping requests are excluded).
+    if (publishInFlight) {
+      res.status(409).json({
+        code: "DEPLOY_PUBLISH_IN_PROGRESS",
+        error: "عملية نشر قيد التنفيذ بالفعل — انتظر انتهاءها قبل المحاولة مجددًا.",
+      });
+      return;
+    }
+    publishInFlight = true;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const explicitVersion = boundedString(body.version, VERSION_MAX_LENGTH);
     let version = explicitVersion ?? DEPLOY_SYSTEM_PROTOTYPE_VERSION;
@@ -296,7 +332,36 @@ export function createAdminDeployRouter(
         res.status(503).json(DEPLOY_STORE_UNAVAILABLE_BODY);
         return;
       }
-      const environment = await store.getEnvironment();
+      const storeEnvironment = await store.getEnvironment();
+      // The UI environment selector is the client's expression of intent; the
+      // server-side store is the source of truth. If the client sends an
+      // environment it must match the store's active environment — otherwise
+      // the two are out of sync and the publish is refused (fail closed). If
+      // the client omits it, the store's active environment is used.
+      const bodyEnvironment =
+        typeof body.environment === "string" ? body.environment : null;
+      if (bodyEnvironment !== null && !isDeployEnvironment(bodyEnvironment)) {
+        res.status(400).json({
+          code: "INVALID_ENVIRONMENT",
+          error: "قيمة البيئة غير صالحة (TEST أو LIVE).",
+        });
+        return;
+      }
+      const environment = bodyEnvironment ?? storeEnvironment;
+      if (bodyEnvironment !== null && bodyEnvironment !== storeEnvironment) {
+        await store.recordAudit({
+          action: "publish_failed",
+          environment: storeEnvironment,
+          result: "rejected",
+          reason:
+            "تضارب بين البيئة المختارة في الواجهة وحالة الخادم — لم يُنفَّذ أي نشر.",
+        });
+        res.status(409).json({
+          code: "DEPLOY_ENVIRONMENT_MISMATCH",
+          error: "تضارب بين البيئة المختارة في الواجهة وحالة الخادم.",
+        });
+        return;
+      }
       const context = await readGitContext();
       const report = await collectChecks();
       // Use the latest explicitly-run checks (real results + run times) where
@@ -334,6 +399,61 @@ export function createAdminDeployRouter(
       let postDeploy: DeployPostDeployVerification | null = null;
       let deployDetail = DEPLOY_PUBLISH_NOTICE;
       if (!failedChecks) {
+        // Firebase CLI authentication is required before any rollout command
+        // can run. Check server-side session credentials first (fail closed).
+        // NOTE: TEST publishes are dispatched to GitHub Actions and never run
+        // the Firebase CLI, so this Firebase-only auth gate does NOT apply to
+        // them (requesting Google OAuth for a TEST publish would block the
+        // GitHub-only path).
+        const sessionId = (req.sessionID ?? "") as string;
+        const adminId = sessionId; // Session ID is the admin-scoped identifier.
+        const requiresFirebaseAuth = environment !== "TEST";
+        const authStatus = await getDeployAuthStatus(sessionId, adminId);
+        if (requiresFirebaseAuth && !authStatus.authenticated) {
+          // Store the pending publish intent for automatic resume after OAuth.
+          // Single-use: deleted after retrieval via getAndDeletePendingPublish.
+          const pendingPublish = {
+            gitCommit: report.git?.commit ?? "",
+            environment: environment as string,
+            approval: approval === true,
+            requestedTarget,
+            worktree: (context.git?.worktree ?? "unknown") as string,
+            sessionId,
+            adminId,
+            createdAt: Date.now(),
+          };
+          const authStart: DeployAuthStartResult = startDeployAuthFlow(
+            sessionId,
+            adminId,
+            pendingPublish,
+          );
+          if (authStart.status === "not_configured") {
+            await store.recordAudit({
+              action: "publish_failed",
+              environment,
+              result: "rejected",
+              reason: "إعدادات OAuth غير مهيأة على الخادم — لا يمكن إنشاء rollout.",
+            });
+            res.status(503).json({
+              code: "DEPLOY_AUTH_NOT_CONFIGURED",
+              error: authStart.reason,
+            });
+            return;
+          }
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: "مصادقة Firebase CLI مطلوبة قبل النشر.",
+          });
+          res.status(403).json({
+            code: "DEPLOY_AUTH_REQUIRED",
+            error: "مصادقة Firebase CLI مطلوبة قبل النشر. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+            authUrl: authStart.authUrl ?? null,
+          });
+          return;
+        }
+
         let outcome: DeployPublishOutcome;
         try {
           outcome = await executor.publish({
@@ -343,6 +463,8 @@ export function createAdminDeployRouter(
             requestedTarget,
             worktree: context.git?.worktree ?? "unknown",
             environment,
+            sessionId,
+            adminId,
           });
         } catch (error) {
           await store.recordAudit({
@@ -371,6 +493,39 @@ export function createAdminDeployRouter(
             error: outcome.detail,
             stage: outcome.stage ?? null,
             target: outcome.target ?? null,
+          });
+          return;
+        }
+        if (outcome.authRequired === true) {
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: outcome.detail,
+          });
+          res.status(403).json({
+            code: "DEPLOY_AUTH_REQUIRED",
+            error: outcome.detail,
+            authUrl: outcome.authUrl ?? null,
+          });
+          return;
+        }
+        if (outcome.ghDispatch?.accepted === true) {
+          // The TEST publish was delegated to GitHub Actions (workflow_dispatch).
+          // GitHub — not this app — creates the rollout, so this is recorded as
+          // a REQUEST, never as a deploy; there is no release record here.
+          await store.recordAudit({
+            action: "publish_dispatched",
+            environment,
+            result: "accepted",
+            reason: outcome.detail,
+          });
+          res.status(202).json({
+            code: "DEPLOY_GITHUB_DISPATCH_ACCEPTED",
+            detail: outcome.detail,
+            target: outcome.target ?? null,
+            branch: outcome.ghDispatch.ref,
+            actionsUrl: outcome.ghDispatch.actionsUrl,
           });
           return;
         }
@@ -466,6 +621,8 @@ export function createAdminDeployRouter(
       if (!handleStoreFailure(res, error)) {
         res.status(500).json({ code: "DEPLOY_PUBLISH_FAILED", error: "تعذّر تسجيل الإصدار." });
       }
+    } finally {
+      publishInFlight = false;
     }
   });
 
@@ -650,6 +807,8 @@ export function createAdminDeployRouter(
         gitCommit: release.gitCommit,
         approval: true,
         environment,
+        sessionId: (req.sessionID ?? "") as string,
+        adminId: (req.sessionID ?? "") as string,
       });
 
       if (restore.blocked === true) {

@@ -23,7 +23,7 @@ import {
   isFreeSubscriptionPackage,
 } from "@shared/freeCommissionConsent";
 
-// ظ¤ظ¤ظ¤ Visual Captcha helpers ظ¤ظ¤ظ¤
+// Visual Captcha helpers
 const CAPTCHA_CHARS = '23456789';
 
 function generateCaptchaText(length = 5): string {

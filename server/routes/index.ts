@@ -49,6 +49,7 @@ import adminBookingsRoutes from "./admin/bookings";
 import adminBookingPaymentsRoutes from "./admin/booking-payments";
 import adminOperationsRoutes from "./admin/operations";
 import adminDeployRoutes from "./admin/deploy";
+import adminDeployAuthRoutes from "./admin/deploy-auth";
 import { setDeploySystemStoreFactory } from "../services/DeploySystemStore";
 import { createFirestoreDeploySystemStore } from "../services/FirestoreDeploySystemStore";
 
@@ -97,6 +98,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Auth routes (login, logout, session, password reset)
   app.use(authRoutes);
+
+  // RWQAN DEPLOY AUTH: OAuth start/status/revoke require admin session (applied
+  // per-route inside the router); the OAuth callback is intentionally NOT behind
+  // requireAdmin because Google's redirect does not carry the admin session.
+  // CSRF protection is via single-use state + nonce in deployAuth.
+  app.use(adminDeployAuthRoutes);
 
   // Additive verified owner accounts; legacy property-number/PIN login remains.
   app.use(ownerAccountRoutes);

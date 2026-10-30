@@ -28,10 +28,12 @@ import {
   RealDeployExecutor,
   createRealDeployDependencies,
 } from "./DeployRealExecutor";
+import type { GhDispatchAccepted } from "./DeployGhWorkflowService";
 
 /** Stage a real publish stopped at (used for a precise audit reason). */
 export type DeployPublishStage =
   | "approval"
+  | "auth"
   | "target"
   | "source"
   | "build"
@@ -58,6 +60,16 @@ export interface DeployPublishOutcome {
   verify?: DeployPostDeployVerification | null;
   /** Authoritative source-identity check from the App Hosting control plane. */
   buildSource?: BuildSourceVerification | null;
+  /** TRUE when Firebase CLI authentication is required before deploy can proceed. */
+  authRequired?: boolean;
+  /** Google OAuth authorization URL to open (when authRequired === true). */
+  authUrl?: string | null;
+  /**
+   * Present when the TEST publish was DELEGATED to GitHub Actions
+   * (workflow_dispatch). GitHub — not this app — creates the rollout, so this
+   * outcome never claims `deployed: true`; the dispatch is only a request.
+   */
+  ghDispatch?: GhDispatchAccepted | null;
 }
 
 /** Result of asking the executor to restore a previous release. */
@@ -91,6 +103,10 @@ export interface DeployPublishInput {
   worktree?: "clean" | "dirty" | "unknown";
   /** Active deploy environment selecting the target (defaults to TEST). */
   environment?: DeployTargetEnvironment;
+  /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+  sessionId?: string;
+  /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+  adminId?: string;
 }
 
 export interface DeployRestoreInput {
@@ -100,6 +116,10 @@ export interface DeployRestoreInput {
   requestedTarget?: string | null;
   /** Active deploy environment selecting the target (defaults to TEST). */
   environment?: DeployTargetEnvironment;
+  /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+  sessionId?: string;
+  /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+  adminId?: string;
 }
 
 /**
