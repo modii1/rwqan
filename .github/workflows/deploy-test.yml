@@ -6,7 +6,7 @@
 #
 # Production safety (hard requirements, do not relax):
 #   - This workflow MUST ONLY ever run on the branch
-#     apphosting/test-secret-isolation. The `if:` guard on the job enforces this
+#     test/unified-gateway-ui-only. The `if:` guard on the job enforces this
 #     even for workflow_dispatch, so a manual run can never target another branch.
 #   - LIVE stays on main / backend `rwqan` / firebase.json / apphosting.yaml —
 #     none of those are touched by this file.
@@ -17,7 +17,7 @@
 #     WIF_PROVIDER        projects/<proj-no>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
 #     WIF_SERVICE_ACCOUNT <sa-name>@<project>.iam.gserviceaccount.com
 #   The provider's attribute condition must restrict admission to
-#   repository "modii1/rwqan" + ref "refs/heads/apphosting/test-secret-isolation".
+#   repository "modii1/rwqan" + ref "refs/heads/test/unified-gateway-ui-only".
 #   The service account gets roles/firebaseapphosting.developer scoped to the
 #   TEST backend only (see setup instructions).
 #   firebase-tools resolves credentials from GOOGLE_APPLICATION_CREDENTIALS
@@ -34,7 +34,7 @@ name: Deploy TEST Rollout
 on:
   push:
     branches:
-      - apphosting/test-secret-isolation
+      - test/unified-gateway-ui-only
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     # Hard guard: push triggers (and manual dispatches) on any other ref abort
     # immediately, before any command runs.
-    if: github.ref == 'refs/heads/apphosting/test-secret-isolation'
+    if: github.ref == 'refs/heads/test/unified-gateway-ui-only'
 
     steps:
       - name: Check WIF configuration

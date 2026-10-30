@@ -659,7 +659,7 @@ function acceptedDispatch(): GhWorkflowDispatchResult {
   return {
     kind: "accepted",
     detail: "أُرسل طلب النشر إلى GitHub (workflow_dispatch).",
-    branch: "apphosting/test-secret-isolation",
+    branch: "test/unified-gateway-ui-only",
     actionsUrl: GH_ACTIONS_URL,
   };
 }
@@ -696,7 +696,7 @@ test("a TEST publish is delegated to GitHub Actions without running any Firebase
   assert.equal(outcome.stage, null);
   assert.equal(outcome.target, DEPLOY_DEV_PROJECT_ID);
   assert.equal(outcome.ghDispatch?.accepted, true);
-  assert.equal(outcome.ghDispatch?.ref, "apphosting/test-secret-isolation");
+  assert.equal(outcome.ghDispatch?.ref, "test/unified-gateway-ui-only");
   assert.equal(outcome.ghDispatch?.actionsUrl, GH_ACTIONS_URL);
 
   // HARD GUARANTEE: no Firebase CLI command and no app probe ran for TEST.

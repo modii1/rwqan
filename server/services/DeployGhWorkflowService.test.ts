@@ -98,7 +98,7 @@ test("ls-remote failure falls back to a read-only API tip query and dispatches w
   assert.equal(result.kind, "accepted");
   // First call: read-only GET of the branch; second: the dispatch POST.
   assert.equal(calls[0].method, "GET");
-  assert.match(calls[0].url, /\/repos\/modii1\/rwqan\/branches\/apphosting%2Ftest-secret-isolation$/);
+  assert.match(calls[0].url, /\/repos\/modii1\/rwqan\/branches\/test%2Funified-gateway-ui-only$/);
   assert.equal(calls[1].method, "POST");
   assert.match(calls[1].url, /\/dispatches$/);
 });
@@ -177,11 +177,11 @@ test("successful dispatch (204) returns accepted with non-secret fields", async 
   );
   const headers = new Headers(call.init.headers as HeadersInit);
   assert.equal(headers.get("Authorization"), `Bearer ${TOKEN}`);
-  assert.equal((call.init.body as string).includes("apphosting/test-secret-isolation"), true);
+  assert.equal((call.init.body as string).includes("test/unified-gateway-ui-only"), true);
 
   assert.equal(result.kind, "accepted");
   if (result.kind === "accepted") {
-    assert.equal(result.branch, "apphosting/test-secret-isolation");
+    assert.equal(result.branch, "test/unified-gateway-ui-only");
     assert.match(result.actionsUrl, /actions\/workflows\/deploy-test\.yml$/);
     assert.ok(!result.detail.includes(TOKEN));
   }

@@ -375,7 +375,7 @@ export class RealDeployExecutor {
     // TEST publish DELEGATION (GitHub Actions): for TEST the app NEVER runs the
     // Firebase CLI / apphosting:rollouts:create itself. The ONLY path is a
     // workflow_dispatch to GitHub, which creates the rollout from the branch's
-    // remote tip on `modii1/rwqan @ apphosting/test-secret-isolation`.
+    // remote tip on `modii1/rwqan @ test/unified-gateway-ui-only`.
     // No git push, no Firebase CLI, no new credentials — a missing pre-existing
     // GitHub token fails closed with a clear admin-facing reason, and a remote
     // tip that differs from the approved commit is refused (GitHub checks out

@@ -7,7 +7,7 @@ import { promisify } from "node:util";
  * When the admin publishes with environment=TEST, the app does NOT run the
  * Firebase CLI itself. Instead it asks GitHub to run the TEST deploy workflow,
  * which creates the rollout from the branch's remote tip on
- * `modii1/rwqan @ apphosting/test-secret-isolation` — so GitHub (not this app)
+ * `modii1/rwqan @ test/unified-gateway-ui-only` — so GitHub (not this app)
  * performs the deploy and the commit history/current files are untouched.
  *
  * Hard properties:
@@ -33,7 +33,7 @@ const execFileAsync = promisify(execFile);
 
 /** The fixed TEST push/deploy destination (may be overridden via env — see below). */
 export const DEPLOY_GH_TEST_REPOSITORY = "modii1/rwqan";
-export const DEPLOY_GH_TEST_BRANCH = "apphosting/test-secret-isolation";
+export const DEPLOY_GH_TEST_BRANCH = "test/unified-gateway-ui-only";
 export const DEPLOY_GH_TEST_WORKFLOW_FILE = "deploy-test.yml";
 /** Git remote name that must point at the TEST repository (read-only queries). */
 export const DEPLOY_GH_TEST_REMOTE_NAME = "mine";

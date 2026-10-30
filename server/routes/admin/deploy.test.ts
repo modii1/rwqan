@@ -1651,7 +1651,7 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
       target: DEPLOY_DEV_PROJECT_ID,
       ghDispatch: {
         accepted: true,
-        ref: "apphosting/test-secret-isolation",
+        ref: "test/unified-gateway-ui-only",
         actionsUrl: "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml",
       },
     }),
@@ -1668,7 +1668,7 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
     assert.equal(res.status, 202);
     const body = await res.json();
     assert.equal(body.code, "DEPLOY_GITHUB_DISPATCH_ACCEPTED");
-    assert.equal(body.branch, "apphosting/test-secret-isolation");
+    assert.equal(body.branch, "test/unified-gateway-ui-only");
     assert.equal(body.actionsUrl, "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml");
     assert.ok(body.detail.includes("GitHub"));
     // No release record: the dispatch is a REQUEST, never a deploy. The audit
