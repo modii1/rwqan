@@ -4,8 +4,11 @@ import {
   DEPLOY_DEV_BACKEND_ID,
   DEPLOY_DEV_BASE_URL,
   DEPLOY_DEV_PROJECT_ID,
+  DEPLOY_LOCAL_BACKEND_ID,
+  DEPLOY_LOCAL_PROJECT_ID,
   DEPLOY_PROD_BACKEND_ID,
   DEPLOY_PROD_PROJECT_ID,
+  DEPLOY_DEV_FIREBASE_CONFIG,
   type DeployTarget,
 } from "../config/deployTarget";
 import type {
@@ -20,6 +23,7 @@ import {
 import type {
   GhWorkflowDispatchResult,
   GhWorkflowDispatcher,
+  GhLiveWorkflowDispatcher,
 } from "./DeployGhWorkflowService";
 import { resolveFirebaseCommand } from "./DeployToolsService";
 import { clearDeployAuth, __test_setDeployCredentials } from "./deployAuth";
@@ -82,6 +86,8 @@ interface FakeOptions {
   reachable?: boolean;
   /** Fake TEST dispatcher (GitHub Actions seam). */
   dispatch?: GhWorkflowDispatcher;
+  /** Fake LIVE dispatcher (GitHub Actions seam). */
+  dispatchLive?: GhLiveWorkflowDispatcher;
 }
 
 function fakeDeps(options: FakeOptions = {}) {
@@ -130,6 +136,7 @@ function fakeDeps(options: FakeOptions = {}) {
       return verification(options.reachable ?? true);
     },
     ...(options.dispatch ? { dispatchTestDeploy: options.dispatch } : {}),
+    ...(options.dispatchLive ? { dispatchLiveDeploy: options.dispatchLive } : {}),
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     cwd: () => "C:/dev/project",
   };
@@ -151,22 +158,34 @@ function executor(
 }
 
 /**
- * Publish to LIVE (production explicitly enabled): the Firebase CLI rollout
- * path. TEST publishes NEVER reach this path — GitHub Actions is the only
- * TEST route, and the tests below prove it by spying on runCommand/probeHealth.
+ * Publish through the LEGACY Firebase CLI rollout path. After the delegation
+ * change, TEST and LIVE publishes BOTH go to GitHub Actions, so this CLI path
+ * is reachable for the LOCAL environment only — the tests below use it to keep
+ * verifying the CLI mechanics (rollouts:create, auth, sanitisation).
  */
-async function livePublish(
+async function cliPublish(
   deps: RealDeployDependencies,
   input: Partial<Parameters<RealDeployExecutor["publish"]>[0]> = {},
 ) {
-  return executor(deps, prodTarget(), true, true).publish({
+  return executor(deps, localTarget(), true, true).publish({
     gitCommit: COMMIT,
     checks: CHECKS,
     approval: true,
     worktree: "clean",
-    environment: "LIVE",
+    environment: "LOCAL",
     ...input,
   });
+}
+
+/** The LOCAL target required by `deployTargetBlockers` for environment LOCAL. */
+function localTarget(overrides: Partial<DeployTarget> = {}): DeployTarget {
+  return {
+    projectId: DEPLOY_LOCAL_PROJECT_ID,
+    backendId: DEPLOY_LOCAL_BACKEND_ID,
+    baseUrl: "http://localhost:3000",
+    location: LOCATION,
+    ...overrides,
+  };
 }
 
 /** A test TEST publish input (defaults: approved, clean worktree, full sha). */
@@ -183,13 +202,13 @@ function testPublish(
   };
 }
 
-test("a controlled rollout succeeds only after a control-plane source proof (LIVE)", async () => {
+test("a controlled CLI rollout (LOCAL path) succeeds only after a control-plane source proof", async () => {
   const { deps, calls, getProbeCalls } = fakeDeps();
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.equal(outcome.deployed, true);
   assert.equal(outcome.savedToGit, false);
-  assert.equal(outcome.target, DEPLOY_PROD_PROJECT_ID);
-  assert.equal(outcome.releaseRef, `${DEPLOY_PROD_BACKEND_ID}:${COMMIT.slice(0, 7)}`);
+  assert.equal(outcome.target, DEPLOY_LOCAL_PROJECT_ID);
+  assert.equal(outcome.releaseRef, `${DEPLOY_LOCAL_BACKEND_ID}:${COMMIT.slice(0, 7)}`);
   assert.equal(outcome.verify?.ok, true);
   assert.equal(outcome.buildSource?.ok, true);
   assert.equal(outcome.buildSource?.sourceKind, "codebase");
@@ -198,20 +217,17 @@ test("a controlled rollout succeeds only after a control-plane source proof (LIV
   assert.ok(rollout);
   assert.equal(rollout!.file, "firebase");
   assert.ok(rollout!.args.includes("apphosting:rollouts:create"));
-  assert.ok(rollout!.args.includes(DEPLOY_PROD_BACKEND_ID));
+  assert.ok(rollout!.args.includes(DEPLOY_LOCAL_BACKEND_ID));
   assert.ok(rollout!.args.includes("--git-commit"));
   assert.ok(rollout!.args.includes(COMMIT));
   assert.ok(rollout!.args.includes("--location"));
   assert.ok(rollout!.args.includes(LOCATION));
   assert.ok(rollout!.args.includes("--project"));
-  assert.ok(rollout!.args.includes(DEPLOY_PROD_PROJECT_ID));
+  assert.ok(rollout!.args.includes(DEPLOY_LOCAL_PROJECT_ID));
   assert.ok(rollout!.args.includes("--config"));
-  assert.ok(rollout!.args.includes("firebase.json"));
-  // A LIVE rollout must target the PRODUCTION backend only — never the TEST
-  // backend (rwqan-backend) from the duplicated legacy config values.
   assert.ok(
-    !rollout!.args.includes("rwqan-backend"),
-    "LIVE rollout must not target rwqan-backend",
+    rollout!.args.includes(DEPLOY_DEV_FIREBASE_CONFIG),
+    "the LOCAL CLI path uses the isolated development config",
   );
   // The app probe is reachability-only because the proof is mandatory elsewhere.
   assert.equal(getProbeCalls(), 1);
@@ -312,7 +328,11 @@ test("a TEST publish refuses a production target even when production is enabled
   assert.equal(calls.length, 0);
 });
 
-// --- LIVE path (Firebase CLI rollout) --------------------------------------
+// --- LIVE dispatch path (GitHub Actions is the ONLY route, deploy-live.yml) --
+//
+// Legacy note: LIVE publishes previously ran the Firebase CLI directly. The
+// delegation change means they NEVER do now: every test below proves zero
+// Firebase CLI commands, zero app probes, and no local commit comparison.
 
 test("a LIVE publish to production is blocked unless production is explicitly enabled", async () => {
   const { deps, calls } = fakeDeps();
@@ -328,8 +348,21 @@ test("a LIVE publish to production is blocked unless production is explicitly en
   assert.equal(calls.length, 0);
 });
 
-test("a LIVE publish deploys to production with the production config when enabled", async () => {
-  const { deps, calls } = fakeDeps();
+test("a LIVE publish is delegated to GitHub Actions without running any Firebase command", async () => {
+  const dispatches: Array<{ cwd: string; commit?: string }> = [];
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    // Loud spy: if the executor ever runs a command on the LIVE path, fail.
+    dispatchLive: async (request) => {
+      dispatches.push(request);
+      return {
+        kind: "accepted",
+        detail: "أُرسل طلب تحديث الموقع الرسمي إلى GitHub (workflow_dispatch).",
+        branch: "main",
+        actionsUrl:
+          "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml",
+      };
+    },
+  });
   const outcome = await executor(deps, prodTarget(), true, true).publish({
     gitCommit: COMMIT,
     checks: CHECKS,
@@ -337,61 +370,150 @@ test("a LIVE publish deploys to production with the production config when enabl
     worktree: "clean",
     environment: "LIVE",
   });
-  assert.equal(outcome.deployed, true);
+
+  // The LIVE request carries NO commit: the panel publishes the LAST version
+  // already on `main` and never pushes or compares the local tree.
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].cwd, "C:/dev/project");
+  assert.ok(!("commit" in dispatches[0]), "LIVE dispatch must not carry a commit");
+
+  assert.equal(outcome.deployed, false); // a dispatch is a request, not a deploy
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.stage, null);
   assert.equal(outcome.target, DEPLOY_PROD_PROJECT_ID);
-  const rollout = calls.find((call) => call.stage === "deploy");
-  assert.ok(rollout);
-  assert.ok(rollout!.args.includes("--config"));
-  assert.ok(rollout!.args.includes("firebase.json"));
-  assert.ok(rollout!.args.includes(DEPLOY_PROD_PROJECT_ID));
+  assert.equal(outcome.ghDispatch?.accepted, true);
+  assert.equal(outcome.ghDispatch?.ref, "main");
+  assert.equal(
+    outcome.ghDispatch?.actionsUrl,
+    "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml",
+  );
+
+  // HARD GUARANTEE: no Firebase CLI command and no app probe ran for LIVE.
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+  assert.ok(!outcome.detail.includes("rollout"), "must not claim a rollout was created");
 });
 
-test("a LIVE publish without an App Hosting location is refused before any command runs", async () => {
-  const { deps, calls } = fakeDeps();
-  const outcome = await executor(deps, prodTarget({ location: null }), true, true).publish(
-    testPublish({ environment: "LIVE" }),
-  );
+test("a LIVE publish never runs the Firebase CLI even when blocked by GitHub", async () => {
+  const { deps, getProbeCalls } = fakeDeps({
+    dispatchLive: async () => ({
+      kind: "blocked",
+      stage: "auth",
+      reason: "إعداد GitHub المطلوب غير متوفر: رمز DEPLOY_GITHUB_TOKEN مفقود.",
+    }),
+  });
+  deps.runCommand = async (spec) => {
+    throw new Error(
+      `LIVE path must never run a command (stage=${spec.stage}, file=${spec.file})`,
+    );
+  };
+  const outcome = await executor(deps, prodTarget(), true, true).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LIVE",
+  });
+
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "auth");
+  assert.equal(getProbeCalls(), 0);
+});
+
+test("a LIVE publish refuses a second rollout while one is already running (dup-guard)", async () => {
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    // The service-level dup guard is tested in DeployGhWorkflowService.test.ts;
+    // here the executor must simply honour a target-stage block verbatim.
+    dispatchLive: async () => ({
+      kind: "blocked",
+      stage: "target",
+      reason:
+        "يوجد تحديث قيد التنفيذ الآن على الموقع الرسمي (فرع main) — انتظر اكتماله قبل طلب تحديث آخر.",
+    }),
+  });
+  const outcome = await executor(deps, prodTarget(), true, true).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LIVE",
+  });
+
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "target");
-  assert.ok(outcome.detail.includes("DEPLOY_APP_HOSTING_LOCATION"));
-  assert.equal(calls.length, 0);
+  assert.ok(outcome.detail.includes("قيد التنفيذ"));
+  assert.equal(outcome.ghDispatch ?? null, null);
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
 });
 
-test("a real deploy is refused when the source-identity verifier is not configured (LIVE)", async () => {
-  const { deps, calls } = fakeDeps({ buildSource: "absent" });
-  const outcome = await livePublish(deps);
+test("a LIVE publish with a FAILED GitHub dispatch surfaces the real error and runs nothing", async () => {
+  const failure = "رفض GitHub الطلب (403): لا تملك صلاحية actions:write على modii1/rwqan.";
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatchLive: async () => ({ kind: "failed", reason: failure }),
+  });
+  const outcome = await executor(deps, prodTarget(), true, true).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LIVE",
+  });
+
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.blocked, false); // not a block — an external failure
+  assert.equal(outcome.stage, "deploy");
+  assert.equal(outcome.detail, failure, "the REAL GitHub error must surface verbatim");
+  assert.equal(outcome.ghDispatch ?? null, null);
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a LIVE publish without the delegation seam is blocked — NO Firebase fallback", async () => {
+  const { deps, calls, getProbeCalls } = fakeDeps(); // no `dispatchLive` seam at all
+  const outcome = await executor(deps, prodTarget(), true, true).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LIVE",
+  });
+
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.blocked, true);
-  assert.equal(outcome.stage, "verify");
-  assert.equal(calls.length, 0);
+  assert.equal(outcome.stage, "target");
+  assert.ok(outcome.detail.includes("GitHub Actions"), "must explain the GitHub-only path");
+  assert.ok(outcome.detail.includes("لا يوجد مسار Firebase CLI بديل"), "must state no fallback");
+  assert.equal(outcome.ghDispatch ?? null, null);
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
 });
 
-test("a failed rollout command stops before any proof and is not a success (LIVE)", async () => {
-  const { deps, calls, getProbeCalls } = fakeDeps({ rolloutExit: 1 });
-  const outcome = await livePublish(deps);
-  assert.equal(outcome.deployed, false);
-  assert.equal(outcome.stage, "deploy");
-  assert.equal(calls.filter((call) => call.stage === "deploy").length, 1);
-  assert.equal(getProbeCalls(), 0);
-});
+test("a LIVE publish never requires Firebase CLI auth even when a session id is present", async () => {
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatchLive: async () => ({
+      kind: "accepted",
+      detail: "أُرسل طلب تحديث الموقع الرسمي إلى GitHub.",
+      branch: "main",
+      actionsUrl:
+        "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml",
+    }),
+  });
+  clearDeployAuth("test-session-live");
+  // OAuth env is configured on purpose — the LIVE path must not care.
+  process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client-id";
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
+  process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-test("a mismatched control-plane build source is never reported as deployed (LIVE)", async () => {
-  const { deps, getProbeCalls } = fakeDeps({ buildSource: "mismatch" });
-  const outcome = await livePublish(deps);
-  assert.equal(outcome.deployed, false);
-  assert.equal(outcome.stage, "verify");
-  assert.equal(outcome.buildSource?.ok, false);
-  // Reachability is never even attempted when the source proof fails.
-  assert.equal(getProbeCalls(), 0);
-});
+  const outcome = await executor(deps, prodTarget(), true, true).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LIVE",
+    sessionId: "test-session-live",
+    adminId: "admin-1",
+  });
 
-test("a proven source but unreachable app is not reported as deployed (LIVE)", async () => {
-  const { deps } = fakeDeps({ reachable: false });
-  const outcome = await livePublish(deps);
-  assert.equal(outcome.deployed, false);
-  assert.equal(outcome.stage, "verify");
-  assert.equal(outcome.buildSource?.ok, true);
-  assert.equal(outcome.verify?.ok, false);
+  assert.equal(outcome.ghDispatch?.accepted, true);
+  assert.notEqual(outcome.authRequired, true, "LIVE must not demand Firebase CLI auth");
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
 });
 
 // --- Restore (unchanged; still the Firebase CLI rollout path) ---------------
@@ -424,7 +546,7 @@ test("restore requires approval and a full sha before any command runs", async (
   assert.equal(calls.length, 0);
 });
 
-// --- LIVE publish-failure sanitisation / redaction / truncation -------------
+// --- Legacy CLI publish-failure sanitisation / redaction / truncation -------
 
 test("publish failure shows sanitized Firebase error message with exit code", async () => {
   const { deps } = fakeDeps({
@@ -432,14 +554,14 @@ test("publish failure shows sanitized Firebase error message with exit code", as
     rolloutStderr:
       "Error: Failed to get backend: rwqan-backend. Please check the parameters you have provided.",
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.stage, "deploy");
   assert.equal(outcome.blocked, false);
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
   assert.ok(outcome.detail.includes("رمز الخروج: 1"), "should include exit code");
   assert.ok(outcome.detail.includes("Failed to get backend"), "should include sanitized Firebase message");
-  assert.equal(outcome.target, DEPLOY_PROD_PROJECT_ID, "target should remain the production project");
+  assert.equal(outcome.target, DEPLOY_LOCAL_PROJECT_ID, "target should remain the local project");
 });
 
 test("publish failure redacts potential secrets and tokens from stderr", async () => {
@@ -448,7 +570,7 @@ test("publish failure redacts potential secrets and tokens from stderr", async (
     rolloutStderr:
       "Error: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890 invalid, ghp_abcdefghijklmnopqrstuvwxyz1234567890 denied",
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.ok(outcome.detail.includes("***REDACTED***"), "secrets should be redacted");
   assert.ok(!outcome.detail.includes("AIzaSy"), "raw AIza key should not leak");
   assert.ok(!outcome.detail.includes("ghp_abcdef"), "raw ghp_ token should not leak");
@@ -459,7 +581,7 @@ test("publish failure truncates long stderr output", async () => {
     rolloutExit: 1,
     rolloutStderr: "x".repeat(2000),
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.ok(outcome.detail.length < 1000, "detail should be truncated");
   assert.ok(outcome.detail.includes("…"), "should show truncation marker");
 });
@@ -470,7 +592,7 @@ test("publish failure retains diagnostic stderr after secret redaction", async (
     rolloutStderr:
       "Error: Failed to create rollout: backend rwqan not found in project rwqan-757. Token: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890.",
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.stage, "deploy");
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
@@ -489,7 +611,7 @@ test("publish failure with empty stderr uses fallback message with exit code", a
     rolloutStderr: "",
     rolloutStdout: "",
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.stage, "deploy");
   assert.ok(outcome.detail.includes("رمز الخروج: 2"), "should include exit code");
@@ -502,7 +624,7 @@ test("publish failure does not leak raw secrets in detail", async () => {
     rolloutStderr:
       "raw sensitive line that should not appear verbatim AIzaSyRawKey123456789012345678901234567890",
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   // Diagnostic text is retained (not hidden behind generic fallback):
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
   assert.ok(outcome.detail.includes("رمز الخروج: 1"), "should include exit code");
@@ -520,12 +642,12 @@ test("publish failure with missing stderr and stdout uses fallback message", asy
   const { deps } = fakeDeps({
     rolloutExit: 3,
   });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
   assert.ok(outcome.detail.includes("رمز الخروج: 3"), "should include exit code");
   assert.ok(outcome.detail.includes("فشل إنشاء rollout"), "should include the reason");
 });
 
-// --- LIVE auth/session handling (unchanged Firebase CLI behaviour) ----------
+// --- CLI auth/session handling (LOCAL path, unchanged Firebase CLI behaviour)
 
 test("publish returns authRequired when sessionId provided but no Firebase CLI credentials", async () => {
   const { deps, calls } = fakeDeps();
@@ -536,7 +658,7 @@ test("publish returns authRequired when sessionId provided but no Firebase CLI c
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
   process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-  const outcome = await livePublish(deps, { sessionId });
+  const outcome = await cliPublish(deps, { sessionId });
 
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.authRequired, true);
@@ -546,7 +668,7 @@ test("publish returns authRequired when sessionId provided but no Firebase CLI c
 
 test("publish skips auth check when no sessionId is provided", async () => {
   const { deps, calls } = fakeDeps({ rolloutExit: 0 });
-  const outcome = await livePublish(deps);
+  const outcome = await cliPublish(deps);
 
   assert.equal(outcome.deployed, true);
   assert.equal(calls.length, 2, "rollout command + probe should run when no sessionId provided");
@@ -561,7 +683,7 @@ test("publish runs auth-verify before deploy when sessionId has credentials", as
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
   process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-  const outcome = await livePublish(deps, { sessionId, adminId: "admin-1" });
+  const outcome = await cliPublish(deps, { sessionId, adminId: "admin-1" });
 
   assert.equal(outcome.deployed, true);
   // auth-verify should run before deploy
@@ -583,7 +705,7 @@ test("publish refuses when FIREBASE_TOKEN is missing from env despite auth statu
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
   process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-  const outcome = await livePublish(deps, { sessionId: "test-session-no-token", adminId: "admin-1" });
+  const outcome = await cliPublish(deps, { sessionId: "test-session-no-token", adminId: "admin-1" });
 
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.authRequired, true);
@@ -599,7 +721,7 @@ test("publish stores pending publish intent when auth required and pendingPublis
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
   process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-  const outcome = await livePublish(deps, {
+  const outcome = await cliPublish(deps, {
     sessionId,
     adminId: "admin-1",
     pendingPublish: {
@@ -630,7 +752,7 @@ test("publish with valid credentials and pendingPublish proceeds normally", asyn
   process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-client-secret";
   process.env.DEPLOY_AUTH_REDIRECT_URI = "https://example.com/callback";
 
-  const outcome = await livePublish(deps, {
+  const outcome = await cliPublish(deps, {
     sessionId,
     adminId: "admin-1",
     pendingPublish: {

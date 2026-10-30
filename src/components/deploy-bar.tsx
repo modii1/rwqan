@@ -18,7 +18,7 @@
  * (TEST/LIVE data-environment switch), and استعادة (isolated restore).
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -295,6 +295,37 @@ export function DeployBar() {
 
   const state = data?.state;
   const visible = Boolean(state);
+  const trackedEnv: "TEST" | "LIVE" | null =
+    state?.environment === "LIVE" ? "LIVE" : state?.environment === "TEST" ? "TEST" : null;
+
+  // REAL deployment status for the tracked environment — read straight from
+  // GitHub Actions through a read-only server endpoint. An accepted request is
+  // NEVER displayed as "اكتمل": only the actual run state can become one.
+  const { data: publishRunStatus } = useQuery<{
+    environment: string;
+    status: { state: string; runUrl: string | null };
+  }>({
+    queryKey: ["/api/admin/deploy/status", trackedEnv],
+    queryFn: async ({ queryKey }) => {
+      const res = await apiRequest(
+        "GET",
+        `/api/admin/deploy/status?environment=${queryKey[1] as string}`,
+      );
+      return res.json() as Promise<{
+        environment: string;
+        status: { state: string; runUrl: string | null };
+      }>;
+    },
+    enabled: visible && trackedEnv !== null,
+    refetchInterval: 20_000,
+  });
+  const runStatusLabel: Record<string, string> = {
+    running: "جارٍ التحديث الآن",
+    success: "اكتمل آخر تحديث",
+    failed: "فشل آخر تحديث",
+    none: "لم يبدأ أي تحديث بعد",
+    unknown: "حالة التحديث غير معروفة حاليًا",
+  };
 
   // Data-environment toggle (LOCAL/TEST/LIVE). This switches the WHOLE
   // application's data sources and services between local resources, isolated
@@ -331,21 +362,30 @@ export function DeployBar() {
   // The TEST publish is delegated to GitHub Actions: the deployment itself is
   // deployment itself is created by the deploy-test workflow from the remote
   // branch tip, so the follow-up lives in GitHub Actions, not in this panel.
+  // LIVE uses its OWN workflow (deploy-live.yml on main) — the two buttons
+  // below dispatch two DIFFERENT workflows and never cross.
   const GH_TEST_ACTIONS_URL =
     "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml";
+  const GH_LIVE_ACTIONS_URL =
+    "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml";
+  const actionsUrlFor = (environment: "TEST" | "LIVE"): string =>
+    environment === "LIVE" ? GH_LIVE_ACTIONS_URL : GH_TEST_ACTIONS_URL;
+  /** Remembers the environment of the next publish request (auto-resume uses this). */
+  const lastPublishEnvRef = useRef<"TEST" | "LIVE">("TEST");
 
   const publishMutation = useMutation({
-    mutationFn: async (approval: boolean) => {
+    mutationFn: async (input: { environment: "TEST" | "LIVE"; approval: boolean }) => {
       if (!state) throw new Error("لا توجد حالة نشر جاهزة للخادم.");
       const res = await apiRequest("POST", "/api/admin/deploy/releases", {
-        approve: approval,
-        environment: state.environment,
+        approve: input.approval,
+        environment: input.environment,
       });
       return res.json() as Promise<{
         release?: DeployRelease;
         code?: string;
         detail?: string;
         actionsUrl?: string;
+        branch?: string;
       }>;
     },
     onSuccess: (result) => {
@@ -355,11 +395,15 @@ export function DeployBar() {
       if (result.code === "DEPLOY_GITHUB_DISPATCH_ACCEPTED") {
         // طلب أُرسل فقط: النشر يبدأ ويكتمل في GitHub — لا ادعاء للنجاح قبل
         // اكتمال التنفيذ هناك. لغة بسيطة للمشرف دون مصطلحات تقنية.
+        const dispatchedEnv: "TEST" | "LIVE" = result.branch === "main" ? "LIVE" : "TEST";
         toast({
-          title: "تم إرسال طلب التحديث إلى GitHub",
+          title:
+            dispatchedEnv === "LIVE"
+              ? "تم إرسال طلب تحديث الموقع الرسمي إلى GitHub"
+              : "تم إرسال طلب التحديث إلى GitHub",
           description:
             "التحديث يبدأ تلقائيًا في GitHub، وسيظهر تقدّمه في صفحة المتابعة:\n" +
-            (result.actionsUrl ?? GH_TEST_ACTIONS_URL) +
+            (result.actionsUrl ?? actionsUrlFor(dispatchedEnv)) +
             "\n(الحالة هنا لا تعني أن التحديث اكتمل)",
         });
         return;
@@ -461,6 +505,66 @@ export function DeployBar() {
     },
   });
 
+  // Shared entry for BOTH publish buttons and the main publish button: the
+  // server publishes the environment it currently tracks, so a request for the
+  // other environment is refused with a plain-Arabic hint instead of a
+  // technical mismatch error. Each environment can only ever reach its OWN
+  // workflow file and branch — the executor resolves them separately.
+  const startPublish = (targetEnv: "TEST" | "LIVE") => {
+    if (!state) return;
+    if (state.environment !== targetEnv) {
+      toast({
+        title: targetEnv === "LIVE" ? "لتحديث الموقع الرسمي" : "لتحديث بيئة التجربة",
+        description: `الخادم مضبوط حاليًا على بيئة ${state.environment}. استخدم مبدّل البيئة أو زر تبديل البيئة للتحويل أولًا ثم أعد المحاولة.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    lastPublishEnvRef.current = targetEnv;
+    if (!state.realDeployEnabled) {
+      publishMutation.mutate({ environment: targetEnv, approval: false });
+      return;
+    }
+    const target = state.deployTarget;
+    const domain =
+      target?.expectedDomain ??
+      (targetEnv === "LIVE"
+        ? "https://rwqan.sa"
+        : "https://rwqan-backend--rwqan-757.europe-west4.hosted.app/");
+    if (targetEnv === "LIVE") {
+      // LIVE publishes to production and needs a SECOND server-side opt-in;
+      // without it the executor fails closed, so refuse before confirming.
+      if (!state.productionDeployEnabled) {
+        toast({
+          title: "التحديث الرسمي مُعطَّل حاليًا",
+          description: "يتطلب تفعيلًا صريحًا منفصلًا على الخادم. تواصل مع المسؤول التقني لتفعيله.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const confirmed = window.confirm(
+        "هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟\n\n" +
+          `رابط الموقع الرسمي: ${domain}\n` +
+          `متابعة تقدّم التحديث: ${GH_LIVE_ACTIONS_URL}\n\n` +
+          "التحديث يبدأ من GitHub تلقائيًا، وهو لا يمس بيئة التجربة إطلاقًا.\n" +
+          "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
+      );
+      if (!confirmed) return;
+      publishMutation.mutate({ environment: "LIVE", approval: true });
+      return;
+    }
+    const confirmed = window.confirm(
+      "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
+        `رابط بيئة التجربة: ${domain}\n` +
+        `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
+        "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
+        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
+    );
+    if (!confirmed) return;
+    publishMutation.mutate({ environment: "TEST", approval: true });
+  };
+
+  // The main publish button publishes the environment the server tracks now.
   const handlePublish = () => {
     if (!state) return;
     // If Firebase CLI authentication is required, open Google OAuth in a
@@ -503,7 +607,7 @@ export function DeployBar() {
               if (autoResumePending) {
                 setAutoResumePending(false);
                 // Automatically resume the original publish once.
-                publishMutation.mutate(true);
+                publishMutation.mutate({ environment: lastPublishEnvRef.current, approval: true });
               } else {
                 toast({
                   title: "تمت المصادقة بنجاح",
@@ -532,52 +636,8 @@ export function DeployBar() {
       }, 1000);
       return;
     }
-    if (!state.realDeployEnabled) {
-      publishMutation.mutate(false);
-      return;
-    }
-    const target = state.deployTarget;
-    const project = target?.projectId ?? "rwqan-757";
-    const backend =
-      target?.backendId ?? (state.environment === "LIVE" ? "rwqan" : "rwqan-backend");
-    const region = target?.location ?? "europe-west4";
-    const domain =
-      target?.expectedDomain ??
-      (state.environment === "LIVE"
-        ? "https://rwqan.sa"
-        : "https://rwqan-backend--rwqan-757.europe-west4.hosted.app/");
-    // LIVE publishes to production and needs a SECOND server-side opt-in; without
-    // it the executor fails closed, so refuse before asking for confirmation.
-    if (state.environment === "LIVE") {
-      if (!state.productionDeployEnabled) {
-        toast({
-          title: "النشر إلى الإنتاج مُعطَّل",
-          description:
-            "يتطلب تفعيلًا صريحًا منفصلًا على الخادم (DEPLOY_ALLOW_PRODUCTION=enabled).",
-          variant: "destructive",
-        });
-        return;
-      }
-      const confirmed = window.confirm(
-        `نشر حقيقي إلى بيئة الإنتاج (${domain})؟\n\n` +
-          `المشروع: ${project}\n` +
-          `الخدمة: ${backend}\n` +
-          `المنطقة: ${region}\n\n` +
-          "سيُنشأ rollout من الـcommit الحالي على خدمة الإنتاج، ولن يُسجَّل الإصدار كمنشور إلا بعد إثبات هوية مصدر البناء ونجاح فحص ما بعد النشر.",
-      );
-      if (!confirmed) return;
-      publishMutation.mutate(true);
-      return;
-    }
-    const confirmed = window.confirm(
-      "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
-        `رابط بيئة التجربة: ${domain}\n` +
-        `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
-        "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
-        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
-    );
-    if (!confirmed) return;
-    publishMutation.mutate(true);
+    const trackedEnv: "TEST" | "LIVE" = state.environment === "LIVE" ? "LIVE" : "TEST";
+    startPublish(trackedEnv);
   };
 
   const restoreMutation = useMutation({
@@ -794,6 +854,53 @@ export function DeployBar() {
             )}
             نشر
           </Button>
+
+          {/* Independent publish button for each environment: TEST and LIVE each
+              target ONLY their own GitHub workflow and their own Firebase
+              backend; the server enforces the same separation (each request
+              goes to the executor with the environment it names, and a
+              cross-environment request is refused). Plain Arabic labels and
+              prompts — no technical jargon for the site owner. */}
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 shrink-0 px-2 text-xs"
+            onClick={() => startPublish("TEST")}
+            disabled={publishMutation.isPending}
+            data-testid="deploy-bar-publish-test"
+          >
+            نشر نسخة التجربة
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            className="h-7 shrink-0 px-2 text-xs"
+            onClick={() => startPublish("LIVE")}
+            disabled={publishMutation.isPending}
+            data-testid="deploy-bar-publish-live"
+          >
+            نشر الموقع الرسمي
+          </Button>
+
+          {trackedEnv && publishRunStatus?.status?.state && (
+            <a
+              href={publishRunStatus.status.runUrl ?? actionsUrlFor(trackedEnv)}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="deploy-bar-publish-status"
+              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+                publishRunStatus.status.state === "running"
+                  ? "border-sky-300 bg-sky-50 text-sky-900"
+                  : publishRunStatus.status.state === "failed"
+                    ? "border-red-300 bg-red-50 text-red-900"
+                    : publishRunStatus.status.state === "success"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      : "border-amber-300 bg-white text-amber-900"
+              }`}
+            >
+              {runStatusLabel[publishRunStatus.status.state] ?? runStatusLabel.unknown}
+            </a>
+          )}
 
           <div
             dir="ltr"

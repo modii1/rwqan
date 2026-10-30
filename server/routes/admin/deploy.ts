@@ -52,6 +52,7 @@ import {
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
 import { readDeployToolsInfo } from "../../services/DeployToolsService";
+import { readDeployWorkflowRunStatus } from "../../services/DeployGhWorkflowService";
 import {
   getDeployAuthStatus,
   startDeployAuthFlow,
@@ -276,6 +277,28 @@ export function createAdminDeployRouter(
     }
   });
 
+  // Read-only REAL deployment status from GitHub Actions for one environment's
+  // own workflow (TEST → deploy-test.yml on its branch, LIVE → deploy-live.yml
+  // on main). NO dispatch happens here; the answer only mirrors what GitHub
+  // already runs. Unknown state when no token is present (fail quiet).
+  router.get("/api/admin/deploy/status", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const requested =
+      typeof req.query.environment === "string" ? req.query.environment : null;
+    if (!isDeployEnvironment(requested) || requested === "LOCAL") {
+      res.status(400).json({
+        code: "INVALID_ENVIRONMENT",
+        error: "قيمة البيئة غير صالحة (TEST أو LIVE).",
+      });
+      return;
+    }
+    const status = await readDeployWorkflowRunStatus(requested);
+    res.json({
+      environment: requested,
+      status,
+    });
+  });
+
   router.post("/api/admin/deploy/environment", async (req, res) => {
     res.set("Cache-Control", "no-store, private");
     const environment = (req.body ?? {}).environment;
@@ -399,15 +422,17 @@ export function createAdminDeployRouter(
       let postDeploy: DeployPostDeployVerification | null = null;
       let deployDetail = DEPLOY_PUBLISH_NOTICE;
       if (!failedChecks) {
-        // Firebase CLI authentication is required before any rollout command
-        // can run. Check server-side session credentials first (fail closed).
-        // NOTE: TEST publishes are dispatched to GitHub Actions and never run
-        // the Firebase CLI, so this Firebase-only auth gate does NOT apply to
-        // them (requesting Google OAuth for a TEST publish would block the
-        // GitHub-only path).
+        // Firebase CLI authentication is a PUBLISH-time requirement only when
+        // the Firebase CLI path is used. TEST and LIVE publishes are both
+        // dispatched to GitHub Actions and never run the Firebase CLI from the
+        // panel, so this Firebase-only auth gate no longer applies to either.
         const sessionId = (req.sessionID ?? "") as string;
         const adminId = sessionId; // Session ID is the admin-scoped identifier.
-        const requiresFirebaseAuth = environment !== "TEST";
+        // Fail closed: no publish reaches GitHub without the server already
+        // being properly wired (DEPLOY_GITHUB_TOKEN) — the executor enforces
+        // that; the Firebase OAuth gate is intentionally NOT required anymore
+        // because the panel never runs Firebase CLI commands itself.
+        const requiresFirebaseAuth = false;
         const authStatus = await getDeployAuthStatus(sessionId, adminId);
         if (requiresFirebaseAuth && !authStatus.authenticated) {
           // Store the pending publish intent for automatic resume after OAuth.

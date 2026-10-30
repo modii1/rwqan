@@ -1523,7 +1523,7 @@ test("publish refuses a client-supplied environment that conflicts with the serv
   });
 });
 
-test("publish returns 403 DEPLOY_AUTH_REQUIRED with authUrl when no Firebase CLI credentials", async () => {
+test("a LIVE publish is NOT gated by Firebase auth: it reaches the executor and fails closed", async () => {
   // Clear the globally-set credentials so this test simulates no auth.
   await __test_clearAllDeployCredentials();
 
@@ -1533,8 +1533,9 @@ test("publish returns 403 DEPLOY_AUTH_REQUIRED with authUrl when no Firebase CLI
   });
 
   await withServer(app, async (base) => {
-    // The Firebase-CLI auth gate applies to LIVE only: TEST publishes are
-    // dispatched to GitHub Actions and never run the Firebase CLI.
+    // LIVE publishes are dispatched to GitHub Actions and never run the
+    // Firebase CLI, so the Firebase OAuth gate must NEVER fire (no 403): the
+    // publish reaches the executor and fails closed there.
     const toLive = await fetch(`${base}/api/admin/deploy/environment`, {
       method: "POST",
       headers: ADMIN_HEADERS,
@@ -1548,19 +1549,22 @@ test("publish returns 403 DEPLOY_AUTH_REQUIRED with authUrl when no Firebase CLI
       headers: ADMIN_HEADERS,
       body: JSON.stringify({ version: "auth-test", approve: true, environment: "LIVE" }),
     });
-    assert.equal(res.status, 403);
+    assert.notEqual(res.status, 403);
+    assert.equal(res.status, 409);
     const body = await res.json();
-    assert.equal(body.code, "DEPLOY_AUTH_REQUIRED");
-    assert.ok(body.authUrl);
-    assert.ok(body.authUrl.includes("accounts.google.com/o/oauth2/v2/auth"));
+    assert.equal(body.code, "DEPLOY_BLOCKED");
+    // Durable record: the refusal is audited as a block, never as a success.
+    const audits = await store.listAudit();
     assert.ok(
-      body.error.includes("مصادقة Firebase CLI مطلوبة"),
-      "error should be in Arabic",
+      audits.some(
+        (audit) => audit?.action === "publish_blocked" && audit?.environment === "LIVE",
+      ),
+      "the refusal must be audited as a blocked LIVE publish",
     );
   });
 });
 
-test("publish stores pending publish intent when auth required", async () => {
+test("a LIVE publish never stores a pending Firebase-auth intent (no OAuth gate exists)", async () => {
   // Clear the globally-set credentials so this test simulates no auth.
   await __test_clearAllDeployCredentials();
 
@@ -1570,7 +1574,8 @@ test("publish stores pending publish intent when auth required", async () => {
   });
 
   await withServer(app, async (base) => {
-    // LIVE only — TEST never goes through the Firebase CLI auth gate.
+    // LIVE only — and the dispatch-only LIVE path has no Firebase OAuth gate:
+    // there is no authUrl and no pending publish intent to resume.
     const toLive = await fetch(`${base}/api/admin/deploy/environment`, {
       method: "POST",
       headers: ADMIN_HEADERS,
@@ -1588,13 +1593,10 @@ test("publish stores pending publish intent when auth required", async () => {
         environment: "LIVE",
       }),
     });
-    assert.equal(res.status, 403);
+    assert.notEqual(res.status, 403);
     const body = await res.json();
-    assert.equal(body.code, "DEPLOY_AUTH_REQUIRED");
-    assert.ok(body.authUrl);
-    // The pending publish intent should be stored for automatic resume.
-    // We verify this indirectly: the response includes authUrl and the
-    // executor internally stored the pending intent via startDeployAuthFlow.
+    assert.notEqual(body.code, "DEPLOY_AUTH_REQUIRED");
+    assert.equal(body.authUrl ?? null, null);
   });
 });
 

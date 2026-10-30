@@ -59,10 +59,12 @@ import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
-import { dispatchTestDeployWorkflow } from "./DeployGhWorkflowService";
+import { dispatchTestDeployWorkflow, dispatchLiveDeployWorkflow } from "./DeployGhWorkflowService";
 import type {
   GhWorkflowDispatchResult,
   GhWorkflowDispatcher,
+  GhLiveWorkflowDispatcher,
+  GhLiveWorkflowDispatchRequest,
 } from "./DeployGhWorkflowService";
 
 export interface DeployCommandSpec {
@@ -97,6 +99,14 @@ export interface RealDeployDependencies {
    * token is missing, and refusal happens BEFORE any state-changing call.
    */
   dispatchTestDeploy?: GhWorkflowDispatcher;
+  /**
+   * LIVE publish delegation: dispatch GitHub's LIVE deploy workflow
+   * (deploy-live.yml on `main`) so GITHUB — not this app — creates the
+   * production rollout. Same fail-closed rules as TEST: no Firebase CLI from
+   * this app, no git push, and the deployed source is the LAST version already
+   * on the branch (pre-read remote tip), never a local commit.
+   */
+  dispatchLiveDeploy?: GhLiveWorkflowDispatcher;
   /**
    * Post-deploy reachability probe. With `requireCommitProof:false` it proves
    * only that the app is reachable (a stronger proof is mandatory elsewhere).
@@ -372,16 +382,18 @@ export class RealDeployExecutor {
 
     const cwd = dependencies.cwd();
 
-    // TEST publish DELEGATION (GitHub Actions): for TEST the app NEVER runs the
-    // Firebase CLI / apphosting:rollouts:create itself. The ONLY path is a
-    // workflow_dispatch to GitHub, which creates the rollout from the branch's
-    // remote tip on `modii1/rwqan @ test/unified-gateway-ui-only`.
+    // TEST & LIVE publish DELEGATION (GitHub Actions): for BOTH environments
+    // the app NEVER runs the Firebase CLI / apphosting:rollouts:create itself.
+    // The ONLY path is a workflow_dispatch to GitHub, which creates the rollout
+    // from the branch's remote tip:
+    //   TEST → `modii1/rwqan @ test/unified-gateway-ui-only` (deploy-test.yml)
+    //   LIVE → `modii1/rwqan @ main`                        (deploy-live.yml)
     // No git push, no Firebase CLI, no new credentials — a missing pre-existing
-    // GitHub token fails closed with a clear admin-facing reason, and a remote
-    // tip that differs from the approved commit is refused (GitHub checks out
-    // the branch tip, so a mismatch would deploy an unapproved commit).
-    // There is NO fallback to the Firebase CLI here: if the GitHub path is not
-    // wired (missing seam) the publish is blocked, not sent to Firebase.
+    // GitHub token fails closed with a clear admin-facing reason, and (TEST)
+    // a remote tip that differs from the approved commit is refused. There is
+    // NO fallback to the Firebase CLI here: if the GitHub path is not wired
+    // (missing seam) the publish is blocked, not sent to Firebase.
+    const isLiveEnvironment = environment === "LIVE";
     if (environment === "TEST") {
       if (!dependencies.dispatchTestDeploy) {
         return blockedPublish(
@@ -394,6 +406,51 @@ export class RealDeployExecutor {
         commit: commit.toLowerCase(),
         cwd,
       });
+      if (gh.kind === "accepted") {
+        return {
+          deployed: false, // a dispatch is a request; GitHub owns the rollout
+          savedToGit: false,
+          detail: gh.detail,
+          blocked: false,
+          stage: null,
+          target: target.projectId,
+          releaseRef: releaseRef(target, commit),
+          ghDispatch: {
+            accepted: true,
+            ref: gh.branch,
+            actionsUrl: gh.actionsUrl,
+          },
+        };
+      }
+      if (gh.kind === "blocked") {
+        return blockedPublish(target, gh.stage, gh.reason);
+      }
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: gh.reason,
+        blocked: false,
+        stage: "deploy",
+        target: target.projectId,
+        releaseRef: releaseRef(target, commit),
+      };
+    }
+
+    // LIVE publish delegation — same mechanism as TEST, its OWN workflow file
+    // (deploy-live.yml) and its OWN branch (`main`); the two environments can
+    // never cross because each dispatch call resolves only its own config.
+    // The deployed source is the LAST version already on the remote branch —
+    // the panel never creates a commit or a push, so no local-tree comparison
+    // is applied for LIVE. A missing seam blocks with an explicit reason.
+    if (environment === "LIVE") {
+      if (!dependencies.dispatchLiveDeploy) {
+        return blockedPublish(
+          target,
+          "target",
+          "النشر إلى بيئة الإنتاج يتم حصريًا عبر GitHub Actions (workflow_dispatch) — لا يوجد مسار Firebase CLI بديل. التهيئة الخادمية للتفويض غير متوفرة؛ يجب إصلاح إعداد الخادم يدويًا.",
+        );
+      }
+      const gh: GhWorkflowDispatchResult = await dependencies.dispatchLiveDeploy({ cwd });
       if (gh.kind === "accepted") {
         return {
           deployed: false, // a dispatch is a request; GitHub owns the rollout
@@ -631,7 +688,7 @@ export class RealDeployExecutor {
       expectedCommit: commit.toLowerCase(),
       expectedVersion: null,
       requireCommitProof: false,
-      allowProductionHost: environment === "LIVE",
+      allowProductionHost: isLiveEnvironment,
     });
     if (!verify.ok) {
       return {
@@ -927,6 +984,8 @@ export function createRealDeployDependencies(): RealDeployDependencies {
     // succeed without this proof.
     verifyBuildSource: createAppHostingVerifyDependency(),
     dispatchTestDeploy: (request) => dispatchTestDeployWorkflow(request),
+    dispatchLiveDeploy: (request: GhLiveWorkflowDispatchRequest) =>
+      dispatchLiveDeployWorkflow(request),
     now: () => new Date(),
     cwd: () => process.cwd(),
   };

@@ -101,24 +101,56 @@ test("the environment switch wires data AND the real deploy target together", ()
   assert.doesNotMatch(source, /state\.stableBaseline\.site/);
 });
 
-test("publish targets the active environment with an explicit LIVE confirmation", () => {
+test("the mismatch guard runs BEFORE any confirmation, separated per environment", () => {
   const source = read("./deploy-bar.tsx");
-  // LIVE refuses before confirming unless the separate production opt-in is set.
+  // One shared entry for BOTH buttons: a request for the environment the
+  // server is not tracking is refused with plain-Arabic guidance BEFORE any
+  // window.confirm — it is never sent to the server.
+  assert.match(source, /state\.environment !== targetEnv/);
+  const mismatch = source.indexOf("state.environment !== targetEnv");
+  const confirm = source.indexOf("window.confirm");
+  assert.ok(mismatch > 0 && confirm > 0 && mismatch < confirm);
+  // Each environment targets its own tracked env; the live publish still
+  // requires the separate server-side production opt-in (fail closed).
   assert.match(source, /state\.productionDeployEnabled/);
-  assert.match(source, /نشر حقيقي إلى بيئة الإنتاج/);
+  assert.match(source, /هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟/);
   assert.match(source, /rwqan\.sa/);
   // Success is only claimed after the post-deploy verification passed.
   assert.match(source, /release\?\.postDeploy\?\.ok === true/);
 });
 
-test("publish sends the server-tracked environment, never a client-chosen target", () => {
+test("publish carries the requested environment and explicit approval from the confirm flow", () => {
   const source = read("./deploy-bar.tsx");
-  // The publish request carries the environment tracked by server state.
-  assert.match(source, /environment:\s*state\.environment/);
+  // The publish request carries the environment chosen by the clicked button
+  // (validated against server-tracked state first) — never a client target.
+  assert.match(source, /environment:\s*input\.environment/);
   // Approval is explicit and comes from the confirmation flow.
-  assert.match(source, /approve:\s*approval/);
+  assert.match(source, /approve:\s*input\.approval/);
   // The UI never composes a requestedTarget for the server to execute.
   assert.doesNotMatch(source, /requestedTarget/);
+});
+
+test("TEST and LIVE publish buttons are independent, with a real status chip", () => {
+  const source = read("./deploy-bar.tsx");
+  // Two separate buttons, one per environment, with plain Arabic labels.
+  assert.match(source, /data-testid="deploy-bar-publish-test"/);
+  assert.match(source, /data-testid="deploy-bar-publish-live"/);
+  assert.match(source, /نشر نسخة التجربة/);
+  assert.match(source, /نشر الموقع الرسمي/);
+  // Each environment points at ITS OWN GitHub workflow — never crossed.
+  assert.match(source, /actions\/workflows\/deploy-test\.yml/);
+  assert.match(source, /actions\/workflows\/deploy-live\.yml/);
+  // REAL deployment status is read from the read-only server status endpoint
+  // (which mirrors GitHub Actions), polled periodically.
+  assert.match(source, /\/api\/admin\/deploy\/status\?environment=/);
+  assert.match(source, /refetchInterval:\s*20_000/);
+  assert.match(source, /data-testid="deploy-bar-publish-status"/);
+  // Plain Arabic labels of the REAL run state.
+  assert.match(source, /جارٍ التحديث الآن/);
+  assert.match(source, /اكتمل آخر تحديث/);
+  assert.match(source, /فشل آخر تحديث/);
+  // An accepted GitHub request is NEVER shown as a completed deploy.
+  assert.doesNotMatch(source, /تم النشر بنجاح/);
 });
 
 test("publish error handler uses the real server error, not a blanket connection message", () => {
