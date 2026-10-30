@@ -505,6 +505,25 @@ export function createAdminDeployRouter(
           });
           return;
         }
+        if (outcome.ghDispatch?.accepted === true) {
+          // The TEST publish was delegated to GitHub Actions (workflow_dispatch).
+          // GitHub — not this app — creates the rollout, so this is recorded as
+          // a REQUEST, never as a deploy; there is no release record here.
+          await store.recordAudit({
+            action: "publish_dispatched",
+            environment,
+            result: "accepted",
+            reason: outcome.detail,
+          });
+          res.status(202).json({
+            code: "DEPLOY_GITHUB_DISPATCH_ACCEPTED",
+            detail: outcome.detail,
+            target: outcome.target ?? null,
+            branch: outcome.ghDispatch.ref,
+            actionsUrl: outcome.ghDispatch.actionsUrl,
+          });
+          return;
+        }
         if (!outcome.deployed) {
           // The executor reached a stage and failed (build/deploy/verify) or
           // returned an ambiguous outcome — never recorded as success.

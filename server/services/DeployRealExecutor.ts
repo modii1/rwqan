@@ -59,6 +59,11 @@ import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
+import { dispatchTestDeployWorkflow } from "./DeployGhWorkflowService";
+import type {
+  GhWorkflowDispatchResult,
+  GhWorkflowDispatcher,
+} from "./DeployGhWorkflowService";
 
 export interface DeployCommandSpec {
   stage: "deploy" | "restore" | "auth-verify";
@@ -84,6 +89,14 @@ export interface RealDeployDependencies {
    * present it must pass (fail closed) before success is reported.
    */
   verifyBuildSource?: BuildSourceVerifier;
+  /**
+   * TEST publish delegation: dispatch GitHub's TEST deploy workflow
+   * (workflow_dispatch) so GITHUB — not this app — creates the rollout.
+   * When present, `publish()` for TEST NEVER runs Firebase CLI or any git
+   * push; the dispatcher fails closed (blocked) when the pre-existing server
+   * token is missing, and refusal happens BEFORE any state-changing call.
+   */
+  dispatchTestDeploy?: GhWorkflowDispatcher;
   /**
    * Post-deploy reachability probe. With `requireCommitProof:false` it proves
    * only that the app is reachable (a stronger proof is mandatory elsewhere).
@@ -357,6 +370,51 @@ export class RealDeployExecutor {
       );
     }
 
+    const cwd = dependencies.cwd();
+
+    // TEST publish DELEGATION (GitHub Actions): instead of the app running the
+    // Firebase CLI / apphosting:rollouts:create directly for TEST, it ASKS
+    // GitHub to run the TEST deploy workflow, which creates the rollout from
+    // the branch's remote tip on `modii1/rwqan @ apphosting/test-secret-isolation`.
+    // No git push, no Firebase CLI, no new credentials — a missing pre-existing
+    // GitHub token fails closed with a clear admin-facing reason, and a remote
+    // tip that differs from the approved commit is refused (GitHub checks out
+    // the branch tip, so a mismatch would deploy an unapproved commit).
+    if (environment === "TEST" && dependencies.dispatchTestDeploy) {
+      const gh: GhWorkflowDispatchResult = await dependencies.dispatchTestDeploy({
+        commit: commit.toLowerCase(),
+        cwd,
+      });
+      if (gh.kind === "accepted") {
+        return {
+          deployed: false, // a dispatch is a request; GitHub owns the rollout
+          savedToGit: false,
+          detail: gh.detail,
+          blocked: false,
+          stage: null,
+          target: target.projectId,
+          releaseRef: releaseRef(target, commit),
+          ghDispatch: {
+            accepted: true,
+            ref: gh.branch,
+            actionsUrl: gh.actionsUrl,
+          },
+        };
+      }
+      if (gh.kind === "blocked") {
+        return blockedPublish(target, gh.stage, gh.reason);
+      }
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: gh.reason,
+        blocked: false,
+        stage: "deploy",
+        target: target.projectId,
+        releaseRef: releaseRef(target, commit),
+      };
+    }
+
     // A controlled rollout needs an explicit App Hosting region and a
     // trustworthy control-plane verifier. BOTH are mandatory.
     const location = target.location?.trim() ?? "";
@@ -374,8 +432,6 @@ export class RealDeployExecutor {
         "التحقق الموثوق من مصدر البناء إلزامي وغير مُفعَّل — يُرفض النشر الحقيقي.",
       );
     }
-
-    const cwd = dependencies.cwd();
 
     // Firebase CLI authentication is required to run apphosting commands.
     // Resolve FIREBASE_TOKEN from the server-side session credentials and
@@ -861,6 +917,7 @@ export function createRealDeployDependencies(): RealDeployDependencies {
     // The executor treats its ABSENCE as a hard block, so a real deploy can never
     // succeed without this proof.
     verifyBuildSource: createAppHostingVerifyDependency(),
+    dispatchTestDeploy: (request) => dispatchTestDeployWorkflow(request),
     now: () => new Date(),
     cwd: () => process.cwd(),
   };

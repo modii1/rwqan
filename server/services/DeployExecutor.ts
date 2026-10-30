@@ -28,6 +28,7 @@ import {
   RealDeployExecutor,
   createRealDeployDependencies,
 } from "./DeployRealExecutor";
+import type { GhDispatchAccepted } from "./DeployGhWorkflowService";
 
 /** Stage a real publish stopped at (used for a precise audit reason). */
 export type DeployPublishStage =
@@ -63,6 +64,12 @@ export interface DeployPublishOutcome {
   authRequired?: boolean;
   /** Google OAuth authorization URL to open (when authRequired === true). */
   authUrl?: string | null;
+  /**
+   * Present when the TEST publish was DELEGATED to GitHub Actions
+   * (workflow_dispatch). GitHub — not this app — creates the rollout, so this
+   * outcome never claims `deployed: true`; the dispatch is only a request.
+   */
+  ghDispatch?: GhDispatchAccepted | null;
 }
 
 /** Result of asking the executor to restore a previous release. */

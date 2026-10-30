@@ -1,0 +1,101 @@
+# RWQAN TEST — Firebase App Hosting automatic rollout for the TEST backend.
+#
+# Purpose: every push to the TEST branch creates a rollout on the TEST backend
+# (rwqan-backend @ europe-west4, project rwqan-757) using the exact commit SHA
+# that triggered the workflow.
+#
+# Production safety (hard requirements, do not relax):
+#   - This workflow MUST ONLY ever run on the branch
+#     apphosting/test-secret-isolation. The `if:` guard on the job enforces this
+#     even for workflow_dispatch, so a manual run can never target another branch.
+#   - LIVE stays on main / backend `rwqan` / firebase.json / apphosting.yaml —
+#     none of those are touched by this file.
+#
+# Authentication — Workload Identity Federation ONLY (no FIREBASE_TOKEN, no
+# admin OAuth, no service account key, ever):
+#   Repository secrets:
+#     WIF_PROVIDER        projects/<proj-no>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#     WIF_SERVICE_ACCOUNT <sa-name>@<project>.iam.gserviceaccount.com
+#   The provider's attribute condition must restrict admission to
+#   repository "modii1/rwqan" + ref "refs/heads/apphosting/test-secret-isolation".
+#   The service account gets roles/firebaseapphosting.developer scoped to the
+#   TEST backend only (see setup instructions).
+#   firebase-tools resolves credentials from GOOGLE_APPLICATION_CREDENTIALS
+#   (exported by google-github-actions/auth). NOTE: use firebase-tools >=
+#   15.22.3 — older 15.x silently swallowed the real auth error in CI
+#   (firebase-tools issue #10726 / Node CVE-2026-48931 regression).
+# Secrets are never echoed; secret values are never expanded into run scripts
+# (only into `env` blocks via expressions, which are masked).
+#
+# No build, test, or lint steps: this workflow deploys directly.
+
+name: Deploy TEST Rollout
+
+on:
+  push:
+    branches:
+      - apphosting/test-secret-isolation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required only for the Workload Identity Federation path
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false # never cancel an in-flight rollout creation
+
+jobs:
+  deploy-test:
+    name: App Hosting TEST rollout
+    runs-on: ubuntu-latest
+    # Hard guard: push triggers (and manual dispatches) on any other ref abort
+    # immediately, before any command runs.
+    if: github.ref == 'refs/heads/apphosting/test-secret-isolation'
+
+    steps:
+      - name: Check WIF configuration
+        id: auth
+        env:
+          HAS_WIF_PROVIDER: ${{ secrets.WIF_PROVIDER != '' }}
+          HAS_WIF_SA: ${{ secrets.WIF_SERVICE_ACCOUNT != '' }}
+        run: |
+          if [ "$HAS_WIF_PROVIDER" = "true" ] && [ "$HAS_WIF_SA" = "true" ]; then
+            echo "mode=wif" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Workload Identity Federation is not configured. Add WIF_PROVIDER and WIF_SERVICE_ACCOUNT to repository secrets (see workflow file header for the exact setup)."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        if: steps.auth.outputs.mode == 'wif'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          # auth@docs: project_id must be given explicitly — it cannot be
+          # derived from a provider path (which carries the project NUMBER).
+          project_id: rwqan-757
+
+      - name: Install Firebase CLI
+        # Pinned: >= 15.22.3 carries the fix for issue #10726 where older 15.x
+        # replaced the real ADC/STS error with a misleading
+        # "Failed to authenticate, have you run firebase login?" in CI.
+        run: |
+          npm install --global firebase-tools@15.22.3
+          firebase --version
+
+      - name: Create App Hosting TEST rollout
+        # The renderer substitutes the exact SHA of the commit that triggered
+        # this run — never a local archive without commit identity. Credentials
+        # come from GOOGLE_APPLICATION_CREDENTIALS exported by the auth step.
+        run: |
+          firebase apphosting:rollouts:create rwqan-backend \
+            --git-commit ${{ github.sha }} \
+            --location europe-west4 \
+            --project rwqan-757 \
+            --config firebase.dev.json \
+            --non-interactive

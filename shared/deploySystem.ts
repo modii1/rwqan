@@ -291,6 +291,7 @@ export type DeployAuditAction =
   | "checks_run"
   | "publish"
   | "publish_simulated"
+  | "publish_dispatched"
   | "publish_blocked"
   | "publish_failed"
   | "restore_preview"
@@ -306,7 +307,8 @@ export interface DeployAuditEntry {
   actor: "admin";
   at: string;
   environment: DeployEnvironment;
-  result: "ok" | "rejected";
+  /** "accepted" only for requests sent to an external system (e.g. GitHub). */
+  result: "ok" | "accepted" | "rejected";
   releaseId?: string;
   reason?: string;
 }

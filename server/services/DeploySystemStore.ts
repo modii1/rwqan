@@ -88,7 +88,8 @@ export interface CreateReleaseInput {
 export interface RecordAuditInput {
   action: DeployAuditAction;
   environment: DeployEnvironment;
-  result: "ok" | "rejected";
+  /** "accepted" marks a request accepted by an external system (e.g. GitHub). */
+  result: "ok" | "accepted" | "rejected";
   releaseId?: string;
   reason?: string;
 }

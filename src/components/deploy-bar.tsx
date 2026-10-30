@@ -291,12 +291,29 @@ export function DeployBar() {
         approve: approval,
         environment: state.environment,
       });
-      return res.json() as Promise<{ release?: DeployRelease }>;
+      return res.json() as Promise<{
+        release?: DeployRelease;
+        code?: string;
+        detail?: string;
+        actionsUrl?: string;
+      }>;
     },
     onSuccess: (result) => {
       setAuthUrl(null);
       setAutoResumePending(false);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+      if (result.code === "DEPLOY_GITHUB_DISPATCH_ACCEPTED") {
+        // The TEST publish was SENT to GitHub (workflow_dispatch) — GitHub
+        // creates the rollout, so this is deliberately NOT a deploy-success
+        // toast; success is proven only in GitHub Actions.
+        toast({
+          title: "أُرسل طلب النشر إلى GitHub",
+          description: result.actionsUrl
+            ? `${result.detail} المتابعة: ${result.actionsUrl}`
+            : result.detail ?? "النشر يُدار من GitHub Actions.",
+        });
+        return;
+      }
       const release = result.release;
       // Success is claimed ONLY after the route recorded a real deploy AND the
       // post-deploy verification passed — never on an unfinished/unsound deploy.

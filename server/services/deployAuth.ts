@@ -60,13 +60,6 @@ const DEPLOY_OAUTH_SCOPES = [
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
-/** Firebase CLI default OAuth client ID (from firebase-tools/lib/api.js). */
-const FIREBASE_CLI_CLIENT_ID =
-  "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com";
-
-/** Firebase CLI default OAuth client secret (from firebase-tools/lib/api.js). */
-const FIREBASE_CLI_CLIENT_SECRET = "j9iVZfS8kkCEFUPaAeJV0sAi";
-
 /** OAuth state/nonce expiry: 10 minutes. */
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -606,9 +599,11 @@ export async function verifyFirebaseCliAuth(
 /**
  * Get environment variables to inject when running the Firebase CLI.
  * Returns FIREBASE_TOKEN plus FIREBASE_CLIENT_ID and FIREBASE_CLIENT_SECRET
- * so Firebase CLI can exchange the refresh token using our OAuth client
- * credentials (matching those used in the OAuth flow). Never returns secrets
- * to the caller for display — only for process env.
+ * read from GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (the OAuth
+ * client that issued the stored refresh token — never Google's default
+ * values, and never hardcoded). Returns null (fail closed) when the OAuth
+ * config is missing. Never returns secrets to the caller for display — only
+ * for process env.
  */
 export async function getFirebaseCliEnv(
   sessionId: string,
@@ -616,10 +611,12 @@ export async function getFirebaseCliEnv(
 ): Promise<Record<string, string> | null> {
   const creds = await storage.getCredentials(sessionId, adminId);
   if (!creds || !creds.refreshToken) return null;
+  const config = readOAuthConfig();
+  if (!config.clientId || !config.clientSecret) return null;
   return {
     FIREBASE_TOKEN: creds.refreshToken,
-    FIREBASE_CLIENT_ID: FIREBASE_CLI_CLIENT_ID,
-    FIREBASE_CLIENT_SECRET: FIREBASE_CLI_CLIENT_SECRET,
+    FIREBASE_CLIENT_ID: config.clientId,
+    FIREBASE_CLIENT_SECRET: config.clientSecret,
   };
 }
 
