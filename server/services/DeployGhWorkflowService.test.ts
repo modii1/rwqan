@@ -58,11 +58,11 @@ test("invalid environment override refuses before token/API use", async () => {
   );
 });
 
-test("remote tip failing read-only is blocked at source and never pushes", async () => {
+test("remote tip failing read-only (ls-remote AND API) is blocked at source and never pushes", async () => {
   const result = await dispatchTestDeployWorkflow(
     request(),
     { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
-    fetchThatMustNotRun,
+    fetchThatMustNotRun, // the API fallback throwing counts as an API failure
     async () => ({
       tip: null,
       reason: "قراءة فقط فشلت.",
@@ -72,6 +72,72 @@ test("remote tip failing read-only is blocked at source and never pushes", async
   assert.equal(result.kind, "blocked");
   assert.equal(result.kind === "blocked" ? result.stage : null, "source");
   assert.match(result.kind === "blocked" ? result.reason : "", /push/);
+});
+
+test("ls-remote failure falls back to a read-only API tip query and dispatches when it matches", async () => {
+  const calls: Array<{ url: string; method: string }> = [];
+  const result = await dispatchTestDeployWorkflow(
+    request(),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: (init?.method ?? "GET").toUpperCase(),
+      });
+      if ((init?.method ?? "GET").toUpperCase() === "GET") {
+        return {
+          status: 200,
+          json: async () => ({ commit: { sha: COMMIT } }),
+        } as Response;
+      }
+      return { status: 204 } as Response; // dispatches accepted
+    },
+    async () => ({ tip: null, reason: "لا remote محلي." }),
+  );
+
+  assert.equal(result.kind, "accepted");
+  // First call: read-only GET of the branch; second: the dispatch POST.
+  assert.equal(calls[0].method, "GET");
+  assert.match(calls[0].url, /\/repos\/modii1\/rwqan\/branches\/apphosting%2Ftest-secret-isolation$/);
+  assert.equal(calls[1].method, "POST");
+  assert.match(calls[1].url, /\/dispatches$/);
+});
+
+test("API fallback tip mismatch is refused and NO dispatch POST is ever sent", async () => {
+  const calls: Array<{ url: string; method: string }> = [];
+  const result = await dispatchTestDeployWorkflow(
+    request(),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url, init) => {
+      calls.push({ url: String(url), method: (init?.method ?? "GET").toUpperCase() });
+      if ((init?.method ?? "GET").toUpperCase() === "GET") {
+        return {
+          status: 200,
+          json: async () => ({ commit: { sha: "b".repeat(40) } }),
+        } as Response;
+      }
+      throw new Error("dispatch POST must not be called after a tip mismatch");
+    },
+    async () => ({ tip: null, reason: "لا remote محلي." }),
+  );
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.kind === "blocked" ? result.stage : null, "source");
+  assert.match(result.kind === "blocked" ? result.reason : "", /لا يطابق الـcommit المعتمد/);
+  assert.equal(calls.length, 1, "only the read-only GET may have run");
+});
+
+test("API fallback 404 produces a clear 'branch missing' reason", async () => {
+  const result = await dispatchTestDeployWorkflow(
+    request(),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async () => ({ status: 404, json: async () => ({}) } as Response),
+    async () => ({ tip: null, reason: "لا remote محلي." }),
+  );
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.kind === "blocked" ? result.stage : null, "source");
+  assert.match(result.kind === "blocked" ? result.reason : "", /الفرع غير موجود|رفعه|push/);
 });
 
 test("remote tip different from the approved commit is refused", async () => {

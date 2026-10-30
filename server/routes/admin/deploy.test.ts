@@ -1533,11 +1533,20 @@ test("publish returns 403 DEPLOY_AUTH_REQUIRED with authUrl when no Firebase CLI
   });
 
   await withServer(app, async (base) => {
+    // The Firebase-CLI auth gate applies to LIVE only: TEST publishes are
+    // dispatched to GitHub Actions and never run the Firebase CLI.
+    const toLive = await fetch(`${base}/api/admin/deploy/environment`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "LIVE" }),
+    });
+    assert.equal(toLive.status, 200);
+
     const url = `${base}/api/admin/deploy/releases`;
     const res = await fetch(url, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "auth-test", approve: true }),
+      body: JSON.stringify({ version: "auth-test", approve: true, environment: "LIVE" }),
     });
     assert.equal(res.status, 403);
     const body = await res.json();
@@ -1561,6 +1570,14 @@ test("publish stores pending publish intent when auth required", async () => {
   });
 
   await withServer(app, async (base) => {
+    // LIVE only — TEST never goes through the Firebase CLI auth gate.
+    const toLive = await fetch(`${base}/api/admin/deploy/environment`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "LIVE" }),
+    });
+    assert.equal(toLive.status, 200);
+
     const url = `${base}/api/admin/deploy/releases`;
     const res = await fetch(url, {
       method: "POST",
@@ -1568,7 +1585,7 @@ test("publish stores pending publish intent when auth required", async () => {
       body: JSON.stringify({
         version: "auth-resume-test",
         approve: true,
-        environment: "TEST",
+        environment: "LIVE",
       }),
     });
     assert.equal(res.status, 403);
@@ -1578,5 +1595,87 @@ test("publish stores pending publish intent when auth required", async () => {
     // The pending publish intent should be stored for automatic resume.
     // We verify this indirectly: the response includes authUrl and the
     // executor internally stored the pending intent via startDeployAuthFlow.
+  });
+});
+
+test("a TEST publish is NOT gated by Firebase auth: it reaches the executor and surfaces the GitHub-only reason", async () => {
+  await __test_clearAllDeployCredentials(); // no Firebase credentials at all
+
+  const publishInputs: Array<Record<string, unknown>> = [];
+  const executor: DeployExecutor = {
+    publish: async (input) => {
+      publishInputs.push(input as unknown as Record<string, unknown>);
+      // Simulate the GitHub-only TEST outcome (e.g. missing token).
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: "النشر إلى بيئة الاختبار يتم حصريًا عبر GitHub Actions (workflow_dispatch).",
+        blocked: true,
+        stage: "auth",
+        target: DEPLOY_DEV_PROJECT_ID,
+      };
+    },
+    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
+  };
+  const store = new InMemoryDeploySystemStore();
+  const app = buildApp(store, { executor, collectChecks: async () => passingReport() });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/releases`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "gh-only-test", approve: true, environment: "TEST" }),
+    });
+    // The auth gate MUST NOT return 403 DEPLOY_AUTH_REQUIRED for TEST.
+    assert.notEqual(res.status, 403);
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_BLOCKED");
+    assert.ok(body.error.includes("GitHub Actions"));
+    // The executor ran with the TEST environment — it was never blocked upstream.
+    assert.equal(publishInputs.length, 1);
+    assert.equal(publishInputs[0].environment, "TEST");
+    assert.equal((await store.listReleases()).length, 0);
+  });
+});
+
+test("a TEST publish accepted by GitHub returns 202 without a release record", async () => {
+  const store = new InMemoryDeploySystemStore();
+  const executor: DeployExecutor = {
+    publish: async () => ({
+      deployed: false, // a dispatch is a request, never a completed deploy
+      savedToGit: false,
+      detail: "أُرسل طلب النشر إلى GitHub (workflow_dispatch).",
+      blocked: false,
+      stage: null,
+      target: DEPLOY_DEV_PROJECT_ID,
+      ghDispatch: {
+        accepted: true,
+        ref: "apphosting/test-secret-isolation",
+        actionsUrl: "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml",
+      },
+    }),
+    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
+  };
+  const app = buildApp(store, { executor, collectChecks: async () => passingReport() });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/releases`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "202-test", approve: true, environment: "TEST" }),
+    });
+    assert.equal(res.status, 202);
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_GITHUB_DISPATCH_ACCEPTED");
+    assert.equal(body.branch, "apphosting/test-secret-isolation");
+    assert.equal(body.actionsUrl, "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml");
+    assert.ok(body.detail.includes("GitHub"));
+    // No release record: the dispatch is a REQUEST, never a deploy. The audit
+    // records the dispatch without claiming success.
+    assert.equal((await store.listReleases()).length, 0);
+    const audit = (await store.listAudit())[0];
+    assert.equal(audit.action, "publish_dispatched");
+    assert.equal(audit.result, "accepted");
   });
 });

@@ -13,7 +13,8 @@ import { promisify } from "node:util";
  * Hard properties:
  *  - NO git push is ever run from this app: pushing needs Git credentials that
  *    must already exist; this service only performs a READ-ONLY
- *    `git ls-remote` to confirm the approved commit IS the remote branch tip.
+ *    `git ls-remote` (plus a read-only GitHub API branch query fallback) to
+ *    confirm the approved commit IS the remote branch tip.
  *  - The only credential used is a token that ALREADY exists in the server
  *    environment (`DEPLOY_GITHUB_TOKEN` from app config, not Git remotes).
  *    Nothing is created, prompted for, or auto-generated. If it is missing the
@@ -51,6 +52,7 @@ const GH_SANE_WORKFLOW_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.ya?ml$/;
 const GH_SANE_REMOTE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$/;
 const LS_REMOTE_TIMEOUT_MS = 15_000;
 const DISPATCH_TIMEOUT_MS = 15_000;
+const API_READ_TIMEOUT_MS = 15_000;
 
 /** Input of the workflow dispatch delegation. */
 export interface GhWorkflowDispatchRequest {
@@ -173,6 +175,45 @@ export async function readRemoteBranchHead(input: {
 }
 
 /**
+ * READ-ONLY remote branch tip query via the GitHub REST API
+ * (`GET /repos/{repo}/branches/{branch}`), using the SAME pre-existing token.
+ * No write call ever: this only reads the current SHA. Used as a fallback when
+ * the local `git ls-remote` cannot run (e.g. a deployed container without a
+ * `.git` directory or without the `mine` remote). The response body is never
+ * echoed; only the 40-hex commit SHA is extracted.
+ */
+async function readRemoteTipViaApi(
+  input: { repository: string; branch: string; token: string },
+  fetchImpl: typeof fetch,
+): Promise<{ tip: string | null; status: number | null }> {
+  const url = `${GH_API_BASE}/repos/${input.repository}/branches/${encodeURIComponent(input.branch)}`;
+  try {
+    const response = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": GH_API_VERSION,
+        "User-Agent": "rwqan-deploy-bar",
+      },
+      signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+    });
+    if (response.status !== 200) {
+      return { tip: null, status: response.status };
+    }
+    const body = (await response.json()) as { commit?: { sha?: unknown } };
+    const sha =
+      typeof body?.commit?.sha === "string" ? body.commit.sha.trim().toLowerCase() : "";
+    if (!/^[0-9a-f]{40}$/.test(sha)) {
+      return { tip: null, status: null };
+    }
+    return { tip: sha, status: 200 };
+  } catch {
+    return { tip: null, status: null };
+  }
+}
+
+/**
  * Redact the configured token from any text, defensively, before it leaves the
  * server; also cap length. Reasons are constant strings today, but this keeps
  * that property enforced instead of merely assumed.
@@ -222,28 +263,45 @@ export async function dispatchTestDeployWorkflow(
 
   // Identity gate: the workflow deploys the REMOTE branch tip, so it must be
   // EXACTLY the approved commit — otherwise GitHub would deploy something the
-  // admin never approved. Read-only check, no push, preserves commit history.
+  // admin never approved. Read-only check (git ls-remote, with a read-only
+  // GitHub API fallback for servers without a git remote), no push, preserves
+  // commit history.
   const tip = await readTipImpl({
     cwd: request.cwd,
     remoteName: config.remoteName,
     branch: config.branch,
   });
-  if (!tip.tip) {
-    return {
-      kind: "blocked",
-      stage: "source",
-      reason:
-        (tip.reason ?? "تعذّر قراءة tip الفرع البعيد.") +
-        " لا تنفيذ أمر push من التطبيق — يجب أن يقوم المشرف برفع الفرع بنفسه أولًا.",
-    };
+  let remoteTip = tip.tip;
+  if (!remoteTip) {
+    // ls-remote could not run (no local git remote / private / no .git on the
+    // deployed container). Fall back to a READ-ONLY GitHub API branch query
+    // with the same pre-existing token — still no push, no new credentials.
+    const apiTip = await readRemoteTipViaApi(
+      { repository: config.repository, branch: config.branch, token },
+      fetchImpl,
+    );
+    if (!apiTip.tip) {
+      const branchUnavailable =
+        apiTip.status === 404
+          ? `الفرع ${config.branch} غير موجود على ${config.repository} — لا تنفيذ أمر push من التطبيق؛ يجب أن يرفعه المشرف بنفسه أولًا.`
+          : apiTip.status === 401 || apiTip.status === 403
+            ? `رمز DEPLOY_GITHUB_TOKEN لا يملك صلاحية قراءة الفرع ${config.branch} على ${config.repository} (رُفض الاستعلام القراءة-فقط). لا تنفيذ أمر push من التطبيق.`
+            : "تعذّر الوصول إلى GitHub API (شبكة/انتهاء مهلة) — لا تنفيذ أمر push من التطبيق؛ يجب أن يرفعه المشرف بنفسه أولًا.";
+      return {
+        kind: "blocked",
+        stage: "source",
+        reason: `${branchUnavailable} (تعذّر أيضًا استعلام القراءة-فقط عبر git: ${tip.reason ?? "بلا تفسير"}).`,
+      };
+    }
+    remoteTip = apiTip.tip;
   }
-  if (tip.tip !== request.commit.toLowerCase()) {
+  if (remoteTip !== request.commit.toLowerCase()) {
     return {
       kind: "blocked",
       stage: "source",
       reason:
         `tip الفرع ${config.branch} على ${config.repository} لا يطابق الـcommit المعتمد ` +
-        `(${tip.tip.slice(0, 7)} ≠ ${request.commit.slice(0, 7)}) — رُفض الطلب حفاظًا عليه من نشر commit غير معتمد.`,
+        `(${remoteTip.slice(0, 7)} ≠ ${request.commit.slice(0, 7)}) — رُفض الطلب حفاظًا عليه من نشر commit غير معتمد.`,
     };
   }
 
