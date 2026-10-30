@@ -59,12 +59,16 @@ import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
-import { dispatchTestDeployWorkflow, dispatchLiveDeployWorkflow } from "./DeployGhWorkflowService";
+import { dispatchTestDeployWorkflow, dispatchLiveDeployWorkflow, readRemoteBranchHead } from "./DeployGhWorkflowService";
 import type {
   GhWorkflowDispatchResult,
   GhWorkflowDispatcher,
   GhLiveWorkflowDispatcher,
   GhLiveWorkflowDispatchRequest,
+} from "./DeployGhWorkflowService";
+import {
+  DEPLOY_GH_TEST_BRANCH,
+  DEPLOY_GH_TEST_REMOTE_NAME,
 } from "./DeployGhWorkflowService";
 
 export interface DeployCommandSpec {
@@ -99,6 +103,11 @@ export interface RealDeployDependencies {
    * token is missing, and refusal happens BEFORE any state-changing call.
    */
   dispatchTestDeploy?: GhWorkflowDispatcher;
+  /**
+   * Read-only remote branch tip probe (git ls-remote). Injectable so tests can
+   * avoid network/git access; falls back to the imported implementation.
+   */
+  readRemoteTip?: typeof readRemoteBranchHead;
   /**
    * LIVE publish delegation: dispatch GitHub's LIVE deploy workflow
    * (deploy-live.yml on `main`) so GITHUB — not this app — creates the
@@ -402,8 +411,27 @@ export class RealDeployExecutor {
           "النشر إلى بيئة الاختبار يتم حصريًا عبر GitHub Actions (workflow_dispatch) — لا يوجد مسار Firebase CLI بديل. التهيئة الخادمية للتفويض غير متوفرة؛ يجب إصلاح إعداد الخادم يدويًا.",
         );
       }
+      // Source of truth for TEST: the remote branch tip on GitHub, not the local
+      // HEAD. The rollout is created from the branch's remote tip regardless of
+      // what the local checkout says, so we must compare against (and deploy)
+      // the remote tip to avoid rejecting valid publishes when the local clone
+      // is behind the remote (e.g. on the published App Hosting instance).
+      const readTip = dependencies.readRemoteTip ?? readRemoteBranchHead;
+      const remoteTip = await readTip({
+        cwd,
+        remoteName: DEPLOY_GH_TEST_REMOTE_NAME,
+        branch: DEPLOY_GH_TEST_BRANCH,
+      });
+      if (!remoteTip.tip) {
+        return blockedPublish(
+          target,
+          "source",
+          `تعذّر قراءة tip فرع ${DEPLOY_GH_TEST_BRANCH} على GitHub (استعلام قراءة فقط). يُرجى التأكد من وجود الفرع على المستودع ثم المحاولة مجددًا.`,
+        );
+      }
+      const remoteCommit = remoteTip.tip;
       const gh: GhWorkflowDispatchResult = await dependencies.dispatchTestDeploy({
-        commit: commit.toLowerCase(),
+        commit: remoteCommit,
         cwd,
       });
       if (gh.kind === "accepted") {
@@ -414,7 +442,7 @@ export class RealDeployExecutor {
           blocked: false,
           stage: null,
           target: target.projectId,
-          releaseRef: releaseRef(target, commit),
+          releaseRef: releaseRef(target, remoteCommit),
           ghDispatch: {
             accepted: true,
             ref: gh.branch,
@@ -432,7 +460,7 @@ export class RealDeployExecutor {
         blocked: false,
         stage: "deploy",
         target: target.projectId,
-        releaseRef: releaseRef(target, commit),
+        releaseRef: releaseRef(target, remoteCommit),
       };
     }
 
@@ -986,6 +1014,7 @@ export function createRealDeployDependencies(): RealDeployDependencies {
     dispatchTestDeploy: (request) => dispatchTestDeployWorkflow(request),
     dispatchLiveDeploy: (request: GhLiveWorkflowDispatchRequest) =>
       dispatchLiveDeployWorkflow(request),
+    readRemoteTip: readRemoteBranchHead,
     now: () => new Date(),
     cwd: () => process.cwd(),
   };

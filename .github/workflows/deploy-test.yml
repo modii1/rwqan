@@ -92,10 +92,11 @@ jobs:
         # The renderer substitutes the exact SHA of the commit that triggered
         # this run — never a local archive without commit identity. Credentials
         # come from GOOGLE_APPLICATION_CREDENTIALS exported by the auth step.
+        # NOTE: firebase-tools >= 15.22.3 does NOT support --location on
+        # apphosting:rollouts:create; the region is fixed on the backend
+        # (rwqan-backend @ europe-west4) in Firebase Console. -P and -c are
+        # global firebase CLI options (project + config file).
         run: |
-          firebase apphosting:rollouts:create rwqan-backend \
+          firebase -P rwqan-757 -c firebase.dev.json apphosting:rollouts:create rwqan-backend \
             --git-commit ${{ github.sha }} \
-            --location europe-west4 \
-            --project rwqan-757 \
-            --config firebase.dev.json \
-            --non-interactive
+            --force

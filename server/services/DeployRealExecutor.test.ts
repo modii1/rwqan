@@ -20,10 +20,11 @@ import {
   createRealDeployDependencies,
   type RealDeployDependencies,
 } from "./DeployRealExecutor";
-import type {
-  GhWorkflowDispatchResult,
-  GhWorkflowDispatcher,
-  GhLiveWorkflowDispatcher,
+import {
+  readRemoteBranchHead,
+  type GhWorkflowDispatchResult,
+  type GhWorkflowDispatcher,
+  type GhLiveWorkflowDispatcher,
 } from "./DeployGhWorkflowService";
 import { resolveFirebaseCommand } from "./DeployToolsService";
 import { clearDeployAuth, __test_setDeployCredentials } from "./deployAuth";
@@ -88,6 +89,8 @@ interface FakeOptions {
   dispatch?: GhWorkflowDispatcher;
   /** Fake LIVE dispatcher (GitHub Actions seam). */
   dispatchLive?: GhLiveWorkflowDispatcher;
+  /** Fake read-remote-tip (git ls-remote) for TEST dispatch tests. */
+  readRemoteTip?: typeof readRemoteBranchHead;
 }
 
 function fakeDeps(options: FakeOptions = {}) {
@@ -137,6 +140,7 @@ function fakeDeps(options: FakeOptions = {}) {
     },
     ...(options.dispatch ? { dispatchTestDeploy: options.dispatch } : {}),
     ...(options.dispatchLive ? { dispatchLiveDeploy: options.dispatchLive } : {}),
+    readRemoteTip: options.readRemoteTip ?? (async () => ({ tip: COMMIT.toLowerCase() })),
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     cwd: () => "C:/dev/project",
   };
@@ -910,6 +914,30 @@ test("a TEST publish never requires Firebase CLI auth even when a session id is 
 
   assert.equal(outcome.ghDispatch?.accepted, true);
   assert.notEqual(outcome.authRequired, true, "TEST must not demand Firebase CLI auth");
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a TEST publish dispatches the GitHub remote tip, not the local HEAD, when they differ", async () => {
+  const dispatches: Array<{ commit: string; cwd: string }> = [];
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatch: async (request) => {
+      dispatches.push(request);
+      return acceptedDispatch();
+    },
+    // Remote tip differs from the local COMMIT used by testPublish()
+    readRemoteTip: async () => ({ tip: "b".repeat(40) }),
+  });
+  const outcome = await executor(deps).publish(testPublish());
+
+  assert.equal(outcome.deployed, false);
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.stage, null);
+  assert.equal(dispatches.length, 1);
+  // The dispatch must carry the REMOTE tip, not the local COMMIT.
+  assert.equal(dispatches[0].commit, "b".repeat(40));
+  assert.notEqual(dispatches[0].commit, COMMIT);
+
+  // HARD GUARANTEE: no Firebase CLI command ran for TEST.
   assertNoFirebaseCliCalls(calls, getProbeCalls());
 });
 
