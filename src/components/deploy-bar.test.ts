@@ -140,6 +140,39 @@ test("publish error handler uses the real server error, not a blanket connection
   );
 });
 
+test("TEST publish confirmation and result messages use plain Arabic (no technical jargon)", () => {
+  const source = read("./deploy-bar.tsx");
+  // The confirmation prompt is written for a non-technical site owner.
+  assert.match(source, /هل تريد تحديث بيئة التجربة/);
+  assert.match(source, /رابط بيئة التجربة/);
+  assert.match(source, /يبدأ التحديث من GitHub تلقائيًا/);
+  assert.match(source, /الموافقة هنا طلب بدء التحديث فقط/);
+  // No technical terms in the confirm/result surface.
+  assert.doesNotMatch(source, /workflow_dispatch/);
+  // The GitHub Actions follow-up link is always offered.
+  assert.match(source, /modii1\/rwqan\/actions\/workflows\/deploy-test\.yml/);
+});
+
+test("the old direct-Firebase failure message is never shown; friendly admin wording instead", () => {
+  const source = read("./deploy-bar.tsx");
+  // The stale-server Firebase CLI failure text must never be DISPLAYED: the
+  // components contains none of the two banned phrases verbatim (they are
+  // assembled in detection as regex fragments), and every failure path shows
+  // friendly admin Arabic instead.
+  assert.doesNotMatch(source, /فشل إنشاء rollout/);
+  assert.doesNotMatch(source, /رمز الخروج/);
+  assert.match(source, /friendlyDeployFailure/);
+  assert.match(source, /لم يبدأ التحديث: نسخة الموقع على الخادم قديمة/);
+  assert.match(source, /إعداد الربط مع GitHub غير مكتمل/);
+  assert.match(source, /النسخة المرفوعة إلى GitHub ليست هي نفس النسخة المعتمَدة/);
+  assert.match(source, /التفاصيل التقنية في سجل النشر/);
+  // The friendly mapping runs BEFORE any raw server error is displayed.
+  assert.match(
+    source,
+    /friendlyDeployFailure\(status, body\);\s*if \(friendly\) return friendly;\s*if \(typeof body\.error/,
+  );
+});
+
 test("the restore list surfaces the real stable release only", () => {
   const source = read("./deploy-bar.tsx");
   assert.match(source, /state\.stableReleases\.map/);

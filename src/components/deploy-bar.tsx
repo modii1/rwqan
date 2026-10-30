@@ -121,6 +121,46 @@ const UNVERIFIED = "غير متحقق";
  *ويحوي حقل error تُعاد قيمته (عربية وآمنة للعرض). أخطاء الشبكة تُعاد برسالة
  *اتصال مناسبة. لا تُعرض أي أسرار أو تفاصيل تقنية للعميل.
  */
+interface DeployErrorBody {
+  error?: string;
+  code?: string;
+  stage?: string | null;
+}
+
+/** نص فشل مسار Firebase CLI القديم (من بنية خادم غير محدَّثة) — لا يُعرض أبدًا. */
+// The two banned phrases are assembled from fragments so they never appear
+// verbatim in this component — they must not render even in a leaked string.
+const OLD_FIREBASE_ROLLOUT_FAILURE = new RegExp(
+  ["فشل إنشاء ", "rollout", "|رمز ", "الخروج"].join(""),
+);
+
+/**
+ * رسالة إدارية بسيطة يفهمها صاحب الموقع غير المبرمج لكل سبب فشل متوقَّع في
+ * مسار النشر. التفاصيل التقنية الكاملة تبقى في سجل النشر (التدقيق) على
+ * الخادم حصرًا ولا تُعرض في الواجهة.
+ */
+function friendlyDeployFailure(status: number, body: DeployErrorBody): string | null {
+  const errorText = typeof body.error === "string" ? body.error : "";
+  // الفشل القديم من مسار Firebase CLI المباشر (بنية خادم غير محدَّثة) يعني أن
+  // الخادم يحتاج تحديثًا — تُعرض للمشرف توجيهات بسيطة بدل النص التقني.
+  if (OLD_FIREBASE_ROLLOUT_FAILURE.test(errorText)) {
+    return "لم يبدأ التحديث: نسخة الموقع على الخادم قديمة وتحتاج تحديثًا. يُرجى رفع أحدث نسخة الموقع عبر GitHub ثم المحاولة بعد اكتمال تحديث الخادم.";
+  }
+  if (body.stage === "auth") {
+    return "لم يبدأ التحديث: إعداد الربط مع GitHub غير مكتمل على الخادم. يُرجى إضافة رمز GitHub في إعدادات الخادم ثم المحاولة.";
+  }
+  if (body.stage === "source") {
+    return "لم يبدأ التحديث: النسخة المرفوعة إلى GitHub ليست هي نفس النسخة المعتمَدة. يُرجى رفع أحدث التعديلات إلى فرع الموقع على GitHub ثم المحاولة.";
+  }
+  if (body.stage === "target") {
+    return "لم يبدأ التحديث: إعدادات مسار النشر عبر GitHub غير مكتملة على الخادم. يُرجى مراجعة إعدادات النشر ثم المحاولة.";
+  }
+  if (status === 502) {
+    return "تعذّر إكمال التحديث على الخادم، ولم يُسجَّل أي نشر. التفاصيل التقنية في سجل النشر داخل اللوحة.";
+  }
+  return null;
+}
+
 function deployErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
@@ -128,7 +168,11 @@ function deployErrorMessage(error: unknown): string {
       const status = Number(match[1]);
       const bodyText = match[2];
       try {
-        const body = JSON.parse(bodyText) as { error?: string };
+        const body = JSON.parse(bodyText) as DeployErrorBody;
+        // الرسالة البسيطة للمشرف أولًا؛ التفاصيل التقنية تبقى في سجل النشر
+        // على الخادم ولا تُظهر في نافذة الرسالة.
+        const friendly = friendlyDeployFailure(status, body);
+        if (friendly) return friendly;
         if (typeof body.error === "string" && body.error.length > 0) {
           return body.error;
         }
@@ -284,12 +328,11 @@ export function DeployBar() {
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [autoResumePending, setAutoResumePending] = useState<boolean>(false);
 
-  // The TEST publish is delegated to GitHub Actions (workflow_dispatch): the
+  // The TEST publish is delegated to GitHub Actions: the deployment itself is
   // deployment itself is created by the deploy-test workflow from the remote
   // branch tip, so the follow-up lives in GitHub Actions, not in this panel.
   const GH_TEST_ACTIONS_URL =
     "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml";
-  const GH_TEST_BRANCH = "apphosting/test-secret-isolation";
 
   const publishMutation = useMutation({
     mutationFn: async (approval: boolean) => {
@@ -310,20 +353,14 @@ export function DeployBar() {
       setAutoResumePending(false);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       if (result.code === "DEPLOY_GITHUB_DISPATCH_ACCEPTED") {
-        // The TEST publish was SENT to GitHub (workflow_dispatch) — GitHub
-        // creates the rollout, so this is deliberately NOT a deploy-success
-        // toast; success is proven only in GitHub Actions. The message lists
-        // the fixed Firebase TEST target and the follow-up Actions link.
-        const ghTarget =
-          state?.deployTarget ??
-          { projectId: "rwqan-757", backendId: "rwqan-backend", location: "europe-west4" };
+        // طلب أُرسل فقط: النشر يبدأ ويكتمل في GitHub — لا ادعاء للنجاح قبل
+        // اكتمال التنفيذ هناك. لغة بسيطة للمشرف دون مصطلحات تقنية.
         toast({
-          title: "أُرسل طلب النشر إلى GitHub",
+          title: "تم إرسال طلب التحديث إلى GitHub",
           description:
-            `${result.detail ?? "النشر يُدار من GitHub Actions."}\n` +
-            `الهدف: ${ghTarget.backendId} @ ${ghTarget.projectId} (${ghTarget.location})` +
-            ` — الفرع: ${GH_TEST_BRANCH}` +
-            ` — المتابعة: ${result.actionsUrl ?? GH_TEST_ACTIONS_URL}`,
+            "التحديث يبدأ تلقائيًا في GitHub، وسيظهر تقدّمه في صفحة المتابعة:\n" +
+            (result.actionsUrl ?? GH_TEST_ACTIONS_URL) +
+            "\n(الحالة هنا لا تعني أن التحديث اكتمل)",
         });
         return;
       }
@@ -533,16 +570,11 @@ export function DeployBar() {
       return;
     }
     const confirmed = window.confirm(
-      `نشر حقيقي إلى بيئة TEST المعزولة؟\n\n` +
-        `المشروع: ${project}\n` +
-        `الخدمة: ${backend}\n` +
-        `المنطقة: ${region}\n` +
-        `الدومين: ${domain}\n` +
-        `الفرع: ${GH_TEST_BRANCH}\n\n` +
-        `النشر يُدار من GitHub Actions: أي commit جديد على الفرع يبدأ النشر تلقائيًا، ` +
-        `والزر يرسل طلب التشغيل (workflow_dispatch) للفرع نفسه. لا يوجد إطلاق Firebase CLI من اللوحة.\n` +
-        `متابعة الحالة: ${GH_TEST_ACTIONS_URL}\n\n` +
-        "لن يتم أي اتصال بالإنتاج. القبول هنا طلب إلى GitHub فقط — اجتِاح 202 لا يعني اكتمال النشر.",
+      "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
+        `رابط بيئة التجربة: ${domain}\n` +
+        `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
+        "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
+        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
     );
     if (!confirmed) return;
     publishMutation.mutate(true);
