@@ -284,6 +284,13 @@ export function DeployBar() {
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [autoResumePending, setAutoResumePending] = useState<boolean>(false);
 
+  // The TEST publish is delegated to GitHub Actions (workflow_dispatch): the
+  // deployment itself is created by the deploy-test workflow from the remote
+  // branch tip, so the follow-up lives in GitHub Actions, not in this panel.
+  const GH_TEST_ACTIONS_URL =
+    "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml";
+  const GH_TEST_BRANCH = "apphosting/test-secret-isolation";
+
   const publishMutation = useMutation({
     mutationFn: async (approval: boolean) => {
       if (!state) throw new Error("لا توجد حالة نشر جاهزة للخادم.");
@@ -305,12 +312,18 @@ export function DeployBar() {
       if (result.code === "DEPLOY_GITHUB_DISPATCH_ACCEPTED") {
         // The TEST publish was SENT to GitHub (workflow_dispatch) — GitHub
         // creates the rollout, so this is deliberately NOT a deploy-success
-        // toast; success is proven only in GitHub Actions.
+        // toast; success is proven only in GitHub Actions. The message lists
+        // the fixed Firebase TEST target and the follow-up Actions link.
+        const ghTarget =
+          state?.deployTarget ??
+          { projectId: "rwqan-757", backendId: "rwqan-backend", location: "europe-west4" };
         toast({
           title: "أُرسل طلب النشر إلى GitHub",
-          description: result.actionsUrl
-            ? `${result.detail} المتابعة: ${result.actionsUrl}`
-            : result.detail ?? "النشر يُدار من GitHub Actions.",
+          description:
+            `${result.detail ?? "النشر يُدار من GitHub Actions."}\n` +
+            `الهدف: ${ghTarget.backendId} @ ${ghTarget.projectId} (${ghTarget.location})` +
+            ` — الفرع: ${GH_TEST_BRANCH}` +
+            ` — المتابعة: ${result.actionsUrl ?? GH_TEST_ACTIONS_URL}`,
         });
         return;
       }
@@ -524,8 +537,12 @@ export function DeployBar() {
         `المشروع: ${project}\n` +
         `الخدمة: ${backend}\n` +
         `المنطقة: ${region}\n` +
-        `الدومين: ${domain}\n\n` +
-        "لن يتم أي اتصال بالإنتاج. يُسجَّل الإصدار كمنشور فقط بعد نجاح التحقق بعد النشر.",
+        `الدومين: ${domain}\n` +
+        `الفرع: ${GH_TEST_BRANCH}\n\n` +
+        `النشر يُدار من GitHub Actions: أي commit جديد على الفرع يبدأ النشر تلقائيًا، ` +
+        `والزر يرسل طلب التشغيل (workflow_dispatch) للفرع نفسه. لا يوجد إطلاق Firebase CLI من اللوحة.\n` +
+        `متابعة الحالة: ${GH_TEST_ACTIONS_URL}\n\n` +
+        "لن يتم أي اتصال بالإنتاج. القبول هنا طلب إلى GitHub فقط — اجتِاح 202 لا يعني اكتمال النشر.",
     );
     if (!confirmed) return;
     publishMutation.mutate(true);
