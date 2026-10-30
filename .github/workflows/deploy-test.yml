@@ -88,6 +88,22 @@ jobs:
           npm install --global firebase-tools@15.22.3
           firebase --version
 
+      - name: Diagnose WIF identity and project access (temporary, no secrets)
+        if: steps.auth.outputs.mode == 'wif'
+        run: |
+          echo "=== Active identity ==="
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          echo "=== Project ID ==="
+          gcloud config get-value project
+          echo "=== Project number ==="
+          gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)"
+          echo "=== Firebase App Hosting API status ==="
+          gcloud services list --filter="name:firebaseapphosting.googleapis.com" --format="value(name,state)" || true
+          echo "=== Service Usage roles ==="
+          gcloud projects get-iam-policy $(gcloud config get-value project) \
+            --filter="bindings.role:roles/serviceusage.serviceUsageConsumer OR bindings.role:roles/serviceusage.serviceUsageAdmin" \
+            --format="value(bindings.role,bindings.members[])" || true
+
       - name: Create App Hosting TEST rollout
         # The renderer substitutes the exact SHA of the commit that triggered
         # this run — never a local archive without commit identity. Credentials
