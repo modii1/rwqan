@@ -401,10 +401,15 @@ export function createAdminDeployRouter(
       if (!failedChecks) {
         // Firebase CLI authentication is required before any rollout command
         // can run. Check server-side session credentials first (fail closed).
+        // NOTE: TEST publishes are dispatched to GitHub Actions and never run
+        // the Firebase CLI, so this Firebase-only auth gate does NOT apply to
+        // them (requesting Google OAuth for a TEST publish would block the
+        // GitHub-only path).
         const sessionId = (req.sessionID ?? "") as string;
         const adminId = sessionId; // Session ID is the admin-scoped identifier.
+        const requiresFirebaseAuth = environment !== "TEST";
         const authStatus = await getDeployAuthStatus(sessionId, adminId);
-        if (!authStatus.authenticated) {
+        if (requiresFirebaseAuth && !authStatus.authenticated) {
           // Store the pending publish intent for automatic resume after OAuth.
           // Single-use: deleted after retrieval via getAndDeletePendingPublish.
           const pendingPublish = {

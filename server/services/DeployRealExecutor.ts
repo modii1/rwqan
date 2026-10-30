@@ -372,15 +372,24 @@ export class RealDeployExecutor {
 
     const cwd = dependencies.cwd();
 
-    // TEST publish DELEGATION (GitHub Actions): instead of the app running the
-    // Firebase CLI / apphosting:rollouts:create directly for TEST, it ASKS
-    // GitHub to run the TEST deploy workflow, which creates the rollout from
-    // the branch's remote tip on `modii1/rwqan @ apphosting/test-secret-isolation`.
+    // TEST publish DELEGATION (GitHub Actions): for TEST the app NEVER runs the
+    // Firebase CLI / apphosting:rollouts:create itself. The ONLY path is a
+    // workflow_dispatch to GitHub, which creates the rollout from the branch's
+    // remote tip on `modii1/rwqan @ apphosting/test-secret-isolation`.
     // No git push, no Firebase CLI, no new credentials — a missing pre-existing
     // GitHub token fails closed with a clear admin-facing reason, and a remote
     // tip that differs from the approved commit is refused (GitHub checks out
     // the branch tip, so a mismatch would deploy an unapproved commit).
-    if (environment === "TEST" && dependencies.dispatchTestDeploy) {
+    // There is NO fallback to the Firebase CLI here: if the GitHub path is not
+    // wired (missing seam) the publish is blocked, not sent to Firebase.
+    if (environment === "TEST") {
+      if (!dependencies.dispatchTestDeploy) {
+        return blockedPublish(
+          target,
+          "target",
+          "النشر إلى بيئة الاختبار يتم حصريًا عبر GitHub Actions (workflow_dispatch) — لا يوجد مسار Firebase CLI بديل. التهيئة الخادمية للتفويض غير متوفرة؛ يجب إصلاح إعداد الخادم يدويًا.",
+        );
+      }
       const gh: GhWorkflowDispatchResult = await dependencies.dispatchTestDeploy({
         commit: commit.toLowerCase(),
         cwd,
