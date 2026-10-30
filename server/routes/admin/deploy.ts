@@ -400,7 +400,17 @@ export function createAdminDeployRouter(
       const checksMeta =
         storedRun?.meta ??
         buildChecksMeta(report.checks, report.reasons, publishRanAt);
-      const failedChecks = checks.secretScan !== "PASS" || checks.typescript === "FAIL";
+      // The changed-file secret scan needs a local Git checkout. On the deployed
+      // TEST runtime there is none, so it reports BLOCKED — that is "could not
+      // be adjudged", NOT "a secret was found". For a TEST GitHub dispatch the
+      // source is the immutable remote commit, so an unavailable scan must not
+      // block the dispatch; an actual FAIL still blocks. LIVE keeps the strict
+      // existing gate, and LOCAL keeps requiring a definitive PASS.
+      const secretScanUnavailable = checks.secretScan === "BLOCKED" && report.git === null;
+      const failedChecks =
+        environment === "TEST" && secretScanUnavailable
+          ? checks.typescript === "FAIL"
+          : checks.secretScan !== "PASS" || checks.typescript === "FAIL";
 
       // Explicit admin approval + (optional) client-confirmed target. The client
       // can never pick the real target: it is fixed server-side; a mismatch or a
@@ -518,6 +528,7 @@ export function createAdminDeployRouter(
             error: outcome.detail,
             stage: outcome.stage ?? null,
             target: outcome.target ?? null,
+            via: outcome.via ?? null,
           });
           return;
         }
@@ -543,14 +554,16 @@ export function createAdminDeployRouter(
             action: "publish_dispatched",
             environment,
             result: "accepted",
-            reason: outcome.detail,
+            reason: `${outcome.detail} (commit ${outcome.ghDispatch.commit.slice(0, 7)})`,
           });
           res.status(202).json({
             code: "DEPLOY_GITHUB_DISPATCH_ACCEPTED",
             detail: outcome.detail,
             target: outcome.target ?? null,
             branch: outcome.ghDispatch.ref,
+            commit: outcome.ghDispatch.commit,
             actionsUrl: outcome.ghDispatch.actionsUrl,
+            via: outcome.via ?? "github_actions",
           });
           return;
         }
@@ -568,6 +581,7 @@ export function createAdminDeployRouter(
             error: outcome.detail,
             stage: outcome.stage ?? null,
             target: outcome.target ?? null,
+            via: outcome.via ?? null,
           });
           return;
         }

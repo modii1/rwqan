@@ -1655,6 +1655,7 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
         accepted: true,
         ref: "test/unified-gateway-ui-only",
         actionsUrl: "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml",
+        commit: FAKE_SHA,
       },
     }),
     restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
@@ -1679,5 +1680,81 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
     const audit = (await store.listAudit())[0];
     assert.equal(audit.action, "publish_dispatched");
     assert.equal(audit.result, "accepted");
+  });
+});
+
+test("a TEST dispatch is NOT blocked when the local Git scan is unavailable (deployed runtime)", async () => {
+  const store = new InMemoryDeploySystemStore();
+  const publishInputs: Array<Record<string, unknown>> = [];
+  const executor: DeployExecutor = {
+    publish: async (input) => {
+      publishInputs.push(input as unknown as Record<string, unknown>);
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: "أُرسل طلب النشر إلى GitHub (workflow_dispatch).",
+        blocked: false,
+        stage: null,
+        target: DEPLOY_DEV_PROJECT_ID,
+        via: "github_actions",
+        ghDispatch: {
+          accepted: true,
+          ref: "test/unified-gateway-ui-only",
+          actionsUrl: "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml",
+          commit: FAKE_SHA,
+        },
+      };
+    },
+    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
+  };
+  // App Hosting: no local .git → the changed-file scan cannot run (BLOCKED),
+  // which is "unknown", not "a secret was found".
+  const app = buildApp(store, {
+    executor,
+    collectChecks: async () => ({
+      checks: { ...PASSING_CHECKS, secretScan: "BLOCKED" },
+      git: null,
+      reasons: { secretScan: "git غير متاح على الخادم." },
+    }),
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/releases`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "no-git-dispatch", approve: true, environment: "TEST" }),
+    });
+    assert.equal(res.status, 202, "an UNAVAILABLE scan must not block a TEST dispatch");
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_GITHUB_DISPATCH_ACCEPTED");
+    assert.equal(body.via, "github_actions");
+    assert.equal(body.commit, FAKE_SHA);
+    assert.equal(publishInputs.length, 1, "the executor still receives the TEST publish");
+  });
+});
+
+test("a REAL secret-scan failure still blocks a TEST dispatch", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let executorCalled = false;
+  const executor: DeployExecutor = {
+    publish: async () => {
+      executorCalled = true;
+      return { deployed: false, savedToGit: false, detail: "should not run" };
+    },
+    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
+  };
+  const app = buildApp(store, {
+    executor,
+    collectChecks: async () => failingReport(),
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/releases`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ version: "secret-fail", approve: true, environment: "TEST" }),
+    });
+    assert.notEqual(res.status, 202);
+    assert.equal(executorCalled, false, "a real secret finding must still stop the dispatch");
   });
 });

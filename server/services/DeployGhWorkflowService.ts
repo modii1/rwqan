@@ -81,6 +81,12 @@ export interface GhDispatchAccepted {
   ref: string;
   /** Non-secret URL where the admin can watch the run. */
   actionsUrl: string;
+  /**
+   * The full remote-tip SHA the workflow will build (the exact source read
+   * read-only BEFORE dispatch). Recorded so the panel never reports the local
+   * HEAD as the deployed revision.
+   */
+  commit: string;
 }
 
 /**
@@ -94,6 +100,8 @@ export type GhWorkflowDispatchResult =
       detail: string;
       branch: string;
       actionsUrl: string;
+      /** Full remote-tip SHA GitHub will build. */
+      commit: string;
     }
   | {
       /** Fail-closed refusal before any API call (missing token/config, tip mismatch). */
@@ -202,6 +210,18 @@ function resolveGhConfig(
   if (!GH_SANE_REMOTE_PATTERN.test(remoteName)) {
     return { invalid: keys.remoteName };
   }
+  // HARD SEPARATION: TEST can never be pointed at the LIVE branch or the LIVE
+  // workflow file, even through an environment override. Without this guard a
+  // misconfigured DEPLOY_GITHUB_TEST_BRANCH=main would dispatch the TEST button
+  // to production. LIVE keeps its own fixed branch/workflow (main/deploy-live).
+  if (environment === "TEST") {
+    if (/^(main|master)$/i.test(branch)) {
+      return { invalid: keys.branch };
+    }
+    if (workflowFile === DEPLOY_GH_LIVE_WORKFLOW_FILE) {
+      return { invalid: keys.workflowFile };
+    }
+  }
   return { repository, branch, workflowFile, remoteName };
 }
 
@@ -289,6 +309,16 @@ async function readRemoteTipViaApi(
   }
 }
 
+/** Conclusion of the workflow step that actually creates the rollout. */
+export type DeployRolloutStepState = "success" | "failed" | "not_run" | "unknown";
+
+interface LatestRunState {
+  state: "running" | "success" | "failed" | "none" | "unknown";
+  runUrl: string | null;
+  headSha: string | null;
+  runId: number | null;
+}
+
 /**
  * READ-ONLY state probe: the latest run of the environment's workflow on its
  * branch. Used (a) as a duplicate-rollout guard right before any dispatch and
@@ -302,18 +332,15 @@ async function fetchLatestRunState(
   config: ResolvedGhEnvConfig,
   token: string,
   fetchImpl: typeof fetch,
-): Promise<{
-  state: "running" | "success" | "failed" | "none" | "unknown";
-  runUrl: string | null;
-  headSha: string | null;
-}> {
+): Promise<LatestRunState> {
   const url =
     `${GH_API_BASE}/repos/${config.repository}/actions/workflows/${config.workflowFile}/runs` +
     `?branch=${encodeURIComponent(config.branch)}&per_page=1`;
-  const fallbackState = {
-    state: "unknown" as const,
+  const fallbackState: LatestRunState = {
+    state: "unknown",
     runUrl: `https://github.com/${config.repository}/actions/workflows/${config.workflowFile}`,
     headSha: null,
+    runId: null,
   };
   try {
     const response = await fetchImpl(url, {
@@ -331,6 +358,7 @@ async function fetchLatestRunState(
     }
     const body = (await response.json()) as {
       workflow_runs?: Array<{
+        id?: unknown;
         status?: unknown;
         conclusion?: unknown;
         html_url?: unknown;
@@ -339,7 +367,7 @@ async function fetchLatestRunState(
     };
     const run = Array.isArray(body.workflow_runs) ? body.workflow_runs[0] : undefined;
     if (!run || typeof run !== "object") {
-      return { state: "none", runUrl: fallbackState.runUrl, headSha: null };
+      return { state: "none", runUrl: fallbackState.runUrl, headSha: null, runId: null };
     }
     const status = typeof run.status === "string" ? run.status : "";
     const conclusion = typeof run.conclusion === "string" ? run.conclusion : null;
@@ -348,15 +376,19 @@ async function fetchLatestRunState(
       typeof run.head_sha === "string" && /^[0-9a-f]{40}$/.test(run.head_sha.trim().toLowerCase())
         ? run.head_sha.trim().toLowerCase()
         : null;
+    const runId =
+      typeof run.id === "number" && Number.isSafeInteger(run.id) && run.id > 0
+        ? run.id
+        : null;
     if (status === "queued" || status === "in_progress" || status === "waiting") {
-      return { state: "running", runUrl, headSha };
+      return { state: "running", runUrl, headSha, runId };
     }
     if (status === "completed") {
       if (conclusion === "success") {
-        return { state: "success", runUrl, headSha };
+        return { state: "success", runUrl, headSha, runId };
       }
       if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "cancelled") {
-        return { state: "failed", runUrl, headSha };
+        return { state: "failed", runUrl, headSha, runId };
       }
     }
     return fallbackState;
@@ -364,6 +396,83 @@ async function fetchLatestRunState(
     void environment;
     return fallbackState;
   }
+}
+
+/**
+ * READ-ONLY verification that the run REALLY created a rollout. The overall run
+ * conclusion is not enough: a workflow can be green while the rollout step was
+ * skipped or renamed. This reads the run's jobs and requires the step whose name
+ * contains "rollout" to have concluded `success`. Cached briefly per run so the
+ * 20-second status poll does not hammer the API. Unknown stays uncached so a
+ * transient failure is retried on the next poll.
+ */
+const ROLLOUT_STEP_CACHE_TTL_MS = 60_000;
+const rolloutStepCache = new Map<string, { value: DeployRolloutStepState; readAtMs: number }>();
+
+/** Test seam: forget cached rollout-step conclusions. */
+export function resetDeployWorkflowStatusCache(): void {
+  rolloutStepCache.clear();
+}
+
+async function fetchRolloutStepState(
+  config: ResolvedGhEnvConfig,
+  token: string,
+  runId: number,
+  fetchImpl: typeof fetch,
+): Promise<DeployRolloutStepState> {
+  const key = `${config.repository}:${config.workflowFile}:${runId}`;
+  const cached = rolloutStepCache.get(key);
+  if (cached && Date.now() - cached.readAtMs < ROLLOUT_STEP_CACHE_TTL_MS) {
+    return cached.value;
+  }
+  let value: DeployRolloutStepState = "unknown";
+  try {
+    const response = await fetchImpl(
+      `${GH_API_BASE}/repos/${config.repository}/actions/runs/${runId}/jobs?per_page=100`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": GH_API_VERSION,
+          "User-Agent": "rwqan-deploy-bar",
+        },
+        signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status === 200) {
+      const body = (await response.json()) as {
+        jobs?: Array<{
+          steps?: Array<{ name?: unknown; conclusion?: unknown }>;
+        }>;
+      };
+      const steps = (Array.isArray(body.jobs) ? body.jobs : []).flatMap((job) =>
+        Array.isArray(job?.steps) ? job.steps : [],
+      );
+      const rolloutStep = steps.find(
+        (step) => typeof step?.name === "string" && /rollout/i.test(step.name),
+      );
+      if (!rolloutStep) {
+        value = "not_run";
+      } else if (rolloutStep.conclusion === "success") {
+        value = "success";
+      } else if (
+        rolloutStep.conclusion === "failure" ||
+        rolloutStep.conclusion === "cancelled" ||
+        rolloutStep.conclusion === "timed_out"
+      ) {
+        value = "failed";
+      } else if (rolloutStep.conclusion === "skipped") {
+        value = "not_run";
+      }
+    }
+  } catch {
+    value = "unknown";
+  }
+  if (value !== "unknown") {
+    rolloutStepCache.set(key, { value, readAtMs: Date.now() });
+  }
+  return value;
 }
 
 /**
@@ -388,6 +497,7 @@ async function postDispatch(
   config: ResolvedGhEnvConfig,
   token: string,
   dispatchDetail: string,
+  commit: string,
   fetchImpl: typeof fetch,
 ): Promise<GhWorkflowDispatchResult> {
   const actionsUrl = `https://github.com/${config.repository}/actions/workflows/${config.workflowFile}`;
@@ -419,6 +529,7 @@ async function postDispatch(
       detail: sanitizeReason(dispatchDetail, token),
       branch: config.branch,
       actionsUrl,
+      commit,
     };
   }
 
@@ -538,6 +649,7 @@ export async function dispatchTestDeployWorkflow(
     token,
     `أُرسل طلب النشر إلى GitHub (workflow_dispatch على ${config.workflowFile} للفرع ${config.branch}).` +
       " سيُنشأ الـRollout من الفرع البعيد ويُدار من GitHub Actions — هذا الطلب لا يثبت نجاح النشر نفسه.",
+    remoteTip,
     fetchImpl,
   );
 }
@@ -607,8 +719,6 @@ export async function dispatchLiveDeployWorkflow(
     }
     remoteTip = apiTip.tip;
   }
-  void remoteTip;
-
   // Duplicate-rollout prevention (same mechanism as TEST, per environment).
   const runningNow = await fetchLatestRunState("LIVE", config, token, fetchImpl);
   if (runningNow.state === "running") {
@@ -624,6 +734,7 @@ export async function dispatchLiveDeployWorkflow(
     token,
     `أُرسل طلب تحديث الموقع الرسمي إلى GitHub (workflow_dispatch على ${config.workflowFile} للفرع ${config.branch}).` +
       " سيُنشأ الـRollout من آخر نسخة موجودة على الفرع البعيد ويُدار من GitHub Actions — هذا الطلب لا يثبت نجاح النشر نفسه.",
+    remoteTip,
     fetchImpl,
   );
 }
@@ -633,7 +744,25 @@ export interface DeployRunStatus {
   state: "running" | "success" | "failed" | "none" | "unknown";
   runUrl: string | null;
   headSha: string | null;
+  runId: number | null;
+  /**
+   * Conclusion of the workflow step that creates the rollout — NOT the overall
+   * run conclusion. A green run with a skipped/failed rollout step is not a
+   * deployment.
+   */
+  rolloutStep: DeployRolloutStepState;
+  /** TRUE only when the run completed AND its rollout step succeeded. */
+  rolloutVerified: boolean;
 }
+
+const UNKNOWN_RUN_STATUS: DeployRunStatus = {
+  state: "unknown",
+  runUrl: null,
+  headSha: null,
+  runId: null,
+  rolloutStep: "unknown",
+  rolloutVerified: false,
+};
 
 export async function readDeployWorkflowRunStatus(
   environment: DeployGhEnvironment,
@@ -642,11 +771,22 @@ export async function readDeployWorkflowRunStatus(
 ): Promise<DeployRunStatus> {
   const config = resolveGhConfig(environment, env);
   if ("invalid" in config) {
-    return { state: "unknown", runUrl: null, headSha: null };
+    return UNKNOWN_RUN_STATUS;
   }
   const token = env[DEPLOY_GH_TOKEN_ENV_KEY]?.trim() ?? "";
   if (!token) {
-    return { state: "unknown", runUrl: null, headSha: null };
+    return UNKNOWN_RUN_STATUS;
   }
-  return fetchLatestRunState(environment, config, token, fetchImpl);
+  const latest = await fetchLatestRunState(environment, config, token, fetchImpl);
+  const rolloutStep =
+    latest.state === "success" && latest.runId !== null
+      ? await fetchRolloutStepState(config, token, latest.runId, fetchImpl)
+      : "unknown";
+  return {
+    ...latest,
+    rolloutStep,
+    // A dispatch is never proof; even a successful run is only accepted after
+    // the exact rollout step is confirmed successful.
+    rolloutVerified: latest.state === "success" && rolloutStep === "success",
+  };
 }

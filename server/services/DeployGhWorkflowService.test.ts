@@ -5,6 +5,8 @@ import {
   dispatchLiveDeployWorkflow,
   DEPLOY_GH_TOKEN_ENV_KEY,
   DEPLOY_GH_LIVE_BRANCH_ENV_KEY,
+  DEPLOY_GH_TEST_BRANCH_ENV_KEY,
+  DEPLOY_GH_TEST_WORKFLOW_ENV_KEY,
   type GhWorkflowDispatchRequest,
   type GhLiveWorkflowDispatchRequest,
   readDeployWorkflowRunStatus,
@@ -380,4 +382,137 @@ test("read status returns the real run state per environment (unknown without a 
   assert.equal(noToken.state, "unknown");
   assert.equal(noToken.runUrl, null);
   assert.equal(noToken.headSha, null);
+  assert.equal(noToken.rolloutVerified, false);
+});
+
+// ---------------- TEST/LIVE separation + rollout verification ----------------
+
+test("TEST refuses a branch override that points at main or master", async () => {
+  for (const branch of ["main", "MAIN", "master"]) {
+    const result = await dispatchTestDeployWorkflow(
+      request(),
+      {
+        [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN,
+        DEPLOY_GITHUB_TEST_BRANCH: branch,
+      },
+      fetchThatMustNotRun,
+      () => {
+        throw new Error("readTip must not be called when the branch is refused");
+      },
+    );
+    assert.equal(result.kind, "blocked");
+    assert.equal(result.kind === "blocked" ? result.stage : null, "target");
+    assert.match(
+      result.kind === "blocked" ? result.reason : "",
+      /DEPLOY_GITHUB_TEST_BRANCH/,
+    );
+  }
+});
+
+test("TEST refuses the LIVE workflow file override", async () => {
+  const result = await dispatchTestDeployWorkflow(
+    request(),
+    {
+      [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN,
+      DEPLOY_GITHUB_TEST_WORKFLOW_FILE: "deploy-live.yml",
+    },
+    fetchThatMustNotRun,
+    () => {
+      throw new Error("readTip must not be called when the workflow is refused");
+    },
+  );
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.kind === "blocked" ? result.stage : null, "target");
+  assert.match(
+    result.kind === "blocked" ? result.reason : "",
+    /DEPLOY_GITHUB_TEST_WORKFLOW_FILE/,
+  );
+});
+
+function runStateFetch(
+  options: {
+    runId: number;
+    rolloutConclusion: string;
+    includeJobs?: boolean;
+  },
+) {
+  return async (url: string | URL | Request): Promise<Response> => {
+    const u = String(url);
+    if (u.includes("/jobs")) {
+      if (options.includeJobs === false) {
+        return { status: 500, json: async () => ({}) } as Response;
+      }
+      return {
+        status: 200,
+        json: async () => ({
+          jobs: [
+            {
+              steps: [
+                { name: "Check out repository", conclusion: "success" },
+                {
+                  name: "Create App Hosting TEST rollout",
+                  conclusion: options.rolloutConclusion,
+                },
+              ],
+            },
+          ],
+        }),
+      } as Response;
+    }
+    return {
+      status: 200,
+      json: async () => ({
+        workflow_runs: [
+          {
+            id: options.runId,
+            status: "completed",
+            conclusion: "success",
+            html_url: `https://github.com/modii1/rwqan/actions/runs/${options.runId}`,
+            head_sha: COMMIT,
+          },
+        ],
+      }),
+    } as Response;
+  };
+}
+
+test("a green run is only 'verified' when the rollout step itself succeeded", async () => {
+  const ok = await readDeployWorkflowRunStatus(
+    "TEST",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    runStateFetch({ runId: 9001, rolloutConclusion: "success" }),
+  );
+  assert.equal(ok.state, "success");
+  assert.equal(ok.runId, 9001);
+  assert.equal(ok.rolloutStep, "success");
+  assert.equal(ok.rolloutVerified, true);
+  assert.equal(ok.headSha, COMMIT.toLowerCase());
+
+  const failedStep = await readDeployWorkflowRunStatus(
+    "TEST",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    runStateFetch({ runId: 9002, rolloutConclusion: "failure" }),
+  );
+  assert.equal(failedStep.state, "success", "the overall run is still green");
+  assert.equal(failedStep.rolloutStep, "failed");
+  assert.equal(failedStep.rolloutVerified, false, "a failed rollout step is NOT a deployment");
+
+  const skipped = await readDeployWorkflowRunStatus(
+    "TEST",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    runStateFetch({ runId: 9003, rolloutConclusion: "skipped" }),
+  );
+  assert.equal(skipped.rolloutStep, "not_run");
+  assert.equal(skipped.rolloutVerified, false);
+});
+
+test("a green run is never 'verified' when the jobs probe fails", async () => {
+  const result = await readDeployWorkflowRunStatus(
+    "TEST",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    runStateFetch({ runId: 9004, rolloutConclusion: "success", includeJobs: false }),
+  );
+  assert.equal(result.state, "success");
+  assert.equal(result.rolloutStep, "unknown");
+  assert.equal(result.rolloutVerified, false, "unknown verification must fail closed");
 });

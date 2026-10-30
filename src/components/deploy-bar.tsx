@@ -125,39 +125,71 @@ interface DeployErrorBody {
   error?: string;
   code?: string;
   stage?: string | null;
+  via?: string | null;
+  commit?: string;
 }
 
-/** نص فشل مسار Firebase CLI القديم (من بنية خادم غير محدَّثة) — لا يُعرض أبدًا. */
-// The two banned phrases are assembled from fragments so they never appear
-// verbatim in this component — they must not render even in a leaked string.
-const OLD_FIREBASE_ROLLOUT_FAILURE = new RegExp(
-  ["فشل إنشاء ", "rollout", "|رمز ", "الخروج"].join(""),
-);
+const MAX_ERROR_DETAIL = 240;
+
+/** Defensive redaction (the server already sanitises; never show a token). */
+function redactErrorDetail(text: string): string {
+  return text
+    .replace(/(gh[pousr]_[A-Za-z0-9]{20,})/g, "[محجوب]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-]+/gi, "$1[محجوب]")
+    .replace(/(AIza[0-9A-Za-z_\-]{20,})/g, "[محجوب]");
+}
 
 /**
- * رسالة إدارية بسيطة يفهمها صاحب الموقع غير المبرمج لكل سبب فشل متوقَّع في
- * مسار النشر. التفاصيل التقنية الكاملة تبقى في سجل النشر (التدقيق) على
- * الخادم حصرًا ولا تُعرض في الواجهة.
+ * The REAL server reason, appended to the plain-Arabic summary. A failed
+ * Firebase/GitHub operation must never be hidden behind a generic message: the
+ * owner needs the actual cause (e.g. a 403 / permission error) to act on it.
+ */
+function serverDetail(body: DeployErrorBody): string {
+  const raw = typeof body.error === "string" ? body.error.trim() : "";
+  if (!raw) return "";
+  const safe = redactErrorDetail(raw);
+  const capped = safe.length > MAX_ERROR_DETAIL ? `${safe.slice(0, MAX_ERROR_DETAIL)}…` : safe;
+  return `\nالتفاصيل: ${capped}`;
+}
+
+/**
+ * رسالة إدارية بسيطة يفهمها صاحب الموقع غير المبرمج لكل سبب فشل متوقَّع.
+ *
+ * NOTE: this deliberately does NOT try to classify an error as "the server is
+ * old" from text fragments. That heuristic used to match ANY legacy Firebase
+ * CLI error (including real permission/IAM failures) and replaced it with a
+ * misleading "your server is outdated" message, hiding the actual cause. The
+ * real, sanitised server reason is always appended below.
  */
 function friendlyDeployFailure(status: number, body: DeployErrorBody): string | null {
-  const errorText = typeof body.error === "string" ? body.error : "";
-  // الفشل القديم من مسار Firebase CLI المباشر (بنية خادم غير محدَّثة) يعني أن
-  // الخادم يحتاج تحديثًا — تُعرض للمشرف توجيهات بسيطة بدل النص التقني.
-  if (OLD_FIREBASE_ROLLOUT_FAILURE.test(errorText)) {
-    return "لم يبدأ التحديث: نسخة الموقع على الخادم قديمة وتحتاج تحديثًا. يُرجى رفع أحدث نسخة الموقع عبر GitHub ثم المحاولة بعد اكتمال تحديث الخادم.";
-  }
+  const detail = serverDetail(body);
   if (body.stage === "auth") {
-    return "لم يبدأ التحديث: إعداد الربط مع GitHub غير مكتمل على الخادم. يُرجى إضافة رمز GitHub في إعدادات الخادم ثم المحاولة.";
+    return (
+      "لم يبدأ التحديث: إعداد الربط مع GitHub غير مكتمل على الخادم. يُرجى إضافة رمز GitHub في إعدادات الخادم ثم المحاولة." +
+      detail
+    );
   }
   if (body.stage === "source") {
-    return "لم يبدأ التحديث: النسخة المرفوعة إلى GitHub ليست هي نفس النسخة المعتمَدة. يُرجى رفع أحدث التعديلات إلى فرع الموقع على GitHub ثم المحاولة.";
+    return (
+      "لم يبدأ التحديث: تعذّر تأكيد أن النسخة المطلوب نشرها هي النسخة المعتمدة على الفرع." + detail
+    );
   }
   if (body.stage === "target") {
-    return "لم يبدأ التحديث: إعدادات مسار النشر عبر GitHub غير مكتملة على الخادم. يُرجى مراجعة إعدادات النشر ثم المحاولة.";
+    return "لم يبدأ التحديث: إعدادات مسار النشر عبر GitHub غير مكتملة على الخادم." + detail;
+  }
+  if (body.stage === "deploy") {
+    return "فشل بدء التحديث على الخادم قبل إنشاء أي نشر، ولم يتغيّر الموقع." + detail;
+  }
+  if (body.stage === "verify") {
+    return "بدأ التنفيذ لكن لم يتم تأكيد اكتمال التحديث، لذلك لا يُعتبر ناجحًا." + detail;
+  }
+  if (body.stage === "approval") {
+    return "لم يبدأ التحديث: مسار النشر الحقيقي غير مُفعَّل على الخادم." + detail;
   }
   if (status === 502) {
-    return "تعذّر إكمال التحديث على الخادم، ولم يُسجَّل أي نشر. التفاصيل التقنية في سجل النشر داخل اللوحة.";
+    return "تعذّر إكمال التحديث على الخادم، ولم يُسجَّل أي نشر." + detail;
   }
+  if (detail) return detail.trim();
   return null;
 }
 
@@ -300,10 +332,19 @@ export function DeployBar() {
 
   // REAL deployment status for the tracked environment — read straight from
   // GitHub Actions through a read-only server endpoint. An accepted request is
-  // NEVER displayed as "اكتمل": only the actual run state can become one.
+  // NEVER displayed as "اكتمل": only the actual run state can become one, and a
+  // successful run is only shown as a confirmed update when the server also
+  // verified that the step which CREATES the rollout succeeded.
   const { data: publishRunStatus } = useQuery<{
     environment: string;
-    status: { state: string; runUrl: string | null };
+    status: {
+      state: string;
+      runUrl: string | null;
+      headSha?: string | null;
+      runId?: number | null;
+      rolloutStep?: string;
+      rolloutVerified?: boolean;
+    };
   }>({
     queryKey: ["/api/admin/deploy/status", trackedEnv],
     queryFn: async ({ queryKey }) => {
@@ -313,7 +354,14 @@ export function DeployBar() {
       );
       return res.json() as Promise<{
         environment: string;
-        status: { state: string; runUrl: string | null };
+        status: {
+          state: string;
+          runUrl: string | null;
+          headSha?: string | null;
+          runId?: number | null;
+          rolloutStep?: string;
+          rolloutVerified?: boolean;
+        };
       }>;
     },
     enabled: visible && trackedEnv !== null,
@@ -321,11 +369,21 @@ export function DeployBar() {
   });
   const runStatusLabel: Record<string, string> = {
     running: "جارٍ التحديث الآن",
-    success: "اكتمل آخر تحديث",
+    success: "تم إنشاء التحديث وتأكّد",
     failed: "فشل آخر تحديث",
     none: "لم يبدأ أي تحديث بعد",
+    unconfirmed: "انتهى التنفيذ دون تأكيد إنشاء التحديث",
     unknown: "حالة التحديث غير معروفة حاليًا",
   };
+  // A green GitHub run is NOT proof of a deployment. Only downgrade to
+  // "unconfirmed" when the server explicitly says the rollout step was not
+  // confirmed; a missing field (older server) keeps the previous behaviour.
+  const rawRunState = publishRunStatus?.status?.state ?? "";
+  const runState =
+    rawRunState === "success" &&
+    publishRunStatus?.status?.rolloutVerified === false
+      ? "unconfirmed"
+      : rawRunState;
 
   // Data-environment toggle (LOCAL/TEST/LIVE). This switches the WHOLE
   // application's data sources and services between local resources, isolated
@@ -386,6 +444,8 @@ export function DeployBar() {
         detail?: string;
         actionsUrl?: string;
         branch?: string;
+        commit?: string;
+        via?: string;
       }>;
     },
     onSuccess: (result) => {
@@ -396,6 +456,10 @@ export function DeployBar() {
         // طلب أُرسل فقط: النشر يبدأ ويكتمل في GitHub — لا ادعاء للنجاح قبل
         // اكتمال التنفيذ هناك. لغة بسيطة للمشرف دون مصطلحات تقنية.
         const dispatchedEnv: "TEST" | "LIVE" = result.branch === "main" ? "LIVE" : "TEST";
+        const shortSha =
+          typeof result.commit === "string" && result.commit.length >= 7
+            ? result.commit.slice(0, 7)
+            : null;
         toast({
           title:
             dispatchedEnv === "LIVE"
@@ -404,6 +468,7 @@ export function DeployBar() {
           description:
             "التحديث يبدأ تلقائيًا في GitHub، وسيظهر تقدّمه في صفحة المتابعة:\n" +
             (result.actionsUrl ?? actionsUrlFor(dispatchedEnv)) +
+            (shortSha ? `\nالنسخة المطلوبة: ${shortSha}` : "") +
             "\n(الحالة هنا لا تعني أن التحديث اكتمل)",
         });
         return;
@@ -882,23 +947,23 @@ export function DeployBar() {
             نشر الموقع الرسمي
           </Button>
 
-          {trackedEnv && publishRunStatus?.status?.state && (
+          {trackedEnv && runState && (
             <a
-              href={publishRunStatus.status.runUrl ?? actionsUrlFor(trackedEnv)}
+              href={publishRunStatus?.status?.runUrl ?? actionsUrlFor(trackedEnv)}
               target="_blank"
               rel="noreferrer"
               data-testid="deploy-bar-publish-status"
               className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
-                publishRunStatus.status.state === "running"
+                runState === "running"
                   ? "border-sky-300 bg-sky-50 text-sky-900"
-                  : publishRunStatus.status.state === "failed"
+                  : runState === "failed"
                     ? "border-red-300 bg-red-50 text-red-900"
-                    : publishRunStatus.status.state === "success"
+                    : runState === "success"
                       ? "border-emerald-300 bg-emerald-50 text-emerald-900"
                       : "border-amber-300 bg-white text-amber-900"
               }`}
             >
-              {runStatusLabel[publishRunStatus.status.state] ?? runStatusLabel.unknown}
+              {runStatusLabel[runState] ?? runStatusLabel.unknown}
             </a>
           )}
 

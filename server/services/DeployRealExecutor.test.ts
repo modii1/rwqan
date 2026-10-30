@@ -237,29 +237,29 @@ test("a controlled CLI rollout (LOCAL path) succeeds only after a control-plane 
   assert.equal(getProbeCalls(), 1);
 });
 
-// --- Pre-gates (environment-independent; stay on the default TEST) ----------
+// --- LOCAL CLI pre-gates (the local source identity matters only there) -----
 
-test("a short commit sha is refused at the source gate before any command runs", async () => {
+test("a short commit sha is refused at the source gate before any command runs (LOCAL)", async () => {
   const { deps, calls } = fakeDeps();
-  const outcome = await executor(deps).publish(testPublish({ gitCommit: COMMIT.slice(0, 7) }));
+  const outcome = await cliPublish(deps, { gitCommit: COMMIT.slice(0, 7) });
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "source");
   assert.equal(calls.length, 0);
 });
 
-test("a dirty worktree is refused at the source gate before any command runs", async () => {
+test("a dirty worktree is refused at the source gate before any command runs (LOCAL)", async () => {
   const { deps, calls } = fakeDeps();
-  const outcome = await executor(deps).publish(testPublish({ worktree: "dirty" }));
+  const outcome = await cliPublish(deps, { worktree: "dirty" });
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "source");
   assert.ok(outcome.detail.includes("غير مُثبَّتة"));
   assert.equal(calls.length, 0);
 });
 
-test("an unknown worktree state is refused (fail closed) before any command runs", async () => {
+test("an unknown worktree state is refused (fail closed) before any command runs (LOCAL)", async () => {
   const { deps, calls } = fakeDeps();
-  const outcome = await executor(deps).publish(testPublish({ worktree: undefined }));
+  const outcome = await cliPublish(deps, { worktree: undefined });
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "source");
   assert.equal(calls.length, 0);
@@ -275,11 +275,15 @@ test("a deploy without explicit approval is blocked before any command runs", as
   assert.equal(getProbeCalls(), 0);
 });
 
-test("a disabled real deploy is blocked at approval before any command runs", async () => {
+test("a disabled real deploy is blocked at approval before any command runs (LOCAL)", async () => {
   const { deps, calls } = fakeDeps();
-  const outcome = await executor(deps, devTarget(), false).publish(
-    testPublish({ environment: undefined }),
-  );
+  const outcome = await executor(deps, localTarget(), false).publish({
+    gitCommit: COMMIT,
+    checks: CHECKS,
+    approval: true,
+    worktree: "clean",
+    environment: "LOCAL",
+  });
   assert.equal(outcome.blocked, true);
   assert.equal(outcome.stage, "approval");
   assert.equal(calls.length, 0);
@@ -364,6 +368,7 @@ test("a LIVE publish is delegated to GitHub Actions without running any Firebase
         branch: "main",
         actionsUrl:
           "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml",
+        commit: "e".repeat(40),
       };
     },
   });
@@ -497,6 +502,7 @@ test("a LIVE publish never requires Firebase CLI auth even when a session id is 
       branch: "main",
       actionsUrl:
         "https://github.com/modii1/rwqan/actions/workflows/deploy-live.yml",
+      commit: "e".repeat(40),
     }),
   });
   clearDeployAuth("test-session-live");
@@ -781,12 +787,13 @@ test("publish with valid credentials and pendingPublish proceeds normally", asyn
 // unreachable for TEST: every test below asserts ZERO Firebase CLI commands.
 // ---------------------------------------------------------------------------
 
-function acceptedDispatch(): GhWorkflowDispatchResult {
+function acceptedDispatch(commit: string = COMMIT.toLowerCase()): GhWorkflowDispatchResult {
   return {
     kind: "accepted",
     detail: "أُرسل طلب النشر إلى GitHub (workflow_dispatch).",
     branch: "test/unified-gateway-ui-only",
     actionsUrl: GH_ACTIONS_URL,
+    commit,
   };
 }
 
@@ -922,7 +929,7 @@ test("a TEST publish dispatches the GitHub remote tip, not the local HEAD, when 
   const { deps, calls, getProbeCalls } = fakeDeps({
     dispatch: async (request) => {
       dispatches.push(request);
-      return acceptedDispatch();
+      return acceptedDispatch("b".repeat(40));
     },
     // Remote tip differs from the local COMMIT used by testPublish()
     readRemoteTip: async () => ({ tip: "b".repeat(40) }),
@@ -936,9 +943,65 @@ test("a TEST publish dispatches the GitHub remote tip, not the local HEAD, when 
   // The dispatch must carry the REMOTE tip, not the local COMMIT.
   assert.equal(dispatches[0].commit, "b".repeat(40));
   assert.notEqual(dispatches[0].commit, COMMIT);
+  // The recorded source is the remote tip GitHub actually builds.
+  assert.equal(outcome.ghDispatch?.commit, "b".repeat(40));
+  assert.equal(outcome.releaseRef, `${DEPLOY_DEV_BACKEND_ID}:bbbbbbb`);
+  assert.equal(outcome.via, "github_actions");
 
   // HARD GUARANTEE: no Firebase CLI command ran for TEST.
   assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a TEST publish works on a deployed runtime: no real-deploy opt-in, no local Git, unknown worktree", async () => {
+  const dispatches: Array<{ commit: string }> = [];
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatch: async (request) => {
+      dispatches.push(request);
+      return acceptedDispatch(COMMIT.toLowerCase());
+    },
+    readRemoteTip: async () => ({ tip: COMMIT.toLowerCase() }),
+  });
+  // Simulates App Hosting: NODE_ENV=production → realDeployEnabled() is false,
+  // there is no local .git checkout, so gitCommit is empty and the worktree
+  // state is unknown. The TEST dispatch must still reach GitHub Actions.
+  const outcome = await executor(deps, devTarget(), false, false).publish(
+    testPublish({ gitCommit: "", worktree: "unknown" }),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.stage, null);
+  assert.equal(outcome.ghDispatch?.accepted, true);
+  assert.equal(outcome.via, "github_actions");
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].commit, COMMIT.toLowerCase());
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a TEST publish can never call the LIVE dispatcher", async () => {
+  const liveCalls: unknown[] = [];
+  const { deps } = fakeDeps({
+    dispatch: async () => acceptedDispatch(),
+    dispatchLive: async (request) => {
+      liveCalls.push(request);
+      return acceptedDispatch("e".repeat(40));
+    },
+  });
+  const outcome = await executor(deps).publish(testPublish());
+
+  assert.equal(outcome.ghDispatch?.ref, "test/unified-gateway-ui-only");
+  assert.equal(liveCalls.length, 0, "TEST must never dispatch the LIVE workflow");
+});
+
+test("the TEST accepted outcome records the GitHub path and the exact remote SHA", async () => {
+  const { deps } = fakeDeps({
+    dispatch: async () => acceptedDispatch(COMMIT.toLowerCase()),
+  });
+  const outcome = await executor(deps).publish(testPublish());
+
+  assert.equal(outcome.via, "github_actions");
+  assert.equal(outcome.ghDispatch?.commit, COMMIT.toLowerCase());
+  assert.equal(outcome.ghDispatch?.ref, "test/unified-gateway-ui-only");
+  assert.equal(outcome.deployed, false, "a dispatch is never reported as a completed deploy");
 });
 
 // Real end-to-end proof, WITHOUT any deploy: the default runner must launch

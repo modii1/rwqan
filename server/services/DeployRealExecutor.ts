@@ -282,6 +282,7 @@ function failedPublish(
     blocked: false,
     stage,
     target: target.projectId,
+    via: "firebase_cli",
   };
 }
 
@@ -291,10 +292,17 @@ export class RealDeployExecutor {
   private preflight(
     environment: DeployTargetEnvironment,
     stage: DeployPublishStage,
+    options: { allowDispatchWithoutRealDeploy?: boolean } = {},
   ): { target: DeployTarget } | { blocked: DeployPublishOutcome } {
     const target = this.options.resolveTarget(environment);
 
-    if (!this.options.realDeployEnabled()) {
+    // TEST is a GitHub-only dispatch: it cannot change production or `main`, so
+    // it must remain usable on the deployed runtime (NODE_ENV=production, no
+    // local Git clone). The real-deploy opt-in stays mandatory for LIVE/LOCAL,
+    // i.e. for anything that would run the Firebase CLI from this app.
+    const dispatchAllowed =
+      options.allowDispatchWithoutRealDeploy === true && environment === "TEST";
+    if (!dispatchAllowed && !this.options.realDeployEnabled()) {
       return {
         blocked: blockedPublish(
           target,
@@ -346,7 +354,11 @@ export class RealDeployExecutor {
     };
   }): Promise<DeployPublishOutcome> {
     const environment = input.environment ?? "TEST";
-    const preflight = this.preflight(environment, "target");
+    const preflight = this.preflight(environment, "target", {
+      // TEST is GitHub-actions-only; it must work from the deployed runtime
+      // without a local development checkout.
+      allowDispatchWithoutRealDeploy: environment === "TEST",
+    });
     if ("blocked" in preflight) return preflight.blocked;
     const { target } = preflight;
     const { dependencies } = this.options;
@@ -365,27 +377,6 @@ export class RealDeployExecutor {
         isProductionProjectId(requested) && environment === "TEST"
           ? "الهدف المطلوب هو مشروع الإنتاج — يُرفض من بيئة الاختبار."
           : "الهدف المطلوب لا يطابق هدف البيئة المحددة.",
-      );
-    }
-
-    // The source identity must be provable before anything is deployed: a full
-    // 40-char SHA and a clean worktree. Anything else is refused.
-    const commit = input.gitCommit?.trim() ?? "";
-    if (!isFullGitSha(commit)) {
-      return blockedPublish(
-        target,
-        "source",
-        "مرجع المصدر ليس SHA كاملًا (40 خانة سداسية) — لا يمكن تأكيد ما تم بناؤه.",
-      );
-    }
-    const worktree = input.worktree ?? "unknown";
-    if (worktree !== "clean") {
-      return blockedPublish(
-        target,
-        "source",
-        worktree === "dirty"
-          ? "شجرة العمل تحتوي تغييرات غير مُثبَّتة — لا يمكن تأكيد أن البناء يطابق الـcommit."
-          : "حالة شجرة العمل غير معروفة — يجب التأكد من نظافتها قبل النشر الحقيقي.",
       );
     }
 
@@ -442,16 +433,21 @@ export class RealDeployExecutor {
           blocked: false,
           stage: null,
           target: target.projectId,
-          releaseRef: releaseRef(target, remoteCommit),
+          // The dispatcher re-reads the remote tip (with the API fallback) and
+          // returns the exact SHA GitHub will build. That is the authoritative
+          // source — never the local HEAD.
+          releaseRef: releaseRef(target, gh.commit),
+          via: "github_actions",
           ghDispatch: {
             accepted: true,
             ref: gh.branch,
             actionsUrl: gh.actionsUrl,
+            commit: gh.commit,
           },
         };
       }
       if (gh.kind === "blocked") {
-        return blockedPublish(target, gh.stage, gh.reason);
+        return { ...blockedPublish(target, gh.stage, gh.reason), via: "github_actions" };
       }
       return {
         deployed: false,
@@ -461,6 +457,7 @@ export class RealDeployExecutor {
         stage: "deploy",
         target: target.projectId,
         releaseRef: releaseRef(target, remoteCommit),
+        via: "github_actions",
       };
     }
 
@@ -487,16 +484,20 @@ export class RealDeployExecutor {
           blocked: false,
           stage: null,
           target: target.projectId,
-          releaseRef: releaseRef(target, commit),
+          // The deployed source is the branch tip GitHub will build — never the
+          // local HEAD of this machine.
+          releaseRef: releaseRef(target, gh.commit),
+          via: "github_actions",
           ghDispatch: {
             accepted: true,
             ref: gh.branch,
             actionsUrl: gh.actionsUrl,
+            commit: gh.commit,
           },
         };
       }
       if (gh.kind === "blocked") {
-        return blockedPublish(target, gh.stage, gh.reason);
+        return { ...blockedPublish(target, gh.stage, gh.reason), via: "github_actions" };
       }
       return {
         deployed: false,
@@ -505,8 +506,35 @@ export class RealDeployExecutor {
         blocked: false,
         stage: "deploy",
         target: target.projectId,
-        releaseRef: releaseRef(target, commit),
+        via: "github_actions",
       };
+    }
+
+    // ---------------------------------------------------------------------
+    // LOCAL publish: the ONLY path that runs the Firebase CLI from this app.
+    // The local source identity matters here because the CLI builds from the
+    // local checkout: a full 40-char SHA and a clean worktree are mandatory.
+    // (These gates deliberately no longer apply to TEST/LIVE dispatch, which
+    // build the immutable remote commit and must work from a server that has
+    // no up-to-date clone.)
+    // ---------------------------------------------------------------------
+    const commit = input.gitCommit?.trim() ?? "";
+    if (!isFullGitSha(commit)) {
+      return blockedPublish(
+        target,
+        "source",
+        "مرجع المصدر ليس SHA كاملًا (40 خانة سداسية) — لا يمكن تأكيد ما تم بناؤه.",
+      );
+    }
+    const worktree = input.worktree ?? "unknown";
+    if (worktree !== "clean") {
+      return blockedPublish(
+        target,
+        "source",
+        worktree === "dirty"
+          ? "شجرة العمل تحتوي تغييرات غير مُثبَّتة — لا يمكن تأكيد أن البناء يطابق الـcommit."
+          : "حالة شجرة العمل غير معروفة — يجب التأكد من نظافتها قبل النشر الحقيقي.",
+      );
     }
 
     // A controlled rollout needs an explicit App Hosting region and a
@@ -742,6 +770,7 @@ export class RealDeployExecutor {
       releaseRef: releaseRef(target, commit),
       verify,
       buildSource,
+      via: "firebase_cli",
     };
   }
 
