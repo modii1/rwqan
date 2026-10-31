@@ -1,0 +1,55 @@
+
+name: Deploy LIVE Rollout
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-live
+  cancel-in-progress: false
+
+jobs:
+  deploy-live:
+    name: App Hosting LIVE rollout
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check WIF configuration
+        id: auth
+        env:
+          HAS_WIF_PROVIDER: ${{ secrets.WIF_PROVIDER != '' }}
+          HAS_WIF_SA: ${{ secrets.WIF_SERVICE_ACCOUNT != '' }}
+        run: |
+          if [ "$HAS_WIF_PROVIDER" = "true" ] && [ "$HAS_WIF_SA" = "true" ]; then
+            echo "mode=wif" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Workload Identity Federation is not configured."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        if: steps.auth.outputs.mode == 'wif'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: rwqan-757
+
+      - name: Install Firebase CLI
+        run: |
+          npm install --global firebase-tools@15.22.3
+          firebase --version
+
+      - name: Create App Hosting LIVE rollout
+        run: |
+          firebase -P rwqan-757 -c firebase.json apphosting:rollouts:create rwqan \
+            --git-commit ${{ github.sha }} \
+            --force
