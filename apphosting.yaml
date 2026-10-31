@@ -28,6 +28,26 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: ADMIN_CODE
+    secret: projects/rwqan-production-v2/secrets/ADMIN_CODE
+    availability:
+      - RUNTIME
+  - variable: ADMIN_PASSWORD
+    secret: projects/rwqan-production-v2/secrets/ADMIN_PASSWORD
+    availability:
+      - RUNTIME
+  - variable: SESSION_SECRET
+    secret: projects/rwqan-production-v2/secrets/SESSION_SECRET
+    availability:
+      - RUNTIME
+  - variable: PAYMOB_HMAC_SECRET
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_HMAC_SECRET
+    availability:
+      - RUNTIME
+  - variable: FIREBASE_SERVICE_ACCOUNT
+    secret: projects/rwqan-production-v2/secrets/FIREBASE_SERVICE_ACCOUNT
+    availability:
+      - RUNTIME
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
   # - variable: MESSAGE
