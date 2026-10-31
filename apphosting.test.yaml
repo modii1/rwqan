@@ -42,17 +42,17 @@ env:
   # Secret Manager; nothing here stores or reveals a secret value. Versions are
   # pinned (documented App Hosting syntax) because unpinned `latest` references
   # require `secretmanager.versions.get` at build time; a pinned version does
-  # not. All five secrets currently have an enabled version 1.
+  # not. All five secrets currently have an enabled version 1. Current pins: ADMIN_CODE=v2, ADMIN_PASSWORD=v2, FIREBASE_SERVICE_ACCOUNT/SESSION_SECRET/PAYMOB_HMAC_SECRET=v1.
   - variable: FIREBASE_SERVICE_ACCOUNT
     secret: projects/rwqan-757/secrets/rwqan-test-firebase-sa/versions/1
     availability:
       - RUNTIME
   - variable: ADMIN_CODE
-    secret: projects/rwqan-757/secrets/rwqan-test-admin-code/versions/1
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-code/versions/2
     availability:
       - RUNTIME
   - variable: ADMIN_PASSWORD
-    secret: projects/rwqan-757/secrets/rwqan-test-admin-password/versions/1
+    secret: projects/rwqan-757/secrets/rwqan-test-admin-password/versions/2
     availability:
       - RUNTIME
   - variable: SESSION_SECRET
