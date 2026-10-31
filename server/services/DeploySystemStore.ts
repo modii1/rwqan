@@ -18,11 +18,14 @@ import {
   type DeployPostDeployVerification,
   type DeployRelease,
   type DeployState,
+  type DeployToolsInfo,
   type DeployWorktreeState,
 } from "../../shared/deploySystem";
-import { resolveDeployTarget, realDeployEnabled, productionDeployEnabled, DEPLOY_PROD_PROJECT_ID } from "../config/deployTarget";
+import { resolveDeployTarget, realDeployEnabled, deployDispatchEnabled, productionDeployEnabled, DEPLOY_PROD_PROJECT_ID, deployTargetBlockers, resolveAppHostingHost } from "../config/deployTarget";
 import { buildStableBaseline, resolveProductionBaselineIdentity } from "./DeployBaselineService";
 import { resolveAppHostingVerifyConfig } from "./DeployBuildSourceService";
+import { evaluatePreDeployGate } from "./DeployPrepublishGate";
+import { dataEnvironmentStore } from "./LiveDataEnvironmentStore";
 import { RWQAN_STABLE_BASELINE, buildRollbackReadiness } from "../config/stableBaseline";
 
 /**
@@ -38,7 +41,7 @@ import { RWQAN_STABLE_BASELINE, buildRollbackReadiness } from "../config/stableB
  * `DeployStoreUnavailableError` + `UnavailableDeploySystemStore` below.
  */
 
-export const DEPLOY_SOURCE_REPO_URL = "https://github.com/iheeb1/rwqan-sa.git";
+export const DEPLOY_SOURCE_REPO_URL = "https://github.com/modii1/rwqan.git";
 export const DEPLOY_DEV_TARGET = "rwqan-sa-dev";
 
 export const DEPLOY_PERSISTENCE_NOTICE_PERSISTENT =
@@ -85,7 +88,8 @@ export interface CreateReleaseInput {
 export interface RecordAuditInput {
   action: DeployAuditAction;
   environment: DeployEnvironment;
-  result: "ok" | "rejected";
+  /** "accepted" marks a request accepted by an external system (e.g. GitHub). */
+  result: "ok" | "accepted" | "rejected";
   releaseId?: string;
   reason?: string;
 }
@@ -469,6 +473,12 @@ export interface DeployStateContext {
   git?: DeployGitInfo | null;
   github?: DeployGitHubInfo | null;
   /**
+   * Read-only deploy-tools probe (`firebase --version`, cached server-side).
+   * Null/undefined = "could not be adjudged in this snapshot" (the gate renders
+   * غير متحقق for the tools item instead of guessing).
+   */
+  tools?: DeployToolsInfo | null;
+  /**
    * Verified official stable release (commit existence + reachability proven),
    * or null/undefined when it could not be verified. Merged into the state's
    * restored-eligible list; it is a read-only reference, never a fake publish.
@@ -497,6 +507,24 @@ export async function buildDeployState(
   const stableCandidates = stableRelease ? [stableRelease, ...releases] : releases;
   const stableReleases = stableCandidates.filter(isStableRelease);
   const verifyConfig = resolveAppHostingVerifyConfig();
+  const dataEnvironment = dataEnvironmentStore.get();
+  const latestCheckRun = await store.getLatestCheckRun();
+  const gate = evaluatePreDeployGate({
+    environment,
+    git: context.git ?? null,
+    github: context.github ?? null,
+    latestCheckRun,
+    realDeployEnabled: realDeployEnabled(),
+    productionDeployEnabled: productionDeployEnabled(),
+    verifySourceConfig: {
+      enabled: verifyConfig.enabled,
+      ...(verifyConfig.reason ? { reason: verifyConfig.reason } : {}),
+    },
+    target: deployTarget,
+    targetBlockers: deployTargetBlockers(deployTarget, environment),
+    dataEnvironment,
+    tools: context.tools ?? null,
+  });
   const resolvedBaseline = await resolveProductionBaselineIdentity({
     releases,
     location: verifyConfig.location,
@@ -517,14 +545,20 @@ export async function buildDeployState(
     states: DEPLOY_STATE_DESCRIPTORS,
     git: context.git ?? null,
     github: context.github ?? null,
-    latestCheckRun: await store.getLatestCheckRun(),
+    latestCheckRun,
     deployTarget: {
       projectId: deployTarget.projectId,
       backendId: deployTarget.backendId,
       baseUrl: deployTarget.baseUrl,
+      location: deployTarget.location ?? null,
+      expectedDomain: resolveAppHostingHost(deployTarget),
     },
     realDeployEnabled: realDeployEnabled(),
+    deployDispatchEnabled: deployDispatchEnabled(),
     productionDeployEnabled: productionDeployEnabled(),
+    dataEnvironment,
+    gate,
+    tools: context.tools ?? null,
     stableBaseline: buildStableBaseline(
       context.git ?? null,
       RWQAN_STABLE_BASELINE,

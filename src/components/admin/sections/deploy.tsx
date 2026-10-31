@@ -194,6 +194,7 @@ interface DeployState {
   latestCheckRun: DeployCheckRun | null;
   deployTarget?: { projectId: string; backendId: string; baseUrl: string | null };
   realDeployEnabled?: boolean;
+  deployDispatchEnabled?: boolean;
   productionDeployEnabled?: boolean;
   stableBaseline?: DeployStableBaseline;
   rollback?: DeployRollbackReadiness;
@@ -277,10 +278,25 @@ export default function DeploySection() {
         publishNotice?: string;
         blocked?: boolean;
         reason?: string;
+        code?: string;
+        detail?: string;
+        actionsUrl?: string;
       };
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+      if (result.code === "DEPLOY_GITHUB_DISPATCH_ACCEPTED") {
+        // The TEST publish was SENT to GitHub (workflow_dispatch) — GitHub
+        // creates the rollout, so this is deliberately NOT a deploy-success
+        // toast; success is proven only in GitHub Actions.
+        toast({
+          title: "أُرسل طلب النشر إلى GitHub",
+          description: result.actionsUrl
+            ? `${result.detail ?? "النشر يُدار من GitHub Actions."} المتابعة: ${result.actionsUrl}`
+            : result.detail ?? "النشر يُدار من GitHub Actions.",
+        });
+        return;
+      }
       const release = result.release;
       const failed = release?.status === "validation_failed";
       const realDeployed = Boolean(release?.deployed && !release?.simulated);
@@ -296,21 +312,35 @@ export default function DeploySection() {
         variant: failed ? "destructive" : "default",
       });
     },
-    onError: () => {
-      // Brief, non-technical failure only.
+    onError: (error: Error) => {
+      // Surface the server's own Arabic reason (single source of truth for the
+      // failure text), falling back to a brief non-technical message only when
+      // the server response cannot be read.
+      let description = "لم يكتمل النشر. تحقّق من الاتصال وحاول مرة أخرى.";
+      try {
+        const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
+        if (match) {
+          const body = JSON.parse(match[2]) as { error?: string };
+          if (typeof body.error === "string" && body.error.length > 0) {
+            description = body.error;
+          }
+        }
+      } catch {
+        // Keep the generic fallback description.
+      }
       toast({
         title: "تعذّر النشر",
-        description: "لم يكتمل النشر. تحقّق من الاتصال وحاول مرة أخرى.",
+        description,
         variant: "destructive",
       });
     },
   });
 
   const handlePublish = () => {
-    if (state?.realDeployEnabled) {
+    if (state?.deployDispatchEnabled) {
       const target = state.deployTarget;
       const toProduction =
-        state.environment === "LIVE" && state.productionDeployEnabled === true;
+        state.environment === "LIVE" && state.deployDispatchEnabled === true;
       const confirmed = window.confirm(
         (toProduction
           ? "نشر حقيقي إلى الإنتاج؟\n\n"

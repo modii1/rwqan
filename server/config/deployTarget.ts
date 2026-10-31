@@ -9,7 +9,7 @@
  * Targets are resolved from the active deploy environment:
  *   - TEST → the isolated development backend `rwqan-sa-dev` / `rwqan-dev-backend`
  *     (the safe default; a production project/host is refused);
- *   - LIVE → the production backend `rwqan-757` / `rwqan-backend` serving
+ *   - LIVE → the production backend `rwqan-757` / `rwqan` serving
  *     `https://rwqan.sa`, and ONLY when production deploys are explicitly
  *     enabled (NODE_ENV=development + DEPLOY_REAL_DEPLOY=enabled +
  *     DEPLOY_ALLOW_PRODUCTION=enabled). Without that final opt-in the LIVE
@@ -28,15 +28,20 @@ export interface DeployTarget {
 }
 
 /** The active deploy environment selects the target. */
-export type DeployTargetEnvironment = "TEST" | "LIVE";
+export type DeployTargetEnvironment = "TEST" | "LIVE" | "LOCAL";
 
 export const DEPLOY_DEV_PROJECT_ID = "rwqan-sa-dev";
 export const DEPLOY_DEV_BACKEND_ID = "rwqan-dev-backend";
+export const DEPLOY_DEV_BASE_URL = "https://rwqan-dev-backend--rwqan-sa-dev.europe-west4.hosted.app";
 
 /** The real production project/backend serving https://rwqan.sa. */
 export const DEPLOY_PROD_PROJECT_ID = "rwqan-757";
-export const DEPLOY_PROD_BACKEND_ID = "rwqan-backend";
+export const DEPLOY_PROD_BACKEND_ID = "rwqan";
 export const DEPLOY_PROD_BASE_URL = "https://rwqan.sa";
+
+/** The LOCAL deploy target used only for local development builds. */
+export const DEPLOY_LOCAL_PROJECT_ID = "rwqan-local";
+export const DEPLOY_LOCAL_BACKEND_ID = "rwqan-local-backend";
 
 /** Projects recognised as the production project. */
 export const DEPLOY_PRODUCTION_PROJECT_IDS: readonly string[] = [DEPLOY_PROD_PROJECT_ID];
@@ -73,7 +78,7 @@ export const DEPLOY_DEV_FIREBASE_CONFIG = "firebase.dev.json";
 /**
  * Firebase config file for the PRODUCTION App Hosting backend. Used only for a
  * LIVE target; the production project is configured in the repository's
- * `firebase.json`/`.firebaserc` (project `rwqan-757`, backend `rwqan-backend`).
+ * `firebase.json`/`.firebaserc` (project `rwqan-757`, backend `rwqan`).
  */
 export const DEPLOY_PROD_FIREBASE_CONFIG = "firebase.json";
 
@@ -113,6 +118,14 @@ export function resolveDeployTarget(
       location: location || null,
     };
   }
+  if (environment === "LOCAL") {
+    return {
+      projectId: DEPLOY_LOCAL_PROJECT_ID,
+      backendId: DEPLOY_LOCAL_BACKEND_ID,
+      baseUrl: null,
+      location: location || null,
+    };
+  }
   const rawBaseUrl = processEnvironment[DEPLOY_DEV_BASE_URL_ENV_KEY]?.trim() ?? "";
   return {
     projectId: DEPLOY_DEV_PROJECT_ID,
@@ -120,6 +133,22 @@ export function resolveDeployTarget(
     baseUrl: rawBaseUrl || null,
     location: location || null,
   };
+}
+
+/**
+ * The EXPECTED App Hosting host for a target, derived from the external
+ * naming convention `backendId--projectId.location.hosted.app`.
+ */
+export function resolveAppHostingHost(target: DeployTarget): string | null {
+  const projectId = target.projectId?.trim() ?? "";
+  const backendId = target.backendId?.trim() ?? "";
+  const location = target.location?.trim() ?? "";
+  if (!projectId || !backendId || !location) return null;
+  const componentIsSafe = /^[a-z0-9][a-z0-9-]+$/i.test(projectId)
+    && /^[a-z0-9][a-z0-9-]+$/i.test(backendId)
+    && /^[a-z0-9][a-z0-9-]+$/i.test(location);
+  if (!componentIsSafe) return null;
+  return `https://${backendId}--${projectId}.${location}.hosted.app`;
 }
 
 /**
@@ -142,6 +171,13 @@ export function deployTargetBlockers(
         "بيئة الإنتاج تتطلب مشروع الإنتاج الرسمي rwqan-757 — يُرفض أي مشروع آخر.",
       );
     }
+  } else if (environment === "LOCAL") {
+    if (projectId !== DEPLOY_LOCAL_PROJECT_ID) {
+      blockers.push("المشروع المستهدف غير معروف — يُسمح فقط بمشروع التطوير المحلي.");
+    }
+    if (target.backendId?.trim() !== DEPLOY_LOCAL_BACKEND_ID) {
+      blockers.push("خدمة الاستضافة المستهدفة غير معروفة — يُسمح فقط بخدمة التطوير المحلية.");
+    }
   } else if (isProductionProjectId(projectId)) {
     blockers.push("المشروع المستهدف هو مشروع الإنتاج — يُرفض النشر من بيئة الاختبار.");
   } else if (projectId !== DEPLOY_DEV_PROJECT_ID) {
@@ -162,6 +198,18 @@ export function deployTargetBlockers(
   }
 
   return blockers;
+}
+
+/**
+ * TRUE when GitHub Actions dispatch is explicitly enabled. This is the only
+ * gate the TEST/LIVE dispatch path needs: it never runs a local CLI deploy.
+ */
+export function deployDispatchEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    environment[DEPLOY_REAL_DEPLOY_ENV_KEY]?.trim() === DEPLOY_REAL_DEPLOY_ENABLED_VALUE
+  );
 }
 
 /**

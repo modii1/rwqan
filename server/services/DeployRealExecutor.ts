@@ -44,13 +44,35 @@ import {
   type DeployTargetEnvironment,
 } from "../config/deployTarget";
 import { probeDeployHealth } from "./DeployHealthService";
+import { resolveFirebaseCommand } from "./DeployToolsService";
+import {
+  clearDeployAuth,
+  getDeployAuthStatus,
+  getFirebaseCliEnv,
+  startDeployAuthFlow,
+  verifyFirebaseCliAuth,
+  nowMs,
+  type DeployAuthStatus,
+  type DeployAuthVerifyResult,
+} from "./deployAuth";
 import {
   createAppHostingVerifyDependency,
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
+import { dispatchTestDeployWorkflow, dispatchLiveDeployWorkflow, readRemoteBranchHead } from "./DeployGhWorkflowService";
+import type {
+  GhWorkflowDispatchResult,
+  GhWorkflowDispatcher,
+  GhLiveWorkflowDispatcher,
+  GhLiveWorkflowDispatchRequest,
+} from "./DeployGhWorkflowService";
+import {
+  DEPLOY_GH_TEST_BRANCH,
+  DEPLOY_GH_TEST_REMOTE_NAME,
+} from "./DeployGhWorkflowService";
 
 export interface DeployCommandSpec {
-  stage: "deploy" | "restore";
+  stage: "deploy" | "restore" | "auth-verify";
   file: string;
   args: string[];
   cwd: string;
@@ -74,6 +96,27 @@ export interface RealDeployDependencies {
    */
   verifyBuildSource?: BuildSourceVerifier;
   /**
+   * TEST publish delegation: dispatch GitHub's TEST deploy workflow
+   * (workflow_dispatch) so GITHUB — not this app — creates the rollout.
+   * When present, `publish()` for TEST NEVER runs Firebase CLI or any git
+   * push; the dispatcher fails closed (blocked) when the pre-existing server
+   * token is missing, and refusal happens BEFORE any state-changing call.
+   */
+  dispatchTestDeploy?: GhWorkflowDispatcher;
+  /**
+   * Read-only remote branch tip probe (git ls-remote). Injectable so tests can
+   * avoid network/git access; falls back to the imported implementation.
+   */
+  readRemoteTip?: typeof readRemoteBranchHead;
+  /**
+   * LIVE publish delegation: dispatch GitHub's LIVE deploy workflow
+   * (deploy-live.yml on `main`) so GITHUB — not this app — creates the
+   * production rollout. Same fail-closed rules as TEST: no Firebase CLI from
+   * this app, no git push, and the deployed source is the LAST version already
+   * on the branch (pre-read remote tip), never a local commit.
+   */
+  dispatchLiveDeploy?: GhLiveWorkflowDispatcher;
+  /**
    * Post-deploy reachability probe. With `requireCommitProof:false` it proves
    * only that the app is reachable (a stronger proof is mandatory elsewhere).
    */
@@ -95,6 +138,8 @@ export interface RealDeployExecutorOptions {
   dependencies: RealDeployDependencies;
   /** Re-checked at call time: a real deploy must still be explicitly enabled. */
   realDeployEnabled: () => boolean;
+  /** Re-checked at call time: the GitHub-dispatch path must be enabled (TEST/LIVE). */
+  deployDispatchEnabled: () => boolean;
   /** Re-checked at call time: production deploys must be separately enabled. */
   productionDeployEnabled: () => boolean;
 }
@@ -127,19 +172,119 @@ function blockedPublish(
   };
 }
 
+/**
+ * Maximum characters kept from a Firebase CLI error stream before truncation.
+ * Keeps the message useful for diagnosis while avoiding large raw dumps.
+ */
+const DEPLOY_ERROR_MAX_CHARS = 500;
+
+/**
+ * Maximum number of lines kept from a Firebase CLI error stream.
+ */
+const DEPLOY_ERROR_MAX_LINES = 5;
+
+/**
+ * Patterns that may indicate secrets, tokens, keys, or credentials in CLI
+ * output. These are redacted before any error text leaves the server.
+ */
+const DEPLOY_ERROR_SECRET_PATTERNS: RegExp[] = [
+  /(AIza[0-9A-Za-z_\-]{35,})/g,
+  /(sk-[A-Za-z0-9]{20,})/g,
+  /(ghp_[A-Za-z0-9]{20,})/g,
+  /(gho_[A-Za-z0-9]{20,})/g,
+  /(ghu_[A-Za-z0-9]{20,})/g,
+  /(ghs_[A-Za-z0-9]{20,})/g,
+  /(xox[baprs]-[A-Za-z0-9-]{10,})/g,
+  /(eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,})/g,
+  /(password|passwd|secret|token|api[_-]?key|private[_-]?key)\s*[:=]\s*\S+/gi,
+];
+
+/**
+ * Redacts potential credentials embedded in a URL (user:pass@host).
+ */
+function redactUrlCredentials(text: string): string {
+  return text.replace(
+    /(https?:\/\/)[^@\/]+(:[^@\/]+)?@/gi,
+    "$1redacted@",
+  );
+}
+
+/**
+ * Sanitize a Firebase CLI error stream before it leaves the server.
+ *
+ * - Redacts potential secrets/tokens/keys/credentials.
+ * - Redacts URL-embedded credentials.
+ * - Caps total characters and line count.
+ * - If sanitization cannot be guaranteed, returns a safe fallback that names
+ *   only the exit code and a generic reason.
+ *
+ * Never returns raw CLI output to the browser or audit log.
+ */
+function sanitizeDeployError(
+  reason: string,
+  stderr: string | undefined | null,
+  stdout: string | undefined | null,
+  exitCode: number,
+): string {
+  const rawParts: string[] = [];
+  if (stderr && stderr.trim().length > 0) rawParts.push(stderr.trim());
+  if (stdout && stdout.trim().length > 0) rawParts.push(stdout.trim());
+
+  let combined = rawParts.join("\n").trim();
+
+  // If there is no CLI output at all, the reason + exit code is the safest message.
+  if (!combined) {
+    return `${reason} (رمز الخروج: ${exitCode})`;
+  }
+
+  // Redact URL credentials first.
+  combined = redactUrlCredentials(combined);
+
+  // Extract and redact potential secret patterns — keep the rest of the
+  // diagnostic text so Firebase CLI error messages are not hidden behind a
+  // generic fallback. Secrets are redacted but surrounding text is retained.
+  for (const pattern of DEPLOY_ERROR_SECRET_PATTERNS) {
+    combined = combined.replace(pattern, (match) => {
+      return match.slice(0, 4) + "***REDACTED***";
+    });
+  }
+
+  const cap = (text: string): string => {
+    const lines = text.split(/\r?\n/).slice(0, DEPLOY_ERROR_MAX_LINES);
+    let capped = lines.join(" ");
+    if (capped.length > DEPLOY_ERROR_MAX_CHARS) {
+      capped = capped.slice(0, DEPLOY_ERROR_MAX_CHARS) + "…";
+    }
+    return capped;
+  };
+
+  let result = cap(combined);
+  if (!result || result.length < 3) {
+    return `${reason} (رمز الخروج: ${exitCode})`;
+  }
+  return `${reason} — ${result} (رمز الخروج: ${exitCode})`;
+}
+
 function failedPublish(
   target: DeployTarget,
   stage: DeployPublishStage,
+  result: DeployCommandResult | null,
   reason: string,
-  exitCode: number,
 ): DeployPublishOutcome {
+  const exitCode = result?.exitCode ?? 1;
   return {
     deployed: false,
     savedToGit: false,
-    detail: `${reason} (رمز الخروج: ${exitCode})`,
+    detail: sanitizeDeployError(
+      reason,
+      result?.stderr ?? undefined,
+      result?.stdout ?? undefined,
+      exitCode,
+    ),
     blocked: false,
     stage,
     target: target.projectId,
+    via: "firebase_cli",
   };
 }
 
@@ -149,10 +294,23 @@ export class RealDeployExecutor {
   private preflight(
     environment: DeployTargetEnvironment,
     stage: DeployPublishStage,
+    options: { allowDispatchWithoutRealDeploy?: boolean } = {},
   ): { target: DeployTarget } | { blocked: DeployPublishOutcome } {
     const target = this.options.resolveTarget(environment);
 
-    if (!this.options.realDeployEnabled()) {
+    // TEST is a GitHub-only dispatch: it cannot change production or `main`, so
+    // it must remain usable on the deployed runtime (NODE_ENV=production, no
+    // local Git clone). The real-deploy opt-in stays mandatory for LIVE/LOCAL,
+    // i.e. for anything that would run the Firebase CLI from this app.
+    // TEST and LIVE both use the GitHub-dispatch path, so neither may depend on
+    // the LOCAL real-deploy opt-in. LIVE is still hard-gated below by
+    // deployDispatchEnabled() (DEPLOY_REAL_DEPLOY=enabled). The separate
+    // productionDeployEnabled() opt-in (DEPLOY_ALLOW_PRODUCTION) is only needed
+    // for LOCAL production deploys via Firebase CLI, which LIVE never uses.
+    const dispatchAllowed =
+      (options.allowDispatchWithoutRealDeploy === true && environment === "TEST") ||
+      environment === "LIVE";
+    if (!dispatchAllowed && !this.options.realDeployEnabled()) {
       return {
         blocked: blockedPublish(
           target,
@@ -162,12 +320,12 @@ export class RealDeployExecutor {
       };
     }
 
-    if (environment === "LIVE" && !this.options.productionDeployEnabled()) {
+    if (environment === "LIVE" && !this.options.deployDispatchEnabled()) {
       return {
         blocked: blockedPublish(
           target,
           "target",
-          "النشر إلى الإنتاج يتطلب تفعيلًا صريحًا منفصلًا (DEPLOY_ALLOW_PRODUCTION=enabled).",
+          "مسار النشر عبر GitHub Actions غير مُفعَّل — فعِّل DEPLOY_REAL_DEPLOY=enabled ثم أعد المحاولة.",
         ),
       };
     }
@@ -187,9 +345,28 @@ export class RealDeployExecutor {
     requestedTarget?: string | null;
     worktree?: "clean" | "dirty" | "unknown";
     environment?: DeployTargetEnvironment;
+    /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+    sessionId?: string;
+    /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+    adminId?: string;
+    /** Pending publish intent to store for automatic resume after OAuth. */
+    pendingPublish?: {
+      gitCommit: string;
+      environment: string;
+      approval: boolean;
+      requestedTarget?: string | null;
+      worktree?: string;
+      sessionId: string;
+      adminId?: string;
+      createdAt: number;
+    };
   }): Promise<DeployPublishOutcome> {
     const environment = input.environment ?? "TEST";
-    const preflight = this.preflight(environment, "target");
+    const preflight = this.preflight(environment, "target", {
+      // TEST is GitHub-actions-only; it must work from the deployed runtime
+      // without a local development checkout.
+      allowDispatchWithoutRealDeploy: environment === "TEST",
+    });
     if ("blocked" in preflight) return preflight.blocked;
     const { target } = preflight;
     const { dependencies } = this.options;
@@ -211,8 +388,144 @@ export class RealDeployExecutor {
       );
     }
 
-    // The source identity must be provable before anything is deployed: a full
-    // 40-char SHA and a clean worktree. Anything else is refused.
+    const cwd = dependencies.cwd();
+
+    // TEST & LIVE publish DELEGATION (GitHub Actions): for BOTH environments
+    // the app NEVER runs the Firebase CLI / apphosting:rollouts:create itself.
+    // The ONLY path is a workflow_dispatch to GitHub, which creates the rollout
+    // from the branch's remote tip:
+    //   TEST → `modii1/rwqan @ test/unified-gateway-ui-only` (deploy-test.yml)
+    //   LIVE → `modii1/rwqan @ main`                        (deploy-live.yml)
+    // No git push, no Firebase CLI, no new credentials — a missing pre-existing
+    // GitHub token fails closed with a clear admin-facing reason, and (TEST)
+    // a remote tip that differs from the approved commit is refused. There is
+    // NO fallback to the Firebase CLI here: if the GitHub path is not wired
+    // (missing seam) the publish is blocked, not sent to Firebase.
+    const isLiveEnvironment = environment === "LIVE";
+    if (environment === "TEST") {
+      if (!dependencies.dispatchTestDeploy) {
+        return blockedPublish(
+          target,
+          "target",
+          "النشر إلى بيئة الاختبار يتم حصريًا عبر GitHub Actions (workflow_dispatch) — لا يوجد مسار Firebase CLI بديل. التهيئة الخادمية للتفويض غير متوفرة؛ يجب إصلاح إعداد الخادم يدويًا.",
+        );
+      }
+      // Source of truth for TEST: the remote branch tip on GitHub, not the local
+      // HEAD. The rollout is created from the branch's remote tip regardless of
+      // what the local checkout says, so we must compare against (and deploy)
+      // the remote tip to avoid rejecting valid publishes when the local clone
+      // is behind the remote (e.g. on the published App Hosting instance).
+      const readTip = dependencies.readRemoteTip ?? readRemoteBranchHead;
+      const remoteTip = await readTip({
+        cwd,
+        remoteName: DEPLOY_GH_TEST_REMOTE_NAME,
+        branch: DEPLOY_GH_TEST_BRANCH,
+      });
+      if (!remoteTip.tip) {
+        return blockedPublish(
+          target,
+          "source",
+          `تعذّر قراءة tip فرع ${DEPLOY_GH_TEST_BRANCH} على GitHub (استعلام قراءة فقط). يُرجى التأكد من وجود الفرع على المستودع ثم المحاولة مجددًا.`,
+        );
+      }
+      const remoteCommit = remoteTip.tip;
+      const gh: GhWorkflowDispatchResult = await dependencies.dispatchTestDeploy({
+        commit: remoteCommit,
+        cwd,
+      });
+      if (gh.kind === "accepted") {
+        return {
+          deployed: false, // a dispatch is a request; GitHub owns the rollout
+          savedToGit: false,
+          detail: gh.detail,
+          blocked: false,
+          stage: null,
+          target: target.projectId,
+          // The dispatcher re-reads the remote tip (with the API fallback) and
+          // returns the exact SHA GitHub will build. That is the authoritative
+          // source — never the local HEAD.
+          releaseRef: releaseRef(target, gh.commit),
+          via: "github_actions",
+          ghDispatch: {
+            accepted: true,
+            ref: gh.branch,
+            actionsUrl: gh.actionsUrl,
+            commit: gh.commit,
+          },
+        };
+      }
+      if (gh.kind === "blocked") {
+        return { ...blockedPublish(target, gh.stage, gh.reason), via: "github_actions" };
+      }
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: gh.reason,
+        blocked: false,
+        stage: "deploy",
+        target: target.projectId,
+        releaseRef: releaseRef(target, remoteCommit),
+        via: "github_actions",
+      };
+    }
+
+    // LIVE publish delegation — same mechanism as TEST, its OWN workflow file
+    // (deploy-live.yml) and its OWN branch (`main`); the two environments can
+    // never cross because each dispatch call resolves only its own config.
+    // The deployed source is the LAST version already on the remote branch —
+    // the panel never creates a commit or a push, so no local-tree comparison
+    // is applied for LIVE. A missing seam blocks with an explicit reason.
+    if (environment === "LIVE") {
+      if (!dependencies.dispatchLiveDeploy) {
+        return blockedPublish(
+          target,
+          "target",
+          "النشر إلى بيئة الإنتاج يتم حصريًا عبر GitHub Actions (workflow_dispatch) — لا يوجد مسار Firebase CLI بديل. التهيئة الخادمية للتفويض غير متوفرة؛ يجب إصلاح إعداد الخادم يدويًا.",
+        );
+      }
+      const gh: GhWorkflowDispatchResult = await dependencies.dispatchLiveDeploy({ cwd });
+      if (gh.kind === "accepted") {
+        return {
+          deployed: false, // a dispatch is a request; GitHub owns the rollout
+          savedToGit: false,
+          detail: gh.detail,
+          blocked: false,
+          stage: null,
+          target: target.projectId,
+          // The deployed source is the branch tip GitHub will build — never the
+          // local HEAD of this machine.
+          releaseRef: releaseRef(target, gh.commit),
+          via: "github_actions",
+          ghDispatch: {
+            accepted: true,
+            ref: gh.branch,
+            actionsUrl: gh.actionsUrl,
+            commit: gh.commit,
+          },
+        };
+      }
+      if (gh.kind === "blocked") {
+        return { ...blockedPublish(target, gh.stage, gh.reason), via: "github_actions" };
+      }
+      return {
+        deployed: false,
+        savedToGit: false,
+        detail: gh.reason,
+        blocked: false,
+        stage: "deploy",
+        target: target.projectId,
+        via: "github_actions",
+      };
+    }
+
+    // ---------------------------------------------------------------------
+    // LOCAL publish: the ONLY path that runs the Firebase CLI from this app.
+    // The local source identity matters here because the CLI builds from the
+    // local checkout: a full 40-char SHA and a clean worktree are mandatory.
+    // (These gates deliberately no longer apply to TEST/LIVE dispatch, which
+    // build the immutable remote commit and must work from a server that has
+    // no up-to-date clone.)
+    // ---------------------------------------------------------------------
     const commit = input.gitCommit?.trim() ?? "";
     if (!isFullGitSha(commit)) {
       return blockedPublish(
@@ -250,7 +563,129 @@ export class RealDeployExecutor {
       );
     }
 
-    const cwd = dependencies.cwd();
+    // Firebase CLI authentication is required to run apphosting commands.
+    // Resolve FIREBASE_TOKEN from the server-side session credentials and
+    // inject it into the command environment. Never return the token to the
+    // caller or log it.
+    let cliEnv: Record<string, string> | undefined;
+    if (input.sessionId) {
+      const authStatus: DeployAuthStatus = await getDeployAuthStatus(
+        input.sessionId,
+        input.adminId,
+      );
+      if (!authStatus.authenticated) {
+        // Store the pending publish intent for automatic resume after OAuth.
+        // Single-use: deleted after retrieval via getAndDeletePendingPublish.
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "مصادقة Firebase CLI مطلوبة قبل النشر. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+      const verified: DeployAuthVerifyResult = await verifyFirebaseCliAuth(
+        input.sessionId,
+        input.adminId,
+        cwd,
+      );
+      if (!verified.valid) {
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "بيانات اعتماد Firebase CLI غير صالحة أو منتهية. يُرجى تسجيل الدخول عبر Google مرة أخرى.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+      cliEnv = (await getFirebaseCliEnv(input.sessionId, input.adminId)) ?? undefined;
+      if (!cliEnv) {
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(input.sessionId, input.adminId, {
+            ...input.pendingPublish,
+            sessionId: input.sessionId,
+            adminId: input.adminId,
+            createdAt: nowMs(),
+          });
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "بيانات اعتماد Firebase CLI غير متوفرة. يُرجى تسجيل الدخول عبر Google ثم المحاولة مجددًا.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+
+      // Pre-flight read-only check: confirm the Firebase CLI can authenticate
+      // with the stored credentials BEFORE creating any rollout. This runs
+      // `firebase projects:list` which requires no project selection and creates
+      // no rollout or deploy. If this fails, refuse the publish with a clear
+      // message instead of creating a rollout that will fail.
+      const cliProbe = await dependencies.runCommand({
+        stage: "auth-verify",
+        file: "firebase",
+        args: ["projects:list", "--format=json"],
+        cwd,
+        env: cliEnv,
+      });
+      if (cliProbe.exitCode !== 0) {
+        if (input.pendingPublish) {
+          void startDeployAuthFlow(
+            input.sessionId,
+            input.adminId,
+            input.pendingPublish,
+          );
+        } else {
+          void startDeployAuthFlow(input.sessionId, input.adminId);
+        }
+        return {
+          deployed: false,
+          savedToGit: false,
+          detail:
+            "تعذّر المصادقة مع Firebase CLI باستخدام بيانات الاعتماد المخزّنة. يُرجى تسجيل الدخول عبر Google مرة أخرى أو التحقق من صلاحيات الحساب.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+          authRequired: true,
+          authUrl: undefined,
+        };
+      }
+    }
 
     // Create a rollout from the EXACT commit on the GitHub-connected backend.
     const rollout = await dependencies.runCommand({
@@ -269,13 +704,14 @@ export class RealDeployExecutor {
         firebaseConfigFor(environment),
       ],
       cwd,
+      env: cliEnv ?? undefined,
     });
     if (rollout.exitCode !== 0) {
       return failedPublish(
         target,
         "deploy",
+        rollout,
         `فشل إنشاء rollout للـcommit المحدد على هدف ${environmentLabel(environment)}.`,
-        rollout.exitCode,
       );
     }
 
@@ -316,7 +752,7 @@ export class RealDeployExecutor {
       expectedCommit: commit.toLowerCase(),
       expectedVersion: null,
       requireCommitProof: false,
-      allowProductionHost: environment === "LIVE",
+      allowProductionHost: isLiveEnvironment,
     });
     if (!verify.ok) {
       return {
@@ -342,6 +778,7 @@ export class RealDeployExecutor {
       releaseRef: releaseRef(target, commit),
       verify,
       buildSource,
+      via: "firebase_cli",
     };
   }
 
@@ -356,6 +793,10 @@ export class RealDeployExecutor {
     approval?: boolean;
     requestedTarget?: string | null;
     environment?: DeployTargetEnvironment;
+    /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+    sessionId?: string;
+    /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+    adminId?: string;
   }): Promise<DeployRestoreOutcome> {
     const environment = input.environment ?? "TEST";
     const preflight = this.preflight(environment, "target");
@@ -412,6 +853,53 @@ export class RealDeployExecutor {
       };
     }
 
+    const rolloutEnv = (() => {
+      if (!input.sessionId) return undefined;
+      return undefined; // resolved asynchronously below
+    })();
+    let cliEnvRestore: Record<string, string> | undefined;
+    if (input.sessionId) {
+      const authStatus = await getDeployAuthStatus(
+        input.sessionId,
+        input.adminId,
+      );
+      if (authStatus.authenticated) {
+        const verified = await verifyFirebaseCliAuth(
+          input.sessionId,
+          input.adminId,
+          dependencies.cwd(),
+        );
+        if (verified.valid) {
+          cliEnvRestore = (await getFirebaseCliEnv(
+            input.sessionId,
+            input.adminId,
+          )) ?? undefined;
+        }
+      }
+    }
+
+    // Pre-flight read-only check for restore: confirm the Firebase CLI can
+    // authenticate before creating any rollout.
+    if (cliEnvRestore) {
+      const cliProbe = await dependencies.runCommand({
+        stage: "auth-verify",
+        file: "firebase",
+        args: ["projects:list", "--format=json"],
+        cwd: dependencies.cwd(),
+        env: cliEnvRestore,
+      });
+      if (cliProbe.exitCode !== 0) {
+        return {
+          restored: false,
+          detail:
+            "تعذّر المصادقة مع Firebase CLI باستخدام بيانات الاعتماد المخزّنة. يُرجى تسجيل الدخول عبر Google مرة أخرى أو التحقق من صلاحيات الحساب.",
+          blocked: false,
+          stage: "auth",
+          target: target.projectId,
+        };
+      }
+    }
+
     const rollout = await dependencies.runCommand({
       stage: "restore",
       file: "firebase",
@@ -428,11 +916,17 @@ export class RealDeployExecutor {
         firebaseConfigFor(environment),
       ],
       cwd: dependencies.cwd(),
+      env: cliEnvRestore ?? undefined,
     });
     if (rollout.exitCode !== 0) {
       return {
         restored: false,
-        detail: `فشل إنشاء rollout للاستعادة على ${target.backendId} (رمز الخروج: ${rollout.exitCode}).`,
+        detail: sanitizeDeployError(
+          `فشل إنشاء rollout للاستعادة على ${target.backendId}.`,
+          rollout.stderr ?? undefined,
+          rollout.stdout ?? undefined,
+          rollout.exitCode,
+        ),
         blocked: false,
         stage: "deploy",
         target: target.projectId,
@@ -495,14 +989,24 @@ export class RealDeployExecutor {
 /**
  * Default real dependencies: `execFile` (no shell) for the deploy commands and
  * the HTTP health probe. Used only when a real deploy is explicitly enabled.
+ *
+ * Windows: `firebase` exists only as a `.cmd` shim that Node refuses to spawn
+ * directly, so the launch helper runs firebase-tools' JS entry through
+ * `process.execPath` instead — still no shell, still a plain argv array. An
+ * unresolvable entry falls back to the plain `firebase` spawn, preserving
+ * every existing fail-closed failure path.
  */
 export function createRealDeployDependencies(): RealDeployDependencies {
   return {
     runCommand(spec) {
       return new Promise<DeployCommandResult>((resolve) => {
+        const launch =
+          spec.file === "firebase"
+            ? resolveFirebaseCommand()
+            : { file: spec.file, prefixArgs: [] as string[] };
         execFile(
-          spec.file,
-          spec.args,
+          launch.file,
+          [...launch.prefixArgs, ...spec.args],
           {
             cwd: spec.cwd,
             windowsHide: true,
@@ -544,6 +1048,10 @@ export function createRealDeployDependencies(): RealDeployDependencies {
     // The executor treats its ABSENCE as a hard block, so a real deploy can never
     // succeed without this proof.
     verifyBuildSource: createAppHostingVerifyDependency(),
+    dispatchTestDeploy: (request) => dispatchTestDeployWorkflow(request),
+    dispatchLiveDeploy: (request: GhLiveWorkflowDispatchRequest) =>
+      dispatchLiveDeployWorkflow(request),
+    readRemoteTip: readRemoteBranchHead,
     now: () => new Date(),
     cwd: () => process.cwd(),
   };

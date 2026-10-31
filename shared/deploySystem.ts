@@ -6,7 +6,7 @@
  * connects to production, or stores secrets. All records are presentation data.
  */
 
-export type DeployEnvironment = "TEST" | "LIVE";
+export type DeployEnvironment = "TEST" | "LIVE" | "LOCAL";
 
 /**
  * Lifecycle of a release. `simulated` marks prototype/sandbox records.
@@ -291,6 +291,7 @@ export type DeployAuditAction =
   | "checks_run"
   | "publish"
   | "publish_simulated"
+  | "publish_dispatched"
   | "publish_blocked"
   | "publish_failed"
   | "restore_preview"
@@ -306,7 +307,8 @@ export interface DeployAuditEntry {
   actor: "admin";
   at: string;
   environment: DeployEnvironment;
-  result: "ok" | "rejected";
+  /** "accepted" only for requests sent to an external system (e.g. GitHub). */
+  result: "ok" | "accepted" | "rejected";
   releaseId?: string;
   reason?: string;
 }
@@ -448,6 +450,61 @@ export interface DeployRollbackReadiness {
   reason: string;
 }
 
+export interface DeployGateItem {
+  /** Stable machine key (e.g. `git_worktree`, `target_config`). */
+  key: string;
+  /** Arabic label from the SERVER (single source of truth for the UI). */
+  label: string;
+  /** `ok` = proven, `blocked` = the executor/route would refuse, `unverified` = missing info. */
+  state: DeployGateItemState;
+  /** Human-readable, non-secret reason (Arabic) when present. */
+  reason?: string;
+  /** Testid for the UI chips. */
+  testId?: string;
+}
+
+export type DeployGateItemState = "ok" | "blocked" | "unverified";
+
+/** The three accepted verdicts of the pre-deploy review gate. */
+export type DeployGateStatus =
+  | "ready_for_review"
+  | "blocked_by_failed_check"
+  | "unverified_missing_info";
+
+export const DEPLOY_GATE_LABELS: Record<DeployGateStatus, string> = {
+  ready_for_review: "جاهز للمراجعة",
+  blocked_by_failed_check: "ممنوع بسبب فشل فحص",
+  unverified_missing_info: "غير متحقق — نقص معلومات أو صلاحيات",
+};
+
+export const DEPLOY_GATE_ITEM_STATE_LABELS: Record<DeployGateItemState, string> = {
+  ok: "تم",
+  blocked: "ممنوع",
+  unverified: "غير متحقق",
+};
+
+/**
+ * The pre-deploy review gate. PRESENTATION ONLY — it classifies the same
+ * conditions the executor/route already ENFORCE (target policy, opt-ins, clean
+ * worktree, full SHA, mandatory checks). It never grants permission, never
+ * bypasses an enforcement point, and never claims success.
+ */
+export interface DeployGateState {
+  status: DeployGateStatus;
+  items: DeployGateItem[];
+}
+
+/**
+ * Read-only availability of the deploy tools on this machine (a `firebase
+ * --version` probe: strictly LOCAL, no project, no network request). The
+ * version string is the only output kept — never credentials.
+ */
+export interface DeployToolsInfo {
+  firebaseCliAvailable: boolean;
+  firebaseCliVersion: string | null;
+  readAt: string;
+}
+
 export interface DeployStateDescriptor {
   status: DeployReleaseStatus;
   label: string;
@@ -488,11 +545,32 @@ export interface DeployState {
     projectId: string;
     backendId: string;
     baseUrl: string | null;
+    /** App Hosting region from env (`null` = unknown → يُعرض في الواجهة كغير متحقق). */
+    location: string | null;
+    /**
+     * EXPECTED rollout host from the external naming convention (`null` when
+     * the location is unknown — never a guessed domain).
+     */
+    expectedDomain: string | null;
   };
   /** TRUE only when NODE_ENV=development AND DEPLOY_REAL_DEPLOY=enabled. */
   realDeployEnabled: boolean;
+  /** TRUE when DEPLOY_REAL_DEPLOY=enabled (GitHub-dispatch path enabled for TEST/LIVE). */
+  deployDispatchEnabled: boolean;
   /** TRUE only when real deploys target production (second, separate opt-in). */
   productionDeployEnabled: boolean;
+  /**
+   * The data environment currently served by this DEV runtime (the in-memory
+   * TEST/LIVE/LOCAL selector; TEST is the safe default and reset value).
+   */
+  dataEnvironment: DeployEnvironment;
+  /**
+   * The pre-deploy review gate: a server-computed classification of the SAME
+   * conditions the executor/route enforce. Presentation only — never permission.
+   */
+  gate: DeployGateState;
+  /** Availability of the deploy tools on this machine (read-only probe; null = unknown). */
+  tools: DeployToolsInfo | null;
   /** Official stable baseline for the public site (read-only reference). */
   stableBaseline: DeployStableBaseline;
   /** Rollback mechanism + readiness (never claims readiness without proof). */
@@ -521,7 +599,8 @@ export const DEPLOY_PROTOTYPE_VERSION = "0.0.0-prototype";
 
 export const DEPLOY_ENVIRONMENT_NOTICE: Record<DeployEnvironment, string> = {
   TEST: "بيئة الاختبار: نشر حقيقي إلى هدف التطوير المعزول rwqan-sa-dev فقط.",
-  LIVE: "بيئة الإنتاج: نشر حقيقي إلى مشروع الإنتاج rwqan-757 (rwqan.sa) — يتطلب تفعيلًا صريحًا منفصلًا (DEPLOY_ALLOW_PRODUCTION=enabled).",
+  LIVE: "بيئة الإنتاج: نشر حقيقي إلى مشروع الإنتاج rwqan-757 (rwqan.sa) عبر GitHub Actions (workflow_dispatch) — يتطلب DEPLOY_REAL_DEPLOY=enabled.",
+  LOCAL: "بيئة محلية: النشر والاستعادة يستهدفان الموارد المحلية فقط، لا اتصال بالتطوير المعزول أو بالإنتاج.",
 };
 
 export const DEPLOY_STATE_DESCRIPTORS: DeployStateDescriptor[] = [

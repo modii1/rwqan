@@ -20,6 +20,7 @@ import {
 import type { BuildSourceVerification } from "./DeployBuildSourceService";
 import {
   productionDeployEnabled as defaultProductionDeployEnabled,
+  deployDispatchEnabled as defaultDeployDispatchEnabled,
   realDeployEnabled as defaultRealDeployEnabled,
   resolveDeployTarget,
   type DeployTargetEnvironment,
@@ -28,10 +29,12 @@ import {
   RealDeployExecutor,
   createRealDeployDependencies,
 } from "./DeployRealExecutor";
+import type { GhDispatchAccepted } from "./DeployGhWorkflowService";
 
 /** Stage a real publish stopped at (used for a precise audit reason). */
 export type DeployPublishStage =
   | "approval"
+  | "auth"
   | "target"
   | "source"
   | "build"
@@ -58,6 +61,22 @@ export interface DeployPublishOutcome {
   verify?: DeployPostDeployVerification | null;
   /** Authoritative source-identity check from the App Hosting control plane. */
   buildSource?: BuildSourceVerification | null;
+  /** TRUE when Firebase CLI authentication is required before deploy can proceed. */
+  authRequired?: boolean;
+  /** Google OAuth authorization URL to open (when authRequired === true). */
+  authUrl?: string | null;
+  /**
+   * Present when the TEST publish was DELEGATED to GitHub Actions
+   * (workflow_dispatch). GitHub — not this app — creates the rollout, so this
+   * outcome never claims `deployed: true`; the dispatch is only a request.
+   */
+  ghDispatch?: GhDispatchAccepted | null;
+  /**
+   * The path that actually executed. Recorded so the panel/audit can PROVE
+   * whether the request went to GitHub Actions or to a local Firebase CLI —
+   * never inferred from the message text.
+   */
+  via?: "github_actions" | "firebase_cli" | null;
 }
 
 /** Result of asking the executor to restore a previous release. */
@@ -78,6 +97,8 @@ export interface DeployRestoreOutcome {
   verify?: DeployPostDeployVerification | null;
   /** Authoritative source-identity check from the App Hosting control plane. */
   buildSource?: BuildSourceVerification | null;
+  /** The path that actually executed (see DeployPublishOutcome.via). */
+  via?: "github_actions" | "firebase_cli" | null;
 }
 
 export interface DeployPublishInput {
@@ -91,6 +112,10 @@ export interface DeployPublishInput {
   worktree?: "clean" | "dirty" | "unknown";
   /** Active deploy environment selecting the target (defaults to TEST). */
   environment?: DeployTargetEnvironment;
+  /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+  sessionId?: string;
+  /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+  adminId?: string;
 }
 
 export interface DeployRestoreInput {
@@ -100,6 +125,10 @@ export interface DeployRestoreInput {
   requestedTarget?: string | null;
   /** Active deploy environment selecting the target (defaults to TEST). */
   environment?: DeployTargetEnvironment;
+  /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
+  sessionId?: string;
+  /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
+  adminId?: string;
 }
 
 /**
@@ -116,6 +145,8 @@ export interface DeployExecutorOptions {
   restoreNotice: string;
   /** Test seam: decide whether a real deploy is enabled (defaults to env). */
   realDeployEnabled?: () => boolean;
+  /** Test seam: decide whether the GitHub-dispatch path is enabled (defaults to env). */
+  deployDispatchEnabled?: () => boolean;
   /** Test seam: decide whether production deploys are enabled (defaults to env). */
   productionDeployEnabled?: () => boolean;
 }
@@ -149,10 +180,22 @@ export class DisabledDeployExecutor implements DeployExecutor {
 }
 
 /**
- * Build the executor. Returns the fail-closed executor unless a real deploy is
- * explicitly enabled (NODE_ENV=development AND DEPLOY_REAL_DEPLOY=enabled). The
- * real executor resolves its target per call from the active environment and
- * always requires an explicit approval; it never auto-deploys.
+ * Build the executor.
+ *
+ * IMPORTANT (TEST remediation): this ALWAYS returns the real executor. The
+ * previous version returned `DisabledDeployExecutor` unless
+ * `NODE_ENV=development` AND `DEPLOY_REAL_DEPLOY=enabled`, which made the TEST
+ * button unusable on the deployed App Hosting runtime (NODE_ENV is always
+ * `production` there) and forced the panel to depend on the local machine being
+ * a development checkout. Environment-specific safety is now enforced INSIDE
+ * the executor:
+ *   - TEST  → GitHub Actions dispatch only (no Firebase CLI). It needs the
+ *             server-side GitHub token + admin approval; it can never touch
+ *             production or `main`.
+ *   - LIVE  → still requires the real-deploy opt-in AND the separate production
+ *             opt-in before anything is dispatched.
+ *   - LOCAL → still requires the real-deploy opt-in (Firebase CLI path).
+ * A missing GitHub token still fails closed with a clear reason.
  */
 export function createDeployExecutor(
   options: DeployExecutorOptions = {
@@ -161,14 +204,13 @@ export function createDeployExecutor(
   },
 ): DeployExecutor {
   const realEnabled = options.realDeployEnabled ?? defaultRealDeployEnabled;
+  const dispatchEnabled = options.deployDispatchEnabled ?? defaultDeployDispatchEnabled;
   const prodEnabled = options.productionDeployEnabled ?? defaultProductionDeployEnabled;
-  if (!realEnabled()) {
-    return new DisabledDeployExecutor(options);
-  }
   return new RealDeployExecutor({
     resolveTarget: (environment: DeployTargetEnvironment) => resolveDeployTarget(environment),
     dependencies: createRealDeployDependencies(),
     realDeployEnabled: realEnabled,
+    deployDispatchEnabled: dispatchEnabled,
     productionDeployEnabled: prodEnabled,
   });
 }
