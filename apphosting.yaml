@@ -56,6 +56,84 @@ env:
     availability:
       - RUNTIME
 
+  # ── WhatsApp sending only (no webhook variables) ──
+  - variable: META_WHATSAPP_TOKEN
+    secret: projects/rwqan-production-v2/secrets/META_WHATSAPP_TOKEN
+    availability:
+      - RUNTIME
+
+  - variable: META_PHONE_NUMBER_ID
+    secret: projects/rwqan-production-v2/secrets/META_PHONE_NUMBER_ID
+    availability:
+      - RUNTIME
+
+  - variable: ENJAZATIK_URL
+    secret: projects/rwqan-production-v2/secrets/ENJAZATIK_URL
+    availability:
+      - RUNTIME
+
+  - variable: ENJAZATIK_TOKEN
+    secret: projects/rwqan-production-v2/secrets/ENJAZATIK_TOKEN
+    availability:
+      - RUNTIME
+
+  # ── Cloudflare R2 (production image store; not LIVE_R2_*) ──
+  - variable: R2_REGION
+    secret: projects/rwqan-production-v2/secrets/R2_REGION
+    availability:
+      - RUNTIME
+
+  - variable: R2_ENDPOINT
+    secret: projects/rwqan-production-v2/secrets/R2_ENDPOINT
+    availability:
+      - RUNTIME
+
+  - variable: R2_ACCESS_KEY_ID
+    secret: projects/rwqan-production-v2/secrets/R2_ACCESS_KEY_ID
+    availability:
+      - RUNTIME
+
+  - variable: R2_SECRET_ACCESS_KEY
+    secret: projects/rwqan-production-v2/secrets/R2_SECRET_ACCESS_KEY
+    availability:
+      - RUNTIME
+
+  - variable: R2_BUCKET_NAME
+    secret: projects/rwqan-production-v2/secrets/R2_BUCKET_NAME
+    availability:
+      - RUNTIME
+
+  - variable: R2_PUBLIC_URL
+    secret: projects/rwqan-production-v2/secrets/R2_PUBLIC_URL
+    availability:
+      - RUNTIME
+
+  # ── Paymob (PAYMOB_HMAC_SECRET is already bound above) ──
+  - variable: PAYMOB_API_KEY
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_API_KEY
+    availability:
+      - RUNTIME
+
+  - variable: PAYMOB_PUBLIC_KEY
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_PUBLIC_KEY
+    availability:
+      - RUNTIME
+
+  - variable: PAYMOB_LEGACY_API_KEY
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_LEGACY_API_KEY
+    availability:
+      - RUNTIME
+
+  - variable: PAYMOB_INTEGRATION_ID_CARDS
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_INTEGRATION_ID_CARDS
+    availability:
+      - RUNTIME
+
+  - variable: PAYMOB_INTEGRATION_ID_APPLEPAY
+    secret: projects/rwqan-production-v2/secrets/PAYMOB_INTEGRATION_ID_APPLEPAY
+    availability:
+      - RUNTIME
+
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
   # - variable: MESSAGE
