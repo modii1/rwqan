@@ -1,3 +1,4 @@
+
 # Settings for Backend (on Cloud Run).
 # See https://firebase.google.com/docs/app-hosting/configure#cloud-run
 runConfig:
@@ -23,38 +24,48 @@ env:
     value: production
     availability:
       - RUNTIME
+
   - variable: NEXT_PUBLIC_BASE_URL
     value: https://rwqan.sa
     availability:
       - BUILD
       - RUNTIME
+
   - variable: ADMIN_CODE
     secret: projects/rwqan-production-v2/secrets/ADMIN_CODE
     availability:
       - RUNTIME
+
   - variable: ADMIN_PASSWORD
     secret: projects/rwqan-production-v2/secrets/ADMIN_PASSWORD
     availability:
       - RUNTIME
+
   - variable: SESSION_SECRET
     secret: projects/rwqan-production-v2/secrets/SESSION_SECRET
     availability:
       - RUNTIME
+
   - variable: PAYMOB_HMAC_SECRET
     secret: projects/rwqan-production-v2/secrets/PAYMOB_HMAC_SECRET
     availability:
       - RUNTIME
+
   - variable: FIREBASE_SERVICE_ACCOUNT
     secret: projects/rwqan-production-v2/secrets/FIREBASE_SERVICE_ACCOUNT
     availability:
-      - variable: META_WHATSAPP_APP_SECRET
+      - RUNTIME
+
+  - variable: META_WHATSAPP_APP_SECRET
     secret: projects/rwqan-production-v2/secrets/META_WHATSAPP_APP_SECRET
     availability:
       - RUNTIME
+
   - variable: META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
     secret: projects/rwqan-production-v2/secrets/META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
     availability:
       - RUNTIME
+
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
   # - variable: MESSAGE
