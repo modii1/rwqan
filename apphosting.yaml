@@ -47,6 +47,13 @@ env:
   - variable: FIREBASE_SERVICE_ACCOUNT
     secret: projects/rwqan-production-v2/secrets/FIREBASE_SERVICE_ACCOUNT
     availability:
+      - variable: META_WHATSAPP_APP_SECRET
+    secret: projects/rwqan-production-v2/secrets/META_WHATSAPP_APP_SECRET
+    availability:
+      - RUNTIME
+  - variable: META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
+    secret: projects/rwqan-production-v2/secrets/META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
+    availability:
       - RUNTIME
   # Configure environment variables.
   # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
