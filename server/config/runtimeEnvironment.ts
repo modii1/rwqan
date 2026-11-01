@@ -197,11 +197,6 @@ export function assertProductionSecurityEnvironment(
       "META_WHATSAPP_APP_SECRET and META_WHATSAPP_WEBHOOK_VERIFY_TOKEN must be configured together in production",
     );
   }
-  if (!relayConfigured && !metaAppSecretConfigured) {
-    throw new Error(
-      "Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials in production",
-    );
-  }
 
   if (relayConfigured && Buffer.byteLength(relaySecret, "utf8") < 32) {
     throw new Error(

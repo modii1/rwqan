@@ -73,9 +73,9 @@ test("production accepts Meta-only webhook authentication", () => {
   );
 });
 
-test("production requires one webhook authentication mode", () => {
-  assert.throws(
-    () => assertProductionSecurityEnvironment({
+test("production starts without any WhatsApp webhook keys configured", () => {
+  assert.doesNotThrow(() =>
+    assertProductionSecurityEnvironment({
       NODE_ENV: "production",
       ADMIN_CODE: "configured-code",
       ADMIN_PASSWORD: "configured-password",
@@ -83,7 +83,6 @@ test("production requires one webhook authentication mode", () => {
       PAYMOB_HMAC_SECRET: "configured-paymob-hmac",
       FIREBASE_SERVICE_ACCOUNT,
     }),
-    /Configure either WHATSAPP_DELIVERY_WEBHOOK_SECRET or the Meta WhatsApp webhook credentials/,
   );
 });
 
