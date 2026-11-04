@@ -344,6 +344,8 @@ export function DeployBar() {
       runId?: number | null;
       rolloutStep?: string;
       rolloutVerified?: boolean;
+      reason?: string;
+      failureReason?: string;
     };
   }>({
     queryKey: ["/api/admin/deploy/status", trackedEnv],
@@ -384,6 +386,14 @@ export function DeployBar() {
     publishRunStatus?.status?.rolloutVerified === false
       ? "unconfirmed"
       : rawRunState;
+  // Show the REAL reason: a failed run's failed job/step, or why the status
+  // could not be read. Never invent success and never hide the failure cause.
+  const statusDetail =
+    runState === "unknown"
+      ? publishRunStatus?.status?.reason ?? ""
+      : runState === "failed"
+        ? publishRunStatus?.status?.failureReason ?? ""
+        : "";
 
   // Data-environment toggle (LOCAL/TEST/LIVE). This switches the WHOLE
   // application's data sources and services between local resources, isolated
@@ -953,7 +963,10 @@ export function DeployBar() {
               target="_blank"
               rel="noreferrer"
               data-testid="deploy-bar-publish-status"
-              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+              title={statusDetail || undefined}
+              className={`flex shrink-0 items-start gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+                statusDetail ? "max-w-[24rem] whitespace-normal text-right leading-4" : ""
+              } ${
                 runState === "running"
                   ? "border-sky-300 bg-sky-50 text-sky-900"
                   : runState === "failed"
@@ -963,7 +976,10 @@ export function DeployBar() {
                       : "border-amber-300 bg-white text-amber-900"
               }`}
             >
-              {runStatusLabel[runState] ?? runStatusLabel.unknown}
+              <span>{runStatusLabel[runState] ?? runStatusLabel.unknown}</span>
+              {statusDetail ? (
+                <span className="font-normal opacity-80">— {statusDetail}</span>
+              ) : null}
             </a>
           )}
 

@@ -147,8 +147,11 @@ test("TEST and LIVE publish buttons are independent, with a real status chip", (
   assert.match(source, /data-testid="deploy-bar-publish-status"/);
   // Plain Arabic labels of the REAL run state.
   assert.match(source, /جارٍ التحديث الآن/);
-  assert.match(source, /اكتمل آخر تحديث/);
+  assert.match(source, /تم إنشاء التحديث وتأكّد/);
   assert.match(source, /فشل آخر تحديث/);
+  // The real reason (failed step, or why GitHub could not be read) is shown.
+  assert.match(source, /publishRunStatus\?\.status\?\.reason/);
+  assert.match(source, /publishRunStatus\?\.status\?\.failureReason/);
   // An accepted GitHub request is NEVER shown as a completed deploy.
   assert.doesNotMatch(source, /تم النشر بنجاح/);
 });
@@ -194,10 +197,13 @@ test("the old direct-Firebase failure message is never shown; friendly admin wor
   assert.doesNotMatch(source, /فشل إنشاء rollout/);
   assert.doesNotMatch(source, /رمز الخروج/);
   assert.match(source, /friendlyDeployFailure/);
-  assert.match(source, /لم يبدأ التحديث: نسخة الموقع على الخادم قديمة/);
+  // The misleading "your server is outdated" heuristic was intentionally removed
+  // so the real, sanitised server reason is never hidden. The source-stage
+  // message now asks the owner to re-verify the published commit instead.
+  assert.doesNotMatch(source, /نسخة الموقع على الخادم قديمة/);
+  assert.match(source, /تعذّر تأكيد أن النسخة المطلوب نشرها هي النسخة المعتمدة على الفرع/);
   assert.match(source, /إعداد الربط مع GitHub غير مكتمل/);
-  assert.match(source, /النسخة المرفوعة إلى GitHub ليست هي نفس النسخة المعتمَدة/);
-  assert.match(source, /التفاصيل التقنية في سجل النشر/);
+  assert.match(source, /التفاصيل: \$\{capped\}/);
   // The friendly mapping runs BEFORE any raw server error is displayed.
   assert.match(
     source,

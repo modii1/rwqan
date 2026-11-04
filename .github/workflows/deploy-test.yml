@@ -1,8 +1,8 @@
 # RWQAN TEST — Firebase App Hosting automatic rollout for the TEST backend.
 #
-# Purpose: every push to the TEST branch creates a rollout on the TEST backend
-# (rwqan-backend @ europe-west4, project rwqan-757) using the exact commit SHA
-# that triggered the workflow.
+# Purpose: a manual workflow_dispatch on the TEST branch creates a rollout on
+# the TEST backend (rwqan-backend @ europe-west4, project rwqan-757) using the
+# exact commit SHA of that branch.
 #
 # Production safety (hard requirements, do not relax):
 #   - This workflow MUST ONLY ever run on the branch
@@ -32,9 +32,6 @@
 name: Deploy TEST Rollout
 
 on:
-  push:
-    branches:
-      - test/unified-gateway-ui-only
   workflow_dispatch:
 
 permissions:

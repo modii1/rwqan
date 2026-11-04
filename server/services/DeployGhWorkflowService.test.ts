@@ -10,6 +10,7 @@ import {
   type GhWorkflowDispatchRequest,
   type GhLiveWorkflowDispatchRequest,
   readDeployWorkflowRunStatus,
+  resetDeployWorkflowStatusCache,
 } from "./DeployGhWorkflowService";
 
 const COMMIT = "a".repeat(40);
@@ -358,7 +359,8 @@ test("LIVE blocked when the branch tip cannot be read at all", async () => {
   assert.match(result.kind === "blocked" ? result.reason : "", /غير موجود|تعذّر|push/);
 });
 
-test("read status returns the real run state per environment (unknown without a token)", async () => {
+test("read status returns the real run state per environment (anonymous read for public repo)", async () => {
+  resetDeployWorkflowStatusCache();
   const running = await readDeployWorkflowRunStatus(
     "TEST",
     { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
@@ -378,11 +380,88 @@ test("read status returns the real run state per environment (unknown without a 
   assert.equal(running.state, "running");
   assert.equal(running.headSha, COMMIT.toLowerCase());
 
-  const noToken = await readDeployWorkflowRunStatus("LIVE", {}, fetchThatMustNotRun);
-  assert.equal(noToken.state, "unknown");
-  assert.equal(noToken.runUrl, null);
-  assert.equal(noToken.headSha, null);
-  assert.equal(noToken.rolloutVerified, false);
+  resetDeployWorkflowStatusCache();
+  const anonymous = await readDeployWorkflowRunStatus("LIVE", {}, async (url, init) => {
+    const u = String(url);
+    const headers = new Headers(init?.headers as HeadersInit);
+    assert.equal(headers.get("Authorization"), null, "anonymous read must not send a token");
+    if (u.includes("/jobs")) {
+      return {
+        status: 200,
+        json: async () => ({
+          jobs: [{ name: "deploy", steps: [{ name: "Create rollout", conclusion: "success" }] }],
+        }),
+      } as Response;
+    }
+    return {
+      status: 200,
+      json: async () => ({
+        workflow_runs: [
+          {
+            id: 7001,
+            status: "completed",
+            conclusion: "success",
+            head_sha: COMMIT,
+            html_url: "https://github.com/modii1/rwqan/actions/runs/7001",
+          },
+        ],
+      }),
+    } as Response;
+  });
+  assert.equal(anonymous.state, "success");
+  assert.equal(anonymous.rolloutVerified, true);
+});
+
+test("an unreadable GitHub status returns a reason, never a fake success", async () => {
+  resetDeployWorkflowStatusCache();
+  const denied = await readDeployWorkflowRunStatus(
+    "TEST",
+    {},
+    async () => ({ status: 403, json: async () => ({}) } as Response),
+  );
+  assert.equal(denied.state, "unknown");
+  assert.equal(denied.rolloutVerified, false);
+  assert.ok(denied.reason && denied.reason.includes("GitHub"));
+});
+
+test("a failed run exposes the failed job/step as its reason", async () => {
+  resetDeployWorkflowStatusCache();
+  const failed = await readDeployWorkflowRunStatus("TEST", {}, async (url) => {
+    const u = String(url);
+    if (u.includes("/jobs")) {
+      return {
+        status: 200,
+        json: async () => ({
+          jobs: [
+            {
+              name: "deploy-test",
+              steps: [
+                { name: "Create App Hosting TEST rollout", conclusion: "failure" },
+              ],
+            },
+          ],
+        }),
+      } as Response;
+    }
+    return {
+      status: 200,
+      json: async () => ({
+        workflow_runs: [
+          {
+            id: 7002,
+            status: "completed",
+            conclusion: "failure",
+            head_sha: COMMIT,
+            html_url: "https://github.com/modii1/rwqan/actions/runs/7002",
+          },
+        ],
+      }),
+    } as Response;
+  });
+  assert.equal(failed.state, "failed");
+  assert.match(failed.failureReason ?? "", /deploy-test/);
+  assert.match(failed.failureReason ?? "", /rollout/);
+  assert.equal(failed.rolloutVerified, false);
 });
 
 // ---------------- TEST/LIVE separation + rollout verification ----------------

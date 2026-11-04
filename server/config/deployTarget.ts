@@ -80,7 +80,7 @@ export const DEPLOY_DEV_FIREBASE_CONFIG = "firebase.dev.json";
 /**
  * Firebase config file for the PRODUCTION App Hosting backend. Used only for a
  * LIVE target; the production project is configured in the repository's
- * `firebase.json`/`.firebaserc` (project `rwqan-757`, backend `rwqan-backend`).
+ * `firebase.json`/`.firebaserc` (project `rwqan-757`, backend `rwqan`).
  */
 export const DEPLOY_PROD_FIREBASE_CONFIG = "firebase.json";
 

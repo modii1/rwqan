@@ -1,4 +1,4 @@
-# TEST App Hosting configuration for the isolated backend `rwqan-backend`.
+# TEST App Hosting configuration for the backend `rwqan-backend`.
 #
 # HOW THIS FILE IS SELECTED (important): App Hosting chooses an environment
 # specific override from the BACKEND's "Environment name" setting, which is set
