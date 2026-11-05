@@ -479,3 +479,40 @@ Rollback: feature stays behind the current admin section; no flag required.
 
 SAFE DEV STATUS: PASS
 PRODUCTION RELEASE GATE = BLOCKED
+
+## 0.7.0 — Deploy bar: icon-only «رفع إلى GitHub» upload button (dev)
+Date: 2026-11-05
+Environment: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+Base commit: 06e6876805133379852b39524e4effbfddc77daf
+
+What changed:
+- Deploy bar (global dev-only) gains an icon-only upload button next to the TEST
+  publish button:
+  - Only an `Upload` (arrow-up) icon; NO visible text/label next to it.
+  - Tooltip on hover: «رفع إلى GitHub».
+  - Icon size (h-3.5 w-3.5) and button styling (size=sm, h-7, px-2, text-xs, outline)
+    consistent with the admin dashboard buttons; shrink-0 so it scrolls with the bar.
+  - Clear and usable on mobile and desktop (bar is overflow-x-auto).
+  - Accessible name via aria-label="رفع إلى GitHub" (no visible text).
+
+- On click, the approved branch upload runs through the approved GitHub prompt
+  controls: `startPublish("TEST")` → source check → explicit approval (window.confirm,
+  incl. dirty-worktree warning) → GitHub Actions dispatch → post-deploy verification.
+  The approved branch is `test/unified-gateway-ui-only`.
+
+What did NOT change:
+- LIVE publish, environment switch, restore, checks, or any server/API behavior.
+- No push/deploy executed for this release.
+
+Verification (this session):
+- TypeScript (frontend + server): PASS 0 errors.
+- Deploy bar source tests: PASS 18/18.
+- Playwright: tests/deploy-bar-upload.spec.ts PASS 1/1 (button visible, icon-only
+  `toHaveText("")`, tooltip «رفع إلى GitHub», click safe).
+
+Deployment: NONE. No TEST/LIVE deploy executed.
+
+Rollback: remove the button / revert the deploy-bar.tsx change.
+
+SAFE DEV STATUS: PASS
+PRODUCTION RELEASE GATE = BLOCKED

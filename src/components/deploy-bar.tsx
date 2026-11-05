@@ -26,11 +26,17 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   ShieldCheck,
-  UploadCloud,
   RotateCcw,
   Loader2,
   X,
+  Upload,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   DEPLOY_GATE_ITEM_STATE_LABELS,
   DEPLOY_GATE_LABELS,
@@ -123,6 +129,7 @@ const UNVERIFIED = "غير متحقق";
  */
 interface DeployErrorBody {
   error?: string;
+  details?: string | null;
   code?: string;
   stage?: string | null;
   via?: string | null;
@@ -145,7 +152,10 @@ function redactErrorDetail(text: string): string {
  * owner needs the actual cause (e.g. a 403 / permission error) to act on it.
  */
 function serverDetail(body: DeployErrorBody): string {
-  const raw = typeof body.error === "string" ? body.error.trim() : "";
+  const raw = [body.error, body.details]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(" — ");
   if (!raw) return "";
   const safe = redactErrorDetail(raw);
   const capped = safe.length > MAX_ERROR_DETAIL ? `${safe.slice(0, MAX_ERROR_DETAIL)}…` : safe;
@@ -206,7 +216,8 @@ function deployErrorMessage(error: unknown): string {
         const friendly = friendlyDeployFailure(status, body);
         if (friendly) return friendly;
         if (typeof body.error === "string" && body.error.length > 0) {
-          return body.error;
+          const detail = serverDetail(body).trim();
+          return detail || body.error;
         }
       } catch {
         // الجسم ليس JSON — استخدم رسالة افتراضية حسب رمز الحالة أدناه.
@@ -456,6 +467,8 @@ export function DeployBar() {
         branch?: string;
         commit?: string;
         via?: string;
+        worktree?: "clean" | "dirty" | "unknown";
+        localChangesIgnored?: boolean;
       }>;
     },
     onSuccess: (result) => {
@@ -479,6 +492,9 @@ export function DeployBar() {
             "التحديث يبدأ تلقائيًا في GitHub، وسيظهر تقدّمه في صفحة المتابعة:\n" +
             (result.actionsUrl ?? actionsUrlFor(dispatchedEnv)) +
             (shortSha ? `\nالنسخة المطلوبة: ${shortSha}` : "") +
+            (result.localChangesIgnored
+              ? "\nتنبيه: توجد تغييرات محلية غير محفوظة لم تُنشر؛ تم نشر آخر Commit معتمد على فرع TEST."
+              : "") +
             "\n(الحالة هنا لا تعني أن التحديث اكتمل)",
         });
         return;
@@ -489,6 +505,11 @@ export function DeployBar() {
       const realDeployed = Boolean(
         release?.deployed && !release?.simulated && release?.postDeploy?.ok === true,
       );
+      const failureDetail =
+        release?.error ??
+        release?.checkNotes?.secretScan ??
+        release?.checkNotes?.typescript ??
+        null;
       toast({
         title: realDeployed
           ? "نُشر فعليًا وتحقّق منه"
@@ -497,10 +518,15 @@ export function DeployBar() {
             : "لم يتم النشر",
         description: realDeployed
           ? `التحقق بعد النشر: ${release?.postDeploy?.ok ? "ناجح" : "غير مؤكَّد"}`
-          : "لم يُسجَّل أي إصدار منشور.",
+          : release?.status === "validation_failed" && failureDetail
+            ? failureDetail
+            : "لم يُسجَّل أي إصدار منشور.",
       });
     },
     onError: (error: unknown) => {
+      // A commit/push may have succeeded before a later dispatch failure; refresh
+      // the tree state and SHA so the bar never shows a stale worktree.
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       if (error instanceof Error) {
         const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
         if (match) {
@@ -551,9 +577,25 @@ export function DeployBar() {
   const checksMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/admin/deploy/checks", {});
-      return res.json() as Promise<{ checkRun?: DeployCheckRun }>;
+      return res.json() as Promise<{
+        checkRun?: DeployCheckRun;
+        publishNotice?: string;
+        state?: DeployState;
+      }>;
     },
     onSuccess: (result) => {
+      // Update the visible state immediately from the checks response, then
+      // invalidate for the authoritative refresh. Without this, the badges only
+      // change after a second round-trip and the button can look unresponsive.
+      if (result.state) {
+        queryClient.setQueryData<{ prototypeVersion: string; state: DeployState }>(
+          ["/api/admin/deploy/state"],
+          (previous) => ({
+            prototypeVersion: previous?.prototypeVersion ?? "",
+            state: result.state as DeployState,
+          }),
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       const checks = result.checkRun?.checks;
       // Mirrors the route's failing predicate exactly:
@@ -571,10 +613,11 @@ export function DeployBar() {
           : "نتائج الفحص محفوظة في سجل الإصدارات.",
       });
     },
-    onError: () => {
+    onError: (error: unknown) => {
+      // Never hide the real server reason behind a generic message.
       toast({
         title: "تعذّر تشغيل الفحوصات",
-        description: "لم تُسجَّل نتائج. حاول مرة أخرى.",
+        description: deployErrorMessage(error),
         variant: "destructive",
       });
     },
@@ -604,22 +647,13 @@ export function DeployBar() {
     const domain =
       target?.expectedDomain ??
       (targetEnv === "LIVE"
-        ? "https://rwqan.sa"
+        ? "https://rwqan--rwqan-757.europe-west4.hosted.app/"
         : "https://rwqan-backend--rwqan-757.europe-west4.hosted.app/");
     if (targetEnv === "LIVE") {
-      // LIVE publishes to production and needs a SECOND server-side opt-in;
-      // without it the executor fails closed, so refuse before confirming.
-      if (!state.productionDeployEnabled) {
-        toast({
-          title: "التحديث الرسمي مُعطَّل حاليًا",
-          description: "يتطلب تفعيلًا صريحًا منفصلًا على الخادم. تواصل مع المسؤول التقني لتفعيله.",
-          variant: "destructive",
-        });
-        return;
-      }
       const confirmed = window.confirm(
         "هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟\n\n" +
-          `رابط الموقع الرسمي: ${domain}\n` +
+          `رابط الاستضافة: ${domain}\n` +
+          "الموقع الرسمي: https://rwqan.sa\n" +
           `متابعة تقدّم التحديث: ${GH_LIVE_ACTIONS_URL}\n\n` +
           "التحديث يبدأ من GitHub تلقائيًا، وهو لا يمس بيئة التجربة إطلاقًا.\n" +
           "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
@@ -628,15 +662,26 @@ export function DeployBar() {
       publishMutation.mutate({ environment: "LIVE", approval: true });
       return;
     }
+    const testDirtyWarning =
+      state.git?.worktree === "dirty"
+        ? "\n\nتنبيه: توجد تغييرات محلية غير محفوظة. لن تُنشر هذه التغييرات، وسيُنشر آخر Commit معتمد على فرع TEST فقط."
+        : "";
     const confirmed = window.confirm(
       "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
         `رابط بيئة التجربة: ${domain}\n` +
         `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
         "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
-        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
+        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه." +
+        testDirtyWarning,
     );
     if (!confirmed) return;
     publishMutation.mutate({ environment: "TEST", approval: true });
+  };
+
+  // رفع الفرع المعتمد (test/unified-gateway-ui-only) عبر مسار النشر المعتمد:
+  // المصدر → الموافقة → الإرسال إلى GitHub Actions → التحقق.
+  const handleUploadBranch = () => {
+    startPublish("TEST");
   };
 
   // The main publish button publishes the environment the server tracks now.
@@ -914,28 +959,33 @@ export function DeployBar() {
               </Button>
             </div>
           )}
-          <Button
-            size="sm"
-            variant="default"
-            className="h-7 shrink-0 px-2 text-xs"
-            onClick={handlePublish}
-            disabled={publishMutation.isPending}
-            data-testid="deploy-bar-publish"
-          >
-            {publishMutation.isPending ? (
-              <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <UploadCloud className="ml-1 h-3.5 w-3.5" />
-            )}
-            نشر
-          </Button>
-
           {/* Independent publish button for each environment: TEST and LIVE each
               target ONLY their own GitHub workflow and their own Firebase
               backend; the server enforces the same separation (each request
               goes to the executor with the environment it names, and a
               cross-environment request is refused). Plain Arabic labels and
               prompts — no technical jargon for the site owner. */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 px-2 text-xs"
+                  onClick={handleUploadBranch}
+                  disabled={publishMutation.isPending}
+                  aria-label="رفع إلى GitHub"
+                  data-testid="deploy-bar-upload-test"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                رفع إلى GitHub
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button
             size="sm"
             variant="default"
@@ -990,12 +1040,12 @@ export function DeployBar() {
             data-testid="deploy-bar-environment"
             className="flex shrink-0 items-stretch overflow-hidden rounded-md border border-amber-300 text-xs font-semibold"
           >
-            {/* PERMANENT three-option switch: LOCAL, TEST, and LIVE are always
-                shown and the active one is highlighted. Selecting a different
-                option performs the real switch. Never a single button whose text
-                changes. TEST never targets LIVE, and LOCAL never targets any
-                remote backend. */}
-            {(["LOCAL", "TEST", "LIVE"] as const).map((option) => {
+            {/* PERMANENT two-option switch: TEST and LIVE are always shown and
+                the active one is highlighted. Selecting a different option
+                performs the real switch. Never a single button whose text
+                changes. TEST never targets LIVE. LOCAL is a fixed local
+                environment and is intentionally not offered as a switch. */}
+            {(["TEST", "LIVE"] as const).map((option) => {
               const active = dataEnvironment?.environment === option;
               const disabled = environmentMutation.isPending || !dataEnvironment;
               return (
@@ -1011,9 +1061,7 @@ export function DeployBar() {
                     active
                       ? option === "LIVE"
                         ? "bg-red-600 text-white"
-                        : option === "TEST"
-                        ? "bg-amber-600 text-white"
-                        : "bg-emerald-600 text-white"
+                        : "bg-amber-600 text-white"
                       : "bg-white text-amber-900 hover:bg-amber-100"
                   }`}
                 >
@@ -1085,19 +1133,28 @@ export function DeployBar() {
             <div className="mb-2 rounded border border-amber-200 bg-white/70 p-1.5">
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   className="h-6 shrink-0 px-2 text-[11px]"
-                  onClick={() => checksMutation.mutate()}
+                  onClick={() => {
+                    if (!checksMutation.isPending) checksMutation.mutate();
+                  }}
                   disabled={checksMutation.isPending}
+                  aria-busy={checksMutation.isPending}
                   data-testid="deploy-bar-checks"
                 >
                   {checksMutation.isPending ? (
-                    <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                    <>
+                      <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                      جارٍ الفحص…
+                    </>
                   ) : (
-                    <ShieldCheck className="ml-1 h-3 w-3" />
+                    <>
+                      <ShieldCheck className="ml-1 h-3 w-3" />
+                      فحص ما قبل النشر
+                    </>
                   )}
-                  فحص ما قبل النشر
                 </Button>
                 {state.latestCheckRun ? (
                   <>
@@ -1133,6 +1190,22 @@ export function DeployBar() {
                     لم تُشغَّل فحوص محفوظة بعد.
                   </span>
                 )}
+              </div>
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="deploy-bar-checks-feedback"
+                className="mt-1 text-[10px] leading-4 text-muted-foreground"
+              >
+                {checksMutation.isPending
+                  ? "جارٍ الفحص… قد يستغرق حتى دقيقة (TypeScript + فحص الأسرار)."
+                  : checksMutation.isError
+                    ? `تعذّر تشغيل الفحوصات: ${deployErrorMessage(checksMutation.error)}`
+                    : checksMutation.data?.checkRun
+                      ? `اكتمل الفحص: TypeScript ${CHECK_RESULT_LABEL[checksMutation.data.checkRun.checks.typescript]} · الأسرار ${CHECK_RESULT_LABEL[checksMutation.data.checkRun.checks.secretScan]}.`
+                      : state.latestCheckRun
+                        ? `آخر فحص محفوظ: TypeScript ${CHECK_RESULT_LABEL[state.latestCheckRun.checks.typescript]} · الأسرار ${CHECK_RESULT_LABEL[state.latestCheckRun.checks.secretScan]}.`
+                        : "لم يُشغَّل فحص بعد."}
               </div>
             </div>
 

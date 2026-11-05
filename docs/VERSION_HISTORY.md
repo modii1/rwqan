@@ -737,3 +737,43 @@ NEXT STEP:
 - Restart the dev server to load 0.6.0; commit approved changes manually; then an
   approved TEST publish deploys that commit. A real dispatch still requires a valid
   GitHub auth source.
+
+---
+
+VERSION: 0.7.0 (deploy bar: icon-only upload branch button)
+DATE: 2026-11-05
+ENVIRONMENT: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+BASE COMMIT: 06e6876805133379852b39524e4effbfddc77daf
+RELEASE TYPE: Development version (no deployment executed)
+PREVIOUS VERSION: 0.6.0
+WHY 0.7.0:
+- MINOR bump: a new admin UI capability (icon-only branch upload button) is added
+  without touching the publish logic itself. No breaking change.
+SUMMARY:
+- Deploy bar gains an icon-only Upload button (arrow-up) next to the TEST publish
+  button. No visible text; Tooltip «رفع إلى GitHub» on hover; aria-label for a11y.
+- Icon h-3.5 w-3.5; button size=sm / h-7 / px-2 / text-xs / outline; shrink-0 (scrolls in
+  the overflow-x bar); usable on mobile and desktop.
+- On click → handleUploadBranch → startPublish("TEST") → approved flow:
+  source check → approval (confirm + dirty warning) → GitHub dispatch → verify.
+- New browser E2E: tests/deploy-bar-upload.spec.ts PASS 1/1.
+CHANGED (code):
+- src/components/deploy-bar.tsx
+- NEW: tests/deploy-bar-upload.spec.ts
+CHANGED (documentation): docs/RELEASE_NOTES.md, docs/VERSION_HISTORY.md.
+VERIFICATION (this session):
+- TypeScript frontend + server: PASS 0 errors.
+- Deploy bar source tests: PASS 18/18.
+- Playwright (deploy bar upload): PASS 1/1.
+DATABASE IMPACT: NONE.
+SECURITY IMPACT: NONE (no auth/secret/permission change; click still gated by the
+  approved publish flow).
+UI/UX IMPACT:
+- Icon-only upload button next to the TEST publish button; tooltip «رفع إلى GitHub»;
+  no visible text; RTL/Arabic bar retained; responsive scroll retained.
+BUSINESS LOGIC IMPACT: NONE (upload reuses the approved publish path).
+DEPLOYMENT: NONE. No TEST/LIVE deploy executed.
+NEXT STEP:
+- Restart the dev server to load 0.7.0; commit approved changes manually; then an
+  approved TEST publish deploys that commit. A real dispatch still requires a valid
+  GitHub auth source.
