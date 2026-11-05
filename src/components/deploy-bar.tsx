@@ -42,6 +42,7 @@ import {
   DEPLOY_GATE_LABELS,
   DEPLOY_STATE_DESCRIPTORS,
   isFullGitSha,
+  type DeployBranchPushResult,
   type DeployCheckResult,
   type DeployCheckRun,
   type DeployGateItem,
@@ -51,6 +52,9 @@ import {
   type DeployReleaseStatus,
   type DeployRestorePreview,
   type DeployState,
+  type DeployUploadStage,
+  type DeployUploadStageResult,
+  type DeployUploadStageStatus,
 } from "@shared/deploySystem";
 import type { DataEnvironment, LiveDataStatus } from "@shared/liveData";
 
@@ -120,6 +124,32 @@ const GITHUB_MATCH_LABEL: Record<string, string> = {
 };
 
 const UNVERIFIED = "غير متحقق";
+
+/** The fixed upload (branch upload command) pipeline stages surfaced in the stepper UI. */
+const UPLOAD_STAGES: { key: DeployUploadStage; label: string }[] = [
+  { key: "connection", label: "فحص الاتصال بمستودع Git" },
+  { key: "branch", label: "التحقق من الفرع المعتمد" },
+  { key: "changes", label: "فحص التغييرات المحلية" },
+  { key: "github_connection", label: "فحص الاتصال بـ GitHub" },
+  { key: "push", label: "رفع Commit إلى GitHub" },
+  { key: "verify", label: "التحقق من نزول Commit" },
+];
+
+const UPLOAD_STAGE_STATUS_LABEL: Record<DeployUploadStageStatus, string> = {
+  pending: "في انتظار التنفيذ",
+  running: "جارٍ التنفيذ",
+  ok: "ناجح",
+  failed: "فشل",
+  skipped: "تم التخطي",
+};
+
+function UploadStageStatusIcon({ status }: { status: DeployUploadStageStatus }) {
+  if (status === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />;
+  if (status === "ok") return <span className="text-xs font-bold text-green-700">✓</span>;
+  if (status === "failed") return <span className="text-xs font-bold text-red-700">⚠</span>;
+  if (status === "skipped") return <span className="text-xs font-bold text-amber-700">⏭</span>;
+  return <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />;
+}
 
 /**
  * يستخرج رسالة خطأ بالعربية من خطأ خطأ apiRequest.
@@ -438,6 +468,11 @@ export function DeployBar() {
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [autoResumePending, setAutoResumePending] = useState<boolean>(false);
 
+  // Dedicated branch upload (the dedicated branch upload command ONLY — independent from the publish flow).
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadStages, setUploadStages] = useState<DeployUploadStageResult[]>([]);
+  const [uploadOutcome, setUploadOutcome] = useState<DeployBranchPushResult | null>(null);
+
   // The TEST publish is delegated to GitHub Actions: the deployment itself is
   // deployment itself is created by the deploy-test workflow from the remote
   // branch tip, so the follow-up lives in GitHub Actions, not in this panel.
@@ -571,6 +606,43 @@ export function DeployBar() {
     },
   });
 
+  // Dedicated branch upload: runs ONLY the dedicated branch upload command via
+  // the dedicated fail-closed pipeline. It never dispatches a publish and never
+  // deploys anything. The target branch is derived from the selected environment:
+  // TEST -> test/unified-gateway-ui-only, LIVE -> main.
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest("POST", "/api/admin/deploy/upload", {
+        environment: state.environment as "TEST" | "LIVE",
+      });
+      return res.json() as Promise<{ result?: DeployBranchPushResult }>;
+    },
+    onSuccess: (result) => {
+      const outcome = result.result ?? null;
+      setUploadOutcome(outcome);
+      setUploadStages(outcome?.stages && outcome.stages.length > 0 ? outcome.stages : []);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+      toast({
+        title: outcome?.ok ? "تم رفع الفرع إلى GitHub" : "تعذّر رفع الفرع إلى GitHub",
+        description: outcome?.detail ?? "تعذّر تنفيذ رفع الفرع.",
+        variant: outcome?.ok ? "default" : "destructive",
+      });
+    },
+    onError: (error: unknown) => {
+      const message = deployErrorMessage(error);
+      setUploadOutcome(null);
+      setUploadStages([
+        { stage: "final", status: "failed", message },
+      ]);
+      toast({
+        title: "تعذّر رفع الفرع",
+        description: message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Real, explicit release checks (POST /api/admin/deploy/checks): runs the
   // DEV-safe local checks (tsc --noEmit + secret scan) on the SERVER and stores
   // them. Nothing is built/deployed; no production connection is made.
@@ -678,10 +750,22 @@ export function DeployBar() {
     publishMutation.mutate({ environment: "TEST", approval: true });
   };
 
-  // رفع الفرع المعتمد (test/unified-gateway-ui-only) عبر مسار النشر المعتمد:
-  // المصدر → الموافقة → الإرسال إلى GitHub Actions → التحقق.
+  // Dedicated branch upload handler: opens the smart stage stepper and runs the
+  // branch push through the DEDICATED upload pipeline (the dedicated branch upload
+  // command ONLY). It never
+  // calls the publish flow (no publish mutation, no external deploy dispatch).
   const handleUploadBranch = () => {
-    startPublish("TEST");
+    if (!state) return;
+    setUploadOpen(true);
+    setUploadOutcome(null);
+    setUploadStages(
+      UPLOAD_STAGES.map((entry, index) => ({
+        stage: entry.key,
+        status: index === 0 ? ("running" as const) : ("pending" as const),
+        message: index === 0 ? "فحص الاتصال بمستودع Git…" : "في انتظار التنفيذ.",
+      })),
+    );
+    uploadMutation.mutate();
   };
 
   // The main publish button publishes the environment the server tracks now.
@@ -882,6 +966,17 @@ export function DeployBar() {
   // production connection is configured.
   const handleSelectEnvironment = (target: DataEnvironment) => {
     if (!dataEnvironment || dataEnvironment.environment === target) return;
+    // Prevent switching environment while an upload is in flight so the upload
+    // target never changes mid-flight.
+    if (uploadMutation.isPending) {
+      toast({
+        title: "لا يمكن تبديل البيئة",
+        description:
+          "عملية رفع الفرع قيد التنفيذ حاليًا. يُرجى الانتظار حتى تنتهي قبل تبديل البيئة.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (target === "LIVE") {
       if (!dataEnvironment.liveAvailable) {
         // Brief only: the server reason names credentials/variables, which must
@@ -974,7 +1069,7 @@ export function DeployBar() {
                   variant="outline"
                   className="h-7 shrink-0 px-2 text-xs"
                   onClick={handleUploadBranch}
-                  disabled={publishMutation.isPending}
+                  disabled={uploadMutation.isPending}
                   aria-label="رفع إلى GitHub"
                   data-testid="deploy-bar-upload-test"
                 >
@@ -1376,6 +1471,99 @@ export function DeployBar() {
               : "مسار النشر مُعطَّل حتى تُضبط بيانات الاعتماد صراحةً. "}
             الاستعادة تنفّذ rollout حقيقيًا من الـcommit الثابت بعد التحقق من المصدر والوصول.
           </p>
+        </div>
+      )}
+
+      {uploadOpen && (
+        <div
+          data-testid="deploy-bar-upload-panel"
+          dir="rtl"
+          className="fixed left-2 right-2 top-[40px] z-[100] max-h-[70vh] overflow-y-auto rounded-b-lg border border-amber-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-[520px]"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-amber-950">رفع الفرع إلى GitHub</h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => setUploadOpen(false)}
+              aria-label="إغلاق"
+              data-testid="deploy-bar-upload-panel-close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <ul className="space-y-1.5" data-testid="deploy-bar-upload-stages">
+            {uploadStages.map((entry) => {
+              const stageMeta = UPLOAD_STAGES.find((item) => item.key === entry.stage);
+              const stageLabel = stageMeta?.label ?? entry.stage;
+              return (
+                <li
+                  key={entry.stage}
+                  data-testid={`deploy-bar-upload-stage-${entry.stage}`}
+                  className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2"
+                >
+                  <span className="mt-0.5">
+                    <UploadStageStatusIcon status={entry.status} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-amber-950">{stageLabel}</p>
+                    <p className="text-[11px] leading-4 text-muted-foreground">{entry.message}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {uploadOutcome ? (
+            <div
+              data-testid="deploy-bar-upload-result"
+              className={`mt-2 rounded-md border p-2 ${
+                uploadOutcome.ok
+                  ? "border-green-300 bg-green-50"
+                  : "border-red-300 bg-red-50"
+              }`}
+            >
+              <p
+                className={`text-xs font-bold ${uploadOutcome.ok ? "text-green-800" : "text-red-800"}`}
+                data-testid="deploy-bar-upload-result-title"
+              >
+                {uploadOutcome.ok
+                  ? uploadOutcome.skipped
+                    ? "الفرع محدّث بالفعل على GitHub"
+                    : "تم رفع الفرع إلى GitHub بنجاح"
+                  : "تعذّر رفع الفرع إلى GitHub"}
+              </p>
+              <p
+                className="mt-1 text-[11px] leading-4 text-muted-foreground"
+                data-testid="deploy-bar-upload-result-detail"
+              >
+                {uploadOutcome.detail}
+              </p>
+              {uploadOutcome.ok && uploadOutcome.pushedSha ? (
+                <p
+                  dir="ltr"
+                  className="mt-1 font-mono text-[10px] text-muted-foreground"
+                  data-testid="deploy-bar-upload-result-sha"
+                >
+                  Commit: {uploadOutcome.pushedSha}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-2 flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 px-2 text-xs"
+              onClick={() => setUploadOpen(false)}
+              data-testid="deploy-bar-upload-done"
+            >
+              إغلاق
+            </Button>
+          </div>
         </div>
       )}
     </>

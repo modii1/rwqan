@@ -97,6 +97,83 @@ export interface DeployCheckRun {
   meta?: Partial<Record<keyof DeployChecks, DeployCheckMeta>>;
 }
 
+/**
+ * Upload (git push) pipeline stages for the dedicated branch-upload action.
+ * The sequence is fixed and each stage can end as ok / failed / skipped.
+ */
+export type DeployUploadStage =
+  | "connection"
+  | "branch"
+  | "changes"
+  | "github_connection"
+  | "push"
+  | "verify"
+  | "final";
+
+export type DeployUploadStageStatus = "pending" | "running" | "ok" | "failed" | "skipped";
+
+/** One step of the branch-upload pipeline with its safe, human-readable result. */
+export interface DeployUploadStageResult {
+  stage: DeployUploadStage;
+  status: DeployUploadStageStatus;
+  message: string;
+}
+
+/** Outcome of pushing the approved branch (`git push origin <branch>`). */
+export interface DeployBranchPushResult {
+  /** Environment the upload targets (TEST or LIVE). */
+  environment: DeployEnvironment;
+  ok: boolean;
+  /** TRUE only when a new commit was actually pushed. */
+  pushed: boolean;
+  /** TRUE when the remote branch already matched the local HEAD (nothing to push). */
+  skipped: boolean;
+  branch: string;
+  localSha: string | null;
+  remoteSha: string | null;
+  pushedSha: string | null;
+  detail: string;
+  /** Stage where the pipeline ended (null when everything completed). */
+  stage: DeployUploadStage | null;
+  stages: DeployUploadStageResult[];
+}
+
+/** The only branch an admin may ever ask the upload action to push for TEST. */
+export const APPROVED_UPLOAD_BRANCH_TEST = "test/unified-gateway-ui-only";
+
+/** The only branch an admin may ever ask the upload action to push for LIVE. */
+export const APPROVED_UPLOAD_BRANCH_LIVE = "main";
+
+/**
+ * Returns the approved upload branch for the given environment, or null when
+ * upload is not supported (e.g. LOCAL). Fail closed: never guess a branch.
+ */
+export function getApprovedUploadBranch(
+  environment: DeployEnvironment,
+): string | null {
+  if (environment === "TEST") return APPROVED_UPLOAD_BRANCH_TEST;
+  if (environment === "LIVE") return APPROVED_UPLOAD_BRANCH_LIVE;
+  return null;
+}
+
+/** TRUE only when `branch` is the approved upload branch for `environment`. */
+export function isApprovedUploadBranch(
+  environment: DeployEnvironment,
+  branch: string | null | undefined,
+): boolean {
+  if (typeof branch !== "string" || branch.trim().length === 0) return false;
+  const approved = getApprovedUploadBranch(environment);
+  return approved !== null && branch.trim() === approved;
+}
+
+/** The only branch an admin may ever ask the upload action to push. */
+export const APPROVED_UPLOAD_BRANCH = APPROVED_UPLOAD_BRANCH_TEST;
+
+/** TRUE only for the single default approved upload branch (back-compat). */
+export function isApprovedUploadBranchLegacy(branch: string | null | undefined): boolean {
+  return isApprovedUploadBranch("TEST", branch);
+}
+
 /** Outcome of a real (isolated) restore attempt. */
 export type DeployRestoreStatus = "success" | "failed" | "blocked";
 
@@ -294,6 +371,9 @@ export type DeployAuditAction =
   | "publish_dispatched"
   | "publish_blocked"
   | "publish_failed"
+  | "branch_push"
+  | "branch_push_blocked"
+  | "branch_push_failed"
   | "restore_preview"
   | "restore_snapshot"
   | "restore_real"
@@ -555,7 +635,7 @@ export interface DeployState {
   };
   /** TRUE only when NODE_ENV=development AND DEPLOY_REAL_DEPLOY=enabled. */
   realDeployEnabled: boolean;
-  /** TRUE only when real deploys target production (second, separate opt-in). */
+  /** Mirrors realDeployEnabled: LIVE has no separate production opt-in. */
   productionDeployEnabled: boolean;
   /**
    * The data environment currently served by this DEV runtime (the in-memory
@@ -577,7 +657,7 @@ export interface DeployState {
 
 /** Shown when a real publish is requested but the real deploy path is disabled. */
 export const DEPLOY_PUBLISH_NOTICE =
-  "النشر الحقيقي غير مُفعَّل: لم يُنفَّذ أي بناء أو commit أو push أو نشر. فعِّل DEPLOY_REAL_DEPLOY لهدف التطوير، وDEPLOY_ALLOW_PRODUCTION للإنتاج، ثم أعد المحاولة.";
+  "النشر الحقيقي غير مُفعَّل: لم يُنفَّذ أي بناء أو commit أو push أو نشر. فعِّل DEPLOY_REAL_DEPLOY ثم أعد المحاولة.";
 
 /** Shown after a real hosting restore materializes a prior release's commit. */
 export const DEPLOY_RESTORE_REAL_NOTICE =
@@ -596,8 +676,8 @@ export const DEPLOY_AUDIT_HISTORY_LIMIT = 50;
 export const DEPLOY_PROTOTYPE_VERSION = "0.0.0-prototype";
 
 export const DEPLOY_ENVIRONMENT_NOTICE: Record<DeployEnvironment, string> = {
-  TEST: "بيئة الاختبار: نشر حقيقي إلى هدف التطوير المعزول rwqan-sa-dev فقط.",
-  LIVE: "بيئة الإنتاج: نشر حقيقي إلى مشروع الإنتاج rwqan-757 (rwqan.sa) — يتطلب تفعيلًا صريحًا منفصلًا (DEPLOY_ALLOW_PRODUCTION=enabled).",
+  TEST: "بيئة الاختبار: نشر حقيقي إلى مشروع rwqan-757 / backend rwqan-backend على رابط TEST المعتمد.",
+  LIVE: "بيئة الإنتاج: نشر حقيقي إلى مشروع rwqan-757 / backend rwqan — الموقع الرسمي https://rwqan.sa ورابط الاستضافة https://rwqan--rwqan-757.europe-west4.hosted.app. يُفعَّل بمفتاح النشر الحقيقي مع فحوص البناء والوجهة والصلاحيات.",
   LOCAL: "بيئة محلية: النشر والاستعادة يستهدفان الموارد المحلية فقط، لا اتصال بالتطوير المعزول أو بالإنتاج.",
 };
 

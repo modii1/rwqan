@@ -516,3 +516,84 @@ Rollback: remove the button / revert the deploy-bar.tsx change.
 
 SAFE DEV STATUS: PASS
 PRODUCTION RELEASE GATE = BLOCKED
+
+## 0.8.0 — Upload button now performs the dedicated branch push + smart stage stepper (dev)
+Date: 2026-11-05
+Environment: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+Base commit: 34715bb54e175c6a2bc5ec9b62a7c7ba6360f7f3
+
+What changed:
+- FIXED: the icon-only upload button (`deploy-bar-upload-test`) no longer delegates to
+  the publish flow. It now runs the DEDICATED branch-upload pipeline.
+- New dedicated pipeline (server/services/DeployGitPushService.ts + shared/deploySystem.ts):
+  - Fixed stage sequence: connection → branch → changes → github_connection → push →
+    verify → final.
+  - Only the approved branch is ever pushed: `test/unified-gateway-ui-only` (fail closed).
+  - Push executes only the branch upload command (NO workflow dispatch, NO deploy).
+  - Fail closed at the failing stage; success requires read-back SHA verification.
+  - Already-up-to-date branch short-circuits with «الفرع محدّث بالفعل».
+- New admin route: POST /api/admin/deploy/upload (admin-guarded, same-origin, DEV gate,
+  single-flight; branch not approved → rejected before any push).
+- Smart stepper UI (src/components/deploy-bar.tsx): upload panel renders the stage rows
+  (connection, branch, changes, github_connection, push, verify) with running/pending/ok/
+  failed/skipped states, final result card with commit SHA, and close action.
+
+What did NOT change:
+- Publish (TEST/LIVE), environment switch, restore, checks behavior — untouched.
+- No push/deploy executed for this release.
+
+Verification (this session):
+- TypeScript (frontend + server): PASS 0 errors.
+- DeployGitPushService: PASS 7/7. Deploy routes: PASS 44/44. Deploy bar sources: PASS 23/23.
+- Playwright: tests/deploy-bar-upload.spec.ts PASS 1/1 (icon-only button, tooltip, mocked
+  dedicated upload flow, no publish call).
+
+Deployment: NONE. No TEST/LIVE deploy executed.
+
+Rollback: revert the deploy-bar/upload route/pipeline changes.
+
+SAFE DEV STATUS: PASS
+PRODUCTION RELEASE GATE = BLOCKED
+
+## 0.9.0 — Upload button linked to selected environment (TEST → test/unified-gateway-ui-only, LIVE → main) (dev)
+Date: 2026-11-06
+Environment: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+Base commit: 34715bb54e175c6a2bc5ec9b62a7c7ba6360f7f3
+
+What changed:
+- The icon-only upload button (`deploy-bar-upload-test`) is now linked to the selected
+  environment in the deploy bar switcher:
+  - TEST  => pushes branch `test/unified-gateway-ui-only` to the TEST GitHub repository.
+  - LIVE  => pushes branch `main` to the LIVE GitHub repository.
+  - LOCAL => upload not supported (fail closed, no approved branch).
+- The upload route `POST /api/admin/deploy/upload` now accepts `environment`
+  (TEST or LIVE) and resolves the approved branch server-side via
+  `getApprovedUploadBranch(environment)`. No branch is ever guessed.
+- The branch-upload pipeline (`server/services/DeployGitPushService.ts`) reads the
+  target branch commit directly (no checkout, no branch switching), verifies it
+  against the remote SHA via read-only `git ls-remote`, pushes only when different,
+  and verifies the pushed SHA before claiming success.
+- Environment switching is blocked while an upload is in flight (clear Arabic alert).
+- Publish (TEST/LIVE), environment switch, restore, checks behavior — untouched.
+
+What did NOT change:
+- Only ONE upload button exists (no duplicate icon).
+- The button executes `git push origin <branch>` ONLY — no workflow dispatch,
+  no Firebase App Hosting deploy, no startPublish("TEST"/"LIVE").
+- No Auto Commit, no Force Push, no automatic branch switching, no local-tree edits.
+- Server-side admin authorization (`requireAdmin` + `requireSameOrigin` + DEV gate).
+- No secrets or tokens exposed.
+
+Verification (this session):
+- TypeScript (frontend + server): PASS 0 errors.
+- DeployGitPushService: PASS 8/8. Deploy routes: PASS 44/44. Deploy bar sources: PASS 23/23.
+- Playwright: tests/deploy-bar-upload.spec.ts PASS 1/1 on LOCAL http://localhost:5001.
+- Manual API probe: POST /api/admin/deploy/upload returns 401 (guarded) for TEST/LIVE,
+  confirming the route is loaded and protected (not 404).
+
+Deployment: NONE. No TEST/LIVE deploy executed. No real Git push performed.
+
+Rollback: revert the deploy-bar/upload route/pipeline changes.
+
+SAFE DEV STATUS: PASS
+PRODUCTION RELEASE GATE = BLOCKED

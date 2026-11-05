@@ -23,6 +23,7 @@ import {
   runReleaseChecks,
 } from "../../services/DeployChecksRunner";
 import { readDeployGitInfo } from "../../services/DeployGitInfoService";
+import { runBranchUpload } from "../../services/DeployGitPushService";
 import {
   githubLsRemoteEnabled,
   readDeployGitHubInfo,
@@ -40,6 +41,7 @@ import {
   DEPLOY_PUBLISH_NOTICE,
   DEPLOY_RESTORE_REAL_NOTICE,
   isFullGitSha,
+  type DeployBranchPushResult,
   type DeployChecks,
   type DeployCheckRun,
   type DeployEnvironment,
@@ -49,10 +51,15 @@ import {
   type DeployRelease,
   type DeployRestorePreview,
   type DeployToolsInfo,
+  type DeployUploadStageResult,
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
 import { readDeployToolsInfo } from "../../services/DeployToolsService";
 import { readDeployWorkflowRunStatus } from "../../services/DeployGhWorkflowService";
+import {
+  resolveDeployGithubToken,
+  DEPLOY_GITHUB_TOKEN_ENV_KEY,
+} from "../../services/GitHubAuthService";
 import {
   getDeployAuthStatus,
   startDeployAuthFlow,
@@ -188,6 +195,12 @@ export function createAdminDeployRouter(
    * synchronously before any await and cleared in `finally` on every path.
    */
   let publishInFlight = false;
+  /**
+   * Single-flight guard for the DEDICATED branch upload (`git push origin`).
+   * A second upload is refused with 409 while one runs, so the branch ref can
+   * never be pushed concurrently.
+   */
+  let uploadInFlight = false;
 
   /**
    * Read-only Git/GitHub context. Local Git is read always; the GitHub remote
@@ -214,6 +227,21 @@ export function createAdminDeployRouter(
       allowLsRemote: githubLsRemoteEnabled(),
     }).catch(() => null);
     return { git, github, stableRelease, tools };
+  };
+
+  // Read-only GitHub Actions status uses the same trusted credential as dispatch
+  // when available. The public repository can be read anonymously, but the
+  // shared anonymous limit (60/hour) is easily exhausted by polling; an
+  // authenticated read (5,000/hour) keeps the status accurate.
+  const resolveStatusGithubEnv = async (): Promise<
+    Record<string, string | undefined>
+  > => {
+    if (process.env[DEPLOY_GITHUB_TOKEN_ENV_KEY]?.trim()) return process.env;
+    const auth = await resolveDeployGithubToken(process.env, {
+      allowGhCli: true,
+    }).catch(() => null);
+    if (!auth?.token) return process.env;
+    return { ...process.env, [DEPLOY_GITHUB_TOKEN_ENV_KEY]: auth.token };
   };
 
   const router = Router();
@@ -292,7 +320,10 @@ export function createAdminDeployRouter(
       });
       return;
     }
-    const status = await readDeployWorkflowRunStatus(requested);
+    const status = await readDeployWorkflowRunStatus(
+      requested,
+      await resolveStatusGithubEnv(),
+    );
     res.json({
       environment: requested,
       status,
@@ -326,6 +357,70 @@ export function createAdminDeployRouter(
         res.status(500).json({ code: "DEPLOY_ENV_FAILED", error: "تعذّر تبديل البيئة." });
       }
     }
+  });
+
+  // Dedicated branch upload: `git push origin <approved-branch-for-environment>` ONLY.
+  // INDEPENDENT from the publish flow: it never dispatches a GitHub Actions
+  // workflow, never runs a Firebase CLI deploy and never touches the LIVE path.
+  // Runs a fixed fail-closed pipeline per environment and returns the
+  // stage-by-stage outcome.
+  router.post("/api/admin/deploy/upload", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    if (uploadInFlight) {
+      res.status(409).json({
+        code: "DEPLOY_UPLOAD_IN_PROGRESS",
+        error: "عملية رفع الفرع قيد التنفيذ بالفعل — انتظر انتهاءها قبل المحاولة مجددًا.",
+      });
+      return;
+    }
+    uploadInFlight = true;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const requestedEnvironment =
+      typeof body.environment === "string" ? body.environment : null;
+    const environment =
+      requestedEnvironment === "TEST" || requestedEnvironment === "LIVE"
+        ? requestedEnvironment
+        : null;
+    if (!environment) {
+      uploadInFlight = false;
+      res.status(400).json({
+        code: "DEPLOY_UPLOAD_ENVIRONMENT_REQUIRED",
+        error: "بيئة الرفع غير محددة — يُطلب TEST أو LIVE.",
+      });
+      return;
+    }
+    let result: DeployBranchPushResult;
+    try {
+      result = await runBranchUpload({ environment, cwd: process.cwd() });
+    } catch {
+      uploadInFlight = false;
+      res.status(500).json({
+        code: "DEPLOY_UPLOAD_FAILED",
+        error: "تعذّر تنفيذ رفع الفرع.",
+      });
+      return;
+    }
+    // Best-effort audit trail for the upload pipeline (never blocks the response).
+    try {
+      const store = getStore();
+      if (await store.isPersistent()) {
+        const auditAction = result.ok
+          ? "branch_push"
+          : result.stage === "branch"
+            ? "branch_push_blocked"
+            : "branch_push_failed";
+        await store.recordAudit({
+          action: auditAction,
+          environment,
+          result: result.ok ? "ok" : "rejected",
+          reason: result.detail,
+        });
+      }
+    } catch {
+      // Audit persistence is best-effort for the upload action.
+    }
+    uploadInFlight = false;
+    res.json({ result });
   });
 
   router.post("/api/admin/deploy/releases", async (req, res) => {
@@ -550,11 +645,17 @@ export function createAdminDeployRouter(
           // The TEST publish was delegated to GitHub Actions (workflow_dispatch).
           // GitHub — not this app — creates the rollout, so this is recorded as
           // a REQUEST, never as a deploy; there is no release record here.
+          const localChangesIgnored =
+            environment === "TEST" && context.git?.worktree === "dirty";
           await store.recordAudit({
             action: "publish_dispatched",
             environment,
             result: "accepted",
-            reason: `${outcome.detail} (commit ${outcome.ghDispatch.commit.slice(0, 7)})`,
+            reason:
+              `${outcome.detail} (commit ${outcome.ghDispatch.commit.slice(0, 7)})` +
+              (localChangesIgnored
+                ? " — تنبيه: تغييرات محلية غير محفوظة لم تُنشر."
+                : ""),
           });
           res.status(202).json({
             code: "DEPLOY_GITHUB_DISPATCH_ACCEPTED",
@@ -564,6 +665,8 @@ export function createAdminDeployRouter(
             commit: outcome.ghDispatch.commit,
             actionsUrl: outcome.ghDispatch.actionsUrl,
             via: outcome.via ?? "github_actions",
+            worktree: context.git?.worktree ?? "unknown",
+            localChangesIgnored,
           });
           return;
         }

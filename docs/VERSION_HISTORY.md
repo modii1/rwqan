@@ -777,3 +777,100 @@ NEXT STEP:
 - Restart the dev server to load 0.7.0; commit approved changes manually; then an
   approved TEST publish deploys that commit. A real dispatch still requires a valid
   GitHub auth source.
+
+---
+
+VERSION: 0.8.0 (upload button: dedicated branch push + smart stage stepper)
+DATE: 2026-11-05
+ENVIRONMENT: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+BASE COMMIT: 34715bb54e175c6a2bc5ec9b62a7c7ba6360f7f3
+RELEASE TYPE: Development version (no deployment executed)
+PREVIOUS VERSION: 0.7.0
+WHY 0.8.0:
+- MINOR bump: a new admin capability is delivered (dedicated branch-upload pipeline +
+  smart stage stepper) and the 0.7.0 upload button behavior is corrected (it no longer
+  delegates to the publish flow). No breaking change.
+SUMMARY:
+- FIXED: icon-only upload button no longer calls the publish flow; it runs the dedicated
+  branch push only.
+- New pipeline: server/services/DeployGitPushService.ts (stages: connection, branch,
+  changes, github_connection, push, verify, final; fail closed; read-back SHA verify;
+  up-to-date skip).
+- New route: POST /api/admin/deploy/upload (admin-guarded, same-origin, DEV gate, single
+  flight; only the approved branch accepted).
+- Smart stepper UI: stage rows with running/pending/ok/failed/skipped, final result with
+  commit SHA, close action.
+- Tests: DeployGitPushService PASS 7/7; deploy routes PASS 44/44; deploy bar sources PASS
+  23/23; Playwright upload PASS 1/1 (mocked).
+CHANGED (code):
+- shared/deploySystem.ts (upload result types + audit actions)
+- server/services/DeployGitPushService.ts (NEW)
+- server/services/DeployGitPushService.test.ts (NEW)
+- server/routes/admin/deploy.ts (POST /api/admin/deploy/upload)
+- src/components/deploy-bar.tsx (fix + stepper)
+- src/components/deploy-bar-upload.test.ts (NEW)
+- tests/deploy-bar-upload.spec.ts (rewritten for dedicated upload flow)
+CHANGED (documentation): docs/RELEASE_NOTES.md, docs/VERSION_HISTORY.md.
+VERIFICATION (this session):
+- TypeScript frontend + server: PASS 0 errors.
+- DeployGitPushService: PASS 7/7. Deploy routes: PASS 44/44. Deploy bar sources: PASS 23/23.
+- Playwright (deploy bar upload): PASS 1/1.
+DATABASE IMPACT: NONE.
+SECURITY IMPACT: NONE (no auth/secret/permission change; branch allow-list fail closed).
+UI/UX IMPACT:
+- Icon-only upload button with tooltip «رفع إلى GitHub»; smart stage stepper panel; no
+  visible label; RTL/Arabic retained; responsive scroll retained.
+BUSINESS LOGIC IMPACT: NONE (upload independent from publish; publish behavior untouched).
+DEPLOYMENT: NONE. No TEST/LIVE deploy executed.
+NEXT STEP:
+- Restart the dev server to load 0.8.0; commit approved changes manually; then an
+  approved TEST publish deploys that commit. A real dispatch still requires a valid
+  GitHub auth source.
+
+---
+
+VERSION: 0.9.0 (upload button linked to selected environment TEST/LIVE)
+DATE: 2026-11-06
+ENVIRONMENT: DEVELOPMENT — branch `test/unified-gateway-ui-only`
+BASE COMMIT: 34715bb54e175c6a2bc5ec9b62a7c7ba6360f7f3
+RELEASE TYPE: Development version (no deployment executed)
+PREVIOUS VERSION: 0.8.0
+WHY 0.9.0:
+- MINOR bump: the upload button is now linked to the selected environment
+  (TEST pushes `test/unified-gateway-ui-only`, LIVE pushes `main`) and prevents
+  environment switching while an upload is in flight. No breaking change.
+SUMMARY:
+- Upload button is a single smart button linked to the deploy bar environment
+  switcher. One icon only — no duplicate.
+- Target branch resolved server-side per environment:
+  TEST -> test/unified-gateway-ui-only, LIVE -> main, LOCAL -> unsupported.
+- New route: POST /api/admin/deploy/upload (environment parameter, admin-guarded).
+- Pipeline: connection -> branch -> changes -> github_connection -> push -> verify
+  -> final, fail closed, read-back SHA verification.
+- Environment switch blocked while upload is pending.
+- Tests: DeployGitPushService PASS 8/8; deploy routes PASS 44/44; deploy bar
+  sources PASS 23/23; Playwright upload PASS 1/1.
+CHANGED (code):
+- shared/deploySystem.ts (approved branch per environment + result types)
+- server/services/DeployGitPushService.ts (environment-aware pipeline)
+- server/services/DeployGitPushService.test.ts (NEW, 8 tests)
+- server/routes/admin/deploy.ts (POST /api/admin/deploy/upload with environment)
+- src/components/deploy-bar.tsx (environment-linked upload + switch lock)
+- src/components/deploy-bar-upload.test.ts (NEW, source tests)
+- tests/deploy-bar-upload.spec.ts (Playwright E2E against localhost:5001)
+CHANGED (documentation): docs/RELEASE_NOTES.md, docs/VERSION_HISTORY.md.
+VERIFICATION (this session):
+- TypeScript frontend + server: PASS 0 errors.
+- DeployGitPushService: PASS 8/8. Deploy routes: PASS 44/44. Deploy bar sources: PASS 23/23.
+- Playwright (deploy bar upload): PASS 1/1 on LOCAL http://localhost:5001.
+DATABASE IMPACT: NONE.
+SECURITY IMPACT: NONE (no auth/secret/permission change; branch allow-list fail closed per environment).
+UI/UX IMPACT:
+- Single icon-only upload button with tooltip «رفع إلى GitHub»; smart stage stepper;
+  no visible label; RTL/Arabic retained; responsive scroll retained; switch lock during upload.
+BUSINESS LOGIC IMPACT: NONE (upload independent from publish; publish behavior untouched).
+DEPLOYMENT: NONE. No TEST/LIVE deploy executed. No real Git push performed.
+NEXT STEP:
+- Restart the dev server to load 0.9.0; commit approved changes manually; then an
+  approved TEST publish deploys that commit. A real dispatch still requires a valid
+  GitHub auth source.
