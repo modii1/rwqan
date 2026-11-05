@@ -39,6 +39,62 @@ router.get("/api/admin/partner-profits/summary", async (req, res) => {
   }
 });
 
+// تجهيز/إعادة حساب دورة شهرية — يجب أن يكون قبل /:id
+router.post("/api/admin/partner-profits/prepare", async (req, res) => {
+  try {
+    const { monthYear } = req.body || {};
+    const profit = await financeService.prepareMonthlyCycle(monthYear);
+    res.json(profit);
+  } catch (error: any) {
+    console.error("Error preparing partner profit cycle:", error);
+    res.status(500).json({ error: error.message || "فشل في تجهيز دورة الأرباح" });
+  }
+});
+
+// إقفال نهائي لدورة شهرية
+router.post("/api/admin/partner-profits/:id/close", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adminId = (req.sessionID ?? "unknown") as string;
+    const profit = await financeService.closeMonthlyCycle(id, adminId);
+    if (!profit) {
+      return res.status(404).json({ error: "سجل الأرباح غير موجود" });
+    }
+    res.json(profit);
+  } catch (error: any) {
+    console.error("Error closing partner profit cycle:", error);
+    res.status(400).json({ error: error.message || "فشل في إقفال دورة الأرباح" });
+  }
+});
+
+// تسجيل تحويل لمستحق الشريك
+router.post("/api/admin/partner-profits/:id/transfers", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, reference } = req.body || {};
+    const adminId = (req.sessionID ?? "unknown") as string;
+
+    if (!amount || isNaN(parseFloat(amount))) {
+      return res.status(400).json({ error: "مبلغ التحويل مطلوب" });
+    }
+
+    const profit = await financeService.recordTransfer(
+      id,
+      parseFloat(amount),
+      reference,
+      adminId
+    );
+    if (!profit) {
+      return res.status(404).json({ error: "سجل الأرباح غير موجود" });
+    }
+    res.json(profit);
+  } catch (error: any) {
+    console.error("Error recording partner profit transfer:", error);
+    res.status(400).json({ error: error.message || "فشل في تسجيل التحويل" });
+  }
+});
+
+// إنشاء سجل يدوي — محصور بالملاحظات/بيانات إدارية
 router.post("/api/admin/partner-profits", async (req, res) => {
   try {
     const profit = await financeService.createPartnerProfit(req.body);
@@ -49,17 +105,18 @@ router.post("/api/admin/partner-profits", async (req, res) => {
   }
 });
 
+// تعديل سجل — مسموح بتعديل الملاحظات فقط للدورات غير المقفلة
 router.put("/api/admin/partner-profits/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const profit = await financeService.updatePartnerProfit(id, req.body);
+    const profit = await financeService.updatePartnerProfitNotes(id, req.body.notes);
     if (!profit) {
       return res.status(404).json({ error: "سجل الأرباح غير موجود" });
     }
     res.json(profit);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating partner profit:", error);
-    res.status(500).json({ error: "فشل في تحديث سجل الأرباح" });
+    res.status(400).json({ error: error.message || "فشل في تحديث سجل الأرباح" });
   }
 });
 
