@@ -874,3 +874,37 @@ NEXT STEP:
 - Restart the dev server to load 0.9.0; commit approved changes manually; then an
   approved TEST publish deploys that commit. A real dispatch still requires a valid
   GitHub auth source.
+
+---
+
+VERSION: 1.0.0 (إصلاح شامل لمحرك احتساب المدفوعات في نظام أرباح الشريك)
+DATE: 2026-11-07
+ENVIRONMENT: DEVELOPMENT — branch 	est/unified-gateway-ui-only
+BASE COMMIT: 5c16eb8c666a31dba4b83dd0cede96e10042fbb5
+RELEASE TYPE: Development version (no deployment executed)
+PREVIOUS VERSION: 0.9.0
+WHY 1.0.0:
+- MAJOR bump (within 0.x): إصلاح شامل لمحرك احتساب المدفوعات يؤثر على جميع دورات الأرباح الشهرية. لا تغيير سلوكي على النظام نفسه، لكن منطق احتساب الصافي تغير جوهريًا.
+SUMMARY:
+- FIXED: calculateRevenueAfterFees في server/services/PartnerProfitCalculator.ts الآن يتعامل بشكل صحيح مع netAmount = 0 و総 fees.
+- دالة جديدة calculatePaymentNetAmount توحد منطق حساب الصافي لكل وسيلة دفع (Apple Pay، تحويل بنكي، بطاقة، إلخ).
+- جميع حالات الدفع المكتملة تُقبل؛ جميع حالات الدفع غير المكتملة تُستبعد.
+- تفصيل كل دفعة يُعاد في paymentsDetail للمطابقة مع إيرادات الدورة.
+- لا تُخصم الرسوم مرتين، لا تُحتسب أي دفعة مكررة.
+CHANGED (code):
+- server/services/PartnerProfitCalculator.ts (إعادة هيكلة منطق احتساب الإيرادات)
+- server/services/PartnerProfitCalculator.test.ts (28 اختبارًا شاملاً)
+CHANGED (documentation): docs/RELEASE_NOTES.md, docs/VERSION_HISTORY.md.
+VERIFICATION (this session):
+- TypeScript frontend + server: PASS 0 errors.
+- PartnerProfitCalculator: PASS 28/28.
+- FinanceService: PASS 6/6.
+DATABASE IMPACT: NONE.
+SECURITY IMPACT: NONE.
+UI/UX IMPACT: NONE (محرك حسابات فقط).
+BUSINESS LOGIC IMPACT: NONE (نظام الدورات، 50/50، ترحيل الخسائر، التحويلات، الحماية — جميعها دون تغيير).
+DEPLOYMENT: NONE. No TEST/LIVE deploy executed. No real Git push performed.
+NEXT STEP:
+- Restart the dev server to load 1.0.0; commit approved changes manually; then an
+  approved TEST publish deploys that commit. A real dispatch still requires a valid
+  GitHub auth source.

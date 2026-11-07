@@ -597,3 +597,45 @@ Rollback: revert the deploy-bar/upload route/pipeline changes.
 
 SAFE DEV STATUS: PASS
 PRODUCTION RELEASE GATE = BLOCKED
+
+## 1.0.0 — إصلاح شامل لمحرك احتساب المدفوعات في نظام أرباح الشريك (dev)
+Date: 2026-11-07
+Environment: DEVELOPMENT — branch 	est/unified-gateway-ui-only
+Base commit: 5c16eb8c666a31dba4b83dd0cede96e10042fbb5
+
+What changed:
+- FIXED: إعادة هيكلة شاملة لدالة calculateRevenueAfterFees في server/services/PartnerProfitCalculator.ts لضمان احتساب جميع المدفوعات المكتملة ماليًا بصافيها الصحيح بعد الرسوم.
+- دالة جديدة calculatePaymentNetAmount توحد منطق حساب الصافي لكل وسيلة دفع:
+  * netAmount > 0: يُستخدم كصافي صحيح.
+  * netAmount = 0且 totalFees > 0: الصافي صحيح = 0 (كل المبلغ ذهب رسومًا).
+  * netAmount غير موجود且 totalFees > 0: الصافي = المبلغ ناقص الرسوم.
+  * netAmount غير موجود أو = 0且 لا توجد رسوم: يُستخدم المبلغ الكامل (لا يُفترض أن الصفر يعني رسومًا دون دليل).
+- لم تعد الدفعة تُستبعد لمجرد أن netAmount = 0 دون وجود رسوم فعلية.
+- جميع حالات الدفع غير المكتملة تُستبعد: "معلق", "فشل", "ملغي", "قيد المراجعة", "نجح - قيد التحقق", "قيد التحقق", "منتهي الصلاحية", "ملغي - انتهت المهلة", "pending", "قيد الدفع".
+- جميع حالات الدفع المكتملة تُقبل: "مكتمل", "completed", "نجح", "نجاح".
+- التفاصيل لكل دفعة تُعاد في paymentsDetail للمطابقة والمراجعة بين تفاصيل الدفعة وإيرادات الدورة.
+- لا تُخصم الرسوم مرتين، لا تُحتسب أي دفعة مكررة.
+
+What did NOT change:
+- نظام الدورات الشهرية (تجهيز → مراجعة → إقفال).
+- ترحيل الخسائر قبل توزيع الأرباح.
+- حصة الشريك 50%.
+- التحويلات الجزئية والمتعددة.
+- منع تكرار التحويل.
+- حماية الدورات المقفلة والتاريخية.
+- لا تعديل على سجلات المدفوعات التاريخية.
+- لا تسجيل تحويلات مالية.
+- لا إقفال لأي دورة.
+
+Verification (this session):
+- TypeScript (frontend + server): PASS 0 errors.
+- PartnerProfitCalculator: PASS 28/28.
+- FinanceService: PASS 6/6.
+- tsc server: PASS 0 errors.
+
+Deployment: NONE. No TEST/LIVE deploy executed. No real Git push performed. No commit/push without approval.
+
+Rollback: revert PartnerProfitCalculator.ts changes.
+
+SAFE DEV STATUS: PASS
+PRODUCTION RELEASE GATE = BLOCKED

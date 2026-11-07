@@ -35,6 +35,16 @@ export type PartnerProfitCalculation = {
   partnerShare: number;
   ourShare: number;
   partnerPercentage: number;
+  /** تفاصيل كل دفعة ساهمت في إيرادات الدورة (للمطابقة والمراجعة). */
+  paymentsDetail: Array<{
+    id: string;
+    propertyNumber: string;
+    amount: number;
+    netAmount: number;
+    status: string;
+    paymentMethod: string | undefined;
+    completedAt: string | undefined;
+  }>;
 };
 
 const COMPLETED_PAYMENT_STATUSES = new Set([
@@ -94,15 +104,71 @@ function calculateMonthlyExpenses(expenses: Expense[], monthYear: string): numbe
   return Math.round(total * 100) / 100;
 }
 
+/**
+ * حساب صافي دفعة واحدة بعد الرسوم.
+ *
+ * القواعد:
+ * - إذا كان netAmount > 0: يُستخدم كصافي صحيح (قد يكون चुका محسوبًا من المزود).
+ * - إذا كان netAmount = 0且 totalFees > 0: الصافي صحيح = 0 (كل المبلغ ذهب رسومًا).
+ * - إذا كان netAmount غير موجود و totalFees > 0: الصافي = المبلغ ناقص الرسوم.
+ * - إذا كان netAmount غير موجود أو = 0 و totalFees غير موجود أو = 0: لا توجد رسوم،
+ *   يُستخدم المبلغ الكامل (لا يُفترض أن الصفر يعني رسومًا دون دليل).
+ * - لا تُخصم الرسوم مرتين.
+ */
+function calculatePaymentNetAmount(payment: Payment): number {
+  const amount = payment.finalAmount || 0;
+  const totalFees =
+    typeof payment.totalFees === "number" ? payment.totalFees : 0;
+  const netAmount =
+    typeof payment.netAmount === "number" ? payment.netAmount : null;
+
+  // netAmount محسوم وموجب: استخدمه كما هو.
+  if (netAmount !== null && netAmount > 0) {
+    return netAmount;
+  }
+
+  // netAmount = 0且 هناك رسوم فعلية: الصافي صحيح = 0.
+  if (netAmount === 0 && totalFees > 0) {
+    return 0;
+  }
+
+  // netAmount غير موجود و هناك رسوم: احسب الصافي من المبلغ ناقص الرسوم.
+  if (netAmount === null && totalFees > 0) {
+    return Math.max(0, amount - totalFees);
+  }
+
+  // لا يوجد netAmount محسوم ولا رسوم فعلية: استخدم المبلغ الكامل.
+  // لا نُفترض أن netAmount = 0 بدون رسوم يعني صافي صفر.
+  return amount;
+}
+
 function calculateRevenueAfterFees(payments: Payment[], monthYear: string): {
   totalRevenue: number;
   revenueAfterFees: number;
   activeSubscriptions: number;
+  paymentsDetail: Array<{
+    id: string;
+    propertyNumber: string;
+    amount: number;
+    netAmount: number;
+    status: string;
+    paymentMethod: string | undefined;
+    completedAt: string | undefined;
+  }>;
 } {
   const normalized = normalizeMonthYear(monthYear);
   let totalRevenue = 0;
   let revenueAfterFees = 0;
   let activeSubscriptions = 0;
+  const paymentsDetail: Array<{
+    id: string;
+    propertyNumber: string;
+    amount: number;
+    netAmount: number;
+    status: string;
+    paymentMethod: string | undefined;
+    completedAt: string | undefined;
+  }> = [];
 
   for (const payment of payments) {
     if (!COMPLETED_PAYMENT_STATUSES.has(payment.status)) continue;
@@ -112,21 +178,25 @@ function calculateRevenueAfterFees(payments: Payment[], monthYear: string): {
     totalRevenue += amount;
     activeSubscriptions += 1;
 
-    if (typeof payment.netAmount === "number") {
-      //netAmount قد يكون صفرًا بصريح الحال (مثلاً رسوم تُستنفذ المبلغ كاملاً)،
-      //فلا يُعامل الصفر على أنه "غير مضبوط" ويُعاود استخدام المبلغ الإجمالي.
-      revenueAfterFees += payment.netAmount;
-    } else if (typeof payment.totalFees === "number" && payment.totalFees > 0) {
-      revenueAfterFees += Math.max(0, amount - payment.totalFees);
-    } else {
-      revenueAfterFees += amount;
-    }
+    const net = calculatePaymentNetAmount(payment);
+    revenueAfterFees += net;
+
+    paymentsDetail.push({
+      id: payment.id,
+      propertyNumber: payment.propertyNumber,
+      amount,
+      netAmount: net,
+      status: payment.status,
+      paymentMethod: payment.paymentMethod,
+      completedAt: payment.completedAt,
+    });
   }
 
   return {
     totalRevenue: Math.round(totalRevenue * 100) / 100,
     revenueAfterFees: Math.round(revenueAfterFees * 100) / 100,
     activeSubscriptions,
+    paymentsDetail,
   };
 }
 
@@ -149,7 +219,7 @@ export function calculatePartnerProfitMonth(
   input: PartnerProfitMonthInput
 ): PartnerProfitCalculation {
   const normalizedMonth = normalizeMonthYear(input.monthYear);
-  const { totalRevenue, revenueAfterFees, activeSubscriptions } =
+  const { totalRevenue, revenueAfterFees, activeSubscriptions, paymentsDetail } =
     calculateRevenueAfterFees(input.payments, normalizedMonth);
 
   const totalExpenses = calculateMonthlyExpenses(input.expenses, normalizedMonth);
@@ -190,6 +260,7 @@ export function calculatePartnerProfitMonth(
     distributableProfit,
     partnerShare,
     ourShare,
+    paymentsDetail,
     partnerPercentage,
   };
 }
