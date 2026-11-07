@@ -112,7 +112,9 @@ function calculateRevenueAfterFees(payments: Payment[], monthYear: string): {
     totalRevenue += amount;
     activeSubscriptions += 1;
 
-    if (typeof payment.netAmount === "number" && payment.netAmount > 0) {
+    if (typeof payment.netAmount === "number") {
+      //netAmount قد يكون صفرًا بصريح الحال (مثلاً رسوم تُستنفذ المبلغ كاملاً)،
+      //فلا يُعامل الصفر على أنه "غير مضبوط" ويُعاود استخدام المبلغ الإجمالي.
       revenueAfterFees += payment.netAmount;
     } else if (typeof payment.totalFees === "number" && payment.totalFees > 0) {
       revenueAfterFees += Math.max(0, amount - payment.totalFees);

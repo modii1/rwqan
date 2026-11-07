@@ -180,3 +180,111 @@ test("زيادة الخسارة المرحّلة عند خسارة إضافية"
   assert.equal(result.carriedLossForward, 500);
   assert.equal(result.carriedLossRemaining, 800);
 });
+
+test("Contabilizes completed Apple Pay payment with netAmount and excludes bank transfer with netAmount zero", () => {
+  const result = calculatePartnerProfitMonth({
+    monthYear: "2026-11",
+    payments: [
+      // Property 31285: Apple Pay، 40 ريال، رسوم 2.76، صافي 37.24، تاريخ 2026-11-07
+      makePayment({
+        propertyNumber: "31285",
+        amount: 40,
+        finalAmount: 40,
+        status: "مكتمل",
+        paymentMethod: "Apple Pay",
+        completedAt: "2026-11-07T10:00:00.000Z",
+        netAmount: 37.24,
+        totalFees: 2.76,
+      }),
+      // Property 75699: تحويل بنكي، 40 ريال، صافي معروض صفر، حالة قيد التحقق (غير مكتمل مالياً)
+      makePayment({
+        propertyNumber: "75699",
+        amount: 40,
+        finalAmount: 40,
+        status: "قيد التحقق",
+        paymentMethod: "تحويل بنكي",
+        completedAt: "2026-11-07T12:00:00.000Z",
+        netAmount: 0,
+        totalFees: 0,
+      }),
+    ],
+    expenses: [makeExpense({ amount: 20, date: "2026-11-05" })],
+    previousClosedCycles: [],
+  });
+
+  assert.equal(result.activeSubscriptions, 1);
+  assert.equal(result.totalRevenue, 40);
+  assert.equal(result.revenueAfterFees, 37.24);
+  assert.equal(result.totalExpenses, 20);
+  assert.equal(result.netProfitAfterExpenses, 17.24);
+  assert.equal(result.distributableProfit, 17.24);
+  assert.equal(result.partnerShare, 8.62);
+  assert.equal(result.ourShare, 8.62);
+});
+
+test("completed payment with netAmount zero contributes zero to revenueAfterFees", () => {
+  const result = calculatePartnerProfitMonth({
+    monthYear: "2026-11",
+    payments: [
+      // دفعة مكتملة ولكن صافيها صفر (كل المبلغ ذهب رسوماً)
+      makePayment({
+        propertyNumber: "99999",
+        amount: 40,
+        finalAmount: 40,
+        status: "مكتمل",
+        paymentMethod: "تحويل بنكي",
+        completedAt: "2026-11-07T12:00:00.000Z",
+        netAmount: 0,
+        totalFees: 0,
+      }),
+    ],
+    expenses: [],
+    previousClosedCycles: [],
+  });
+
+  assert.equal(result.activeSubscriptions, 1);
+  assert.equal(result.totalRevenue, 40);
+  assert.equal(result.revenueAfterFees, 0);
+  assert.equal(result.netProfitAfterExpenses, 0);
+  assert.equal(result.distributableProfit, 0);
+  assert.equal(result.partnerShare, 0);
+});
+
+test("pending verification statuses are excluded from revenue", () => {
+  const result = calculatePartnerProfitMonth({
+    monthYear: "2026-11",
+    payments: [
+      makePayment({
+        propertyNumber: "11111",
+        amount: 100,
+        finalAmount: 100,
+        status: "قيد التحقق",
+        completedAt: "2026-11-07T10:00:00.000Z",
+        netAmount: 90,
+      }),
+      makePayment({
+        propertyNumber: "22222",
+        amount: 100,
+        finalAmount: 100,
+        status: "نجح - قيد التحقق",
+        completedAt: "2026-11-07T11:00:00.000Z",
+        netAmount: 90,
+      }),
+      makePayment({
+        propertyNumber: "33333",
+        amount: 100,
+        finalAmount: 100,
+        status: "مكتمل",
+        completedAt: "2026-11-07T12:00:00.000Z",
+        netAmount: 90,
+      }),
+    ],
+    expenses: [],
+    previousClosedCycles: [],
+  });
+
+  assert.equal(result.activeSubscriptions, 1);
+  assert.equal(result.totalRevenue, 100);
+  assert.equal(result.revenueAfterFees, 90);
+  assert.equal(result.partnerShare, 45);
+});
