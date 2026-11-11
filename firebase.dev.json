@@ -1,7 +1,7 @@
 {
   "apphosting": [
     {
-      "backendId": "rwqan-dev-backend",
+      "backendId": "rwqan-backend",
       "rootDir": ".",
       "ignore": [
         "node_modules",

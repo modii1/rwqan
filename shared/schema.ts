@@ -530,17 +530,40 @@ export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 // =========================
 // Partner Profits Schema (أرباح الشريك)
 // =========================
+export const partnerProfitTransferSchema = z.object({
+  id: z.string(),
+  amount: z.number(), // المبلغ المحوّل
+  date: z.string(), // تاريخ التحويل
+  reference: z.string().optional(), // مرجع/رقم العملية
+  createdBy: z.string().optional(), // معرّف المسؤول
+  createdAt: z.string().optional(),
+});
+
+export type PartnerProfitTransfer = z.infer<typeof partnerProfitTransferSchema>;
+
 export const partnerProfitSchema = z.object({
   id: z.string(),
-  monthYear: z.string(), // الشهر/السنة مثل "2025/11"
-  activeSubscriptions: z.number(), // عدد الاشتراكات الفعالة
-  totalRevenue: z.number(), // إجمالي الإيرادات
-  partnerShare: z.number(), // نصيب الشريك (50%)
+  monthYear: z.string(), // الشهر/السنة (يفضّل YYYY-MM أو YYYY/MM)
+  activeSubscriptions: z.number().default(0), // عدد الاشتراكات الفعالة/الدفعات
+  totalRevenue: z.number().default(0), // إجمالي الإيرادات قبل الرسوم
+  revenueAfterFees: z.number().default(0), // الإيرادات بعد رسوم الدفع
+  partnerShare: z.number().default(0), // نصيب الشريك المستحق (50% من الربح القابل للتوزيع)
   partnerPercentage: z.number().default(50), // نسبة الشريك
-  totalExpenses: z.number().default(0), // إجمالي التكاليف
-  netProfitAfterExpenses: z.number().default(0), // الربح الصافي بعد التكاليف
-  transferDate: z.string().optional(), // تاريخ التحويل
-  transferStatus: z.enum(['pending', 'transferred']).default('pending'), // حالة التحويل
+  totalExpenses: z.number().default(0), // إجمالي التكاليف المعتمدة للشهر
+  netProfitAfterExpenses: z.number().default(0), // صافي نتيجة الشهر = الإيرادات - التكاليف
+  carriedLossForward: z.number().default(0), // الخسارة المحمّلة من الأشهر السابقة عند فتح الدورة
+  carriedLossRemaining: z.number().default(0), // الخسارة المتبقية بعد خصم نتيجة الشهر الحالي
+  distributableProfit: z.number().default(0), // الربح القابل للتوزيع بعد تغطية الخسائر
+  ourShare: z.number().default(0), // نصيبنا (50%)
+  owedToPartner: z.number().default(0), // المستحق الحالي للشريك (يمكن أن يتغير قبل الإقفال)
+  transferredToPartner: z.number().default(0), // إجمالي المحوّل للشريك
+  remainingToTransfer: z.number().default(0), // المتبقي للتحويل
+  transfers: z.array(partnerProfitTransferSchema).default([]), // سجل التحويلات
+  status: z.enum(["draft", "pending_review", "closed"]).default("draft"), // حالة الدورة
+  closedAt: z.string().optional(), // تاريخ الإقفال النهائي
+  closedBy: z.string().optional(), // معرّف المسؤول الذي أقفل الدورة
+  transferDate: z.string().optional(), // @deprecated استخدم transfers
+  transferStatus: z.enum(['pending', 'transferred']).default('pending'), // @deprecated استخدم remainingToTransfer
   notes: z.string().optional(), // ملاحظات
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),

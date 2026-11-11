@@ -5844,6 +5844,12 @@ export class FirebaseService {
         return snapshot.docs.map(doc => doc.data() as PartnerProfit);
     }
 
+    async getPartnerProfitById(id: string): Promise<PartnerProfit | null> {
+        const doc = await this.db.collection("partner_profits").doc(id).get();
+        if (!doc.exists) return null;
+        return doc.data() as PartnerProfit;
+    }
+
     async createPartnerProfit(profit: InsertPartnerProfit): Promise<PartnerProfit> {
         const id = `PP-${Date.now()}`;
         const newProfit: PartnerProfit = {

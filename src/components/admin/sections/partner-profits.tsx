@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,1200 +11,28 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Plus, Loader2, Calendar, CreditCard, TrendingUp, Check, Clock, RefreshCw, DollarSign, ArrowUpRight, Receipt, AlertCircle, Percent, Calculator, Trash2, MinusCircle, Banknote, ChevronDown } from "lucide-react";
+import {
+  Wallet,
+  Plus,
+  Loader2,
+  Calendar,
+  CreditCard,
+  TrendingUp,
+  Check,
+  Clock,
+  RefreshCw,
+  DollarSign,
+  Receipt,
+  AlertCircle,
+  MinusCircle,
+  Banknote,
+  ChevronDown,
+  ChevronUp,
+  Lock,
+  Edit3,
+} from "lucide-react";
 import type { PartnerProfit, Payment, Expense } from "@shared/schema";
-import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
-
-// رسوم Paymob
-const PAYMOB_FEE_RATES: Record<string, { percentage: number; fixedFee: number; label: string }> = {
-  "mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
-  "visa-local": { percentage: 2.7, fixedFee: 1, label: "Visa/MC (2.7% + 1 ر.س)" },
-  "stc": { percentage: 1.0, fixedFee: 1, label: "STC Pay (1% + 1 ر.س)" },
-  "apple": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
-  "بطاقة": { percentage: 2.7, fixedFee: 1, label: "بطاقة (2.7% + 1 ر.س)" },
-  "Visa": { percentage: 2.7, fixedFee: 1, label: "Visa (2.7% + 1 ر.س)" },
-  "MasterCard": { percentage: 2.7, fixedFee: 1, label: "MasterCard (2.7% + 1 ر.س)" },
-  "Mada": { percentage: 1.0, fixedFee: 1, label: "مدى (1% + 1 ر.س)" },
-  "Apple Pay": { percentage: 2.7, fixedFee: 1, label: "Apple Pay (2.7% + 1 ر.س)" },
-  "تحويل بنكي": { percentage: 0, fixedFee: 0, label: "تحويل بنكي (0%)" },
-  "default": { percentage: 2.7, fixedFee: 1, label: "افتراضي (2.7% + 1 ر.س)" },
-};
-
-const VAT_RATE = 0.15;
-const PARTNER_SHARE = 0.50;
-
-function calculateFees(amount: number, paymentMethod: string) {
-  const method = (paymentMethod || "").toLowerCase();
-  
-  let config = PAYMOB_FEE_RATES["default"];
-  if (method.includes("mada") || method.includes("مدى")) {
-    config = PAYMOB_FEE_RATES["mada"];
-  } else if (method.includes("stc")) {
-    config = PAYMOB_FEE_RATES["stc"];
-  } else if (method.includes("apple")) {
-    config = PAYMOB_FEE_RATES["apple"];
-  } else if (method.includes("تحويل") || method.includes("bank")) {
-    config = PAYMOB_FEE_RATES["تحويل بنكي"];
-  } else {
-    config = PAYMOB_FEE_RATES[paymentMethod] || PAYMOB_FEE_RATES["default"];
-  }
-  
-  const baseFee = (amount * config.percentage / 100) + config.fixedFee;
-  const vatOnFee = baseFee * VAT_RATE;
-  const totalFees = baseFee + vatOnFee;
-  const netAmount = amount - totalFees;
-  const partnerProfit = netAmount * PARTNER_SHARE;
-  const ourProfit = netAmount * PARTNER_SHARE;
-  
-  return {
-    feeRate: config.percentage / 100,
-    fixedFee: config.fixedFee,
-    feeLabel: config.label,
-    feeAmount: baseFee,
-    vatOnFee,
-    totalFees,
-    netAmount,
-    partnerProfit,
-    ourProfit,
-  };
-}
-
-export default function PartnerProfitsSection() {
-  const { toast } = useToast();
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-
-  const { data: profits = [], isLoading } = useQuery<PartnerProfit[]>({
-    queryKey: ["/api/admin/partner-profits"],
-  });
-
-  const { data: summary, isLoading: isLoadingSummary, refetch: refetchSummary } = useQuery<{
-    currentMonth: {
-      monthYear: string;
-      totalRevenue: number;
-      netRevenue: number;
-      totalExpenses: number;
-      realProfit: number;
-      partnerShare: number;
-      ourShare: number;
-      paymentsCount: number;
-      isProfitable: boolean;
-    };
-    allTime: {
-      totalRevenue: number;
-      netRevenue: number;
-      totalExpenses: number;
-      realProfit: number;
-      partnerShare: number;
-      ourShare: number;
-      paymentsCount: number;
-      isProfitable: boolean;
-    };
-    pendingPayments: number;
-    recentPayments: Payment[];
-    recentExpenses: Expense[];
-  }>({
-    queryKey: ["/api/admin/partner-profits/summary"],
-  });
-
-  const { data: expenses = [], isLoading: isLoadingExpenses, refetch: refetchExpenses } = useQuery<Expense[]>({
-    queryKey: ["/api/admin/expenses"],
-  });
-
-  const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
-  const [isMigrationDialogOpen, setIsMigrationDialogOpen] = useState(false);
-  const [migrationData, setMigrationData] = useState<{
-    paidSubscriptions: any[];
-    totalRevenue: number;
-    partnerShare: number;
-    isLoading: boolean;
-  }>({ paidSubscriptions: [], totalRevenue: 0, partnerShare: 0, isLoading: false });
-
-  const createExpenseMutation = useMutation({
-    mutationFn: async (data: any) => {
-      return apiRequest("POST", "/api/admin/expenses", data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits/summary"] });
-      setIsExpenseDialogOpen(false);
-      toast({
-        title: "تمت الإضافة",
-        description: "تم إضافة التكلفة بنجاح",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "فشل في إضافة التكلفة",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteExpenseMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/admin/expenses/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits/summary"] });
-      toast({
-        title: "تم الحذف",
-        description: "تم حذف التكلفة بنجاح",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "فشل في حذف التكلفة",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (data: any) => {
-      return apiRequest("POST", "/api/admin/partner-profits", data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
-      setIsAddDialogOpen(false);
-      toast({
-        title: "تم الإضافة",
-        description: "تم إضافة سجل الأرباح بنجاح",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "فشل في إضافة سجل الأرباح",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      return apiRequest("PUT", `/api/admin/partner-profits/${id}`, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
-      toast({
-        title: "تم التحديث",
-        description: "تم تحديث سجل الأرباح بنجاح",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "خطأ",
-        description: "فشل في تحديث سجل الأرباح",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleCreateFromCurrent = () => {
-    if (!summary?.currentMonth) return;
-    
-    // لا يُسمح بالحفظ إذا الربح الحقيقي <= 0
-    if ((summary.currentMonth.realProfit || 0) <= 0) {
-      toast({
-        title: "لا يمكن حفظ السجل",
-        description: "لا يُسمح بحفظ سجل أرباح الشريك في شهر خاسر أو متعادل",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    createMutation.mutate({
-      monthYear: summary.currentMonth.monthYear,
-      activeSubscriptions: summary.currentMonth.paymentsCount,
-      totalRevenue: summary.currentMonth.netRevenue, // صافي الإيرادات
-      partnerShare: summary.currentMonth.partnerShare, // حصة الشريك من الربح الحقيقي
-      partnerPercentage: 50,
-      totalExpenses: summary.currentMonth.totalExpenses || 0,
-      netProfitAfterExpenses: summary.currentMonth.realProfit || 0, // الربح الحقيقي
-      transferStatus: "pending",
-    });
-  };
-
-  // فتح modal الترحيل وجلب البيانات
-  const handleOpenMigration = async () => {
-    setMigrationData(prev => ({ ...prev, isLoading: true }));
-    setIsMigrationDialogOpen(true);
-    
-    try {
-      const response = await fetch('/api/admin/subscriptions');
-      const subscriptions = await response.json();
-      
-      // جمع الاشتراكات التي لها رسوم (price > 0)
-      const paidSubscriptions = subscriptions.filter((sub: any) => {
-        const price = parseFloat(String(sub.price || 0));
-        return price > 0;
-      });
-      
-      // حساب الإجماليات
-      const totalRevenue = paidSubscriptions.reduce((sum: number, sub: any) => {
-        const price = parseFloat(String(sub.price || 0));
-        return sum + price;
-      }, 0);
-      const partnerShare = totalRevenue * PARTNER_SHARE;
-      
-      setMigrationData({
-        paidSubscriptions,
-        totalRevenue,
-        partnerShare,
-        isLoading: false,
-      });
-    } catch (error) {
-      toast({
-        title: "خطأ",
-        description: "فشل في جلب بيانات الاشتراكات",
-        variant: "destructive",
-      });
-      setIsMigrationDialogOpen(false);
-      setMigrationData(prev => ({ ...prev, isLoading: false }));
-    }
-  };
-
-  // تنفيذ الترحيل الفعلي
-  const handleConfirmMigration = () => {
-    if (migrationData.paidSubscriptions.length === 0) {
-      toast({
-        title: "لا توجد بيانات",
-        description: "لا توجد اشتراكات قديمة للترحيل",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    createMutation.mutate({
-      monthYear: "ترحيل الدورة السابقة",
-      activeSubscriptions: migrationData.paidSubscriptions.length,
-      totalRevenue: migrationData.totalRevenue,
-      partnerShare: migrationData.partnerShare,
-      partnerPercentage: 50,
-      totalExpenses: 0,
-      netProfitAfterExpenses: migrationData.partnerShare,
-      transferStatus: "pending",
-      notes: `تم ترحيل ${migrationData.paidSubscriptions.length} اشتراك من شيت الاشتراكات | الإجمالي: ${migrationData.totalRevenue.toFixed(2)} ر.س`,
-    });
-    
-    setIsMigrationDialogOpen(false);
-  };
-
-  const handleMarkTransferred = (profit: PartnerProfit) => {
-    updateMutation.mutate({
-      id: profit.id,
-      data: {
-        transferStatus: "completed",
-        transferDate: new Date().toISOString(),
-      },
-    });
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <Badge variant="default" className="bg-green-600">تم التحويل</Badge>;
-      case "pending":
-        return <Badge variant="secondary">معلق</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
-  const getPaymentStatusBadge = (status: string) => {
-    switch (status) {
-      case "مكتمل":
-      case "نجحت":
-        return <Badge variant="default" className="bg-green-600">مكتمل</Badge>;
-      case "قيد المراجعة":
-        return <Badge variant="secondary">قيد المراجعة</Badge>;
-      case "معلق":
-        return <Badge variant="outline">معلق</Badge>;
-      case "فشل":
-        return <Badge variant="destructive">فشل</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
-  if (isLoading || isLoadingSummary) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  const getCategoryBadge = (category: string) => {
-    const colors: Record<string, string> = {
-      "صيانة": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-      "إعلانات": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-      "رواتب": "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-      "استضافة": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-      "أخرى": "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
-    };
-    return <Badge className={colors[category] || colors["أخرى"]}>{category}</Badge>;
-  };
-
-  return (
-    <div className="space-y-6" dir="rtl">
-      {/* ===================== الشهر الحالي ===================== */}
-      <Card className="border-2 border-primary/20">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Calendar className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">الشهر الحالي: {summary?.currentMonth.monthYear}</CardTitle>
-                <CardDescription>أرقام هذا الشهر فقط (بناءً على تاريخ الدفع)</CardDescription>
-              </div>
-            </div>
-            {summary?.currentMonth.isProfitable ? (
-              <Badge className="bg-green-600 text-white text-sm px-3 py-1">شهر رابح</Badge>
-            ) : (summary?.currentMonth.realProfit || 0) < 0 ? (
-              <Badge variant="destructive" className="text-sm px-3 py-1">شهر خاسر</Badge>
-            ) : (
-              <Badge variant="secondary" className="text-sm px-3 py-1">متعادل</Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
-              <div className="flex items-center gap-2 mb-2">
-                <Banknote className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-700 dark:text-blue-400">إيرادات الشهر (صافي بعد الرسوم)</span>
-              </div>
-              <p className="text-2xl font-bold text-blue-700 dark:text-blue-400" dir="ltr">
-                {(summary?.currentMonth.netRevenue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {summary?.currentMonth.paymentsCount || 0} دفعة | قبل الخصم: {(summary?.currentMonth.totalRevenue || 0).toLocaleString("en-US")} ر.س
-              </p>
-            </div>
-
-            <div className="p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-              <div className="flex items-center gap-2 mb-2">
-                <MinusCircle className="w-4 h-4 text-red-600" />
-                <span className="text-sm font-medium text-red-700 dark:text-red-400">تكاليف الشهر</span>
-              </div>
-              <p className="text-2xl font-bold text-red-600 dark:text-red-400" dir="ltr">
-                -{(summary?.currentMonth.totalExpenses || 0).toLocaleString("en-US")} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                تشمل: شهرية + موزعة + لمرة واحدة
-              </p>
-            </div>
-
-            <div className={`p-4 rounded-lg border ${(summary?.currentMonth.realProfit || 0) >= 0 
-              ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' 
-              : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className={`w-4 h-4 ${(summary?.currentMonth.realProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} />
-                <span className={`text-sm font-medium ${(summary?.currentMonth.realProfit || 0) >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>
-                  الربح الحقيقي للشهر
-                </span>
-              </div>
-              <p className={`text-2xl font-bold ${(summary?.currentMonth.realProfit || 0) >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} dir="ltr">
-                {(summary?.currentMonth.realProfit || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                = الإيرادات - التكاليف
-              </p>
-            </div>
-
-            <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-              <div className="flex items-center gap-2 mb-2">
-                <Wallet className="w-4 h-4 text-amber-600" />
-                <span className="text-sm font-medium text-amber-700 dark:text-amber-400">حصة الشريك (50%)</span>
-              </div>
-              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400" dir="ltr">
-                {(summary?.currentMonth.partnerShare || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {(summary?.currentMonth.realProfit || 0) > 0 ? '50% من الربح الحقيقي' : 'لا توزيع في حالة الخسارة'}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ===================== الإجماليات (كل الفترات) ===================== */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-muted">
-              <DollarSign className="w-5 h-5 text-foreground" />
-            </div>
-            <div>
-              <CardTitle className="text-lg">الإجماليات (كل الفترات)</CardTitle>
-              <CardDescription>مجموع كل المدفوعات والتكاليف من البداية</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-lg border">
-              <div className="flex items-center gap-2 mb-2">
-                <Banknote className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">إجمالي الإيرادات (كل الفترات)</span>
-              </div>
-              <p className="text-2xl font-bold" dir="ltr">
-                {(summary?.allTime.netRevenue || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {summary?.allTime.paymentsCount || 0} دفعة | صافي بعد الرسوم
-              </p>
-            </div>
-
-            <div className="p-4 rounded-lg border">
-              <div className="flex items-center gap-2 mb-2">
-                <MinusCircle className="w-4 h-4 text-red-600" />
-                <span className="text-sm font-medium">إجمالي التكاليف</span>
-              </div>
-              <p className="text-2xl font-bold text-red-600" dir="ltr">
-                -{(summary?.allTime.totalExpenses || 0).toLocaleString("en-US")} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {expenses.length} تكلفة مسجلة
-              </p>
-            </div>
-
-            <div className="p-4 rounded-lg border">
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className={`w-4 h-4 ${(summary?.allTime.realProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} />
-                <span className="text-sm font-medium">إجمالي الربح الحقيقي</span>
-              </div>
-              <p className={`text-2xl font-bold ${(summary?.allTime.realProfit || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} dir="ltr">
-                {(summary?.allTime.realProfit || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                حصة الشريك: {(summary?.allTime.partnerShare || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })} ر.س
-              </p>
-            </div>
-
-            <div className="p-4 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20">
-              <div className="flex items-center gap-2 mb-2">
-                <AlertCircle className="w-4 h-4 text-orange-600" />
-                <span className="text-sm font-medium text-orange-700 dark:text-orange-400">في انتظار المراجعة</span>
-              </div>
-              <p className="text-2xl font-bold text-orange-600" dir="ltr">
-                {summary?.pendingPayments || 0}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                دفعات تحتاج موافقة
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* قسم إدارة التكاليف */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <MinusCircle className="w-5 h-5 text-red-500" />
-                إدارة التكاليف والمصروفات
-              </CardTitle>
-              <CardDescription>
-                أضف التكاليف التي يجب خصمها من الأرباح
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetchExpenses()}
-                className="gap-2"
-                data-testid="button-refresh-expenses"
-              >
-                <RefreshCw className="w-4 h-4" />
-                تحديث
-              </Button>
-              <Dialog open={isExpenseDialogOpen} onOpenChange={setIsExpenseDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="gap-2" data-testid="button-add-expense">
-                    <Plus className="w-4 h-4" />
-                    إضافة تكلفة
-                  </Button>
-                </DialogTrigger>
-                <DialogContent dir="rtl" className="max-h-[85vh] flex flex-col p-0">
-                  <DialogHeader className="px-6 pt-6 pb-2">
-                    <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
-                    <DialogDescription>
-                      أدخل بيانات التكلفة لخصمها من الأرباح
-                    </DialogDescription>
-                  </DialogHeader>
-                  <AddExpenseForm
-                    onSubmit={(data) => createExpenseMutation.mutate(data)}
-                    isPending={createExpenseMutation.isPending}
-                    onCancel={() => setIsExpenseDialogOpen(false)}
-                  />
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoadingExpenses ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            </div>
-          ) : expenses.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <MinusCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>لا توجد تكاليف مسجلة</p>
-              <p className="text-sm mt-2">اضغط على "إضافة تكلفة" لإضافة أول تكلفة</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {expenses.map((expense) => (
-                <div
-                  key={expense.id}
-                  className="flex items-center justify-between p-4 rounded-lg border hover-elevate"
-                  data-testid={`expense-row-${expense.id}`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`p-2 rounded-lg ${
-                      expense.expenseType === "شهرية" ? "bg-green-100 dark:bg-green-900/30" :
-                      expense.expenseType === "موزعة" ? "bg-purple-100 dark:bg-purple-900/30" :
-                      "bg-red-100 dark:bg-red-900/30"
-                    }`}>
-                      <MinusCircle className={`w-5 h-5 ${
-                        expense.expenseType === "شهرية" ? "text-green-600" :
-                        expense.expenseType === "موزعة" ? "text-purple-600" :
-                        "text-red-600"
-                      }`} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold">{expense.title}</span>
-                        {getCategoryBadge(expense.category)}
-                        {expense.expenseType && expense.expenseType !== "مرة واحدة" && (
-                          <Badge variant="outline" className={
-                            expense.expenseType === "شهرية" ? "border-green-500 text-green-600" :
-                            "border-purple-500 text-purple-600"
-                          }>
-                            {expense.expenseType}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {expense.description && <span>{expense.description} | </span>}
-                        <span>{formatLiveSaudiDate(expense.date)}</span>
-                        {expense.expenseType === "موزعة" && expense.durationMonths && (
-                          <span> | {expense.durationMonths} شهر</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-left">
-                      {expense.expenseType === "موزعة" && expense.monthlyAmount ? (
-                        <div>
-                          <p className="font-bold text-purple-600" dir="ltr">
-                            -{expense.monthlyAmount.toLocaleString("en-US")} ر.س/شهر
-                          </p>
-                          <p className="text-xs text-muted-foreground" dir="ltr">
-                            إجمالي: {expense.amount.toLocaleString("en-US")} ر.س
-                          </p>
-                        </div>
-                      ) : expense.expenseType === "شهرية" ? (
-                        <p className="font-bold text-green-600" dir="ltr">
-                          -{expense.amount.toLocaleString("en-US")} ر.س/شهر
-                        </p>
-                      ) : (
-                        <p className="font-bold text-red-600" dir="ltr">
-                          -{expense.amount.toLocaleString("en-US")} ر.س
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-red-500 hover:text-red-700 hover:bg-red-100"
-                      onClick={() => deleteExpenseMutation.mutate(expense.id)}
-                      disabled={deleteExpenseMutation.isPending}
-                      data-testid={`button-delete-expense-${expense.id}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Receipt className="w-5 h-5" />
-                مدفوعات الشهر الحالي
-              </CardTitle>
-              <CardDescription>
-                المدفوعات التي تم دفعها في الشهر الحالي ({summary?.currentMonth.monthYear})
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refetchSummary()}
-              className="gap-2"
-              data-testid="button-refresh-payments"
-            >
-              <RefreshCw className="w-4 h-4" />
-              تحديث
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            // فصل المدفوعات: الشهر الحالي والشهور السابقة
-            const currentMonthYear = summary?.currentMonth.monthYear || "";
-            const currentMonthPayments = summary?.recentPayments?.filter((p) => {
-              if (!p.createdAt) return false;
-              const paymentDate = new Date(p.createdAt);
-              const paymentMonthYear = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-              return paymentMonthYear === currentMonthYear;
-            }) || [];
-            const previousMonthPayments = summary?.recentPayments?.filter((p) => {
-              if (!p.createdAt) return false;
-              const paymentDate = new Date(p.createdAt);
-              const paymentMonthYear = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
-              return paymentMonthYear !== currentMonthYear;
-            }) || [];
-
-            const renderPayment = (payment: Payment, index: number, isPreviousMonth: boolean) => {
-              const amount = payment.finalAmount || 0;
-              const calculatedFees = calculateFees(amount, payment.paymentMethod || '');
-              
-              const paymentData = payment as any;
-              const totalFees = paymentData.totalFees !== undefined 
-                ? paymentData.totalFees 
-                : calculatedFees.totalFees;
-              const netAmount = paymentData.netAmount !== undefined 
-                ? paymentData.netAmount 
-                : amount - totalFees;
-              const partnerProfit = netAmount * PARTNER_SHARE;
-              const ourProfit = netAmount * PARTNER_SHARE;
-              
-              return (
-                <div
-                  key={payment.id || index}
-                  className={`p-4 rounded-lg border ${isPreviousMonth ? 'opacity-60 bg-muted/30' : ''}`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`p-2 rounded-lg ${
-                          payment.status === "مكتمل"
-                            ? "bg-green-100 dark:bg-green-900/30"
-                            : "bg-gray-100 dark:bg-gray-800"
-                        }`}
-                      >
-                        <CreditCard
-                          className={`w-4 h-4 ${
-                            payment.status === "مكتمل"
-                              ? "text-green-600"
-                              : "text-gray-500"
-                          }`}
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">
-                            عقار: {payment.propertyNumber}
-                          </span>
-                          {getPaymentStatusBadge(payment.status)}
-                          {isPreviousMonth && (
-                            <Badge variant="outline" className="text-xs border-gray-400 text-gray-500">
-                              شهر سابق
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {payment.paymentMethod} |{" "}
-                          {formatLiveSaudiDate(payment.createdAt || "")}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-left" dir="ltr">
-                      <p className="font-bold text-lg">
-                        {amount.toLocaleString("en-US")} ريال
-                      </p>
-                    </div>
-                  </div>
-                    
-                    {payment.status === "مكتمل" && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
-                        <div className="text-center p-2 rounded bg-red-50 dark:bg-red-950/20">
-                          <div className="flex items-center justify-center gap-1 text-xs text-red-600 mb-1">
-                            <Percent className="w-3 h-3" />
-                            <span>الرسوم + ض.ق.م</span>
-                          </div>
-                          <p className="font-semibold text-red-600" dir="ltr">
-                            -{totalFees.toFixed(2)} ر.س
-                          </p>
-                        </div>
-                        
-                        <div className="text-center p-2 rounded bg-blue-50 dark:bg-blue-950/20">
-                          <div className="flex items-center justify-center gap-1 text-xs text-blue-600 mb-1">
-                            <Calculator className="w-3 h-3" />
-                            <span>الصافي</span>
-                          </div>
-                          <p className="font-semibold text-blue-600" dir="ltr">
-                            {netAmount.toFixed(2)} ر.س
-                          </p>
-                        </div>
-                        
-                        <div className="text-center p-2 rounded bg-emerald-50 dark:bg-emerald-950/20">
-                          <div className="flex items-center justify-center gap-1 text-xs text-emerald-600 mb-1">
-                            <Wallet className="w-3 h-3" />
-                            <span>حصة الشريك (50%)</span>
-                          </div>
-                          <p className="font-semibold text-emerald-600" dir="ltr">
-                            {partnerProfit.toFixed(2)} ر.س
-                          </p>
-                        </div>
-                        
-                        <div className="text-center p-2 rounded bg-amber-50 dark:bg-amber-950/20">
-                          <div className="flex items-center justify-center gap-1 text-xs text-amber-600 mb-1">
-                            <TrendingUp className="w-3 h-3" />
-                            <span>حصتنا (50%)</span>
-                          </div>
-                          <p className="font-semibold text-amber-600" dir="ltr">
-                            {ourProfit.toFixed(2)} ر.س
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              };
-
-            // عرض المدفوعات
-            const allPayments = [...currentMonthPayments, ...previousMonthPayments];
-            
-            if (allPayments.length === 0) {
-              return (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Receipt className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>لا توجد مدفوعات بعد</p>
-                </div>
-              );
-            }
-
-            return (
-              <div className="space-y-4">
-                {/* مدفوعات الشهر الحالي */}
-                {currentMonthPayments.length > 0 && (
-                  <div className="space-y-3">
-                    {currentMonthPayments.map((payment, index) => renderPayment(payment, index, false))}
-                  </div>
-                )}
-                
-                {/* مدفوعات الشهور السابقة */}
-                {previousMonthPayments.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground pt-4 border-t">
-                      <Clock className="w-4 h-4" />
-                      <span>مدفوعات من شهور سابقة ({previousMonthPayments.length})</span>
-                    </div>
-                    {previousMonthPayments.map((payment, index) => renderPayment(payment, index, true))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </CardContent>
-
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Wallet className="w-5 h-5" />
-                سجل أرباح الشريك
-              </CardTitle>
-              <CardDescription>
-                تتبع أرباح الشريك بنسبة 50% من الإيرادات شهرياً
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleCreateFromCurrent}
-                disabled={!summary?.currentMonth || createMutation.isPending}
-                className="gap-2"
-                data-testid="button-save-current-month"
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <ArrowUpRight className="w-4 h-4" />
-                )}
-                حفظ الشهر الحالي
-              </Button>
-              <Button
-                size="sm"
-                variant="default"
-                onClick={handleOpenMigration}
-                disabled={createMutation.isPending || migrationData.isLoading}
-                className="gap-2 bg-amber-600 hover:bg-amber-700"
-                data-testid="button-migration"
-              >
-                {migrationData.isLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4" />
-                )}
-                ترحيل
-              </Button>
-              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="gap-2" data-testid="button-add-profit">
-                    <Plus className="w-4 h-4" />
-                    إضافة يدوي
-                  </Button>
-                </DialogTrigger>
-                <DialogContent dir="rtl">
-                  <DialogHeader>
-                    <DialogTitle>إضافة سجل أرباح يدوي</DialogTitle>
-                    <DialogDescription>
-                      أدخل بيانات الأرباح للشهر
-                    </DialogDescription>
-                  </DialogHeader>
-                  <AddProfitForm
-                    onSubmit={(data) => createMutation.mutate(data)}
-                    isPending={createMutation.isPending}
-                  />
-                </DialogContent>
-              </Dialog>
-
-              {/* Modal تأكيد الترحيل */}
-              <Dialog open={isMigrationDialogOpen} onOpenChange={setIsMigrationDialogOpen}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" dir="rtl">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      <RefreshCw className="w-5 h-5 text-amber-600" />
-                      ترحيل الاشتراكات القديمة
-                    </DialogTitle>
-                    <DialogDescription>
-                      سيتم ترحيل جميع الاشتراكات المدفوعة من شيت "الاشتراكات" إلى سجل أرباح الشريك
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  {migrationData.isLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
-                      <span className="mr-3 text-muted-foreground">جاري جلب البيانات...</span>
-                    </div>
-                  ) : migrationData.paidSubscriptions.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <AlertCircle className="w-12 h-12 mx-auto mb-3 text-amber-500" />
-                      <p>لا توجد اشتراكات مدفوعة للترحيل</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {/* ملخص الترحيل */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 text-center">
-                          <div className="text-2xl font-bold text-blue-600">
-                            {migrationData.paidSubscriptions.length}
-                          </div>
-                          <div className="text-xs text-muted-foreground">اشتراك مدفوع</div>
-                        </div>
-                        <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 text-center">
-                          <div className="text-2xl font-bold text-emerald-600" dir="ltr">
-                            {migrationData.totalRevenue.toFixed(2)}
-                          </div>
-                          <div className="text-xs text-muted-foreground">ر.س إجمالي الإيرادات</div>
-                        </div>
-                        <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-center">
-                          <div className="text-2xl font-bold text-amber-600" dir="ltr">
-                            {migrationData.partnerShare.toFixed(2)}
-                          </div>
-                          <div className="text-xs text-muted-foreground">ر.س حصة الشريك (50%)</div>
-                        </div>
-                      </div>
-
-                      {/* قائمة الاشتراكات */}
-                      <div className="border rounded-lg max-h-60 overflow-y-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-muted/50 sticky top-0">
-                            <tr>
-                              <th className="p-2 text-right">رقم العقار</th>
-                              <th className="p-2 text-right">اسم العقار</th>
-                              <th className="p-2 text-right">النوع</th>
-                              <th className="p-2 text-left">الرسوم</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {migrationData.paidSubscriptions.map((sub: any, idx: number) => (
-                              <tr key={idx} className="border-t hover:bg-muted/30">
-                                <td className="p-2 font-mono">{sub.propertyNumber}</td>
-                                <td className="p-2">{sub.name || "غير معروف"}</td>
-                                <td className="p-2">
-                                  <Badge variant={isPremiumSubscriptionType(sub.subscriptionType) ? "default" : "secondary"}>
-                                    {getSubscriptionTypeLabel(sub.subscriptionType)}
-                                  </Badge>
-                                </td>
-                                <td className="p-2 text-left font-semibold text-emerald-600" dir="ltr">
-                                  {parseFloat(String(sub.price || 0)).toFixed(2)} ر.س
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* أزرار التأكيد */}
-                      <div className="flex gap-3 pt-4 border-t">
-                        <Button
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => setIsMigrationDialogOpen(false)}
-                          data-testid="button-cancel-migration"
-                        >
-                          إلغاء
-                        </Button>
-                        <Button
-                          className="flex-1 bg-amber-600 hover:bg-amber-700 gap-2"
-                          onClick={handleConfirmMigration}
-                          disabled={createMutation.isPending}
-                          data-testid="button-confirm-migration"
-                        >
-                          {createMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Check className="w-4 h-4" />
-                          )}
-                          تأكيد الترحيل
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {profits.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>لا توجد سجلات أرباح محفوظة بعد</p>
-              <p className="text-sm mt-2">اضغط على "حفظ الشهر الحالي" لحفظ أول سجل</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {profits.map((profit) => (
-                <div
-                  key={profit.id}
-                  className="p-4 rounded-lg border hover-elevate"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 rounded-lg bg-primary/10">
-                        <Calendar className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">{profit.monthYear}</span>
-                          {getStatusBadge(profit.transferStatus)}
-                        </div>
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {profit.activeSubscriptions} دفعة | <span dir="ltr">{profit.totalRevenue.toLocaleString("en-US")}</span> ر.س إيرادات
-                        </div>
-                      </div>
-                    </div>
-                    {profit.transferStatus === "pending" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleMarkTransferred(profit)}
-                        disabled={updateMutation.isPending}
-                        className="gap-2"
-                        data-testid={`button-mark-transferred-${profit.id}`}
-                      >
-                        <Check className="w-4 h-4" />
-                        تم التحويل
-                      </Button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
-                    <div className="text-center p-2 rounded bg-emerald-50 dark:bg-emerald-950/20">
-                      <div className="text-xs text-emerald-600 mb-1">حصة الشريك</div>
-                      <p className="font-semibold text-emerald-600" dir="ltr">
-                        {profit.partnerShare.toLocaleString("en-US")} ر.س
-                      </p>
-                    </div>
-                    <div className="text-center p-2 rounded bg-red-50 dark:bg-red-950/20">
-                      <div className="text-xs text-red-600 mb-1">التكاليف</div>
-                      <p className="font-semibold text-red-600" dir="ltr">
-                        -{(profit.totalExpenses || 0).toLocaleString("en-US")} ر.س
-                      </p>
-                    </div>
-                    <div className="text-center p-2 rounded bg-amber-50 dark:bg-amber-950/20">
-                      <div className="text-xs text-amber-600 mb-1">صافي الربح</div>
-                      <p className="font-semibold text-amber-600" dir="ltr">
-                        {(profit.netProfitAfterExpenses || 0).toFixed(2)} ر.س
-                      </p>
-                    </div>
-                    <div className="text-center p-2 rounded bg-blue-50 dark:bg-blue-950/20">
-                      <div className="text-xs text-blue-600 mb-1">نسبة الشريك</div>
-                      <p className="font-semibold text-blue-600">
-                        {profit.partnerPercentage}%
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">كيف يعمل نظام الأرباح</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
-            <ul className="space-y-2 text-sm text-muted-foreground list-disc list-inside">
-              <li>يتم حساب الأرباح تلقائياً من المدفوعات المكتملة (حالة: مكتمل أو نجحت)</li>
-              <li>نسبة الشريك الافتراضية: <strong>50%</strong> من كل دفعة</li>
-              <li>يمكنك حفظ أرباح الشهر الحالي كسجل ثابت في أي وقت</li>
-              <li>بعد تحويل الأرباح للشريك، اضغط "تم التحويل" لتوثيق العملية</li>
-              <li>المدفوعات "قيد المراجعة" لا تُحسب في الأرباح حتى يتم اعتمادها</li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function AddProfitForm({ 
-  onSubmit, 
-  isPending 
-}: { 
-  onSubmit: (data: any) => void; 
-  isPending: boolean;
-}) {
-  const [formData, setFormData] = useState({
-    monthYear: "",
-    activeSubscriptions: 0,
-    totalRevenue: 0,
-    partnerPercentage: 50,
-    notes: "",
-  });
-
-  const partnerShare = Math.round(formData.totalRevenue * (formData.partnerPercentage / 100) * 100) / 100;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      ...formData,
-      partnerShare,
-      transferStatus: "pending",
-    });
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>الشهر/السنة</Label>
-          <Input
-            placeholder="مثال: 2025/01"
-            value={formData.monthYear}
-            onChange={(e) => setFormData({ ...formData, monthYear: e.target.value })}
-            required
-            data-testid="input-month-year"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>عدد الدفعات</Label>
-          <Input
-            type="number"
-            value={formData.activeSubscriptions}
-            onChange={(e) => setFormData({ ...formData, activeSubscriptions: parseInt(e.target.value) || 0 })}
-            required
-            data-testid="input-subscriptions"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>إجمالي الإيرادات (ريال)</Label>
-          <Input
-            type="number"
-            step="0.01"
-            value={formData.totalRevenue}
-            onChange={(e) => setFormData({ ...formData, totalRevenue: parseFloat(e.target.value) || 0 })}
-            required
-            data-testid="input-revenue"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>نسبة الشريك (%)</Label>
-          <Input
-            type="number"
-            min="0"
-            max="100"
-            value={formData.partnerPercentage}
-            onChange={(e) => setFormData({ ...formData, partnerPercentage: parseFloat(e.target.value) || 50 })}
-            required
-            data-testid="input-percentage"
-          />
-        </div>
-      </div>
-
-      <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">نصيب الشريك المحسوب:</span>
-          <span className="font-bold text-emerald-600">{partnerShare.toLocaleString()} ريال</span>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>ملاحظات (اختياري)</Label>
-        <Textarea
-          value={formData.notes}
-          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-          placeholder="أي ملاحظات إضافية..."
-          data-testid="input-notes"
-        />
-      </div>
-
-      <Button type="submit" className="w-full" disabled={isPending} data-testid="button-submit-profit">
-        {isPending ? (
-          <Loader2 className="w-4 h-4 animate-spin ml-2" />
-        ) : null}
-        إضافة السجل
-      </Button>
-    </form>
-  );
-}
+import { formatLiveSaudiDate } from "@/lib/dateUtils";
 
 const EXPENSE_CATEGORIES = [
   { value: "صيانة", label: "صيانة" },
@@ -1220,6 +48,787 @@ const EXPENSE_TYPES = [
   { value: "موزعة", label: "موزعة", description: "مدفوعة مسبقاً وتُوزع على أشهر" },
 ];
 
+function formatMonthYearInput(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isEffectivelyClosed(profit: PartnerProfit): boolean {
+  return profit.status === "closed" || !profit.status;
+}
+
+export default function PartnerProfitsSection() {
+  const { toast } = useToast();
+  const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
+  const [transferProfitId, setTransferProfitId] = useState<string | null>(null);
+  const [transferForm, setTransferForm] = useState({ amount: "", reference: "" });
+  const [expandedProfitId, setExpandedProfitId] = useState<string | null>(null);
+  const [expandedPayments, setExpandedPayments] = useState(false);
+  const [notesEditId, setNotesEditId] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [manualMonthYear, setManualMonthYear] = useState(formatMonthYearInput());
+  const [manualNotes, setManualNotes] = useState("");
+
+  const { data: profits = [], isLoading, refetch: refetchProfits } = useQuery<PartnerProfit[]>({
+    queryKey: ["/api/admin/partner-profits"],
+  });
+
+  const { data: payments = [], isLoading: isLoadingPayments } = useQuery<Payment[]>({
+    queryKey: ["/api/admin/payments"],
+  });
+
+  const { data: expenses = [], isLoading: isLoadingExpenses, refetch: refetchExpenses } = useQuery<Expense[]>({
+    queryKey: ["/api/admin/expenses"],
+  });
+
+  const currentMonthStr = formatMonthYearInput();
+  const currentCycle = useMemo(
+    () => profits.find((p) => p.monthYear.replace("/", "-") === currentMonthStr),
+    [profits, currentMonthStr]
+  );
+
+  const completedPayments = useMemo(
+    () =>
+      payments.filter(
+        (p) =>
+          ["مكتمل", "نجح", "نجاح", "completed"].includes(p.status) &&
+          (p.completedAt || p.createdAt || "").startsWith(currentMonthStr)
+      ),
+    [payments, currentMonthStr]
+  );
+
+  const pendingPaymentsCount = useMemo(
+    () => payments.filter((p) => ["قيد المراجعة", "معلق", "نجح - قيد التحقق"].includes(p.status)).length,
+    [payments]
+  );
+
+  // ─── Mutations ───────────────────────────────────────────────────────────────
+
+  const createExpenseMutation = useMutation({
+    mutationFn: async (data: any) => apiRequest("POST", "/api/admin/expenses", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      setIsExpenseDialogOpen(false);
+      toast({ title: "تمت الإضافة", description: "تم إضافة التكلفة بنجاح" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في إضافة التكلفة", variant: "destructive" }),
+  });
+
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("DELETE", `/api/admin/expenses/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      toast({ title: "تم الحذف", description: "تم حذف التكلفة بنجاح" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في حذف التكلفة", variant: "destructive" }),
+  });
+
+  const prepareCycleMutation = useMutation({
+    mutationFn: async (monthYear?: string) =>
+      apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      toast({ title: "تم التجهيز", description: "تم تجهيز/إعادة حساب دورة الأرباح" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في تجهيز دورة الأرباح", variant: "destructive" }),
+  });
+
+  const createManualCycleMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear: manualMonthYear }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      setIsAddDialogOpen(false);
+      toast({ title: "تم التجهيز", description: "تم تجهيز الدورة اليدوية" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في تجهيز الدورة", variant: "destructive" }),
+  });
+
+  const closeCycleMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiRequest("POST", `/api/admin/partner-profits/${id}/close`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      toast({ title: "تم الإقفال", description: "تم إقفال الدورة الشهرية نهائيًا" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في إقفال الدورة", variant: "destructive" }),
+  });
+
+  const recordTransferMutation = useMutation({
+    mutationFn: async ({ id, amount, reference }: { id: string; amount: number; reference: string }) =>
+      apiRequest("POST", `/api/admin/partner-profits/${id}/transfers`, { amount, reference }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      setTransferProfitId(null);
+      setTransferForm({ amount: "", reference: "" });
+      toast({ title: "تم التسجيل", description: "تم تسجيل التحويل بنجاح" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في تسجيل التحويل", variant: "destructive" }),
+  });
+
+  const updateNotesMutation = useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes: string }) =>
+      apiRequest("PUT", `/api/admin/partner-profits/${id}`, { notes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      setNotesEditId(null);
+      setNotesDraft("");
+      toast({ title: "تم الحفظ", description: "تم تحديث الملاحظات" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل في تحديث الملاحظات", variant: "destructive" }),
+  });
+
+  // ─── Handlers ─────────────────────────────────────────────────────────────────
+
+  const handlePrepareCurrent = () => prepareCycleMutation.mutate(currentMonthStr);
+
+  const handleMarkTransferred = (profit: PartnerProfit) => {
+    if (isEffectivelyClosed(profit)) return;
+    setTransferProfitId(profit.id);
+  };
+
+  const handleSubmitTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferProfitId) return;
+    const amount = parseFloat(transferForm.amount);
+    if (!amount || amount <= 0) {
+      toast({ title: "خطأ", description: "مبلغ التحويل يجب أن يكون أكبر من صفر", variant: "destructive" });
+      return;
+    }
+    recordTransferMutation.mutate({
+      id: transferProfitId,
+      amount,
+      reference: transferForm.reference.trim(),
+    });
+  };
+
+  const startNotesEdit = (profit: PartnerProfit) => {
+    if (isEffectivelyClosed(profit)) return;
+    setNotesEditId(profit.id);
+    setNotesDraft(profit.notes || "");
+  };
+
+  const saveNotes = (id: string) => updateNotesMutation.mutate({ id, notes: notesDraft });
+
+  const getCycleStatusBadge = (profit: PartnerProfit) => {
+    if (isEffectivelyClosed(profit)) return <Badge className="bg-green-600">مقفلة</Badge>;
+    if (profit.status === "pending_review") return <Badge variant="secondary">بانتظار المراجعة</Badge>;
+    return <Badge variant="outline">مسودة</Badge>;
+  };
+
+  const getCategoryBadge = (category: string) => {
+    const colors: Record<string, string> = {
+      "صيانة": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+      "إعلانات": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+      "رواتب": "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+      "استضافة": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+      "أخرى": "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
+    };
+    return <Badge className={colors[category] || colors["أخرى"]}>{category}</Badge>;
+  };
+
+  if (isLoading || isLoadingPayments || isLoadingExpenses) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      {/* ===================== الدورة الحالية ===================== */}
+      <Card className="border-2 border-primary/20">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Calendar className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">الدورة الحالية: {currentMonthStr.replace("-", "/")}</CardTitle>
+                <CardDescription>
+                  {currentCycle
+                    ? `حالة الدورة: ${isEffectivelyClosed(currentCycle) ? "مقفلة" : currentCycle.status === "pending_review" ? "بانتظار المراجعة" : "مسودة"}`
+                    : "لم تُجهّز دورة لهذا الشهر بعد"}
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => refetchProfits()}
+                className="gap-2"
+                data-testid="button-refresh-profits"
+              >
+                <RefreshCw className="w-4 h-4" />
+                تحديث
+              </Button>
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handlePrepareCurrent}
+                disabled={prepareCycleMutation.isPending || (currentCycle ? isEffectivelyClosed(currentCycle) : false)}
+                className="gap-2"
+                data-testid="button-prepare-current"
+              >
+                {prepareCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
+                {currentCycle ? "إعادة حساب الدورة" : "تجهيز الدورة"}
+              </Button>
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="gap-2" data-testid="button-add-profit">
+                    <Plus className="w-4 h-4" />
+                    شهر آخر
+                  </Button>
+                </DialogTrigger>
+                <DialogContent dir="rtl">
+                  <DialogHeader>
+                    <DialogTitle>تجهيز دورة شهرية يدويًا</DialogTitle>
+                    <DialogDescription>
+                      اختر الشهر/السنة لحساب الدورة من المدفوعات والتكاليف المسجلة.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>الشهر/السنة</Label>
+                      <Input
+                        type="month"
+                        value={manualMonthYear}
+                        onChange={(e) => setManualMonthYear(e.target.value)}
+                        data-testid="input-manual-month"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>ملاحظات (اختياري)</Label>
+                      <Textarea
+                        value={manualNotes}
+                        onChange={(e) => setManualNotes(e.target.value)}
+                        placeholder="أي ملاحظات إدارية..."
+                        data-testid="input-manual-notes"
+                      />
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={() => createManualCycleMutation.mutate()}
+                      disabled={createManualCycleMutation.isPending}
+                      data-testid="button-submit-manual"
+                    >
+                      {createManualCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+                      تجهيز
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {currentCycle ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <MetricBox label="إيرادات الشهر (صافي)" value={currentCycle.revenueAfterFees || 0} icon={<Banknote className="w-4 h-4" />} color="blue" />
+                <MetricBox label="تكاليف الشهر" value={-(currentCycle.totalExpenses || 0)} icon={<MinusCircle className="w-4 h-4" />} color="red" />
+                <MetricBox label="صافي نتيجة الشهر" value={currentCycle.netProfitAfterExpenses || 0} icon={<TrendingUp className="w-4 h-4" />} color={currentCycle.netProfitAfterExpenses >= 0 ? "emerald" : "red"} />
+                <MetricBox label="حصة الشريك (50%)" value={currentCycle.partnerShare || 0} icon={<Wallet className="w-4 h-4" />} color="amber" />
+              </div>
+
+              {(currentCycle.carriedLossForward > 0 || currentCycle.carriedLossRemaining > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800">
+                    <div className="text-sm text-orange-700 dark:text-orange-400 mb-1">خسارة مرحّلة من السابق</div>
+                    <p className="text-2xl font-bold text-orange-600" dir="ltr">{currentCycle.carriedLossForward.toLocaleString("en-US")} ر.س</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800">
+                    <div className="text-sm text-orange-700 dark:text-orange-400 mb-1">خسارة متبقية للأشهر القادمة</div>
+                    <p className="text-2xl font-bold text-orange-600" dir="ltr">{currentCycle.carriedLossRemaining.toLocaleString("en-US")} ر.س</p>
+                  </div>
+                </div>
+              )}
+
+              <TransferPanel profit={currentCycle} onTransfer={() => handleMarkTransferred(currentCycle)} />
+
+              {!isEffectivelyClosed(currentCycle) && (
+                <div className="flex gap-2 flex-wrap">
+                  <Button size="sm" variant="default" onClick={() => closeCycleMutation.mutate(currentCycle.id)} disabled={closeCycleMutation.isPending} className="gap-2" data-testid="button-close-current">
+                    <Lock className="w-4 h-4" />
+                    إقفال نهائي
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => startNotesEdit(currentCycle)} className="gap-2" data-testid="button-edit-notes-current">
+                    <Edit3 className="w-4 h-4" />
+                    تعديل الملاحظات
+                  </Button>
+                </div>
+              )}
+
+              {notesEditId === currentCycle.id && (
+                <div className="space-y-2">
+                  <Label>ملاحظات الدورة</Label>
+                  <Textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => saveNotes(currentCycle.id)} disabled={updateNotesMutation.isPending}>حفظ</Button>
+                    <Button size="sm" variant="outline" onClick={() => setNotesEditId(null)}>إلغاء</Button>
+                  </div>
+                </div>
+              )}
+
+              {currentCycle.notes && !notesEditId && (
+                <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded">{currentCycle.notes}</p>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Calendar className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>لم تُجهّز دورة لهذا الشهر بعد</p>
+              <p className="text-sm mt-2">اضغط "تجهيز الدورة" لحساب الأرباح من المدفوعات والتكاليف</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===================== ملخص سريع ===================== */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <DollarSign className="w-4 h-4" />
+            ملخص مالي
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickStat label="الدورات المسجلة" value={profits.length} suffix="" />
+            <QuickStat label="المستحق للشريك" value={profits.reduce((s, p) => s + (p.partnerShare || 0), 0)} suffix="ر.س" />
+            <QuickStat label="المحوّل" value={profits.reduce((s, p) => s + (p.transferredToPartner || 0), 0)} suffix="ر.س" />
+            <QuickStat label="المتبقي" value={profits.reduce((s, p) => s + (p.remainingToTransfer || 0), 0)} suffix="ر.س" />
+          </div>
+          {pendingPaymentsCount > 0 && (
+            <div className="mt-4 p-3 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-orange-600" />
+              <span className="text-sm text-orange-700 dark:text-orange-400">{pendingPaymentsCount} دفعة في انتظار المراجعة ولم تُحسب بعد</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===================== سجل الدورات ===================== */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2">
+            <Wallet className="w-5 h-5" />
+            سجل الدورات الشهرية
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {profits.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>لا توجد دورات محفوظة بعد</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {profits.map((profit) => {
+                const closed = isEffectivelyClosed(profit);
+                const expanded = expandedProfitId === profit.id;
+                return (
+                  <div key={profit.id} data-testid={`cycle-row-${profit.id}`} className={`rounded-lg border ${closed ? "bg-muted/30" : ""}`}>
+                    <button
+                      onClick={() => setExpandedProfitId(expanded ? null : profit.id)}
+                      className="w-full p-4 flex items-center justify-between text-right hover:bg-muted/40 transition"
+                      data-testid={`cycle-header-${profit.id}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`p-2 rounded-lg ${closed ? "bg-green-100 dark:bg-green-900/30" : "bg-primary/10"}`}>
+                          <Calendar className={`w-5 h-5 ${closed ? "text-green-600" : "text-primary"}`} />
+                        </div>
+                        <div className="text-start">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold">{profit.monthYear}</span>
+                            {getCycleStatusBadge(profit)}
+                            {closed && <Badge variant="outline" className="text-xs"><Lock className="w-3 h-3 ml-1" /> مقفلة</Badge>}
+                          </div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            {profit.activeSubscriptions} دفعة | مستحق: <span dir="ltr">{(profit.partnerShare || 0).toLocaleString("en-US")}</span> ر.س | متبقي: <span dir="ltr">{(profit.remainingToTransfer || 0).toLocaleString("en-US")}</span> ر.س
+                          </div>
+                        </div>
+                      </div>
+                      {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </button>
+
+                    {expanded && (
+                      <div className="p-4 pt-0 border-t">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                          <MetricBox label="إيرادات" value={profit.totalRevenue || 0} color="blue" compact />
+                          <MetricBox label="صافي" value={profit.revenueAfterFees || 0} color="blue" compact />
+                          <MetricBox label="تكاليف" value={-(profit.totalExpenses || 0)} color="red" compact />
+                          <MetricBox label="صافي الشهر" value={profit.netProfitAfterExpenses || 0} color={profit.netProfitAfterExpenses >= 0 ? "emerald" : "red"} compact />
+                        </div>
+
+                        {(profit.carriedLossForward > 0 || profit.carriedLossRemaining > 0) && (
+                          <div className="grid grid-cols-2 gap-3 mt-3">
+                            <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 text-center">
+                              <div className="text-xs text-orange-600 mb-1">خسارة مرحّلة</div>
+                              <p className="font-bold text-orange-600" dir="ltr">{profit.carriedLossForward.toLocaleString("en-US")} ر.س</p>
+                            </div>
+                            <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 text-center">
+                              <div className="text-xs text-orange-600 mb-1">خسارة متبقية</div>
+                              <p className="font-bold text-orange-600" dir="ltr">{profit.carriedLossRemaining.toLocaleString("en-US")} ر.س</p>
+                            </div>
+                          </div>
+                        )}
+
+                        <TransferPanel profit={profit} onTransfer={() => handleMarkTransferred(profit)} className="mt-3" />
+
+                        {!closed && (
+                          <div className="flex gap-2 mt-3 flex-wrap">
+                            <Button size="sm" variant="default" onClick={() => closeCycleMutation.mutate(profit.id)} disabled={closeCycleMutation.isPending} className="gap-2" data-testid={`button-close-${profit.id}`}>
+                              <Lock className="w-4 h-4" /> إقفال
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => startNotesEdit(profit)} className="gap-2" data-testid={`button-edit-notes-${profit.id}`}>
+                              <Edit3 className="w-4 h-4" /> تعديل ملاحظات
+                            </Button>
+                          </div>
+                        )}
+
+                        {notesEditId === profit.id && (
+                          <div className="space-y-2 mt-3">
+                            <Label>ملاحظات الدورة</Label>
+                            <Textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} />
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => saveNotes(profit.id)} disabled={updateNotesMutation.isPending}>حفظ</Button>
+                              <Button size="sm" variant="outline" onClick={() => setNotesEditId(null)}>إلغاء</Button>
+                            </div>
+                          </div>
+                        )}
+
+                        {profit.notes && !notesEditId && (
+                          <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded mt-3">{profit.notes}</p>
+                        )}
+
+                        {(profit.transfers || []).length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-sm font-medium mb-2">سجل التحويلات</p>
+                            <div className="space-y-2">
+                              {(profit.transfers || []).map((t) => (
+                                <div key={t.id} className="flex items-center justify-between p-2 rounded bg-muted/50 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <Banknote className="w-4 h-4 text-primary" />
+                                    <span dir="ltr">{t.amount.toLocaleString("en-US")} ر.س</span>
+                                    {t.reference && <Badge variant="outline" className="text-xs">مرجع: {t.reference}</Badge>}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">{formatLiveSaudiDate(t.date)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===================== المدفوعات ===================== */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              مدفوعات الشهر الحالي
+            </CardTitle>
+            <Button size="sm" variant="ghost" onClick={() => setExpandedPayments((v) => !v)} className="gap-2">
+              {expandedPayments ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {expandedPayments ? "إخفاء" : "عرض"}
+            </Button>
+          </div>
+        </CardHeader>
+        {expandedPayments && (
+          <CardContent>
+            {completedPayments.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">
+                <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p>لا توجد مدفوعات مكتملة في هذا الشهر</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {completedPayments.map((payment) => (
+                  <div key={payment.id} className="flex items-center justify-between p-3 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+                        <CreditCard className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">عقار: {payment.propertyNumber}</div>
+                        <div className="text-xs text-muted-foreground">{payment.paymentMethod} | {formatLiveSaudiDate(payment.completedAt || payment.createdAt || "")}</div>
+                      </div>
+                    </div>
+                    <div className="text-left" dir="ltr">
+                      <p className="font-bold">{(payment.finalAmount || 0).toLocaleString("en-US")} ر.س</p>
+                      <p className="text-xs text-muted-foreground">صافي: {(payment.netAmount || 0).toLocaleString("en-US")} ر.س</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ===================== إدارة التكاليف ===================== */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <MinusCircle className="w-5 h-5 text-red-500" />
+                إدارة التكاليف والمصروفات
+              </CardTitle>
+              <CardDescription>التكاليف المعتمدة تُخصم من إيرادات الشهر</CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => refetchExpenses()} className="gap-2" data-testid="button-refresh-expenses">
+                <RefreshCw className="w-4 h-4" />
+                تحديث
+              </Button>
+              <Dialog open={isExpenseDialogOpen} onOpenChange={setIsExpenseDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-2" data-testid="button-add-expense">
+                    <Plus className="w-4 h-4" />
+                    إضافة تكلفة
+                  </Button>
+                </DialogTrigger>
+                <DialogContent dir="rtl" className="max-h-[85vh] flex flex-col p-0">
+                  <DialogHeader className="px-6 pt-6 pb-2">
+                    <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
+                    <DialogDescription>أدخل بيانات التكلفة لخصمها من الأرباح</DialogDescription>
+                  </DialogHeader>
+                  <AddExpenseForm onSubmit={(data) => createExpenseMutation.mutate(data)} isPending={createExpenseMutation.isPending} onCancel={() => setIsExpenseDialogOpen(false)} />
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoadingExpenses ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : expenses.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <MinusCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>لا توجد تكاليف مسجلة</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {expenses.map((expense) => (
+                <div key={expense.id} className="flex items-center justify-between p-4 rounded-lg border hover-elevate" data-testid={`expense-row-${expense.id}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`p-2 rounded-lg ${expense.expenseType === "شهرية" ? "bg-green-100 dark:bg-green-900/30" : expense.expenseType === "موزعة" ? "bg-purple-100 dark:bg-purple-900/30" : "bg-red-100 dark:bg-red-900/30"}`}>
+                      <MinusCircle className={`w-5 h-5 ${expense.expenseType === "شهرية" ? "text-green-600" : expense.expenseType === "موزعة" ? "text-purple-600" : "text-red-600"}`} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold">{expense.title}</span>
+                        {getCategoryBadge(expense.category)}
+                        {expense.expenseType && expense.expenseType !== "مرة واحدة" && (
+                          <Badge variant="outline" className={expense.expenseType === "شهرية" ? "border-green-500 text-green-600" : "border-purple-500 text-purple-600"}>{expense.expenseType}</Badge>
+                        )}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {expense.description && <span>{expense.description} | </span>}
+                        <span>{formatLiveSaudiDate(expense.date)}</span>
+                        {expense.expenseType === "موزعة" && expense.durationMonths && <span> | {expense.durationMonths} شهر</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-left">
+                      {expense.expenseType === "موزعة" && expense.monthlyAmount ? (
+                        <div>
+                          <p className="font-bold text-purple-600" dir="ltr">-{expense.monthlyAmount.toLocaleString("en-US")} ر.س/شهر</p>
+                          <p className="text-xs text-muted-foreground" dir="ltr">إجمالي: {expense.amount.toLocaleString("en-US")} ر.س</p>
+                        </div>
+                      ) : expense.expenseType === "شهرية" ? (
+                        <p className="font-bold text-green-600" dir="ltr">-{expense.amount.toLocaleString("en-US")} ر.س/شهر</p>
+                      ) : (
+                        <p className="font-bold text-red-600" dir="ltr">-{expense.amount.toLocaleString("en-US")} ر.س</p>
+                      )}
+                    </div>
+                    <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-100" onClick={() => deleteExpenseMutation.mutate(expense.id)} disabled={deleteExpenseMutation.isPending} data-testid={`button-delete-expense-${expense.id}`}>
+                      <TrashIcon />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===================== شرح النظام ===================== */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">كيف يعمل نظام الأرباح</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+            <ul className="space-y-2 text-sm text-muted-foreground list-disc list-inside">
+              <li>يتم حساب الأرباح من المدفوعات المكتملة بعد خصم رسوم الدفع</li>
+              <li>تُخصم التكاليف المعتمدة للشهر، ثم تُغطى الخسارة المرحّلة أولاً</li>
+              <li>لا توزيع قبل تغطية الخسائر بالكامل</li>
+              <li>الربح المتبقي يُقسّم <strong>50%</strong> للشريك و<strong>50%</strong> لنا</li>
+              <li>"تجهيز الدورة" يحسب/يُعيد حساب الشهر دون حفظ نهائي</li>
+              <li>"إقفال" يُثبت الدورة نهائيًا ويمنع إعادة احتسابها</li>
+              <li>"تسجيل تحويل" يسجل مبلغًا ومرجعًا ويُحدّث المتبقي</li>
+              <li>الدورات المقفلة أو التاريخية لا تُعدّل</li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ===================== نموذج تسجيل تحويل ===================== */}
+      <Dialog open={!!transferProfitId} onOpenChange={(open) => { if (!open) setTransferProfitId(null); }}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle>تسجيل تحويل للشريك</DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const profit = profits.find((p) => p.id === transferProfitId);
+                return profit ? (
+                  <span>المستحق: {(profit.partnerShare || 0).toLocaleString("en-US")} ر.س | المتبقي: {(profit.remainingToTransfer || 0).toLocaleString("en-US")} ر.س</span>
+                ) : null;
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmitTransfer} className="space-y-4">
+            <div className="space-y-2">
+              <Label>المبلغ (ر.س)</Label>
+              <Input type="number" step="0.01" value={transferForm.amount} onChange={(e) => setTransferForm({ ...transferForm, amount: e.target.value })} required data-testid="input-transfer-amount" />
+            </div>
+            <div className="space-y-2">
+              <Label>مرجع/رقم العملية (اختياري)</Label>
+              <Input value={transferForm.reference} onChange={(e) => setTransferForm({ ...transferForm, reference: e.target.value })} data-testid="input-transfer-reference" />
+            </div>
+            <Button type="submit" className="w-full" disabled={recordTransferMutation.isPending} data-testid="button-submit-transfer">
+              {recordTransferMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "تسجيل التحويل"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Helper components ────────────────────────────────────────────────────────
+
+function MetricBox({
+  label,
+  value,
+  icon,
+  color,
+  compact,
+}: {
+  label: string;
+  value: number;
+  icon?: React.ReactNode;
+  color: "blue" | "red" | "emerald" | "amber";
+  compact?: boolean;
+}) {
+  const palette: Record<string, { bg: string; border: string; text: string }> = {
+    blue: { bg: "bg-blue-50 dark:bg-blue-950/20", border: "border-blue-200 dark:border-blue-800", text: "text-blue-700 dark:text-blue-400" },
+    red: { bg: "bg-red-50 dark:bg-red-950/20", border: "border-red-200 dark:border-red-800", text: "text-red-700 dark:text-red-400" },
+    emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/20", border: "border-emerald-200 dark:border-emerald-800", text: "text-emerald-700 dark:text-emerald-400" },
+    amber: { bg: "bg-amber-50 dark:bg-amber-950/20", border: "border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400" },
+  };
+  const p = palette[color];
+  return (
+    <div className={`${compact ? "p-2" : "p-4"} rounded-lg ${p.bg} border ${p.border}`}>
+      <div className={`flex items-center gap-2 mb-1 ${compact ? "justify-center" : ""}`}>
+        {icon}
+        <span className={`text-xs font-medium ${p.text}`}>{label}</span>
+      </div>
+      <p className={`font-bold ${p.text} ${compact ? "text-sm" : "text-2xl"}`} dir="ltr">
+        {value.toLocaleString("en-US", { maximumFractionDigits: 2 })} {compact ? "ر.س" : "ر.س"}
+      </p>
+    </div>
+  );
+}
+
+function QuickStat({ label, value, suffix }: { label: string; value: number; suffix: string }) {
+  return (
+    <div className="p-3 rounded-lg border text-center">
+      <div className="text-xs text-muted-foreground mb-1">{label}</div>
+      <p className="font-bold text-lg" dir="ltr">
+        {suffix ? `${value.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${suffix}` : value}
+      </p>
+    </div>
+  );
+}
+
+function TransferPanel({
+  profit,
+  onTransfer,
+  className = "",
+}: {
+  profit: PartnerProfit;
+  onTransfer: () => void;
+  className?: string;
+}) {
+  const transferred = profit.transferredToPartner || 0;
+  const remaining = profit.remainingToTransfer || 0;
+  const owed = profit.partnerShare || 0;
+  const closed = isEffectivelyClosed(profit);
+  return (
+    <div className={`p-4 rounded-lg border ${className}`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="font-medium">حالة التحويل</span>
+        {!closed && remaining > 0 && (
+          <Button size="sm" variant="outline" onClick={onTransfer} className="gap-2">
+            <Banknote className="w-4 h-4" />
+            تسجيل تحويل
+          </Button>
+        )}
+        {!closed && remaining <= 0 && owed > 0 && (
+          <Badge className="bg-green-600">تم التحويل بالكامل</Badge>
+        )}
+        {closed && <Badge variant="outline">مقفلة</Badge>}
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="text-center p-2 rounded bg-emerald-50 dark:bg-emerald-950/20">
+          <div className="text-xs text-emerald-600 mb-1">مستحق الشريك</div>
+          <p className="font-semibold text-emerald-600" dir="ltr">{owed.toLocaleString("en-US")} ر.س</p>
+        </div>
+        <div className="text-center p-2 rounded bg-blue-50 dark:bg-blue-950/20">
+          <div className="text-xs text-blue-600 mb-1">المحوّل</div>
+          <p className="font-semibold text-blue-600" dir="ltr">{transferred.toLocaleString("en-US")} ر.س</p>
+        </div>
+        <div className="text-center p-2 rounded bg-amber-50 dark:bg-amber-950/20">
+          <div className="text-xs text-amber-600 mb-1">المتبقي</div>
+          <p className="font-semibold text-amber-600" dir="ltr">{remaining.toLocaleString("en-US")} ر.س</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  );
+}
+
+// ─── Expense form ─────────────────────────────────────────────────────────────
+
 type ExpenseFormData = {
   title: string;
   amount: number;
@@ -1232,24 +841,16 @@ type ExpenseFormData = {
   isActive?: boolean;
 };
 
-function AddExpenseForm({ 
-  onSubmit, 
-  isPending,
-  onCancel
-}: { 
-  onSubmit: (data: ExpenseFormData) => void; 
-  isPending: boolean;
-  onCancel?: () => void;
-}) {
+function AddExpenseForm({ onSubmit, isPending, onCancel }: { onSubmit: (data: ExpenseFormData) => void; isPending: boolean; onCancel?: () => void }) {
   const [formData, setFormData] = useState<ExpenseFormData>({
     title: "",
     amount: 0,
     category: "أخرى",
     description: "",
-    date: new Date().toISOString().split('T')[0],
+    date: new Date().toISOString().split("T")[0],
     expenseType: "مرة واحدة",
     durationMonths: 12,
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: new Date().toISOString().split("T")[0],
     isActive: true,
   });
   const [currency, setCurrency] = useState<"SAR" | "USD">("SAR");
@@ -1257,11 +858,10 @@ function AddExpenseForm({
   const [exchangeRate, setExchangeRate] = useState(3.75);
   const [isLoadingRate, setIsLoadingRate] = useState(false);
 
-  // جلب سعر الصرف عند اختيار الدولار
   const fetchExchangeRate = async () => {
     setIsLoadingRate(true);
     try {
-      const response = await fetch('/api/currency/rate');
+      const response = await fetch("/api/currency/rate");
       const data = await response.json();
       setExchangeRate(data.rate || 3.75);
     } catch {
@@ -1270,21 +870,15 @@ function AddExpenseForm({
     setIsLoadingRate(false);
   };
 
-  // تحويل من دولار لريال
   const handleUsdChange = (value: number) => {
     setUsdAmount(value);
-    const sarAmount = Math.round(value * exchangeRate * 100) / 100;
-    setFormData({ ...formData, amount: sarAmount });
+    setFormData({ ...formData, amount: Math.round(value * exchangeRate * 100) / 100 });
   };
 
-  // حساب المبلغ الشهري للتكاليف الموزعة
-  const monthlyAmount = formData.expenseType === "موزعة" && formData.durationMonths 
-    ? Math.round((formData.amount / formData.durationMonths) * 100) / 100 
-    : formData.amount;
+  const monthlyAmount = formData.expenseType === "موزعة" && formData.durationMonths ? Math.round((formData.amount / formData.durationMonths) * 100) / 100 : formData.amount;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // إضافة ملاحظة عن التحويل إذا كان بالدولار
     let description = formData.description;
     if (currency === "USD" && usdAmount > 0) {
       description = `${description ? description + " | " : ""}تحويل من $${usdAmount} بسعر ${exchangeRate}`;
@@ -1294,53 +888,26 @@ function AddExpenseForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-      {/* منطقة قابلة للتمرير */}
       <div className="flex-1 overflow-y-auto px-6 space-y-4">
         <div className="space-y-2">
           <Label>عنوان التكلفة</Label>
-          <Input
-            placeholder="مثال: صيانة السيرفر"
-            value={formData.title}
-            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-            required
-            data-testid="input-expense-title"
-          />
+          <Input placeholder="مثال: صيانة السيرفر" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required data-testid="input-expense-title" />
         </div>
 
-        {/* صف يحتوي على نوع التكلفة + العملة + التصنيف */}
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>نوع التكلفة</Label>
-            <Select
-              value={formData.expenseType}
-              onValueChange={(value: "مرة واحدة" | "شهرية" | "موزعة") => 
-                setFormData({ ...formData, expenseType: value })
-              }
-            >
-              <SelectTrigger data-testid="select-expense-type">
-                <SelectValue placeholder="اختر النوع" />
-              </SelectTrigger>
+            <Select value={formData.expenseType} onValueChange={(value: "مرة واحدة" | "شهرية" | "موزعة") => setFormData({ ...formData, expenseType: value })}>
+              <SelectTrigger data-testid="select-expense-type"><SelectValue placeholder="اختر النوع" /></SelectTrigger>
               <SelectContent>
-                {EXPENSE_TYPES.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    {type.label}
-                  </SelectItem>
-                ))}
+                {EXPENSE_TYPES.map((type) => <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
             <Label>العملة</Label>
-            <Select
-              value={currency}
-              onValueChange={(value: "SAR" | "USD") => {
-                setCurrency(value);
-                if (value === "USD") fetchExchangeRate();
-              }}
-            >
-              <SelectTrigger data-testid="select-expense-currency">
-                <SelectValue />
-              </SelectTrigger>
+            <Select value={currency} onValueChange={(value: "SAR" | "USD") => { setCurrency(value); if (value === "USD") fetchExchangeRate(); }}>
+              <SelectTrigger data-testid="select-expense-currency"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="SAR">ريال (ر.س)</SelectItem>
                 <SelectItem value="USD">دولار ($)</SelectItem>
@@ -1349,19 +916,10 @@ function AddExpenseForm({
           </div>
           <div className="space-y-2">
             <Label>التصنيف</Label>
-            <Select
-              value={formData.category}
-              onValueChange={(value) => setFormData({ ...formData, category: value })}
-            >
-              <SelectTrigger data-testid="select-expense-category">
-                <SelectValue placeholder="اختر التصنيف" />
-              </SelectTrigger>
+            <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
+              <SelectTrigger data-testid="select-expense-category"><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
               <SelectContent>
-                {EXPENSE_CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </SelectItem>
-                ))}
+                {EXPENSE_CATEGORIES.map((cat) => <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -1371,31 +929,12 @@ function AddExpenseForm({
           <div className="space-y-3">
             <div className="space-y-2">
               <Label>المبلغ {formData.expenseType === "موزعة" ? "الإجمالي" : ""} بالدولار ($)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={usdAmount || ""}
-                onChange={(e) => handleUsdChange(parseFloat(e.target.value) || 0)}
-                required
-                data-testid="input-expense-usd"
-              />
+              <Input type="number" step="0.01" min="0" value={usdAmount || ""} onChange={(e) => handleUsdChange(parseFloat(e.target.value) || 0)} required data-testid="input-expense-usd" />
             </div>
             <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  سعر الصرف: {isLoadingRate ? <Loader2 className="inline w-3 h-3 animate-spin" /> : `$1 = ${exchangeRate} ر.س`}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={fetchExchangeRate}
-                  disabled={isLoadingRate}
-                  className="h-6 px-2"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isLoadingRate ? 'animate-spin' : ''}`} />
-                </Button>
+                <span className="text-muted-foreground">سعر الصرف: {isLoadingRate ? <Loader2 className="inline w-3 h-3 animate-spin" /> : `$1 = ${exchangeRate} ر.س`}</span>
+                <Button type="button" variant="ghost" size="sm" onClick={fetchExchangeRate} disabled={isLoadingRate} className="h-6 px-2"><RefreshCw className={`w-3 h-3 ${isLoadingRate ? "animate-spin" : ""}`} /></Button>
               </div>
               <div className="flex items-center justify-between mt-2">
                 <span className="text-sm text-muted-foreground">المبلغ بالريال:</span>
@@ -1406,54 +945,22 @@ function AddExpenseForm({
         ) : (
           <div className="space-y-2">
             <Label>المبلغ {formData.expenseType === "موزعة" ? "الإجمالي" : ""} (ريال)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={formData.amount || ""}
-              onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
-              required
-              data-testid="input-expense-amount"
-            />
+            <Input type="number" step="0.01" min="0" value={formData.amount || ""} onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })} required data-testid="input-expense-amount" />
           </div>
         )}
 
-        {/* حقل التاريخ مع نص توضيحي */}
         <div className="space-y-2">
-          <Label>
-            {formData.expenseType === "مرة واحدة" && "تاريخ تسجيل التكلفة"}
-            {formData.expenseType === "شهرية" && "تاريخ بداية الاحتساب"}
-            {formData.expenseType === "موزعة" && "تاريخ بداية التوزيع"}
-          </Label>
-          <Input
-            type="date"
-            value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-            required
-            data-testid="input-expense-date"
-          />
-          <p className="text-xs text-muted-foreground">
-            يُستخدم هذا التاريخ لتحديد متى تبدأ هذه التكلفة في التأثير على الأرباح
-          </p>
+          <Label>{formData.expenseType === "مرة واحدة" ? "تاريخ تسجيل التكلفة" : formData.expenseType === "شهرية" ? "تاريخ بداية الاحتساب" : "تاريخ بداية التوزيع"}</Label>
+          <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} required data-testid="input-expense-date" />
         </div>
 
-        {/* مساحة محجوزة للحقول الشرطية - ارتفاع ثابت */}
         <div className="min-h-[120px]">
-          {/* حقول إضافية للتكاليف الموزعة */}
           {formData.expenseType === "موزعة" && (
             <div className="space-y-4 p-4 rounded-lg bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>عدد أشهر التوزيع</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={formData.durationMonths || ""}
-                    onChange={(e) => setFormData({ ...formData, durationMonths: parseInt(e.target.value) || 12 })}
-                    required
-                    data-testid="input-expense-duration"
-                  />
+                  <Input type="number" min="1" max="60" value={formData.durationMonths || ""} onChange={(e) => setFormData({ ...formData, durationMonths: parseInt(e.target.value) || 12 })} required data-testid="input-expense-duration" />
                 </div>
                 <div className="flex items-center justify-center">
                   <div className="text-center">
@@ -1464,62 +971,28 @@ function AddExpenseForm({
               </div>
             </div>
           )}
-
-          {/* حقول للتكاليف الشهرية */}
           {formData.expenseType === "شهرية" && (
             <div className="p-4 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800">
-              <p className="text-sm text-muted-foreground">
-                سيتم احتساب {formData.amount.toLocaleString()} ر.س شهرياً بدءاً من التاريخ المحدد
-              </p>
+              <p className="text-sm text-muted-foreground">سيتم احتساب {formData.amount.toLocaleString()} ر.س شهرياً بدءاً من التاريخ المحدد</p>
             </div>
           )}
-
-          {/* رسالة للتكلفة مرة واحدة */}
           {formData.expenseType === "مرة واحدة" && (
             <div className="p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-              <p className="text-sm text-muted-foreground">
-                سيتم خصم {formData.amount.toLocaleString()} ر.س في شهر التاريخ المحدد فقط
-              </p>
+              <p className="text-sm text-muted-foreground">سيتم خصم {formData.amount.toLocaleString()} ر.س في شهر التاريخ المحدد فقط</p>
             </div>
           )}
         </div>
 
         <div className="space-y-2">
           <Label>الوصف (اختياري)</Label>
-          <Textarea
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            placeholder="تفاصيل إضافية عن التكلفة..."
-            data-testid="input-expense-description"
-          />
+          <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="تفاصيل إضافية عن التكلفة..." data-testid="input-expense-description" />
         </div>
-
-        {/* مسافة إضافية في الأسفل */}
-        <div className="h-4" />
       </div>
 
-      {/* أزرار الإجراء - ثابتة في الأسفل */}
-      <div className="bg-background border-t px-6 py-4 flex gap-3 flex-shrink-0">
-        {onCancel && (
-          <Button 
-            type="button" 
-            variant="outline"
-            className="flex-1" 
-            onClick={onCancel}
-            data-testid="button-cancel-expense"
-          >
-            إلغاء
-          </Button>
-        )}
-        <Button 
-          type="submit" 
-          className={onCancel ? "flex-1" : "w-full"}
-          disabled={isPending || !formData.title.trim() || formData.amount <= 0} 
-          data-testid="button-submit-expense"
-        >
-          {isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin ml-2" />
-          ) : null}
+      <div className="px-6 py-4 border-t flex gap-3">
+        <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>إلغاء</Button>
+        <Button type="submit" className="flex-1" disabled={isPending} data-testid="button-submit-expense">
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
           إضافة التكلفة
         </Button>
       </div>

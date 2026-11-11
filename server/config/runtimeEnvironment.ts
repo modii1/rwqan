@@ -25,6 +25,71 @@ const ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT_KEY =
   "ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT";
 
 /**
+ * Explicit deployment-environment marker. It is intentionally NOT NODE_ENV:
+ * every App Hosting runtime is built and run with NODE_ENV=production, so
+ * NODE_ENV cannot distinguish the isolated test backend from production.
+ *
+ * Only `APP_ENV=test` is treated as the test environment; anything else
+ * (including a missing value) is treated as production for the webhook opt-out
+ * below, so an ambiguous runtime can never disable a production control.
+ */
+export const APP_ENV_KEY = "APP_ENV";
+export const APP_ENV_TEST = "test";
+
+/**
+ * Explicit opt-out for the WhatsApp provider delivery webhook.
+ *
+ * Honoured only when ALL hold:
+ *   1. WHATSAPP_DELIVERY_WEBHOOK_DISABLED=true,
+ *   2. APP_ENV=test,
+ *   3. NEXT_PUBLIC_BASE_URL is a valid origin that is NOT the production site.
+ *
+ * Any other combination keeps the webhook enabled and keeps the production
+ * credential check mandatory (current behaviour).
+ */
+export const WHATSAPP_DELIVERY_WEBHOOK_DISABLED_KEY =
+  "WHATSAPP_DELIVERY_WEBHOOK_DISABLED";
+const PRODUCTION_PUBLIC_ORIGIN = "https://rwqan.sa";
+
+function publicOriginOf(environment: NodeJS.ProcessEnv): string {
+  const raw = environment.NEXT_PUBLIC_BASE_URL?.trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * True only for a runtime that is provably the isolated test backend. Fails
+ * closed: a missing/invalid public URL, the production origin, an unset
+ * APP_ENV, or an absent flag all keep the webhook enabled.
+ */
+export function whatsappDeliveryWebhookDisabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (
+    environment[WHATSAPP_DELIVERY_WEBHOOK_DISABLED_KEY]?.trim().toLowerCase() !==
+    "true"
+  ) {
+    return false;
+  }
+  if (environment[APP_ENV_KEY]?.trim().toLowerCase() !== APP_ENV_TEST) {
+    return false;
+  }
+  const origin = publicOriginOf(environment);
+  if (!origin) return false;
+  return origin !== PRODUCTION_PUBLIC_ORIGIN;
+}
+
+export function whatsappDeliveryWebhookEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return !whatsappDeliveryWebhookDisabled(environment);
+}
+
+/**
  * Paymob-only development opt-in. Deliberately independent from
  * ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT so a DEV Paymob test cannot enable
  * WhatsApp, Gemini, OCR, or disable the DEV customer OTP console sink.

@@ -26,16 +26,23 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   ShieldCheck,
-  UploadCloud,
   RotateCcw,
   Loader2,
   X,
+  Upload,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   DEPLOY_GATE_ITEM_STATE_LABELS,
   DEPLOY_GATE_LABELS,
   DEPLOY_STATE_DESCRIPTORS,
   isFullGitSha,
+  type DeployBranchPushResult,
   type DeployCheckResult,
   type DeployCheckRun,
   type DeployGateItem,
@@ -45,6 +52,9 @@ import {
   type DeployReleaseStatus,
   type DeployRestorePreview,
   type DeployState,
+  type DeployUploadStage,
+  type DeployUploadStageResult,
+  type DeployUploadStageStatus,
 } from "@shared/deploySystem";
 import type { DataEnvironment, LiveDataStatus } from "@shared/liveData";
 
@@ -115,6 +125,32 @@ const GITHUB_MATCH_LABEL: Record<string, string> = {
 
 const UNVERIFIED = "غير متحقق";
 
+/** The fixed upload (branch upload command) pipeline stages surfaced in the stepper UI. */
+const UPLOAD_STAGES: { key: DeployUploadStage; label: string }[] = [
+  { key: "connection", label: "فحص الاتصال بمستودع Git" },
+  { key: "branch", label: "التحقق من الفرع المعتمد" },
+  { key: "changes", label: "فحص التغييرات المحلية" },
+  { key: "github_connection", label: "فحص الاتصال بـ GitHub" },
+  { key: "push", label: "رفع Commit إلى GitHub" },
+  { key: "verify", label: "التحقق من نزول Commit" },
+];
+
+const UPLOAD_STAGE_STATUS_LABEL: Record<DeployUploadStageStatus, string> = {
+  pending: "في انتظار التنفيذ",
+  running: "جارٍ التنفيذ",
+  ok: "ناجح",
+  failed: "فشل",
+  skipped: "تم التخطي",
+};
+
+function UploadStageStatusIcon({ status }: { status: DeployUploadStageStatus }) {
+  if (status === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />;
+  if (status === "ok") return <span className="text-xs font-bold text-green-700">✓</span>;
+  if (status === "failed") return <span className="text-xs font-bold text-red-700">⚠</span>;
+  if (status === "skipped") return <span className="text-xs font-bold text-amber-700">⏭</span>;
+  return <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />;
+}
+
 /**
  * يستخرج رسالة خطأ بالعربية من خطأ خطأ apiRequest.
  * apiRequest يرمي خطأً على الشكل "<status>: <body>"؛ إذا كان الجسم JSONًا
@@ -123,6 +159,7 @@ const UNVERIFIED = "غير متحقق";
  */
 interface DeployErrorBody {
   error?: string;
+  details?: string | null;
   code?: string;
   stage?: string | null;
   via?: string | null;
@@ -145,7 +182,10 @@ function redactErrorDetail(text: string): string {
  * owner needs the actual cause (e.g. a 403 / permission error) to act on it.
  */
 function serverDetail(body: DeployErrorBody): string {
-  const raw = typeof body.error === "string" ? body.error.trim() : "";
+  const raw = [body.error, body.details]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(" — ");
   if (!raw) return "";
   const safe = redactErrorDetail(raw);
   const capped = safe.length > MAX_ERROR_DETAIL ? `${safe.slice(0, MAX_ERROR_DETAIL)}…` : safe;
@@ -206,7 +246,8 @@ function deployErrorMessage(error: unknown): string {
         const friendly = friendlyDeployFailure(status, body);
         if (friendly) return friendly;
         if (typeof body.error === "string" && body.error.length > 0) {
-          return body.error;
+          const detail = serverDetail(body).trim();
+          return detail || body.error;
         }
       } catch {
         // الجسم ليس JSON — استخدم رسالة افتراضية حسب رمز الحالة أدناه.
@@ -344,6 +385,8 @@ export function DeployBar() {
       runId?: number | null;
       rolloutStep?: string;
       rolloutVerified?: boolean;
+      reason?: string;
+      failureReason?: string;
     };
   }>({
     queryKey: ["/api/admin/deploy/status", trackedEnv],
@@ -384,6 +427,14 @@ export function DeployBar() {
     publishRunStatus?.status?.rolloutVerified === false
       ? "unconfirmed"
       : rawRunState;
+  // Show the REAL reason: a failed run's failed job/step, or why the status
+  // could not be read. Never invent success and never hide the failure cause.
+  const statusDetail =
+    runState === "unknown"
+      ? publishRunStatus?.status?.reason ?? ""
+      : runState === "failed"
+        ? publishRunStatus?.status?.failureReason ?? ""
+        : "";
 
   // Data-environment toggle (LOCAL/TEST/LIVE). This switches the WHOLE
   // application's data sources and services between local resources, isolated
@@ -417,6 +468,11 @@ export function DeployBar() {
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [autoResumePending, setAutoResumePending] = useState<boolean>(false);
 
+  // Dedicated branch upload (the dedicated branch upload command ONLY — independent from the publish flow).
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadStages, setUploadStages] = useState<DeployUploadStageResult[]>([]);
+  const [uploadOutcome, setUploadOutcome] = useState<DeployBranchPushResult | null>(null);
+
   // The TEST publish is delegated to GitHub Actions: the deployment itself is
   // deployment itself is created by the deploy-test workflow from the remote
   // branch tip, so the follow-up lives in GitHub Actions, not in this panel.
@@ -446,6 +502,8 @@ export function DeployBar() {
         branch?: string;
         commit?: string;
         via?: string;
+        worktree?: "clean" | "dirty" | "unknown";
+        localChangesIgnored?: boolean;
       }>;
     },
     onSuccess: (result) => {
@@ -469,6 +527,9 @@ export function DeployBar() {
             "التحديث يبدأ تلقائيًا في GitHub، وسيظهر تقدّمه في صفحة المتابعة:\n" +
             (result.actionsUrl ?? actionsUrlFor(dispatchedEnv)) +
             (shortSha ? `\nالنسخة المطلوبة: ${shortSha}` : "") +
+            (result.localChangesIgnored
+              ? "\nتنبيه: توجد تغييرات محلية غير محفوظة لم تُنشر؛ تم نشر آخر Commit معتمد على فرع TEST."
+              : "") +
             "\n(الحالة هنا لا تعني أن التحديث اكتمل)",
         });
         return;
@@ -479,6 +540,11 @@ export function DeployBar() {
       const realDeployed = Boolean(
         release?.deployed && !release?.simulated && release?.postDeploy?.ok === true,
       );
+      const failureDetail =
+        release?.error ??
+        release?.checkNotes?.secretScan ??
+        release?.checkNotes?.typescript ??
+        null;
       toast({
         title: realDeployed
           ? "نُشر فعليًا وتحقّق منه"
@@ -487,10 +553,15 @@ export function DeployBar() {
             : "لم يتم النشر",
         description: realDeployed
           ? `التحقق بعد النشر: ${release?.postDeploy?.ok ? "ناجح" : "غير مؤكَّد"}`
-          : "لم يُسجَّل أي إصدار منشور.",
+          : release?.status === "validation_failed" && failureDetail
+            ? failureDetail
+            : "لم يُسجَّل أي إصدار منشور.",
       });
     },
     onError: (error: unknown) => {
+      // A commit/push may have succeeded before a later dispatch failure; refresh
+      // the tree state and SHA so the bar never shows a stale worktree.
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       if (error instanceof Error) {
         const match = error.message.match(/^(\d{3}):\s*(.*)$/s);
         if (match) {
@@ -535,15 +606,68 @@ export function DeployBar() {
     },
   });
 
+  // Dedicated branch upload: runs ONLY the dedicated branch upload command via
+  // the dedicated fail-closed pipeline. It never dispatches a publish and never
+  // deploys anything. The target branch is derived from the selected environment:
+  // TEST -> test/unified-gateway-ui-only, LIVE -> main.
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest("POST", "/api/admin/deploy/upload", {
+        environment: state.environment as "TEST" | "LIVE",
+      });
+      return res.json() as Promise<{ result?: DeployBranchPushResult }>;
+    },
+    onSuccess: (result) => {
+      const outcome = result.result ?? null;
+      setUploadOutcome(outcome);
+      setUploadStages(outcome?.stages && outcome.stages.length > 0 ? outcome.stages : []);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+      toast({
+        title: outcome?.ok ? "تم رفع الفرع إلى GitHub" : "تعذّر رفع الفرع إلى GitHub",
+        description: outcome?.detail ?? "تعذّر تنفيذ رفع الفرع.",
+        variant: outcome?.ok ? "default" : "destructive",
+      });
+    },
+    onError: (error: unknown) => {
+      const message = deployErrorMessage(error);
+      setUploadOutcome(null);
+      setUploadStages([
+        { stage: "final", status: "failed", message },
+      ]);
+      toast({
+        title: "تعذّر رفع الفرع",
+        description: message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Real, explicit release checks (POST /api/admin/deploy/checks): runs the
   // DEV-safe local checks (tsc --noEmit + secret scan) on the SERVER and stores
   // them. Nothing is built/deployed; no production connection is made.
   const checksMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/admin/deploy/checks", {});
-      return res.json() as Promise<{ checkRun?: DeployCheckRun }>;
+      return res.json() as Promise<{
+        checkRun?: DeployCheckRun;
+        publishNotice?: string;
+        state?: DeployState;
+      }>;
     },
     onSuccess: (result) => {
+      // Update the visible state immediately from the checks response, then
+      // invalidate for the authoritative refresh. Without this, the badges only
+      // change after a second round-trip and the button can look unresponsive.
+      if (result.state) {
+        queryClient.setQueryData<{ prototypeVersion: string; state: DeployState }>(
+          ["/api/admin/deploy/state"],
+          (previous) => ({
+            prototypeVersion: previous?.prototypeVersion ?? "",
+            state: result.state as DeployState,
+          }),
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       const checks = result.checkRun?.checks;
       // Mirrors the route's failing predicate exactly:
@@ -561,10 +685,11 @@ export function DeployBar() {
           : "نتائج الفحص محفوظة في سجل الإصدارات.",
       });
     },
-    onError: () => {
+    onError: (error: unknown) => {
+      // Never hide the real server reason behind a generic message.
       toast({
         title: "تعذّر تشغيل الفحوصات",
-        description: "لم تُسجَّل نتائج. حاول مرة أخرى.",
+        description: deployErrorMessage(error),
         variant: "destructive",
       });
     },
@@ -586,13 +711,7 @@ export function DeployBar() {
       return;
     }
     lastPublishEnvRef.current = targetEnv;
-    // LIVE is dispatched through GitHub Actions, so it needs only the
-    // GitHub-dispatch opt-in (DEPLOY_REAL_DEPLOY=enabled). TEST also uses the
-    // same dispatch path. The separate productionDeployEnabled opt-in is only
-    // for LOCAL production deploys via Firebase CLI, which neither TEST nor
-    // LIVE dispatch uses.
-    const dispatchReady = state.deployDispatchEnabled;
-    if (!dispatchReady) {
+    if (!state.realDeployEnabled) {
       publishMutation.mutate({ environment: targetEnv, approval: false });
       return;
     }
@@ -600,12 +719,13 @@ export function DeployBar() {
     const domain =
       target?.expectedDomain ??
       (targetEnv === "LIVE"
-        ? "https://rwqan.sa"
+        ? "https://rwqan--rwqan-757.europe-west4.hosted.app/"
         : "https://rwqan-backend--rwqan-757.europe-west4.hosted.app/");
     if (targetEnv === "LIVE") {
       const confirmed = window.confirm(
         "هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟\n\n" +
-          `رابط الموقع الرسمي: ${domain}\n` +
+          `رابط الاستضافة: ${domain}\n` +
+          "الموقع الرسمي: https://rwqan.sa\n" +
           `متابعة تقدّم التحديث: ${GH_LIVE_ACTIONS_URL}\n\n` +
           "التحديث يبدأ من GitHub تلقائيًا، وهو لا يمس بيئة التجربة إطلاقًا.\n" +
           "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
@@ -614,15 +734,38 @@ export function DeployBar() {
       publishMutation.mutate({ environment: "LIVE", approval: true });
       return;
     }
+    const testDirtyWarning =
+      state.git?.worktree === "dirty"
+        ? "\n\nتنبيه: توجد تغييرات محلية غير محفوظة. لن تُنشر هذه التغييرات، وسيُنشر آخر Commit معتمد على فرع TEST فقط."
+        : "";
     const confirmed = window.confirm(
       "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
         `رابط بيئة التجربة: ${domain}\n` +
         `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
         "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
-        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه.",
+        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه." +
+        testDirtyWarning,
     );
     if (!confirmed) return;
     publishMutation.mutate({ environment: "TEST", approval: true });
+  };
+
+  // Dedicated branch upload handler: opens the smart stage stepper and runs the
+  // branch push through the DEDICATED upload pipeline (the dedicated branch upload
+  // command ONLY). It never
+  // calls the publish flow (no publish mutation, no external deploy dispatch).
+  const handleUploadBranch = () => {
+    if (!state) return;
+    setUploadOpen(true);
+    setUploadOutcome(null);
+    setUploadStages(
+      UPLOAD_STAGES.map((entry, index) => ({
+        stage: entry.key,
+        status: index === 0 ? ("running" as const) : ("pending" as const),
+        message: index === 0 ? "فحص الاتصال بمستودع Git…" : "في انتظار التنفيذ.",
+      })),
+    );
+    uploadMutation.mutate();
   };
 
   // The main publish button publishes the environment the server tracks now.
@@ -823,6 +966,17 @@ export function DeployBar() {
   // production connection is configured.
   const handleSelectEnvironment = (target: DataEnvironment) => {
     if (!dataEnvironment || dataEnvironment.environment === target) return;
+    // Prevent switching environment while an upload is in flight so the upload
+    // target never changes mid-flight.
+    if (uploadMutation.isPending) {
+      toast({
+        title: "لا يمكن تبديل البيئة",
+        description:
+          "عملية رفع الفرع قيد التنفيذ حاليًا. يُرجى الانتظار حتى تنتهي قبل تبديل البيئة.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (target === "LIVE") {
       if (!dataEnvironment.liveAvailable) {
         // Brief only: the server reason names credentials/variables, which must
@@ -900,28 +1054,33 @@ export function DeployBar() {
               </Button>
             </div>
           )}
-          <Button
-            size="sm"
-            variant="default"
-            className="h-7 shrink-0 px-2 text-xs"
-            onClick={handlePublish}
-            disabled={publishMutation.isPending}
-            data-testid="deploy-bar-publish"
-          >
-            {publishMutation.isPending ? (
-              <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <UploadCloud className="ml-1 h-3.5 w-3.5" />
-            )}
-            نشر
-          </Button>
-
           {/* Independent publish button for each environment: TEST and LIVE each
               target ONLY their own GitHub workflow and their own Firebase
               backend; the server enforces the same separation (each request
               goes to the executor with the environment it names, and a
               cross-environment request is refused). Plain Arabic labels and
               prompts — no technical jargon for the site owner. */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 px-2 text-xs"
+                  onClick={handleUploadBranch}
+                  disabled={uploadMutation.isPending}
+                  aria-label="رفع إلى GitHub"
+                  data-testid="deploy-bar-upload-test"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                رفع إلى GitHub
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button
             size="sm"
             variant="default"
@@ -949,7 +1108,10 @@ export function DeployBar() {
               target="_blank"
               rel="noreferrer"
               data-testid="deploy-bar-publish-status"
-              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+              title={statusDetail || undefined}
+              className={`flex shrink-0 items-start gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+                statusDetail ? "max-w-[24rem] whitespace-normal text-right leading-4" : ""
+              } ${
                 runState === "running"
                   ? "border-sky-300 bg-sky-50 text-sky-900"
                   : runState === "failed"
@@ -959,7 +1121,10 @@ export function DeployBar() {
                       : "border-amber-300 bg-white text-amber-900"
               }`}
             >
-              {runStatusLabel[runState] ?? runStatusLabel.unknown}
+              <span>{runStatusLabel[runState] ?? runStatusLabel.unknown}</span>
+              {statusDetail ? (
+                <span className="font-normal opacity-80">— {statusDetail}</span>
+              ) : null}
             </a>
           )}
 
@@ -970,12 +1135,12 @@ export function DeployBar() {
             data-testid="deploy-bar-environment"
             className="flex shrink-0 items-stretch overflow-hidden rounded-md border border-amber-300 text-xs font-semibold"
           >
-            {/* PERMANENT three-option switch: LOCAL, TEST, and LIVE are always
-                shown and the active one is highlighted. Selecting a different
-                option performs the real switch. Never a single button whose text
-                changes. TEST never targets LIVE, and LOCAL never targets any
-                remote backend. */}
-            {(["LOCAL", "TEST", "LIVE"] as const).map((option) => {
+            {/* PERMANENT two-option switch: TEST and LIVE are always shown and
+                the active one is highlighted. Selecting a different option
+                performs the real switch. Never a single button whose text
+                changes. TEST never targets LIVE. LOCAL is a fixed local
+                environment and is intentionally not offered as a switch. */}
+            {(["TEST", "LIVE"] as const).map((option) => {
               const active = dataEnvironment?.environment === option;
               const disabled = environmentMutation.isPending || !dataEnvironment;
               return (
@@ -991,9 +1156,7 @@ export function DeployBar() {
                     active
                       ? option === "LIVE"
                         ? "bg-red-600 text-white"
-                        : option === "TEST"
-                        ? "bg-amber-600 text-white"
-                        : "bg-emerald-600 text-white"
+                        : "bg-amber-600 text-white"
                       : "bg-white text-amber-900 hover:bg-amber-100"
                   }`}
                 >
@@ -1065,19 +1228,28 @@ export function DeployBar() {
             <div className="mb-2 rounded border border-amber-200 bg-white/70 p-1.5">
               <div className="flex flex-wrap items-center gap-1.5">
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   className="h-6 shrink-0 px-2 text-[11px]"
-                  onClick={() => checksMutation.mutate()}
+                  onClick={() => {
+                    if (!checksMutation.isPending) checksMutation.mutate();
+                  }}
                   disabled={checksMutation.isPending}
+                  aria-busy={checksMutation.isPending}
                   data-testid="deploy-bar-checks"
                 >
                   {checksMutation.isPending ? (
-                    <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                    <>
+                      <Loader2 className="ml-1 h-3 w-3 animate-spin" />
+                      جارٍ الفحص…
+                    </>
                   ) : (
-                    <ShieldCheck className="ml-1 h-3 w-3" />
+                    <>
+                      <ShieldCheck className="ml-1 h-3 w-3" />
+                      فحص ما قبل النشر
+                    </>
                   )}
-                  فحص ما قبل النشر
                 </Button>
                 {state.latestCheckRun ? (
                   <>
@@ -1113,6 +1285,22 @@ export function DeployBar() {
                     لم تُشغَّل فحوص محفوظة بعد.
                   </span>
                 )}
+              </div>
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="deploy-bar-checks-feedback"
+                className="mt-1 text-[10px] leading-4 text-muted-foreground"
+              >
+                {checksMutation.isPending
+                  ? "جارٍ الفحص… قد يستغرق حتى دقيقة (TypeScript + فحص الأسرار)."
+                  : checksMutation.isError
+                    ? `تعذّر تشغيل الفحوصات: ${deployErrorMessage(checksMutation.error)}`
+                    : checksMutation.data?.checkRun
+                      ? `اكتمل الفحص: TypeScript ${CHECK_RESULT_LABEL[checksMutation.data.checkRun.checks.typescript]} · الأسرار ${CHECK_RESULT_LABEL[checksMutation.data.checkRun.checks.secretScan]}.`
+                      : state.latestCheckRun
+                        ? `آخر فحص محفوظ: TypeScript ${CHECK_RESULT_LABEL[state.latestCheckRun.checks.typescript]} · الأسرار ${CHECK_RESULT_LABEL[state.latestCheckRun.checks.secretScan]}.`
+                        : "لم يُشغَّل فحص بعد."}
               </div>
             </div>
 
@@ -1283,6 +1471,99 @@ export function DeployBar() {
               : "مسار النشر مُعطَّل حتى تُضبط بيانات الاعتماد صراحةً. "}
             الاستعادة تنفّذ rollout حقيقيًا من الـcommit الثابت بعد التحقق من المصدر والوصول.
           </p>
+        </div>
+      )}
+
+      {uploadOpen && (
+        <div
+          data-testid="deploy-bar-upload-panel"
+          dir="rtl"
+          className="fixed left-2 right-2 top-[40px] z-[100] max-h-[70vh] overflow-y-auto rounded-b-lg border border-amber-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-[520px]"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-amber-950">رفع الفرع إلى GitHub</h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => setUploadOpen(false)}
+              aria-label="إغلاق"
+              data-testid="deploy-bar-upload-panel-close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <ul className="space-y-1.5" data-testid="deploy-bar-upload-stages">
+            {uploadStages.map((entry) => {
+              const stageMeta = UPLOAD_STAGES.find((item) => item.key === entry.stage);
+              const stageLabel = stageMeta?.label ?? entry.stage;
+              return (
+                <li
+                  key={entry.stage}
+                  data-testid={`deploy-bar-upload-stage-${entry.stage}`}
+                  className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2"
+                >
+                  <span className="mt-0.5">
+                    <UploadStageStatusIcon status={entry.status} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-amber-950">{stageLabel}</p>
+                    <p className="text-[11px] leading-4 text-muted-foreground">{entry.message}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {uploadOutcome ? (
+            <div
+              data-testid="deploy-bar-upload-result"
+              className={`mt-2 rounded-md border p-2 ${
+                uploadOutcome.ok
+                  ? "border-green-300 bg-green-50"
+                  : "border-red-300 bg-red-50"
+              }`}
+            >
+              <p
+                className={`text-xs font-bold ${uploadOutcome.ok ? "text-green-800" : "text-red-800"}`}
+                data-testid="deploy-bar-upload-result-title"
+              >
+                {uploadOutcome.ok
+                  ? uploadOutcome.skipped
+                    ? "الفرع محدّث بالفعل على GitHub"
+                    : "تم رفع الفرع إلى GitHub بنجاح"
+                  : "تعذّر رفع الفرع إلى GitHub"}
+              </p>
+              <p
+                className="mt-1 text-[11px] leading-4 text-muted-foreground"
+                data-testid="deploy-bar-upload-result-detail"
+              >
+                {uploadOutcome.detail}
+              </p>
+              {uploadOutcome.ok && uploadOutcome.pushedSha ? (
+                <p
+                  dir="ltr"
+                  className="mt-1 font-mono text-[10px] text-muted-foreground"
+                  data-testid="deploy-bar-upload-result-sha"
+                >
+                  Commit: {uploadOutcome.pushedSha}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-2 flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 px-2 text-xs"
+              onClick={() => setUploadOpen(false)}
+              data-testid="deploy-bar-upload-done"
+            >
+              إغلاق
+            </Button>
+          </div>
         </div>
       )}
     </>

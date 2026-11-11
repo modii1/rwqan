@@ -23,7 +23,7 @@ import {
   isFreeSubscriptionPackage,
 } from "@shared/freeCommissionConsent";
 
-// ─── Visual Captcha helpers ───
+// Visual Captcha helpers
 const CAPTCHA_CHARS = '23456789';
 
 function generateCaptchaText(length = 5): string {
@@ -558,7 +558,7 @@ export default function SubscriptionPage() {
           {/* AI Scan Results */}
           {aiScanResult && (
             <div className={`p-4 rounded-lg border ${
-              aiScanResult.recommendation === 'تفعيل_تلقائي' 
+              aiScanResult.recommendation === 'تفعيل_تلقائي'
                 ? 'bg-emerald-50 border-emerald-300' 
                 : aiScanResult.recommendation === 'رفض'
                 ? 'bg-red-50 border-red-300'
@@ -567,7 +567,7 @@ export default function SubscriptionPage() {
               <div className="flex items-center justify-between mb-3">
                 <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
                 <Badge variant="outline" className={
-                  aiScanResult.recommendation === 'تفعيل_تلقائي' 
+                  aiScanResult.recommendation === 'تفعيل_تلقائي'
                     ? 'border-emerald-500 text-emerald-600' 
                     : aiScanResult.recommendation === 'رفض'
                     ? 'border-red-500 text-red-600'
@@ -1064,7 +1064,7 @@ export default function SubscriptionPage() {
                                   <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
                                   <img 
                                     src="/assets/bank-qr.png" 
-                                    alt="QR Code للدفع" 
+                                    alt="QR Code للدفع"
                                     className="h-auto w-full max-w-[180px] mx-auto rounded-lg cursor-pointer hover:scale-105 transition-transform"
                                     onClick={() => window.open('/assets/bank-qr.png', '_blank')}
                                   />

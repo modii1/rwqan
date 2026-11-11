@@ -21,6 +21,7 @@ import type {
 } from "../../../shared/deploySystem";
 import {
   DEPLOY_DEV_BACKEND_ID,
+  DEPLOY_DEV_BASE_URL,
   DEPLOY_DEV_PROJECT_ID,
 } from "../../config/deployTarget";
 import {
@@ -1345,8 +1346,8 @@ test("state exposes the gate, target location/expectedDomain, data environment a
     // the gate must show غير متحقق, never a guessed host.
     assert.equal(state.deployTarget.projectId, DEPLOY_DEV_PROJECT_ID);
     assert.equal(state.deployTarget.backendId, DEPLOY_DEV_BACKEND_ID);
-    assert.equal(state.deployTarget.location, null);
-    assert.equal(state.deployTarget.expectedDomain, null);
+    assert.equal(state.deployTarget.location, "europe-west4");
+    assert.equal(state.deployTarget.expectedDomain, DEPLOY_DEV_BASE_URL);
 
     // The data environment (TEST default) flows into the state.
     assert.equal(state.dataEnvironment, "TEST");
@@ -1378,7 +1379,7 @@ test("state exposes the gate, target location/expectedDomain, data environment a
       (state.gate?.items ?? []).find(
         (entry: { key: string }) => entry.key === "apphosting_location",
       )?.state,
-      "unverified",
+      "ok",
     );
     assert.equal(
       (state.gate?.items ?? []).find(
@@ -1407,7 +1408,7 @@ test("with a configured location the expected domain follows the proven conventi
       const state = ((await res.json()) as any).state;
       assert.equal(
         state.deployTarget.expectedDomain,
-        "https://rwqan-dev-backend--rwqan-sa-dev.europe-west1.hosted.app",
+        "https://rwqan-backend--rwqan-757.europe-west1.hosted.app",
       );
       assert.equal(
         (state.gate?.items ?? []).find(

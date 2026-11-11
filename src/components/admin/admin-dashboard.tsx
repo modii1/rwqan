@@ -190,7 +190,7 @@ export default function AdminDashboard({ initialSection }: { initialSection?: Ad
       </div>
 
       {/* Sidebar */}
-      <aside className="w-full md:w-56 bg-card border-b md:border-b-0 md:border-l px-2 md:px-4 py-3 md:py-6 flex md:flex-col gap-1 md:gap-2 overflow-x-auto md:overflow-visible md:sticky md:top-0 md:h-screen md:border-l">
+      <aside className="admin-sidebar-scroll w-full md:w-56 bg-card border-b md:border-b-0 md:border-l px-2 md:px-4 py-3 md:py-6 flex md:flex-col gap-1 md:gap-2 overflow-x-auto md:overflow-y-auto md:overflow-x-hidden md:sticky md:top-0 md:h-screen md:border-l">
         <div className="hidden md:flex items-center justify-between mb-3 px-2">
           <div className="flex items-center gap-2">
             <LayoutDashboard className="w-5 h-5 text-primary" />

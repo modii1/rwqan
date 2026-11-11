@@ -20,7 +20,6 @@ import {
 import type { BuildSourceVerification } from "./DeployBuildSourceService";
 import {
   productionDeployEnabled as defaultProductionDeployEnabled,
-  deployDispatchEnabled as defaultDeployDispatchEnabled,
   realDeployEnabled as defaultRealDeployEnabled,
   resolveDeployTarget,
   type DeployTargetEnvironment,
@@ -145,8 +144,6 @@ export interface DeployExecutorOptions {
   restoreNotice: string;
   /** Test seam: decide whether a real deploy is enabled (defaults to env). */
   realDeployEnabled?: () => boolean;
-  /** Test seam: decide whether the GitHub-dispatch path is enabled (defaults to env). */
-  deployDispatchEnabled?: () => boolean;
   /** Test seam: decide whether production deploys are enabled (defaults to env). */
   productionDeployEnabled?: () => boolean;
 }
@@ -204,13 +201,11 @@ export function createDeployExecutor(
   },
 ): DeployExecutor {
   const realEnabled = options.realDeployEnabled ?? defaultRealDeployEnabled;
-  const dispatchEnabled = options.deployDispatchEnabled ?? defaultDeployDispatchEnabled;
   const prodEnabled = options.productionDeployEnabled ?? defaultProductionDeployEnabled;
   return new RealDeployExecutor({
     resolveTarget: (environment: DeployTargetEnvironment) => resolveDeployTarget(environment),
     dependencies: createRealDeployDependencies(),
     realDeployEnabled: realEnabled,
-    deployDispatchEnabled: dispatchEnabled,
     productionDeployEnabled: prodEnabled,
   });
 }

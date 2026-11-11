@@ -222,6 +222,7 @@ function resolveGhConfig(
       return { invalid: keys.workflowFile };
     }
   }
+
   // HARD SEPARATION: LIVE has one fixed destination. No environment override
   // may point it at TEST, another repository, another branch, or the TEST
   // workflow. The remote used for the read-only tip probe must likewise be the
@@ -335,6 +336,33 @@ interface LatestRunState {
   runUrl: string | null;
   headSha: string | null;
   runId: number | null;
+  /** Safe Arabic reason when the real status could not be read. */
+  reason?: string;
+  /** HTTP status of the failed GitHub read (diagnostic only, no body). */
+  httpStatus?: number;
+}
+
+/** GitHub REST headers. Anonymous reads are allowed for PUBLIC repositories. */
+function githubHeaders(token: string | null): Record<string, string> {
+  return {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": GH_API_VERSION,
+    "User-Agent": "rwqan-deploy-bar",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+function githubStatusReason(status: number): string {
+  if (status === 401 || status === 403) {
+    return "تعذّر قراءة حالة GitHub Actions (صلاحية GitHub مرفوضة أو حد الطلبات).";
+  }
+  if (status === 404) {
+    return "مسار workflow غير موجود على هذا الفرع.";
+  }
+  if (status === 429) {
+    return "تم تجاوز حد طلبات GitHub Actions — أعد المحاولة بعد قليل.";
+  }
+  return "تعذّر جلب حالة GitHub Actions من GitHub.";
 }
 
 /**
@@ -348,7 +376,7 @@ interface LatestRunState {
 async function fetchLatestRunState(
   environment: DeployGhEnvironment,
   config: ResolvedGhEnvConfig,
-  token: string,
+  token: string | null,
   fetchImpl: typeof fetch,
 ): Promise<LatestRunState> {
   const url =
@@ -359,20 +387,20 @@ async function fetchLatestRunState(
     runUrl: `https://github.com/${config.repository}/actions/workflows/${config.workflowFile}`,
     headSha: null,
     runId: null,
+    reason: "تعذّر جلب حالة GitHub Actions.",
   };
   try {
     const response = await fetchImpl(url, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": GH_API_VERSION,
-        "User-Agent": "rwqan-deploy-bar",
-      },
+      headers: githubHeaders(token),
       signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
     });
     if (response.status !== 200) {
-      return fallbackState;
+      return {
+        ...fallbackState,
+        reason: githubStatusReason(response.status),
+        httpStatus: response.status,
+      };
     }
     const body = (await response.json()) as {
       workflow_runs?: Array<{
@@ -412,7 +440,10 @@ async function fetchLatestRunState(
     return fallbackState;
   } catch {
     void environment;
-    return fallbackState;
+    return {
+      ...fallbackState,
+      reason: "تعذّر الاتصال بـ GitHub لقراءة حالة التشغيل.",
+    };
   }
 }
 
@@ -430,11 +461,13 @@ const rolloutStepCache = new Map<string, { value: DeployRolloutStepState; readAt
 /** Test seam: forget cached rollout-step conclusions. */
 export function resetDeployWorkflowStatusCache(): void {
   rolloutStepCache.clear();
+  failureDetailCache.clear();
+  anonymousStatusCache.clear();
 }
 
 async function fetchRolloutStepState(
   config: ResolvedGhEnvConfig,
-  token: string,
+  token: string | null,
   runId: number,
   fetchImpl: typeof fetch,
 ): Promise<DeployRolloutStepState> {
@@ -449,12 +482,7 @@ async function fetchRolloutStepState(
       `${GH_API_BASE}/repos/${config.repository}/actions/runs/${runId}/jobs?per_page=100`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": GH_API_VERSION,
-          "User-Agent": "rwqan-deploy-bar",
-        },
+        headers: githubHeaders(token),
         signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
       },
     );
@@ -490,6 +518,76 @@ async function fetchRolloutStepState(
   if (value !== "unknown") {
     rolloutStepCache.set(key, { value, readAtMs: Date.now() });
   }
+  return value;
+}
+
+const FAILURE_DETAIL_CACHE_TTL_MS = 60_000;
+const failureDetailCache = new Map<
+  string,
+  { value: string | null; readAtMs: number }
+>();
+
+function safeStepText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+/**
+ * READ-ONLY: the failed job/step of a failed run, shown to the admin as the
+ * real failure reason. Never invents a reason; when the details cannot be read
+ * the caller shows the safe status reason instead.
+ */
+async function fetchRunFailureDetail(
+  config: ResolvedGhEnvConfig,
+  token: string | null,
+  runId: number,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
+  const key = `${config.repository}:${config.workflowFile}:${runId}:failure`;
+  const cached = failureDetailCache.get(key);
+  if (cached && Date.now() - cached.readAtMs < FAILURE_DETAIL_CACHE_TTL_MS) {
+    return cached.value;
+  }
+  let value: string | null = null;
+  try {
+    const response = await fetchImpl(
+      `${GH_API_BASE}/repos/${config.repository}/actions/runs/${runId}/jobs?per_page=100`,
+      {
+        method: "GET",
+        headers: githubHeaders(token),
+        signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status === 200) {
+      const body = (await response.json()) as {
+        jobs?: Array<{
+          name?: unknown;
+          steps?: Array<{ name?: unknown; conclusion?: unknown }>;
+        }>;
+      };
+      const jobs = Array.isArray(body.jobs) ? body.jobs : [];
+      for (const job of jobs) {
+        const steps = Array.isArray(job?.steps) ? job.steps : [];
+        const failedStep = steps.find(
+          (step) =>
+            step?.conclusion === "failure" ||
+            step?.conclusion === "timed_out" ||
+            step?.conclusion === "cancelled",
+        );
+        if (failedStep) {
+          const jobName = safeStepText(job?.name);
+          const stepName = safeStepText(failedStep.name);
+          value =
+            [jobName, stepName].filter(Boolean).join(" — ") ||
+            "فشل أحد خطوات التشغيل.";
+          break;
+        }
+      }
+    }
+  } catch {
+    value = null;
+  }
+  failureDetailCache.set(key, { value, readAtMs: Date.now() });
   return value;
 }
 
@@ -771,6 +869,10 @@ export interface DeployRunStatus {
   rolloutStep: DeployRolloutStepState;
   /** TRUE only when the run completed AND its rollout step succeeded. */
   rolloutVerified: boolean;
+  /** Safe Arabic reason when the real status could not be read. */
+  reason?: string;
+  /** Failed job/step of a failed run (real GitHub detail, no secrets). */
+  failureReason?: string;
 }
 
 const UNKNOWN_RUN_STATUS: DeployRunStatus = {
@@ -780,7 +882,14 @@ const UNKNOWN_RUN_STATUS: DeployRunStatus = {
   runId: null,
   rolloutStep: "unknown",
   rolloutVerified: false,
+  reason: "إعدادات GitHub غير صالحة.",
 };
+
+const ANONYMOUS_STATUS_CACHE_TTL_MS = 60_000;
+const anonymousStatusCache = new Map<
+  string,
+  { value: DeployRunStatus; readAtMs: number }
+>();
 
 export async function readDeployWorkflowRunStatus(
   environment: DeployGhEnvironment,
@@ -792,19 +901,34 @@ export async function readDeployWorkflowRunStatus(
     return UNKNOWN_RUN_STATUS;
   }
   const token = env[DEPLOY_GH_TOKEN_ENV_KEY]?.trim() ?? "";
-  if (!token) {
-    return UNKNOWN_RUN_STATUS;
+  const authToken = token || null;
+  const cacheKey = `${environment}:${config.repository}:${config.branch}:${config.workflowFile}`;
+  // Anonymous reads are allowed for this PUBLIC repository; cache them briefly
+  // so the 20-second polling never exhausts GitHub's 60 requests/hour limit.
+  if (!authToken) {
+    const cached = anonymousStatusCache.get(cacheKey);
+    if (cached && Date.now() - cached.readAtMs < ANONYMOUS_STATUS_CACHE_TTL_MS) {
+      return cached.value;
+    }
   }
-  const latest = await fetchLatestRunState(environment, config, token, fetchImpl);
+  const latest = await fetchLatestRunState(environment, config, authToken, fetchImpl);
   const rolloutStep =
     latest.state === "success" && latest.runId !== null
-      ? await fetchRolloutStepState(config, token, latest.runId, fetchImpl)
+      ? await fetchRolloutStepState(config, authToken, latest.runId, fetchImpl)
       : "unknown";
-  return {
+  const failureReason =
+    latest.state === "failed" && latest.runId !== null
+      ? await fetchRunFailureDetail(config, authToken, latest.runId, fetchImpl)
+      : null;
+  const status: DeployRunStatus = {
     ...latest,
     rolloutStep,
-    // A dispatch is never proof; even a successful run is only accepted after
-    // the exact rollout step is confirmed successful.
+    // A green run is never a deployment unless its rollout step succeeded.
     rolloutVerified: latest.state === "success" && rolloutStep === "success",
+    ...(failureReason ? { failureReason } : {}),
   };
+  if (!authToken) {
+    anonymousStatusCache.set(cacheKey, { value: status, readAtMs: Date.now() });
+  }
+  return status;
 }

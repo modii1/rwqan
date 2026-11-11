@@ -138,8 +138,6 @@ export interface RealDeployExecutorOptions {
   dependencies: RealDeployDependencies;
   /** Re-checked at call time: a real deploy must still be explicitly enabled. */
   realDeployEnabled: () => boolean;
-  /** Re-checked at call time: the GitHub-dispatch path must be enabled (TEST/LIVE). */
-  deployDispatchEnabled: () => boolean;
   /** Re-checked at call time: production deploys must be separately enabled. */
   productionDeployEnabled: () => boolean;
 }
@@ -302,14 +300,8 @@ export class RealDeployExecutor {
     // it must remain usable on the deployed runtime (NODE_ENV=production, no
     // local Git clone). The real-deploy opt-in stays mandatory for LIVE/LOCAL,
     // i.e. for anything that would run the Firebase CLI from this app.
-    // TEST and LIVE both use the GitHub-dispatch path, so neither may depend on
-    // the LOCAL real-deploy opt-in. LIVE is still hard-gated below by
-    // deployDispatchEnabled() (DEPLOY_REAL_DEPLOY=enabled). The separate
-    // productionDeployEnabled() opt-in (DEPLOY_ALLOW_PRODUCTION) is only needed
-    // for LOCAL production deploys via Firebase CLI, which LIVE never uses.
     const dispatchAllowed =
-      (options.allowDispatchWithoutRealDeploy === true && environment === "TEST") ||
-      environment === "LIVE";
+      options.allowDispatchWithoutRealDeploy === true && environment === "TEST";
     if (!dispatchAllowed && !this.options.realDeployEnabled()) {
       return {
         blocked: blockedPublish(
@@ -320,12 +312,12 @@ export class RealDeployExecutor {
       };
     }
 
-    if (environment === "LIVE" && !this.options.deployDispatchEnabled()) {
+    if (environment === "LIVE" && !this.options.productionDeployEnabled()) {
       return {
         blocked: blockedPublish(
           target,
           "target",
-          "مسار النشر عبر GitHub Actions غير مُفعَّل — فعِّل DEPLOY_REAL_DEPLOY=enabled ثم أعد المحاولة.",
+          "النشر إلى الإنتاج يتطلب تفعيلًا صريحًا منفصلًا (DEPLOY_ALLOW_PRODUCTION=enabled).",
         ),
       };
     }

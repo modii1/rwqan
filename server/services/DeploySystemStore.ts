@@ -21,7 +21,7 @@ import {
   type DeployToolsInfo,
   type DeployWorktreeState,
 } from "../../shared/deploySystem";
-import { resolveDeployTarget, realDeployEnabled, deployDispatchEnabled, productionDeployEnabled, DEPLOY_PROD_PROJECT_ID, deployTargetBlockers, resolveAppHostingHost } from "../config/deployTarget";
+import { resolveDeployTarget, realDeployEnabled, productionDeployEnabled, DEPLOY_PROD_PROJECT_ID, deployTargetBlockers, resolveAppHostingHost } from "../config/deployTarget";
 import { buildStableBaseline, resolveProductionBaselineIdentity } from "./DeployBaselineService";
 import { resolveAppHostingVerifyConfig } from "./DeployBuildSourceService";
 import { evaluatePreDeployGate } from "./DeployPrepublishGate";
@@ -554,7 +554,6 @@ export async function buildDeployState(
       expectedDomain: resolveAppHostingHost(deployTarget),
     },
     realDeployEnabled: realDeployEnabled(),
-    deployDispatchEnabled: deployDispatchEnabled(),
     productionDeployEnabled: productionDeployEnabled(),
     dataEnvironment,
     gate,

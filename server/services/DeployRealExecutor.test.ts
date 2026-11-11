@@ -29,14 +29,6 @@ import {
 import { resolveFirebaseCommand } from "./DeployToolsService";
 import { clearDeployAuth, __test_setDeployCredentials } from "./deployAuth";
 
-// Synthetic tokens are assembled at runtime so this test file never contains a
-// literal secret-shaped string. The deploy secret scan must keep rejecting real
-// keys; only the source-level fixture is split, and the redaction assertions
-// still exercise the exact same values.
-const FAKE_GOOGLE_KEY = ["AIza", "SyAbcdefghijklmnopqrstuvwxyz1234567890"].join("");
-const FAKE_GITHUB_TOKEN = ["ghp", "_", "abcdefghijklmnopqrstuvwxyz1234567890"].join("");
-const FAKE_GOOGLE_KEY_RAW = ["AIza", "SyRawKey123456789012345678901234567890"].join("");
-
 const COMMIT = "c".repeat(40);
 const LOCATION = "us-central1";
 const GH_ACTIONS_URL =
@@ -160,13 +152,11 @@ function executor(
   target: DeployTarget = devTarget(),
   enabled = true,
   production = false,
-  dispatch = true,
 ) {
   return new RealDeployExecutor({
     resolveTarget: () => target,
     dependencies: deps,
     realDeployEnabled: () => enabled,
-    deployDispatchEnabled: () => dispatch,
     productionDeployEnabled: () => production,
   });
 }
@@ -588,7 +578,7 @@ test("publish failure redacts potential secrets and tokens from stderr", async (
   const { deps } = fakeDeps({
     rolloutExit: 1,
     rolloutStderr:
-      "Error: " + FAKE_GOOGLE_KEY + " invalid, " + FAKE_GITHUB_TOKEN + " denied",
+      "Error: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890 invalid, ghp_abcdefghijklmnopqrstuvwxyz1234567890 denied",
   });
   const outcome = await cliPublish(deps);
   assert.ok(outcome.detail.includes("***REDACTED***"), "secrets should be redacted");
@@ -610,9 +600,7 @@ test("publish failure retains diagnostic stderr after secret redaction", async (
   const { deps } = fakeDeps({
     rolloutExit: 1,
     rolloutStderr:
-      "Error: Failed to create rollout: backend rwqan not found in project rwqan-757. Token: " +
-      FAKE_GOOGLE_KEY +
-      ".",
+      "Error: Failed to create rollout: backend rwqan not found in project rwqan-757. Token: AIzaSyAbcdefghijklmnopqrstuvwxyz1234567890.",
   });
   const outcome = await cliPublish(deps);
   assert.equal(outcome.deployed, false);
@@ -644,7 +632,7 @@ test("publish failure does not leak raw secrets in detail", async () => {
   const { deps } = fakeDeps({
     rolloutExit: 1,
     rolloutStderr:
-      "raw sensitive line that should not appear verbatim " + FAKE_GOOGLE_KEY_RAW,
+      "raw sensitive line that should not appear verbatim AIzaSyRawKey123456789012345678901234567890",
   });
   const outcome = await cliPublish(deps);
   // Diagnostic text is retained (not hidden behind generic fallback):
