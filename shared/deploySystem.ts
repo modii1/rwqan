@@ -267,6 +267,18 @@ export interface DeploySyncPreflight {
   preparedCount: number;
   /** Opaque token binding this confirmation to the current Git state. */
   token: string;
+  /** Three-way base used for this plan (the last synced TEST commit). */
+  baseSha?: string;
+  /** Where the base came from: recorded sync trailer, last sync commit or merge-base. */
+  baseSource?: "trailer" | "last-sync" | "merge-base";
+  /** Present only when the base is an approximation. */
+  baseWarning?: string | null;
+  /** Files that will be transferred or auto-merged (approved code only). */
+  files?: string[];
+  /** Files that need a human decision; safe files still proceed. */
+  conflicts?: Array<{ path: string; reason: string }>;
+  /** TRUE when some files are blocked but the rest can still be synced. */
+  partial?: boolean;
 }
 
 /** Read-only review of local changes before a commit/push is approved. */

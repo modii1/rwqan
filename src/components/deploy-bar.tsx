@@ -876,6 +876,17 @@ export function DeployBar() {
         });
         return;
       }
+      const conflictNotice =
+        (preflight.conflicts?.length ?? 0) > 0
+          ? `\n\n⚠️ لن تُنقل ${preflight.conflicts!.length} ملف لتعارض حقيقي (لن يتوقف نقل الباقي):\n` +
+            preflight.conflicts!
+              .slice(0, 5)
+              .map((entry) => `• ${entry.path}\n  ${entry.reason}`)
+              .join("\n") +
+            (preflight.conflicts!.length > 5
+              ? `\n… و${preflight.conflicts!.length - 5} ملفًا آخر`
+              : "")
+          : "";
       const confirmationMessage = preflight.prepared
         ? "استئناف مزامنة LIVE مُجهّزة مسبقًا؟\n\n" +
           `الملفات المُجهّزة: ${preflight.preparedCount} (` +
@@ -891,7 +902,8 @@ export function DeployBar() {
           `رسالة Commit: ${preflight.commitMessage}\n\n` +
           "سيتم تطبيق التحديثات البرمجية فقط، ثم تشغيل الفحوص والاختبارات والبناء في مساحة LIVE، " +
           "ثم إنشاء Commit على main وPush إلى GitHub.\n" +
-          "لن يتم نقل الأسرار أو إعدادات البيئات أو التغييرات غير المعتمدة.";
+          "لن يتم نقل الأسرار أو إعدادات البيئات أو التغييرات غير المعتمدة." +
+          conflictNotice;
       const confirmed = window.confirm(confirmationMessage);
       if (!confirmed) {
         toast({

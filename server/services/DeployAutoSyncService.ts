@@ -1,7 +1,7 @@
 import { exec, execFile, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -37,16 +37,25 @@ import {
  *
  * LIVE:
  *   discover APPROVED commits on the TEST branch -> filter to code paths only
- *   (no secrets, env config, docs, reports, artifacts) -> apply the filtered
- *   patch to the existing isolated LIVE worktree -> run typecheck + tests +
- *   build -> commit on main -> push -> verify.
+ *   (no secrets, env config, docs, reports, artifacts) -> classify every file
+ *   against the LAST SUCCESSFUL SYNC (recorded as a `Sync-Test-SHA:` trailer on
+ *   the LIVE sync commit, never the raw fork point) -> transfer TEST-only
+ *   files, auto-merge non-overlapping edits, and leave only real same-line
+ *   overlaps for review -> run typecheck + tests + build -> commit on main ->
+ *   push -> verify.
+ *
+ * Why it never re-conflicts:
+ *   - the three-way base is the last synced TEST commit, not `merge-base`;
+ *   - BOM and CRLF/LF differences are canonicalised, so they are never changes;
+ *   - safe files are always transferred, even when another file needs review;
+ *   - only a genuine overlap of the same lines is reported as a conflict.
  *
  * Hard rules:
  *   - Never creates worktrees/folders.
  *   - Never force-pushes, resets, cleans, stashes, merges, or rebases.
  *   - Never moves uncommitted TEST changes to LIVE.
  *   - Never touches the TEST working tree during a LIVE sync.
- *   - On a failed check/conflict, reverses only the patch it applied.
+ *   - On a failed check/commit, restores only the files it wrote.
  */
 
 const execFileAsync = promisify(execFile);
@@ -55,6 +64,12 @@ const GIT_TIMEOUT_MS = 20_000;
 const GIT_MAX_BUFFER = 1024 * 1024 * 64;
 const CHECK_TIMEOUT_MS = 10 * 60_000;
 const BUILD_TIMEOUT_MS = 20 * 60_000;
+
+/**
+ * Trailer written into LIVE sync commits. It is the ONLY place the sync
+ * remembers its baseline: no ledger file, no extra branch, no extra ref.
+ */
+const SYNC_BASELINE_TRAILER = "Sync-Test-SHA";
 
 export interface DeploySyncCheckResult {
   ok: boolean;
@@ -77,6 +92,7 @@ export interface DeployAutoSyncDependencies {
   push(args: string[], cwd: string): Promise<string>;
   lsRemote(args: string[], cwd: string): Promise<string>;
   readTextFile(absolutePath: string): Promise<string | null>;
+  writeTextFile(absolutePath: string, content: string): Promise<void>;
   checks: DeploySyncChecks;
 }
 
@@ -345,10 +361,14 @@ const DEFAULT_DEPENDENCIES: DeployAutoSyncDependencies = {
   },
   readTextFile: async (absolutePath) => {
     try {
-      return (await readFile(absolutePath, "utf8")).slice(0, 1024 * 1024);
+      return await readFile(absolutePath, "utf8");
     } catch {
       return null;
     }
+  },
+  writeTextFile: async (absolutePath, content) => {
+    mkdirSync(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, content, "utf8");
   },
   checks: DEFAULT_CHECKS,
 };
@@ -464,16 +484,22 @@ function countsForEntries(entries: NameStatusEntry[]): DeployUploadChangeCounts 
 
 function buildSyncMessage(
   environment: DeployEnvironment,
-  counts: DeployUploadChangeCounts
+  counts: DeployUploadChangeCounts,
+  syncedTestSha: string | null = null
 ): string {
   const parts: string[] = [];
   if (counts.modified > 0) parts.push(`${counts.modified} معدّل`);
   if (counts.added > 0) parts.push(`${counts.added} جديد`);
   if (counts.deleted > 0) parts.push(`${counts.deleted} محذوف`);
   if (counts.renamed > 0) parts.push(`${counts.renamed} معاد تسميته`);
-  return `sync(${environment}): ${counts.total} ملف${
+  const summary = `sync(${environment}): ${counts.total} ملف${
     parts.length > 0 ? ` — ${parts.join("، ")}` : ""
   }`;
+  // The trailer is the durable "last successful sync" reference. It is written
+  // only when the whole TEST delta was transferred (no leftover conflicts).
+  return syncedTestSha
+    ? `${summary}\n\n${SYNC_BASELINE_TRAILER}: ${syncedTestSha}`
+    : summary;
 }
 
 function commitUrlFor(remote: string, sha: string): string | null {
@@ -810,6 +836,21 @@ function normalizeText(value: string): string {
   return withoutBom.replace(/\r\n/g, "\n");
 }
 
+/**
+ * Canonical text used for ALL sync comparisons and writes.
+ *
+ * BOM and CRLF/CR differences are environmental noise, not code changes, so
+ * they must never produce a conflict. Writes use this form (LF, no BOM) so the
+ * LIVE tree stays stable across repeated syncs.
+ */
+function canonicalContent(value: string): string {
+  return normalizeText(value).replace(/\r/g, "\n");
+}
+
+function isBinaryContent(value: string): boolean {
+  return value.includes("\0");
+}
+
 function lineMultiset(value: string): Map<string, number> {
   const map = new Map<string, number>();
   for (const line of normalizeText(value).split("\n")) {
@@ -831,24 +872,425 @@ function mergeHasConflicts(
   baseContent: string,
   testContent: string
 ): boolean {
+  return mergeThreeWay(current, baseContent, testContent).conflict;
+}
+
+interface ThreeWayMerge {
+  conflict: boolean;
+  content: string;
+}
+
+/**
+ * Real three-way merge on canonical text (BOM stripped, CRLF/CR compared as LF).
+ * Returns conflict-marked content for review; the caller MUST NOT write it.
+ */
+function mergeThreeWay(
+  current: string,
+  baseContent: string,
+  testContent: string
+): ThreeWayMerge {
   const dir = mkdtempSync(path.join(tmpdir(), "rwqan-sync-merge-"));
   try {
     const baseFile = path.join(dir, "base");
     const currentFile = path.join(dir, "current");
     const testFile = path.join(dir, "test");
-    writeFileSync(baseFile, normalizeText(baseContent), "utf8");
-    writeFileSync(currentFile, normalizeText(current), "utf8");
-    writeFileSync(testFile, normalizeText(testContent), "utf8");
+    writeFileSync(baseFile, canonicalContent(baseContent), "utf8");
+    writeFileSync(currentFile, canonicalContent(current), "utf8");
+    writeFileSync(testFile, canonicalContent(testContent), "utf8");
     const merged = spawnSync(
       "git",
       ["merge-file", "-p", "--diff3", currentFile, baseFile, testFile],
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
     );
-    return /^<<<<<<< /m.test(merged.stdout ?? "");
+    const content = merged.stdout ?? "";
+    return {
+      conflict: merged.status !== 0 || /^<<<<<<< /m.test(content),
+      content,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// ── sync baseline (last successful TEST→LIVE sync) ───────────────────────────
+
+type SyncBaselineSource = "trailer" | "last-sync" | "merge-base";
+
+interface SyncBaseline {
+  baseSha: string;
+  source: SyncBaselineSource;
+  warning: string | null;
+}
+
+/**
+ * Resolve the three-way base: the state whose content LIVE already contains.
+ *
+ * 1. newest LIVE commit carrying `Sync-Test-SHA:` (exact TEST commit)
+ * 2. newest LIVE `sync(LIVE):` commit (its tree IS the last exported TEST state)
+ * 3. `git merge-base main TEST` with an explicit warning
+ *
+ * Options 1 and 2 are content-equivalent for synced files. Neither is a new
+ * file, branch, ref or ledger: they are already in the repository history.
+ */
+async function resolveLiveBaseline(
+  liveCwd: string,
+  testCwd: string,
+  liveBranch: string,
+  testBranch: string,
+  deps: DeployAutoSyncDependencies
+): Promise<SyncBaseline> {
+  const log = await deps
+    .run(["log", "-n", "80", "--format=%H%x1f%B%x1e"], liveCwd)
+    .catch(() => "");
+  // A commit that was not pushed yet must not advance the baseline.
+  const remoteRef = `origin/${liveBranch}`;
+  const hasRemoteRef = await deps
+    .run(["rev-parse", "--verify", remoteRef], liveCwd)
+    .then(() => true)
+    .catch(() => false);
+
+  let lastSyncCommit: string | null = null;
+  const chunks = log.split("\x1e");
+  for (const chunk of chunks) {
+    const separator = chunk.indexOf("\x1f");
+    if (separator < 0) continue;
+    const message = chunk.slice(separator + 1);
+    const match = message.match(
+      new RegExp(`^${SYNC_BASELINE_TRAILER}:\\s*([0-9a-f]{40})\\s*$`, "m")
+    );
+    if (!match) continue;
+    const candidate = match[1];
+    const exists = await deps
+      .run(["cat-file", "-e", `${candidate}^{commit}`], testCwd)
+      .then(() => true)
+      .catch(() => false);
+    if (!exists) continue;
+    const isAncestor = await deps
+      .run(["merge-base", "--is-ancestor", candidate, testBranch], testCwd)
+      .then(() => true)
+      .catch(() => false);
+    if (!isAncestor) continue;
+    if (hasRemoteRef) {
+      const pushed = await deps
+        .run(["merge-base", "--is-ancestor", `${candidate}^{commit}`, remoteRef], liveCwd)
+        .then(() => true)
+        .catch(() => false);
+      if (!pushed) continue;
+    }
+    return { baseSha: candidate, source: "trailer", warning: null };
+  }
+
+  for (const chunk of chunks) {
+    const separator = chunk.indexOf("\x1f");
+    if (separator < 0) continue;
+    const sha = chunk.slice(0, separator).trim();
+    const subject = chunk.slice(separator + 1).split("\n")[0] ?? "";
+    if (!/^sync\(LIVE\):/.test(subject)) continue;
+    if (!sha) continue;
+    if (hasRemoteRef) {
+      const pushed = await deps
+        .run(["merge-base", "--is-ancestor", sha, remoteRef], liveCwd)
+        .then(() => true)
+        .catch(() => false);
+      if (!pushed) continue;
+    }
+    lastSyncCommit = sha;
+    break;
+  }
+  if (lastSyncCommit) {
+    return {
+      baseSha: lastSyncCommit,
+      source: "last-sync",
+      warning:
+        "لم يُسجَّل مرجع TEST السابق في commit المزامنة — استُخدم آخر commit مزامنة في LIVE كأساس (مكافئ للمحتوى المُصدَّر).",
+    };
+  }
+
+  const fallback = await deps.run(["merge-base", liveBranch, testBranch], liveCwd);
+  return {
+    baseSha: fallback,
+    source: "merge-base",
+    warning:
+      "لا يوجد مرجع مزامنة سابق — استُخدم merge-base كأساس تقريبي، والتغييرات الآمنة تُصنّف بقواعد الاحتواء.",
+  };
+}
+
+// ── per-file sync plan ───────────────────────────────────────────────────────
+
+/**
+ * LIVE-only security invariants that a TEST transfer must never silently drop.
+ * If LIVE currently enforces one and TEST does not, the file needs a human
+ * decision instead of an automatic transfer.
+ */
+const PROTECTED_LIVE_MARKERS: Array<{
+  file: string;
+  marker: string;
+  label: string;
+}> = [
+  {
+    file: "server/services/DeployPrepublishGate.ts",
+    marker: "DEPLOY_ALLOW_PRODUCTION",
+    label: "شرط DEPLOY_ALLOW_PRODUCTION للنشر الإنتاجي",
+  },
+  {
+    file: "server/services/DeployGhWorkflowService.ts",
+    marker: "HARD SEPARATION",
+    label: "فصل وجهة LIVE الثابتة",
+  },
+];
+
+function protectedInvariantLost(
+  file: string,
+  liveText: string,
+  testText: string
+): string | null {
+  for (const entry of PROTECTED_LIVE_MARKERS) {
+    if (entry.file !== file) continue;
+    if (liveText.includes(entry.marker) && !testText.includes(entry.marker)) {
+      return entry.label;
+    }
+  }
+  return null;
+}
+
+type SyncActionKind = "transfer" | "auto-merge" | "conflict";
+
+interface SyncPlanAction {
+  path: string;
+  kind: SyncActionKind;
+  /** Human-readable Arabic reason, safe to expose to the admin. */
+  reason: string;
+  /** Exact content to write (canonical LF). Absent for conflicts. */
+  content?: string;
+}
+
+interface LivePlan {
+  baseline: SyncBaseline;
+  actions: SyncPlanAction[];
+  transferPaths: string[];
+  mergePaths: string[];
+  conflictPaths: string[];
+  noopPaths: string[];
+}
+
+/**
+ * Classify every approved TEST change against LIVE's current content.
+ *
+ * Safety invariant: no line that exists only in LIVE is ever discarded.
+ *  - BOM/CRLF are canonicalised, so they can never be a "change".
+ *  - If TEST's lines are all present in LIVE, TEST is already there -> no-op.
+ *  - If LIVE's lines are all present in TEST, LIVE has nothing unique -> safe.
+ *  - Anything else is a real three-way merge; only overlapping hunks conflict.
+ */
+async function buildLivePlan(params: {
+  testWorkspace: DeployWorkspaceInfo;
+  liveWorkspace: DeployWorkspaceInfo;
+  testBranch: string;
+  baseSha: string;
+  forkBaseSha: string;
+  baseline: SyncBaseline;
+  entries: NameStatusEntry[];
+  deps: DeployAutoSyncDependencies;
+}): Promise<LivePlan> {
+  const {
+    testWorkspace,
+    liveWorkspace,
+    testBranch,
+    baseSha,
+    forkBaseSha,
+    baseline,
+    entries,
+    deps,
+  } = params;
+  const actions: SyncPlanAction[] = [];
+  const transferPaths: string[] = [];
+  const mergePaths: string[] = [];
+  const conflictPaths: string[] = [];
+  const noopPaths: string[] = [];
+
+  for (const entry of entries) {
+    const file = entry.displayPath;
+
+    if (entry.kind === "deleted") {
+      const liveContent = await deps.readTextFile(path.join(liveWorkspace.path, file));
+      // A file that never existed on TEST is a LIVE-only file, not a deletion.
+      const existedOnTest = await deps
+        .run(["cat-file", "-e", `${forkBaseSha}:${file}`], testWorkspace.path)
+        .then(() => true)
+        .catch(() => false);
+      if (!existedOnTest || liveContent === null) {
+        noopPaths.push(file);
+        continue;
+      }
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "حذف ملف في TEST — يتطلب موافقة صريحة قبل حذفه من LIVE.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+    if (entry.kind === "renamed") {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "إعادة تسمية/نقل ملف — يتطلب مراجعة يدوية.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+
+    const testContent = await deps
+      .showFile(testBranch, file, testWorkspace.path)
+      .catch(() => null);
+    if (testContent === null) {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "تعذّرت قراءة محتوى TEST.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+    const baseContent = await deps
+      .showFile(baseSha, file, testWorkspace.path)
+      .catch(() => null);
+    const liveContent = await deps.readTextFile(path.join(liveWorkspace.path, file));
+
+    if (isBinaryContent(testContent) || (liveContent && isBinaryContent(liveContent))) {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "ملف ثنائي — لا يمكن دمجه تلقائيًا.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+
+    const testText = canonicalContent(testContent);
+    const liveText = liveContent === null ? null : canonicalContent(liveContent);
+    const baseText = baseContent === null ? null : canonicalContent(baseContent);
+
+    // 1) LIVE is already identical to TEST (line endings/BOM ignored).
+    if (liveText !== null && liveText === testText) {
+      noopPaths.push(file);
+      continue;
+    }
+    // 2) Every TEST line is already in LIVE: TEST is already transferred.
+    if (liveText !== null && containsAllLines(liveText, testText)) {
+      noopPaths.push(file);
+      continue;
+    }
+    // 3) TEST never touched this file since the baseline: LIVE owns it.
+    if (baseText !== null && baseText === testText) {
+      noopPaths.push(file);
+      continue;
+    }
+    // 4) New file on TEST.
+    if (liveText === null && baseText === null) {
+      actions.push({
+        path: file,
+        kind: "transfer",
+        reason: "ملف جديد في TEST — يُنقل كما هو.",
+        content: testContent,
+      });
+      transferPaths.push(file);
+      continue;
+    }
+    // 5) LIVE deleted a file TEST still has: never recreate silently.
+    if (liveText === null) {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "الملف محذوف في LIVE — لن يُعاد إنشاؤه دون قرار صريح.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+    // 6) Added on both sides with different content.
+    if (baseText === null) {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason: "أُضيف الملف في TEST وLIVE بمحتوى مختلف — يحتاج قرارًا.",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+    // 7) Every LIVE line is still present in TEST: nothing LIVE-specific is lost.
+    if (containsAllLines(testText, liveText)) {
+      const lostInvariant = protectedInvariantLost(file, liveText, testText);
+      if (lostInvariant) {
+        actions.push({
+          path: file,
+          kind: "conflict",
+          reason: `نقل TEST سيزيل ${lostInvariant} الموجود في LIVE — يتطلب موافقة صريحة.`,
+        });
+        conflictPaths.push(file);
+        continue;
+      }
+      actions.push({
+        path: file,
+        kind: "transfer",
+        reason: "TEST فقط تغيّر — نقل آمن دون لمس أي تغيير في LIVE.",
+        content: testContent,
+      });
+      transferPaths.push(file);
+      continue;
+    }
+    // 8) LIVE is byte-identical to the baseline: a clean transfer.
+    if (liveText === baseText) {
+      const lostInvariant = protectedInvariantLost(file, liveText, testText);
+      if (lostInvariant) {
+        actions.push({
+          path: file,
+          kind: "conflict",
+          reason: `نقل TEST سيزيل ${lostInvariant} الموجود في LIVE — يتطلب موافقة صريحة.`,
+        });
+        conflictPaths.push(file);
+        continue;
+      }
+      actions.push({
+        path: file,
+        kind: "transfer",
+        reason: "TEST فقط تغيّر — نقل آمن دون لمس أي تغيير في LIVE.",
+        content: testContent,
+      });
+      transferPaths.push(file);
+      continue;
+    }
+
+    // 9) Both sides changed: attempt a real three-way merge.
+    const merged = mergeThreeWay(liveText, baseText, testText);
+    if (merged.conflict) {
+      actions.push({
+        path: file,
+        kind: "conflict",
+        reason:
+          "TEST وLIVE غيّرا الأسطر نفسها — تعارض حقيقي يحتاج قرارًا (لن يُلمس الملف).",
+      });
+      conflictPaths.push(file);
+      continue;
+    }
+    actions.push({
+      path: file,
+      kind: "auto-merge",
+      reason: "تعديلات متباعدة في الملف نفسه — تُدمج تلقائيًا مع الحفاظ على تعديلات LIVE.",
+      content: merged.content,
+    });
+    mergePaths.push(file);
+  }
+
+  return {
+    baseline,
+    actions,
+    transferPaths,
+    mergePaths,
+    conflictPaths,
+    noopPaths,
+  };
+}
+
 
 function countsForPaths(
   changes: Array<{ path: string; kind: DeployUploadChangeKind }>,
@@ -1084,11 +1526,17 @@ interface LiveDiscovery {
   testSha: string;
   liveHead: string;
   baseSha: string;
+  baselineSource: SyncBaselineSource;
+  baselineWarning: string | null;
   approvedEntries: NameStatusEntry[];
   approvedPaths: string[];
   excludedCount: number;
   counts: DeployUploadChangeCounts;
-  patch: string;
+  actions: SyncPlanAction[];
+  conflictPaths: string[];
+  noopPaths: string[];
+  /** TRUE when every TEST change was transferred/merged with no leftover conflict. */
+  fullSync: boolean;
   token: string;
   commitMessage: string;
   blockedReason: string | null;
@@ -1113,11 +1561,16 @@ async function discoverLive(
     testSha: "",
     liveHead: "",
     baseSha: "",
+    baselineSource: "merge-base",
+    baselineWarning: null,
     approvedEntries: [],
     approvedPaths: [],
     excludedCount: 0,
     counts: countsForEntries([]),
-    patch: "",
+    actions: [],
+    conflictPaths: [],
+    noopPaths: [],
+    fullSync: false,
     token: "",
     commitMessage: "",
     blockedReason: null,
@@ -1136,7 +1589,22 @@ async function discoverLive(
 
   const testSha = await deps.run(["rev-parse", testBranch], testCwd);
   const liveHead = await deps.run(["rev-parse", "HEAD"], liveCwd);
-  const baseSha = await deps.run(["merge-base", liveBranch, testBranch], liveCwd);
+  // Base = the TEST commit LIVE already contains (recorded by the previous
+  // successful sync commit), never the raw fork point.
+  const baseline = await resolveLiveBaseline(
+    liveCwd,
+    testCwd,
+    liveBranch,
+    testBranch,
+    deps
+  );
+  const baseSha = baseline.baseSha;
+  // Always available (and always an ancestor of TEST) — used only to tell a
+  // TEST deletion apart from a file that never existed on TEST.
+  const forkBaseSha = await deps.run(
+    ["merge-base", liveBranch, testBranch],
+    liveCwd
+  );
 
   const nameStatus = await deps.run(
     ["diff", "--name-status", `${baseSha}..${testBranch}`],
@@ -1147,10 +1615,6 @@ async function discoverLive(
     entry.paths.every((filePath) => isApprovedLiveSyncPath(filePath))
   );
   const excludedCount = entries.length - approvedEntries.length;
-  const approvedPaths = Array.from(
-    new Set(approvedEntries.flatMap((entry) => entry.paths))
-  );
-  const counts = countsForEntries(approvedEntries);
 
   if (approvedEntries.length === 0) {
     return {
@@ -1158,10 +1622,13 @@ async function discoverLive(
       testSha,
       liveHead,
       baseSha,
+      baselineSource: baseline.source,
+      baselineWarning: baseline.warning,
       excludedCount,
-      counts,
       blockedReason:
-        "لا توجد تحديثات برمجية معتمدة على TEST تستحق النقل إلى LIVE.",
+        baseline.source === "trailer"
+          ? "لا توجد تحديثات جديدة منذ آخر مزامنة ناجحة."
+          : "لا توجد تحديثات برمجية معتمدة على TEST تستحق النقل إلى LIVE.",
     };
   }
 
@@ -1185,6 +1652,8 @@ async function discoverLive(
         testSha,
         liveHead,
         baseSha,
+        baselineSource: baseline.source,
+        baselineWarning: baseline.warning,
         counts: prepared.counts,
         blockedReason: prepared.blockedReason,
       };
@@ -1194,6 +1663,8 @@ async function discoverLive(
       testSha,
       liveHead,
       baseSha,
+      baselineSource: baseline.source,
+      baselineWarning: baseline.warning,
       counts: prepared.counts,
       token: prepared.token,
       commitMessage: buildSyncMessage("LIVE", prepared.counts),
@@ -1211,110 +1682,97 @@ async function discoverLive(
       testSha,
       liveHead,
       baseSha,
+      baselineSource: baseline.source,
+      baselineWarning: baseline.warning,
       approvedEntries,
-      approvedPaths,
       excludedCount,
-      counts,
+      counts: countsForEntries(approvedEntries),
       blockedReason:
         "مساحة LIVE لا تحتوي على node_modules — لن يتم تثبيتها تلقائيًا. ثبّت التبعيات في مساحة LIVE يدويًا ثم أعد المحاولة.",
     };
   }
 
-  // Generate a patch containing ONLY approved paths. `--full-index` is required
-  // so `git apply --3way` can perform a real three-way merge when both TEST and
-  // LIVE changed the same file since the merge base.
-  const chunks: string[] = [];
-  for (let index = 0; index < approvedPaths.length; index += 40) {
-    const chunk = approvedPaths.slice(index, index + 40);
-    const part = await deps.run(
-      [
-        "diff",
-        "--binary",
-        "--full-index",
-        `${baseSha}..${testBranch}`,
-        "--",
-        ...chunk,
-      ],
-      testCwd
-    );
-    if (part) chunks.push(part);
-  }
-  const patch = chunks.length > 0 ? `${chunks.join("\n")}\n` : "";
-  if (!patch.trim()) {
-    return {
-      ...empty,
-      testSha,
-      liveHead,
-      baseSha,
-      approvedEntries,
-      approvedPaths,
-      excludedCount,
-      counts,
-      blockedReason: "لم يُنتج أي فرق قابل للتطبيق على LIVE.",
-    };
-  }
+  // Per-file, change-based plan. Line-ending/BOM noise is canonicalised away,
+  // so only a genuine overlap in the same lines can be reported as a conflict.
+  const plan = await buildLivePlan({
+    testWorkspace,
+    liveWorkspace,
+    testBranch,
+    baseSha,
+    forkBaseSha,
+    baseline,
+    entries: approvedEntries,
+    deps,
+  });
 
-  // `--whitespace=nowarn` suppresses trailing-whitespace warnings without
-  // modifying content. `--3way` merges files changed on both branches. The
-  // check exits 0 even when it would produce conflicts, so parse its output.
-  let checkOutput = "";
-  try {
-    checkOutput = await deps.runWithInput(
-      ["apply", "--check", "--3way", "--whitespace=nowarn", "-"],
-      liveCwd,
-      patch
-    );
-  } catch (error) {
-    return {
-      ...empty,
-      testSha,
-      liveHead,
-      baseSha,
-      approvedEntries,
-      approvedPaths,
-      excludedCount,
-      counts,
-      blockedReason: `تعارض حقيقي عند تطبيق تحديثات TEST على LIVE: ${
-        error instanceof Error ? shortDetail(error.message) : "تعذّر التحقق"
-      }`,
-    };
-  }
-
-  const conflicts = parseApplyConflicts(checkOutput);
-  if (conflicts.length > 0) {
-    return {
-      ...empty,
-      testSha,
-      liveHead,
-      baseSha,
-      approvedEntries,
-      approvedPaths,
-      excludedCount,
-      counts,
-      blockedReason: `تعارض حقيقي في ${conflicts.length} ملف: ${conflicts
-        .slice(0, 6)
-        .join(", ")}${conflicts.length > 6 ? "…" : ""} — لم يُطبَّق أي تغيير.`,
-    };
-  }
-
-  const token = hash(
-    `${testSha}:${liveHead}:${baseSha}:${approvedPaths.slice().sort().join("\n")}:${hash(patch)}`
+  const plannedPaths = new Set([
+    ...plan.transferPaths,
+    ...plan.mergePaths,
+  ]);
+  const approvedPaths = Array.from(plannedPaths);
+  const actionableEntries = approvedEntries.filter((entry) =>
+    plannedPaths.has(entry.displayPath)
   );
+  const counts = countsForEntries(actionableEntries);
+  const fullSync = plan.conflictPaths.length === 0;
+
+  if (approvedPaths.length === 0) {
+    const conflicts = plan.actions.filter((action) => action.kind === "conflict");
+    return {
+      ...empty,
+      testSha,
+      liveHead,
+      baseSha,
+      baselineSource: baseline.source,
+      baselineWarning: baseline.warning,
+      approvedEntries,
+      excludedCount,
+      counts: countsForEntries(approvedEntries),
+      actions: plan.actions,
+      conflictPaths: plan.conflictPaths,
+      noopPaths: plan.noopPaths,
+      blockedReason:
+        conflicts.length > 0
+          ? `تعارض حقيقي في ${conflicts.length} ملف — يحتاج قرارًا قبل النقل: ${conflicts
+              .slice(0, 6)
+              .map((action) => action.path)
+              .join(", ")}${conflicts.length > 6 ? "…" : ""}`
+          : "لا توجد تحديثات جديدة منذ آخر مزامنة ناجحة.",
+    };
+  }
+
+  const contentHashes = plan.actions
+    .filter((action) => action.kind !== "conflict")
+    .map((action) => `${action.path}:${hash(action.content ?? "")}`)
+    .sort()
+    .join("\n");
+  const token = hash(
+    `${testSha}:${liveHead}:${baseSha}:${approvedPaths
+      .slice()
+      .sort()
+      .join("\n")}:${contentHashes}`
+  );
+
   return {
     testSha,
     liveHead,
     baseSha,
+    baselineSource: baseline.source,
+    baselineWarning: baseline.warning,
     approvedEntries,
     approvedPaths,
     excludedCount,
     counts,
-    patch,
+    actions: plan.actions,
+    conflictPaths: plan.conflictPaths,
+    noopPaths: plan.noopPaths,
+    fullSync,
     token,
     prepared: false,
     preparedPaths: [],
     preparedApprovedPaths: [],
     preparedSupportingPaths: [],
-    commitMessage: buildSyncMessage("LIVE", counts),
+    commitMessage: buildSyncMessage("LIVE", counts, fullSync ? testSha : null),
     blockedReason: null,
   };
 }
@@ -1328,13 +1786,16 @@ export async function runLiveSyncPreflight(
     input.liveWorkspace,
     deps
   );
+  const conflicts = discovery.actions
+    .filter((action) => action.kind === "conflict")
+    .map((action) => ({ path: action.path, reason: action.reason }));
   return {
     environment: "LIVE",
     branch: getApprovedUploadBranch("LIVE") ?? "",
     workspace: input.liveWorkspace,
     approvedCount: discovery.prepared
       ? discovery.preparedApprovedPaths.length
-      : discovery.approvedEntries.length,
+      : discovery.approvedPaths.length,
     counts: discovery.counts,
     commitMessage: discovery.commitMessage,
     canSync: discovery.blockedReason === null,
@@ -1343,10 +1804,18 @@ export async function runLiveSyncPreflight(
       discovery.blockedReason ??
       (discovery.prepared
         ? `تم العثور على مزامنة سابقة مُجهّزة (${discovery.preparedPaths.length} ملفًا) — سيتم استئنافها دون إعادة تطبيق.`
-        : `${discovery.counts.total} ملف برمجي معتمد من TEST (استُثني ${discovery.excludedCount}).`),
+        : conflicts.length > 0
+          ? `سيُنقل ${discovery.counts.total} ملف، و${conflicts.length} ملف يحتاج مراجعة (لن يتوقف نقل الباقي).`
+          : `${discovery.counts.total} ملف برمجي معتمد من TEST (استُثني ${discovery.excludedCount}).`),
     prepared: discovery.prepared,
     preparedCount: discovery.prepared ? discovery.preparedPaths.length : 0,
     token: discovery.token,
+    baseSha: discovery.baseSha,
+    baseSource: discovery.baselineSource,
+    baseWarning: discovery.baselineWarning,
+    files: discovery.approvedPaths,
+    conflicts,
+    partial: !discovery.fullSync,
   };
 }
 
@@ -1452,17 +1921,46 @@ export async function runLiveSync(
       "ok",
       discovery.prepared
         ? `تم التعرف على مزامنة سابقة مُجهّزة (${discovery.preparedPaths.length} ملفًا) — لن تُعاد.`
-        : `${discovery.counts.total} ملف برمجي معتمد من TEST.`
+        : discovery.conflictPaths.length > 0
+          ? `${discovery.counts.total} ملف جاهز للنقل، و${discovery.conflictPaths.length} ملف يحتاج مراجعة (لن يتوقف الباقي).`
+          : `${discovery.counts.total} ملف برمجي معتمد من TEST.`
     )
   );
 
+  // Files we wrote in this request, with their exact previous content so a
+  // failed check/commit restores LIVE byte-for-byte (no reset/checkout/stash).
+  const backups = new Map<string, string | null>();
+  const restoreBackups = async () => {
+    for (const [file, previous] of backups) {
+      const absolute = path.join(liveCwd, file);
+      try {
+        if (previous === null) {
+          await deps.run(["rm", "-f", "--", file], liveCwd);
+        } else {
+          await deps.writeTextFile(absolute, previous);
+        }
+      } catch {
+        // Best-effort restoration; the original failure is reported.
+      }
+    }
+    backups.clear();
+  };
+
   if (!discovery.prepared) {
     try {
-      await deps.runWithInput(["apply", "--check", "--3way", "--whitespace=nowarn", "-"], liveCwd, discovery.patch);
-      await deps.runWithInput(["apply", "--3way", "--whitespace=nowarn", "-"], liveCwd, discovery.patch);
+      for (const action of discovery.actions) {
+        if (action.kind === "conflict" || action.content === undefined) continue;
+        const absolute = path.join(liveCwd, action.path);
+        backups.set(
+          action.path,
+          await deps.readTextFile(absolute).catch(() => null)
+        );
+        await deps.writeTextFile(absolute, action.content);
+      }
     } catch (error) {
-      const message = `تعارض عند تطبيق تحديثات TEST على LIVE: ${
-        error instanceof Error ? shortDetail(error.message) : "تعذّر التطبيق"
+      await restoreBackups();
+      const message = `تعذّر كتابة ملفات المزامنة في LIVE: ${
+        error instanceof Error ? shortDetail(error.message) : "خطأ غير معروف"
       }`;
       stages.push(stage("changes", "failed", message));
       return finalize({
@@ -1479,7 +1977,7 @@ export async function runLiveSync(
     }
   }
 
-  // All checks run against the PATCHED LIVE working tree.
+  // All checks run against the UPDATED LIVE working tree.
   const typecheck: DeploySyncCheckResult = await deps.checks.typecheck(liveCwd);
   const tests: DeploySyncCheckResult = typecheck.ok
     ? await deps.checks.tests(liveCwd)
@@ -1494,11 +1992,7 @@ export async function runLiveSync(
     const failedStage: DeployUploadStage =
       typecheck.ok && tests.ok ? "build" : "checks";
     const label = failedStage === "build" ? "فشل البناء في LIVE" : "فشل الفحص";
-    try {
-      await deps.runWithInput(["apply", "-R", "--3way", "--whitespace=nowarn", "-"], liveCwd, discovery.patch);
-    } catch {
-      // Best-effort reversal; the failure is reported below.
-    }
+    await restoreBackups();
     const message = `${label}: ${failed.detail}`;
     stages.push(stage(failedStage, "failed", message));
     return finalize({
@@ -1529,15 +2023,11 @@ export async function runLiveSync(
       deps
     );
   } catch (error) {
-    // No commit was created: reverse only a patch WE applied in this request.
-    // In prepared mode there is no patch to reverse; the prepared worktree must
+    // No commit was created: restore every file we wrote in this request.
+    // In prepared mode the worktree belongs to the previous attempt and must
     // be preserved exactly as it is.
     if (!discovery.prepared) {
-      try {
-        await deps.runWithInput(["apply", "-R", "--3way", "--whitespace=nowarn", "-"], liveCwd, discovery.patch);
-      } catch {
-        // Best-effort reversal; the failure is reported below.
-      }
+      await restoreBackups();
     }
     const message = `فشل إنشاء Commit: ${
       error instanceof Error ? shortDetail(error.message) : "خطأ غير معروف"
@@ -1594,6 +2084,10 @@ export async function runLiveSync(
       : discovery.counts.total,
     detail: discovery.prepared
       ? `تم استئناف مزامنة LIVE المُجهّزة (${discovery.preparedPaths.length} ملفًا) ورفعها إلى main.`
-      : `تمت مزامنة ${discovery.counts.total} ملف برمجي معتمد إلى main.`,
+      : discovery.conflictPaths.length > 0
+        ? `تمت مزامنة ${discovery.counts.total} ملف آمن إلى main. لم يُنقل ${discovery.conflictPaths.length} ملف لتعارض حقيقي: ${discovery.conflictPaths
+            .slice(0, 5)
+            .join(", ")}${discovery.conflictPaths.length > 5 ? "…" : ""}.`
+        : `تمت مزامنة ${discovery.counts.total} ملف برمجي معتمد إلى main.`,
   });
 }

@@ -33,14 +33,24 @@ interface SyncEnvOptions {
   liveTestsOk?: boolean;
   liveBuildOk?: boolean;
   liveBuildLog?: string;
-  applyCheckFails?: boolean;
-  applyCheckConflicts?: string[];
-  applyCheckOutput?: string;
   pushFails?: boolean;
   verifyMismatch?: boolean;
   ahead?: string;
   nodeModules?: boolean;
-  files?: Record<string, string>;
+  /** Exact content at the recorded baseline (per path). */
+  base?: Record<string, string>;
+  /** Exact content on the TEST branch (per path). */
+  test?: Record<string, string>;
+  /** Exact content in the LIVE working tree (per path). */
+  live?: Record<string, string>;
+  /** Simulated `git log` output (used to discover the baseline trailer). */
+  log?: string;
+  /** Extra SHAs accepted as the recorded baseline. */
+  baseShas?: string[];
+  /** SHA written in the fake `Sync-Test-SHA:` trailer (defaults to TEST_SHA). */
+  trailerSha?: string;
+  /** Fail writing this path (simulates a disk error). */
+  failWritePath?: string;
 }
 
 function makeSyncEnv(options: SyncEnvOptions = {}) {
@@ -72,14 +82,19 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
   let liveHead = LIVE_SHA;
   let testRemote = TEST_REMOTE_SHA;
   let liveRemote = LIVE_SHA;
+  const baseShas = new Set([BASE_SHA, ...(options.baseShas ?? [])]);
+  const liveFiles: Record<string, string> = { ...(options.live ?? {}) };
   const calls = {
     run: [] as string[][],
     commit: [] as string[][],
+    commitMessages: [] as string[],
     push: [] as string[][],
-    apply: [] as string[],
-    reverse: [] as string[],
+    writes: [] as Array<{ path: string; content: string }>,
     checks: [] as string[],
   };
+
+  const relative = (absolutePath: string) =>
+    absolutePath.replace(/\\/g, "/").replace(`${root.replace(/\\/g, "/")}/`, "").replace(/^live\//, "");
 
   const deps = {
     run: async (args: string[], cwd: string) => {
@@ -91,12 +106,18 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       if (args[0] === "rev-parse" && args[1] === "HEAD") {
         return inTest ? testHead : liveHead;
       }
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        return liveRemote;
+      }
       if (
         args[0] === "rev-parse" &&
         args[1] === APPROVED_UPLOAD_BRANCH_TEST
       ) {
         return TEST_SHA;
       }
+      if (args[0] === "log") return options.log ?? "";
+      if (args[0] === "cat-file") return "";
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") return "";
       if (args[0] === "merge-base") return BASE_SHA;
       if (args[0] === "status") {
         return inTest ? options.testStatus ?? "" : options.liveStatus ?? "";
@@ -104,10 +125,11 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       if (args[0] === "diff" && args[1] === "--name-status") {
         return options.nameStatus ?? "";
       }
-      if (args[0] === "diff" && args[1] === "--binary") {
-        return `PATCH:${args.slice(4).join(",")}`;
-      }
       if (args[0] === "rev-list") return options.ahead ?? "0\t0";
+      if (args[0] === "rm") {
+        delete liveFiles[args[args.length - 1]];
+        return "";
+      }
       if (args[0] === "config" && args[1] === "--get" && args[2] === "user.name") {
         return "";
       }
@@ -124,31 +146,29 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       if (args[0] === "add") return "";
       if (args.includes("commit")) {
         calls.commit.push(args);
+        const messageIndex = args.indexOf("-m");
+        calls.commitMessages.push(messageIndex >= 0 ? args[messageIndex + 1] : "");
         if (inTest) testHead = TEST_NEW_SHA;
         else liveHead = LIVE_NEW_SHA;
         return "";
       }
       throw new Error(`unexpected git call: ${args.join(" ")}`);
     },
-    runWithInput: async (args: string[], _cwd: string, input: string) => {
-      if (args[0] === "apply" && args.includes("--check")) {
-        if (options.applyCheckFails) throw new Error("conflict in file");
-        if (options.applyCheckConflicts?.length) {
-          return options.applyCheckConflicts
-            .map((file) => `Applied patch to '${file}' with conflicts.`)
-            .join("\n");
-        }
-        return options.applyCheckOutput ?? "";
-      }
-      if (args[0] === "apply" && args.includes("-R")) {
-        calls.reverse.push(input);
-        return "";
-      }
-      if (args[0] === "apply") {
-        calls.apply.push(input);
-        return "";
-      }
+    runWithInput: async (args: string[], _cwd: string, _input: string) => {
+      calls.run.push(args);
       return "";
+    },
+    showFile: async (rev: string, file: string) => {
+      const source =
+        rev === APPROVED_UPLOAD_BRANCH_TEST || rev === TEST_SHA
+          ? options.test
+          : baseShas.has(rev)
+            ? options.base
+            : undefined;
+      if (!source || source[file] === undefined) {
+        throw new Error(`missing blob ${rev}:${file}`);
+      }
+      return source[file];
     },
     push: async (args: string[]) => {
       calls.push.push(args);
@@ -163,11 +183,14 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       return `${options.verifyMismatch ? "9".repeat(40) : sha}\t${ref}`;
     },
     readTextFile: async (absolutePath: string) => {
-      const normalized = absolutePath.replace(/\\/g, "/");
-      const key = Object.keys(options.files ?? {}).find((entry) =>
-        normalized.endsWith(entry)
-      );
-      return key ? options.files?.[key] ?? null : null;
+      const key = relative(absolutePath);
+      return key in liveFiles ? liveFiles[key] : null;
+    },
+    writeTextFile: async (absolutePath: string, content: string) => {
+      const key = relative(absolutePath);
+      if (options.failWritePath === key) throw new Error("disk full");
+      liveFiles[key] = content;
+      calls.writes.push({ path: key, content });
     },
     checks: {
       typecheck: async (cwd: string) => {
@@ -196,7 +219,17 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
     },
   };
 
-  return { root, testPath, livePath, testWorkspace, liveWorkspace, deps, calls };
+  return {
+    root,
+    testPath,
+    livePath,
+    testWorkspace,
+    liveWorkspace,
+    deps,
+    calls,
+    liveFiles,
+    trailerSha: options.trailerSha ?? TEST_SHA,
+  };
 }
 
 function noForbiddenCommands(calls: { run: string[][]; push: string[][] }): boolean {
@@ -322,31 +355,13 @@ test("parseApplyConflicts ignores whitespace warnings and catches real conflicts
   );
 });
 
-test("LIVE preflight blocks real 3-way conflicts and applies nothing", async () => {
+test("TEST-only change syncs with zero conflicts and records its baseline", async () => {
+  const file = "server/services/app.ts";
   const env = makeSyncEnv({
-    nameStatus: "M\tserver/services/app.ts\nM\tshared/deploySystem.ts",
-    applyCheckConflicts: ["shared/deploySystem.ts"],
-  });
-  try {
-    const preflight = await runLiveSyncPreflight({
-      testWorkspace: env.testWorkspace,
-      liveWorkspace: env.liveWorkspace,
-      dependencies: env.deps,
-    });
-    assert.equal(preflight.canSync, false);
-    assert.match(preflight.blockedReason ?? "", /تعارض حقيقي/);
-    assert.match(preflight.blockedReason ?? "", /shared\/deploySystem\.ts/);
-    assert.equal(preflight.token, "");
-    assert.equal(env.calls.apply.length, 0);
-  } finally {
-    rmSync(env.root, { recursive: true, force: true });
-  }
-});
-
-test("LIVE preflight does not treat whitespace warnings as a conflict", async () => {
-  const env = makeSyncEnv({
-    nameStatus: "M\tserver/services/app.ts",
-    applyCheckOutput: "<stdin>:4: trailing whitespace.\nimport x from 'y';",
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\nb\nc\n" },
+    test: { [file]: "a\nB\nc\n" },
+    live: { [file]: "a\nb\nc\n" },
   });
   try {
     const preflight = await runLiveSyncPreflight({
@@ -355,7 +370,230 @@ test("LIVE preflight does not treat whitespace warnings as a conflict", async ()
       dependencies: env.deps,
     });
     assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.deepEqual(preflight.files, [file]);
+    assert.equal(preflight.partial, false);
     assert.ok(preflight.token.length > 0);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.pushed, true);
+    assert.deepEqual(env.calls.writes.map((entry) => entry.path), [file]);
+    assert.equal(env.calls.writes[0].content, "a\nB\nc\n");
+    assert.match(env.calls.commitMessages[0], /Sync-Test-SHA: /);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("baseline trailer is the three-way base, not the fork point", async () => {
+  const file = "server/services/app.ts";
+  const recorded = "f".repeat(40);
+  const env = makeSyncEnv({
+    log: `cccccccccccccccccccccccccccccccccccccccc\u001fsync(LIVE): 3 ملف\n\nSync-Test-SHA: ${recorded}\u001e`,
+    baseShas: [recorded],
+    nameStatus: "",
+    base: { [file]: "a\nb\n" },
+    test: { [file]: "a\nb\n" },
+    live: { [file]: "a\nb\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.baseSource, "trailer");
+    assert.equal(preflight.baseSha, recorded);
+    assert.equal(preflight.canSync, false);
+    assert.match(preflight.blockedReason ?? "", /منذ آخر مزامنة ناجحة/);
+    const diff = env.calls.run.find(
+      (args) =>
+        args[0] === "diff" &&
+        args[1] === "--name-status" &&
+        args.includes(`${recorded}..${APPROVED_UPLOAD_BRANCH_TEST}`)
+    );
+    assert.ok(diff, "git diff must start at the recorded baseline");
+    assert.equal(env.calls.writes.length, 0);
+    assert.equal(env.calls.commit.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("non-overlapping edits in the same file are merged, keeping both sides", async () => {
+  const file = "server/services/app.ts";
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: "one\ntwo\nthree\nfour\nfive\n" },
+    test: { [file]: "ONE\ntwo\nthree\nfour\nfive\n" },
+    live: { [file]: "one\ntwo\nthree\nfour\nFIVE\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.conflicts, []);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    const written = env.calls.writes.find((entry) => entry.path === file);
+    assert.ok(written);
+    assert.match(written!.content, /^ONE\n/);
+    assert.match(written!.content, /FIVE\n$/);
+    assert.equal(env.liveFiles[file], written!.content);
+    assert.equal(written!.content.includes("<<<<<<<"), false);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a real same-line overlap is the only conflict; safe files still transfer", async () => {
+  const shared = "shared/deploySystem.ts";
+  const safe = "server/services/app.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`M\t${shared}`, `M\t${safe}`].join("\n"),
+    base: { [shared]: "x\ny\n", [safe]: "1\n2\n" },
+    test: { [shared]: "x\nTEST\n", [safe]: "1\n2\nTEST\n" },
+    live: { [shared]: "x\nLIVE\n", [safe]: "1\n2\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.equal(preflight.partial, true);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [shared]);
+    assert.deepEqual(preflight.files, [safe]);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(env.calls.writes.map((entry) => entry.path), [safe]);
+    assert.equal(env.liveFiles[shared], "x\nLIVE\n");
+    assert.equal(env.liveFiles[safe], "1\n2\nTEST\n");
+    // A partial sync must NOT advance the baseline.
+    assert.equal(env.calls.commitMessages[0].includes("Sync-Test-SHA:"), false);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a transfer that would drop a LIVE security invariant becomes a conflict", async () => {
+  const file = "server/services/DeployPrepublishGate.ts";
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: "const gate = 1;\nDEPLOY_ALLOW_PRODUCTION\n" },
+    test: { [file]: "const gate = 1;\nconst extra = 2;\n" },
+    live: { [file]: "const gate = 1;\nDEPLOY_ALLOW_PRODUCTION\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, false);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [file]);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /DEPLOY_ALLOW_PRODUCTION/);
+    assert.equal(env.calls.writes.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("without a trailer the last LIVE sync commit is used as the baseline", async () => {
+  const file = "server/services/app.ts";
+  const env = makeSyncEnv({
+    log: `dddddddddddddddddddddddddddddddddddddddd\u001fsync(LIVE): 5 ملف — 3 معدّل\u001e`,
+    baseShas: [LIVE_NEW_SHA],
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\nb\n" },
+    test: { [file]: "a\nb2\n" },
+    live: { [file]: "a\nb\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.baseSource, "last-sync");
+    assert.equal(preflight.baseSha, LIVE_NEW_SHA);
+    assert.match(preflight.baseWarning ?? "", /آخر commit مزامنة/);
+    assert.equal(preflight.canSync, true);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("CRLF and BOM differences are never reported as conflicts", async () => {
+  const file = "server/services/app.ts";
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\nb\n" },
+    test: { [file]: "\uFEFFa\r\nb\r\n" },
+    live: { [file]: "a\nb\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.conflicts, []);
+    assert.equal(preflight.canSync, false);
+    assert.match(preflight.blockedReason ?? "", /منذ آخر مزامنة ناجحة/);
+    assert.equal(env.calls.writes.length, 0);
+    assert.equal(env.calls.commit.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("repeating a sync after success produces no changes or conflicts", async () => {
+  const file = "server/services/app.ts";
+  const env = makeSyncEnv({
+    log: `cccccccccccccccccccccccccccccccccccccccc\u001fsync(LIVE): 1 ملف\n\nSync-Test-SHA: ${TEST_SHA}\u001e`,
+    baseShas: [TEST_SHA],
+    nameStatus: "",
+    base: { [file]: "a\nB\n" },
+    test: { [file]: "a\nB\n" },
+    live: { [file]: "a\nB\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, false);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.equal(env.calls.writes.length, 0);
+    assert.equal(env.calls.commit.length, 0);
+    assert.equal(env.calls.push.length, 0);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
@@ -431,13 +669,13 @@ test("TEST sync stops when tests fail", async () => {
     assert.match(result.detail, /فشل الفحص/);
     assert.equal(env.calls.commit.length, 0);
     assert.equal(env.calls.push.length, 0);
-    assert.equal(env.calls.apply.length, 0);
+    assert.equal(env.calls.writes.length, 0);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
 });
 
-test("LIVE preflight counts only approved code paths and hides files", async () => {
+test("LIVE preflight plans only approved code paths", async () => {
   const env = makeSyncEnv({
     nameStatus: [
       "M\tserver/services/app.ts",
@@ -446,6 +684,14 @@ test("LIVE preflight counts only approved code paths and hides files", async () 
       "M\tdocs/GUIDE.md",
       "M\treports/data.json",
     ].join("\n"),
+    base: {
+      "server/services/app.ts": "a\n",
+    },
+    test: {
+      "server/services/app.ts": "a\nb\n",
+      "src/new-feature.ts": "new\n",
+    },
+    live: { "server/services/app.ts": "a\n" },
   });
   try {
     const preflight = await runLiveSyncPreflight({
@@ -454,18 +700,18 @@ test("LIVE preflight counts only approved code paths and hides files", async () 
       dependencies: env.deps,
     });
     assert.equal(preflight.canSync, true);
-    assert.equal(preflight.approvedCount, 2);
     assert.equal(preflight.counts.total, 2);
     assert.match(preflight.detail, /استُثني 3/);
     assert.ok(preflight.token.length > 0);
-    const binaryCall = env.calls.run.find(
-      (args) => args[0] === "diff" && args[1] === "--binary"
+    assert.deepEqual(preflight.files, [
+      "server/services/app.ts",
+      "src/new-feature.ts",
+    ]);
+    assert.equal(
+      preflight.files?.includes("server/config/dataEnvironment.ts"),
+      false
     );
-    assert.ok(binaryCall);
-    assert.ok(binaryCall!.includes("server/services/app.ts"));
-    assert.ok(binaryCall!.includes("src/new-feature.ts"));
-    assert.equal(binaryCall!.includes("server/config/dataEnvironment.ts"), false);
-    assert.equal(binaryCall!.includes("docs/GUIDE.md"), false);
+    assert.equal(preflight.files?.includes("docs/GUIDE.md"), false);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
@@ -507,10 +753,13 @@ test("LIVE preflight blocks missing node_modules", async () => {
   }
 });
 
-test("LIVE preflight blocks a patch conflict", async () => {
+test("LIVE preflight reports the exact conflicting file and writes nothing", async () => {
+  const file = "server/services/app.ts";
   const env = makeSyncEnv({
-    nameStatus: "M\tserver/services/app.ts",
-    applyCheckFails: true,
+    nameStatus: `M\t${file}`,
+    base: { [file]: "x\ny\n" },
+    test: { [file]: "x\nTEST\n" },
+    live: { [file]: "x\nLIVE\n" },
   });
   try {
     const preflight = await runLiveSyncPreflight({
@@ -519,13 +768,17 @@ test("LIVE preflight blocks a patch conflict", async () => {
       dependencies: env.deps,
     });
     assert.equal(preflight.canSync, false);
-    assert.match(preflight.blockedReason ?? "", /تعارض/);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [file]);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /الأسطر نفسها/);
+    assert.match(preflight.blockedReason ?? "", /server\/services\/app\.ts/);
+    assert.equal(preflight.token, "");
+    assert.equal(env.calls.writes.length, 0);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
 });
 
-test("LIVE sync applies only approved code, checks, commits and pushes", async () => {
+test("LIVE sync transfers only approved code, checks, commits and pushes", async () => {
   const env = makeSyncEnv({
     nameStatus: [
       "M\tserver/services/app.ts",
@@ -533,6 +786,14 @@ test("LIVE sync applies only approved code, checks, commits and pushes", async (
       "M\tserver/config/dataEnvironment.ts",
       "M\tdocs/GUIDE.md",
     ].join("\n"),
+    base: {
+      "server/services/app.ts": "a\n",
+    },
+    test: {
+      "server/services/app.ts": "a\nb\n",
+      "src/new-feature.ts": "new\n",
+    },
+    live: { "server/services/app.ts": "a\n" },
   });
   try {
     const preflight = await runLiveSyncPreflight({
@@ -554,24 +815,37 @@ test("LIVE sync applies only approved code, checks, commits and pushes", async (
     assert.equal(result.pushed, true);
     assert.equal(result.commitSha, LIVE_NEW_SHA);
     assert.equal(result.changeCount, 2);
-    assert.equal(env.calls.apply.length, 1);
-    assert.ok(env.calls.apply[0].includes("server/services/app.ts"));
-    assert.equal(env.calls.apply[0].includes("server/config/dataEnvironment.ts"), false);
-    assert.equal(env.calls.apply[0].includes("docs/GUIDE.md"), false);
+    assert.deepEqual(env.calls.writes.map((entry) => entry.path), [
+      "server/services/app.ts",
+      "src/new-feature.ts",
+    ]);
+    assert.equal(
+      env.calls.writes.some((entry) => entry.path.includes("dataEnvironment")),
+      false
+    );
+    assert.equal(
+      env.calls.writes.some((entry) => entry.path.includes("GUIDE")),
+      false
+    );
     assert.deepEqual(
       env.calls.checks.filter((entry) => entry.startsWith("typecheck:")),
       [`typecheck:${env.livePath}`]
     );
     assert.deepEqual(env.calls.push, [["push", "origin", "main"]]);
     assert.equal(noForbiddenCommands(env.calls), true);
+    assert.match(env.calls.commitMessages[0], /Sync-Test-SHA: /);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
 });
 
-test("LIVE sync reverses its patch when the build fails", async () => {
+test("LIVE sync restores every written file when the build fails", async () => {
+  const file = "server/services/app.ts";
   const env = makeSyncEnv({
-    nameStatus: "M\tserver/services/app.ts",
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\nb\n" },
+    test: { [file]: "a\nB\n" },
+    live: { [file]: "a\nb\n" },
     liveBuildOk: false,
     liveBuildLog:
       "> next build\n✓ Compiled successfully\nError occurred prerendering page \"/_global-error\"\nTypeError: Cannot read properties of null (reading 'useContext')\nBuild failed",
@@ -593,8 +867,47 @@ test("LIVE sync reverses its patch when the build fails", async () => {
     assert.match(result.detail, /فشل البناء/);
     assert.match(result.failureLog ?? "", /Compiled successfully/);
     assert.match(result.failureLog ?? "", /TypeError: Cannot read properties/);
-    assert.equal(env.calls.apply.length, 1);
-    assert.equal(env.calls.reverse.length, 1);
+    assert.ok(
+      env.calls.writes.some(
+        (entry) => entry.path === file && entry.content === "a\nB\n"
+      )
+    );
+    // Byte-for-byte restoration: no reset, no checkout, no stash.
+    assert.equal(env.liveFiles[file], "a\nb\n");
+    assert.equal(env.calls.commit.length, 0);
+    assert.equal(env.calls.push.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("LIVE sync restores earlier files when a later write fails", async () => {
+  const first = "server/services/a.ts";
+  const second = "server/services/b.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`M\t${first}`, `M\t${second}`].join("\n"),
+    base: { [first]: "a\n", [second]: "b\n" },
+    test: { [first]: "a2\n", [second]: "b2\n" },
+    live: { [first]: "a\n", [second]: "b\n" },
+    failWritePath: second,
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /تعذّر كتابة/);
+    assert.equal(env.liveFiles[first], "a\n");
+    assert.equal(env.liveFiles[second], "b\n");
     assert.equal(env.calls.commit.length, 0);
     assert.equal(env.calls.push.length, 0);
   } finally {
@@ -603,8 +916,12 @@ test("LIVE sync reverses its patch when the build fails", async () => {
 });
 
 test("LIVE sync refuses a token from a changed Git state", async () => {
+  const file = "server/services/app.ts";
   const env = makeSyncEnv({
-    nameStatus: "M\tserver/services/app.ts",
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\n" },
+    test: { [file]: "a2\n" },
+    live: { [file]: "a\n" },
   });
   try {
     const result = await runLiveSync({
@@ -616,7 +933,7 @@ test("LIVE sync refuses a token from a changed Git state", async () => {
     });
     assert.equal(result.ok, false);
     assert.match(result.detail, /تغيّرت حالة Git/);
-    assert.equal(env.calls.apply.length, 0);
+    assert.equal(env.calls.writes.length, 0);
     assert.equal(env.calls.commit.length, 0);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
