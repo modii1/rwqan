@@ -1,7 +1,8 @@
 import type { Firestore, Transaction } from "firebase-admin/firestore";
-import { getLiveFirestoreForCycleWriter } from "../config/dataEnvironment";
+import { LiveDataSourceError } from "../config/dataEnvironment";
+import { getOrCreateLiveFirestore } from "../config/firebase";
 import { dataEnvironmentStore } from "./LiveDataEnvironmentStore";
-import { liveWriteEnabled } from "../config/liveDataEnvironment";
+import { liveWriteEnabled, readLiveDataConfig } from "../config/liveDataEnvironment";
 import { firebaseService } from "../firebaseService";
 import type { InsertPartnerProfit, PartnerProfit } from "../../shared/schema";
 
@@ -121,10 +122,41 @@ export function setLiveCycleDbForTests(
   injectedLiveCycleDb = db;
 }
 
+/**
+ * Resolve the UNWRAPPED LIVE Firestore connection for this writer only.
+ *
+ * Why this is local instead of imported from `config/dataEnvironment`:
+ * `server/config/` is intentionally EXCLUDED from the TEST→LIVE sync (it holds
+ * environment-specific policy), while this file IS synced. A synced module must
+ * therefore not depend on a helper that exists on only one side.
+ *
+ * Behaviour is identical to the environment resolver: it uses the same
+ * primitives and the same `rwqan-live` named app, so it returns the SAME
+ * project, credentials and Firestore instance:
+ *   readLiveDataConfig(process.env) → getOrCreateLiveFirestore(...)
+ *
+ * Safety:
+ *   - No LIVE configuration → `null`; callers keep the existing fail-closed
+ *     `firebaseService` path and never fall back to the DEV database.
+ *   - The global read-only guard in `getActiveFirestore()` is untouched.
+ *   - No secret is stored or exposed.
+ */
+function resolveLiveCycleFirestore(): Firestore | null {
+  const { config } = readLiveDataConfig(process.env);
+  if (!config) return null;
+  try {
+    return getOrCreateLiveFirestore(
+      config.firebase.serviceAccount
+    ) as unknown as Firestore;
+  } catch {
+    throw new LiveDataSourceError();
+  }
+}
+
 function getLiveCycleDb(): Firestore | null {
   if (injectedLiveCycleDb !== undefined) return injectedLiveCycleDb;
   if (dataEnvironmentStore.get() === "LIVE" && !liveWriteEnabled()) {
-    return getLiveFirestoreForCycleWriter() as Firestore | null;
+    return resolveLiveCycleFirestore();
   }
   return null;
 }

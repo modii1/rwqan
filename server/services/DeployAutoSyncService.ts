@@ -1,7 +1,7 @@
 import { exec, execFile, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -93,6 +93,8 @@ export interface DeployAutoSyncDependencies {
   lsRemote(args: string[], cwd: string): Promise<string>;
   readTextFile(absolutePath: string): Promise<string | null>;
   writeTextFile(absolutePath: string, content: string): Promise<void>;
+  /** Remove a file this request created (used only when rolling back). */
+  deleteFile(absolutePath: string): Promise<void>;
   checks: DeploySyncChecks;
 }
 
@@ -369,6 +371,11 @@ const DEFAULT_DEPENDENCIES: DeployAutoSyncDependencies = {
   writeTextFile: async (absolutePath, content) => {
     mkdirSync(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, content, "utf8");
+  },
+  deleteFile: async (absolutePath) => {
+    // `git rm` only works on tracked paths, so newly created files must be
+    // removed from the filesystem directly. `force` makes a missing file a no-op.
+    await rm(absolutePath, { force: true });
   },
   checks: DEFAULT_CHECKS,
 };
@@ -1053,6 +1060,62 @@ function protectedInvariantLost(
   return null;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Named relative imports/re-exports that must resolve for the file to compile.
+ * Bare package imports are ignored (they are not moved by the sync).
+ */
+function parseModuleDependencies(
+  source: string
+): Array<{ module: string; names: string[] }> {
+  const found: Array<{ module: string; names: string[] }> = [];
+  const patterns = [
+    /import\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g,
+    /export\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const names = match[1]
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => part.replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim())
+        .filter(Boolean);
+      if (names.length > 0) found.push({ module: match[2], names });
+    }
+  }
+  return found;
+}
+
+/**
+ * Static dependency gate.
+ *
+ * Requirement: never move a file whose imports cannot resolve on the LIVE tree.
+ * The most common case is a new export added to an EXCLUDED folder
+ * (`server/config/`), which is never synced. Without this gate the transfer
+ * only fails later, inside the LIVE typecheck.
+ *
+ * Rules (conservative to avoid false blocks):
+ *  - Only relative imports/re-exports are inspected.
+ *  - A module that is part of the same transfer is always accepted.
+ *  - An existing LIVE module is accepted unless a named export is provably
+ *    absent (`export * from` counts as "cannot prove absence" → accepted).
+ *  - A missing module is rejected unless it looks like a non-code asset.
+ */
+const DEPENDENCY_ASSET_EXTENSION =
+  /\.(css|scss|sass|less|json|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|eot|otf|md|txt|ya?ml|html)$/i;
+
+function exportNamePattern(name: string): RegExp {
+  const escaped = escapeRegExp(name);
+  return new RegExp(
+    String.raw`export\s+(?:declare\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+${escaped}\b|export\s*\{[^}]*\b${escaped}\b`
+  );
+}
+
+
 type SyncActionKind = "transfer" | "auto-merge" | "conflict";
 
 interface SyncPlanAction {
@@ -1279,6 +1342,94 @@ async function buildLivePlan(params: {
       content: merged.content,
     });
     mergePaths.push(file);
+  }
+
+  // ── dependency gate (before anything is allowed to move) ──────────────────
+  const providedByPlan = new Set(
+    actions
+      .filter((action) => action.content !== undefined)
+      .map((action) => action.path)
+  );
+  const liveContentCache = new Map<string, string | null>();
+  const readLiveContent = async (filePath: string): Promise<string | null> => {
+    if (!liveContentCache.has(filePath)) {
+      liveContentCache.set(
+        filePath,
+        await deps.readTextFile(path.join(liveWorkspace.path, filePath))
+      );
+    }
+    return liveContentCache.get(filePath) ?? null;
+  };
+
+  for (const action of actions) {
+    if (action.kind === "conflict" || action.content === undefined) continue;
+    const issues: string[] = [];
+    for (const dependency of parseModuleDependencies(action.content)) {
+      if (!dependency.module.startsWith(".")) continue;
+      if (dependency.module.includes("?")) continue;
+      const base = path.posix.normalize(
+        path.posix.join(path.posix.dirname(action.path), dependency.module)
+      );
+      const candidates = [
+        base,
+        `${base}.ts`,
+        `${base}.tsx`,
+        `${base}/index.ts`,
+        `${base}/index.tsx`,
+      ];
+      let resolved: string | null = null;
+      let suppliedByPlan = false;
+      for (const candidate of candidates) {
+        if (providedByPlan.has(candidate)) {
+          suppliedByPlan = true;
+          resolved = candidate;
+          break;
+        }
+        if ((await readLiveContent(candidate)) !== null) {
+          resolved = candidate;
+          break;
+        }
+      }
+      if (suppliedByPlan) continue;
+      if (!resolved) {
+        const looksLikeCode =
+          !DEPENDENCY_ASSET_EXTENSION.test(dependency.module) &&
+          !/\.(js|mjs|cjs)$/i.test(dependency.module);
+        if (looksLikeCode) {
+          issues.push(`${dependency.module} (الوحدة غير موجودة في LIVE)`);
+        }
+        continue;
+      }
+      const liveContent = await readLiveContent(resolved);
+      if (liveContent === null) {
+        issues.push(`${dependency.module} (الوحدة غير موجودة في LIVE)`);
+        continue;
+      }
+      // Cannot prove absence when the module re-exports everything.
+      if (/export\s+\*\s+from/.test(liveContent)) continue;
+      for (const name of dependency.names) {
+        if (!exportNamePattern(name).test(liveContent)) {
+          issues.push(`${name} من ${dependency.module}`);
+        }
+      }
+    }
+    if (issues.length > 0) {
+      action.kind = "conflict";
+      action.content = undefined;
+      action.reason = `اعتماديات غير متوفرة في LIVE: ${issues
+        .slice(0, 3)
+        .join("، ")}${issues.length > 3 ? "…" : ""} — لن يُنقل لتفادي فشل الفحص.`;
+    }
+  }
+
+  // Rebuild the per-kind lists after the gate.
+  transferPaths.length = 0;
+  mergePaths.length = 0;
+  conflictPaths.length = 0;
+  for (const action of actions) {
+    if (action.kind === "transfer") transferPaths.push(action.path);
+    else if (action.kind === "auto-merge") mergePaths.push(action.path);
+    else if (action.kind === "conflict") conflictPaths.push(action.path);
   }
 
   return {
@@ -1929,13 +2080,15 @@ export async function runLiveSync(
 
   // Files we wrote in this request, with their exact previous content so a
   // failed check/commit restores LIVE byte-for-byte (no reset/checkout/stash).
+  // `null` means the file did not exist before, so rollback deletes it.
   const backups = new Map<string, string | null>();
   const restoreBackups = async () => {
     for (const [file, previous] of backups) {
       const absolute = path.join(liveCwd, file);
       try {
         if (previous === null) {
-          await deps.run(["rm", "-f", "--", file], liveCwd);
+          // Untracked/new files cannot be reverted with git; remove them.
+          await deps.deleteFile(absolute);
         } else {
           await deps.writeTextFile(absolute, previous);
         }

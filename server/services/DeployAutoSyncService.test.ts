@@ -90,6 +90,7 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
     commitMessages: [] as string[],
     push: [] as string[][],
     writes: [] as Array<{ path: string; content: string }>,
+    deletes: [] as string[],
     checks: [] as string[],
   };
 
@@ -191,6 +192,11 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       if (options.failWritePath === key) throw new Error("disk full");
       liveFiles[key] = content;
       calls.writes.push({ path: key, content });
+    },
+    deleteFile: async (absolutePath: string) => {
+      const key = relative(absolutePath);
+      delete liveFiles[key];
+      calls.deletes.push(key);
     },
     checks: {
       typecheck: async (cwd: string) => {
@@ -519,6 +525,111 @@ test("a transfer that would drop a LIVE security invariant becomes a conflict", 
     assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [file]);
     assert.match(preflight.conflicts?.[0].reason ?? "", /DEPLOY_ALLOW_PRODUCTION/);
     assert.equal(env.calls.writes.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a new file importing a missing export from an excluded folder is blocked", async () => {
+  const feature = "server/services/new-feature.ts";
+  const safe = "server/services/safe.ts";
+  const gate = "server/config/dataEnvironment.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`A\t${feature}`, `M\t${safe}`].join("\n"),
+    base: { [safe]: "a\n" },
+    test: {
+      [safe]: "a2\n",
+      [feature]: 'import { missing } from "../config/dataEnvironment";\n',
+    },
+    live: { [safe]: "a\n", [gate]: "export const present = 1;\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.equal(preflight.partial, true);
+    assert.deepEqual(preflight.files, [safe]);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [feature]);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /missing/);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /dataEnvironment/);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a dependency that exists in LIVE does not block the transfer", async () => {
+  const feature = "server/services/new-feature.ts";
+  const gate = "server/config/dataEnvironment.ts";
+  const env = makeSyncEnv({
+    nameStatus: `A\t${feature}`,
+    base: {},
+    test: {
+      [feature]: 'import { present } from "../config/dataEnvironment";\n',
+    },
+    live: { [gate]: "export const present = 1;\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.conflicts, []);
+    assert.deepEqual(preflight.files, [feature]);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a dependency supplied by the same transfer is accepted", async () => {
+  const helper = "shared/helper.ts";
+  const feature = "server/services/new-feature.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`A\t${feature}`, `A\t${helper}`].join("\n"),
+    base: {},
+    test: {
+      [feature]: 'import { helper } from "../../shared/helper";\n',
+      [helper]: "export const helper = 1;\n",
+    },
+    live: {},
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.conflicts, []);
+    assert.deepEqual(preflight.files?.slice().sort(), [feature, helper].sort());
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("a missing relative module blocks only the dependent file", async () => {
+  const feature = "server/services/new-feature.ts";
+  const safe = "server/services/safe.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`A\t${feature}`, `M\t${safe}`].join("\n"),
+    base: { [safe]: "a\n" },
+    test: {
+      [safe]: "a2\n",
+      [feature]: 'import { x } from "../missing/module";\n',
+    },
+    live: { [safe]: "a\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.files, [safe]);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [feature]);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /غير موجودة في LIVE/);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
@@ -874,8 +985,114 @@ test("LIVE sync restores every written file when the build fails", async () => {
     );
     // Byte-for-byte restoration: no reset, no checkout, no stash.
     assert.equal(env.liveFiles[file], "a\nb\n");
+    // A pre-existing file must be restored, never deleted.
+    assert.deepEqual(env.calls.deletes, []);
     assert.equal(env.calls.commit.length, 0);
     assert.equal(env.calls.push.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("LIVE sync deletes files it created when the build fails", async () => {
+  const created = "server/services/new-feature.ts";
+  const env = makeSyncEnv({
+    nameStatus: `A\t${created}`,
+    base: {},
+    test: { [created]: "export const x = 1;\n" },
+    live: {},
+    liveBuildOk: false,
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.files, [created]);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, false);
+    assert.ok(env.calls.writes.some((entry) => entry.path === created));
+    // The new file must be gone from the filesystem after the rollback.
+    assert.equal(created in env.liveFiles, false);
+    assert.deepEqual(env.calls.deletes, [created]);
+    assert.equal(env.calls.commit.length, 0);
+    assert.equal(env.calls.push.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("LIVE sync restores existing files and deletes only the new ones", async () => {
+  const existing = "server/services/app.ts";
+  const created = "server/services/new-feature.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`M\t${existing}`, `A\t${created}`].join("\n"),
+    base: { [existing]: "old\n" },
+    test: { [existing]: "new\n", [created]: "created\n" },
+    live: { [existing]: "old\n" },
+    liveBuildOk: false,
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(env.liveFiles[existing], "old\n");
+    assert.equal(created in env.liveFiles, false);
+    assert.deepEqual(env.calls.deletes, [created]);
+    assert.equal(env.calls.commit.length, 0);
+    assert.equal(env.calls.push.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("LIVE sync deletes a created file when a later write fails", async () => {
+  const created = "server/services/new-a.ts";
+  const failing = "server/services/b.ts";
+  const env = makeSyncEnv({
+    nameStatus: [`A\t${created}`, `M\t${failing}`].join("\n"),
+    base: { [failing]: "b\n" },
+    test: { [created]: "a\n", [failing]: "b2\n" },
+    live: { [failing]: "b\n" },
+    failWritePath: failing,
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(created in env.liveFiles, false);
+    assert.equal(env.liveFiles[failing], "b\n");
+    assert.deepEqual(env.calls.deletes, [created]);
+    assert.equal(env.calls.commit.length, 0);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
