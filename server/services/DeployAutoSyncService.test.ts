@@ -349,6 +349,11 @@ test("runCheckCommand reports a non-zero exit as a failure", async () => {
 test("isApprovedLiveSyncPath excludes settings, docs, reports, secrets", () => {
   assert.equal(isApprovedLiveSyncPath("server/services/app.ts"), true);
   assert.equal(isApprovedLiveSyncPath("src/pages/index.tsx"), true);
+  // The BASE App Hosting config is allowed; environment variants are not.
+  assert.equal(isApprovedLiveSyncPath("apphosting.yaml"), true);
+  assert.equal(isApprovedLiveSyncPath("apphosting.test.yaml"), false);
+  assert.equal(isApprovedLiveSyncPath("apphosting.dev.yaml"), false);
+  assert.equal(isApprovedLiveSyncPath("apphosting-prod.yaml"), false);
   assert.equal(isApprovedLiveSyncPath("server/config/dataEnvironment.ts"), false);
   assert.equal(isApprovedLiveSyncPath("docs/README.md"), false);
   assert.equal(isApprovedLiveSyncPath("reports/x.json"), false);
@@ -690,6 +695,274 @@ test("an unpushed sync commit is not trusted as the baseline", async () => {
     });
     assert.notEqual(preflight.baseSource, "trailer");
     assert.notEqual(preflight.baseSha, recorded);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml is detected and transferred when only GEMINI differs", async () => {
+  const file = "apphosting.yaml";
+  const baseYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const testYaml =
+    baseYaml +
+    [
+      "  - variable: GEMINI_API_KEY",
+      "    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1",
+      "    availability:",
+      "      - RUNTIME",
+      "",
+    ].join("\n");
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: baseYaml },
+    test: { [file]: testYaml },
+    live: { [file]: baseYaml },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.files, [file]);
+    assert.equal(preflight.counts.total, 1);
+    assert.deepEqual(preflight.conflicts, []);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    const written = env.calls.writes.find((entry) => entry.path === file);
+    assert.ok(written);
+    assert.match(written!.content, /GEMINI_API_KEY/);
+    assert.match(written!.content, /versions\/1/);
+    assert.match(env.calls.commitMessages[0], /Sync-Test-SHA: /);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml merge preserves LIVE-only variables and adds TEST ones", async () => {
+  const file = "apphosting.yaml";
+  const liveYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "  - variable: WHATSAPP_TOKEN",
+    "    secret: projects/rwqan-production-v2/secrets/WHATSAPP_TOKEN",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const testYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "  - variable: GEMINI_API_KEY",
+    "    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: testYaml },
+    test: { [file]: testYaml },
+    live: { [file]: liveYaml },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.deepEqual(preflight.files, [file]);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    const written = env.calls.writes.find((entry) => entry.path === file);
+    assert.ok(written);
+    assert.match(written!.content, /WHATSAPP_TOKEN/);
+    assert.match(written!.content, /GEMINI_API_KEY/);
+    assert.match(written!.content, /NODE_ENV/);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml changing an existing LIVE variable needs manual review", async () => {
+  const file = "apphosting.yaml";
+  const liveYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const testYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: development",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: liveYaml },
+    test: { [file]: testYaml },
+    live: { [file]: liveYaml },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.files, []);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [file]);
+    assert.match(preflight.conflicts?.[0].reason ?? "", /NODE_ENV/);
+    assert.equal(env.calls.writes.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml already present in LIVE reports no updates", async () => {
+  const file = "apphosting.yaml";
+  const liveYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "  - variable: GEMINI_API_KEY",
+    "    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const testYaml = liveYaml;
+  const env = makeSyncEnv({
+    nameStatus: `M\t${file}`,
+    base: { [file]: liveYaml },
+    test: { [file]: testYaml },
+    live: { [file]: liveYaml },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, false);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.match(preflight.blockedReason ?? "", /منذ آخر مزامنة ناجحة/);
+    assert.equal(env.calls.writes.length, 0);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml is evaluated even when TEST has not changed since the baseline", async () => {
+  const file = "apphosting.yaml";
+  const baseYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const testYaml = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "  - variable: GEMINI_API_KEY",
+    "    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const env = makeSyncEnv({
+    // No TEST change since the baseline: the file is absent from the diff.
+    nameStatus: "",
+    base: { [file]: baseYaml },
+    test: { [file]: testYaml },
+    live: { [file]: baseYaml },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.files, [file]);
+    assert.equal(preflight.counts.total, 1);
+    assert.deepEqual(preflight.conflicts, []);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("apphosting.yaml with nothing missing still reports no updates", async () => {
+  const file = "apphosting.yaml";
+  const yamlText = [
+    "env:",
+    "  - variable: NODE_ENV",
+    "    value: production",
+    "    availability:",
+    "      - RUNTIME",
+    "  - variable: GEMINI_API_KEY",
+    "    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1",
+    "    availability:",
+    "      - RUNTIME",
+    "",
+  ].join("\n");
+  const env = makeSyncEnv({
+    nameStatus: "",
+    base: { [file]: yamlText },
+    test: { [file]: yamlText },
+    live: { [file]: yamlText },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, false);
+    assert.deepEqual(preflight.files, []);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.match(preflight.blockedReason ?? "", /منذ آخر مزامنة ناجحة/);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
