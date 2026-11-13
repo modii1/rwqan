@@ -961,6 +961,7 @@ async function resolveLiveBaseline(
   for (const chunk of chunks) {
     const separator = chunk.indexOf("\x1f");
     if (separator < 0) continue;
+    const syncCommitSha = chunk.slice(0, separator).trim();
     const message = chunk.slice(separator + 1);
     const match = message.match(
       new RegExp(`^${SYNC_BASELINE_TRAILER}:\\s*([0-9a-f]{40})\\s*$`, "m")
@@ -977,9 +978,11 @@ async function resolveLiveBaseline(
       .then(() => true)
       .catch(() => false);
     if (!isAncestor) continue;
-    if (hasRemoteRef) {
+    if (hasRemoteRef && syncCommitSha) {
+      // Verify the LIVE commit that CARRIES the trailer was pushed. The trailer
+      // itself points at a TEST commit, which is never an ancestor of main.
       const pushed = await deps
-        .run(["merge-base", "--is-ancestor", `${candidate}^{commit}`, remoteRef], liveCwd)
+        .run(["merge-base", "--is-ancestor", syncCommitSha, remoteRef], liveCwd)
         .then(() => true)
         .catch(() => false);
       if (!pushed) continue;

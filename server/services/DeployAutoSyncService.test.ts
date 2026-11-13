@@ -51,6 +51,8 @@ interface SyncEnvOptions {
   trailerSha?: string;
   /** Fail writing this path (simulates a disk error). */
   failWritePath?: string;
+  /** Simulate a sync commit that was never pushed to origin/main. */
+  syncCommitUnpushed?: boolean;
 }
 
 function makeSyncEnv(options: SyncEnvOptions = {}) {
@@ -118,7 +120,16 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       }
       if (args[0] === "log") return options.log ?? "";
       if (args[0] === "cat-file") return "";
-      if (args[0] === "merge-base" && args[1] === "--is-ancestor") return "";
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") {
+        if (
+          options.syncCommitUnpushed &&
+          args.includes("origin/main") &&
+          args[2] === LIVE_SHA
+        ) {
+          throw new Error("not an ancestor");
+        }
+        return "";
+      }
       if (args[0] === "merge-base") return BASE_SHA;
       if (args[0] === "status") {
         return inTest ? options.testStatus ?? "" : options.liveStatus ?? "";
@@ -654,6 +665,31 @@ test("import-looking text inside a string is not treated as a dependency", async
     });
     assert.deepEqual(preflight.conflicts, []);
     assert.deepEqual(preflight.files, [fixture]);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("an unpushed sync commit is not trusted as the baseline", async () => {
+  const recorded = "f".repeat(40);
+  const file = "server/services/app.ts";
+  const env = makeSyncEnv({
+    log: `${LIVE_SHA}\u001fsync(LIVE): 1 ملف\n\nSync-Test-SHA: ${recorded}\u001e`,
+    baseShas: [recorded],
+    syncCommitUnpushed: true,
+    nameStatus: `M\t${file}`,
+    base: { [file]: "a\nb\n" },
+    test: { [file]: "a\nb2\n" },
+    live: { [file]: "a\nb\n" },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.notEqual(preflight.baseSource, "trailer");
+    assert.notEqual(preflight.baseSha, recorded);
   } finally {
     rmSync(env.root, { recursive: true, force: true });
   }
