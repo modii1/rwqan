@@ -69,6 +69,7 @@ function todayRiyadh() {
 
 function geminiPayload(overrides: Record<string, any> = {}) {
   return {
+    documentType: "bank_transfer_receipt",
     extractedData: {
       amount: 25,
       currency: "SAR",

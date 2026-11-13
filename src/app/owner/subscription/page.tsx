@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,17 @@ import {
   Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2, PauseCircle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ReceiptScanOverlay } from "@/components/receipt-scan-overlay";
+import {
+  applyReceiptScanProgress,
+  classifyReceiptError,
+  classifyReceiptResponse,
+  initialReceiptScanStages,
+  settleReceiptScanStages,
+  type ReceiptScanOutcome,
+  type ReceiptScanResultView,
+  type ReceiptScanStageState,
+} from "@/lib/receipt-scan";
 
 import {
   calculateRemainingDays,
@@ -44,6 +55,69 @@ import {
   getIncludedPropertyCount,
   getMaximumPropertyCount,
 } from "@shared/subscriptionPricing";
+
+type ReceiptUploadError = Error & { code?: string; status?: number };
+
+const RECEIPT_UPLOAD_TIMEOUT_MS = 120_000;
+
+function timeoutReceiptError(): ReceiptUploadError {
+  const error = new Error("انتهت مهلة الاتصال") as ReceiptUploadError;
+  error.code = "TIMEOUT";
+  error.status = 408;
+  return error;
+}
+
+/**
+ * Upload a receipt and preserve the server's real error code/status so the
+ * dialog can distinguish a duplicate from a genuine technical failure.
+ */
+async function postReceiptForm(url: string, formData: FormData): Promise<any> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    RECEIPT_UPLOAD_TIMEOUT_MS
+  );
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const error = new Error(
+        body?.error || "فشل إرسال التحويل"
+      ) as ReceiptUploadError;
+      error.code =
+        typeof body?.code === "string" ? body.code : undefined;
+      error.status = res.status;
+      throw error;
+    }
+    return await res.json();
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      console.error("[receipt-scan] upload timed out", {
+        url,
+        timeoutMs: RECEIPT_UPLOAD_TIMEOUT_MS,
+      });
+      throw timeoutReceiptError();
+    }
+    // Diagnostics for developers only; the user sees a classified, safe text.
+    console.error("[receipt-scan] upload failed", {
+      url,
+      code: (error as ReceiptUploadError)?.code,
+      status: (error as ReceiptUploadError)?.status,
+      message: (error as Error)?.message,
+    });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function getPaymentTime(value: any): number {
   if (!value) return 0;
@@ -95,6 +169,143 @@ export default function OwnerSubscriptionPage() {
   } | null>(null);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [aiScanResult, setAiScanResult] = useState<any>(null);
+  const [receiptScan, setReceiptScan] = useState<{
+    open: boolean;
+    scanId: string | null;
+    stages: ReceiptScanStageState[];
+    outcome: ReceiptScanOutcome;
+    title?: string;
+    message?: string;
+    reasons: string[];
+  }>({
+    open: false,
+    scanId: null,
+    stages: initialReceiptScanStages(),
+    outcome: "scanning",
+    reasons: [],
+  });
+  const scanPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dismissedScanRef = useRef<string | null>(null);
+  const activeScanIdRef = useRef<string | null>(null);
+
+  const stopScanPolling = useCallback(() => {
+    if (scanPollRef.current !== null) {
+      clearInterval(scanPollRef.current);
+      scanPollRef.current = null;
+    }
+  }, []);
+
+  const beginReceiptScan = useCallback(
+    (scanId: string) => {
+      stopScanPolling();
+      dismissedScanRef.current = null;
+      activeScanIdRef.current = scanId;
+      setReceiptScan({
+        open: true,
+        scanId,
+        stages: initialReceiptScanStages().map((stage, index) =>
+          index === 0 ? { ...stage, status: "active" as const } : stage
+        ),
+        outcome: "scanning",
+        reasons: [],
+      });
+      scanPollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(
+            `/api/owner/receipt-scan/${encodeURIComponent(scanId)}`,
+            { credentials: "include", cache: "no-store" }
+          );
+          if (!res.ok) return;
+          if (activeScanIdRef.current !== scanId) return;
+          const data = await res.json();
+          setReceiptScan((prev) =>
+            prev.scanId === scanId
+              ? {
+                  ...prev,
+                  stages: applyReceiptScanProgress(prev.stages, data.progress),
+                }
+              : prev
+          );
+        } catch {
+          // A failed progress read must never invent a completed stage. The
+          // upload response remains the source of truth.
+        }
+      }, 900);
+    },
+    [stopScanPolling]
+  );
+
+  const finishReceiptScan = useCallback(
+    async (
+      scanId: string,
+      payload: any,
+      options: { forceReview?: boolean } = {}
+    ) => {
+      stopScanPolling();
+      activeScanIdRef.current = null;
+      // The dialog is driven by the server's real response, never by a fixed
+      // generic message.
+      const info: ReceiptScanResultView = classifyReceiptResponse(
+        payload,
+        options
+      );
+      let stages: ReceiptScanStageState[] | null = null;
+      try {
+        // One last real snapshot: the scan may finish between two polls.
+        const res = await fetch(
+          `/api/owner/receipt-scan/${encodeURIComponent(scanId)}`,
+          { credentials: "include", cache: "no-store" }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          stages = applyReceiptScanProgress(
+            initialReceiptScanStages(),
+            data.progress
+          );
+        }
+      } catch {
+        // Keep the last server-confirmed state; never fabricate completion.
+      }
+      setReceiptScan((prev) => {
+        if (prev.scanId !== scanId) return prev;
+        return {
+          ...prev,
+          stages: settleReceiptScanStages(stages ?? prev.stages, info.outcome),
+          outcome: info.outcome,
+          title: info.title,
+          message: info.message,
+          reasons: info.reasons,
+        };
+      });
+    },
+    [stopScanPolling]
+  );
+
+  const failReceiptScan = useCallback(
+    (error?: unknown) => {
+      stopScanPolling();
+      const scanId = activeScanIdRef.current;
+      const info = classifyReceiptError(error);
+      const visible =
+        scanId !== null && dismissedScanRef.current !== scanId;
+      activeScanIdRef.current = null;
+      setReceiptScan((prev) => {
+        if (prev.scanId !== scanId) return prev;
+        return {
+          ...prev,
+          stages: settleReceiptScanStages(prev.stages, info.outcome),
+          outcome: info.outcome,
+          title: info.title,
+          message: info.message,
+          reasons: info.reasons,
+        };
+      });
+      return { info, visible };
+    },
+    [stopScanPolling]
+  );
+
+  useEffect(() => () => stopScanPolling(), [stopScanPolling]);
   
   // Additional properties for multi-property packages
   const [additionalProperties, setAdditionalProperties] = useState<Array<{ number: string; verified: boolean; error: string; verifying: boolean; incomplete?: boolean; missingFields?: string[] }>>([]);
@@ -473,18 +684,28 @@ export default function OwnerSubscriptionPage() {
       const verifiedProperties = additionalProperties.filter(p => p.verified).map(p => p.number);
       if (verifiedProperties.length > 0) formData.append("additionalProperties", JSON.stringify(verifiedProperties));
 
-      const res = await fetch("/api/owner/payment/bank-transfer", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "فشل إرسال التحويل");
-      }
-      return res.json();
+      const scanId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `scan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      formData.append("scanId", scanId);
+      beginReceiptScan(scanId);
+
+      const payload = await postReceiptForm(
+        "/api/owner/payment/bank-transfer",
+        formData
+      );
+      return { ...payload, scanId };
     },
     onSuccess: (data) => {
+      void finishReceiptScan(data.scanId, data, {
+        forceReview: Boolean(
+          data.pendingManualReview ||
+            data.pendingAdminApproval ||
+            data.verificationFailed ||
+            data.paymentRejected
+        ),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
       queryClient.invalidateQueries({ queryKey: ["/api/owner/payment/check-pending"] });
       if (data.aiScan) {
@@ -505,7 +726,17 @@ export default function OwnerSubscriptionPage() {
       setPaymentSuccess(true);
     },
     onError: (err: Error) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+      const { info, visible } = failReceiptScan(err);
+      if (!visible) {
+        toast({
+          title:
+            info.outcome === "duplicate"
+              ? "الإيصال مستخدم مسبقًا"
+              : "تعذر إكمال التحقق",
+          description: info.message,
+          variant: "destructive",
+        });
+      }
     },
   });
 
@@ -574,18 +805,22 @@ export default function OwnerSubscriptionPage() {
       formData.append("addOnPackageId", data.addOnPackageId);
       formData.append("receipt", data.receipt);
 
-      const res = await fetch("/api/owner/addons/bank-transfer", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "فشل في إرسال التحويل");
-      }
-      return res.json();
+      const scanId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `scan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      formData.append("scanId", scanId);
+      beginReceiptScan(scanId);
+
+      const payload = await postReceiptForm(
+        "/api/owner/addons/bank-transfer",
+        formData
+      );
+      return { ...payload, scanId };
     },
     onSuccess: (data) => {
+      // Add-on receipts always remain for manual review by policy.
+      void finishReceiptScan(data.scanId, data, { forceReview: true });
       queryClient.invalidateQueries({ queryKey: ["/api/owner/property-addons"] });
       if (data.aiScan) {
         setAddOnAiScanResult(data.aiScan);
@@ -593,7 +828,17 @@ export default function OwnerSubscriptionPage() {
       setAddOnPaymentSuccess(true);
     },
     onError: (err: Error) => {
-      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+      const { info, visible } = failReceiptScan(err);
+      if (!visible) {
+        toast({
+          title:
+            info.outcome === "duplicate"
+              ? "الإيصال مستخدم مسبقًا"
+              : "تعذر إكمال التحقق",
+          description: info.message,
+          variant: "destructive",
+        });
+      }
     },
   });
 
@@ -948,6 +1193,24 @@ export default function OwnerSubscriptionPage() {
     }
   };
 
+  // The receipt scan dialog is rendered in every branch of this page. It must
+  // survive the success/loading screens so only the user can close it.
+  const receiptScanOverlay = (
+    <ReceiptScanOverlay
+      open={receiptScan.open}
+      stages={receiptScan.stages}
+      outcome={receiptScan.outcome}
+      title={receiptScan.title}
+      message={receiptScan.message}
+      reasons={receiptScan.reasons}
+      onClose={() => {
+        dismissedScanRef.current = receiptScan.scanId;
+        stopScanPolling();
+        setReceiptScan((prev) => ({ ...prev, open: false }));
+      }}
+    />
+  );
+
   // Add-on Payment Success Screen
   if (addOnPaymentSuccess) {
     return (
@@ -1052,6 +1315,7 @@ export default function OwnerSubscriptionPage() {
             </Button>
           </div>
         </Card>
+        {receiptScanOverlay}
       </div>
     );
   }
@@ -1063,6 +1327,7 @@ export default function OwnerSubscriptionPage() {
           <div className="inline-block w-8 h-8 border-4 border-[#434040] border-t-transparent rounded-full animate-spin" />
           <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
         </div>
+        {receiptScanOverlay}
       </div>
     );
   }
@@ -1350,6 +1615,7 @@ export default function OwnerSubscriptionPage() {
             </>
           )}
         </Card>
+        {receiptScanOverlay}
       </div>
     );
   }
@@ -2708,6 +2974,7 @@ export default function OwnerSubscriptionPage() {
 
       </OwnerPageMain>
       <OwnerMobileNavigation />
+      {receiptScanOverlay}
     </div>
   );
 }

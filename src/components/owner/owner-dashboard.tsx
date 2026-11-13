@@ -44,6 +44,11 @@ import { PriceDisplay } from "@/components/price-display";
 import { formatLiveSaudiTime } from "@/lib/dateUtils";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
 import {
+  resolvePaymentReceiptStatus,
+  type ReceiptAvailability,
+} from "@/lib/payment-receipt-status";
+import { classifyReceiptError, classifyReceiptScan } from "@/lib/receipt-scan";
+import {
   calculateRemainingDays,
   calculateSubscriptionDuration,
 } from "@/lib/subscription-utils";
@@ -176,7 +181,36 @@ export default function OwnerDashboard() {
     useState<any>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [receiptUploadFeedback, setReceiptUploadFeedback] = useState<{
+    title: string;
+    message: string;
+    tone: "error" | "review";
+  } | null>(null);
+  const [selectedReceiptVerified, setSelectedReceiptVerified] = useState<
+    boolean | null
+  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Verify the previously attached receipt before showing it in the dialog.
+  useEffect(() => {
+    const url = selectedPaymentForReceipt?.receiptUrl;
+    if (!showReceiptDialog || !url) {
+      setSelectedReceiptVerified(null);
+      return;
+    }
+    let cancelled = false;
+    setSelectedReceiptVerified(null);
+    fetch(url, { method: "HEAD", credentials: "include", cache: "no-store" })
+      .then((response) => {
+        if (!cancelled) setSelectedReceiptVerified(response.ok);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedReceiptVerified(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showReceiptDialog, selectedPaymentForReceipt?.receiptUrl]);
 
   // نتيجة الفحص النهائية
   const [verificationResult, setVerificationResult] = useState<{
@@ -663,6 +697,7 @@ export default function OwnerDashboard() {
     if (!receiptFile || !selectedPaymentForReceipt) return;
 
     setIsUploadingReceipt(true);
+    setReceiptUploadFeedback(null);
 
     try {
       const formData = new FormData();
@@ -675,28 +710,79 @@ export default function OwnerDashboard() {
         credentials: "include",
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
-      if (response.ok) {
-        toast({
-          title: "✅ تم رفع الإيصال",
-          description: "تم رفع إيصال التحويل بنجاح وسيتم مراجعته",
+      if (!response.ok) {
+        const info = classifyReceiptError({
+          message: result?.error,
+          code: result?.code,
+          status: response.status,
         });
-
-        // إغلاق النافذة وإعادة تحميل البيانات
-        setShowReceiptDialog(false);
-        setSelectedPaymentForReceipt(null);
-        setReceiptFile(null);
+        setReceiptUploadFeedback({
+          title: info.title,
+          message: info.message,
+          tone: "error",
+        });
+        toast({
+          title: info.title,
+          description: info.message,
+          variant: "destructive",
+        });
         await queryClient.invalidateQueries({
           queryKey: ["/api/owner/payments"],
         });
-      } else {
-        throw new Error(result.error || "فشل رفع الإيصال");
+        return;
       }
-    } catch (error: any) {
+
+      await queryClient.invalidateQueries({
+        queryKey: ["/api/owner/payments"],
+      });
+
+      // Show the real scan result, never a fixed success message.
+      const scanView = result?.aiScan
+        ? classifyReceiptScan(result.aiScan)
+        : null;
+      if (
+        scanView &&
+        (scanView.outcome === "not_receipt" || scanView.outcome === "error")
+      ) {
+        setReceiptUploadFeedback({
+          title: scanView.title,
+          message: scanView.message,
+          tone: "error",
+        });
+        toast({
+          title: scanView.title,
+          description: scanView.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const reviewMessage = "تم رفع الإيصال وسيتم مراجعته من الإدارة.";
+      setReceiptUploadFeedback({
+        title: "تم رفع الإيصال",
+        message: reviewMessage,
+        tone: "review",
+      });
       toast({
-        title: "خطأ",
-        description: error.message || "حدث خطأ في رفع الإيصال",
+        title: "تم رفع الإيصال",
+        description: reviewMessage,
+      });
+
+      setShowReceiptDialog(false);
+      setSelectedPaymentForReceipt(null);
+      setReceiptFile(null);
+    } catch (error: any) {
+      const info = classifyReceiptError(error);
+      setReceiptUploadFeedback({
+        title: info.title,
+        message: info.message,
+        tone: "error",
+      });
+      toast({
+        title: info.title,
+        description: info.message,
         variant: "destructive",
       });
     } finally {
@@ -2339,12 +2425,11 @@ export default function OwnerDashboard() {
                         key={payment.id}
                         payment={payment}
                         onRetryPayment={(p) => {
-                          // إذا كان التحويل بنكي، افتح نافذة رفع الإيصال
                           if (p.paymentMethod === "تحويل بنكي") {
+                            setReceiptUploadFeedback(null);
                             setSelectedPaymentForReceipt(p);
                             setShowReceiptDialog(true);
                           } else {
-                            // دفع إلكتروني - إعادة محاولة الدفع
                             retryPaymentMutation.mutate(p.id);
                           }
                         }}
@@ -2675,7 +2760,8 @@ export default function OwnerDashboard() {
                       )}
                     </span>
                   </div>
-                  {selectedPaymentForReceipt.receiptUrl && (
+                  {selectedPaymentForReceipt.receiptUrl &&
+                    selectedReceiptVerified === true && (
                     <div className="flex justify-between items-center">
                       <span className="text-muted-foreground">إيصال سابق:</span>
                       <a
@@ -2699,8 +2785,11 @@ export default function OwnerDashboard() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
-                  onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                  accept="image/*,application/pdf"
+                  onChange={(e) => {
+                    setReceiptFile(e.target.files?.[0] || null);
+                    setReceiptUploadFeedback(null);
+                  }}
                   className="hidden"
                 />
                 <Button
@@ -2719,29 +2808,32 @@ export default function OwnerDashboard() {
                 )}
               </div>
 
-              {/* عرض الإيصال المرفوع */}
-              {selectedPaymentForReceipt?.receiptUrl && (
-                <div className="space-y-3">
-                  <div className="border rounded-lg overflow-hidden">
-                    <img
-                      src={selectedPaymentForReceipt.receiptUrl}
-                      alt="إيصال التحويل"
-                      className="w-full max-h-48 object-contain bg-gray-50"
-                    />
+              {/* عرض الإيصال المرفوع بعد التحقق من وجود الملف */}
+              {selectedPaymentForReceipt?.receiptUrl &&
+                selectedReceiptVerified === true && (
+                  <div className="space-y-3">
+                    <div className="border rounded-lg overflow-hidden">
+                      <img
+                        src={selectedPaymentForReceipt.receiptUrl}
+                        alt="إيصال التحويل"
+                        className="w-full max-h-48 object-contain bg-gray-50"
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* عرض الإيصال المرفوع */}
-              {selectedPaymentForReceipt?.receiptUrl && (
-                <div className="space-y-3">
-                  <div className="border rounded-lg overflow-hidden">
-                    <img
-                      src={selectedPaymentForReceipt.receiptUrl}
-                      alt="إيصال التحويل"
-                      className="w-full max-h-48 object-contain bg-gray-50"
-                    />
-                  </div>
+              {receiptUploadFeedback && (
+                <div
+                  className={`rounded-lg border p-3 text-sm ${
+                    receiptUploadFeedback.tone === "error"
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  <p className="font-semibold">{receiptUploadFeedback.title}</p>
+                  <p className="mt-1 text-xs leading-5">
+                    {receiptUploadFeedback.message}
+                  </p>
                 </div>
               )}
 
@@ -2770,6 +2862,7 @@ export default function OwnerDashboard() {
                     setShowReceiptDialog(false);
                     setSelectedPaymentForReceipt(null);
                     setReceiptFile(null);
+                    setReceiptUploadFeedback(null);
                   }}
                 >
                   إلغاء
@@ -3085,6 +3178,38 @@ function PaymentRow({
   isVerifying?: boolean;
 }) {
   const [showDetails, setShowDetails] = useState(false);
+  const hasReceiptReference = Boolean(payment.hasReceipt || payment.receiptUrl);
+  const [receiptAvailability, setReceiptAvailability] =
+    useState<ReceiptAvailability>(hasReceiptReference ? "checking" : "none");
+
+  // Verify the receipt file itself. A stale URL or a deleted object must never
+  // be presented as an uploaded receipt.
+  useEffect(() => {
+    if (!hasReceiptReference) {
+      setReceiptAvailability("none");
+      return;
+    }
+    const url =
+      typeof payment.receiptUrl === "string" ? payment.receiptUrl.trim() : "";
+    if (!url) {
+      setReceiptAvailability("invalid");
+      return;
+    }
+    let cancelled = false;
+    setReceiptAvailability("checking");
+    fetch(url, { method: "HEAD", credentials: "include", cache: "no-store" })
+      .then((response) => {
+        if (!cancelled) {
+          setReceiptAvailability(response.ok ? "valid" : "invalid");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setReceiptAvailability("invalid");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceiptReference, payment.receiptUrl]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -3256,6 +3381,23 @@ function PaymentRow({
   const amount = payment.finalAmount || payment.amount || 0;
   const normalizedStatus = getStatusArabic(payment.status);
   const isCompleted = normalizedStatus === "مكتمل";
+  const receiptStatusView = resolvePaymentReceiptStatus({
+    paymentMethod: getPaymentMethodArabic(payment.paymentMethod),
+    status: normalizedStatus,
+    hasReceiptReference,
+    receiptAvailability,
+    scanStatus: payment.receiptScanStatus ?? null,
+  });
+  const statusReason =
+    receiptStatusView?.reason ??
+    getStatusReason(
+      normalizedStatus,
+      getPaymentMethodArabic(payment.paymentMethod),
+      payment.createdAt,
+    );
+  const showUploadReceipt = receiptStatusView
+    ? receiptStatusView.showUpload
+    : shouldShowUploadReceiptButton(payment);
 
   return (
     <div
@@ -3298,11 +3440,7 @@ function PaymentRow({
             <div className="text-xs text-muted-foreground mt-1">
               {formatDate(payment.createdAt)}
             </div>
-            {getStatusReason(
-              normalizedStatus,
-              getPaymentMethodArabic(payment.paymentMethod),
-              payment.createdAt,
-            ) && (
+            {statusReason && (
                 <div
                   className={`text-xs mt-1 ${normalizedStatus === "مكتمل"
                     ? "text-green-600 dark:text-green-400"
@@ -3313,11 +3451,7 @@ function PaymentRow({
                         : "text-amber-600 dark:text-amber-400"
                     }`}
                 >
-                  {getStatusReason(
-                    normalizedStatus,
-                    getPaymentMethodArabic(payment.paymentMethod),
-                    payment.createdAt,
-                  )}
+                  {statusReason}
                 </div>
               )}
           </div>
@@ -3360,7 +3494,7 @@ function PaymentRow({
         )}
 
         {/* زر رفع إيصال - للتحويل البنكي */}
-        {shouldShowUploadReceiptButton(payment) && onRetryPayment && (
+        {showUploadReceipt && onRetryPayment && (
           <Button
             size="sm"
             variant="default"

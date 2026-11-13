@@ -83,7 +83,13 @@ export interface AIScanResult {
 
   // ملخص الفحص
   summary: string;
-  recommendation: "تفعيل_تلقائي" | "مراجعة_يدوية" | "رفض";
+  /**
+   * Explicit document-type classification produced by the analysis. It is kept
+   * separate from the verification result so a non-receipt can never be
+   * mistaken for an incomplete receipt (manual review).
+   */
+  documentType: "bank_transfer_receipt" | "not_a_receipt" | "uncertain";
+  recommendation: "تفعيل_تلقائي" | "مراجعة_يدوية" | "رفض" | "مستند_غير_إيصال";
 
   // نتيجة التحقق الصارمة وأسباب القرار
   verification: ReceiptVerificationResult & {
@@ -113,6 +119,14 @@ export interface ScanReceiptOptions {
   referenceDate?: Date;
   imageFetchTimeoutMs?: number;
   geminiTimeoutMs?: number;
+  /**
+   * Real, user-visible scan progress. Called only when a stage actually starts
+   * or finishes. A throwing callback must never break the scan.
+   */
+  onProgress?: (
+    stage: import("../services/ReceiptScanProgressStore").ReceiptScanStageKey,
+    status: "active" | "done" | "failed"
+  ) => void;
 }
 
 type FailureCode =
@@ -144,6 +158,29 @@ function toScore(value: unknown): number {
   if (parsed === null) return 0;
   // Floor (not round) so a score just below the threshold cannot become 80.
   return Math.max(0, Math.min(100, Math.floor(parsed)));
+}
+
+type DocumentType = "bank_transfer_receipt" | "not_a_receipt" | "uncertain";
+
+/**
+ * Normalise the model's document-type classification. Anything missing or
+ * unexpected becomes "uncertain" so a real receipt is never rejected by a
+ * parsing glitch; uncertainty is handled as a manual review.
+ */
+function normalizeDocumentType(value: unknown): DocumentType {
+  if (typeof value !== "string") return "uncertain";
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "not_a_receipt" || normalized === "non_receipt") {
+    return "not_a_receipt";
+  }
+  if (
+    normalized === "bank_transfer_receipt" ||
+    normalized === "bank_receipt" ||
+    normalized === "receipt"
+  ) {
+    return "bank_transfer_receipt";
+  }
+  return "uncertain";
 }
 
 function toStringList(value: unknown): string[] {
@@ -222,6 +259,18 @@ async function loadReceiptImage(
     return { error: aborted ? "IMAGE_FETCH_TIMEOUT" : "IMAGE_FETCH_FAILED" };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+function reportProgress(
+  options: ScanReceiptOptions,
+  stage: import("../services/ReceiptScanProgressStore").ReceiptScanStageKey,
+  status: "active" | "done" | "failed"
+): void {
+  try {
+    options.onProgress?.(stage, status);
+  } catch {
+    // Progress must never break the receipt scan.
   }
 }
 
@@ -330,6 +379,7 @@ function buildFailureResult(params: {
       matchDetails: summary,
     },
     summary,
+    documentType: "uncertain",
     recommendation: "مراجعة_يدوية",
     verification: {
       ...verification,
@@ -371,6 +421,8 @@ export async function scanReceiptWithAI(
     return null;
   }
 
+  reportProgress(options, "received", "active");
+
   const referenceDate = options.referenceDate ?? new Date();
   const imageTimeout =
     options.imageFetchTimeoutMs ?? DEFAULT_IMAGE_FETCH_TIMEOUT_MS;
@@ -389,6 +441,9 @@ export async function scanReceiptWithAI(
   }
 
   if (approvedAccounts.length === 0) {
+    reportProgress(options, "received", "done");
+    reportProgress(options, "reading", "failed");
+    reportProgress(options, "finalizing", "done");
     const failure = buildFailureResult({
       paymentId,
       code: "NO_APPROVED_ACCOUNTS",
@@ -407,6 +462,8 @@ export async function scanReceiptWithAI(
 
   const loaded = await loadReceiptImage(imageUrl, options, imageTimeout);
   if ("error" in loaded) {
+    reportProgress(options, "received", "failed");
+    reportProgress(options, "finalizing", "done");
     const failure = buildFailureResult({
       paymentId,
       code: loaded.error,
@@ -421,11 +478,15 @@ export async function scanReceiptWithAI(
     return failure;
   }
 
+  reportProgress(options, "received", "done");
+
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     console.error(
       "🔬 [AI Scanner] GEMINI_API_KEY غير موجود في بيئة التشغيل — لن يتم استدعاء Gemini.",
     );
+    reportProgress(options, "reading", "failed");
+    reportProgress(options, "finalizing", "done");
     const failure = buildFailureResult({
       paymentId,
       code: "GEMINI_NOT_CONFIGURED",
@@ -480,6 +541,7 @@ export async function scanReceiptWithAI(
 
 أجب بصيغة JSON فقط بالهيكل التالي:
 {
+  "documentType": "bank_transfer_receipt" | "not_a_receipt" | "uncertain",
   "extractedData": {
     "amount": رقم أو null,
     "currency": "SAR" أو "ريال" أو null,
@@ -514,11 +576,16 @@ export async function scanReceiptWithAI(
 }
 
 ملاحظات:
+- documentType must be exactly one of: "bank_transfer_receipt", "not_a_receipt", "uncertain".
+  Use "not_a_receipt" ONLY when you are certain the document is not a bank transfer receipt
+  (for example a programming guide, article, non-bank invoice, ID card, or unrelated screenshot).
+  Use "uncertain" when the document type cannot be confirmed or the image is unclear.
 - لا تخترع أي قيمة غير ظاهرة في الصورة.
 - إن لم تظهر قيمة فاجعلها null.
 - القرار النهائي للتفعيل تتخذه الخادم وليس أنت.`;
 
   let rawAnalysis = "";
+  reportProgress(options, "reading", "active");
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
@@ -539,6 +606,7 @@ export async function scanReceiptWithAI(
       { timeout: geminiTimeout },
     );
     rawAnalysis = result.response.text();
+    reportProgress(options, "reading", "done");
     console.log(
       `[AI Scanner] Gemini response received, length: ${rawAnalysis.length} chars`,
     );
@@ -548,6 +616,8 @@ export async function scanReceiptWithAI(
       /timeout|timed out|abort/i.test(message) ||
       error?.name === "GoogleGenerativeAIAbortError";
     const code: FailureCode = timedOut ? "GEMINI_TIMEOUT" : "GEMINI_ERROR";
+    reportProgress(options, "reading", "failed");
+    reportProgress(options, "finalizing", "done");
     console.error(`🔬 [AI Scanner] خطأ في Gemini: ${message}`);
     const failure = buildFailureResult({
       paymentId,
@@ -571,6 +641,8 @@ export async function scanReceiptWithAI(
     analysisData = JSON.parse(jsonMatch[0]);
   } catch (parseError: any) {
     console.error("🔬 [AI Scanner] خطأ في تحليل JSON:", parseError?.message ?? parseError);
+    reportProgress(options, "reading", "failed");
+    reportProgress(options, "finalizing", "done");
     const failure = buildFailureResult({
       paymentId,
       code: "INVALID_AI_RESPONSE",
@@ -625,6 +697,17 @@ export async function scanReceiptWithAI(
   };
 
   const confidence = toScore(analysisData?.confidence);
+  const documentType = normalizeDocumentType(analysisData?.documentType);
+  const looksLikeReceipt =
+    extractedData.amount !== null &&
+    Boolean(
+      extractedData.receiverIban ||
+        extractedData.referenceNumber ||
+        extractedData.paymentReference ||
+        extractedData.transactionId
+    );
+  const confirmedNotReceipt =
+    documentType === "not_a_receipt" && !looksLikeReceipt;
   const verification = evaluateReceiptVerification({
     extracted: extractedData,
     authenticity: authenticityAnalysis,
@@ -635,8 +718,40 @@ export async function scanReceiptWithAI(
     approvedAccounts,
     referenceDate,
   });
-  const recommendation = recommendationForVerification(verification);
+  const recommendation: AIScanResult["recommendation"] = confirmedNotReceipt
+    ? "مستند_غير_إيصال"
+    : documentType === "bank_transfer_receipt"
+      ? recommendationForVerification(verification)
+      : "مراجعة_يدوية";
   const reviewReason = manualReviewReason(verification);
+  const typeReviewReason =
+    documentType === "uncertain"
+      ? "تعذّر تأكيد نوع المستند؛ يتطلب مراجعة."
+      : documentType === "not_a_receipt" && looksLikeReceipt
+        ? "نوع المستند غير مؤكد؛ يتطلب مراجعة."
+        : null;
+
+  reportProgress(
+    options,
+    "amount",
+    verification.amountMatch && verification.currencyMatch ? "done" : "failed"
+  );
+  reportProgress(
+    options,
+    "beneficiary",
+    verification.beneficiaryMatch && verification.ibanMatch ? "done" : "failed"
+  );
+  reportProgress(options, "date", verification.dateMatch ? "done" : "failed");
+  reportProgress(
+    options,
+    "authenticity",
+    verification.authenticityOk &&
+      verification.qualityOk &&
+      verification.confidenceOk
+      ? "done"
+      : "failed"
+  );
+  reportProgress(options, "finalizing", "active");
 
   const scanResult: AIScanResult = {
     paymentId,
@@ -682,14 +797,27 @@ export async function scanReceiptWithAI(
     },
     summary:
       toTextOrNull(analysisData?.summary) ||
-      (verification.autoActivationAllowed
+      (recommendation === "تفعيل_تلقائي"
         ? "الإيصال مطابق لشروط التفعيل التلقائي."
-        : reviewReason),
+        : confirmedNotReceipt
+          ? "المستند ليس إيصال تحويل بنكي."
+          : [typeReviewReason, reviewReason].filter(Boolean).join(" ") ||
+            reviewReason),
+    documentType,
     recommendation,
     verification: {
       ...verification,
+      autoActivationAllowed:
+        recommendation === "تفعيل_تلقائي"
+          ? verification.autoActivationAllowed
+          : false,
       decisionSource: "ai",
-      manualReviewReason: recommendation === "مراجعة_يدوية" ? reviewReason : undefined,
+      manualReviewReason:
+        recommendation === "مراجعة_يدوية"
+          ? [typeReviewReason, reviewReason].filter(Boolean).join(" ")
+          : confirmedNotReceipt
+            ? "المستند ليس إيصال تحويل بنكي."
+            : undefined,
     },
     receiptHash: options.receiptHash,
     receiptObjectKey: options.receiptObjectKey,
@@ -699,6 +827,7 @@ export async function scanReceiptWithAI(
   };
 
   await saveAIScanResult(scanResult);
+  reportProgress(options, "finalizing", "done");
   console.log(
     `🔬 [AI Scanner] اكتمل الفحص - التوصية: ${scanResult.recommendation}, الثقة: ${scanResult.confidence}%`,
   );
@@ -715,6 +844,7 @@ async function saveAIScanResult(scanResult: AIScanResult): Promise<void> {
       receiptHash: scanResult.receiptHash,
       receiptObjectKey: scanResult.receiptObjectKey,
       recommendation: scanResult.recommendation,
+      documentType: scanResult.documentType,
       decisionSource: "ai",
       manualReviewReason:
         scanResult.recommendation === "مراجعة_يدوية"

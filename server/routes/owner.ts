@@ -27,6 +27,10 @@ import {
 } from "../integrations/whatsapp";
 import { PaymobIntentionError, paymobService } from "../integrations/paymob";
 import { scanReceiptWithAI, persistAIScanResult } from "../integrations/aiReceiptScanner";
+import {
+  isValidReceiptScanId,
+  receiptScanProgressStore,
+} from "../services/ReceiptScanProgressStore";
 import { detectBookingCommissionReceiptContentType } from "../services/BookingCommissionReceiptService";
 import {
   hashReceiptContent,
@@ -201,6 +205,9 @@ function toOwnerPaymentSummary(payment: Payment) {
     status: payment.status,
     paymentMethod: payment.paymentMethod,
     receiptUrl: payment.receiptUrl,
+    hasReceipt: Boolean(
+      payment.receiptUrl || (payment as any).receiptObjectKey,
+    ),
     createdAt: payment.createdAt,
     completedAt: payment.completedAt,
     action: payment.action,
@@ -214,6 +221,36 @@ function toOwnerPaymentSummary(payment: Payment) {
     linkedProperties: payment.linkedProperties,
     notes: payment.notes,
   };
+}
+
+/**
+ * Safe, display-only classification of the stored scan result. It never
+ * approves anything; it only tells the owner UI whether a receipt was read.
+ */
+function deriveReceiptScanStatus(ocr: any): string | null {
+  if (!ocr) return null;
+  const recommendation = String(ocr.recommendation ?? "");
+  const documentType = String(ocr.documentType ?? "");
+  const failureReason = String(ocr.failureReason ?? "");
+  if (documentType === "not_a_receipt" || recommendation === "مستند_غير_إيصال") {
+    return "not_receipt";
+  }
+  if (
+    [
+      "GEMINI_NOT_CONFIGURED",
+      "GEMINI_TIMEOUT",
+      "GEMINI_ERROR",
+      "IMAGE_FETCH_FAILED",
+      "IMAGE_FETCH_TIMEOUT",
+      "INVALID_AI_RESPONSE",
+      "NO_APPROVED_ACCOUNTS",
+    ].includes(failureReason)
+  ) {
+    return "error";
+  }
+  if (recommendation === "تفعيل_تلقائي") return "verified";
+  if (recommendation === "مراجعة_يدوية") return "review";
+  return "pending";
 }
 
 function toOwnerSafeProperty(property: any): Record<string, unknown> {
@@ -1279,7 +1316,20 @@ router.get("/api/owner/payments", requireOwner, async (req, res) => {
       (req.session as any).authVersion,
     );
 
-    res.json(payments.map(toOwnerPaymentSummary));
+    const summaries = await Promise.all(
+      payments.map(async (payment) => {
+        const summary = toOwnerPaymentSummary(payment);
+        if (!summary.hasReceipt) {
+          return { ...summary, receiptScanStatus: null };
+        }
+        const ocr = await firebaseService
+          .getReceiptVerification(payment.id)
+          .catch(() => null);
+        return { ...summary, receiptScanStatus: deriveReceiptScanStatus(ocr) };
+      }),
+    );
+
+    res.json(summaries);
   } catch (err: any) {
     console.error("Get owner payments error:", err?.message);
     res.status(500).json({ error: "Failed to load payments" });
@@ -1446,6 +1496,7 @@ router.post("/api/owner/payment/:paymentId/rescan", requireOwnerOrAdmin, require
       success: true,
       scan: {
         recommendation: aiScanResult.recommendation,
+        documentType: aiScanResult.documentType,
         confidence: aiScanResult.confidence,
         summary: aiScanResult.summary,
         matchScore: aiScanResult.matchAnalysis.matchScore,
@@ -1577,6 +1628,18 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 // 💰 POST /api/owner/payment/bank-transfer - Submit bank transfer with receipt
 // ======================================================
+// Real, read-only progress for an in-flight receipt scan. It exposes only
+// stage states, never receipt contents or customer data.
+router.get("/api/owner/receipt-scan/:scanId", requireOwner, (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  const snapshot = receiptScanProgressStore.get(String(req.params.scanId || ""));
+  if (!snapshot) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ progress: snapshot });
+});
+
 router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin, parseReceiptUpload, async (req, res) => {
   let uploadedReceiptKey: string | null = null;
   let receiptHashForClaim: string | null = null;
@@ -1584,6 +1647,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
   let paymentCreated = false;
   let claimedPaymentId: string | null = null;
   let referenceClaimKey: string | null = null;
+  const rawScanId = (req.body as any)?.scanId;
+  const scanId = isValidReceiptScanId(rawScanId) ? rawScanId : null;
+  if (scanId) receiptScanProgressStore.start(scanId);
   try {
     const {
       propertyNumber: requestedPropertyNumber,
@@ -1861,8 +1927,22 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
           mimeType: detectedReceiptType,
           receiptHash,
           receiptObjectKey,
+          onProgress: (stage, status) =>
+            receiptScanProgressStore.setStage(scanId, stage, status),
         },
       );
+      if (scanId) receiptScanProgressStore.finish(scanId, "done");
+
+      // Safety net: a document that is not a bank transfer receipt can never
+      // be auto-activated, regardless of what the model extracted.
+      if (aiScanResult && aiScanResult.documentType !== "bank_transfer_receipt") {
+        aiScanResult.verification.autoActivationAllowed = false;
+        if (aiScanResult.recommendation === "تفعيل_تلقائي") {
+          aiScanResult.recommendation = "مراجعة_يدوية";
+          // Keep the stored scan result identical to what is shown/decided.
+          await persistAIScanResult(aiScanResult);
+        }
+      }
 
       // A bank reference / transaction id may only back one payment. A
       // duplicate downgrades the result to manual review; it never activates.
@@ -2178,6 +2258,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       unlinkedProperties: unlinkedProperties.length > 0 ? unlinkedProperties : undefined,
       aiScan: aiScanResult ? {
         recommendation: aiScanResult.recommendation,
+        documentType: aiScanResult.documentType,
         confidence: aiScanResult.confidence,
         summary: aiScanResult.summary,
         matchScore: aiScanResult.matchAnalysis.matchScore,
@@ -2195,6 +2276,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       } : null
     });
   } catch (err: any) {
+    if (scanId) receiptScanProgressStore.finish(scanId, "error");
     console.error("Bank transfer error:", err);
     if (fingerprintClaimed && receiptHashForClaim && claimedPaymentId) {
       try {
@@ -2242,6 +2324,227 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
     res.status(500).json({ error: "خطأ في معالجة التحويل البنكي" });
   }
 });
+
+// ======================================================
+// 📤 POST /api/owner/payment/upload-receipt
+// Attach/replace a receipt on an EXISTING bank-transfer payment. It never
+// creates a payment and never changes its status, amount, or dates.
+// ======================================================
+router.post(
+  "/api/owner/payment/upload-receipt",
+  requireOwner,
+  requireSameOrigin,
+  parseReceiptUpload,
+  async (req, res) => {
+    const sessionPropertyNumber = String(
+      (req.session as any)?.propertyNumber || "",
+    );
+    const rawScanId = (req.body as any)?.scanId;
+    const scanId = isValidReceiptScanId(rawScanId) ? rawScanId : null;
+    if (scanId) receiptScanProgressStore.start(scanId);
+
+    let claimedHash: string | null = null;
+    let claimedPaymentId: string | null = null;
+    let uploadedReceiptKey: string | null = null;
+    let receiptPersisted = false;
+    let aiScanResult: Awaited<ReturnType<typeof scanReceiptWithAI>> = null;
+
+    try {
+      const paymentId = String((req.body as any)?.paymentId || "").trim();
+      if (!paymentId) {
+        return res.status(400).json({ error: "معرف الدفعة مطلوب" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "الإيصال مطلوب" });
+      }
+      if (!r2 || !R2_BUCKET) {
+        return res.status(503).json({ error: "خدمة تخزين الإيصالات غير متاحة" });
+      }
+
+      const detectedReceiptType = detectBookingCommissionReceiptContentType(
+        req.file.buffer,
+      );
+      if (!detectedReceiptType) {
+        return res
+          .status(415)
+          .json({ error: "محتوى الإيصال لا يطابق صيغة الملف" });
+      }
+
+      const payment = await paymentService.getById(paymentId);
+      if (!payment) {
+        return res.status(404).json({ error: "الدفعة غير موجودة" });
+      }
+
+      const canAccess = await ownerCanAccessPayment(
+        sessionPropertyNumber,
+        payment,
+        (req.session as any).ownerAccountId,
+        (req.session as any).authVersion,
+      );
+      if (!canAccess) {
+        return res.status(403).json({ error: "غير مصرح لك" });
+      }
+
+      if (
+        payment.paymentMethod !== "تحويل بنكي" &&
+        payment.paymentMethod !== "bank_transfer"
+      ) {
+        return res
+          .status(409)
+          .json({ error: "هذه الدفعة ليست تحويلًا بنكيًا" });
+      }
+      if (payment.status !== "معلق" && payment.status !== "قيد المراجعة") {
+        return res
+          .status(409)
+          .json({ error: "لا يمكن رفع إيصال لهذه الدفعة في حالتها الحالية" });
+      }
+
+      // Same duplicate guard as every other receipt entry point. The claim is
+      // taken before any upload, and re-uploading for the same payment is
+      // idempotent.
+      const receiptHash = hashReceiptContent(req.file.buffer);
+      const fingerprint = await receiptDuplicateGuard().claimFingerprint(
+        receiptHash,
+        payment.id,
+      );
+      if (fingerprint.status === "duplicate") {
+        return res.status(409).json({
+          error: "تم استخدام صورة الإيصال هذه في عملية دفع أخرى.",
+          code: "DUPLICATE_RECEIPT",
+        });
+      }
+      if (fingerprint.status === "claimed") {
+        claimedHash = receiptHash;
+        claimedPaymentId = payment.id;
+      }
+
+      const ext =
+        detectedReceiptType === "application/pdf"
+          ? "pdf"
+          : detectedReceiptType === "image/png"
+            ? "png"
+            : detectedReceiptType === "image/webp"
+              ? "webp"
+              : "jpg";
+      const receiptKey = `receipts/${payment.propertyNumber}-${Date.now()}.${ext}`;
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: receiptKey,
+          Body: req.file.buffer,
+          ContentType: detectedReceiptType,
+        }),
+      );
+      uploadedReceiptKey = receiptKey;
+      const receiptUrl = receiptProxyPath(receiptKey);
+
+      // Update ONLY the receipt fields of the same payment.
+      await paymentService.update(payment.id, {
+        receiptUrl,
+        receiptObjectKey: receiptKey,
+        receiptHash,
+      } as any);
+      receiptPersisted = true;
+
+      try {
+        aiScanResult = await scanReceiptWithAI(
+          receiptUrl,
+          payment.id,
+          payment.finalAmount ?? payment.amount,
+          payment.paymentReference,
+          undefined,
+          undefined,
+          {
+            imageBuffer: req.file.buffer,
+            mimeType: detectedReceiptType,
+            receiptHash,
+            receiptObjectKey: receiptKey,
+            onProgress: (stage, status) =>
+              receiptScanProgressStore.setStage(scanId, stage, status),
+          },
+        );
+      } catch (scanError) {
+        console.error("[receipt-upload] scan error:", scanError);
+      }
+      if (scanId) {
+        receiptScanProgressStore.finish(scanId, aiScanResult ? "done" : "error");
+      }
+
+      if (claimedHash && claimedPaymentId) {
+        await receiptDuplicateGuard()
+          .finalizeFingerprint(claimedHash, claimedPaymentId, {
+            verificationId: payment.id,
+            recommendation:
+              aiScanResult?.recommendation ?? "مراجعة_يدوية",
+          })
+          .catch((error) =>
+            console.error("[receipt-upload] finalize fingerprint error:", error),
+          );
+      }
+
+      res.json({
+        success: true,
+        paymentId: payment.id,
+        receiptUrl,
+        aiScan: aiScanResult
+          ? {
+              recommendation: aiScanResult.recommendation,
+              documentType: aiScanResult.documentType,
+              confidence: aiScanResult.confidence,
+              summary: aiScanResult.summary,
+              matchScore: aiScanResult.matchAnalysis?.matchScore,
+              authenticityScore:
+                aiScanResult.authenticityAnalysis?.overallScore,
+              blockers: aiScanResult.verification?.blockers,
+              manualReviewReason:
+                aiScanResult.verification?.manualReviewReason,
+              failureReason: aiScanResult.failureReason,
+            }
+          : null,
+      });
+    } catch (error) {
+      if (scanId) receiptScanProgressStore.finish(scanId, "error");
+      console.error("Receipt upload error:", error);
+      if (claimedHash && claimedPaymentId) {
+        try {
+          if (receiptPersisted) {
+            await receiptDuplicateGuard().finalizeFingerprint(
+              claimedHash,
+              claimedPaymentId,
+              { verificationId: claimedPaymentId, failedAfterPayment: true },
+            );
+          } else {
+            await receiptDuplicateGuard().releaseFingerprint(
+              claimedHash,
+              claimedPaymentId,
+            );
+          }
+        } catch (cleanupError) {
+          console.error(
+            "[receipt-upload] fingerprint cleanup error:",
+            cleanupError,
+          );
+        }
+      }
+      if (uploadedReceiptKey && !receiptPersisted && r2 && R2_BUCKET) {
+        await r2
+          .send(
+            new DeleteObjectCommand({
+              Bucket: R2_BUCKET,
+              Key: uploadedReceiptKey,
+            }),
+          )
+          .catch((cleanupError) =>
+            console.error(
+              "[receipt-upload] orphan object cleanup error:",
+              cleanupError,
+            ),
+          );
+      }
+      res.status(500).json({ error: "فشل رفع الإيصال" });
+    }
+  },
+);
 
 
 router.get("/api/owner/r2-images", requireOwner, async (req, res) => {
