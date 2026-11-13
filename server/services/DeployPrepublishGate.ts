@@ -1,4 +1,4 @@
-﻿import { isFullGitSha } from "../../shared/deploySystem";
+import { isFullGitSha } from "../../shared/deploySystem";
 import type { DeployGateItemState } from "../../shared/deploySystem";
 import {
   DEPLOY_GATE_LABELS,
@@ -252,18 +252,35 @@ export function evaluatePreDeployGate(
     ),
   );
 
-  // 7) LIVE enablement: there is no separate production opt-in. LIVE is enabled
-  // by the same real-deploy switch; build, target and permission checks remain.
-  items.push(
-    item(
-      "production_opt_in",
-      "تفعيل النشر إلى الإنتاج",
-      "ok",
-      input.environment === "LIVE"
-        ? "لا يوجد تفعيل إنتاجي منفصل — LIVE يُفعَّل بمفتاح النشر الحقيقي، مع فحوص البناء والوجهة والصلاحيات."
-        : "غير مطلوب في بيئة الاختبار أو المحلية — الهدف الثابت معزول عن الإنتاج.",
-    ),
-  );
+  // 7) Production opt-in (only the SECOND gate for a LIVE target).
+  if (input.environment === "TEST" || input.environment === "LOCAL") {
+    items.push(
+      item(
+        "production_opt_in",
+        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
+        "ok",
+        "غير مطلوب في بيئة الاختبار أو المحلية — الهدف الثابت معزول عن الإنتاج.",
+      ),
+    );
+  } else if (input.productionDeployEnabled) {
+    items.push(
+      item(
+        "production_opt_in",
+        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
+        "ok",
+        "مفعّل — تحذير: الهدف الحالي هو الإنتاج.",
+      ),
+    );
+  } else {
+    items.push(
+      item(
+        "production_opt_in",
+        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
+        "blocked",
+        "مطلوب تفعيل إنتاجي صريح مستقل قبل السماح بأي rollout إلى الإنتاج.",
+      ),
+    );
+  }
 
   // 8) App Hosting region — mandatory for a controlled rollout (executor precondition).
   if (input.target.location?.trim()) {
