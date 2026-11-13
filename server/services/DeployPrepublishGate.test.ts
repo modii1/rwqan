@@ -11,6 +11,7 @@ import {
   DEPLOY_DEV_BACKEND_ID,
   DEPLOY_DEV_PROJECT_ID,
   DEPLOY_PROD_BACKEND_ID,
+  DEPLOY_PROD_BASE_URL,
   DEPLOY_PROD_PROJECT_ID,
   deployTargetBlockers,
   type DeployTarget,
@@ -116,10 +117,55 @@ test("all conditions proven → جاهز للمراجعة (TEST target, TEST dat
   }
 });
 
-test("a dirty worktree is BLOCKED (verdict: ممنوع بسبب فشل فحص)", () => {
-  const gate = evaluatePreDeployGate(input({ git: git({ worktree: "dirty" }) }));
-  assert.equal(gate.status, "blocked_by_failed_check");
+test("a dirty worktree is BLOCKED for LIVE (strict, unchanged)", () => {
+  const gate = evaluatePreDeployGate(
+    input({
+      environment: "LIVE",
+      git: git({ worktree: "dirty" }),
+      target: target({
+        projectId: DEPLOY_PROD_PROJECT_ID,
+        backendId: DEPLOY_PROD_BACKEND_ID,
+        baseUrl: DEPLOY_PROD_BASE_URL,
+      }),
+      productionDeployEnabled: true,
+    }),
+  );
   assert.equal(itemState(gate, "git_worktree"), "blocked");
+});
+
+test("TEST warns about local changes but publishes the last approved commit", () => {
+  const gate = evaluatePreDeployGate(
+    input({ environment: "TEST", git: git({ worktree: "dirty" }) }),
+  );
+  assert.equal(itemState(gate, "git_worktree"), "ok");
+  const item = gate.items.find((entry) => entry.key === "git_worktree");
+  assert.match(item?.reason ?? "", /لن تُنشر/);
+  assert.match(item?.reason ?? "", /آخر Commit معتمد/);
+});
+
+test("LOCAL and LIVE block a dirty worktree (no auto-commit path)", () => {
+  for (const environment of ["LIVE", "LOCAL"] as const) {
+    const gate = evaluatePreDeployGate(
+      input({
+        environment,
+        git: git({ worktree: "dirty" }),
+        target: target({
+          projectId:
+            environment === "LIVE" ? DEPLOY_PROD_PROJECT_ID : DEPLOY_DEV_PROJECT_ID,
+          backendId:
+            environment === "LIVE" ? DEPLOY_PROD_BACKEND_ID : DEPLOY_DEV_BACKEND_ID,
+          baseUrl:
+            environment === "LIVE" ? DEPLOY_PROD_BASE_URL : "https://dev.example.com",
+        }),
+        productionDeployEnabled: environment === "LIVE",
+      }),
+    );
+    assert.equal(
+      itemState(gate, "git_worktree"),
+      "blocked",
+      `${environment} must keep the strict dirty-worktree gate`,
+    );
+  }
 });
 
 test("a non-full SHA is BLOCKED; a full SHA passes", () => {
@@ -183,20 +229,20 @@ test("missing real-deploy opt-in BLOCKS; TEST never requires the production opt-
   assert.equal(itemState(closed, "production_opt_in"), "ok");
 });
 
-test("a LIVE target without the production opt-in is BLOCKED", () => {
+test("a LIVE target no longer requires a separate production opt-in", () => {
   const gate = evaluatePreDeployGate(
     input({
       environment: "LIVE",
       target: target({
         projectId: DEPLOY_PROD_PROJECT_ID,
         backendId: DEPLOY_PROD_BACKEND_ID,
-        baseUrl: "https://rwqan.sa",
+        baseUrl: DEPLOY_PROD_BASE_URL,
       }),
       productionDeployEnabled: false,
     }),
   );
-  assert.equal(gate.status, "blocked_by_failed_check");
-  assert.equal(itemState(gate, "production_opt_in"), "blocked");
+  assert.equal(itemState(gate, "production_opt_in"), "ok");
+  assert.notEqual(gate.status, "blocked_by_failed_check");
 });
 
 test("missing location/base-url/verify-config/tools turn the gate UNVERIFIED (no fake readiness)", () => {

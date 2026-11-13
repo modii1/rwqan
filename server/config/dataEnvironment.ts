@@ -211,6 +211,22 @@ function wrapReadOnlyFirestore(fs: Firestore): Firestore {
   });
 }
 
+/**
+ * Returns the unwrapped LIVE Firestore connection for the partner-profit cycle
+ * writer ONLY.
+ *
+ * This is deliberately NOT a general write capability:
+ *   - The only allowed consumer is `services/PartnerProfitCycleWriter.ts`.
+ *   - That writer accepts only two operations: recompute derived fields on an
+ *     UNLOCKED cycle, and delete an UNLOCKED cycle with NO transfers.
+ *   - It re-validates the cycle state inside a Firestore transaction and never
+ *     touches payments, expenses, transfers, or any other collection.
+ *   - The global read-only guard in `getActiveFirestore()` remains unchanged.
+ */
+export function getLiveFirestoreForCycleWriter(): Firestore | null {
+  return resolveLiveFirestore();
+}
+
 // ── Test helpers ────────────────────────────────────────────────────────────
 
 export function resetDataEnvironmentForTests(): void {

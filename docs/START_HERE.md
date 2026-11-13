@@ -1,5 +1,15 @@
 # START HERE — Ruqan / Rwqan Project System
 
+CURRENT VERSION: **0.5.0** (2026-11-05)
+BRANCH / COMMIT: `test/unified-gateway-ui-only` @ `190b43577b3eee10b835579aa63d2c155fd7e660`
+  (0.5.0 changes are in the working tree, not yet committed)
+OFFICIAL REMOTE: `https://github.com/modii1/rwqan`
+CURRENT STATE: DEV version — TEST publish deploys the last approved commit on
+`test/unified-gateway-ui-only`; it never creates commits, pushes, or branches. Local
+uncommitted changes are warned about and never published. GitHub dispatch reuses the
+configured token or the existing `gh` session in development. LIVE/LOCAL unchanged. No
+production release; no deployment executed for 0.5.0.
+
 ## 1. First Read This Order
 1. `docs/PROJECT_MASTER_REFERENCE.md`
 2. Last entry in `docs/VERSION_HISTORY.md`
@@ -11,10 +21,18 @@
 ## 2. Know the Current Status
 - Read the header block of `PROJECT_MASTER_REFERENCE.md` first.
 - Current STATUS/ENVIRONMENT/VERSION are always recorded at the top.
+- Current version: **0.5.0** (2026-11-05), branch `test/unified-gateway-ui-only`,
+  base commit `190b43577b3eee10b835579aa63d2c155fd7e660` (0.5.0 changes are in the working tree).
+- TEST publish deploys the last approved commit on the TEST branch. It never creates
+  commits, pushes, or branches; local uncommitted changes are warned about and never
+  published. Check-page UX and the secret-scan fix are retained; LIVE/LOCAL unchanged.
 
 ## 3. Project Boundary (CRITICAL)
 - DEV/OpenCode workspace: `C:\Users\zerof\Desktop\rwqan-sa-opencode`
-- Production/Original/Live (DO NOT TOUCH during development): `C:\Users\zerof\Desktop\rwqan-sa`
+- Official remote: `https://github.com/modii1/rwqan` (remote `origin`)
+- Backup: `C:\Users\zerof\Desktop\rwqan-sa-full-backup.git`
+- Legacy local folder `C:\Users\zerof\Desktop\rwqan-sa` was removed earlier; do not
+  recreate it. Recovery sources are the official remote and the backup.
 - Never use Production credentials in DEV.
 - Never use Production Firebase, R2, Paymob, WhatsApp, Google Drive, Gemini/OCR in DEV.
 - DEV is a new, empty Firebase (`rwqan-sa-dev`, project number 467810513087, region me-central2).

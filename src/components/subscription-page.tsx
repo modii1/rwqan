@@ -602,6 +602,23 @@ export default function SubscriptionPage() {
                 </p>
               )}
 
+              {Array.isArray(aiScanResult.blockers) && aiScanResult.blockers.length > 0 && (
+                <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
+                  <div className="font-semibold mb-1">سبب المراجعة اليدوية:</div>
+                  <ul className="list-disc pr-4 space-y-0.5">
+                    {aiScanResult.blockers.map((item: string, index: number) => (
+                      <li key={`owner-blocker-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {aiScanResult.manualReviewReason && (!Array.isArray(aiScanResult.blockers) || aiScanResult.blockers.length === 0) && (
+                <p className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
+                  {aiScanResult.manualReviewReason}
+                </p>
+              )}
+
               <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
                 مستوى الثقة: {aiScanResult.confidence}%
               </div>

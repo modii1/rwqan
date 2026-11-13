@@ -39,8 +39,11 @@ function normalized(value: unknown): string {
 
 function safeReceiptUrl(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  // New receipts are served through the authenticated same-origin proxy.
+  if (trimmed.startsWith("/api/receipts/view?key=")) return trimmed;
   try {
-    const url = new URL(value);
+    const url = new URL(trimmed);
     return url.protocol === "https:" ||
       (url.protocol === "http:" && process.env.NODE_ENV !== "production")
       ? url.toString()

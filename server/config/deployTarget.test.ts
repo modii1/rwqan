@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEPLOY_ALLOW_PRODUCTION_ENV_KEY,
   DEPLOY_APP_HOSTING_LOCATION_ENV_KEY,
   DEPLOY_DEV_BACKEND_ID,
   DEPLOY_DEV_BASE_URL,
@@ -159,24 +158,12 @@ test("a LIVE target requires the production project, backend, and host", () => {
   assert.ok(deployTargetBlockers(target(), "LIVE").length > 0);
 });
 
-test("productionDeployEnabled requires BOTH the real-deploy and production opt-ins", () => {
-  assert.equal(
-    productionDeployEnabled(
-      env({
-        [DEPLOY_REAL_DEPLOY_ENV_KEY]: "enabled",
-        [DEPLOY_ALLOW_PRODUCTION_ENV_KEY]: "enabled",
-      }),
-    ),
-    true,
-  );
+test("productionDeployEnabled follows the real-deploy switch (no second opt-in)", () => {
   assert.equal(
     productionDeployEnabled(env({ [DEPLOY_REAL_DEPLOY_ENV_KEY]: "enabled" })),
-    false,
+    true,
   );
-  assert.equal(
-    productionDeployEnabled(env({ [DEPLOY_ALLOW_PRODUCTION_ENV_KEY]: "enabled" })),
-    false,
-  );
+  assert.equal(productionDeployEnabled(env({})), false);
 });
 
 test("resolveAppHostingHost derives the App Hosting host from the external convention", () => {
@@ -196,9 +183,9 @@ test("resolveAppHostingHost derives the App Hosting host from the external conve
       projectId: DEPLOY_DEV_PROJECT_ID,
       backendId: DEPLOY_DEV_BACKEND_ID,
       baseUrl: null,
-      location: "us-central1",
+      location: "europe-west4",
     }),
-    "https://rwqan-backend--rwqan-757.us-central1.hosted.app",
+    "https://rwqan-backend--rwqan-757.europe-west4.hosted.app",
   );
 });
 

@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   ShieldCheck,
@@ -43,6 +44,7 @@ import {
   DEPLOY_STATE_DESCRIPTORS,
   isFullGitSha,
   type DeployBranchPushResult,
+  type DeployBranchSwitchResult,
   type DeployCheckResult,
   type DeployCheckRun,
   type DeployGateItem,
@@ -52,6 +54,9 @@ import {
   type DeployReleaseStatus,
   type DeployRestorePreview,
   type DeployState,
+  type DeploySyncPreflight,
+  type DeployUploadChange,
+  type DeployUploadPreview,
   type DeployUploadStage,
   type DeployUploadStageResult,
   type DeployUploadStageStatus,
@@ -130,9 +135,40 @@ const UPLOAD_STAGES: { key: DeployUploadStage; label: string }[] = [
   { key: "connection", label: "فحص الاتصال بمستودع Git" },
   { key: "branch", label: "التحقق من الفرع المعتمد" },
   { key: "changes", label: "فحص التغييرات المحلية" },
+  { key: "commit", label: "إنشاء Commit جديد" },
   { key: "github_connection", label: "فحص الاتصال بـ GitHub" },
   { key: "push", label: "رفع Commit إلى GitHub" },
   { key: "verify", label: "التحقق من نزول Commit" },
+];
+
+const UPLOAD_CHANGE_CATEGORY_LABEL: Record<string, string> = {
+  code: "الكود",
+  tests: "الاختبارات",
+  docs: "التوثيق",
+  config: "الإعدادات",
+  environment: "ملفات البيئة",
+  artifacts: "مخرجات/تقارير",
+  sensitive: "حساسة (محظورة)",
+  other: "أخرى",
+};
+
+const UPLOAD_CHANGE_KIND_LABEL: Record<string, string> = {
+  modified: "معدّل",
+  added: "جديد",
+  deleted: "محذوف",
+  renamed: "معاد تسميته",
+  untracked: "غير متتبع",
+};
+
+const SYNC_STAGES: { key: DeployUploadStage; label: string }[] = [
+  { key: "connection", label: "فحص مساحة العمل" },
+  { key: "branch", label: "التحقق من الفرع" },
+  { key: "changes", label: "اكتشاف التحديثات" },
+  { key: "checks", label: "تشغيل الفحوص والاختبارات" },
+  { key: "build", label: "بناء LIVE" },
+  { key: "commit", label: "إنشاء Commit" },
+  { key: "push", label: "Push إلى GitHub" },
+  { key: "verify", label: "التحقق من Commit" },
 ];
 
 const UPLOAD_STAGE_STATUS_LABEL: Record<DeployUploadStageStatus, string> = {
@@ -472,6 +508,10 @@ export function DeployBar() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadStages, setUploadStages] = useState<DeployUploadStageResult[]>([]);
   const [uploadOutcome, setUploadOutcome] = useState<DeployBranchPushResult | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<DeployUploadPreview | null>(null);
+  const [uploadSelectedPaths, setUploadSelectedPaths] = useState<string[]>([]);
+  const [uploadCommitMessage, setUploadCommitMessage] = useState("");
+  const [branchAckUnpushed, setBranchAckUnpushed] = useState(false);
 
   // The TEST publish is delegated to GitHub Actions: the deployment itself is
   // deployment itself is created by the deploy-test workflow from the remote
@@ -606,25 +646,90 @@ export function DeployBar() {
     },
   });
 
-  // Dedicated branch upload: runs ONLY the dedicated branch upload command via
-  // the dedicated fail-closed pipeline. It never dispatches a publish and never
-  // deploys anything. The target branch is derived from the selected environment:
-  // TEST -> test/unified-gateway-ui-only, LIVE -> main.
+  // Read-only preview: lists every local change (modified/added/deleted/
+  // renamed/untracked), classifies it, and blocks secret-looking files. It never
+  // stages, commits, or pushes. The admin reviews the result before confirming.
+  const uploadPreviewMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest("POST", "/api/admin/deploy/upload/preview", {
+        environment: state.environment as "TEST" | "LIVE",
+      });
+      return res.json() as Promise<{ preview?: DeployUploadPreview }>;
+    },
+    onSuccess: (data) => {
+      const preview = data.preview ?? null;
+      setUploadPreview(preview);
+      setUploadOutcome(null);
+      setUploadStages(
+        preview
+          ? []
+          : [{ stage: "changes", status: "failed", message: "تعذّر فحص التغييرات المحلية." }]
+      );
+      setUploadSelectedPaths(
+        preview
+          ? preview.changes
+              .filter((change) => change.selectedByDefault && !change.blocked)
+              .map((change) => change.path)
+          : []
+      );
+      setUploadCommitMessage(preview?.suggestedMessage ?? "");
+      setBranchAckUnpushed(false);
+      setUploadOpen(true);
+    },
+    onError: (error: unknown) => {
+      const message = deployErrorMessage(error);
+      setUploadPreview(null);
+      setUploadSelectedPaths([]);
+      setUploadCommitMessage("");
+      setBranchAckUnpushed(false);
+      setUploadStages([
+        { stage: "changes", status: "failed", message },
+      ]);
+      setUploadOpen(true);
+      toast({
+        title: "تعذّر فحص التغييرات",
+        description: message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Dedicated branch upload: creates ONE commit from the approved selection and
+  // pushes the approved branch (TEST -> test/unified-gateway-ui-only, LIVE ->
+  // main). It never dispatches a publish, never deploys, and never force-pushes.
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const environment = uploadPreview?.environment ?? (state.environment as "TEST" | "LIVE");
+      if (environment !== state.environment) {
+        throw new Error(
+          "تغيّرت البيئة بعد فحص التغييرات — أعد فتح لوحة الرفع لفحص التغييرات من جديد."
+        );
+      }
       const res = await apiRequest("POST", "/api/admin/deploy/upload", {
-        environment: state.environment as "TEST" | "LIVE",
+        environment,
+        confirm: true,
+        includePaths: uploadSelectedPaths,
+        commitMessage: uploadCommitMessage.trim() || undefined,
       });
       return res.json() as Promise<{ result?: DeployBranchPushResult }>;
     },
     onSuccess: (result) => {
       const outcome = result.result ?? null;
       setUploadOutcome(outcome);
-      setUploadStages(outcome?.stages && outcome.stages.length > 0 ? outcome.stages : []);
+      setUploadStages(
+        outcome?.stages && outcome.stages.length > 0
+          ? outcome.stages
+          : []
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
       toast({
-        title: outcome?.ok ? "تم رفع الفرع إلى GitHub" : "تعذّر رفع الفرع إلى GitHub",
+        title: outcome?.ok
+          ? outcome.skipped
+            ? "لا توجد تغييرات جديدة"
+            : "تم إنشاء Commit ورفع الفرع إلى GitHub"
+          : "تعذّر رفع الفرع إلى GitHub",
         description: outcome?.detail ?? "تعذّر تنفيذ رفع الفرع.",
         variant: outcome?.ok ? "default" : "destructive",
       });
@@ -641,6 +746,191 @@ export function DeployBar() {
         variant: "destructive",
       });
     },
+  });
+
+  // Safe branch switch: only offered when the working tree is completely clean.
+  // The server refuses any switch that could hide/lose changes and never uses
+  // reset, clean, stash, merge, or force checkout.
+  const branchSwitchMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const environment =
+        uploadPreview?.environment ?? (state.environment as "TEST" | "LIVE");
+      const res = await apiRequest("POST", "/api/admin/deploy/branch/switch", {
+        environment,
+        confirm: true,
+        acknowledgeUnpushed: branchAckUnpushed,
+      });
+      return res.json() as Promise<{ result?: DeployBranchSwitchResult }>;
+    },
+    onSuccess: (data) => {
+      const result = data.result ?? null;
+      if (!result?.ok) {
+        toast({
+          title: "تعذّر الانتقال إلى الفرع المستهدف",
+          description: result?.detail ?? "لم يتم تغيير الفرع.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "تم الانتقال إلى الفرع المستهدف",
+        description: result.detail,
+      });
+      setBranchAckUnpushed(false);
+      // Re-run the read-only preview on the newly checked-out branch.
+      uploadPreviewMutation.mutate();
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: "تعذّر الانتقال إلى الفرع المستهدف",
+        description: deployErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const presentSyncResult = (
+    environment: "TEST" | "LIVE",
+    outcome: DeployBranchPushResult | null
+  ) => {
+    setUploadOutcome(outcome);
+    setUploadStages(outcome?.stages && outcome.stages.length > 0 ? outcome.stages : []);
+    setUploadPreview(null);
+    setUploadOpen(true);
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/deploy/state"] });
+    toast({
+      title: outcome?.ok
+        ? environment === "TEST"
+          ? "تمت مزامنة TEST"
+          : "تمت مزامنة LIVE"
+        : environment === "TEST"
+          ? "تعذّرت مزامنة TEST"
+          : "تعذّرت مزامنة LIVE",
+      description: outcome?.detail ?? "لم تكتمل العملية.",
+      variant: outcome?.ok ? "default" : "destructive",
+    });
+  };
+
+  const presentSyncFailure = (environment: "TEST" | "LIVE", error: unknown) => {
+    const message = deployErrorMessage(error);
+    setUploadOutcome(null);
+    setUploadPreview(null);
+    setUploadStages([{ stage: "changes", status: "failed", message }]);
+    setUploadOpen(true);
+    toast({
+      title:
+        environment === "TEST"
+          ? "تعذّرت مزامنة TEST"
+          : "تعذّرت مزامنة LIVE",
+      description: message,
+      variant: "destructive",
+    });
+  };
+
+  // One-click TEST sync: detect -> checks -> commit -> push -> verify.
+  const syncTestMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest("POST", "/api/admin/deploy/sync/test", {
+        environment: "TEST",
+      });
+      return res.json() as Promise<{ result?: DeployBranchPushResult }>;
+    },
+    onSuccess: (data) => presentSyncResult("TEST", data.result ?? null),
+    onError: (error) => presentSyncFailure("TEST", error),
+  });
+
+  // LIVE preflight: count-only summary + state token, no writes.
+  const livePreflightMutation = useMutation({
+    mutationFn: async () => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest(
+        "POST",
+        "/api/admin/deploy/sync/live/preflight",
+        { environment: "LIVE" }
+      );
+      return res.json() as Promise<{ preflight?: DeploySyncPreflight }>;
+    },
+    onSuccess: (data) => {
+      const preflight = data.preflight;
+      if (!preflight) {
+        presentSyncFailure("LIVE", new Error("تعذّر فحص تحديثات TEST المعتمدة."));
+        return;
+      }
+      if (!preflight.canSync) {
+        setUploadOutcome(null);
+        setUploadPreview(null);
+        setUploadStages([
+          {
+            stage: "changes",
+            status: "failed",
+            message: preflight.blockedReason ?? preflight.detail,
+          },
+        ]);
+        setUploadOpen(true);
+        toast({
+          title: "تعذّرت مزامنة LIVE",
+          description: preflight.blockedReason ?? preflight.detail,
+          variant: "destructive",
+        });
+        return;
+      }
+      const confirmationMessage = preflight.prepared
+        ? "استئناف مزامنة LIVE مُجهّزة مسبقًا؟\n\n" +
+          `الملفات المُجهّزة: ${preflight.preparedCount} (` +
+          `${preflight.counts.modified} معدّل، ${preflight.counts.added} جديد، ` +
+          `${preflight.counts.deleted} محذوف، ${preflight.counts.renamed} معاد تسميته)\n` +
+          `رسالة Commit: ${preflight.commitMessage}\n\n` +
+          "سيتم تشغيل الفحوص والاختبارات والبناء على الحالة المُجهّزة، ثم إنشاء Commit على main وPush إلى GitHub.\n" +
+          "لن تُعاد التغييرات السابقة ولن تُضاعف."
+        : "مزامنة LIVE من آخر تحديثات TEST المعتمدة؟\n\n" +
+          `الملفات المعتمدة: ${preflight.approvedCount} (` +
+          `${preflight.counts.modified} معدّل، ${preflight.counts.added} جديد، ` +
+          `${preflight.counts.deleted} محذوف، ${preflight.counts.renamed} معاد تسميته)\n` +
+          `رسالة Commit: ${preflight.commitMessage}\n\n` +
+          "سيتم تطبيق التحديثات البرمجية فقط، ثم تشغيل الفحوص والاختبارات والبناء في مساحة LIVE، " +
+          "ثم إنشاء Commit على main وPush إلى GitHub.\n" +
+          "لن يتم نقل الأسرار أو إعدادات البيئات أو التغييرات غير المعتمدة.";
+      const confirmed = window.confirm(confirmationMessage);
+      if (!confirmed) {
+        toast({
+          title: "أُلغيت مزامنة LIVE",
+          description: "لم يتم تطبيق أي تغيير.",
+        });
+        return;
+      }
+      setUploadOutcome(null);
+      setUploadPreview(null);
+      setUploadOpen(true);
+      setUploadStages(
+        SYNC_STAGES.map((entry, index) => ({
+          stage: entry.key,
+          status: index === 0 ? ("running" as const) : ("pending" as const),
+          message:
+            index === 0
+              ? "جارٍ تطبيق التحديثات المعتمدة في مساحة LIVE…"
+              : "في انتظار التنفيذ.",
+        }))
+      );
+      liveSyncMutation.mutate({ token: preflight.token });
+    },
+    onError: (error) => presentSyncFailure("LIVE", error),
+  });
+
+  // LIVE sync after the single confirmation.
+  const liveSyncMutation = useMutation({
+    mutationFn: async ({ token }: { token: string }) => {
+      if (!state) throw new Error("لا توجد حالة publish جاهزة للخادم.");
+      const res = await apiRequest("POST", "/api/admin/deploy/sync/live", {
+        environment: "LIVE",
+        confirm: true,
+        token,
+      });
+      return res.json() as Promise<{ result?: DeployBranchPushResult }>;
+    },
+    onSuccess: (data) => presentSyncResult("LIVE", data.result ?? null),
+    onError: (error) => presentSyncFailure("LIVE", error),
   });
 
   // Real, explicit release checks (POST /api/admin/deploy/checks): runs the
@@ -758,15 +1048,73 @@ export function DeployBar() {
     if (!state) return;
     setUploadOpen(true);
     setUploadOutcome(null);
+    setUploadPreview(null);
+    setUploadSelectedPaths([]);
+    setUploadCommitMessage("");
+    setBranchAckUnpushed(false);
     setUploadStages(
       UPLOAD_STAGES.map((entry, index) => ({
         stage: entry.key,
         status: index === 0 ? ("running" as const) : ("pending" as const),
-        message: index === 0 ? "فحص الاتصال بمستودع Git…" : "في انتظار التنفيذ.",
-      })),
+        message:
+          index === 0 ? "فحص الاتصال بمستودع Git…" : "في انتظار التنفيذ.",
+      }))
     );
-    uploadMutation.mutate();
+    uploadPreviewMutation.mutate();
   };
+
+  // One-click cloud sync. TEST runs immediately; LIVE runs a read-only
+  // preflight and then asks for exactly ONE confirmation.
+  const handleCloudSync = () => {
+    if (!state) return;
+    setUploadOutcome(null);
+    setUploadPreview(null);
+    setUploadSelectedPaths([]);
+    setUploadCommitMessage("");
+    setUploadStages([]);
+    if (state.environment === "TEST") {
+      setUploadOpen(true);
+      setUploadStages(
+        SYNC_STAGES.filter((entry) => entry.key !== "build").map(
+          (entry, index) => ({
+            stage: entry.key,
+            status: index === 0 ? ("running" as const) : ("pending" as const),
+            message:
+              index === 0
+                ? "جارٍ اكتشاف التحديثات المحلية…"
+                : "في انتظار التنفيذ.",
+          })
+        )
+      );
+      syncTestMutation.mutate();
+    } else {
+      livePreflightMutation.mutate();
+    }
+  };
+
+  const syncPending =
+    syncTestMutation.isPending ||
+    livePreflightMutation.isPending ||
+    liveSyncMutation.isPending;
+
+  const toggleUploadPath = (filePath: string) => {
+    setUploadSelectedPaths((current) =>
+      current.includes(filePath)
+        ? current.filter((entry) => entry !== filePath)
+        : [...current, filePath]
+    );
+  };
+
+  const selectAllUploadPaths = () => {
+    if (!uploadPreview) return;
+    setUploadSelectedPaths(
+      uploadPreview.changes
+        .filter((change) => !change.blocked)
+        .map((change) => change.path)
+    );
+  };
+
+  const clearUploadPaths = () => setUploadSelectedPaths([]);
 
   // The main publish button publishes the environment the server tracks now.
   const handlePublish = () => {
@@ -968,11 +1316,11 @@ export function DeployBar() {
     if (!dataEnvironment || dataEnvironment.environment === target) return;
     // Prevent switching environment while an upload is in flight so the upload
     // target never changes mid-flight.
-    if (uploadMutation.isPending) {
+    if (syncPending || uploadMutation.isPending) {
       toast({
         title: "لا يمكن تبديل البيئة",
         description:
-          "عملية رفع الفرع قيد التنفيذ حاليًا. يُرجى الانتظار حتى تنتهي قبل تبديل البيئة.",
+          "عملية مزامنة/رفع قيد التنفيذ حاليًا. يُرجى الانتظار حتى تنتهي قبل تبديل البيئة.",
         variant: "destructive",
       });
       return;
@@ -1068,16 +1416,20 @@ export function DeployBar() {
                   size="sm"
                   variant="outline"
                   className="h-7 shrink-0 px-2 text-xs"
-                  onClick={handleUploadBranch}
-                  disabled={uploadMutation.isPending}
-                  aria-label="رفع إلى GitHub"
+                  onClick={handleCloudSync}
+                  disabled={syncPending}
+                  aria-label="مزامنة التحديثات"
                   data-testid="deploy-bar-upload-test"
                 >
-                  <Upload className="h-3.5 w-3.5" />
+                  {syncPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                رفع إلى GitHub
+                مزامنة التحديثات
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -1142,7 +1494,8 @@ export function DeployBar() {
                 environment and is intentionally not offered as a switch. */}
             {(["TEST", "LIVE"] as const).map((option) => {
               const active = dataEnvironment?.environment === option;
-              const disabled = environmentMutation.isPending || !dataEnvironment;
+              const disabled =
+                environmentMutation.isPending || syncPending || !dataEnvironment;
               return (
                 <button
                   key={option}
@@ -1481,7 +1834,7 @@ export function DeployBar() {
           className="fixed left-2 right-2 top-[40px] z-[100] max-h-[70vh] overflow-y-auto rounded-b-lg border border-amber-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-[520px]"
         >
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-amber-950">رفع الفرع إلى GitHub</h3>
+            <h3 className="text-sm font-bold text-amber-950">مزامنة التحديثات</h3>
             <Button
               size="sm"
               variant="ghost"
@@ -1494,27 +1847,289 @@ export function DeployBar() {
             </Button>
           </div>
 
-          <ul className="space-y-1.5" data-testid="deploy-bar-upload-stages">
-            {uploadStages.map((entry) => {
-              const stageMeta = UPLOAD_STAGES.find((item) => item.key === entry.stage);
-              const stageLabel = stageMeta?.label ?? entry.stage;
-              return (
-                <li
-                  key={entry.stage}
-                  data-testid={`deploy-bar-upload-stage-${entry.stage}`}
-                  className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2"
+          {uploadStages.length > 0 ? (
+            <ul className="space-y-1.5" data-testid="deploy-bar-upload-stages">
+              {uploadStages.map((entry) => {
+                const stageMeta =
+                  SYNC_STAGES.find((item) => item.key === entry.stage) ??
+                  UPLOAD_STAGES.find((item) => item.key === entry.stage);
+                const stageLabel = stageMeta?.label ?? entry.stage;
+                return (
+                  <li
+                    key={entry.stage}
+                    data-testid={`deploy-bar-upload-stage-${entry.stage}`}
+                    className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2"
+                  >
+                    <span className="mt-0.5">
+                      <UploadStageStatusIcon status={entry.status} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-amber-950">{stageLabel}</p>
+                      <p className="text-[11px] leading-4 text-muted-foreground">{entry.message}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
+          {uploadPreview && !uploadOutcome ? (
+            <div
+              className="mt-2 space-y-2 rounded-md border border-amber-200 bg-amber-50/40 p-2"
+              data-testid="deploy-bar-upload-preview"
+            >
+              <div className="space-y-0.5 text-[11px] text-muted-foreground">
+                <p>
+                  البيئة: <strong className="text-amber-950">{uploadPreview.environment}</strong>{" "}
+                  · الفرع: <span dir="ltr">{uploadPreview.branch}</span>
+                </p>
+                <p>
+                  الفرع الحالي: <span dir="ltr">{uploadPreview.currentBranch ?? "غير معروف"}</span>{" "}
+                  {uploadPreview.branchMatches ? "✓ مطابق" : "✗ غير مطابق"}
+                </p>
+                {uploadPreview.workspace ? (
+                  <p className="rounded border border-amber-200 bg-white px-1.5 py-1">
+                    مساحة العمل: <strong className="text-amber-950">{uploadPreview.workspace.label}</strong>
+                    {uploadPreview.workspace.created ? " — أُنشئت الآن" : ""}
+                    <br />
+                    <span dir="ltr" className="font-mono text-[10px]">
+                      {uploadPreview.workspace.path}
+                    </span>
+                  </p>
+                ) : null}
+                {uploadPreview.workspace ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    مساحة مستقلة تمامًا — لا تُضمّن تغييرات البيئة الأخرى.
+                  </p>
+                ) : null}
+                <p>
+                  التغييرات: {uploadPreview.counts.total} — {uploadPreview.counts.modified} معدّل،{" "}
+                  {uploadPreview.counts.added} جديد، {uploadPreview.counts.deleted} محذوف،{" "}
+                  {uploadPreview.counts.untracked} غير متتبع
+                </p>
+                {uploadPreview.remoteSha ? (
+                  <p dir="ltr" className="font-mono text-[10px]">
+                    GitHub: {uploadPreview.remoteSha.slice(0, 12)}
+                  </p>
+                ) : null}
+                {uploadPreview.aheadCount !== null ||
+                uploadPreview.behindCount !== null ? (
+                  <p>
+                    Commits محلية غير مرفوعة: {uploadPreview.aheadCount ?? 0} · خلف GitHub:{" "}
+                    {uploadPreview.behindCount ?? 0}
+                  </p>
+                ) : null}
+              </div>
+
+              {uploadPreview.environment !== state?.environment ? (
+                <p className="rounded-md border border-red-300 bg-red-50 p-2 text-[11px] font-medium text-red-800">
+                  تغيّرت البيئة بعد فحص التغييرات — أعد فتح لوحة الرفع للفحص من جديد.
+                </p>
+              ) : null}
+
+              {uploadPreview.blockedReason ? (
+                <p
+                  className="rounded-md border border-red-300 bg-red-50 p-2 text-[11px] font-medium text-red-800"
+                  data-testid="deploy-bar-upload-blocked"
                 >
-                  <span className="mt-0.5">
-                    <UploadStageStatusIcon status={entry.status} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-amber-950">{stageLabel}</p>
-                    <p className="text-[11px] leading-4 text-muted-foreground">{entry.message}</p>
+                  {uploadPreview.blockedReason}
+                </p>
+              ) : null}
+
+              {!uploadPreview.branchMatches && uploadPreview.branchSwitch ? (
+                <div
+                  className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2"
+                  data-testid="deploy-bar-branch-switch"
+                >
+                  <p className="text-[11px] font-bold text-amber-950">
+                    الانتقال الآمن إلى الفرع المستهدف
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    الفرع الحالي:{" "}
+                    <span dir="ltr" className="font-mono">
+                      {uploadPreview.branchSwitch.currentBranch ?? "غير معروف"}
+                    </span>{" "}
+                    → الفرع المستهدف:{" "}
+                    <span dir="ltr" className="font-mono">
+                      {uploadPreview.branchSwitch.targetBranch}
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    تغييرات شجرة العمل: {uploadPreview.branchSwitch.workingTreeCounts.total}
+                  </p>
+
+                  {uploadPreview.branchSwitch.unpushedCurrentCommits.length > 0 ? (
+                    <div className="text-[11px]">
+                      <p className="font-medium text-amber-950">
+                        Commits محلية غير مرفوعة على الفرع الحالي:
+                      </p>
+                      <ul dir="ltr" className="mt-1 space-y-0.5 font-mono text-[10px] text-muted-foreground">
+                        {uploadPreview.branchSwitch.unpushedCurrentCommits.map((commit) => (
+                          <li key={commit.sha}>
+                            {commit.sha.slice(0, 7)} {commit.subject}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {uploadPreview.branchSwitch.unpushedTargetCommits.length > 0 ? (
+                    <div className="text-[11px]">
+                      <p className="font-medium text-amber-950">
+                        Commits محلية غير مرفوعة على الفرع المستهدف:
+                      </p>
+                      <ul dir="ltr" className="mt-1 space-y-0.5 font-mono text-[10px] text-muted-foreground">
+                        {uploadPreview.branchSwitch.unpushedTargetCommits.map((commit) => (
+                          <li key={commit.sha}>
+                            {commit.sha.slice(0, 7)} {commit.subject}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {uploadPreview.branchSwitch.safeOptions.length > 0 ? (
+                    <ul className="list-disc space-y-0.5 ps-5 text-[11px] text-muted-foreground">
+                      {uploadPreview.branchSwitch.safeOptions.map((option) => (
+                        <li key={option}>{option}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+
+                  {uploadPreview.branchSwitch.canSwitch ? (
+                    <div className="space-y-2">
+                      {uploadPreview.branchSwitch.requiresUnpushedAck ? (
+                        <label className="flex items-start gap-2 text-[11px] text-amber-950">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-3.5 w-3.5"
+                            checked={branchAckUnpushed}
+                            onChange={(event) => setBranchAckUnpushed(event.target.checked)}
+                            data-testid="deploy-bar-branch-switch-ack"
+                          />
+                          أفهم أن الـCommits المحلية ستبقى على الفرع الحالي ولن تُنقل إلى الفرع المستهدف.
+                        </label>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="h-7 px-2 text-xs"
+                        disabled={
+                          branchSwitchMutation.isPending ||
+                          uploadPreview.environment !== state?.environment ||
+                          (uploadPreview.branchSwitch.requiresUnpushedAck && !branchAckUnpushed)
+                        }
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            `الانتقال إلى الفرع ${uploadPreview.branchSwitch?.targetBranch ?? ""}؟\n\n` +
+                              `الفرع الحالي: ${uploadPreview.branchSwitch?.currentBranch ?? "غير معروف"}\n` +
+                              "لن يتم نقل أي تغييرات غير محفوظة، ولن يتم دمج الفروع، ولن يُستخدم reset أو clean أو stash."
+                          );
+                          if (confirmed) branchSwitchMutation.mutate();
+                        }}
+                        data-testid="deploy-bar-branch-switch-button"
+                      >
+                        {branchSwitchMutation.isPending ? (
+                          <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" />
+                        ) : null}
+                        الانتقال إلى {uploadPreview.branchSwitch.targetBranch}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {uploadPreview.changes.length > 0 ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[11px]"
+                      onClick={selectAllUploadPaths}
+                      data-testid="deploy-bar-upload-select-all"
+                    >
+                      تحديد الكل
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[11px]"
+                      onClick={clearUploadPaths}
+                      data-testid="deploy-bar-upload-clear"
+                    >
+                      إلغاء التحديد
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">
+                      محدد: {uploadSelectedPaths.length}/{uploadPreview.changes.filter((c) => !c.blocked).length}
+                    </span>
                   </div>
-                </li>
-              );
-            })}
-          </ul>
+
+                  <div
+                    className="max-h-44 overflow-y-auto rounded-md border border-amber-200 bg-white"
+                    data-testid="deploy-bar-upload-changes"
+                  >
+                    {uploadPreview.changes.map((change: DeployUploadChange) => (
+                      <label
+                        key={change.path}
+                        data-testid={`deploy-bar-upload-change-${change.path}`}
+                        className={`flex cursor-pointer items-center gap-2 border-b border-amber-100 px-2 py-1 last:border-b-0 ${
+                          change.blocked ? "cursor-not-allowed bg-red-50/60" : "hover:bg-amber-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={uploadSelectedPaths.includes(change.path)}
+                          disabled={change.blocked}
+                          onChange={() => toggleUploadPath(change.path)}
+                        />
+                        <span
+                          dir="ltr"
+                          className="min-w-0 flex-1 truncate font-mono text-[10px]"
+                          title={change.path}
+                        >
+                          {change.path}
+                        </span>
+                        <Badge variant="outline" className="shrink-0 text-[9px]">
+                          {UPLOAD_CHANGE_KIND_LABEL[change.kind] ?? change.kind}
+                        </Badge>
+                        <Badge
+                          variant={change.blocked ? "destructive" : "secondary"}
+                          className="shrink-0 text-[9px]"
+                        >
+                          {UPLOAD_CHANGE_CATEGORY_LABEL[change.category] ?? change.category}
+                        </Badge>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-amber-950" htmlFor="deploy-upload-message">
+                      رسالة Commit
+                    </label>
+                    <Input
+                      id="deploy-upload-message"
+                      className="h-7 text-xs"
+                      value={uploadCommitMessage}
+                      onChange={(event) => setUploadCommitMessage(event.target.value)}
+                      placeholder="وصف واضح للتغييرات"
+                      data-testid="deploy-bar-upload-message"
+                    />
+                  </div>
+                </>
+              ) : uploadPreview.canPushExistingCommits ? (
+                <p className="text-[11px] text-muted-foreground">
+                  لا توجد تغييرات في شجرة العمل — سيتم رفع{" "}
+                  {uploadPreview.aheadCount ?? 0} Commits محلية موجودة على هذا الفرع.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  لا توجد تغييرات جديدة لرفعها.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {uploadOutcome ? (
             <div
@@ -1531,9 +2146,9 @@ export function DeployBar() {
               >
                 {uploadOutcome.ok
                   ? uploadOutcome.skipped
-                    ? "الفرع محدّث بالفعل على GitHub"
-                    : "تم رفع الفرع إلى GitHub بنجاح"
-                  : "تعذّر رفع الفرع إلى GitHub"}
+                    ? "لا توجد تحديثات جديدة"
+                    : "تمت مزامنة التحديثات ورفعها إلى GitHub"
+                  : "تعذّرت مزامنة التحديثات"}
               </p>
               <p
                 className="mt-1 text-[11px] leading-4 text-muted-foreground"
@@ -1541,19 +2156,81 @@ export function DeployBar() {
               >
                 {uploadOutcome.detail}
               </p>
-              {uploadOutcome.ok && uploadOutcome.pushedSha ? (
+              {uploadOutcome.failureLog ? (
+                <div className="mt-2">
+                  <p className="text-[11px] font-medium text-red-800">
+                    سجل الفشل الكامل:
+                  </p>
+                  <pre
+                    dir="ltr"
+                    className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-red-950/5 p-2 font-mono text-[10px] leading-4 text-red-900"
+                    data-testid="deploy-bar-upload-failure-log"
+                  >
+                    {uploadOutcome.failureLog}
+                  </pre>
+                </div>
+              ) : null}
+              {uploadOutcome.commitSha ? (
                 <p
                   dir="ltr"
                   className="mt-1 font-mono text-[10px] text-muted-foreground"
                   data-testid="deploy-bar-upload-result-sha"
                 >
-                  Commit: {uploadOutcome.pushedSha}
+                  Commit: {uploadOutcome.commitSha}
                 </p>
+              ) : null}
+              {uploadOutcome.remoteSha ? (
+                <p
+                  dir="ltr"
+                  className="mt-0.5 font-mono text-[10px] text-muted-foreground"
+                  data-testid="deploy-bar-upload-result-remote-sha"
+                >
+                  GitHub: {uploadOutcome.remoteSha}
+                </p>
+              ) : null}
+              {uploadOutcome.commitUrl ? (
+                <a
+                  href={uploadOutcome.commitUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-[11px] font-medium text-blue-700 underline"
+                  data-testid="deploy-bar-upload-result-url"
+                >
+                  عرض Commit على GitHub
+                </a>
               ) : null}
             </div>
           ) : null}
 
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-end gap-2">
+            {uploadPreview && !uploadOutcome ? (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 shrink-0 px-2 text-xs"
+                onClick={() => uploadMutation.mutate()}
+                disabled={
+                  !(uploadPreview.canCommit
+                    ? uploadSelectedPaths.length > 0
+                    : uploadPreview.canPushExistingCommits) ||
+                  uploadPreview.environment !== state?.environment ||
+                  uploadMutation.isPending ||
+                  uploadPreviewMutation.isPending
+                }
+                data-testid="deploy-bar-upload-confirm"
+              >
+                {uploadMutation.isPending ? (
+                  <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="ml-1 h-3.5 w-3.5" />
+                )}
+                {uploadPreview.canCommit
+                  ? "إنشاء Commit ورفع"
+                  : uploadPreview.canPushExistingCommits
+                    ? "رفع Commits المحلية"
+                    : "لا توجد تغييرات جديدة"}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"

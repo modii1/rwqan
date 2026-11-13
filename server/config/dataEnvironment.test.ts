@@ -7,6 +7,7 @@ import {
   getActiveDataEnvironment,
   getActiveFirestoreProjectId,
   activeFirestore,
+  getLiveFirestoreForCycleWriter,
   LiveDataSourceError,
   LiveWriteBlockedError,
   resetDataEnvironmentForTests,
@@ -163,6 +164,37 @@ test("LIVE with write enabled does not apply the read-only guard", async () => {
   // reasons, but never with LiveWriteBlockedError).
   const result = await Promise.resolve()
     .then(() => firestore.collection("properties").doc("10001").set({ name: "x" }))
+    .catch((error: unknown) => error);
+  assert.ok(!isLiveWriteBlocked(result));
+});
+
+test("LIVE read-only mode still blocks direct partner_profits writes through the guarded handle", async () => {
+  setLiveEnv({ writeEnabled: false });
+  dataEnvironmentStore.set("LIVE");
+  const firestore = getActiveFirestore();
+  // There is deliberately NO collection-wide write exception. Only the scoped
+  // cycle writer may obtain the unwrapped connection.
+  const result = await Promise.resolve()
+    .then(() =>
+      firestore
+        .collection("partner_profits")
+        .doc("PP-DIRECT")
+        .set({ monthYear: "2026-11" })
+    )
+    .catch((error: unknown) => error);
+  assert.ok(isLiveWriteBlocked(result));
+});
+
+test("getLiveFirestoreForCycleWriter returns the unwrapped LIVE connection", async () => {
+  setLiveEnv({ writeEnabled: false });
+  dataEnvironmentStore.set("LIVE");
+  const raw = getLiveFirestoreForCycleWriter();
+  assert.ok(raw, "scoped live firestore should be available when LIVE is configured");
+  // The scoped connection is not guarded by the in-process read-only proxy;
+  // it is intended only for the validated partner-profit cycle writer.
+  // (A real write may still fail for IAM/network reasons.)
+  const result = await Promise.resolve()
+    .then(() => raw!.collection("properties").doc("10001").set({ name: "x" }))
     .catch((error: unknown) => error);
   assert.ok(!isLiveWriteBlocked(result));
 });

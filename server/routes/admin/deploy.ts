@@ -23,7 +23,20 @@ import {
   runReleaseChecks,
 } from "../../services/DeployChecksRunner";
 import { readDeployGitInfo } from "../../services/DeployGitInfoService";
-import { runBranchUpload } from "../../services/DeployGitPushService";
+import {
+  runBranchSwitch,
+  runBranchSwitchPreview,
+  runBranchUpload,
+  runBranchUploadPreview,
+} from "../../services/DeployGitPushService";
+import {
+  resolveDeployWorkspace,
+} from "../../services/DeployWorkspace";
+import {
+  runLiveSync,
+  runLiveSyncPreflight,
+  runTestAutoSync,
+} from "../../services/DeployAutoSyncService";
 import {
   githubLsRemoteEnabled,
   readDeployGitHubInfo,
@@ -118,6 +131,22 @@ export interface DeployRouterOptions {
    * needs the CLI on the machine.
    */
   readTools?: () => Promise<DeployToolsInfo>;
+  /** Test seam: override the branch upload (commit + push) pipeline. */
+  runUpload?: typeof runBranchUpload;
+  /** Test seam: override the read-only upload preview. */
+  runUploadPreview?: typeof runBranchUploadPreview;
+  /** Test seam: override the read-only branch-switch assessment. */
+  runBranchSwitchPreview?: typeof runBranchSwitchPreview;
+  /** Test seam: override the branch switch action. */
+  runBranchSwitch?: typeof runBranchSwitch;
+  /** Test seam: override the per-environment isolated workspace resolver. */
+  resolveWorkspace?: typeof resolveDeployWorkspace;
+  /** Test seam: override the automatic TEST sync. */
+  runTestSync?: typeof runTestAutoSync;
+  /** Test seam: override the LIVE sync preflight. */
+  runLivePreflight?: typeof runLiveSyncPreflight;
+  /** Test seam: override the LIVE sync action. */
+  runLiveSync?: typeof runLiveSync;
 }
 
 /** DEV root + observed working-tree state + target environment for a restore. */
@@ -169,6 +198,15 @@ export function createAdminDeployRouter(
   const enabled = options.enabled ?? (() => deploySystemEnabled());
   const collectChecks = options.collectChecks ?? (() => collectDeployChecks(process.cwd()));
   const runChecks = options.runChecks ?? (() => runReleaseChecks(process.cwd()));
+  const runUpload = options.runUpload ?? runBranchUpload;
+  const runUploadPreview = options.runUploadPreview ?? runBranchUploadPreview;
+  const runSwitchPreview =
+    options.runBranchSwitchPreview ?? runBranchSwitchPreview;
+  const runSwitch = options.runBranchSwitch ?? runBranchSwitch;
+  const resolveWorkspace = options.resolveWorkspace ?? resolveDeployWorkspace;
+  const runTestSync = options.runTestSync ?? runTestAutoSync;
+  const runLivePreflight = options.runLivePreflight ?? runLiveSyncPreflight;
+  const runLiveSyncAction = options.runLiveSync ?? runLiveSync;
   const executor = options.executor ?? createDeployExecutor();
   const productionEnabled = options.productionDeployEnabled ?? (() => productionDeployEnabled());
   const restorePreview =
@@ -201,6 +239,8 @@ export function createAdminDeployRouter(
    * never be pushed concurrently.
    */
   let uploadInFlight = false;
+  /** Single-flight guard for one-click TEST/LIVE synchronisation. */
+  let syncInFlight = false;
 
   /**
    * Read-only Git/GitHub context. Local Git is read always; the GitHub remote
@@ -359,11 +399,318 @@ export function createAdminDeployRouter(
     }
   });
 
-  // Dedicated branch upload: `git push origin <approved-branch-for-environment>` ONLY.
+  // One-click TEST sync: detect local changes, run checks, commit, push, verify.
+  router.post("/api/admin/deploy/sync/test", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.environment !== "TEST") {
+      res.status(400).json({
+        code: "DEPLOY_SYNC_ENVIRONMENT_REQUIRED",
+        error: "مزامنة TEST تتطلب اختيار بيئة TEST.",
+      });
+      return;
+    }
+    if (syncInFlight || uploadInFlight) {
+      res.status(409).json({
+        code: "DEPLOY_SYNC_IN_PROGRESS",
+        error: "عملية مزامنة قيد التنفيذ بالفعل — انتظر انتهاءها.",
+      });
+      return;
+    }
+    syncInFlight = true;
+    try {
+      const workspace = await resolveWorkspace({
+        environment: "TEST",
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const result = await runTestSync({ workspace });
+      try {
+        const store = getStore();
+        if (await store.isPersistent()) {
+          await store.recordAudit({
+            action: result.ok ? "sync_test" : "sync_test_failed",
+            environment: "TEST",
+            result: result.ok ? "ok" : "rejected",
+            reason: result.detail,
+          });
+        }
+      } catch {
+        // Best-effort audit.
+      }
+      res.json({ result, workspace });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحة TEST.",
+      });
+    } finally {
+      syncInFlight = false;
+    }
+  });
+
+  // LIVE preflight: count-only summary + state token. No writes.
+  router.post("/api/admin/deploy/sync/live/preflight", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.environment !== "LIVE") {
+      res.status(400).json({
+        code: "DEPLOY_SYNC_ENVIRONMENT_REQUIRED",
+        error: "مزامنة LIVE تتطلب اختيار بيئة LIVE.",
+      });
+      return;
+    }
+    try {
+      const testWorkspace = await resolveWorkspace({
+        environment: "TEST",
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const liveWorkspace = await resolveWorkspace({
+        environment: "LIVE",
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const preflight = await runLivePreflight({
+        testWorkspace,
+        liveWorkspace,
+      });
+      res.json({ preflight });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحتي TEST وLIVE.",
+      });
+    }
+  });
+
+  // LIVE sync after the single confirmation: apply approved code, run checks +
+  // build in the isolated LIVE worktree, commit on main, push, verify.
+  router.post("/api/admin/deploy/sync/live", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.environment !== "LIVE") {
+      res.status(400).json({
+        code: "DEPLOY_SYNC_ENVIRONMENT_REQUIRED",
+        error: "مزامنة LIVE تتطلب اختيار بيئة LIVE.",
+      });
+      return;
+    }
+    if (body.confirm !== true || typeof body.token !== "string") {
+      res.status(400).json({
+        code: "DEPLOY_SYNC_CONFIRM_REQUIRED",
+        error: "مزامنة LIVE تتطلب تأكيدًا واحدًا صريحًا.",
+      });
+      return;
+    }
+    if (syncInFlight || uploadInFlight) {
+      res.status(409).json({
+        code: "DEPLOY_SYNC_IN_PROGRESS",
+        error: "عملية مزامنة قيد التنفيذ بالفعل — انتظر انتهاءها.",
+      });
+      return;
+    }
+    syncInFlight = true;
+    try {
+      const testWorkspace = await resolveWorkspace({
+        environment: "TEST",
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const liveWorkspace = await resolveWorkspace({
+        environment: "LIVE",
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const result = await runLiveSyncAction({
+        testWorkspace,
+        liveWorkspace,
+        token: body.token,
+        confirm: true,
+      });
+      try {
+        const store = getStore();
+        if (await store.isPersistent()) {
+          await store.recordAudit({
+            action: result.ok
+              ? "sync_live"
+              : result.stage === "changes"
+                ? "sync_live_blocked"
+                : "sync_live_failed",
+            environment: "LIVE",
+            result: result.ok ? "ok" : "rejected",
+            reason: result.detail,
+          });
+        }
+      } catch {
+        // Best-effort audit.
+      }
+      res.json({ result, workspace: liveWorkspace });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحتي TEST وLIVE.",
+      });
+    } finally {
+      syncInFlight = false;
+    }
+  });
+
+  // Read-only assessment for moving to the environment's approved branch.
+  // Never switches, resets, cleans, stashes, merges, or pushes.
+  router.post("/api/admin/deploy/branch/preview", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const requestedEnvironment =
+      typeof body.environment === "string" ? body.environment : null;
+    const environment =
+      requestedEnvironment === "TEST" || requestedEnvironment === "LIVE"
+        ? requestedEnvironment
+        : null;
+    if (!environment) {
+      res.status(400).json({
+        code: "DEPLOY_BRANCH_ENVIRONMENT_REQUIRED",
+        error: "بيئة الانتقال غير محددة — يُطلب TEST أو LIVE.",
+      });
+      return;
+    }
+    try {
+      const workspace = await resolveWorkspace({
+        environment,
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const assessment = await runSwitchPreview({
+        environment,
+        cwd: workspace.path,
+      });
+      res.json({ assessment, workspace });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحة العمل المستقلة لهذه البيئة.",
+      });
+    }
+  });
+
+  // Safe branch switch. Requires an explicit confirmation; refuses a dirty
+  // working tree; requires acknowledgment for unpushed local commits; never
+  // resets, cleans, stashes, merges, rebases, or force-switches.
+  router.post("/api/admin/deploy/branch/switch", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const requestedEnvironment =
+      typeof body.environment === "string" ? body.environment : null;
+    const environment =
+      requestedEnvironment === "TEST" || requestedEnvironment === "LIVE"
+        ? requestedEnvironment
+        : null;
+    if (!environment) {
+      res.status(400).json({
+        code: "DEPLOY_BRANCH_ENVIRONMENT_REQUIRED",
+        error: "بيئة الانتقال غير محددة — يُطلب TEST أو LIVE.",
+      });
+      return;
+    }
+    try {
+      const workspace = await resolveWorkspace({
+        environment,
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const result = await runSwitch({
+        environment,
+        cwd: workspace.path,
+        confirm: body.confirm === true,
+        acknowledgeUnpushed: body.acknowledgeUnpushed === true,
+      });
+      // Best-effort audit (never blocks the response).
+      try {
+        const store = getStore();
+        if (await store.isPersistent()) {
+          const auditAction = result.ok
+            ? "branch_switch"
+            : result.switched
+              ? "branch_switch_failed"
+              : "branch_switch_blocked";
+          await store.recordAudit({
+            action: auditAction,
+            environment,
+            result: result.ok ? "ok" : "rejected",
+            reason: result.detail,
+          });
+        }
+      } catch {
+        // Audit persistence is best-effort.
+      }
+      res.json({ result, workspace });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_BRANCH_SWITCH_FAILED",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تنفيذ الانتقال إلى الفرع المستهدف.",
+      });
+    }
+  });
+
+  // Read-only preview of local changes before an upload commit is approved.
+  // It never stages, commits, pushes, resets, or switches branches.
+  router.post("/api/admin/deploy/upload/preview", async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const requestedEnvironment =
+      typeof body.environment === "string" ? body.environment : null;
+    const environment =
+      requestedEnvironment === "TEST" || requestedEnvironment === "LIVE"
+        ? requestedEnvironment
+        : null;
+    if (!environment) {
+      res.status(400).json({
+        code: "DEPLOY_UPLOAD_ENVIRONMENT_REQUIRED",
+        error: "بيئة الرفع غير محددة — يُطلب TEST أو LIVE.",
+      });
+      return;
+    }
+    try {
+      const workspace = await resolveWorkspace({
+        environment,
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+      const preview = await runUploadPreview({
+        environment,
+        cwd: workspace.path,
+      });
+      res.json({ preview: { ...preview, workspace } });
+    } catch (error) {
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحة العمل المستقلة لهذه البيئة.",
+      });
+    }
+  });
+
+  // Dedicated branch upload: inspect, create ONE commit from the approved
+  // selection, then `git push origin <approved-branch-for-environment>`.
   // INDEPENDENT from the publish flow: it never dispatches a GitHub Actions
-  // workflow, never runs a Firebase CLI deploy and never touches the LIVE path.
-  // Runs a fixed fail-closed pipeline per environment and returns the
-  // stage-by-stage outcome.
+  // workflow, never runs a Firebase CLI deploy and never force-pushes.
   router.post("/api/admin/deploy/upload", async (req, res) => {
     res.set("Cache-Control", "no-store, private");
     if (uploadInFlight) {
@@ -373,7 +720,6 @@ export function createAdminDeployRouter(
       });
       return;
     }
-    uploadInFlight = true;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const requestedEnvironment =
       typeof body.environment === "string" ? body.environment : null;
@@ -382,16 +728,59 @@ export function createAdminDeployRouter(
         ? requestedEnvironment
         : null;
     if (!environment) {
-      uploadInFlight = false;
       res.status(400).json({
         code: "DEPLOY_UPLOAD_ENVIRONMENT_REQUIRED",
         error: "بيئة الرفع غير محددة — يُطلب TEST أو LIVE.",
       });
       return;
     }
+    // No write is ever attempted without an explicit confirmation from the
+    // review panel. This is checked before the single-flight flag is set.
+    if (body.confirm !== true) {
+      res.status(400).json({
+        code: "DEPLOY_UPLOAD_CONFIRM_REQUIRED",
+        error:
+          "لم يتم تأكيد إنشاء Commit ورفع الفرع — راجع التغييرات ثم أكّد العملية.",
+      });
+      return;
+    }
+    uploadInFlight = true;
+    const includePaths = Array.isArray(body.includePaths)
+      ? body.includePaths.filter(
+          (entry): entry is string => typeof entry === "string"
+        )
+      : undefined;
+    const commitMessage =
+      typeof body.commitMessage === "string" ? body.commitMessage : undefined;
+
+    let workspace;
+    try {
+      workspace = await resolveWorkspace({
+        environment,
+        repoRoot: process.cwd(),
+        createLiveWorktree: false,
+      });
+    } catch (error) {
+      uploadInFlight = false;
+      res.status(503).json({
+        code: "DEPLOY_WORKSPACE_UNAVAILABLE",
+        error:
+          error instanceof Error
+            ? error.message
+            : "تعذّر تجهيز مساحة العمل المستقلة لهذه البيئة.",
+      });
+      return;
+    }
+
     let result: DeployBranchPushResult;
     try {
-      result = await runBranchUpload({ environment, cwd: process.cwd() });
+      result = await runUpload({
+        environment,
+        cwd: workspace.path,
+        approveAll: true,
+        includePaths,
+        commitMessage,
+      });
     } catch {
       uploadInFlight = false;
       res.status(500).json({
@@ -405,7 +794,9 @@ export function createAdminDeployRouter(
       const store = getStore();
       if (await store.isPersistent()) {
         const auditAction = result.ok
-          ? "branch_push"
+          ? result.skipped
+            ? "branch_push_no_changes"
+            : "branch_commit_push"
           : result.stage === "branch"
             ? "branch_push_blocked"
             : "branch_push_failed";
@@ -420,7 +811,7 @@ export function createAdminDeployRouter(
       // Audit persistence is best-effort for the upload action.
     }
     uploadInFlight = false;
-    res.json({ result });
+    res.json({ result, workspace });
   });
 
   router.post("/api/admin/deploy/releases", async (req, res) => {

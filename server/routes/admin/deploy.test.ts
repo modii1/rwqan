@@ -11,6 +11,9 @@ import {
 import type { DeployCheckReport } from "../../services/DeployChecksService";
 import type { DeployExecutor, DeployRestoreOutcome } from "../../services/DeployExecutor";
 import type {
+  DeployBranchPushResult,
+  DeployBranchSwitchAssessment,
+  DeployBranchSwitchResult,
   DeployCheckRun,
   DeployChecks,
   DeployGitSource,
@@ -18,11 +21,29 @@ import type {
   DeployRelease,
   DeployRestorePreview,
   DeployToolsInfo,
+  DeployUploadPreview,
+} from "../../../shared/deploySystem";
+import type {
+  runBranchSwitch,
+  runBranchSwitchPreview,
+  runBranchUpload,
+  runBranchUploadPreview,
+} from "../../services/DeployGitPushService";
+import type { resolveDeployWorkspace } from "../../services/DeployWorkspace";
+import type {
+  runLiveSync,
+  runLiveSyncPreflight,
+  runTestAutoSync,
+} from "../../services/DeployAutoSyncService";
+import {
+  getApprovedUploadBranch,
+  type DeploySyncPreflight,
 } from "../../../shared/deploySystem";
 import {
   DEPLOY_DEV_BACKEND_ID,
   DEPLOY_DEV_BASE_URL,
   DEPLOY_DEV_PROJECT_ID,
+  DEPLOY_PROD_PROJECT_ID,
 } from "../../config/deployTarget";
 import {
   __test_setDeployCredentials,
@@ -129,6 +150,14 @@ function buildApp(
     resolveStableRelease?: (cwd: string) => Promise<DeployRelease | null>;
     /** Test seam: inject the deploy-tools availability (never a real probe). */
     readTools?: () => Promise<DeployToolsInfo>;
+    runUpload?: typeof runBranchUpload;
+    runUploadPreview?: typeof runBranchUploadPreview;
+    runBranchSwitchPreview?: typeof runBranchSwitchPreview;
+    runBranchSwitch?: typeof runBranchSwitch;
+    resolveWorkspace?: typeof resolveDeployWorkspace;
+    runTestSync?: typeof runTestAutoSync;
+    runLivePreflight?: typeof runLiveSyncPreflight;
+    runLiveSync?: typeof runLiveSync;
   } = {},
 ) {
   const app = express();
@@ -157,6 +186,25 @@ function buildApp(
           firebaseCliAvailable: true,
           firebaseCliVersion: "15.34.0",
           readAt: "2026-10-26T00:00:00.000Z",
+        })),
+      runUpload: options.runUpload,
+      runUploadPreview: options.runUploadPreview,
+      runBranchSwitchPreview: options.runBranchSwitchPreview,
+      runBranchSwitch: options.runBranchSwitch,
+      runTestSync: options.runTestSync,
+      runLivePreflight: options.runLivePreflight,
+      runLiveSync: options.runLiveSync,
+      resolveWorkspace:
+        options.resolveWorkspace ??
+        (async (input) => ({
+          environment: input.environment,
+          branch: getApprovedUploadBranch(input.environment) ?? "",
+          path: "/repo",
+          label:
+            input.environment === "LIVE"
+              ? "مساحة LIVE المستقلة (main)"
+              : "مساحة TEST",
+          created: false,
         })),
     }),
   );
@@ -449,6 +497,7 @@ test("restore requires confirmation and rejects unknown/incomplete/unsafe releas
 });
 
 const FAKE_SHA = "a".repeat(40);
+const OTHER_SHA = "b".repeat(40);
 
 async function seedRestorableRelease(
   store: InMemoryDeploySystemStore,
@@ -1398,7 +1447,7 @@ test("with a configured location the expected domain follows the proven conventi
   const app = buildApp(new InMemoryDeploySystemStore({ seed: true }));
   // The location comes from env; the convention is pure code, so asserting it
   // end-to-end here proves state+gate wiring without any cloud call.
-  process.env.DEPLOY_APP_HOSTING_LOCATION = "europe-west1";
+  process.env.DEPLOY_APP_HOSTING_LOCATION = "europe-west4";
   try {
     await withServer(app, async (base) => {
       const res = await fetch(`${base}/api/admin/deploy/state`, {
@@ -1408,7 +1457,7 @@ test("with a configured location the expected domain follows the proven conventi
       const state = ((await res.json()) as any).state;
       assert.equal(
         state.deployTarget.expectedDomain,
-        "https://rwqan-backend--rwqan-757.europe-west1.hosted.app",
+        "https://rwqan-backend--rwqan-757.europe-west4.hosted.app",
       );
       assert.equal(
         (state.gate?.items ?? []).find(
@@ -1674,62 +1723,18 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
     assert.equal(body.branch, "test/unified-gateway-ui-only");
     assert.equal(body.actionsUrl, "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml");
     assert.ok(body.detail.includes("GitHub"));
+    // No automatic commit/push claim exists anymore; the last approved commit
+    // is what GitHub dispatches. Local changes are only warned about.
+    assert.equal(body.autoCommit, undefined);
+    assert.equal(typeof body.worktree, "string");
+    assert.equal(typeof body.localChangesIgnored, "boolean");
     // No release record: the dispatch is a REQUEST, never a deploy. The audit
     // records the dispatch without claiming success.
     assert.equal((await store.listReleases()).length, 0);
     const audit = (await store.listAudit())[0];
     assert.equal(audit.action, "publish_dispatched");
     assert.equal(audit.result, "accepted");
-  });
-});
-
-test("a TEST dispatch is NOT blocked when the local Git scan is unavailable (deployed runtime)", async () => {
-  const store = new InMemoryDeploySystemStore();
-  const publishInputs: Array<Record<string, unknown>> = [];
-  const executor: DeployExecutor = {
-    publish: async (input) => {
-      publishInputs.push(input as unknown as Record<string, unknown>);
-      return {
-        deployed: false,
-        savedToGit: false,
-        detail: "أُرسل طلب النشر إلى GitHub (workflow_dispatch).",
-        blocked: false,
-        stage: null,
-        target: DEPLOY_DEV_PROJECT_ID,
-        via: "github_actions",
-        ghDispatch: {
-          accepted: true,
-          ref: "test/unified-gateway-ui-only",
-          actionsUrl: "https://github.com/modii1/rwqan/actions/workflows/deploy-test.yml",
-          commit: FAKE_SHA,
-        },
-      };
-    },
-    restore: async () => ({ restored: false, detail: "غير مُستخدم." }),
-  };
-  // App Hosting: no local .git → the changed-file scan cannot run (BLOCKED),
-  // which is "unknown", not "a secret was found".
-  const app = buildApp(store, {
-    executor,
-    collectChecks: async () => ({
-      checks: { ...PASSING_CHECKS, secretScan: "BLOCKED" },
-      git: null,
-      reasons: { secretScan: "git غير متاح على الخادم." },
-    }),
-  });
-
-  await withServer(app, async (base) => {
-    const res = await fetch(`${base}/api/admin/deploy/releases`, {
-      method: "POST",
-      headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "no-git-dispatch", approve: true, environment: "TEST" }),
-    });
-    assert.equal(res.status, 202, "an UNAVAILABLE scan must not block a TEST dispatch");
-    const body = await res.json();
-    assert.equal(body.code, "DEPLOY_GITHUB_DISPATCH_ACCEPTED");
-    assert.equal(body.via, "github_actions");
-    assert.equal(body.commit, FAKE_SHA);
-    assert.equal(publishInputs.length, 1, "the executor still receives the TEST publish");
+    assert.doesNotMatch(audit.reason ?? "", /auto-commit/);
   });
 });
 
@@ -1756,5 +1761,395 @@ test("a REAL secret-scan failure still blocks a TEST dispatch", async () => {
     });
     assert.notEqual(res.status, 202);
     assert.equal(executorCalled, false, "a real secret finding must still stop the dispatch");
+  });
+});
+
+const FAKE_LIVE_WORKSPACE = {
+  environment: "LIVE" as const,
+  branch: "main",
+  path: "/repo-live",
+  label: "مساحة LIVE المستقلة (main)",
+  created: false,
+};
+
+const FAKE_SYNC_PREFLIGHT: DeploySyncPreflight = {
+  environment: "LIVE",
+  branch: "main",
+  workspace: FAKE_LIVE_WORKSPACE,
+  approvedCount: 3,
+  counts: {
+    total: 3,
+    modified: 2,
+    added: 1,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    sensitive: 0,
+  },
+  commitMessage: "sync(LIVE): 3 ملف — 2 معدّل، 1 جديد",
+  canSync: true,
+  blockedReason: null,
+  detail: "3 ملف برمجي معتمد من TEST.",
+  prepared: false,
+  preparedCount: 0,
+  token: "sync-token-123",
+};
+
+const FAKE_SYNC_RESULT: DeployBranchPushResult = {
+  environment: "LIVE",
+  ok: true,
+  pushed: true,
+  skipped: false,
+  branch: "main",
+  localSha: "d".repeat(40),
+  remoteSha: "d".repeat(40),
+  pushedSha: "d".repeat(40),
+  commitSha: "d".repeat(40),
+  commitMessage: "sync(LIVE): 3 ملف",
+  commitUrl: `https://github.com/modii1/rwqan/commit/${"d".repeat(40)}`,
+  changeCount: 3,
+  detail: "تمت مزامنة 3 ملف برمجي معتمد إلى main.",
+  stage: "final",
+  stages: [],
+};
+
+const FAKE_BRANCH_ASSESSMENT: DeployBranchSwitchAssessment = {
+  environment: "TEST",
+  targetBranch: "test/unified-gateway-ui-only",
+  currentBranch: "main",
+  branchMatches: false,
+  targetBranchExists: true,
+  workingTreeChanges: [],
+  workingTreeCounts: {
+    total: 0,
+    modified: 0,
+    added: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 0,
+    sensitive: 0,
+  },
+  unpushedCurrentCommits: [],
+  unpushedTargetCommits: [],
+  canSwitch: true,
+  requiresUnpushedAck: false,
+  blockedReason: null,
+  safeOptions: ["الانتقال الآمن متاح."],
+};
+
+const FAKE_BRANCH_SWITCH_RESULT: DeployBranchSwitchResult = {
+  ...FAKE_BRANCH_ASSESSMENT,
+  currentBranch: "test/unified-gateway-ui-only",
+  branchMatches: true,
+  ok: true,
+  switched: true,
+  detail: "تم الانتقال بأمان.",
+};
+
+const FAKE_UPLOAD_PREVIEW: DeployUploadPreview = {
+  environment: "TEST",
+  branch: "test/unified-gateway-ui-only",
+  currentBranch: "test/unified-gateway-ui-only",
+  branchMatches: true,
+  localSha: "a".repeat(40),
+  remoteSha: "b".repeat(40),
+  aheadCount: 2,
+  behindCount: 0,
+  changes: [
+    {
+      path: "src/a.ts",
+      kind: "modified",
+      category: "code",
+      blocked: false,
+      selectedByDefault: true,
+    },
+    {
+      path: "reports/out.json",
+      kind: "untracked",
+      category: "artifacts",
+      blocked: false,
+      selectedByDefault: false,
+    },
+  ],
+  counts: {
+    total: 2,
+    modified: 1,
+    added: 0,
+    deleted: 0,
+    renamed: 0,
+    untracked: 1,
+    sensitive: 0,
+  },
+  canCommit: true,
+  canPushExistingCommits: false,
+  blockedReason: null,
+  suggestedMessage: "رفع تحديثات TEST — 2 ملف (1 معدّل، 1 غير متتبع)",
+  detail: "2 ملف على فرع test/unified-gateway-ui-only.",
+};
+
+const FAKE_UPLOAD_RESULT: DeployBranchPushResult = {
+  environment: "TEST",
+  ok: true,
+  pushed: true,
+  skipped: false,
+  branch: "test/unified-gateway-ui-only",
+  localSha: "c".repeat(40),
+  remoteSha: "c".repeat(40),
+  pushedSha: "c".repeat(40),
+  commitSha: "c".repeat(40),
+  commitMessage: "رفع تحديثات TEST",
+  commitUrl: `https://github.com/modii1/rwqan/commit/${"c".repeat(40)}`,
+  changeCount: 2,
+  detail: "تم إنشاء Commit ورفعه.",
+  stage: "final",
+  stages: [],
+};
+
+test("branch preview endpoint returns the read-only switch assessment", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let receivedEnvironment: string | null = null;
+  const app = buildApp(store, {
+    runBranchSwitchPreview: async (input) => {
+      receivedEnvironment = input.environment;
+      return FAKE_BRANCH_ASSESSMENT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/branch/preview`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "TEST" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.assessment.canSwitch, true);
+    assert.equal(receivedEnvironment, "TEST");
+    assert.equal(body.workspace.path, "/repo");
+    assert.equal(body.workspace.environment, "TEST");
+  });
+});
+
+test("branch switch endpoint passes confirmation and acknowledgment to the service", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let received: {
+    environment?: string;
+    confirm?: boolean;
+    acknowledgeUnpushed?: boolean;
+  } = {};
+  const app = buildApp(store, {
+    runBranchSwitch: async (input) => {
+      received = {
+        environment: input.environment,
+        confirm: input.confirm,
+        acknowledgeUnpushed: input.acknowledgeUnpushed,
+      };
+      return FAKE_BRANCH_SWITCH_RESULT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/branch/switch`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        environment: "TEST",
+        confirm: true,
+        acknowledgeUnpushed: true,
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.switched, true);
+    assert.equal(received.environment, "TEST");
+    assert.equal(received.confirm, true);
+    assert.equal(received.acknowledgeUnpushed, true);
+    assert.equal(body.workspace.path, "/repo");
+  });
+});
+
+test("TEST sync endpoint runs the one-click sync and returns the result", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let called = false;
+  const app = buildApp(store, {
+    runTestSync: async () => {
+      called = true;
+      return { ...FAKE_SYNC_RESULT, environment: "TEST", branch: "test/unified-gateway-ui-only" };
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/sync/test`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "TEST" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.ok, true);
+    assert.equal(called, true);
+    assert.equal(body.workspace.environment, "TEST");
+  });
+});
+
+test("LIVE sync preflight returns a count-only summary and token", async () => {
+  const store = new InMemoryDeploySystemStore();
+  const app = buildApp(store, {
+    runLivePreflight: async () => FAKE_SYNC_PREFLIGHT,
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/sync/live/preflight`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "LIVE" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.preflight.canSync, true);
+    assert.equal(body.preflight.token, "sync-token-123");
+    assert.equal(body.preflight.changes, undefined);
+  });
+});
+
+test("LIVE sync endpoint requires the single explicit confirmation", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let called = false;
+  const app = buildApp(store, {
+    runLiveSync: async () => {
+      called = true;
+      return FAKE_SYNC_RESULT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/sync/live`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "LIVE", token: "sync-token-123" }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_SYNC_CONFIRM_REQUIRED");
+    assert.equal(called, false);
+  });
+});
+
+test("LIVE sync endpoint passes the confirmation token to the service", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let receivedToken: string | null = null;
+  const app = buildApp(store, {
+    runLiveSync: async (input) => {
+      receivedToken = input.token;
+      return FAKE_SYNC_RESULT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/sync/live`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        environment: "LIVE",
+        confirm: true,
+        token: "sync-token-123",
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.ok, true);
+    assert.equal(receivedToken, "sync-token-123");
+    assert.equal(body.workspace.environment, "LIVE");
+  });
+});
+
+test("upload preview endpoint returns the read-only change review", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let receivedEnvironment: string | null = null;
+  const app = buildApp(store, {
+    runUploadPreview: async (input) => {
+      receivedEnvironment = input.environment;
+      return FAKE_UPLOAD_PREVIEW;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/upload/preview`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "TEST" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.preview.counts.total, 2);
+    assert.equal(body.preview.canCommit, true);
+    assert.equal(receivedEnvironment, "TEST");
+    assert.equal(body.preview.workspace.path, "/repo");
+    assert.equal(body.preview.workspace.environment, "TEST");
+  });
+});
+
+test("upload endpoint refuses to commit without explicit confirmation", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let uploadCalled = false;
+  const app = buildApp(store, {
+    runUpload: async () => {
+      uploadCalled = true;
+      return FAKE_UPLOAD_RESULT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/upload`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ environment: "TEST", includePaths: ["src/a.ts"] }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, "DEPLOY_UPLOAD_CONFIRM_REQUIRED");
+    assert.equal(uploadCalled, false);
+  });
+});
+
+test("upload endpoint passes the approved paths and message to the pipeline", async () => {
+  const store = new InMemoryDeploySystemStore();
+  let received: {
+    environment?: string;
+    approveAll?: boolean;
+    includePaths?: string[];
+    commitMessage?: string;
+  } = {};
+  const app = buildApp(store, {
+    runUpload: async (input) => {
+      received = {
+        environment: input.environment,
+        approveAll: input.approveAll,
+        includePaths: input.includePaths,
+        commitMessage: input.commitMessage,
+      };
+      return FAKE_UPLOAD_RESULT;
+    },
+  });
+
+  await withServer(app, async (base) => {
+    const res = await fetch(`${base}/api/admin/deploy/upload`, {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        environment: "TEST",
+        confirm: true,
+        includePaths: ["src/a.ts"],
+        commitMessage: "رسالة مخصصة",
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.commitSha, "c".repeat(40));
+    assert.equal(received.environment, "TEST");
+    assert.equal(received.approveAll, true);
+    assert.deepEqual(received.includePaths, ["src/a.ts"]);
+    assert.equal(received.commitMessage, "رسالة مخصصة");
+    assert.equal(body.workspace.path, "/repo");
   });
 });

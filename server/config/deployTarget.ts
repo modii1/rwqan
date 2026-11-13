@@ -10,11 +10,11 @@
  *   - TEST → the approved test backend `rwqan-757` / `rwqan-backend` serving
  *     `https://rwqan-backend--rwqan-757.europe-west4.hosted.app/` (the safe default;
  *     a production host/project is refused);
- *   - LIVE → the production backend `rwqan-757` / `rwqan` serving
- *     `https://rwqan.sa`, and ONLY when production deploys are explicitly
- *     enabled (NODE_ENV=development + DEPLOY_REAL_DEPLOY=enabled +
- *     DEPLOY_ALLOW_PRODUCTION=enabled). Without that final opt-in the LIVE
- *     target is refused exactly as before.
+ *   - LIVE → the production backend `rwqan-757` / `rwqan` serving the official
+ *     domain `https://rwqan.sa` (untouched) and the approved hosting URL
+ *     `https://rwqan--rwqan-757.europe-west4.hosted.app`, enabled by the real
+ *     deploy switch (`DEPLOY_REAL_DEPLOY=enabled`) with no separate production
+ *     opt-in. Build checks, target checks and admin permissions still apply.
  */
 
 export interface DeployTarget {
@@ -36,10 +36,11 @@ export const DEPLOY_DEV_PROJECT_ID = "rwqan-757";
 export const DEPLOY_DEV_BACKEND_ID = "rwqan-backend";
 export const DEPLOY_DEV_BASE_URL = "https://rwqan-backend--rwqan-757.europe-west4.hosted.app";
 
-/** The real production project/backend serving https://rwqan.sa. */
+/** The real production backend serving the official domain https://rwqan.sa
+ *  (untouched) and the approved LIVE hosting URL. */
 export const DEPLOY_PROD_PROJECT_ID = "rwqan-757";
 export const DEPLOY_PROD_BACKEND_ID = "rwqan";
-export const DEPLOY_PROD_BASE_URL = "https://rwqan.sa";
+export const DEPLOY_PROD_BASE_URL = "https://rwqan--rwqan-757.europe-west4.hosted.app";
 
 /** The LOCAL deploy target used only for local development builds. */
 export const DEPLOY_LOCAL_PROJECT_ID = "rwqan-local";
@@ -49,19 +50,19 @@ export const DEPLOY_LOCAL_BACKEND_ID = "rwqan-local-backend";
 export const DEPLOY_PRODUCTION_PROJECT_IDS: readonly string[] = [DEPLOY_PROD_PROJECT_ID];
 
 /** Hosts recognised as production hosts. */
-export const DEPLOY_PRODUCTION_HOSTS: readonly string[] = ["rwqan.sa", "www.rwqan.sa"];
+export const DEPLOY_PRODUCTION_HOSTS: readonly string[] = [
+  "rwqan.sa",
+  "www.rwqan.sa",
+  "rwqan--rwqan-757.europe-west4.hosted.app",
+];
 
 export const DEPLOY_REAL_DEPLOY_ENV_KEY = "DEPLOY_REAL_DEPLOY";
 export const DEPLOY_REAL_DEPLOY_ENABLED_VALUE = "enabled";
 export const DEPLOY_DEV_BASE_URL_ENV_KEY = "DEPLOY_DEV_BASE_URL";
 export const DEPLOY_PROD_BASE_URL_ENV_KEY = "DEPLOY_PROD_BASE_URL";
-/**
- * Second, independent opt-in required before a real deploy may target
- * production. Kept separate from DEPLOY_REAL_DEPLOY so enabling real deploys for
- * the DEV backend never implicitly grants production deploy rights.
- */
-export const DEPLOY_ALLOW_PRODUCTION_ENV_KEY = "DEPLOY_ALLOW_PRODUCTION";
-export const DEPLOY_ALLOW_PRODUCTION_ENABLED_VALUE = "enabled";
+// LIVE no longer has a separate DEPLOY_ALLOW_PRODUCTION opt-in: the real-deploy
+// switch (DEPLOY_REAL_DEPLOY=enabled) is the single enablement, while build,
+// target and admin-permission checks remain mandatory.
 /**
  * App Hosting region of the DEV backend. Required for a controlled rollout
  * (`apphosting:rollouts:create --location`) and for the read-only control-plane
@@ -199,7 +200,7 @@ export function deployTargetBlockers(
     }
     if (baseUrl !== DEPLOY_PROD_BASE_URL) {
       blockers.push(
-        "رابط التحقق في بيئة الإنتاج يجب أن يكون https://rwqan.sa — يُرفض أي رابط آخر.",
+        "رابط التحقق في بيئة الإنتاج يجب أن يكون https://rwqan--rwqan-757.europe-west4.hosted.app — يُرفض أي رابط آخر.",
       );
     }
   } else if (environment === "TEST") {
@@ -225,7 +226,7 @@ export function deployTargetBlockers(
     }
     if (baseUrl === DEPLOY_PROD_BASE_URL) {
       blockers.push(
-        "بيئة الاختبار لا تُستهدف لرابط الإنتاج https://rwqan.sa — يُرفض.",
+        "بيئة الاختبار لا تُستهدف لرابط الإنتاج https://rwqan--rwqan-757.europe-west4.hosted.app — يُرفض.",
       );
     }
   } else if (environment === "LOCAL") {
@@ -255,16 +256,12 @@ export function realDeployEnabled(
 }
 
 /**
- * TRUE only when a real deploy may target PRODUCTION. Requires the base real
- * deploy opt-in AND a SECOND, independent production opt-in, so enabling real
- * DEV deploys never implicitly grants production deploy rights.
+ * TRUE when a real deploy may target PRODUCTION. LIVE is enabled by the same
+ * real-deploy switch as the rest of the console — there is no separate
+ * production opt-in. Build, target and admin-permission checks still apply.
  */
 export function productionDeployEnabled(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return (
-    realDeployEnabled(environment) &&
-    environment[DEPLOY_ALLOW_PRODUCTION_ENV_KEY]?.trim() ===
-      DEPLOY_ALLOW_PRODUCTION_ENABLED_VALUE
-  );
+  return realDeployEnabled(environment);
 }

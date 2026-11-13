@@ -105,6 +105,25 @@ router.post("/api/admin/partner-profits", async (req, res) => {
   }
 });
 
+// حذف دورة أرباح مشتقة — لا يحذف المدفوعات أو التكاليف أو التحويلات
+router.delete("/api/admin/partner-profits/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await financeService.deleteMonthlyCycle(id);
+    if (!deleted) {
+      return res.status(404).json({ error: "سجل الأرباح غير موجود" });
+    }
+    res.json({
+      success: true,
+      id,
+      message: "تم حذف دورة الأرباح المشتقة فقط. المدفوعات والتكاليف والتحويلات لم تُمس.",
+    });
+  } catch (error: any) {
+    console.error("Error deleting partner profit cycle:", error);
+    res.status(400).json({ error: error.message || "فشل في حذف دورة الأرباح" });
+  }
+});
+
 // تعديل سجل — مسموح بتعديل الملاحظات فقط للدورات غير المقفلة
 router.put("/api/admin/partner-profits/:id", async (req, res) => {
   try {

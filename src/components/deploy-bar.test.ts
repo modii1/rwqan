@@ -21,9 +21,12 @@ test("the deploy bar only probes the admin API in a development build", () => {
   assert.match(source, /if \(!visible \|\| !state\) return null/);
 });
 
-test("the deploy bar shows exactly three options: publish, switch environment, restore", () => {
+test("the deploy bar shows TEST/LIVE publish, environment switch, restore (no generic publish)", () => {
   const source = read("./deploy-bar.tsx");
-  assert.match(source, /data-testid="deploy-bar-publish"/);
+  // The generic cloud "نشر" button was removed; each environment has its own.
+  assert.doesNotMatch(source, /data-testid="deploy-bar-publish"/);
+  assert.match(source, /data-testid="deploy-bar-publish-test"/);
+  assert.match(source, /data-testid="deploy-bar-publish-live"/);
   assert.match(source, /data-testid="deploy-bar-environment"/);
   assert.match(source, /data-testid="deploy-bar-restore"/);
   assert.match(source, /تبديل البيئة/);
@@ -59,7 +62,10 @@ test("the bar exposes ONE permanent two-option LIVE|TEST switch (never a single 
   // One grouped control whose BOTH options are always rendered side by side.
   assert.match(source, /data-testid="deploy-bar-environment"/);
   assert.doesNotMatch(source, /data-testid="deploy-bar-data-environment"/);
-  assert.match(source, /\(\["LOCAL", "TEST", "LIVE"\] as const\)\.map/);
+  assert.match(source, /\(\["TEST", "LIVE"\] as const\)\.map/);
+  // LOCAL is a fixed local environment and must not be offered as a switch.
+  assert.doesNotMatch(source, /deploy-bar-environment-local/);
+  assert.doesNotMatch(source, /"LOCAL", "TEST", "LIVE"/);
   assert.match(source, /deploy-bar-environment-\$\{option\.toLowerCase\(\)\}/);
   // The active option is marked for assistive tech and visually highlighted.
   assert.match(source, /aria-pressed=\{active\}/);
@@ -75,6 +81,14 @@ test("the bar exposes ONE permanent two-option LIVE|TEST switch (never a single 
   assert.match(source, /تعذّر تفعيل LIVE/);
   assert.doesNotMatch(source, /parsed\.reason/);
   assert.doesNotMatch(source, /liveUnavailableReason/);
+});
+
+test("LOCAL is not offered as a switch while TEST and LIVE remain", () => {
+  const source = read("./deploy-bar.tsx");
+  assert.match(source, /\(\["TEST", "LIVE"\] as const\)\.map/);
+  assert.doesNotMatch(source, /deploy-bar-environment-local/);
+  assert.doesNotMatch(source, /"LOCAL", "TEST", "LIVE"/);
+  assert.match(source, /deploy-bar-environment-\$\{option\.toLowerCase\(\)\}/);
 });
 
 test("the LIVE switch is refused with an explanation when production images are unconfigured", () => {
@@ -97,7 +111,8 @@ test("the environment switch wires data AND the real deploy target together", ()
   // The switch refreshes the WHOLE app so the visible data reflects it.
   assert.match(source, /queryClient\.invalidateQueries\(\)/);
   // Both option labels are literal, and nothing technical leaks into the bar.
-  assert.match(source, /"LOCAL", "TEST", "LIVE"/);
+  assert.match(source, /"TEST", "LIVE"/);
+  assert.doesNotMatch(source, /"LOCAL", "TEST", "LIVE"/);
   assert.doesNotMatch(source, /state\.stableBaseline\.site/);
 });
 
@@ -108,10 +123,14 @@ test("the mismatch guard runs BEFORE any confirmation, separated per environment
   // window.confirm — it is never sent to the server.
   assert.match(source, /state\.environment !== targetEnv/);
   const mismatch = source.indexOf("state.environment !== targetEnv");
-  const confirm = source.indexOf("window.confirm");
+  // Use the PUBLISH confirmation text, not an unrelated confirm elsewhere in
+  // the component (e.g. the LIVE sync confirmation).
+  const confirm = source.indexOf(
+    "هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟"
+  );
   assert.ok(mismatch > 0 && confirm > 0 && mismatch < confirm);
-  // Each environment targets its own tracked env; the live publish still
-  // requires the separate server-side production opt-in (fail closed).
+  // Each environment targets its own tracked env; LIVE publish uses its own
+  // workflow and explicit confirmation (no separate production opt-in).
   assert.match(source, /state\.productionDeployEnabled/);
   assert.match(source, /هل تريد تحديث الموقع الرسمي بآخر نسخة موجودة على فرعه؟/);
   assert.match(source, /rwqan\.sa/);
@@ -164,6 +183,14 @@ test("publish error handler uses the real server error, not a blanket connection
   // deployErrorMessage is defined and handles status + body + network fallback.
   assert.match(source, /function deployErrorMessage\(error: unknown\): string/);
   assert.match(source, /body\.error/);
+  assert.match(source, /body\.details/);
+  assert.match(source, /serverDetail\(body\)/);
+  // A commit/push can succeed before a later dispatch failure: the tree state
+  // and SHA must refresh on error too.
+  assert.match(
+    source,
+    /onError:\s*\(error: unknown\)\s*=>\s*\{[\s\S]*?invalidateQueries/,
+  );
   assert.match(source, /case 401:/);
   assert.match(source, /case 409:/);
   assert.match(source, /case 502:/);
@@ -174,6 +201,37 @@ test("publish error handler uses the real server error, not a blanket connection
     /onError:\s*\(\)\s*=>\s*\{\s*toast\(\s*\{\s*title:\s*"تعذّر النشر"/s,
   );
 });
+
+test("pre-publish check button sends the request and shows pending/progress/result/error", () => {
+  const source = read("./deploy-bar.tsx");
+  // Correct wiring: the button calls the checks mutation, which POSTs the real
+  // checks endpoint and stores the run server-side.
+  assert.match(source, /data-testid="deploy-bar-checks"/);
+  assert.match(
+    source,
+    /apiRequest\(\s*"POST",\s*"\/api\/admin\/deploy\/checks"/s,
+  );
+  // Explicit pending text and disabled state (no repeated clicks).
+  assert.match(source, /جارٍ الفحص/);
+  assert.match(source, /disabled=\{checksMutation\.isPending\}/);
+  assert.match(source, /aria-busy=\{checksMutation\.isPending\}/);
+  // Persistent result/feedback line for success and failure.
+  assert.match(source, /data-testid="deploy-bar-checks-feedback"/);
+  assert.match(source, /checksMutation\.data\?\.checkRun/);
+  assert.match(source, /تعذّر تشغيل الفحوصات: \$\{deployErrorMessage\(checksMutation\.error\)\}/);
+  // The state is updated immediately from the response, not only after refetch.
+  assert.match(source, /setQueryData/);
+});
+
+test("TEST publish no longer auto-commits or auto-pushes; it warns about local changes", () => {
+  const source = read("./deploy-bar.tsx");
+  assert.doesNotMatch(source, /autoCommit/);
+  assert.doesNotMatch(source, /DeployTestAutoCommitService/);
+  assert.match(source, /localChangesIgnored/);
+  assert.match(source, /لن تُنشر هذه التغييرات/);
+  assert.match(source, /آخر Commit معتمد/);
+});
+
 
 test("TEST publish confirmation and result messages use plain Arabic (no technical jargon)", () => {
   const source = read("./deploy-bar.tsx");
@@ -186,6 +244,12 @@ test("TEST publish confirmation and result messages use plain Arabic (no technic
   assert.doesNotMatch(source, /workflow_dispatch/);
   // The GitHub Actions follow-up link is always offered.
   assert.match(source, /modii1\/rwqan\/actions\/workflows\/deploy-test\.yml/);
+  // A failed mandatory check surfaces the real server reason; the blanket
+  // "no release recorded" text is not used when a validation_failed release
+  // actually exists.
+  assert.match(source, /release\?\.error/);
+  assert.match(source, /release\?\.checkNotes\?\.secretScan/);
+  assert.match(source, /release\?\.checkNotes\?\.typescript/);
 });
 
 test("the old direct-Firebase failure message is never shown; friendly admin wording instead", () => {

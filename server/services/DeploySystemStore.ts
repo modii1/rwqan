@@ -41,7 +41,7 @@ import { RWQAN_STABLE_BASELINE, buildRollbackReadiness } from "../config/stableB
  * `DeployStoreUnavailableError` + `UnavailableDeploySystemStore` below.
  */
 
-export const DEPLOY_SOURCE_REPO_URL = "https://github.com/iheeb1/rwqan-sa.git";
+export const DEPLOY_SOURCE_REPO_URL = "https://github.com/modii1/rwqan.git";
 export const DEPLOY_DEV_TARGET = "rwqan-sa-dev";
 
 export const DEPLOY_PERSISTENCE_NOTICE_PERSISTENT =

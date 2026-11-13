@@ -1,11 +1,13 @@
-# DEV App Hosting configuration for the isolated backend `rwqan-dev-backend`.
+# LEGACY DEV App Hosting configuration (NOT USED) — the approved hosting
+# targets are TEST (`rwqan-backend--rwqan-757.europe-west4.hosted.app`) and LIVE
+# (`rwqan--rwqan-757.europe-west4.hosted.app`). No hosted DEV backend is approved.
 #
 # HOW THIS FILE IS SELECTED (important): App Hosting chooses an environment
 # specific override from the BACKEND's "Environment name" setting, which is set
 # in the Firebase Console — it is NOT referenced from firebase.json or from this
-# file. To activate this file, set rwqan-dev-backend's Environment name to `dev`
-# in the Console; App Hosting then merges `apphosting.dev.yaml` OVER the base
-# `apphosting.yaml` for THAT backend only. Keep the production backend on a
+# file. To activate this file, set the legacy DEV backend's Environment name to
+# `dev` in the Console; App Hosting then merges `apphosting.dev.yaml` OVER the
+# base `apphosting.yaml` for THAT backend only. Keep the production backend on a
 # different / no environment name so these DEV values never reach it.
 #
 # DEV ONLY. No secrets and no production values belong here.
@@ -24,10 +26,9 @@ env:
     value: production
     availability:
       - RUNTIME
-  # MUST be the DEV backend's own host. If left at the production value the DEV
-  # app would emit production links. Replace before the first rollout.
+  # LOCAL only. No hosted DEV backend is approved; keep the local address.
   - variable: NEXT_PUBLIC_BASE_URL
-    value: https://REPLACE-WITH-DEV-BACKEND-HOST
+    value: http://localhost:5001
     availability:
       - BUILD
       - RUNTIME

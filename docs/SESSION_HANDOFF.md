@@ -1,5 +1,83 @@
 # SESSION HANDOFF — Ruqan / Rwqan
 
+## 0.4.3 — Final TEST worktree gate accepts the verified auto-commit (2026-11-04)
+- Version 0.4.3 (PATCH), branch `test/unified-gateway-ui-only`, base commit
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; changes in the working tree.
+- Root cause: after auto-commit, the gate re-read the raw worktree; `reports/` and other
+  excluded files kept it dirty, so TEST still showed "ممنوع: شجرة العمل تحتوي تغييرات".
+- Fix: the service now re-inspects post-commit and fails closed on any approved leftover,
+  returning `remaining` + `publishWorktree: "clean"`. The route uses that verified result
+  as the final worktree proof and new SHA for TEST. The gate marks dirty TEST as
+  auto-saved (LIVE/LOCAL stay blocked). No empty commit; only approved pathspecs.
+- Verified: TS 0 errors; deploy server suite 297/297; deploy bar/section 17/17. No real
+  commit/push/deploy executed.
+- Remaining external blocker: `DEPLOY_GITHUB_TOKEN` with actions:write on
+  `modii1/rwqan`. The live error was produced by the old dev-server process (started
+  before 0.4.x); restart is required to load the fix.
+- Next: restart the dev server, run checks once, provide the token, then an approved TEST
+  publish.
+
+---
+
+## 0.4.2 — TEST auto-save invocation fixed; fail-closed Git handling (2026-11-04)
+- Version 0.4.2 (PATCH), branch `test/unified-gateway-ui-only`, base commit
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; changes in the working tree.
+- Root cause proven: the running dev server started at 20:40:50 local, before
+  `server/routes/admin/deploy.ts` was written at 22:05:01 local; `tsx` does not hot-reload,
+  so the old route without the auto-commit block was executing. The durable store's last
+  publish attempt is 19:23:23Z; later 19:44/19:45 entries are only `checks_run`.
+- Code defects fixed: silent skip when Git state was unknown; checks not persisted until
+  after the commit; generic push errors; stale tree/SHA on error.
+- Now: TEST fails closed with `DEPLOY_GIT_UNAVAILABLE` if Git cannot be inspected; passing
+  checks are persisted before the commit; auto-commit runs before dispatch; commit/push
+  failures return sanitized real details; the bar refreshes state/SHA on success/error.
+- Verified: TS 0 errors; deploy server suite 293/293; deploy bar/section 16/16. No real
+  commit/push/deploy executed.
+- Next: restart the dev server to load 0.4.2, run checks once to persist PASS, then an
+  approved TEST publish. A real dispatch still needs `DEPLOY_GITHUB_TOKEN`.
+
+---
+
+## 0.4.1 — TEST publish secret-scan failure diagnosed and fixed (2026-11-04)
+- Version 0.4.1 (PATCH), branch `test/unified-gateway-ui-only`, base commit
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; changes in the working tree.
+- Actual last failure (read from Firestore `deploy_audit_log` + `deploy_check_runs`):
+  mandatory `secretScan` = FAIL; reason "نمط سرّي وُجد داخل محتوى أحد الملفات المُغيَّرة."
+  TypeScript was PASS. No commit, no push, no Actions run, no App Hosting rollout, no
+  change to the TEST working version.
+- Root cause: `server/services/DeployRealExecutor.test.ts` embedded token-shaped synthetic
+  strings (`AIza…` / `ghp_…`) verbatim; the scanner correctly flagged them. They are not
+  real credentials.
+- Fix: assemble those fixtures at runtime from split fragments (source no longer matches;
+  runtime still tests redaction). Secret-scan reasons now name the offending file(s).
+  The bar now shows the real failure reason instead of the misleading generic line.
+- Verified: read-only secret scan on the current tree = PASS; TS 0 errors; deploy server
+  suite 291/291; deploy bar/section 16/16. No deployment executed.
+- Next: restart the dev server, run the checks once to persist a fresh PASS, then perform
+  an approved TEST publish. A real dispatch still needs `DEPLOY_GITHUB_TOKEN`.
+
+---
+
+## 0.4.0 — TEST publish automatic safe Git handling (2026-11-04)
+- Version 0.4.0 (MINOR), branch `test/unified-gateway-ui-only`, base commit
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; changes are in the working tree.
+- TEST publish no longer rejects a dirty tree. New `DeployTestAutoCommitService`:
+  inspects every changed path, aborts on secrets, excludes local/unintended files,
+  commits approved paths with `chore(release): v0.4.0 — TEST auto-publish`, pushes ONLY
+  the approved TEST branch (hard guard; `main` impossible), and verifies the remote tip.
+- Mandatory gates run before the commit and are never bypassed: `secretScan === PASS`
+  and `typescript === PASS`. Failure returns 409 with the real reason and does nothing.
+- Route integration is TEST-only; the 202 payload includes `autoCommit` and the bar toast
+  shows short SHA, branch, file count and the Actions link. LIVE and LOCAL unchanged.
+- Verified: TS 0 errors (frontend+server); deploy server suite 291/291 PASS; deploy
+  bar/section 16/16 PASS. No real commit/push/deploy was executed by tests.
+- Blocked (external): `DEPLOY_GITHUB_TOKEN` absent locally; a real TEST dispatch/publish
+  was NOT executed and is not claimed.
+- Next: commit 0.4.0 with explicit approval; provide the pre-existing token; then TEST
+  publish can auto-commit/push and dispatch `deploy-test.yml`.
+
+---
+
 SESSION: 2026-10-13 (FULL DEV REALISTIC PRODUCT E2E / UX / BUSINESS-FLOW TEST —
 synthetic DEV data + real browser E2E)
   + DEC-004 ratification (no roles invented; admin doc scope stays UNKNOWN/BLOCKED)
@@ -217,3 +295,83 @@ ADDENDUM (RWQAN DEPLOY — Phase C durable DEV registry, 2026-10-15):
 - Verified live against rwqan-sa-dev (create/list/order/retain-5/audit), then cleaned up.
   tsc 0 errors; tests 69/69 (server+service+gate 18, runtimeEnvironment 43, components 8).
 - Docs: docs/DEPLOY_SYSTEM_PHASE_C_AR.md. No commit/push/deploy; Phase D/E/F not started.
+
+ADDENDUM (2026-11-04 — version 0.2.0, documentation handoff):
+- Branch: `test/unified-gateway-ui-only`
+- Commit: `190b43577b3eee10b835579aa63d2c155fd7e660`
+- This session is documentation-only: no code/UI/config/database/secrets changes, and no
+  commit/push/deploy in this session.
+- Version 0.2.0 adopted per the existing SemVer convention (MINOR bump since 0.1.0 for
+  backward-compatible features). Previous 0.1.0 entries are preserved.
+- Current verified state:
+  - Unified owner account login (phone OTP + property-number tab) and property switcher.
+  - Partner profits admin system present.
+  - Deploy bar/console covers TEST and LIVE through GitHub Actions dispatch.
+  - Canonical TEST target: project `rwqan-757` / backend `rwqan-backend` /
+    `https://rwqan-backend--rwqan-757.europe-west4.hosted.app`; workflow
+    `deploy-test.yml` on this branch.
+  - LIVE target unchanged: project `rwqan-757` / backend `rwqan` / `https://rwqan.sa`.
+  - Real GitHub Actions status (anonymous public read): last TEST run success
+    (41333932185); last LIVE run success (41352340982). Success is shown only after the
+    rollout step is verified; unreadable status shows a reason, never fake success.
+  - `deploy-test.yml` is manual `workflow_dispatch` only (push trigger disabled) so a
+    push cannot deploy TEST before approval.
+- LOCAL: fixed developer environment; DEC-015 approves removing the LOCAL switch button
+  from the environment bar, but it is NOT implemented at this commit (bar still shows
+  LOCAL/TEST/LIVE).
+- Tests verified on this branch: TypeScript 0 errors; deploy-related tests 164/164 PASS.
+  Full source suite on this branch: NOT RUN in this session (not claimed).
+- No TEST or LIVE deployment was executed. LIVE settings were not changed.
+- Next step: explicit approval for the TEST deployment; implement DEC-015 as a separate
+  code change.
+
+ADDENDUM (2026-11-04 — version 0.3.0, LIVE enabled + approved hosting links cleanup):
+- Branch: `test/unified-gateway-ui-only`; base commit:
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; the 0.3.0 changes are in the working tree
+  and are not committed.
+- LIVE is no longer programmatically blocked: the separate
+  `DEPLOY_ALLOW_PRODUCTION` opt-in was removed, `productionDeployEnabled()` mirrors
+  `DEPLOY_REAL_DEPLOY`, and the deploy bar's "official update disabled" guard was removed.
+  Build checks, target validation, admin session/same-origin and GitHub dispatch checks
+  remain mandatory. The explicit publish confirmation is still the user action.
+- Approved hosting links:
+  - LIVE: `https://rwqan--rwqan-757.europe-west4.hosted.app/`
+  - TEST: `https://rwqan-backend--rwqan-757.europe-west4.hosted.app/`
+- The official domain `https://rwqan.sa` is untouched (Paymob, WhatsApp/booking links,
+  SEO and the production base URL remain).
+- Removed unapproved development hosting URLs: the `rwqan-sa-dev--rwqan-dev-backend`
+  us-central1 host, the us-central1/europe-west1 TEST fixtures, and the legacy
+  `REPLACE-WITH-DEV-BACKEND-HOST` placeholder. `apphosting.dev.yaml` is marked legacy and
+  points to the LOCAL address; no file was deleted.
+- Active deploy code now uses the official repository `modii1/rwqan`.
+- Verified with the admin state API (no deployment): LIVE target `rwqan-757` / `rwqan`,
+  base URL `https://rwqan--rwqan-757.europe-west4.hosted.app`,
+  `productionDeployEnabled=true`, `production_opt_in=ok`, `target_config=ok`,
+  `release_checks=ok`, `real_deploy_opt_in=ok`.
+- Remaining operational constraints (not a permanent programmatic block):
+  - dirty worktree because the changes are uncommitted (resolves after an approved commit);
+  - `DEPLOY_GITHUB_TOKEN` is absent locally; GitHub dispatch requires the pre-existing
+    server token. No secret was added.
+- Tests: TypeScript 0 errors; deploy-related tests 185/185 PASS. Full source suite on this
+  branch: NOT RUN in this session (not claimed).
+- No TEST or LIVE deployment was executed.
+- Next: commit with explicit approval to clean the worktree; provide the pre-existing
+  `DEPLOY_GITHUB_TOKEN`; then LIVE publish is available through the approved path.
+
+ADDENDUM (2026-11-04 — version 0.3.1, environment-bar cleanup):
+- Branch: `test/unified-gateway-ui-only`; base commit:
+  `190b43577b3eee10b835579aa63d2c155fd7e660`; changes are in the working tree.
+- DEC-015 implemented: removed the LOCAL option/button/label from the environment switch
+  in `src/components/deploy-bar.tsx`. The switch now offers only TEST and LIVE. LOCAL
+  remains the fixed developer environment at `http://localhost:5001`; detection/operation
+  unchanged.
+- Removed the generic cloud "نشر" button (`deploy-bar-publish`). The explicit
+  "نشر نسخة التجربة" and "نشر الموقع الرسمي" buttons, TEST/LIVE status, run information
+  and the publish mechanism remain unchanged.
+- No change to environment links, deploy settings, backend, data or secrets.
+- Tests: TypeScript 0 errors; deploy bar/section 19/19 PASS; source assertions confirm
+  LOCAL and the generic publish button are absent while TEST/LIVE remain.
+- Full source suite on this branch: NOT RUN in this session (not claimed).
+- No TEST/LIVE deployment, commit or push was executed.
+- Next: commit with approval; provide `DEPLOY_GITHUB_TOKEN`; then TEST/LIVE publish is
+  available through the approved path.

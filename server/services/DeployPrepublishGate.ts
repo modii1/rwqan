@@ -106,14 +106,28 @@ export function evaluatePreDeployGate(
   } else if (git.worktree === "clean") {
     items.push(item("git_worktree", "حالة شجرة العمل (Git)", "ok"));
   } else if (git.worktree === "dirty") {
-    items.push(
-      item(
-        "git_worktree",
-        "حالة شجرة العمل (Git)",
-        "blocked",
-        "شجرة العمل تحتوي تغييرات غير مُثبّتة — النشر الحقيقي يُرفض.",
-      ),
-    );
+    if (input.environment === "TEST") {
+      // TEST deploys the last approved commit on its branch. Local uncommitted
+      // changes are NOT published and are never committed automatically; the
+      // gate warns instead of pretending the tree is clean or blocking forever.
+      items.push(
+        item(
+          "git_worktree",
+          "حالة شجرة العمل (Git)",
+          "ok",
+          "توجد تغييرات محلية غير محفوظة — لن تُنشر؛ سيُنشر آخر Commit معتمد على فرع TEST.",
+        ),
+      );
+    } else {
+      items.push(
+        item(
+          "git_worktree",
+          "حالة شجرة العمل (Git)",
+          "blocked",
+          "شجرة العمل تحتوي تغييرات غير مُثبّتة — النشر الحقيقي يُرفض.",
+        ),
+      );
+    }
   } else {
     items.push(
       item(
@@ -238,35 +252,18 @@ export function evaluatePreDeployGate(
     ),
   );
 
-  // 7) Production opt-in (only the SECOND gate for a LIVE target).
-  if (input.environment === "TEST" || input.environment === "LOCAL") {
-    items.push(
-      item(
-        "production_opt_in",
-        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
-        "ok",
-        "غير مطلوب في بيئة الاختبار أو المحلية — الهدف الثابت معزول عن الإنتاج.",
-      ),
-    );
-  } else if (input.productionDeployEnabled) {
-    items.push(
-      item(
-        "production_opt_in",
-        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
-        "ok",
-        "مفعّل — تحذير: الهدف الحالي هو الإنتاج.",
-      ),
-    );
-  } else {
-    items.push(
-      item(
-        "production_opt_in",
-        "تفعيل النشر إلى الإنتاج (DEPLOY_ALLOW_PRODUCTION)",
-        "blocked",
-        "مطلوب تفعيل إنتاجي صريح مستقل قبل السماح بأي rollout إلى الإنتاج.",
-      ),
-    );
-  }
+  // 7) LIVE enablement: there is no separate production opt-in. LIVE is enabled
+  // by the same real-deploy switch; build, target and permission checks remain.
+  items.push(
+    item(
+      "production_opt_in",
+      "تفعيل النشر إلى الإنتاج",
+      "ok",
+      input.environment === "LIVE"
+        ? "لا يوجد تفعيل إنتاجي منفصل — LIVE يُفعَّل بمفتاح النشر الحقيقي، مع فحوص البناء والوجهة والصلاحيات."
+        : "غير مطلوب في بيئة الاختبار أو المحلية — الهدف الثابت معزول عن الإنتاج.",
+    ),
+  );
 
   // 8) App Hosting region — mandatory for a controlled rollout (executor precondition).
   if (input.target.location?.trim()) {

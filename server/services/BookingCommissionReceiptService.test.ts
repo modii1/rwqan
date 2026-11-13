@@ -7,6 +7,7 @@ import {
   removeBookingCommissionReceipt,
   storeBookingCommissionReceipt,
 } from "./BookingCommissionReceiptService";
+import { receiptProxyPath } from "../utils/receiptProxy";
 
 function receiptFile(
   mimetype: string,
@@ -122,7 +123,7 @@ test("receipt storage ignores the client filename and uses an opaque random key"
     /^booking-commission-receipts\/[a-f0-9]{24}\/[a-f0-9]{24}-fixed-random-suffix\.png$/,
   );
   assert.equal(stored.objectKey.includes("sensitive"), false);
-  assert.equal(stored.url, `https://receipts.example/${stored.objectKey}`);
+  assert.equal(stored.url, receiptProxyPath(stored.objectKey));
   assert.equal(stored.contentType, "image/png");
   assert.equal(stored.sizeBytes, 9);
   assert.equal(commands.length, 1);

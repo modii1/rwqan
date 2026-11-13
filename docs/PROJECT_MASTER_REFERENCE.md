@@ -1,26 +1,48 @@
 # PROJECT MASTER REFERENCE — Ruqan / Rwqan
 
-CURRENT VERSION: 0.1.0 (documentation + verification baseline, tracked in VERSION_HISTORY.md)
-CURRENT ENVIRONMENT: DEVELOPMENT (rwqan-sa-opencode clone)
-CURRENT STATUS: VERIFIED BASELINE — docs complete; AUTH-001 follow-ups done; AUTHZ-001 fixed;
-  scanner NEW:0; browser E2E + build + smoke PASS; production readiness not claimed
-LAST VERIFIED: 2026-10-13 (TS 0 errors; tests 702/702 serial; browser E2E 2/2 PASS;
-  build PASS; DEV smoke PASS; scanner RED-trigger 1 = SEC-001)
+CURRENT VERSION: 0.5.0 (TEST publish reverted to the last approved commit; auto-commit/push removed)
+VERSION DATE: 2026-11-05
+CURRENT BRANCH / COMMIT: test/unified-gateway-ui-only @ 190b43577b3eee10b835579aa63d2c155fd7e660
+  (0.5.0 changes are in the working tree, not yet committed)
+CURRENT ENVIRONMENT: DEVELOPMENT (LOCAL on port 5001) with TEST/LIVE deploy targets
+CURRENT STATUS: DEV version — TEST publish deploys the last approved commit on
+  `test/unified-gateway-ui-only`; it never creates commits, pushes, or branches. Local
+  uncommitted changes are warned about and are never published. GitHub dispatch reuses
+  `DEPLOY_GITHUB_TOKEN` or the existing `gh` session in development. LIVE/LOCAL unchanged.
+  No production release and no deployment executed for this entry.
+LAST VERIFIED: 2026-11-05 (TS 0 errors frontend+server; deploy+auth suite 285/285 PASS;
+  deploy bar/section 18/18 PASS; the temporary diagnostic ref is absent from the remote;
+  no deploy executed)
+DEPLOY TARGETS:
+  - LOCAL: local developer machine, http://localhost:5001 (fixed; the LOCAL switch button
+    was removed from the environment bar in 0.3.1 — DEC-015 implemented)
+  - TEST: project rwqan-757 / backend rwqan-backend /
+    https://rwqan-backend--rwqan-757.europe-west4.hosted.app (workflow deploy-test.yml on
+    branch test/unified-gateway-ui-only; manual workflow_dispatch only). The TEST publish
+    auto-commits only approved paths and hard-refuses any branch other than the approved
+    TEST branch.
+  - LIVE: project rwqan-757 / backend rwqan /
+    https://rwqan--rwqan-757.europe-west4.hosted.app (workflow deploy-live.yml on main);
+    official domain https://rwqan.sa is untouched; enabled by DEPLOY_REAL_DEPLOY with
+    build/target/permission checks still enforced. LIVE never auto-commits.
 SECURITY STATUS: See SECURITY_STATUS.md (SEC-001 open/BLOCKED; AUTHZ-001 closed)
 TEST STATUS: See SESSION_HANDOFF.md / VERSION_HISTORY entries
 PRODUCTION READINESS: NOT_CLAIMED — Production Release Gate = BLOCKED
-LAST RELEASE: NONE ON RECORD (doc baseline 0.1.0 only)
-NEXT SAFE ACTION: Production authorization on SEC-001 rotation; Private R2 hardening
-needs a real document-scope model (owner-approved) — ADMIN_DOCUMENT_SCOPE stays
-UNKNOWN/BLOCKED_BY_MISSING_MODEL (ratified DEC-004/DEC-012, no invented roles); then
-production rollout per the locked plan.
+LAST RELEASE: NONE ON RECORD (development version 0.4.0 only)
+NEXT SAFE ACTION: commit the 0.4.0 changes with explicit approval; provide the pre-existing
+DEPLOY_GITHUB_TOKEN for GitHub dispatch; then the TEST publish can auto-commit/push and
+dispatch. SEC-001 rotation remains pending; ADMIN_DOCUMENT_SCOPE stays
+UNKNOWN/BLOCKED_BY_MISSING_MODEL (ratified DEC-004/DEC-012, no invented roles).
 
 ---
 
 ## 1. Project Identity
 - Name: Ruqan / Rwqan (Arabic-first, RTL)
 - Repo (DEV clone): `C:\Users\zerof\Desktop\rwqan-sa-opencode`
-- Production/Original (DO NOT TOUCH during DEV): `C:\Users\zerof\Desktop\rwqan-sa`
+- Official remote: `https://github.com/modii1/rwqan` (remote `origin`)
+- Backup: `C:\Users\zerof\Desktop\rwqan-sa-full-backup.git`
+- Legacy local folder `C:\Users\zerof\Desktop\rwqan-sa` was removed earlier; do not
+  recreate it. The official remote + backup are the recovery sources.
 
 ## 2. Purpose
 Property-management SaaS: owners, properties, subscriptions, payments, discounts,
@@ -64,6 +86,8 @@ requests, analytics, booking commission receipts, WhatsApp notifications, admin.
 
 ## 7. Firebase
 - DEV project: `rwqan-sa-dev`, project number 467810513087, region me-central2.
+- Deploy target note (0.2.0): the DEV *data* project (`rwqan-sa-dev`) is separate from
+  the TEST *deploy* target (`rwqan-757` / backend `rwqan-backend`). Do not confuse them.
 - DEV DB is NEW and EMPTY. No seed of production-like data.
 - Isolation: `assertFirebaseDevIsolation` refuses non-DEV project in DEV when credentials present.
 
@@ -103,6 +127,9 @@ requests, analytics, booking commission receipts, WhatsApp notifications, admin.
   - flags: AUTH_HASH_MIGRATION_ENABLED, AUTH_ENFORCE_HASHED_ONLY.
   - DEV default: migration enabled; hashed-only enabled.
   - PROD default: both disabled until validated.
+- Owner unified account (0.2.0): phone OTP login via `OwnerAccountStore`/`OwnerAccountService`,
+  plus the property-number tab; one account can access its linked properties and switch
+  between them from the owner dashboard.
 - Admin: ADMIN_CODE/ADMIN_PASSWORD; session `isAdmin`.
 - Sessions: express-session.
 
@@ -162,8 +189,42 @@ requests, analytics, booking commission receipts, WhatsApp notifications, admin.
 - See docs/RELEASE_NOTES.md, VERSION_HISTORY.md, OPERATIONS.md.
 - Every release has version + docs + evidence.
 
+## 27.1 Deploy Bar / Environments (0.5.0)
+- UI: `src/components/deploy-bar.tsx` + admin section `sections/deploy.tsx`.
+- API: `/api/admin/deploy/*` (state, checks, releases, restore, status).
+- TEST and LIVE are separate targets; the bar shows the real GitHub Actions run state.
+- TEST: project `rwqan-757` / backend `rwqan-backend` /
+  `https://rwqan-backend--rwqan-757.europe-west4.hosted.app`; workflow
+  `deploy-test.yml` on branch `test/unified-gateway-ui-only` (manual dispatch only).
+- TEST publish deploys the last approved commit on
+  `test/unified-gateway-ui-only`. It NEVER creates a commit, push, or branch. If the local
+  worktree has uncommitted changes, the bar warns that they will not be published; it does
+  not delete, stash, or replace them.
+- The pre-deploy gate marks a dirty TEST worktree as `ok` with that warning (deploying the
+  last approved commit is still valid). LIVE and LOCAL keep the strict blocked behavior.
+- A failed mandatory check shows its real server reason. The secret-scan reason names the
+  offending changed file(s), never the content.
+- GitHub dispatch uses one credential resolver: explicit `DEPLOY_GITHUB_TOKEN`, or the
+  existing authenticated `gh` session in development only. The token is memory-only and
+  never written/logged; production requires the explicit env token.
+- LIVE: project `rwqan-757` / backend `rwqan` /
+  `https://rwqan--rwqan-757.europe-west4.hosted.app`; workflow `deploy-live.yml` on
+  `main`. The official domain `https://rwqan.sa` remains untouched. LIVE is enabled by
+  `DEPLOY_REAL_DEPLOY` with no separate production opt-in; build, target and permission
+  checks remain mandatory. LIVE never auto-commits.
+- Status is read from the public GitHub repository anonymously (read-only); when it
+  cannot be read, a reason is shown and no success is claimed.
+- LOCAL is a fixed local environment (port 5001). The LOCAL switch button was removed
+  from the bar in 0.3.1 (DEC-015); LOCAL detection/operation are unchanged.
+- The generic cloud "نشر" button was removed; the environment-specific TEST/LIVE publish
+  buttons, their status and the publish mechanism remain unchanged.
+
 ## 28. Production Deployment
-- NOT authorized/started. Requires PRODUCTION RELEASE GATE = PASS and explicit approval.
+- LIVE deploy is available through the approved GitHub Actions path when
+  `DEPLOY_REAL_DEPLOY` is enabled; there is no separate production opt-in. Build, target
+  and permission checks still apply. No deployment was executed for 0.4.1.
+- A formal production release still requires the documented
+  `PRODUCTION RELEASE GATE = PASS` and explicit approval.
 
 ## 29. Post-Deployment Verification
 - Health, critical UI, auth, authz, critical APIs, storage, business logic, static assets.
@@ -173,7 +234,12 @@ requests, analytics, booking commission receipts, WhatsApp notifications, admin.
 - Production data gate NOT cleared.
 
 ## 31. Current Version
-- VERSION_HISTORY.md to define. Current WORKING baseline recorded there.
+- CURRENT VERSION: **0.5.0** (2026-11-05) — branch `test/unified-gateway-ui-only`,
+  base commit `190b43577b3eee10b835579aa63d2c155fd7e660`; 0.5.0 changes are in the
+  working tree (not yet committed).
+- Full entry: `docs/VERSION_HISTORY.md`; notes: `docs/RELEASE_NOTES.md`.
+- Previous versions: 0.4.4, 0.4.3, 0.4.2, 0.4.1, 0.4.0, 0.3.1, 0.3.0, 0.2.0 and 0.1.0 +
+  addendum (preserved in history; 0.4.0/0.4.2/0.4.3 auto-commit are superseded).
 
 ## 32. Next Safe Action
 - Finish documentation system (this session), then continue safe security/verification phases.

@@ -208,6 +208,10 @@ test("collectDeployChecks applies the real-secret bar to env templates", async (
 
   const planted = await collectDeployChecks("/repo", depsFor(SECRET_IN_TEMPLATE));
   assert.equal(planted.checks.secretScan, "FAIL");
+  assert.ok(
+    planted.reasons.secretScan?.includes(".env.template"),
+    "the reason must name the offending file without exposing its content",
+  );
 
   const key = await collectDeployChecks("/repo", depsFor(REAL_PRIVATE_KEY));
   assert.equal(key.checks.secretScan, "FAIL");

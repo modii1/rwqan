@@ -105,6 +105,9 @@ export type DeployUploadStage =
   | "connection"
   | "branch"
   | "changes"
+  | "checks"
+  | "build"
+  | "commit"
   | "github_connection"
   | "push"
   | "verify"
@@ -119,23 +122,187 @@ export interface DeployUploadStageResult {
   message: string;
 }
 
-/** Outcome of pushing the approved branch (`git push origin <branch>`). */
+/** Outcome of committing local changes and pushing the approved branch. */
 export interface DeployBranchPushResult {
   /** Environment the upload targets (TEST or LIVE). */
   environment: DeployEnvironment;
   ok: boolean;
   /** TRUE only when a new commit was actually pushed. */
   pushed: boolean;
-  /** TRUE when the remote branch already matched the local HEAD (nothing to push). */
+  /** TRUE when there was nothing to commit/push. */
   skipped: boolean;
   branch: string;
   localSha: string | null;
   remoteSha: string | null;
   pushedSha: string | null;
+  /** SHA of the commit created by this upload (null when nothing was committed). */
+  commitSha?: string | null;
+  /** Commit message used for the new commit. */
+  commitMessage?: string | null;
+  /** Browsable GitHub URL for the new commit, when derivable. */
+  commitUrl?: string | null;
+  /** Number of files included in the new commit. */
+  changeCount?: number;
+  /** Full output of the failed check/build, for the admin-facing log view. */
+  failureLog?: string | null;
   detail: string;
   /** Stage where the pipeline ended (null when everything completed). */
   stage: DeployUploadStage | null;
   stages: DeployUploadStageResult[];
+}
+
+/** Git status kind for one local change. */
+export type DeployUploadChangeKind =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked";
+
+/** Coarse category used to group changes for admin review. */
+export type DeployUploadChangeCategory =
+  | "code"
+  | "tests"
+  | "docs"
+  | "config"
+  | "environment"
+  | "artifacts"
+  | "sensitive"
+  | "other";
+
+/** One local change shown in the upload review panel. */
+export interface DeployUploadChange {
+  /** Repo-relative path (forward slashes). */
+  path: string;
+  kind: DeployUploadChangeKind;
+  category: DeployUploadChangeCategory;
+  /** TRUE for secret-looking files — never selectable or committable. */
+  blocked: boolean;
+  /** TRUE when the UI should preselect this change. */
+  selectedByDefault: boolean;
+}
+
+export interface DeployUploadChangeCounts {
+  total: number;
+  modified: number;
+  added: number;
+  deleted: number;
+  renamed: number;
+  untracked: number;
+  sensitive: number;
+}
+
+/** One local commit that is not yet on the GitHub branch tip. */
+export interface DeployBranchCommitSummary {
+  sha: string;
+  subject: string;
+}
+
+/**
+ * Read-only assessment for moving to the environment's approved branch.
+ * A switch is offered ONLY when the working tree is completely clean.
+ */
+export interface DeployBranchSwitchAssessment {
+  environment: DeployEnvironment;
+  targetBranch: string;
+  currentBranch: string | null;
+  branchMatches: boolean;
+  targetBranchExists: boolean;
+  workingTreeChanges: DeployUploadChange[];
+  workingTreeCounts: DeployUploadChangeCounts;
+  /** Local commits on the CURRENT branch that are not on its GitHub tip. */
+  unpushedCurrentCommits: DeployBranchCommitSummary[];
+  /** Local commits on the TARGET branch that are not on its GitHub tip. */
+  unpushedTargetCommits: DeployBranchCommitSummary[];
+  /** TRUE only when a safe `git switch` is possible (clean tree, branch exists). */
+  canSwitch: boolean;
+  /** TRUE when unpushed current-branch commits exist and need acknowledgment. */
+  requiresUnpushedAck: boolean;
+  blockedReason: string | null;
+  /** Plain-Arabic safe options shown to the admin. */
+  safeOptions: string[];
+}
+
+/** Outcome of a requested branch switch (never resets/cleans/stashes/merges). */
+export interface DeployBranchSwitchResult extends DeployBranchSwitchAssessment {
+  ok: boolean;
+  switched: boolean;
+  needsConfirm?: boolean;
+  requiresAck?: boolean;
+  detail: string;
+}
+
+/**
+ * The isolated on-disk workspace for one environment. TEST and LIVE never share
+ * a working tree, so uncommitted TEST changes are never visible to LIVE.
+ */
+export interface DeployWorkspaceInfo {
+  environment: DeployEnvironment;
+  branch: string;
+  /** Absolute local path of the environment's dedicated worktree. */
+  path: string;
+  /** Admin-facing label (never a secret). */
+  label: string;
+  /** TRUE when the resolver created this worktree during this request. */
+  created: boolean;
+}
+
+/**
+ * One-click sync preflight for LIVE. It contains a count-only summary (never a
+ * file list) plus a token that must be echoed when the admin confirms.
+ */
+export interface DeploySyncPreflight {
+  environment: DeployEnvironment;
+  branch: string;
+  workspace: DeployWorkspaceInfo;
+  approvedCount: number;
+  counts: DeployUploadChangeCounts;
+  commitMessage: string;
+  canSync: boolean;
+  blockedReason: string | null;
+  detail: string;
+  /** TRUE when LIVE already contains a previously prepared sync result. */
+  prepared: boolean;
+  /** Number of files in the prepared LIVE result. */
+  preparedCount: number;
+  /** Opaque token binding this confirmation to the current Git state. */
+  token: string;
+}
+
+/** Read-only review of local changes before a commit/push is approved. */
+export interface DeployUploadPreview {
+  environment: DeployEnvironment;
+  /** Approved branch for the environment. */
+  branch: string;
+  /** Branch currently checked out (null when detached/unknown). */
+  currentBranch: string | null;
+  /** TRUE only when the checked-out branch is the approved branch. */
+  branchMatches: boolean;
+  localSha: string | null;
+  remoteSha: string | null;
+  /** Commits reachable from HEAD but not from the GitHub tip (unpushed). */
+  aheadCount: number | null;
+  /** Commits reachable from the GitHub tip but not from HEAD (must merge). */
+  behindCount: number | null;
+  changes: DeployUploadChange[];
+  counts: DeployUploadChangeCounts;
+  /** FALSE when there is nothing to commit or a hard safety block exists. */
+  canCommit: boolean;
+  /**
+   * TRUE when there is no working-tree change but local commits exist on this
+   * branch that are not yet on GitHub; they can be pushed without a new commit.
+   */
+  canPushExistingCommits: boolean;
+  /** Safe Arabic reason when `canCommit` is false. */
+  blockedReason: string | null;
+  /** Suggested commit message. */
+  suggestedMessage: string;
+  /** Safe human-readable summary. */
+  detail: string;
+  /** Present when the checked-out branch is not the environment's branch. */
+  branchSwitch?: DeployBranchSwitchAssessment;
+  /** The isolated workspace this preview belongs to. */
+  workspace?: DeployWorkspaceInfo;
 }
 
 /** The only branch an admin may ever ask the upload action to push for TEST. */
@@ -372,8 +539,18 @@ export type DeployAuditAction =
   | "publish_blocked"
   | "publish_failed"
   | "branch_push"
+  | "branch_commit_push"
+  | "branch_push_no_changes"
   | "branch_push_blocked"
   | "branch_push_failed"
+  | "branch_switch"
+  | "branch_switch_blocked"
+  | "branch_switch_failed"
+  | "sync_test"
+  | "sync_test_failed"
+  | "sync_live"
+  | "sync_live_blocked"
+  | "sync_live_failed"
   | "restore_preview"
   | "restore_snapshot"
   | "restore_real"

@@ -342,6 +342,17 @@ export const paymentSchema = z.object({
   // confirmed transactions back into the legacy generic "بطاقة" bucket.
   paymentMethod: z.string().trim().min(1).max(64).optional(),
   receiptUrl: z.string().optional(),
+  // Private R2 object key for the receipt. New receipts are served through an
+  // authenticated proxy instead of a public bucket URL.
+  receiptObjectKey: z.string().optional(),
+  // SHA-256 of the uploaded receipt content (never the filename).
+  receiptHash: z.string().optional(),
+  // How the payment was approved: auto_ai | admin_manual | manual_review.
+  approvalSource: z.string().optional(),
+  verificationId: z.string().optional(),
+  manualReviewReason: z.string().optional(),
+  verifiedAt: z.string().optional(),
+  approvedByAdminAt: z.string().optional(),
   packageName: z.string().optional(),
   ocrConfidence: z.number().optional(),
   autoMatched: z.union([z.boolean(), z.string()]).optional(),
@@ -565,12 +576,18 @@ export const partnerProfitSchema = z.object({
   transferDate: z.string().optional(), // @deprecated استخدم transfers
   transferStatus: z.enum(['pending', 'transferred']).default('pending'), // @deprecated استخدم remainingToTransfer
   notes: z.string().optional(), // ملاحظات
+  /** Payment details for reconciliation (not stored in DB) */
+  paymentsDetail: z.array(z.any()).optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
 
 export type PartnerProfit = z.infer<typeof partnerProfitSchema>;
-export const insertPartnerProfitSchema = partnerProfitSchema.omit({ id: true, createdAt: true });
+export const insertPartnerProfitSchema = partnerProfitSchema.omit({
+  id: true,
+  createdAt: true,
+  paymentsDetail: true,
+});
 export type InsertPartnerProfit = z.infer<typeof insertPartnerProfitSchema>;
 
 // =========================
@@ -895,15 +912,44 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlag[] = [
 // =========================
 export const ocrResultSchema = z.object({
   paymentId: z.string(),
+  // Full AI receipt-verification record (all fields optional so legacy OCR rows
+  // remain valid). No API keys or raw secrets are ever written here.
+  receiptHash: z.string().optional(),
+  receiptObjectKey: z.string().optional(),
+  recommendation: z.string().optional(), // تفعيل_تلقائي | مراجعة_يدوية | رفض
+  decisionSource: z.string().optional(), // ai | admin | system
+  manualReviewReason: z.string().optional(),
+  summary: z.string().optional(),
+  failureReason: z.string().optional(),
+  model: z.string().optional(),
+  scannedAt: z.string().optional(),
   extractedAmount: z.number().optional(),
+  extractedCurrency: z.string().optional(),
   extractedDate: z.string().optional(),
   extractedIban: z.string().optional(),
   extractedReference: z.string().optional(),
   extractedBankName: z.string().optional(),
   extractedBeneficiaryName: z.string().optional(),
   extractedAccountNumber: z.string().optional(),
+  extractedSenderName: z.string().optional(),
+  extractedTransactionId: z.string().optional(),
+  extractedPaymentReference: z.string().optional(),
   confidence: z.number().optional(), // نسبة الثقة 0-100
   rawText: z.string().optional(), // النص الكامل المستخرج
+  rawAnalysis: z.string().optional(), // رد Gemini الخام (بدون مفاتيح)
+  extractedData: z.record(z.string(), z.unknown()).optional(),
+  authenticityAnalysis: z.record(z.string(), z.unknown()).optional(),
+  imageQuality: z.record(z.string(), z.unknown()).optional(),
+  matchAnalysis: z.record(z.string(), z.unknown()).optional(),
+  amountMatch: z.boolean().optional(),
+  currencyMatch: z.boolean().optional(),
+  beneficiaryMatch: z.boolean().optional(),
+  ibanMatch: z.boolean().optional(),
+  referenceMatch: z.boolean().optional(),
+  dateMatch: z.boolean().optional(),
+  autoActivationAllowed: z.boolean().optional(),
+  blockers: z.array(z.string()).optional(),
+  reasons: z.array(z.string()).optional(),
   matchDetails: z.object({
     bankMatched: z.boolean().optional(),
     beneficiaryMatched: z.boolean().optional(),
@@ -911,6 +957,7 @@ export const ocrResultSchema = z.object({
     referenceMatched: z.boolean().optional(),
   }).optional(),
   createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
 });
 
 export type OcrResult = z.infer<typeof ocrResultSchema>;

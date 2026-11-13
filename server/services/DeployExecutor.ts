@@ -189,8 +189,9 @@ export class DisabledDeployExecutor implements DeployExecutor {
  *   - TEST  → GitHub Actions dispatch only (no Firebase CLI). It needs the
  *             server-side GitHub token + admin approval; it can never touch
  *             production or `main`.
- *   - LIVE  → still requires the real-deploy opt-in AND the separate production
- *             opt-in before anything is dispatched.
+ *   - LIVE  → enabled by the same real-deploy switch; it still dispatches
+ *             `deploy-live.yml` to GitHub and keeps build/target/permission
+ *             checks (no separate production opt-in).
  *   - LOCAL → still requires the real-deploy opt-in (Firebase CLI path).
  * A missing GitHub token still fails closed with a clear reason.
  */

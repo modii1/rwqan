@@ -5870,6 +5870,14 @@ export class FirebaseService {
         return updatedDoc.data() as PartnerProfit;
     }
 
+    async deletePartnerProfit(id: string): Promise<boolean> {
+        const ref = this.db.collection("partner_profits").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return false;
+        await ref.delete();
+        return true;
+    }
+
     async calculateMonthlyProfits(): Promise<{
         monthYear: string;
         activeSubscriptions: number;
@@ -6589,6 +6597,43 @@ export class FirebaseService {
     }
 
     // ================== OCR Results ==================
+
+    /**
+     * Persist the COMPLETE AI receipt verification (extracted fields, match
+     * booleans, blockers, authenticity and image quality). Nothing here is a
+     * secret; API keys are never passed to this method.
+     */
+    async saveReceiptVerification(
+        data: InsertOcrResult & Record<string, unknown>,
+    ): Promise<void> {
+        const id = data.paymentId || `OCR-${Date.now()}`;
+        const ref = this.db.collection("ocr_results").doc(id);
+        const now = toRiyadhISO(getNowInRiyadh());
+        await this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            const existing = snapshot.exists
+                ? (snapshot.data() as Record<string, unknown>)
+                : null;
+            transaction.set(
+                ref,
+                {
+                    ...data,
+                    createdAt:
+                        (existing?.createdAt as string | undefined) || now,
+                    updatedAt: now,
+                },
+                { merge: true },
+            );
+        });
+        console.log(`✅ [Firebase] Receipt verification saved for payment: ${id}`);
+    }
+
+    async getReceiptVerification(
+        paymentId: string,
+    ): Promise<OcrResult | null> {
+        const doc = await this.db.collection("ocr_results").doc(paymentId).get();
+        return doc.exists ? (doc.data() as OcrResult) : null;
+    }
 
     async saveOcrResult(data: InsertOcrResult): Promise<void> {
         const id = data.paymentId || `OCR-${Date.now()}`;

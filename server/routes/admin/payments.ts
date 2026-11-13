@@ -112,6 +112,25 @@ router.get("/api/admin/payments", requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Full AI receipt verification record for one payment. Read-only, admin-only.
+ * The response contains extracted fields and decision reasons, never secrets.
+ */
+router.get("/api/admin/payments/:paymentId/verification", requireAdmin, async (req, res) => {
+  try {
+    const verification = await firebaseService.getReceiptVerification(
+      String(req.params.paymentId || ""),
+    );
+    if (!verification) {
+      return res.status(404).json({ error: "لا يوجد سجل فحص ذكي لهذه الدفعة" });
+    }
+    res.json(verification);
+  } catch (error) {
+    console.error("Error fetching receipt verification:", error);
+    res.status(500).json({ error: "تعذر جلب سجل فحص الإيصال" });
+  }
+});
+
 router.put("/api/admin/payments/:id/status", async (req, res) => {
   try {
     const { id } = req.params;

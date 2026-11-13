@@ -53,6 +53,63 @@ type Payment = {
   action?: string;
   notes?: string;
   fulfillmentState?: string;
+  approvalSource?: string;
+  verificationId?: string;
+  manualReviewReason?: string;
+  receiptObjectKey?: string;
+  verifiedAt?: string;
+  approvedByAdminAt?: string;
+};
+
+type PaymentVerification = {
+  paymentId: string;
+  recommendation?: string;
+  decisionSource?: string;
+  confidence?: number;
+  summary?: string;
+  failureReason?: string;
+  manualReviewReason?: string;
+  model?: string;
+  scannedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  receiptHash?: string;
+  extractedAmount?: number;
+  extractedCurrency?: string;
+  extractedDate?: string;
+  extractedBeneficiaryName?: string;
+  extractedIban?: string;
+  extractedReference?: string;
+  extractedBankName?: string;
+  extractedTransactionId?: string;
+  extractedPaymentReference?: string;
+  extractedSenderName?: string;
+  amountMatch?: boolean;
+  currencyMatch?: boolean;
+  beneficiaryMatch?: boolean;
+  ibanMatch?: boolean;
+  referenceMatch?: boolean;
+  dateMatch?: boolean;
+  autoActivationAllowed?: boolean;
+  blockers?: string[];
+  reasons?: string[];
+  authenticityAnalysis?: {
+    overallScore?: number;
+    isLikelyAuthentic?: boolean;
+    concerns?: string[];
+    positiveIndicators?: string[];
+  };
+  imageQuality?: { clarity?: string; isComplete?: boolean };
+  matchAnalysis?: {
+    matchScore?: number;
+    amountMatch?: boolean;
+    currencyMatch?: boolean;
+    beneficiaryMatch?: boolean;
+    ibanMatch?: boolean;
+    referenceMatch?: boolean;
+    dateMatch?: boolean;
+  };
+  extractedData?: Record<string, unknown>;
 };
 
 type PaymentApprovalResult = {
@@ -165,6 +222,199 @@ import { formatLiveSaudiTime, formatLiveSaudiDate } from "@/lib/dateUtils";
 
 function formatDate(dateStr: string) {
   return formatLiveSaudiDate(dateStr);
+}
+
+function VerificationFlag({
+  label,
+  value,
+}: {
+  label: string;
+  value?: boolean;
+}) {
+  const style =
+    value === true
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : value === false
+        ? "bg-red-50 text-red-700 border-red-200"
+        : "bg-muted text-muted-foreground border-border";
+  const text = value === true ? "مطابق" : value === false ? "غير مطابق" : "غير متاح";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${style}`}>
+      {label}: <strong>{text}</strong>
+    </span>
+  );
+}
+
+function PaymentVerificationPanel({ paymentId }: { paymentId: string }) {
+  const { data, isLoading, isError } = useQuery<PaymentVerification | null>({
+    queryKey: ["admin-payment-verification", paymentId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/payments/${paymentId}/verification`);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error("تعذر جلب سجل الفحص");
+      return res.json();
+    },
+    staleTime: 0,
+    retry: false,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" /> جاري تحميل نتيجة الفحص الذكي...
+      </div>
+    );
+  }
+  if (isError || !data) {
+    return (
+      <p className="mb-4 text-xs text-muted-foreground">
+        لا يوجد سجل فحص ذكي محفوظ لهذه الدفعة.
+      </p>
+    );
+  }
+
+  const recommendation = data.recommendation || "مراجعة_يدوية";
+  const recommendationStyle =
+    recommendation === "تفعيل_تلقائي"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : "bg-amber-50 text-amber-700 border-amber-200";
+  const confidence = Number(data.confidence ?? 0);
+  const matchScore = Number(data.matchAnalysis?.matchScore ?? 0);
+  const authenticity = Number(data.authenticityAnalysis?.overallScore ?? 0);
+  const blockers = data.blockers ?? [];
+  const reasons = data.reasons ?? [];
+
+  return (
+    <div
+      className="mb-4 rounded-lg border bg-card p-4"
+      data-testid={`admin-payment-verification-${paymentId}`}
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-bold">🔬 نتيجة الفحص الذكي</h4>
+        <span className={`rounded border px-2 py-1 text-[11px] font-semibold ${recommendationStyle}`}>
+          {recommendation === "تفعيل_تلقائي"
+            ? "مطابق — مؤهل للتفعيل الآلي"
+            : recommendation === "رفض"
+              ? "غير مطابق"
+              : "يحتاج مراجعة يدوية"}
+        </span>
+      </div>
+
+      <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+        <div className="rounded border bg-background p-2">
+          <div className="text-muted-foreground">الثقة</div>
+          <div className="font-bold">{confidence}%</div>
+        </div>
+        <div className="rounded border bg-background p-2">
+          <div className="text-muted-foreground">نسبة التطابق</div>
+          <div className="font-bold">{matchScore}%</div>
+        </div>
+        <div className="rounded border bg-background p-2">
+          <div className="text-muted-foreground">الأصالة</div>
+          <div className="font-bold">{authenticity}%</div>
+        </div>
+        <div className="rounded border bg-background p-2">
+          <div className="text-muted-foreground">جودة الصورة</div>
+          <div className="font-bold">{data.imageQuality?.clarity || "غير معروفة"}</div>
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <VerificationFlag label="المبلغ" value={data.amountMatch} />
+        <VerificationFlag label="العملة" value={data.currencyMatch} />
+        <VerificationFlag label="المستفيد" value={data.beneficiaryMatch} />
+        <VerificationFlag label="IBAN" value={data.ibanMatch} />
+        <VerificationFlag label="المرجع" value={data.referenceMatch} />
+        <VerificationFlag label="التاريخ" value={data.dateMatch} />
+      </div>
+
+      {blockers.length > 0 && (
+        <div className="mb-3 rounded border border-red-200 bg-red-50 p-2">
+          <div className="mb-1 text-[11px] font-semibold text-red-700">
+            سبب الإحالة إلى المراجعة اليدوية:
+          </div>
+          <ul className="list-disc space-y-0.5 pr-4 text-[11px] text-red-700">
+            {blockers.map((item, index) => (
+              <li key={`blocker-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {reasons.length > 0 && (
+        <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 p-2">
+          <div className="mb-1 text-[11px] font-semibold text-emerald-700">
+            نتائج التحقق الناجحة:
+          </div>
+          <ul className="list-disc space-y-0.5 pr-4 text-[11px] text-emerald-700">
+            {reasons.map((item, index) => (
+              <li key={`reason-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
+        <div>
+          <span className="text-muted-foreground">المبلغ المستخرج: </span>
+          <strong>{data.extractedAmount ?? "—"} {data.extractedCurrency || ""}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">التاريخ: </span>
+          <strong dir="ltr">{data.extractedDate || "—"}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">المستفيد: </span>
+          <strong>{data.extractedBeneficiaryName || "—"}</strong>
+        </div>
+        <div className="truncate" dir="ltr">
+          <span className="text-muted-foreground">IBAN: </span>
+          <strong>{data.extractedIban || "—"}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">المرجع: </span>
+          <strong dir="ltr">{data.extractedReference || "—"}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">رقم العملية: </span>
+          <strong dir="ltr">{data.extractedTransactionId || "—"}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">المصدر: </span>
+          <strong>{data.decisionSource === "ai" ? "فحص آلي" : data.decisionSource || "—"}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">الموديل: </span>
+          <strong dir="ltr">{data.model || "—"}</strong>
+        </div>
+      </div>
+
+      {(data.summary || data.failureReason || data.manualReviewReason) && (
+        <div className="mt-2 rounded bg-muted/40 p-2 text-[11px]">
+          {data.summary && <p>{data.summary}</p>}
+          {data.failureReason && (
+            <p className="mt-1 text-red-700">رمز الفشل: {data.failureReason}</p>
+          )}
+          {data.manualReviewReason && (
+            <p className="mt-1 text-amber-700">{data.manualReviewReason}</p>
+          )}
+        </div>
+      )}
+
+      {data.receiptHash && (
+        <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+          SHA-256: {data.receiptHash}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function approvalSourceLabel(source?: string) {
+  if (source === "auto_ai") return { text: "اعتماد آلي (AI)", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  if (source === "admin_manual") return { text: "اعتماد إداري يدوي", className: "bg-blue-50 text-blue-700 border-blue-200" };
+  if (source === "manual_review") return { text: "بانتظار مراجعة يدوية", className: "bg-amber-50 text-amber-700 border-amber-200" };
+  return null;
 }
 
 export default function PaymentsSection() {
@@ -786,8 +1036,15 @@ const totals = completedPayments.reduce((acc, p) => {
                       <tr key={`${p.id}-pending-details`} className={`${p.status === "مرفوض" ? "bg-red-50 dark:bg-red-900/10 border-t-2 border-red-300" : "bg-amber-50 dark:bg-amber-900/10 border-t-2 border-amber-300"}`}>
                         <Td colSpan={10}>
                           <div className="py-4 px-3">
-                            <div className={`text-sm font-bold mb-3 ${p.status === "مرفوض" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
-                              {p.status === "مرفوض" ? "تحويل بنكي مرفوض" : "تحويل بنكي — قيد التحقق التلقائي"}
+                            <div className={`text-sm font-bold mb-3 flex flex-wrap items-center gap-2 ${p.status === "مرفوض" ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+                              <span>
+                                {p.status === "مرفوض" ? "تحويل بنكي مرفوض" : "تحويل بنكي — قيد التحقق التلقائي"}
+                              </span>
+                              {approvalSourceLabel(p.approvalSource) ? (
+                                <span className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${approvalSourceLabel(p.approvalSource)!.className}`}>
+                                  {approvalSourceLabel(p.approvalSource)!.text}
+                                </span>
+                              ) : null}
                             </div>
                             
                             {/* حالة التحقق التلقائي */}
@@ -849,6 +1106,8 @@ const totals = completedPayments.reduce((acc, p) => {
                                 </a>
                               </div>
                             )}
+
+                            <PaymentVerificationPanel paymentId={p.id} />
 
                             {/* أزرار تجاوز الأدمن */}
                             <div className="flex gap-3 mt-4 items-center">

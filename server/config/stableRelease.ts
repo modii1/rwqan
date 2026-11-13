@@ -39,7 +39,7 @@ export const RWQAN_STABLE_RELEASE: DeployRelease = {
   gitCommit: RWQAN_STABLE_RELEASE_SHA,
   gitTag: null,
   gitBranch: "main",
-  sourceRepoUrl: "https://github.com/iheeb1/rwqan-sa.git",
+  sourceRepoUrl: "https://github.com/modii1/rwqan.git",
   // Rollout created time (ISO, from the App Hosting deployment record).
   createdAt: "2026-09-24T22:24:23.519Z",
   createdBy: "admin",

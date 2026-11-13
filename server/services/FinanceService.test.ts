@@ -143,3 +143,150 @@ test("prepareMonthlyCycle treats historical records without status as closed", a
   assert.equal(created.distributableProfit, 660);
   assert.equal(created.partnerShare, 330);
 });
+
+test("prepareMonthlyCycle updates the existing cycle instead of creating a duplicate", async () => {
+  const existing = makeProfit({
+    id: "PP-EXISTING",
+    status: "pending_review",
+    notes: "ملاحظة محفوظة",
+    transferredToPartner: 5,
+    remainingToTransfer: 475,
+    transfers: [{ id: "T1", amount: 5, date: "2026-11-05", reference: "REF" }],
+  });
+  let updatedId: string | null = null;
+  let updatedPayload: any = null;
+  let createCalled = false;
+
+  stub("getPayments", async () => [
+    { id: "P1", status: "مكتمل", finalAmount: 80, netAmount: 77.24, completedAt: "2026-11-05T00:00:00.000Z" } as any,
+  ]);
+  stub("getExpenses", async () => [
+    { id: "E1", title: "تكلفة", amount: 20, date: "2026-11-01", expenseType: "مرة واحدة", isActive: true } as any,
+  ]);
+  stub("getPartnerProfits", async () => [existing]);
+  stub("updatePartnerProfit", async (id: string, data: any) => {
+    updatedId = id;
+    updatedPayload = data;
+    return { ...existing, ...data };
+  });
+  stub("createPartnerProfit", async () => {
+    createCalled = true;
+    throw new Error("should not create a duplicate cycle");
+  });
+  // A recalculation must never write to source financial records.
+  for (const method of [
+    "updatePayment",
+    "updatePaymentStatus",
+    "updatePaymentFees",
+    "updateExpense",
+    "deleteExpense",
+  ]) {
+    stub(method, async () => {
+      throw new Error(`recalculation must not call ${method}`);
+    });
+  }
+
+  const service = new FinanceService();
+  const result = await service.prepareMonthlyCycle("2026-11");
+
+  assert.equal(createCalled, false, "must not create a second cycle for the same month");
+  assert.equal(updatedId, "PP-EXISTING");
+  assert.equal(result.id, "PP-EXISTING");
+  assert.equal(updatedPayload.revenueAfterFees, 77.24);
+  assert.equal(updatedPayload.totalExpenses, 20);
+  assert.equal(updatedPayload.partnerShare, 28.62);
+  // Protected fields are not rewritten by the scoped writer.
+  assert.equal("status" in updatedPayload, false);
+  assert.equal("transfers" in updatedPayload, false);
+  assert.equal("transferredToPartner" in updatedPayload, false);
+  assert.equal("notes" in updatedPayload, false);
+  assert.equal("monthYear" in updatedPayload, false);
+});
+
+test("deleteMonthlyCycle deletes an unlocked cycle without transfers and touches nothing else", async () => {
+  let deletedId: string | null = null;
+  stub("getPartnerProfitById", async () => makeProfit({ id: "PP-TEST", transfers: [], transferredToPartner: 0 }));
+  stub("deletePartnerProfit", async (id: string) => {
+    deletedId = id;
+    return true;
+  });
+  // These must never be called by a cycle delete.
+  stub("getPayments", async () => {
+    throw new Error("delete must not read payments");
+  });
+  stub("getExpenses", async () => {
+    throw new Error("delete must not read expenses");
+  });
+  stub("updatePartnerProfit", async () => {
+    throw new Error("delete must not update transfers");
+  });
+
+  const service = new FinanceService();
+  const deleted = await service.deleteMonthlyCycle("PP-TEST");
+
+  assert.equal(deleted, true);
+  assert.equal(deletedId, "PP-TEST");
+});
+
+test("deleteMonthlyCycle refuses a closed cycle", async () => {
+  let deleteCalled = false;
+  stub("getPartnerProfitById", async () => makeProfit({ id: "PP-CLOSED", status: "closed" }));
+  stub("deletePartnerProfit", async () => {
+    deleteCalled = true;
+    return true;
+  });
+
+  const service = new FinanceService();
+  await assert.rejects(
+    () => service.deleteMonthlyCycle("PP-CLOSED"),
+    /مقفلة أو تاريخية/
+  );
+  assert.equal(deleteCalled, false);
+});
+
+test("deleteMonthlyCycle refuses a historical cycle without status", async () => {
+  let deleteCalled = false;
+  stub("getPartnerProfitById", async () =>
+    makeProfit({ id: "PP-OLD", status: undefined } as any)
+  );
+  stub("deletePartnerProfit", async () => {
+    deleteCalled = true;
+    return true;
+  });
+
+  const service = new FinanceService();
+  await assert.rejects(
+    () => service.deleteMonthlyCycle("PP-OLD"),
+    /مقفلة أو تاريخية/
+  );
+  assert.equal(deleteCalled, false);
+});
+
+test("deleteMonthlyCycle refuses a cycle with transfers", async () => {
+  let deleteCalled = false;
+  stub("getPartnerProfitById", async () =>
+    makeProfit({
+      id: "PP-TRANSFERRED",
+      transferredToPartner: 10,
+      transfers: [{ id: "T1", amount: 10, date: "2026-11-05" }],
+    })
+  );
+  stub("deletePartnerProfit", async () => {
+    deleteCalled = true;
+    return true;
+  });
+
+  const service = new FinanceService();
+  await assert.rejects(
+    () => service.deleteMonthlyCycle("PP-TRANSFERRED"),
+    /مرتبطة بتحويلات/
+  );
+  assert.equal(deleteCalled, false);
+});
+
+test("deleteMonthlyCycle returns false for a missing cycle", async () => {
+  stub("getPartnerProfitById", async () => null);
+  const service = new FinanceService();
+  const deleted = await service.deleteMonthlyCycle("PP-MISSING");
+  assert.equal(deleted, false);
+});

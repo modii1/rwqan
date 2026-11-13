@@ -343,8 +343,8 @@ export default function DeploySection() {
       const confirmed = window.confirm(
         (toProduction
           ? "نشر حقيقي إلى الإنتاج؟\n\n"
-          : "نشر حقيقي إلى بيئة التطوير المعزولة؟\n\n") +
-          `المشروع: ${target?.projectId ?? "rwqan-sa-dev"}\n` +
+          : "نشر حقيقي إلى بيئة الاختبار المعتمدة؟\n\n") +
+          `المشروع: ${target?.projectId ?? "rwqan-757"}\n` +
           `الخدمة: ${target?.backendId ?? "—"}\n\n` +
           (toProduction
             ? "تحذير: هذا الهدف هو الإنتاج."
@@ -526,7 +526,7 @@ export default function DeploySection() {
                 <CardDescription>
                   {state.environment === "LIVE" && state.productionDeployEnabled
                     ? "الهدف الحالي هو الإنتاج"
-                    : "الهدف الحالي DEV المعزول"}
+                    : "الهدف الحالي بيئة الاختبار المعتمدة"}
                   {state.deployTarget ? ` (${state.deployTarget.projectId})` : ""}.
                 </CardDescription>
               </CardHeader>

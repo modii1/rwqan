@@ -26,7 +26,7 @@ const execFileAsync = promisify(execFile);
 
 const GIT_TIMEOUT_MS = 8_000;
 const MAX_SCANNED_FILE_BYTES = 512 * 1024;
-const FALLBACK_REPO_URL = "https://github.com/iheeb1/rwqan-sa.git";
+const FALLBACK_REPO_URL = "https://github.com/modii1/rwqan.git";
 
 export interface DeployCheckReport {
   checks: DeployChecks;
@@ -178,6 +178,8 @@ export function evaluateChecks(input: {
   gitAvailable: boolean;
   secretFiles: string[];
   secretContentMatch: boolean;
+  /** Repo-relative paths whose content matched (never their content). */
+  secretContentFiles?: string[];
 }): {
   checks: DeployChecks;
   reasons: Partial<Record<keyof DeployChecks, string>>;
@@ -196,7 +198,13 @@ export function evaluateChecks(input: {
       .join(", ")}`;
   } else if (input.secretContentMatch) {
     secretScan = "FAIL";
-    reasons.secretScan = "نمط سرّي وُجد داخل محتوى أحد الملفات المُغيَّرة.";
+    const files = input.secretContentFiles ?? [];
+    reasons.secretScan =
+      files.length > 0
+        ? `نمط سرّي وُجد داخل محتوى الملفات المُغيَّرة: ${files
+            .slice(0, 5)
+            .join(", ")}`
+        : "نمط سرّي وُجد داخل محتوى أحد الملفات المُغيَّرة.";
   } else {
     secretScan = "PASS";
   }
@@ -306,25 +314,25 @@ export async function collectDeployChecks(
     .catch(() => ({ files: [] as string[], gitAvailable: false }));
 
   const secretFiles: string[] = [];
-  let secretContentMatch = false;
+  const secretContentFiles: string[] = [];
 
   for (const relativeFile of files) {
     if (isSecretFileName(relativeFile)) {
       secretFiles.push(relativeFile);
       continue;
     }
-    if (secretContentMatch) continue;
     const absolutePath = path.resolve(cwd, relativeFile);
     const content = await dependencies.readTextFile(absolutePath).catch(() => null);
     if (content && secretContentDetectedIn(content, relativeFile)) {
-      secretContentMatch = true;
+      secretContentFiles.push(relativeFile);
     }
   }
 
   const { checks, reasons } = evaluateChecks({
     gitAvailable,
     secretFiles,
-    secretContentMatch,
+    secretContentMatch: secretContentFiles.length > 0,
+    secretContentFiles,
   });
 
   return { checks, git, reasons };

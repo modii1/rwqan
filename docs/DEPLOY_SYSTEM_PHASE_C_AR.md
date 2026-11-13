@@ -609,8 +609,14 @@ prunedSecrets: [".env"] | worktreeUnchanged: true | cleaned: true
 | `npm run build` | تجميع Next.js **نجح** ثم فشل في خطوة TypeScript على `_probe_public.ts` (غير E) ⇒ لا `dist` |
 | `firebase`/`gcloud`/`docker`/`gh` | **غير مثبّتة**؛ `git` متوفّر |
 
-## E.11.5) `apphosting.dev.yaml` — ما يلزم قبل أول rollout (بلا قيم مخمَّنة)
-- يُختار عبر **Environment name = `dev`** في إعداد الـbackend (لا من `firebase.json`).
-- `NEXT_PUBLIC_BASE_URL` = **نائب** `https://REPLACE-WITH-DEV-BACKEND-HOST` ⇒ يجب استبداله بمضيف الـbackend الفعلي (قيمة تُؤخذ من App Hosting، لا تُخمَّن).
-- `NODE_ENV=production` مقصود (وقت تشغيل App Hosting إنتاجي؛ فيبقى Git fallback معطَّلًا).
-- **لا يُحقن commit هنا** (E.10.1): إثبات الهوية يأتي من `Build.source.codebase.hash` عبر `traffic.current` فقط.
+## E.11.5) `apphosting.dev.yaml` — historical note (updated 0.3.0)
+- The legacy development App Hosting backend is not an approved target. Approved hosting
+  targets are TEST (`https://rwqan-backend--rwqan-757.europe-west4.hosted.app/`) and LIVE
+  (`https://rwqan--rwqan-757.europe-west4.hosted.app/`).
+- 0.3.0 removed the `REPLACE-WITH-DEV-BACKEND-HOST` placeholder and pointed the legacy
+  file at the LOCAL address (`http://localhost:5001`); the file is marked legacy and was
+  not deleted.
+- `NODE_ENV=production` remains intentional for any App Hosting runtime; the Git fallback
+  stays disabled there.
+- **No commit is injected here** (E.10.1): identity comes only from
+  `Build.source.codebase.hash` via `traffic.current`.
