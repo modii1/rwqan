@@ -6124,6 +6124,21 @@ export class FirebaseService {
         await this.updateProperty(propertyNumber, { pin: newPassword });
     }
 
+    /**
+     * Store a verified legacy credential as an Argon2id hash on the owner
+     * document only. `properties.pin` is intentionally left untouched so the
+     * existing group-PIN compatibility checks keep their current stored value.
+     */
+    async migrateOwnerPasswordHash(propertyNumber: string, newPassword: string): Promise<void> {
+        await this.db.collection("owners").doc(propertyNumber).update({
+            password: newPassword,
+            resetCode: "",
+            resetExpire: "",
+            resetCodePurpose: "",
+            resetCodeAttempts: 0,
+        });
+    }
+
     async clearOwnerResetCode(propertyNumber: string): Promise<void> {
         await this.db.collection("owners").doc(propertyNumber).update({
             resetCode: "",

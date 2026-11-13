@@ -48,3 +48,7 @@ env:
     secret: projects/rwqan-production-v2/secrets/FIREBASE_SERVICE_ACCOUNT
     availability:
       - RUNTIME
+  - variable: GEMINI_API_KEY
+    secret: projects/rwqan-production-v2/secrets/GEMINI_API_KEY/versions/1
+    availability:
+      - RUNTIME
