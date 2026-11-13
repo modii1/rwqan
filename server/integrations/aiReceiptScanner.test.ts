@@ -24,6 +24,7 @@ function todayRiyadh() {
 
 function geminiPayload(overrides: Record<string, any> = {}) {
   return {
+    documentType: "bank_transfer_receipt",
     extractedData: {
       amount: 150,
       currency: "SAR",
@@ -87,6 +88,7 @@ async function runScan(options: {
   key?: string | null;
   accounts?: any[];
   fetchUrlBehavior?: "success" | "fail";
+  progress?: Array<{ stage: string; status: string }>;
 }) {
   const originalNodeEnv = (process.env as any).NODE_ENV;
   const originalKey = process.env.GEMINI_API_KEY;
@@ -180,6 +182,9 @@ async function runScan(options: {
         ),
         mimeType: "image/png",
         geminiTimeoutMs: options.geminiTimeoutMs ?? 2_000,
+        onProgress: options.progress
+          ? (stage, status) => options.progress!.push({ stage, status })
+          : undefined,
       },
     );
     return { result, saved, geminiCalls, lastRequestBody };
@@ -310,6 +315,127 @@ test("a non-receipt image is manual review", async () => {
   assert.equal(result?.verification.autoActivationAllowed, false);
 });
 
+test("a confirmed non-receipt document gets its own classification", async () => {
+  const { result, saved } = await runScan({
+    payload: geminiPayload({
+      documentType: "not_a_receipt",
+      extractedData: {
+        amount: null,
+        currency: null,
+        date: null,
+        receiverName: null,
+        receiverIban: null,
+        referenceNumber: null,
+        paymentReference: null,
+      },
+      imageQuality: { clarity: "واضحة", isComplete: true },
+      authenticityAnalysis: { overallScore: 0, isLikelyAuthentic: false },
+      confidence: 88,
+      summary: "دليل برمجي وليس إيصال تحويل",
+    }),
+  });
+  assert.equal(result?.documentType, "not_a_receipt");
+  assert.equal(result?.recommendation, "مستند_غير_إيصال");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+  assert.equal(result?.verification.manualReviewReason, "المستند ليس إيصال تحويل بنكي.");
+  assert.equal(saved[0].documentType, "not_a_receipt");
+});
+
+test("a non-receipt invoice with an amount but no bank identifiers is still a non-receipt", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({
+      documentType: "not_a_receipt",
+      extractedData: {
+        amount: 250,
+        currency: null,
+        date: null,
+        receiverName: "شركة تجارية",
+        receiverIban: null,
+        referenceNumber: null,
+        transactionId: null,
+        paymentReference: null,
+      },
+      confidence: 90,
+    }),
+  });
+  assert.equal(result?.documentType, "not_a_receipt");
+  assert.equal(result?.recommendation, "مستند_غير_إيصال");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+});
+
+test("a non-receipt label is not trusted when receipt data is present", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({ documentType: "not_a_receipt" }),
+  });
+  // The model contradicts itself: real receipt fields exist, so never reject.
+  assert.notEqual(result?.recommendation, "مستند_غير_إيصال");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+  assert.equal(result?.recommendation, "مراجعة_يدوية");
+});
+
+test("an uncertain document type goes to manual review, never rejection", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({
+      documentType: "uncertain",
+      extractedData: { amount: null, receiverIban: null, receiverName: null },
+      confidence: 20,
+    }),
+  });
+  assert.equal(result?.documentType, "uncertain");
+  assert.equal(result?.recommendation, "مراجعة_يدوية");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+  assert.match(
+    String(result?.verification.manualReviewReason ?? ""),
+    /تعذّر تأكيد نوع المستند/,
+  );
+});
+
+test("a recognised bank receipt with a different amount stays manual review", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({
+      documentType: "bank_transfer_receipt",
+      extractedData: { amount: 149 },
+    }),
+  });
+  assert.equal(result?.documentType, "bank_transfer_receipt");
+  assert.equal(result?.recommendation, "مراجعة_يدوية");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+});
+
+test("a recognised bank receipt keeps the existing auto-activation rules", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({ documentType: "bank_transfer_receipt" }),
+  });
+  assert.equal(result?.documentType, "bank_transfer_receipt");
+  assert.equal(result?.recommendation, "تفعيل_تلقائي");
+  assert.equal(result?.verification.autoActivationAllowed, true);
+});
+
+test("an unrecognised document-type value is treated as uncertain", async () => {
+  const { result } = await runScan({
+    payload: geminiPayload({ documentType: "some_new_label" }),
+  });
+  assert.equal(result?.documentType, "uncertain");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+});
+
+test("a missing document type is uncertain, never a rejection", async () => {
+  const payload: any = geminiPayload();
+  delete payload.documentType;
+  const { result } = await runScan({ payload });
+  assert.equal(result?.documentType, "uncertain");
+  assert.notEqual(result?.recommendation, "مستند_غير_إيصال");
+  assert.equal(result?.verification.autoActivationAllowed, false);
+});
+
+test("the analysis request asks the model for an explicit document type", async () => {
+  const { lastRequestBody } = await runScan({ payload: geminiPayload() });
+  const prompt = JSON.stringify(lastRequestBody);
+  assert.match(prompt, /documentType/);
+  assert.match(prompt, /not_a_receipt/);
+  assert.match(prompt, /uncertain/);
+});
+
 test("a missing Gemini key returns a persisted manual-review result without calling Gemini", async () => {
   const { result, saved, geminiCalls } = await runScan({ key: null });
   assert.ok(result);
@@ -369,5 +495,78 @@ test("an image fetch failure is manual review", async () => {
     else (process.env as any).NODE_ENV = originalNodeEnv;
     if (originalKey === undefined) delete (process.env as any).GEMINI_API_KEY;
     else (process.env as any).GEMINI_API_KEY = originalKey;
+  }
+});
+
+test("scan progress reports real stages for a matching receipt", async () => {
+  const progress: Array<{ stage: string; status: string }> = [];
+  const { result } = await runScan({ payload: geminiPayload(), progress });
+
+  assert.equal(result?.recommendation, "تفعيل_تلقائي");
+  const seen = (stage: string, status: string) =>
+    progress.some((entry) => entry.stage === stage && entry.status === status);
+
+  assert.ok(seen("received", "active"));
+  assert.ok(seen("received", "done"));
+  assert.ok(seen("reading", "active"));
+  assert.ok(seen("reading", "done"));
+  assert.ok(seen("amount", "done"));
+  assert.ok(seen("beneficiary", "done"));
+  assert.ok(seen("date", "done"));
+  assert.ok(seen("authenticity", "done"));
+  assert.ok(seen("finalizing", "active"));
+  assert.ok(seen("finalizing", "done"));
+});
+
+test("scan progress marks reading as failed on an outage", async () => {
+  const progress: Array<{ stage: string; status: string }> = [];
+  const { result } = await runScan({ behavior: "error", progress });
+
+  assert.equal(result?.failureReason, "GEMINI_ERROR");
+  assert.ok(
+    progress.some((entry) => entry.stage === "reading" && entry.status === "failed"),
+  );
+  assert.ok(
+    progress.some((entry) => entry.stage === "finalizing" && entry.status === "done"),
+  );
+});
+
+test("scan progress marks verification stages as failed for a non-receipt", async () => {
+  const progress: Array<{ stage: string; status: string }> = [];
+  const { result } = await runScan({
+    progress,
+    payload: {
+      extractedData: {
+        amount: null,
+        currency: null,
+        date: null,
+        receiverName: null,
+        receiverIban: null,
+        paymentReference: null,
+      },
+      authenticityAnalysis: {
+        overallScore: 5,
+        isLikelyAuthentic: false,
+        concerns: ["ليس إيصالًا بنكيًا"],
+        positiveIndicators: [],
+      },
+      imageQuality: {
+        clarity: "ممتازة",
+        isComplete: true,
+        hasWatermarks: false,
+        isScreenshot: false,
+      },
+      summary: "المستند ليس إيصالًا بنكيًا",
+      confidence: 100,
+    },
+  });
+
+  assert.equal(result?.recommendation, "مراجعة_يدوية");
+  const failed = ["amount", "beneficiary", "date", "authenticity"];
+  for (const stage of failed) {
+    assert.ok(
+      progress.some((entry) => entry.stage === stage && entry.status === "failed"),
+      `expected ${stage} to be reported as failed`,
+    );
   }
 });

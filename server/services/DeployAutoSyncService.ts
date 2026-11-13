@@ -403,7 +403,10 @@ const LIVE_EXCLUDED_PREFIXES = [
 ];
 
 const LIVE_EXCLUDED_PATTERNS = [
-  /^apphosting.*\.ya?ml$/i,
+  // Only the BASE App Hosting config may travel; every environment-specific
+  // variant (apphosting.test.yaml, apphosting.dev.yaml, apphosting-prod.yaml,
+  // ...) stays excluded so LOCAL/TEST/LIVE settings never mix.
+  /^apphosting[-.].+\.ya?ml$/i,
   /^firebase\.json$/i,
   /^\.firebaserc$/i,
   /^shared\/liveData\.ts$/i,
@@ -1152,6 +1155,128 @@ function exportNamePattern(name: string): RegExp {
   );
 }
 
+/** Environment variable names declared in a base App Hosting config. */
+interface AppHostingEntry {
+  name: string;
+  lines: string[];
+}
+
+interface AppHostingMerge {
+  added: string[];
+  removed: string[];
+  differing: string[];
+  liveCount: number;
+  content: string | null;
+}
+
+function normalizeAppHostingEntry(lines: string[]): string {
+  return lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function parseAppHostingEntries(text: string): {
+  lines: string[];
+  eol: string;
+  entries: AppHostingEntry[];
+  insertAt: number;
+} | null {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const envIndex = lines.findIndex((line) => /^env:\s*$/.test(line));
+  if (envIndex < 0) return null;
+
+  const starts: Array<{ index: number; name: string }> = [];
+  for (let index = envIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^\s*-\s*variable:\s*([A-Za-z0-9_]+)\s*$/);
+    if (match) {
+      starts.push({ index, name: match[1] });
+      continue;
+    }
+    if (line.trim() === "" || /^\s/.test(line)) continue;
+    break; // a top-level line ends the env block
+  }
+
+  const entries = starts.map((start, position) => {
+    const next = starts[position + 1]?.index ?? lines.length;
+    let end = next;
+    while (end > start.index + 1) {
+      const line = lines[end - 1];
+      if (line.trim() === "" || /^\s*#/.test(line)) end -= 1;
+      else break;
+    }
+    return { name: start.name, lines: lines.slice(start.index, end) };
+  });
+
+  return {
+    lines,
+    eol,
+    entries,
+    insertAt: entries.length > 0 ? starts[starts.length - 1].index + entries[entries.length - 1].lines.length : envIndex + 1,
+  };
+}
+
+/**
+ * Additive merge for the base App Hosting config.
+ *
+ * LIVE owns environment-specific secrets (WhatsApp, R2, Paymob, ...) that TEST
+ * may not declare. A plain TEST overwrite would delete them, so the merge:
+ *  - starts from LIVE's file (order, formatting and extra variables preserved),
+ *  - appends only variables that TEST declares and LIVE does not,
+ *  - refuses (returns `differing`) when a shared variable's definition changed,
+ *    so a LIVE security setting is never silently rewritten by TEST.
+ */
+function mergeAppHostingConfig(
+  liveText: string,
+  testText: string
+): AppHostingMerge | null {
+  const live = parseAppHostingEntries(liveText);
+  const test = parseAppHostingEntries(testText);
+  if (!live || !test) return null;
+
+  const liveByName = new Map(live.entries.map((entry) => [entry.name, entry]));
+  const testByName = new Map(test.entries.map((entry) => [entry.name, entry]));
+
+  const added = [...testByName.keys()]
+    .filter((name) => !liveByName.has(name))
+    .sort();
+  const removed = [...liveByName.keys()]
+    .filter((name) => !testByName.has(name))
+    .sort();
+  const differing = [...liveByName.keys()]
+    .filter((name) => testByName.has(name))
+    .filter(
+      (name) =>
+        normalizeAppHostingEntry(liveByName.get(name)!.lines) !==
+        normalizeAppHostingEntry(testByName.get(name)!.lines)
+    )
+    .sort();
+
+  if (added.length === 0) {
+    return { added, removed, differing, liveCount: live.entries.length, content: null };
+  }
+
+  const additions = added.flatMap((name) => [
+    "",
+    ...testByName.get(name)!.lines,
+  ]);
+  const mergedLines = [
+    ...live.lines.slice(0, live.insertAt),
+    ...additions,
+    ...live.lines.slice(live.insertAt),
+  ];
+
+  return {
+    added,
+    removed,
+    differing,
+    liveCount: live.entries.length,
+    content: mergedLines.join(live.eol),
+  };
+}
+
 
 type SyncActionKind = "transfer" | "auto-merge" | "conflict";
 
@@ -1279,6 +1404,51 @@ async function buildLivePlan(params: {
     // 2) Every TEST line is already in LIVE: TEST is already transferred.
     if (liveText !== null && containsAllLines(liveText, testText)) {
       noopPaths.push(file);
+      continue;
+    }
+    // 2b) Base App Hosting config: additive, LIVE-preserving merge.
+    // LIVE owns environment-specific secrets that TEST may not declare, so a
+    // TEST overwrite must never delete them. New TEST variables are appended;
+    // a changed definition of an existing variable needs manual review.
+    if (file === "apphosting.yaml" && liveText !== null) {
+      const merge = mergeAppHostingConfig(liveText, testText);
+      if (!merge) {
+        actions.push({
+          path: file,
+          kind: "conflict",
+          reason: "تعذّر تحليل apphosting.yaml — يتطلب دمجًا يدويًا.",
+        });
+        conflictPaths.push(file);
+        continue;
+      }
+      if (merge.differing.length > 0) {
+        actions.push({
+          path: file,
+          kind: "conflict",
+          reason: `TEST يغيّر تعريف ${merge.differing.length} متغيرًا موجودًا في LIVE (${merge.differing
+            .slice(0, 5)
+            .join(", ")}${merge.differing.length > 5 ? "…" : ""}) — يتطلب مراجعة يدوية للحفاظ على إعدادات LIVE.`,
+        });
+        conflictPaths.push(file);
+        continue;
+      }
+      if (merge.added.length === 0) {
+        noopPaths.push(file);
+        continue;
+      }
+      actions.push({
+        path: file,
+        kind: "auto-merge",
+        reason: `إضافة ${merge.added.length} متغيرًا من TEST (${merge.added
+          .slice(0, 5)
+          .join(", ")})${merge.added.length > 5 ? "…" : ""} مع الحفاظ على ${merge.liveCount} متغيرًا في LIVE${
+          merge.removed.length > 0
+            ? ` (منها ${merge.removed.length} متغيرًا موجودًا في LIVE فقط)`
+            : ""
+        }.`,
+        content: merge.content ?? undefined,
+      });
+      mergePaths.push(file);
       continue;
     }
     // 3) TEST never touched this file since the baseline: LIVE owns it.
@@ -1807,7 +1977,30 @@ async function discoverLive(
   );
   const excludedCount = entries.length - approvedEntries.length;
 
-  if (approvedEntries.length === 0) {
+  // A file that used to be excluded must never be treated as "already synced"
+  // just because TEST has not changed since the baseline. Always evaluate the
+  // base App Hosting config when it exists on TEST: the planner turns this into
+  // a no-op when LIVE already has every variable, so it cannot invent a change.
+  const planEntries = [...approvedEntries];
+  const APP_HOSTING_FILE = "apphosting.yaml";
+  if (
+    isApprovedLiveSyncPath(APP_HOSTING_FILE) &&
+    !planEntries.some((entry) => entry.displayPath === APP_HOSTING_FILE)
+  ) {
+    const existsOnTest = await deps
+      .showFile(testBranch, APP_HOSTING_FILE, testCwd)
+      .then(() => true)
+      .catch(() => false);
+    if (existsOnTest) {
+      planEntries.push({
+        kind: "modified",
+        paths: [APP_HOSTING_FILE],
+        displayPath: APP_HOSTING_FILE,
+      });
+    }
+  }
+
+  if (planEntries.length === 0) {
     return {
       ...empty,
       testSha,
@@ -1892,7 +2085,7 @@ async function discoverLive(
     baseSha,
     forkBaseSha,
     baseline,
-    entries: approvedEntries,
+    entries: planEntries,
     deps,
   });
 
@@ -1901,7 +2094,7 @@ async function discoverLive(
     ...plan.mergePaths,
   ]);
   const approvedPaths = Array.from(plannedPaths);
-  const actionableEntries = approvedEntries.filter((entry) =>
+  const actionableEntries = planEntries.filter((entry) =>
     plannedPaths.has(entry.displayPath)
   );
   const counts = countsForEntries(actionableEntries);

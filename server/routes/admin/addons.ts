@@ -13,6 +13,10 @@ import {
 import { r2, R2_BUCKET } from "../../utils/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { scanReceiptWithAI, persistAIScanResult } from "../../integrations/aiReceiptScanner";
+import {
+  isValidReceiptScanId,
+  receiptScanProgressStore,
+} from "../../services/ReceiptScanProgressStore";
 import { manualReviewReason } from "../../utils/receiptMatching";
 import { receiptProxyPath } from "../../utils/receiptProxy";
 import { randomUUID } from "node:crypto";
@@ -614,6 +618,9 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
   let addonClaimedPaymentId = "";
   let addonReceiptHash = "";
   let addonPaymentCreated = false;
+  const rawScanId = (req.body as any)?.scanId;
+  const scanId = isValidReceiptScanId(rawScanId) ? rawScanId : null;
+  if (scanId) receiptScanProgressStore.start(scanId);
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
     const { addOnPackageId, amount, discountCode } = req.body;
@@ -737,6 +744,8 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
           mimeType: detectedReceiptType,
           receiptHash,
           receiptObjectKey,
+          onProgress: (stage, status) =>
+            receiptScanProgressStore.setStage(scanId, stage, status),
         },
       );
 
@@ -784,6 +793,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
     } catch (aiError) {
       console.error("AI scan error for addon:", aiError);
     }
+    if (scanId) receiptScanProgressStore.finish(scanId, "done");
 
     if (addonFingerprintClaimed) {
       await receiptDuplicateGuard()
@@ -822,6 +832,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       paymentId,
       aiScan: aiScanResult ? {
         recommendation: aiScanResult.recommendation,
+        documentType: aiScanResult.documentType,
         confidence: aiScanResult.confidence,
         summary: aiScanResult.summary,
         matchScore: aiScanResult.matchAnalysis?.matchScore,
@@ -839,6 +850,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       } : null
     });
   } catch (err) {
+    if (scanId) receiptScanProgressStore.finish(scanId, "error");
     console.error("Bank transfer addon error:", err);
     if (addonFingerprintClaimed && addonClaimedPaymentId && addonReceiptHash) {
       try {
