@@ -5870,6 +5870,14 @@ export class FirebaseService {
         return updatedDoc.data() as PartnerProfit;
     }
 
+    async deletePartnerProfit(id: string): Promise<boolean> {
+        const ref = this.db.collection("partner_profits").doc(id);
+        const doc = await ref.get();
+        if (!doc.exists) return false;
+        await ref.delete();
+        return true;
+    }
+
     async calculateMonthlyProfits(): Promise<{
         monthYear: string;
         activeSubscriptions: number;
@@ -6114,6 +6122,21 @@ export class FirebaseService {
         });
         // Also update property PIN
         await this.updateProperty(propertyNumber, { pin: newPassword });
+    }
+
+    /**
+     * Store a verified legacy credential as an Argon2id hash on the owner
+     * document only. `properties.pin` is intentionally left untouched so the
+     * existing group-PIN compatibility checks keep their current stored value.
+     */
+    async migrateOwnerPasswordHash(propertyNumber: string, newPassword: string): Promise<void> {
+        await this.db.collection("owners").doc(propertyNumber).update({
+            password: newPassword,
+            resetCode: "",
+            resetExpire: "",
+            resetCodePurpose: "",
+            resetCodeAttempts: 0,
+        });
     }
 
     async clearOwnerResetCode(propertyNumber: string): Promise<void> {

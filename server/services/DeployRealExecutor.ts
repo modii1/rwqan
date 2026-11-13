@@ -9,8 +9,9 @@
  * Safety properties (all enforced here, independently of the route):
  *   - the target is the fixed target for the environment; a mismatched or
  *     unknown target is refused before any command runs;
- *   - a TEST deploy can NEVER touch production; a LIVE deploy to the production
- *     backend requires a SECOND explicit opt-in (DEPLOY_ALLOW_PRODUCTION);
+ *   - a TEST deploy can NEVER touch production; a LIVE deploy is enabled by the
+ *     same real-deploy switch, with build, target and admin-permission checks
+ *     still enforced (no separate production opt-in);
  *   - an explicit admin `approval` is required (no auto-deploy, ever);
  *   - commands run without a shell (no string interpolation, no injection);
  *   - the rollout is created for the EXACT commit on the GitHub-connected
@@ -60,6 +61,10 @@ import {
   type BuildSourceVerifier,
 } from "./DeployBuildSourceService";
 import { dispatchTestDeployWorkflow, dispatchLiveDeployWorkflow, readRemoteBranchHead } from "./DeployGhWorkflowService";
+import {
+  resolveDeployGithubToken,
+  DEPLOY_GITHUB_TOKEN_ENV_KEY,
+} from "./GitHubAuthService";
 import type {
   GhWorkflowDispatchResult,
   GhWorkflowDispatcher,
@@ -138,8 +143,11 @@ export interface RealDeployExecutorOptions {
   dependencies: RealDeployDependencies;
   /** Re-checked at call time: a real deploy must still be explicitly enabled. */
   realDeployEnabled: () => boolean;
-  /** Re-checked at call time: production deploys must be separately enabled. */
-  productionDeployEnabled: () => boolean;
+  /**
+   * @deprecated LIVE no longer requires a second opt-in. Kept optional for API
+   * compatibility; it is not used as a blocking condition.
+   */
+  productionDeployEnabled?: () => boolean;
 }
 
 function releaseRef(target: DeployTarget, commit: string): string {
@@ -308,16 +316,6 @@ export class RealDeployExecutor {
           target,
           "approval",
           "النشر الحقيقي غير مُفعَّل — لا يوجد مسار محاكاة بديل.",
-        ),
-      };
-    }
-
-    if (environment === "LIVE" && !this.options.productionDeployEnabled()) {
-      return {
-        blocked: blockedPublish(
-          target,
-          "target",
-          "النشر إلى الإنتاج يتطلب تفعيلًا صريحًا منفصلًا (DEPLOY_ALLOW_PRODUCTION=enabled).",
         ),
       };
     }
@@ -989,6 +987,19 @@ export class RealDeployExecutor {
  * every existing fail-closed failure path.
  */
 export function createRealDeployDependencies(): RealDeployDependencies {
+  // Unified GitHub auth: reuse DEPLOY_GITHUB_TOKEN when configured, otherwise
+  // the existing authenticated `gh` session (non-production). The resolved
+  // token stays in memory for this dispatch only; it is never written or logged.
+  const githubDispatchEnvironment = async (): Promise<
+    Record<string, string | undefined>
+  > => {
+    const auth = await resolveDeployGithubToken(process.env, {
+      allowGhCli: true,
+    });
+    if (!auth.token) return process.env;
+    return { ...process.env, [DEPLOY_GITHUB_TOKEN_ENV_KEY]: auth.token };
+  };
+
   return {
     runCommand(spec) {
       return new Promise<DeployCommandResult>((resolve) => {
@@ -1040,9 +1051,10 @@ export function createRealDeployDependencies(): RealDeployDependencies {
     // The executor treats its ABSENCE as a hard block, so a real deploy can never
     // succeed without this proof.
     verifyBuildSource: createAppHostingVerifyDependency(),
-    dispatchTestDeploy: (request) => dispatchTestDeployWorkflow(request),
-    dispatchLiveDeploy: (request: GhLiveWorkflowDispatchRequest) =>
-      dispatchLiveDeployWorkflow(request),
+    dispatchTestDeploy: async (request) =>
+      dispatchTestDeployWorkflow(request, await githubDispatchEnvironment()),
+    dispatchLiveDeploy: async (request: GhLiveWorkflowDispatchRequest) =>
+      dispatchLiveDeployWorkflow(request, await githubDispatchEnvironment()),
     readRemoteTip: readRemoteBranchHead,
     now: () => new Date(),
     cwd: () => process.cwd(),

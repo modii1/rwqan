@@ -576,12 +576,18 @@ export const partnerProfitSchema = z.object({
   transferDate: z.string().optional(), // @deprecated استخدم transfers
   transferStatus: z.enum(['pending', 'transferred']).default('pending'), // @deprecated استخدم remainingToTransfer
   notes: z.string().optional(), // ملاحظات
+  /** Payment details for reconciliation (not stored in DB) */
+  paymentsDetail: z.array(z.any()).optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });
 
 export type PartnerProfit = z.infer<typeof partnerProfitSchema>;
-export const insertPartnerProfitSchema = partnerProfitSchema.omit({ id: true, createdAt: true });
+export const insertPartnerProfitSchema = partnerProfitSchema.omit({
+  id: true,
+  createdAt: true,
+  paymentsDetail: true,
+});
 export type InsertPartnerProfit = z.infer<typeof insertPartnerProfitSchema>;
 
 // =========================

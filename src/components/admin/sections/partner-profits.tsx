@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,8 +30,11 @@ import {
   ChevronUp,
   Lock,
   Edit3,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import type { PartnerProfit, Payment, Expense } from "@shared/schema";
+import type { LiveDataStatus } from "@shared/liveData";
 import { formatLiveSaudiDate } from "@/lib/dateUtils";
 
 const EXPENSE_CATEGORIES = [
@@ -56,8 +59,65 @@ function isEffectivelyClosed(profit: PartnerProfit): boolean {
   return profit.status === "closed" || !profit.status;
 }
 
+function canDeleteCycle(profit: PartnerProfit): boolean {
+  const transfers = profit.transfers || [];
+  return (
+    !isEffectivelyClosed(profit) &&
+    transfers.length === 0 &&
+    (profit.transferredToPartner || 0) === 0
+  );
+}
+
+function extractApiError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  let message = raw;
+  const start = raw.indexOf("{");
+  if (start >= 0) {
+    try {
+      const parsed = JSON.parse(raw.slice(start));
+      if (typeof parsed?.error === "string" && parsed.error.trim()) {
+        message = parsed.error;
+      }
+    } catch {
+      // Fall through to the raw message.
+    }
+  }
+  // Make the LIVE IAM failure understandable instead of surfacing a raw
+  // Firestore PERMISSION_DENIED string.
+  if (/PERMISSION_DENIED|permission-denied|Missing or insufficient permissions/i.test(message)) {
+    return "صلاحيات Firebase في بيئة LIVE لا تسمح بالكتابة على دورات الأرباح. راجع صلاحيات حساب الخدمة (IAM) ثم أعد المحاولة.";
+  }
+  return message;
+}
+
+function formatAmount(value: number | undefined): string {
+  return (value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function EnvironmentBadge({
+  environment,
+  testId,
+}: {
+  environment: string;
+  testId?: string;
+}) {
+  const live = environment === "LIVE";
+  return (
+    <Badge
+      variant={live ? "destructive" : "secondary"}
+      className="text-xs"
+      data-testid={testId ?? "environment-badge"}
+    >
+      {live ? "بيئة LIVE" : "بيئة TEST"}
+    </Badge>
+  );
+}
+
 export default function PartnerProfitsSection() {
   const { toast } = useToast();
+  // Use the provider's client, not the disconnected singleton in
+  // @/lib/queryClient, so invalidations actually refetch the visible page.
+  const queryClient = useQueryClient();
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [transferProfitId, setTransferProfitId] = useState<string | null>(null);
   const [transferForm, setTransferForm] = useState({ amount: "", reference: "" });
@@ -68,10 +128,18 @@ export default function PartnerProfitsSection() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [manualMonthYear, setManualMonthYear] = useState(formatMonthYearInput());
   const [manualNotes, setManualNotes] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<PartnerProfit | null>(null);
 
   const { data: profits = [], isLoading, refetch: refetchProfits } = useQuery<PartnerProfit[]>({
     queryKey: ["/api/admin/partner-profits"],
   });
+
+  const { data: liveData } = useQuery<{ status: LiveDataStatus }>({
+    queryKey: ["/api/admin/live/status"],
+    retry: false,
+    staleTime: 30_000,
+  });
+  const environment = liveData?.status?.environment ?? "TEST";
 
   const { data: payments = [], isLoading: isLoadingPayments } = useQuery<Payment[]>({
     queryKey: ["/api/admin/payments"],
@@ -126,24 +194,61 @@ export default function PartnerProfitsSection() {
   });
 
   const prepareCycleMutation = useMutation({
-    mutationFn: async (monthYear?: string) =>
-      apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
-      toast({ title: "تم التجهيز", description: "تم تجهيز/إعادة حساب دورة الأرباح" });
+    mutationFn: async (monthYear?: string) => {
+      const res = await apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear });
+      return (await res.json()) as PartnerProfit;
     },
-    onError: () => toast({ title: "خطأ", description: "فشل في تجهيز دورة الأرباح", variant: "destructive" }),
+    onSuccess: (profit) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      toast({
+        title: `تم إعادة حساب دورة ${profit.monthYear}`,
+        description: `${environment} · صافي الإيرادات ${formatAmount(profit.revenueAfterFees)} ر.س · صافي الربح ${formatAmount(profit.netProfitAfterExpenses)} ر.س · حصة الشريك ${formatAmount(profit.partnerShare)} ر.س`,
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: "خطأ",
+        description: extractApiError(error) || "فشل في إعادة حساب دورة الأرباح",
+        variant: "destructive",
+      }),
   });
 
   const createManualCycleMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear: manualMonthYear }),
-    onSuccess: () => {
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/partner-profits/prepare", { monthYear: manualMonthYear });
+      return (await res.json()) as PartnerProfit;
+    },
+    onSuccess: (profit) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
       setIsAddDialogOpen(false);
-      toast({ title: "تم التجهيز", description: "تم تجهيز الدورة اليدوية" });
+      toast({
+        title: `تم تجهيز دورة ${profit.monthYear}`,
+        description: `${environment} · صافي الإيرادات ${formatAmount(profit.revenueAfterFees)} ر.س`,
+      });
     },
-    onError: () => toast({ title: "خطأ", description: "فشل في تجهيز الدورة", variant: "destructive" }),
+    onError: (error) =>
+      toast({ title: "خطأ", description: extractApiError(error), variant: "destructive" }),
+  });
+
+  const deleteCycleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/partner-profits/${id}`);
+      return (await res.json()) as { success: boolean; id: string; message?: string };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/partner-profits"] });
+      setDeleteTarget(null);
+      toast({
+        title: "تم حذف الدورة",
+        description: `${result.message || "تم حذف سجل دورة الأرباح المشتقة فقط."} (${environment})`,
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: "تعذّر الحذف",
+        description: extractApiError(error),
+        variant: "destructive",
+      }),
   });
 
   const closeCycleMutation = useMutation({
@@ -183,6 +288,21 @@ export default function PartnerProfitsSection() {
   // ─── Handlers ─────────────────────────────────────────────────────────────────
 
   const handlePrepareCurrent = () => prepareCycleMutation.mutate(currentMonthStr);
+
+  const handleRecalculate = (profit: PartnerProfit) => {
+    if (isEffectivelyClosed(profit)) return;
+    prepareCycleMutation.mutate(profit.monthYear.replace("/", "-"));
+  };
+
+  const handleRequestDelete = (profit: PartnerProfit) => {
+    if (!canDeleteCycle(profit)) return;
+    setDeleteTarget(profit);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteCycleMutation.mutate(deleteTarget.id);
+  };
 
   const handleMarkTransferred = (profit: PartnerProfit) => {
     if (isEffectivelyClosed(profit)) return;
@@ -248,7 +368,10 @@ export default function PartnerProfitsSection() {
                 <Calendar className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-lg">الدورة الحالية: {currentMonthStr.replace("-", "/")}</CardTitle>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <CardTitle className="text-lg">الدورة الحالية: {currentMonthStr.replace("-", "/")}</CardTitle>
+                  <EnvironmentBadge environment={environment} testId="environment-badge-current" />
+                </div>
                 <CardDescription>
                   {currentCycle
                     ? `حالة الدورة: ${isEffectivelyClosed(currentCycle) ? "مقفلة" : currentCycle.status === "pending_review" ? "بانتظار المراجعة" : "مسودة"}`
@@ -256,7 +379,8 @@ export default function PartnerProfitsSection() {
                 </CardDescription>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap items-center">
+              <EnvironmentBadge environment={environment} testId="environment-badge-current-actions" />
               <Button
                 size="sm"
                 variant="outline"
@@ -278,6 +402,24 @@ export default function PartnerProfitsSection() {
                 {prepareCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
                 {currentCycle ? "إعادة حساب الدورة" : "تجهيز الدورة"}
               </Button>
+              {currentCycle && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRequestDelete(currentCycle)}
+                  disabled={deleteCycleMutation.isPending || !canDeleteCycle(currentCycle)}
+                  className="gap-2 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                  data-testid="button-delete-current"
+                  title={
+                    canDeleteCycle(currentCycle)
+                      ? "حذف سجل الدورة المشتقة فقط"
+                      : "لا يمكن حذف دورة مقفلة أو مرتبطة بتحويلات"
+                  }
+                >
+                  {deleteCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  حذف الدورة
+                </Button>
+              )}
               <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" variant="outline" className="gap-2" data-testid="button-add-profit">
@@ -335,6 +477,24 @@ export default function PartnerProfitsSection() {
                 <MetricBox label="صافي نتيجة الشهر" value={currentCycle.netProfitAfterExpenses || 0} icon={<TrendingUp className="w-4 h-4" />} color={currentCycle.netProfitAfterExpenses >= 0 ? "emerald" : "red"} />
                 <MetricBox label="حصة الشريك (50%)" value={currentCycle.partnerShare || 0} icon={<Wallet className="w-4 h-4" />} color="amber" />
               </div>
+
+              {prepareCycleMutation.data && (
+                <div
+                  className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800"
+                  data-testid="recalc-result"
+                >
+                  <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                    <Check className="w-4 h-4" />
+                    نتيجة إعادة الحساب · {environment} · {prepareCycleMutation.data.monthYear}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-sm text-emerald-800 dark:text-emerald-300">
+                    <span>صافي الإيرادات: {formatAmount(prepareCycleMutation.data.revenueAfterFees)} ر.س</span>
+                    <span>التكاليف: {formatAmount(prepareCycleMutation.data.totalExpenses)} ر.س</span>
+                    <span>صافي الربح: {formatAmount(prepareCycleMutation.data.netProfitAfterExpenses)} ر.س</span>
+                    <span>حصة الشريك: {formatAmount(prepareCycleMutation.data.partnerShare)} ر.س</span>
+                  </div>
+                </div>
+              )}
 
               {(currentCycle.carriedLossForward > 0 || currentCycle.carriedLossRemaining > 0) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -482,13 +642,50 @@ export default function PartnerProfitsSection() {
                         <TransferPanel profit={profit} onTransfer={() => handleMarkTransferred(profit)} className="mt-3" />
 
                         {!closed && (
-                          <div className="flex gap-2 mt-3 flex-wrap">
+                          <div className="flex gap-2 mt-3 flex-wrap items-center">
+                            <EnvironmentBadge
+                              environment={environment}
+                              testId={`environment-badge-${profit.id}`}
+                            />
+                            <Button size="sm" variant="outline" onClick={() => handleRecalculate(profit)} disabled={prepareCycleMutation.isPending} className="gap-2" data-testid={`button-recalc-${profit.id}`}>
+                              {prepareCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} إعادة حساب
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRequestDelete(profit)}
+                              disabled={deleteCycleMutation.isPending || !canDeleteCycle(profit)}
+                              className="gap-2 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                              data-testid={`button-delete-${profit.id}`}
+                              title={canDeleteCycle(profit) ? "حذف سجل الدورة المشتقة فقط" : "لا يمكن حذف دورة مقفلة أو مرتبطة بتحويلات"}
+                            >
+                              {deleteCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} حذف
+                            </Button>
                             <Button size="sm" variant="default" onClick={() => closeCycleMutation.mutate(profit.id)} disabled={closeCycleMutation.isPending} className="gap-2" data-testid={`button-close-${profit.id}`}>
                               <Lock className="w-4 h-4" /> إقفال
                             </Button>
                             <Button size="sm" variant="outline" onClick={() => startNotesEdit(profit)} className="gap-2" data-testid={`button-edit-notes-${profit.id}`}>
                               <Edit3 className="w-4 h-4" /> تعديل ملاحظات
                             </Button>
+                          </div>
+                        )}
+
+                        {closed && (
+                          <div className="flex gap-2 mt-3 flex-wrap items-center">
+                            <EnvironmentBadge
+                              environment={environment}
+                              testId={`environment-badge-${profit.id}`}
+                            />
+                            <Badge variant="outline" className="text-xs">
+                              <Lock className="w-3 h-3 ml-1" /> دورة مقفلة — لا يمكن إعادة حسابها أو حذفها
+                            </Badge>
+                          </div>
+                        )}
+
+                        {!closed && ((profit.transfers || []).length > 0 || (profit.transferredToPartner || 0) > 0) && (
+                          <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
+                            <AlertTriangle className="w-4 h-4" />
+                            مرتبطة بتحويلات مالية — الحذف محظور، وإعادة الحساب تحافظ على التحويلات.
                           </div>
                         )}
 
@@ -691,6 +888,59 @@ export default function PartnerProfitsSection() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ===================== تأكيد حذف دورة ===================== */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent dir="rtl" data-testid="dialog-delete-cycle">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" />
+              تأكيد حذف دورة الأرباح
+            </DialogTitle>
+            <DialogDescription>
+              سيتم حذف سجل دورة الأرباح المشتقة المحدد فقط. لا يمكن التراجع عن هذه العملية.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteTarget && (
+            <div className="space-y-4">
+              <div className="rounded-lg border p-3 text-sm space-y-1">
+                <div>
+                  الشهر: <strong>{deleteTarget.monthYear}</strong>
+                </div>
+                <div className="flex items-center gap-2">
+                  البيئة: <EnvironmentBadge environment={environment} testId="environment-badge-delete-dialog" />
+                </div>
+                <div>
+                  معرّف الدورة: <code dir="ltr" className="text-xs">{deleteTarget.id}</code>
+                </div>
+              </div>
+              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-400">
+                لن يتم حذف المدفوعات أو التكاليف أو التحويلات أو أي قيود مالية أخرى. بعد الحذف يمكن تجهيز الدورة من جديد من مصادر البيانات الفعلية.
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleteCycleMutation.isPending}
+                  data-testid="button-cancel-delete"
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={confirmDelete}
+                  disabled={deleteCycleMutation.isPending}
+                  className="gap-2"
+                  data-testid="button-confirm-delete"
+                >
+                  {deleteCycleMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  حذف الدورة
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ===================== نموذج تسجيل تحويل ===================== */}
       <Dialog open={!!transferProfitId} onOpenChange={(open) => { if (!open) setTransferProfitId(null); }}>

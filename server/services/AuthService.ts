@@ -39,50 +39,70 @@ export class AuthService {
   // ─── Owner Auth ─────────────────────────────────────────────────────────────
 
   async validateOwnerPin(propertyNumber: string, pin: string): Promise<boolean> {
+    if (typeof pin !== "string" || pin.length === 0) return false;
+
     const owner = await firebaseService.getOwnerByPropertyNumber(propertyNumber);
     if (owner && typeof owner.password === "string" && owner.password.trim().length > 0) {
       const format = detectPasswordFormat(owner.password);
       if (format === "hashed") {
-        if (await verifyPassword(owner.password, pin)) {
-          return true;
-        }
-        return false;
+        return verifyPassword(owner.password, pin);
       }
       if (format === "plaintext") {
-        if (authEnforceHashedOnly()) {
+        if (!this._safeCredentialMatch(pin, owner.password)) {
           return false;
         }
-        if (this._safeCredentialMatch(pin, owner.password)) {
-          if (authHashMigrationEnabled()) {
-            try {
-              const hashed = await hashPassword(pin);
-              await firebaseService.updateOwnerPassword(propertyNumber, hashed);
-            } catch (err) {
-              console.error("Password migration failed");
-            }
+        // The legacy value is verified before any migration. When migration is
+        // enabled, store the SAME value as Argon2id on the owner document and
+        // allow this login. `properties.pin` is not rewritten here.
+        if (authHashMigrationEnabled()) {
+          try {
+            const hashed = await hashPassword(pin);
+            await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed);
+          } catch (err) {
+            console.error("Password migration failed");
           }
           return true;
         }
-        return false;
+        // Migration disabled: enforcement may still reject plaintext.
+        return !authEnforceHashedOnly();
       }
+      return false;
     }
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    if (property && this._safeCredentialMatch(pin, property.pin)) {
-      if (authEnforceHashedOnly()) {
-        return false;
-      }
-      if (authHashMigrationEnabled()) {
-        try {
+    if (!property || typeof property.pin !== "string" || property.pin.trim().length === 0) {
+      return false;
+    }
+    const propertyPin = property.pin;
+    const format = detectPasswordFormat(propertyPin);
+    if (format === "hashed") {
+      // A hashed property PIN is already safe; verify it directly.
+      return verifyPassword(propertyPin, pin);
+    }
+    if (format !== "plaintext") return false;
+    if (!this._safeCredentialMatch(pin, propertyPin)) {
+      return false;
+    }
+
+    if (authHashMigrationEnabled()) {
+      try {
+        if (owner) {
+          // Owner document exists but has no password: store the verified value
+          // as a hash without touching properties.pin.
           const hashed = await hashPassword(pin);
-          await firebaseService.updateOwnerPassword(propertyNumber, hashed);
-        } catch (err) {
-          console.error("Password migration failed");
+          await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed);
+        } else {
+          // No owner document: create one with an Argon2id hash of the same
+          // property PIN, leaving properties.pin unchanged.
+          await firebaseService.syncOwnerFromProperties(propertyNumber);
         }
+      } catch (err) {
+        console.error("Password migration failed");
       }
       return true;
     }
-    return false;
+
+    return !authEnforceHashedOnly();
   }
 
   // ─── Password Reset ──────────────────────────────────────────────────────────

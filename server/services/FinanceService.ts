@@ -4,6 +4,15 @@
  */
 
 import { firebaseService } from "../firebaseService";
+import { getActiveDataEnvironment } from "../config/dataEnvironment";
+import { liveWriteEnabled } from "../config/liveDataEnvironment";
+import {
+  createPartnerProfitCycle,
+  updatePartnerProfitCycle,
+  deletePartnerProfitCycle,
+  assertCycleDeletable,
+  assertCycleMutable,
+} from "./PartnerProfitCycleWriter";
 import type {
   PartnerProfit,
   InsertPartnerProfit,
@@ -44,6 +53,7 @@ export class FinanceService {
     id: string,
     notes: string | undefined
   ): Promise<PartnerProfit | null> {
+    this.assertLiveWriteAllowed("تعديل الملاحظات");
     const existing = await this.getPartnerProfitById(id);
     if (!existing) return null;
     if (this.isEffectivelyClosed(existing)) {
@@ -59,6 +69,18 @@ export class FinanceService {
   private isEffectivelyClosed(profit: PartnerProfit): boolean {
     // Historical records created before the cycle system have no status field.
     return profit.status === "closed" || !profit.status;
+  }
+
+  /**
+   * Protects historical/transfers data in LIVE read-only mode.
+   * Derived partner-profit recalculation is the only LIVE write path allowed.
+   */
+  private assertLiveWriteAllowed(operation: string): void {
+    if (getActiveDataEnvironment() === "LIVE" && !liveWriteEnabled()) {
+      throw new Error(
+        `لا يمكن ${operation} في بيئة الإنتاج بوضع القراءة فقط. فقط إعادة حساب دورة الأرباح مسموحة.`
+      );
+    }
   }
 
   /**
@@ -105,6 +127,8 @@ export class FinanceService {
       previousClosedCycles: closedCycles,
     });
 
+    const { paymentsDetail } = calculation;
+
     const existing = existingProfits.find(
       (p) => normalizeMonthYear(p.monthYear) === calculation.monthYear
     );
@@ -142,15 +166,32 @@ export class FinanceService {
 
     if (existing) {
       // Only mutable cycles may be recalculated.
-      if (this.isEffectivelyClosed(existing)) {
-        return this.enrichProfit(existing);
+      assertCycleMutable(existing);
+      const updated = await updatePartnerProfitCycle(existing.id, payload);
+      if (!updated) {
+        throw new Error("سجل دورة الأرباح غير موجود");
       }
-      const updated = await firebaseService.updatePartnerProfit(existing.id, payload);
-      return this.enrichProfit(updated!);
+      return { ...this.enrichProfit(updated), paymentsDetail };
     }
 
-    const created = await firebaseService.createPartnerProfit(payload);
-    return this.enrichProfit(created);
+    const created = await createPartnerProfitCycle(payload);
+    return { ...this.enrichProfit(created), paymentsDetail };
+  }
+
+  /**
+   * Delete a derived partner-profit cycle.
+   *
+   * Safety rules (enforced here and again inside the LIVE transaction):
+   * - Only the `partner_profits` record itself is deleted.
+   * - Payments, expenses, transfers, and every other collection are untouched.
+   * - Closed / historical cycles cannot be deleted.
+   * - Cycles with any recorded transfer cannot be deleted.
+   */
+  async deleteMonthlyCycle(id: string): Promise<boolean> {
+    const existing = await this.getPartnerProfitById(id);
+    if (!existing) return false;
+    assertCycleDeletable(existing);
+    return deletePartnerProfitCycle(id);
   }
 
   /**
@@ -160,6 +201,7 @@ export class FinanceService {
     id: string,
     adminId: string
   ): Promise<PartnerProfit | null> {
+    this.assertLiveWriteAllowed("إقفال الدورة");
     const existing = await this.getPartnerProfitById(id);
     if (!existing) return null;
     if (this.isEffectivelyClosed(existing)) {
@@ -184,6 +226,7 @@ export class FinanceService {
     reference: string | undefined,
     adminId: string
   ): Promise<PartnerProfit | null> {
+    this.assertLiveWriteAllowed("تسجيل التحويل");
     if (!amount || amount <= 0) {
       throw new Error("مبلغ التحويل يجب أن يكون أكبر من صفر");
     }

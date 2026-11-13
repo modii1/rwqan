@@ -106,14 +106,28 @@ export function evaluatePreDeployGate(
   } else if (git.worktree === "clean") {
     items.push(item("git_worktree", "حالة شجرة العمل (Git)", "ok"));
   } else if (git.worktree === "dirty") {
-    items.push(
-      item(
-        "git_worktree",
-        "حالة شجرة العمل (Git)",
-        "blocked",
-        "شجرة العمل تحتوي تغييرات غير مُثبّتة — النشر الحقيقي يُرفض.",
-      ),
-    );
+    if (input.environment === "TEST") {
+      // TEST deploys the last approved commit on its branch. Local uncommitted
+      // changes are NOT published and are never committed automatically; the
+      // gate warns instead of pretending the tree is clean or blocking forever.
+      items.push(
+        item(
+          "git_worktree",
+          "حالة شجرة العمل (Git)",
+          "ok",
+          "توجد تغييرات محلية غير محفوظة — لن تُنشر؛ سيُنشر آخر Commit معتمد على فرع TEST.",
+        ),
+      );
+    } else {
+      items.push(
+        item(
+          "git_worktree",
+          "حالة شجرة العمل (Git)",
+          "blocked",
+          "شجرة العمل تحتوي تغييرات غير مُثبّتة — النشر الحقيقي يُرفض.",
+        ),
+      );
+    }
   } else {
     items.push(
       item(

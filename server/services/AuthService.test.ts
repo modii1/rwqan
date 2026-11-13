@@ -9,6 +9,8 @@ type Stub = (...args: any[]) => any;
 const originals: Record<string, Stub | undefined> = {};
 const stubbed: string[] = [];
 const writeCalls: Array<[string, string]> = [];
+const migrationWrites: Array<[string, string]> = [];
+const syncOwnerCalls: string[] = [];
 const clearResetCalls: string[] = [];
 
 function stubMethod(name: string, impl: Stub): void {
@@ -26,10 +28,15 @@ function noop(): Promise<void> {
 before(() => {
   stubMethod("getOwnerByPropertyNumber", async () => null);
   stubMethod("getPropertyByNumber", async () => ({ pin: "1234" }));
-  stubMethod("syncOwnerFromProperties", noop);
+  stubMethod("syncOwnerFromProperties", async (propertyNumber: string) => {
+    syncOwnerCalls.push(propertyNumber);
+  });
   stubMethod("validateResetCode", async () => ({ valid: true, message: "" }));
   stubMethod("updateOwnerPassword", async (propertyNumber: string, newPassword: string) => {
     writeCalls.push([propertyNumber, newPassword]);
+  });
+  stubMethod("migrateOwnerPasswordHash", async (propertyNumber: string, newPassword: string) => {
+    migrationWrites.push([propertyNumber, newPassword]);
   });
   stubMethod("updateOwnerResetCode", noop);
   stubMethod("clearOwnerResetCode", async (propertyNumber: string) => {
@@ -99,8 +106,9 @@ test("validateOwnerPin accepts a valid hashed password without rewriting", async
   assert.equal(writeCalls.length, 0);
 });
 
-test("validateOwnerPin rejects a legacy plaintext password in enforcement mode", async () => {
+test("validateOwnerPin migrates a verified legacy plaintext password even in enforcement mode", async () => {
   writeCalls.length = 0;
+  migrationWrites.length = 0;
   stubMethod("getOwnerByPropertyNumber", async () => ({
     ownerId: "332211",
     password: "1234",
@@ -113,14 +121,38 @@ test("validateOwnerPin rejects a legacy plaintext password in enforcement mode",
       AUTH_HASH_MIGRATION_ENABLED: "true",
     },
     async () => {
-      assert.equal(await authService.validateOwnerPin("332211", "1234"), false);
-      assert.equal(writeCalls.length, 0);
+      assert.equal(await authService.validateOwnerPin("332211", "1234"), true);
+      assert.equal(writeCalls.length, 0, "must not rewrite properties.pin via updateOwnerPassword");
+      assert.equal(migrationWrites.length, 1);
+      assert.equal(migrationWrites[0][0], "332211");
+      assert.equal(isArgon2idHash(migrationWrites[0][1]), true);
+    }
+  );
+});
+
+test("validateOwnerPin rejects plaintext when migration is disabled and hashed-only is enforced", async () => {
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "332212",
+    password: "1234",
+  }));
+
+  await withEnv(
+    {
+      NODE_ENV: "production",
+      AUTH_ENFORCE_HASHED_ONLY: "true",
+      AUTH_HASH_MIGRATION_ENABLED: "false",
+    },
+    async () => {
+      assert.equal(await authService.validateOwnerPin("332212", "1234"), false);
+      assert.equal(migrationWrites.length, 0);
     }
   );
 });
 
 test("validateOwnerPin accepts and migrates a legacy plaintext password when enabled", async () => {
   writeCalls.length = 0;
+  migrationWrites.length = 0;
   stubMethod("getOwnerByPropertyNumber", async () => ({
     ownerId: "445566",
     password: "9876",
@@ -128,9 +160,10 @@ test("validateOwnerPin accepts and migrates a legacy plaintext password when ena
 
   await withEnv(MIGRATION, async () => {
     assert.equal(await authService.validateOwnerPin("445566", "9876"), true);
-    assert.equal(writeCalls.length, 1);
-    assert.equal(writeCalls[0][0], "445566");
-    assert.equal(isArgon2idHash(writeCalls[0][1]), true);
+    assert.equal(migrationWrites.length, 1);
+    assert.equal(migrationWrites[0][0], "445566");
+    assert.equal(isArgon2idHash(migrationWrites[0][1]), true);
+    assert.equal(writeCalls.length, 0);
   });
 });
 
@@ -148,11 +181,40 @@ test("validateOwnerPin keeps legacy plaintext accepted when transition flags are
 });
 
 test("validateOwnerPin falls back to property.pin when owner password is missing", async () => {
+  syncOwnerCalls.length = 0;
   stubMethod("getOwnerByPropertyNumber", async () => null);
   stubMethod("getPropertyByNumber", async () => ({ pin: "2468" }));
 
   await withEnv(TRANSITION, async () => {
     assert.equal(await authService.validateOwnerPin("112233", "2468"), true);
+    assert.equal(syncOwnerCalls.length, 0);
+  });
+});
+
+test("validateOwnerPin creates a hashed owner from a verified plaintext property.pin when migration is enabled", async () => {
+  syncOwnerCalls.length = 0;
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => null);
+  stubMethod("getPropertyByNumber", async () => ({ pin: "2468" }));
+
+  await withEnv(MIGRATION, async () => {
+    assert.equal(await authService.validateOwnerPin("112234", "2468"), true);
+    assert.deepEqual(syncOwnerCalls, ["112234"]);
+    assert.equal(migrationWrites.length, 0);
+  });
+});
+
+test("validateOwnerPin verifies a hashed property.pin without rewriting it", async () => {
+  syncOwnerCalls.length = 0;
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => null);
+  stubMethod("getPropertyByNumber", async () => ({ pin: await hashForTest("2468") }));
+
+  await withEnv(MIGRATION, async () => {
+    assert.equal(await authService.validateOwnerPin("112235", "2468"), true);
+    assert.equal(await authService.validateOwnerPin("112235", "0000"), false);
+    assert.equal(syncOwnerCalls.length, 0);
+    assert.equal(migrationWrites.length, 0);
   });
 });
 
@@ -162,7 +224,7 @@ test("validateOwnerPin migration failure does not block a successful login", asy
     password: "8642",
   }));
   let calls = 0;
-  stubMethod("updateOwnerPassword", async () => {
+  stubMethod("migrateOwnerPasswordHash", async () => {
     calls += 1;
     throw new Error("db unavailable");
   });
@@ -172,8 +234,8 @@ test("validateOwnerPin migration failure does not block a successful login", asy
     assert.equal(calls, 1);
   });
 
-  stubMethod("updateOwnerPassword", async (propertyNumber: string, newPassword: string) => {
-    writeCalls.push([propertyNumber, newPassword]);
+  stubMethod("migrateOwnerPasswordHash", async (propertyNumber: string, newPassword: string) => {
+    migrationWrites.push([propertyNumber, newPassword]);
   });
 });
 

@@ -194,7 +194,6 @@ interface DeployState {
   latestCheckRun: DeployCheckRun | null;
   deployTarget?: { projectId: string; backendId: string; baseUrl: string | null };
   realDeployEnabled?: boolean;
-  deployDispatchEnabled?: boolean;
   productionDeployEnabled?: boolean;
   stableBaseline?: DeployStableBaseline;
   rollback?: DeployRollbackReadiness;
@@ -337,15 +336,15 @@ export default function DeploySection() {
   });
 
   const handlePublish = () => {
-    if (state?.deployDispatchEnabled) {
+    if (state?.realDeployEnabled) {
       const target = state.deployTarget;
       const toProduction =
-        state.environment === "LIVE" && state.deployDispatchEnabled === true;
+        state.environment === "LIVE" && state.productionDeployEnabled === true;
       const confirmed = window.confirm(
         (toProduction
           ? "نشر حقيقي إلى الإنتاج؟\n\n"
-          : "نشر حقيقي إلى بيئة التطوير المعزولة؟\n\n") +
-          `المشروع: ${target?.projectId ?? "rwqan-sa-dev"}\n` +
+          : "نشر حقيقي إلى بيئة الاختبار المعتمدة؟\n\n") +
+          `المشروع: ${target?.projectId ?? "rwqan-757"}\n` +
           `الخدمة: ${target?.backendId ?? "—"}\n\n` +
           (toProduction
             ? "تحذير: هذا الهدف هو الإنتاج."
@@ -527,7 +526,7 @@ export default function DeploySection() {
                 <CardDescription>
                   {state.environment === "LIVE" && state.productionDeployEnabled
                     ? "الهدف الحالي هو الإنتاج"
-                    : "الهدف الحالي DEV المعزول"}
+                    : "الهدف الحالي بيئة الاختبار المعتمدة"}
                   {state.deployTarget ? ` (${state.deployTarget.projectId})` : ""}.
                 </CardDescription>
               </CardHeader>
