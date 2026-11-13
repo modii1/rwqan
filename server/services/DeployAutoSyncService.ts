@@ -1066,28 +1066,62 @@ function escapeRegExp(value: string): string {
 
 /**
  * Named relative imports/re-exports that must resolve for the file to compile.
- * Bare package imports are ignored (they are not moved by the sync).
+ *
+ * Uses the TypeScript AST (not regex) so string literals, comments and test
+ * fixtures like `'import { x } from "../y"'` are never mistaken for real
+ * imports. If TypeScript is unavailable the gate is skipped and the LIVE
+ * typecheck + rollback still protect the operation.
  */
-function parseModuleDependencies(
-  source: string
-): Array<{ module: string; names: string[] }> {
-  const found: Array<{ module: string; names: string[] }> = [];
-  const patterns = [
-    /import\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g,
-    /export\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of source.matchAll(pattern)) {
-      const names = match[1]
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .map((part) => part.replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim())
-        .filter(Boolean);
-      if (names.length > 0) found.push({ module: match[2], names });
-    }
+async function parseModuleDependencies(
+  source: string,
+  fileName: string
+): Promise<Array<{ module: string; names: string[] }>> {
+  try {
+    const ts = await import("typescript");
+    const sourceFile = ts.createSourceFile(
+      fileName,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const found: Array<{ module: string; names: string[] }> = [];
+    const visit = (node: import("typescript").Node): void => {
+      if (
+        ts.isImportDeclaration(node) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        const bindings = node.importClause?.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+          const names = bindings.elements.map(
+            (element) => (element.propertyName ?? element.name).text
+          );
+          if (names.length > 0) {
+            found.push({ module: node.moduleSpecifier.text, names });
+          }
+        }
+      } else if (
+        ts.isExportDeclaration(node) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.exportClause &&
+        ts.isNamedExports(node.exportClause)
+      ) {
+        const names = node.exportClause.elements.map(
+          (element) => (element.propertyName ?? element.name).text
+        );
+        if (names.length > 0) {
+          found.push({ module: node.moduleSpecifier.text, names });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return found;
+  } catch {
+    return [];
   }
-  return found;
 }
 
 /**
@@ -1364,7 +1398,10 @@ async function buildLivePlan(params: {
   for (const action of actions) {
     if (action.kind === "conflict" || action.content === undefined) continue;
     const issues: string[] = [];
-    for (const dependency of parseModuleDependencies(action.content)) {
+    for (const dependency of await parseModuleDependencies(
+      action.content,
+      action.path
+    )) {
       if (!dependency.module.startsWith(".")) continue;
       if (dependency.module.includes("?")) continue;
       const base = path.posix.normalize(

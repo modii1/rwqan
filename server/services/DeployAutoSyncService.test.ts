@@ -635,6 +635,30 @@ test("a missing relative module blocks only the dependent file", async () => {
   }
 });
 
+test("import-looking text inside a string is not treated as a dependency", async () => {
+  const fixture = "server/services/fixtures.test.ts";
+  const env = makeSyncEnv({
+    nameStatus: `A\t${fixture}`,
+    base: {},
+    test: {
+      [fixture]:
+        'const sample = \'import { missing } from "../config/dataEnvironment";\';\nexport const ok = 1;\n',
+    },
+    live: {},
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.deepEqual(preflight.conflicts, []);
+    assert.deepEqual(preflight.files, [fixture]);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
 test("without a trailer the last LIVE sync commit is used as the baseline", async () => {
   const file = "server/services/app.ts";
   const env = makeSyncEnv({
