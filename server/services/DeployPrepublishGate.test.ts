@@ -229,8 +229,8 @@ test("missing real-deploy opt-in BLOCKS; TEST never requires the production opt-
   assert.equal(itemState(closed, "production_opt_in"), "ok");
 });
 
-test("a LIVE target no longer requires a separate production opt-in", () => {
-  const gate = evaluatePreDeployGate(
+test("a LIVE target requires DEPLOY_ALLOW_PRODUCTION for production publishing", () => {
+  const missingOptIn = evaluatePreDeployGate(
     input({
       environment: "LIVE",
       target: target({
@@ -241,8 +241,21 @@ test("a LIVE target no longer requires a separate production opt-in", () => {
       productionDeployEnabled: false,
     }),
   );
-  assert.equal(itemState(gate, "production_opt_in"), "ok");
-  assert.notEqual(gate.status, "blocked_by_failed_check");
+  assert.equal(itemState(missingOptIn, "production_opt_in"), "blocked");
+  assert.equal(missingOptIn.status, "blocked_by_failed_check");
+
+  const withOptIn = evaluatePreDeployGate(
+    input({
+      environment: "LIVE",
+      target: target({
+        projectId: DEPLOY_PROD_PROJECT_ID,
+        backendId: DEPLOY_PROD_BACKEND_ID,
+        baseUrl: DEPLOY_PROD_BASE_URL,
+      }),
+      productionDeployEnabled: true,
+    }),
+  );
+  assert.equal(itemState(withOptIn, "production_opt_in"), "ok");
 });
 
 test("missing location/base-url/verify-config/tools turn the gate UNVERIFIED (no fake readiness)", () => {
