@@ -6,9 +6,15 @@ import { PaymobIntentionError, paymobService } from "../../integrations/paymob";
 import { sendWhatsAppNotification } from "../../integrations/whatsapp";
 import { parseReceiptUpload } from "../../utils/helpers";
 import { detectBookingCommissionReceiptContentType } from "../../services/BookingCommissionReceiptService";
-import { r2, R2_BUCKET, R2_PUBLIC_URL } from "../../utils/r2";
+import {
+  hashReceiptContent,
+  receiptDuplicateGuard,
+} from "../../services/ReceiptDuplicateGuard";
+import { r2, R2_BUCKET } from "../../utils/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { scanReceiptWithAI } from "../../integrations/aiReceiptScanner";
+import { scanReceiptWithAI, persistAIScanResult } from "../../integrations/aiReceiptScanner";
+import { manualReviewReason } from "../../utils/receiptMatching";
+import { receiptProxyPath } from "../../utils/receiptProxy";
 import { randomUUID } from "node:crypto";
 import {
   AdminApprovalError,
@@ -20,6 +26,18 @@ import type {
 } from "../../firebaseService";
 
 const router = Router();
+
+function absoluteReceiptUrl(path: string): string {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = (
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    ""
+  ).replace(/\/+$/, "");
+  if (!base) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 const BANK_TRANSFER_METHODS = new Set([
   "تحويل بنكي",
@@ -592,6 +610,10 @@ router.post("/api/owner/addons/pay", requireOwner, requireSameOrigin, async (req
 // OWNER – Bank Transfer for Add-On
 // =======================================
 router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, parseReceiptUpload, async (req, res) => {
+  let addonFingerprintClaimed = false;
+  let addonClaimedPaymentId = "";
+  let addonReceiptHash = "";
+  let addonPaymentCreated = false;
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
     const { addOnPackageId, amount, discountCode } = req.body;
@@ -618,8 +640,28 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       return res.status(404).json({ error: "العقار غير موجود" });
     }
 
-    // رفع الإيصال للتخزين (صور و PDF)
+    // منع استخدام الصورة نفسها لأكثر من دفعة (بصمة SHA-256 ذرية).
+    const receiptHash = hashReceiptContent(receiptFile.buffer);
+    addonReceiptHash = receiptHash;
+    const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
+    const now = new Date();
+    const paymentId = `PAY-ADDON-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    addonClaimedPaymentId = paymentId;
+    const fingerprint = await receiptDuplicateGuard().claimFingerprint(
+      receiptHash,
+      paymentId,
+    );
+    if (fingerprint.status === "duplicate") {
+      return res.status(409).json({
+        error: "تم استخدام صورة الإيصال هذه في عملية دفع أخرى.",
+        code: "DUPLICATE_RECEIPT",
+      });
+    }
+    addonFingerprintClaimed = fingerprint.status === "claimed";
+
+    // رفع الإيصال للتخزين (صور و PDF) — عبر رابط خاص موثّق، لا رابط عام.
     let receiptUrl = "";
+    let receiptObjectKey = "";
     if (r2 && R2_BUCKET) {
       const ext = detectedReceiptType === 'application/pdf'
         ? 'pdf'
@@ -637,13 +679,9 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
           ContentType: detectedReceiptType,
         })
       );
-      receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+      receiptObjectKey = receiptKey;
+      receiptUrl = receiptProxyPath(receiptKey);
     }
-
-    // إنشاء سجل إضافة معلق
-    const addOnId = `ADDON-${propertyNumber}-${Date.now()}`;
-    const now = new Date();
-    const paymentId = `PAY-ADDON-${Date.now()}`;
 
     // إنشاء سجل دفع في جدول المدفوعات (مثل الاشتراكات)
     await paymentService.create({
@@ -657,6 +695,8 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       status: "قيد المراجعة",
       paymentMethod: "تحويل بنكي",
       receiptUrl,
+      receiptObjectKey,
+      receiptHash,
       createdAt: now.toISOString(),
       packageId: addOnPackageId,
       packageName: addon.name,
@@ -667,6 +707,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       pendingPrice: addon.price,
       ownerAccountId: (req.session as any).ownerAccountId || undefined,
     });
+    addonPaymentCreated = true;
 
     await firebaseService.createPropertyAddOn({
       id: addOnId,
@@ -681,21 +722,79 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
       createdAt: now.toISOString(),
     });
 
-    // AI Receipt Scanning
+    // AI Receipt Scanning (الإضافة تبقى مراجعة يدوية دائمًا؛ الفحص للسجل فقط)
     let aiScanResult = null;
     try {
       aiScanResult = await scanReceiptWithAI(
         receiptUrl,
         paymentId,
         addon.price,
-        propertyNumber
+        propertyNumber,
+        undefined,
+        undefined,
+        {
+          imageBuffer: receiptFile.buffer,
+          mimeType: detectedReceiptType,
+          receiptHash,
+          receiptObjectKey,
+        },
       );
 
       if (aiScanResult) {
+        // مرجع تحويل مكرر = مراجعة يدوية، وليس تفعيلًا.
+        const referenceCandidates = [
+          aiScanResult.extractedData.transactionId,
+          aiScanResult.extractedData.referenceNumber,
+          aiScanResult.extractedData.paymentReference,
+        ].filter(Boolean) as string[];
+        for (const reference of referenceCandidates) {
+          const claim = await receiptDuplicateGuard().claimReference(
+            reference,
+            paymentId,
+          );
+          if (claim.status === "duplicate") {
+            aiScanResult.verification.autoActivationAllowed = false;
+            aiScanResult.verification.blockers = [
+              ...aiScanResult.verification.blockers,
+              "رقم مرجع التحويل أو رقم العملية مستخدم في دفعة أخرى",
+            ];
+            aiScanResult.verification.manualReviewReason =
+              aiScanResult.verification.blockers.join("؛ ");
+            await persistAIScanResult(aiScanResult);
+            break;
+          }
+          if (claim.status === "claimed") {
+            await receiptDuplicateGuard()
+              .finalizeReference(claim.key, paymentId, { verificationId: paymentId })
+              .catch(() => undefined);
+            break;
+          }
+        }
+
+        await paymentService.update(paymentId, {
+          approvalSource: "manual_review",
+          verificationId: paymentId,
+          manualReviewReason:
+            aiScanResult.verification.manualReviewReason ||
+            manualReviewReason(aiScanResult.verification),
+        } as any);
+
         console.log(`🔬 [AI Scanner] تم فحص إيصال الإضافة: ${paymentId}, التوصية: ${aiScanResult.recommendation}`);
       }
     } catch (aiError) {
       console.error("AI scan error for addon:", aiError);
+    }
+
+    if (addonFingerprintClaimed) {
+      await receiptDuplicateGuard()
+        .finalizeFingerprint(receiptHash, paymentId, {
+          verificationId: paymentId,
+          recommendation: aiScanResult?.recommendation ?? "مراجعة_يدوية",
+          action: "addon",
+        })
+        .catch((error) =>
+          console.error("[receipt] تعذر تثبيت بصمة إيصال الإضافة:", error),
+        );
     }
 
     // إرسال إشعار واتساب للإدارة
@@ -704,7 +803,7 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
         `العقار: ${propertyNumber} - ${property.name}\n` +
         `الإضافة: ${addon.name}\n` +
         `المبلغ: ${addon.price} ر.س\n` +
-        `رابط الإيصال: ${receiptUrl}`;
+        `رابط الإيصال: ${absoluteReceiptUrl(receiptUrl)}`;
       
       if (aiScanResult) {
         notificationMessage += `\n🔬 نتيجة الفحص: ${aiScanResult.recommendation}\n` +
@@ -727,10 +826,38 @@ router.post("/api/owner/addons/bank-transfer", requireOwner, requireSameOrigin, 
         summary: aiScanResult.summary,
         matchScore: aiScanResult.matchAnalysis?.matchScore,
         authenticityScore: aiScanResult.authenticityAnalysis?.overallScore,
+        amountMatch: aiScanResult.matchAnalysis?.amountMatch,
+        currencyMatch: aiScanResult.matchAnalysis?.currencyMatch,
+        beneficiaryMatch: aiScanResult.matchAnalysis?.beneficiaryMatch,
+        ibanMatch: aiScanResult.matchAnalysis?.ibanMatch,
+        referenceMatch: aiScanResult.matchAnalysis?.referenceMatch,
+        dateMatch: aiScanResult.matchAnalysis?.dateMatch,
+        reasons: aiScanResult.verification?.reasons,
+        blockers: aiScanResult.verification?.blockers,
+        manualReviewReason: aiScanResult.verification?.manualReviewReason,
+        failureReason: aiScanResult.failureReason,
       } : null
     });
   } catch (err) {
     console.error("Bank transfer addon error:", err);
+    if (addonFingerprintClaimed && addonClaimedPaymentId && addonReceiptHash) {
+      try {
+        if (addonPaymentCreated) {
+          await receiptDuplicateGuard().finalizeFingerprint(
+            addonReceiptHash,
+            addonClaimedPaymentId,
+            { action: "addon", failedAfterPayment: true },
+          );
+        } else {
+          await receiptDuplicateGuard().releaseFingerprint(
+            addonReceiptHash,
+            addonClaimedPaymentId,
+          );
+        }
+      } catch (cleanupError) {
+        console.error("[receipt] تعذر تنظيف بصمة إيصال الإضافة:", cleanupError);
+      }
+    }
     res.status(500).json({ error: "فشل رفع الإيصال" });
   }
 });

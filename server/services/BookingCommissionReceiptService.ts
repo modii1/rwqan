@@ -7,6 +7,7 @@ import {
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { R2_BUCKET, R2_PUBLIC_URL, r2 } from "../utils/r2";
+import { receiptProxyPath } from "../utils/receiptProxy";
 
 export const BOOKING_COMMISSION_RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -190,8 +191,8 @@ export async function storeBookingCommissionReceipt(
     );
   }
 
-  const { client, bucket, publicUrl } = dependencies;
-  if (!client || !bucket || !/^https?:\/\//i.test(publicUrl)) {
+  const { client, bucket } = dependencies;
+  if (!client || !bucket) {
     throw new BookingCommissionReceiptError(
       "RECEIPT_STORAGE_UNAVAILABLE",
       "خدمة رفع الإيصالات غير متاحة حالياً.",
@@ -220,7 +221,7 @@ export async function storeBookingCommissionReceipt(
   }));
 
   return {
-    url: `${publicUrl.replace(/\/+$/, "")}/${objectKey}`,
+    url: receiptProxyPath(objectKey),
     objectKey,
     contentType: detectedType,
     sizeBytes: input.file.buffer.length,

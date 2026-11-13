@@ -385,6 +385,8 @@ export class PaymentService {
         firebaseService.updatePayment(paymentId, {
           status: "مكتمل",
           completedAt: new Date().toISOString(),
+          approvalSource: "admin_manual",
+          approvedByAdminAt: new Date().toISOString(),
         } as any),
       {
         status: 500,
@@ -1071,6 +1073,8 @@ export class PaymentService {
         status: "مكتمل",
         completedAt: new Date().toISOString(),
         paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
+        approvalSource: "admin_manual",
+        approvedByAdminAt: new Date().toISOString(),
       });
       return;
     }
@@ -1113,6 +1117,8 @@ export class PaymentService {
           status: "مكتمل",
           completedAt: payment.completedAt ?? new Date().toISOString(),
           paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
+          approvalSource: "admin_manual",
+          approvedByAdminAt: new Date().toISOString(),
         });
       }
       return;
@@ -1193,6 +1199,8 @@ export class PaymentService {
         status: "مكتمل",
         completedAt: new Date().toISOString(),
         paymentMethod: payment.paymentMethod ?? "تأكيد يدوي",
+        approvalSource: "admin_manual",
+        approvedByAdminAt: new Date().toISOString(),
       });
 
       if (property?.whatsappNumber) {

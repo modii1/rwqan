@@ -26,8 +26,14 @@ import {
   notifyNewPayment,
 } from "../integrations/whatsapp";
 import { PaymobIntentionError, paymobService } from "../integrations/paymob";
-import { scanReceiptWithAI } from "../integrations/aiReceiptScanner";
+import { scanReceiptWithAI, persistAIScanResult } from "../integrations/aiReceiptScanner";
 import { detectBookingCommissionReceiptContentType } from "../services/BookingCommissionReceiptService";
+import {
+  hashReceiptContent,
+  receiptDuplicateGuard,
+} from "../services/ReceiptDuplicateGuard";
+import { manualReviewReason } from "../utils/receiptMatching";
+import { receiptProxyPath } from "../utils/receiptProxy";
 import {
   activateVerifiedPaymentSubscription,
   calculateActionDates,
@@ -76,6 +82,66 @@ import { calculateOwnerRequestAnalytics } from "../services/OwnerAnalyticsServic
 import { ownerAccountStore } from "../services/OwnerAccountStore";
 
 const router = Router();
+
+/**
+ * Read a private receipt object back into memory (used by the re-scan path so
+ * it never depends on a public bucket URL).
+ */
+async function downloadReceiptBuffer(key: string): Promise<Buffer | null> {
+  if (!r2 || !R2_BUCKET || !key) return null;
+  try {
+    const output = await r2.send(
+      new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }),
+    );
+    const body: any = output.Body;
+    if (!body) return null;
+    if (Buffer.isBuffer(body)) return body;
+    if (typeof body.transformToByteArray === "function") {
+      return Buffer.from(await body.transformToByteArray());
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of body) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch (error: any) {
+    console.error("[receipt] تعذر قراءة الإيصال من R2:", error?.message ?? error);
+    return null;
+  }
+}
+
+async function claimReceiptReference(
+  scan: NonNullable<Awaited<ReturnType<typeof scanReceiptWithAI>>>,
+  paymentId: string,
+): Promise<{ duplicate: boolean; claimedKey: string | null }> {
+  const candidates = [
+    scan.extractedData.transactionId,
+    scan.extractedData.referenceNumber,
+    scan.extractedData.paymentReference,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const result = await receiptDuplicateGuard().claimReference(candidate, paymentId);
+    if (result.status === "duplicate") {
+      return { duplicate: true, claimedKey: null };
+    }
+    if (result.status === "claimed") {
+      return { duplicate: false, claimedKey: result.key };
+    }
+  }
+  return { duplicate: false, claimedKey: null };
+}
+
+/** Make a private proxy path clickable in WhatsApp/external messages. */
+function absoluteReceiptUrl(path: string): string {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const base = (
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    ""
+  ).replace(/\/+$/, "");
+  if (!base) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set([
   "نشط",
@@ -557,15 +623,6 @@ router.put("/api/owner/property", requireOwner, requireSameOrigin, async (req, r
     // subscription, verification, identifiers, and dotted Firestore paths are
     // server-owned and cannot be changed through this endpoint.
     const rawUpdates = req.body && typeof req.body === "object" ? req.body : {};
-    if (
-      Object.prototype.hasOwnProperty.call(rawUpdates, "whatsappNumber") &&
-      !(req.session as any).ownerAccountId
-    ) {
-      return res.status(403).json({
-        error: "غير مصرح",
-        code: "OWNER_ACCOUNT_REQUIRED",
-      });
-    }
     const ownerEditableFields = new Set([
       "name",
       "location",
@@ -628,6 +685,29 @@ router.put("/api/owner/property", requireOwner, requireSameOrigin, async (req, r
     const currentProperty = await propertyService.getByNumber(propertyNumber);
     if (!currentProperty) {
       return res.status(404).json({ error: "العقار غير موجود" });
+    }
+
+    // A legacy PIN-only owner session may save the edit form, but must not
+    // CHANGE the WhatsApp number (that requires a verified owner account).
+    // The form always submits the current number, so compare first: an
+    // unchanged value is not a change and must not block the whole update.
+    if (
+      updates.whatsappNumber !== undefined &&
+      !(req.session as any).ownerAccountId
+    ) {
+      const phoneDigits = (value: unknown) =>
+        String(value ?? "")
+          .replace(/\D/g, "")
+          .replace(/^966/, "")
+          .replace(/^0/, "");
+      if (phoneDigits(updates.whatsappNumber) !== phoneDigits(currentProperty.whatsappNumber)) {
+        return res.status(403).json({
+          error: "غير مصرح",
+          code: "OWNER_ACCOUNT_REQUIRED",
+        });
+      }
+      // Unchanged: do not rewrite the phone / trigger a phone-change event.
+      delete updates.whatsappNumber;
     }
 
     // تتبع التغييرات الفعلية
@@ -1334,16 +1414,30 @@ router.post("/api/owner/payment/:paymentId/rescan", requireOwnerOrAdmin, require
 
     console.log(`🔬 [AI Scanner] طلب إعادة فحص الإيصال: ${paymentId}`);
 
+    const receiptBuffer = payment.receiptObjectKey
+      ? await downloadReceiptBuffer(payment.receiptObjectKey)
+      : null;
     const { scanReceiptWithAI } = await import("../integrations/aiReceiptScanner");
     const aiScanResult = await scanReceiptWithAI(
       payment.receiptUrl,
       paymentId,
       payment.finalAmount,
-      payment.paymentReference
+      payment.paymentReference,
+      undefined,
+      undefined,
+      {
+        imageBuffer: receiptBuffer ?? undefined,
+        receiptHash: payment.receiptHash,
+        receiptObjectKey: payment.receiptObjectKey,
+      },
     );
 
     if (!aiScanResult) {
-      return res.status(500).json({ error: "فشل في فحص الإيصال - تأكد من تفعيل ميزة OCR" });
+      return res.status(503).json({
+        error:
+          "فحص الإيصال بالذكاء الاصطناعي معطّل في هذه البيئة. تم إبقاء الدفعة قيد المراجعة اليدوية.",
+        code: "AI_SCANNER_DISABLED",
+      });
     }
 
     console.log(`🔬 [AI Scanner] نتيجة الفحص: ${aiScanResult.recommendation}, الثقة: ${aiScanResult.confidence}%`);
@@ -1365,6 +1459,16 @@ router.post("/api/owner/payment/:paymentId/rescan", requireOwnerOrAdmin, require
         isLikelyAuthentic: aiScanResult.authenticityAnalysis.isLikelyAuthentic,
         concerns: aiScanResult.authenticityAnalysis.concerns,
         positiveIndicators: aiScanResult.authenticityAnalysis.positiveIndicators,
+        amountMatch: aiScanResult.matchAnalysis.amountMatch,
+        currencyMatch: aiScanResult.matchAnalysis.currencyMatch,
+        beneficiaryMatch: aiScanResult.matchAnalysis.beneficiaryMatch,
+        ibanMatch: aiScanResult.matchAnalysis.ibanMatch,
+        referenceMatch: aiScanResult.matchAnalysis.referenceMatch,
+        dateMatch: aiScanResult.matchAnalysis.dateMatch,
+        reasons: aiScanResult.verification.reasons,
+        blockers: aiScanResult.verification.blockers,
+        manualReviewReason: aiScanResult.verification.manualReviewReason,
+        failureReason: aiScanResult.failureReason,
       }
     });
   } catch (err: any) {
@@ -1475,6 +1579,11 @@ router.get("/api/owner/payment/check-pending", requireOwner, async (req, res) =>
 // ======================================================
 router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin, parseReceiptUpload, async (req, res) => {
   let uploadedReceiptKey: string | null = null;
+  let receiptHashForClaim: string | null = null;
+  let fingerprintClaimed = false;
+  let paymentCreated = false;
+  let claimedPaymentId: string | null = null;
+  let referenceClaimKey: string | null = null;
   try {
     const {
       propertyNumber: requestedPropertyNumber,
@@ -1585,8 +1694,31 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       }
     }
 
-    // Upload receipt to R2
+    // Duplicate protection: claim the SHA-256 of the exact uploaded bytes
+    // atomically before any payment/R2 write. A concurrent upload of the same
+    // image loses and receives 409 without creating a payment.
+    const receiptHash = hashReceiptContent(req.file.buffer);
+    const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    claimedPaymentId = paymentId;
+    const fingerprint = await receiptDuplicateGuard().claimFingerprint(
+      receiptHash,
+      paymentId,
+    );
+    if (fingerprint.status === "duplicate") {
+      return res.status(409).json({
+        error: "تم استخدام صورة الإيصال هذه في عملية دفع أخرى.",
+        code: "DUPLICATE_RECEIPT",
+      });
+    }
+    if (fingerprint.status === "claimed") {
+      fingerprintClaimed = true;
+      receiptHashForClaim = receiptHash;
+    }
+
+    // Upload receipt to R2. New receipts are referenced by an authenticated
+    // proxy URL, never by a public bucket URL.
     let receiptUrl = "";
+    let receiptObjectKey = "";
     if (req.file && R2_BUCKET && r2) {
       const ext = detectedReceiptType === 'application/pdf'
         ? 'pdf'
@@ -1605,7 +1737,8 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         })
       );
       uploadedReceiptKey = receiptKey;
-      receiptUrl = `${R2_PUBLIC_URL}/${receiptKey}`;
+      receiptObjectKey = receiptKey;
+      receiptUrl = receiptProxyPath(receiptKey);
     }
 
     // Generate payment reference
@@ -1619,6 +1752,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
     // Status: "قيد المراجعة" — بانتظار فحص AI للإيصال، وليس بانتظار مراجعة يدوية
     console.log(`[BANK_TRANSFER] Creating payment for propertyNumber: "${propertyNumber}", packageId: "${packageId}"`);
     const payment = await paymentService.create({
+      id: paymentId,
       propertyNumber,
       packageId,
       amount: finalAmount,
@@ -1628,6 +1762,8 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       status: "قيد المراجعة",
       paymentMethod: "تحويل بنكي",
       receiptUrl,
+      receiptObjectKey,
+      receiptHash,
       action: (action as any) || "new",
       secondPropertyNumber: parsedSecondPropertyNumber || undefined,
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
@@ -1635,6 +1771,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       paymentReference,
       ownerAccountId: (req.session as any).ownerAccountId || undefined,
     } as any);
+    paymentCreated = true;
     console.log(`[BANK_TRANSFER] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
 
 
@@ -1695,7 +1832,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         propertyNumber,
         propertyName: property.name || "",
         ownerPhone: property.whatsappNumber || "",
-        receiptUrl,
+        receiptUrl: absoluteReceiptUrl(receiptUrl),
       }).catch(err => console.error("WhatsApp notify error:", err));
     }
 
@@ -1716,10 +1853,40 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         receiptUrl,
         payment.id,
         finalAmount,
-        paymentReference
+        paymentReference,
+        undefined,
+        undefined,
+        {
+          imageBuffer: req.file.buffer,
+          mimeType: detectedReceiptType,
+          receiptHash,
+          receiptObjectKey,
+        },
       );
 
-      if (aiScanResult?.recommendation === "تفعيل_تلقائي") {
+      // A bank reference / transaction id may only back one payment. A
+      // duplicate downgrades the result to manual review; it never activates.
+      if (aiScanResult) {
+        const referenceClaim = await claimReceiptReference(aiScanResult, payment.id);
+        if (referenceClaim.duplicate) {
+          aiScanResult.verification.autoActivationAllowed = false;
+          aiScanResult.verification.blockers = [
+            ...aiScanResult.verification.blockers,
+            "رقم مرجع التحويل أو رقم العملية مستخدم في دفعة أخرى",
+          ];
+          aiScanResult.verification.manualReviewReason =
+            aiScanResult.verification.blockers.join("؛ ");
+          aiScanResult.recommendation = "مراجعة_يدوية";
+          await persistAIScanResult(aiScanResult);
+        } else if (referenceClaim.claimedKey) {
+          referenceClaimKey = referenceClaim.claimedKey;
+        }
+      }
+
+      const autoAllowed =
+        aiScanResult?.verification?.autoActivationAllowed === true;
+
+      if (autoAllowed && aiScanResult) {
         await paymentService.setStatus(payment.id, "نجح - قيد التحقق");
         const r2ImgCount = await countR2Images(propertyNumber);
         const propertyComplete = await checkPropertyDataComplete(property, r2ImgCount);
@@ -1749,6 +1916,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
             });
             unlinkedProperties = queued.unlinkedProperties;
             pendingAdminApproval = true;
+            await paymentService.update(payment.id, {
+              approvalSource: "auto_ai",
+              verificationId: payment.id,
+              verifiedAt: new Date().toISOString(),
+            } as any);
             responseMessage = "تم التحقق من الإيصال وبيانات العقار. بما أن العقار جديد، سيبقى الطلب بانتظار اعتماد الإدارة قبل تفعيل الاشتراك.";
             nextAction = "لا يلزمك إجراء إضافي الآن. ستصلك رسالة بعد اعتماد الإدارة وتفعيل الاشتراك.";
             nextUrl = "/owner/dashboard";
@@ -1794,6 +1966,11 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
             });
             unlinkedProperties = activation.unlinkedProperties;
             await paymentService.setStatus(payment.id, "مكتمل");
+            await paymentService.update(payment.id, {
+              approvalSource: "auto_ai",
+              verificationId: payment.id,
+              verifiedAt: new Date().toISOString(),
+            } as any);
             autoActivated = true;
             responseMessage = "تم التحقق من الإيصال وبيانات العقار وتفعيل الاشتراك تلقائياً.";
 
@@ -1841,6 +2018,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
           actionLabel = "تعديل بيانات العقار";
           await paymentService.update(payment.id, {
             status: "قيد المراجعة" as any,
+            approvalSource: "manual_review",
+            verificationId: payment.id,
+            manualReviewReason: `بيانات العقار غير مكتملة: ${propertyComplete.missingFields.join('، ')}`,
             notes: `بيانات العقار غير مكتملة: ${propertyComplete.missingFields.join('، ')}`
           });
           if (await isPropertySuspended(propertyNumber)) {
@@ -1877,6 +2057,12 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         actionLabel = "رفع إيصال جديد";
         await paymentService.update(payment.id, {
           status: "قيد المراجعة" as any,
+          approvalSource: "manual_review",
+          verificationId: payment.id,
+          manualReviewReason:
+            aiScanResult?.verification?.manualReviewReason ||
+            aiScanResult?.summary ||
+            "إيصال التحويل غير واضح أو غير مطابق - يحتاج مراجعة يدوية",
           notes: aiScanResult.summary || "إيصال التحويل غير واضح أو غير مطابق - يحتاج مراجعة يدوية",
         });
 
@@ -1905,6 +2091,13 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         actionLabel = "رفع إيصال جديد";
         await paymentService.update(payment.id, {
           status: "قيد المراجعة" as any,
+          approvalSource: "manual_review",
+          verificationId: payment.id,
+          manualReviewReason:
+            aiScanResult?.verification?.manualReviewReason ||
+            (aiScanResult ? manualReviewReason(aiScanResult.verification) : undefined) ||
+            aiScanResult?.failureReason ||
+            "تعذر التحقق من الإيصال تلقائياً - يحتاج مراجعة يدوية",
           notes: aiScanResult?.summary || "فشل فحص الإيصال - يحتاج مراجعة يدوية"
         });
 
@@ -1928,6 +2121,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       actionLabel = "رفع إيصال جديد";
       await paymentService.update(payment.id, {
         status: "قيد المراجعة" as any,
+        approvalSource: "manual_review",
+        verificationId: payment.id,
+        manualReviewReason: "خطأ أثناء فحص الإيصال - يحتاج مراجعة يدوية",
         notes: "خطأ في فحص الإيصال - يحتاج مراجعة يدوية"
       });
 
@@ -1942,10 +2138,34 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       ).catch(err => console.error("WhatsApp notify error:", err));
     }
 
+    // The image is now durably tied to this payment (even when it went to
+    // manual review) so it can never back a second payment later.
+    if (fingerprintClaimed && receiptHashForClaim) {
+      await receiptDuplicateGuard()
+        .finalizeFingerprint(receiptHashForClaim, payment.id, {
+          verificationId: payment.id,
+          recommendation: aiScanResult?.recommendation ?? "مراجعة_يدوية",
+          autoActivated,
+        })
+        .catch((error) =>
+          console.error("[receipt] تعذر تثبيت بصمة الإيصال:", error),
+        );
+    }
+    if (referenceClaimKey) {
+      await receiptDuplicateGuard()
+        .finalizeReference(referenceClaimKey, payment.id, {
+          verificationId: payment.id,
+        })
+        .catch((error) =>
+          console.error("[receipt] تعذر تثبيت مرجع التحويل:", error),
+        );
+    }
+
     res.json({
       ok: true,
       paymentId: payment.id,
       autoActivated: autoActivated,
+      approvalSource: autoActivated ? "auto_ai" : "manual_review",
       verificationFailed: !autoActivated && verificationMissingFields.length > 0,
       paymentRejected,
       message: responseMessage,
@@ -1962,10 +2182,38 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
         summary: aiScanResult.summary,
         matchScore: aiScanResult.matchAnalysis.matchScore,
         authenticityScore: aiScanResult.authenticityAnalysis.overallScore,
+        amountMatch: aiScanResult.matchAnalysis.amountMatch,
+        currencyMatch: aiScanResult.matchAnalysis.currencyMatch,
+        beneficiaryMatch: aiScanResult.matchAnalysis.beneficiaryMatch,
+        ibanMatch: aiScanResult.matchAnalysis.ibanMatch,
+        referenceMatch: aiScanResult.matchAnalysis.referenceMatch,
+        dateMatch: aiScanResult.matchAnalysis.dateMatch,
+        reasons: aiScanResult.verification.reasons,
+        blockers: aiScanResult.verification.blockers,
+        manualReviewReason: aiScanResult.verification.manualReviewReason,
+        failureReason: aiScanResult.failureReason,
       } : null
     });
   } catch (err: any) {
     console.error("Bank transfer error:", err);
+    if (fingerprintClaimed && receiptHashForClaim && claimedPaymentId) {
+      try {
+        if (paymentCreated) {
+          await receiptDuplicateGuard().finalizeFingerprint(
+            receiptHashForClaim,
+            claimedPaymentId,
+            { recommendation: "مراجعة_يدوية", failedAfterPayment: true },
+          );
+        } else {
+          await receiptDuplicateGuard().releaseFingerprint(
+            receiptHashForClaim,
+            claimedPaymentId,
+          );
+        }
+      } catch (cleanupError) {
+        console.error("[receipt] تعذر تنظيف بصمة الإيصال:", cleanupError);
+      }
+    }
     if (
       err instanceof PaymentActionConflictError ||
       err instanceof PaymentActionEligibilityError ||
@@ -2093,6 +2341,82 @@ router.get("/api/owner/r2-image", requireOwner, async (req, res) => {
       return res.status(404).json({ error: "الصورة غير موجودة" });
     }
     res.status(500).json({ error: "تعذر تحميل الصورة" });
+  }
+});
+
+// ======================================================
+// 🔐 GET /api/receipts/view - Authenticated receipt proxy
+// Owners may only read receipts that belong to their property; admins may read
+// any receipt. Legacy public URLs are untouched, but all new receipts are
+// stored as private R2 keys and served through this route.
+// ======================================================
+router.get("/api/receipts/view", async (req, res) => {
+  try {
+    const isAdmin = Boolean((req.session as any)?.isAdmin);
+    const propertyNumber = String((req.session as any)?.propertyNumber || "");
+    const key = typeof req.query.key === "string" ? req.query.key : "";
+
+    if (!isAdmin && !propertyNumber) {
+      return res.status(401).json({ error: "غير مصرح" });
+    }
+    if (!key || key.includes("..") || key.startsWith("/")) {
+      return res.status(400).json({ error: "مفتاح الإيصال غير صالح" });
+    }
+    const receiptPrefixes = [
+      "receipts/",
+      "addon-receipts/",
+      "commission-receipts/",
+      "booking-commission-receipts/",
+    ] as const;
+    if (!receiptPrefixes.some((prefix) => key.startsWith(prefix))) {
+      return res.status(403).json({ error: "المفتاح ليس إيصالاً معروفاً" });
+    }
+    if (!/\.(jpe?g|png|webp|pdf)$/i.test(key)) {
+      return res.status(403).json({ error: "نوع الملف غير مسموح" });
+    }
+    if (!isAdmin) {
+      const ownsReceipt =
+        key.startsWith(`${propertyNumber}/`) ||
+        key.startsWith(`receipts/${propertyNumber}-`) ||
+        key.startsWith(`addon-receipts/${propertyNumber}-`) ||
+        key.startsWith(`commission-receipts/${propertyNumber}-`);
+      if (!ownsReceipt) {
+        return res.status(403).json({ error: "غير مسموح بالوصول" });
+      }
+    }
+    if (!r2 || !R2_BUCKET) {
+      return res.status(503).json({ error: "التخزين غير مهيأ" });
+    }
+
+    const output = await r2.send(
+      new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }),
+    );
+    const body: any = output.Body;
+    if (!body) return res.status(404).json({ error: "الإيصال غير موجود" });
+
+    if (output.ContentType) res.setHeader("Content-Type", output.ContentType);
+    else if (/\.pdf$/i.test(key)) res.setHeader("Content-Type", "application/pdf");
+    else if (/\.png$/i.test(key)) res.setHeader("Content-Type", "image/png");
+    else if (/\.webp$/i.test(key)) res.setHeader("Content-Type", "image/webp");
+    else res.setHeader("Content-Type", "image/jpeg");
+    if (output.ContentLength !== undefined) {
+      res.setHeader("Content-Length", String(output.ContentLength));
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    if (typeof body.pipe === "function") {
+      body.pipe(res);
+    } else {
+      res.send(Buffer.isBuffer(body) ? body : Buffer.from(body));
+    }
+  } catch (err: any) {
+    const status = err?.$metadata?.httpStatusCode;
+    if (status === 404 || err?.name === "NoSuchKey") {
+      return res.status(404).json({ error: "الإيصال غير موجود" });
+    }
+    console.error("[receipt] proxy error:", err?.message ?? err);
+    res.status(500).json({ error: "تعذر تحميل الإيصال" });
   }
 });
 

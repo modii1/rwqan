@@ -291,6 +291,16 @@ export const CODE_ONLY_RUNTIME_COLLECTIONS: ReadonlyArray<{
     fields: ["expiresAtTtl", "id", "issueCount", "updatedAt", "windowStartedAt"],
     note: "Created on demand by consumeContactIdentityIssueLimit (firebaseService.ts:4659). Absent from the PROD probe because PROD has not hit the identity issue limit yet; also TTL-cleaned via deleteExpiredEphemeralSecurityData.",
   },
+  {
+    collection: "receipt_fingerprints",
+    fields: ["createdAt", "paymentId", "recommendation", "status", "updatedAt", "verificationId"],
+    note: "Created on demand by ReceiptDuplicateGuard when a bank-transfer receipt is uploaded. Stores only the SHA-256 document id and claim metadata; never receipt bytes or bank details.",
+  },
+  {
+    collection: "receipt_references",
+    fields: ["createdAt", "paymentId", "status", "updatedAt", "verificationId"],
+    note: "Created on demand by ReceiptDuplicateGuard to prevent one bank transfer reference/transaction id from backing two payments. Document id is SHA-256 of the normalized reference; the raw reference is not stored.",
+  },
 ];
 
 export const PROD_ALIGNED_COLLECTION_NAMES: readonly string[] = [
