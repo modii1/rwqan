@@ -57,7 +57,9 @@ export class AuthService {
         if (authHashMigrationEnabled()) {
           try {
             const hashed = await hashPassword(pin);
-            await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed);
+            await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed, {
+              expectedLegacyPassword: owner.password,
+            });
           } catch (err) {
             console.error("Password migration failed");
           }
@@ -90,7 +92,9 @@ export class AuthService {
           // Owner document exists but has no password: store the verified value
           // as a hash without touching properties.pin.
           const hashed = await hashPassword(pin);
-          await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed);
+          await firebaseService.migrateOwnerPasswordHash(propertyNumber, hashed, {
+            expectedLegacyPassword: "",
+          });
         } else {
           // No owner document: create one with an Argon2id hash of the same
           // property PIN, leaving properties.pin unchanged.
@@ -227,13 +231,23 @@ export class AuthService {
         return verifyPassword(storedPassword, candidate);
       }
       if (format === "plaintext") {
-        if (authEnforceHashedOnly()) return false;
+        // A legacy plaintext credential may be used only when migration is
+        // enabled (or enforcement is explicitly off). changePassword writes an
+        // Argon2id hash immediately afterwards.
+        if (!authHashMigrationEnabled() && authEnforceHashedOnly()) return false;
         return this._safeCredentialMatch(candidate, storedPassword);
       }
     }
-    if (authEnforceHashedOnly()) return false;
+    if (authEnforceHashedOnly() && !authHashMigrationEnabled()) return false;
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
-    return Boolean(property && this._safeCredentialMatch(candidate, property.pin));
+    if (
+      !property ||
+      typeof property.pin !== "string" ||
+      property.pin.trim().length === 0
+    ) {
+      return false;
+    }
+    return verifyPassword(property.pin, candidate);
   }
 
   private _normalizePhone(raw: string): string {

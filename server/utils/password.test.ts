@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   ARGON2ID_HASH_PREFIX,
   detectPasswordFormat,
+  ensureArgon2idHash,
   hashPassword,
   isArgon2idHash,
   verifyPassword,
@@ -53,4 +54,17 @@ test("verifyPassword treats legacy plaintext as direct comparison", async () => 
 test("verifyPassword tolerates malformed stored hashes without throwing", async () => {
   assert.equal(await verifyPassword("not-a-hash", "anything"), false);
   assert.equal(await verifyPassword(null as unknown as string, "x"), false);
+});
+
+test("ensureArgon2idHash hashes plaintext once and preserves leading zeros", async () => {
+  const pin = "0123";
+  const digest = await ensureArgon2idHash(pin);
+  assert.equal(isArgon2idHash(digest), true);
+  assert.equal(await verifyPassword(digest, "0123"), true);
+  assert.equal(await verifyPassword(digest, "123"), false);
+});
+
+test("ensureArgon2idHash returns an existing hash unchanged", async () => {
+  const digest = await hashPassword("4821");
+  assert.equal(await ensureArgon2idHash(digest), digest);
 });

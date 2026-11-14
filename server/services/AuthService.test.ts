@@ -302,7 +302,7 @@ test("changePassword accepts legacy plaintext current password in transition mod
   });
 });
 
-test("changePassword rejects legacy plaintext current password when enforcement is on", async () => {
+test("changePassword verifies a legacy plaintext current password then writes Argon2id", async () => {
   writeCalls.length = 0;
   stubMethod("getOwnerByPropertyNumber", async () => ({
     ownerId: "889900",
@@ -316,13 +316,174 @@ test("changePassword rejects legacy plaintext current password when enforcement 
       AUTH_HASH_MIGRATION_ENABLED: "true",
     },
     async () => {
+      await authService.changePassword("889900", "3160", "1245");
+      assert.equal(writeCalls.length, 1);
+      assert.equal(isArgon2idHash(writeCalls[0][1]), true);
+      assert.notEqual(writeCalls[0][1], "1245");
+    }
+  );
+});
+
+test("changePassword rejects legacy plaintext when migration is disabled and hashed-only is enforced", async () => {
+  writeCalls.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "889901",
+    password: "3160",
+  }));
+
+  await withEnv(
+    {
+      NODE_ENV: "production",
+      AUTH_ENFORCE_HASHED_ONLY: "true",
+      AUTH_HASH_MIGRATION_ENABLED: "false",
+    },
+    async () => {
       await assert.rejects(
-        () => authService.changePassword("889900", "3160", "1245"),
+        () => authService.changePassword("889901", "3160", "1245"),
         (err: any) => err?.code === 400
       );
       assert.equal(writeCalls.length, 0);
     }
   );
+});
+
+test("a PIN with a leading zero is verified exactly", async () => {
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "990011",
+    password: await hashForTest("0123"),
+  }));
+
+  await withEnv(PROD, async () => {
+    assert.equal(await authService.validateOwnerPin("990011", "0123"), true);
+    assert.equal(await authService.validateOwnerPin("990011", "123"), false);
+  });
+});
+
+test("a wrong legacy PIN is never migrated", async () => {
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "990012",
+    password: "0123",
+  }));
+
+  await withEnv(MIGRATION, async () => {
+    assert.equal(await authService.validateOwnerPin("990012", "9999"), false);
+    assert.equal(migrationWrites.length, 0);
+  });
+});
+
+test("after migration the next login uses the Argon2id hash without rewriting", async () => {
+  let stored = "0123";
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "990013",
+    password: stored,
+  }));
+  stubMethod(
+    "migrateOwnerPasswordHash",
+    async (
+      propertyNumber: string,
+      newPassword: string,
+      options?: { expectedLegacyPassword?: string }
+    ) => {
+      if (stored !== options?.expectedLegacyPassword) return false;
+      stored = newPassword;
+      migrationWrites.push([propertyNumber, newPassword]);
+      return true;
+    }
+  );
+
+  await withEnv(MIGRATION, async () => {
+    assert.equal(await authService.validateOwnerPin("990013", "0123"), true);
+    assert.equal(isArgon2idHash(stored), true);
+    const writesAfterFirstLogin = migrationWrites.length;
+    assert.equal(writesAfterFirstLogin, 1);
+
+    assert.equal(await authService.validateOwnerPin("990013", "0123"), true);
+    assert.equal(migrationWrites.length, writesAfterFirstLogin);
+  });
+
+  stubMethod("migrateOwnerPasswordHash", async (propertyNumber: string, newPassword: string) => {
+    migrationWrites.push([propertyNumber, newPassword]);
+  });
+});
+
+test("concurrent legacy logins migrate once and never overwrite a newer hash", async () => {
+  let stored = "0123";
+  let migrations = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "990014",
+    password: stored,
+  }));
+  stubMethod(
+    "migrateOwnerPasswordHash",
+    async (
+      _propertyNumber: string,
+      newPassword: string,
+      options?: { expectedLegacyPassword?: string }
+    ) => {
+      if (stored !== options?.expectedLegacyPassword) return false;
+      stored = newPassword;
+      migrations += 1;
+      return true;
+    }
+  );
+
+  await withEnv(MIGRATION, async () => {
+    const results = await Promise.all([
+      authService.validateOwnerPin("990014", "0123"),
+      authService.validateOwnerPin("990014", "0123"),
+    ]);
+    assert.deepEqual(results, [true, true]);
+    assert.equal(migrations, 1);
+    assert.equal(isArgon2idHash(stored), true);
+  });
+
+  stubMethod("migrateOwnerPasswordHash", async (propertyNumber: string, newPassword: string) => {
+    migrationWrites.push([propertyNumber, newPassword]);
+  });
+});
+
+test("an owner without a password migrates the verified property PIN with an empty expected value", async () => {
+  migrationWrites.length = 0;
+  stubMethod("getOwnerByPropertyNumber", async () => ({
+    ownerId: "990015",
+    password: "",
+  }));
+  stubMethod("getPropertyByNumber", async () => ({ pin: "0123" }));
+  stubMethod(
+    "migrateOwnerPasswordHash",
+    async (
+      propertyNumber: string,
+      newPassword: string,
+      options?: { expectedLegacyPassword?: string }
+    ) => {
+      assert.equal(options?.expectedLegacyPassword, "");
+      migrationWrites.push([propertyNumber, newPassword]);
+      return true;
+    }
+  );
+
+  await withEnv(MIGRATION, async () => {
+    assert.equal(await authService.validateOwnerPin("990015", "0123"), true);
+    assert.equal(migrationWrites.length, 1);
+    assert.equal(isArgon2idHash(migrationWrites[0][1]), true);
+  });
+
+  stubMethod("migrateOwnerPasswordHash", async (propertyNumber: string, newPassword: string) => {
+    migrationWrites.push([propertyNumber, newPassword]);
+  });
+  stubMethod("getPropertyByNumber", async () => ({ pin: "1234" }));
+});
+
+test("setNewPassword stores an Argon2id hash that verifies the exact PIN", async () => {
+  writeCalls.length = 0;
+  await authService.setNewPassword("334456", "000000", "0123");
+  assert.equal(writeCalls.length, 1);
+  assert.equal(isArgon2idHash(writeCalls[0][1]), true);
+  const { verifyPassword } = await import("../utils/password");
+  assert.equal(await verifyPassword(writeCalls[0][1], "0123"), true);
+  assert.equal(await verifyPassword(writeCalls[0][1], "123"), false);
 });
 
 async function hashForTest(pin: string): Promise<string> {

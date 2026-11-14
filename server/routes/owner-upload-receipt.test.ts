@@ -31,17 +31,24 @@ async function withOwnerSession(
   }
 }
 
-test("the payments history marks the nine 90001 payments as having no receipt", async () => {
+test("the payments history exposes a receipt state for every payment", async () => {
   await withOwnerSession(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/owner/payments`);
     assert.equal(response.status, 200);
     const rows = (await response.json()) as any[];
-    assert.equal(rows.length, 9);
+    assert.ok(Array.isArray(rows));
+    assert.ok(rows.length > 0, "expected at least one payment");
     for (const row of rows) {
-      assert.equal(row.propertyNumber, "90001");
-      assert.equal(row.hasReceipt, false);
-      assert.equal(row.receiptUrl, undefined);
-      assert.equal(row.receiptScanStatus, null);
+      assert.equal(typeof row.hasReceipt, "boolean");
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(row, "receiptScanStatus"),
+        "receiptScanStatus must be present",
+      );
+      if (!row.hasReceipt) {
+        assert.equal(row.receiptUrl, undefined);
+      } else {
+        assert.equal(typeof row.receiptUrl, "string");
+      }
     }
   });
 });

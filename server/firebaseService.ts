@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getActiveFirestore } from "./config/dataEnvironment";
-import { hashPassword } from "./utils/password";
+import { ensureArgon2idHash } from "./utils/password";
 import {
     DEFAULT_FEATURE_FLAGS,
     customerPhoneOtpChallengeSchema,
@@ -6091,13 +6091,20 @@ export class FirebaseService {
             const newOwner = {
                 ownerId: propertyNumber,
                 phone: property.whatsappNumber || "",
-                password: property.pin ? await hashPassword(property.pin) : "",
+                password: property.pin ? await ensureArgon2idHash(property.pin) : "",
                 resetCode: "",
                 resetExpire: "",
                 lastReset: "",
             };
-            await this.db.collection("owners").doc(propertyNumber).set(newOwner);
-            console.log(`✅ Synced owner to Firebase: ${propertyNumber}`);
+            try {
+                // Create-if-absent: a concurrent login/reset must never be
+                // overwritten by a stale legacy snapshot.
+                await this.db.collection("owners").doc(propertyNumber).create(newOwner);
+                console.log(`✅ Synced owner to Firebase: ${propertyNumber}`);
+            } catch (error: any) {
+                const code = error?.code;
+                if (code !== 6 && code !== "already-exists") throw error;
+            }
         }
     }
 
@@ -6113,29 +6120,53 @@ export class FirebaseService {
     }
 
     async updateOwnerPassword(propertyNumber: string, newPassword: string): Promise<void> {
+        const storedPassword = await ensureArgon2idHash(newPassword);
         await this.db.collection("owners").doc(propertyNumber).update({
-            password: newPassword,
+            password: storedPassword,
             resetCode: "",
             resetExpire: "",
             resetCodePurpose: "",
             resetCodeAttempts: 0,
         });
         // Also update property PIN
-        await this.updateProperty(propertyNumber, { pin: newPassword });
+        await this.updateProperty(propertyNumber, { pin: storedPassword });
     }
 
     /**
-     * Store a verified legacy credential as an Argon2id hash on the owner
-     * document only. `properties.pin` is intentionally left untouched so the
-     * existing group-PIN compatibility checks keep their current stored value.
+     * Replace a verified legacy plaintext password with an Argon2id hash.
+     *
+     * The write is a compare-and-set: it only applies when the owner document
+     * still contains the exact legacy value that was just verified. A
+     * concurrent reset or migration therefore cannot be overwritten by a stale
+     * login. `properties.pin` is intentionally left untouched so the existing
+     * group-PIN compatibility checks keep their current stored value.
      */
-    async migrateOwnerPasswordHash(propertyNumber: string, newPassword: string): Promise<void> {
-        await this.db.collection("owners").doc(propertyNumber).update({
-            password: newPassword,
-            resetCode: "",
-            resetExpire: "",
-            resetCodePurpose: "",
-            resetCodeAttempts: 0,
+    async migrateOwnerPasswordHash(
+        propertyNumber: string,
+        newPassword: string,
+        options?: { expectedLegacyPassword?: string },
+    ): Promise<boolean> {
+        const storedPassword = await ensureArgon2idHash(newPassword);
+        const expectedLegacyPassword = options?.expectedLegacyPassword;
+        if (expectedLegacyPassword === undefined) return false;
+
+        const ref = this.db.collection("owners").doc(propertyNumber);
+        return this.db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists) return false;
+            const data = snapshot.data() as { password?: unknown } | undefined;
+            const currentPassword =
+                typeof data?.password === "string" ? data.password : "";
+            if (currentPassword !== expectedLegacyPassword) return false;
+
+            transaction.update(ref, {
+                password: storedPassword,
+                resetCode: "",
+                resetExpire: "",
+                resetCodePurpose: "",
+                resetCodeAttempts: 0,
+            });
+            return true;
         });
     }
 
