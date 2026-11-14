@@ -6,12 +6,15 @@ import cookieParser from "cookie-parser";
 import express from "express";
 
 import { firebaseService } from "../firebaseService";
+import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import { contactIdentityService } from "../services/ContactIdentityService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
 import ownerAccountRouter, {
-  createOwnerOtpSender,
+  createOwnerAccountOtpSender,
+  getOwnerAccountOtpSender,
   ownerAccountService,
   readPropertyRegisteredPhone,
+  setOwnerAccountOtpSender,
 } from "./owner-accounts";
 
 function accountFixture() {
@@ -364,35 +367,29 @@ test("attach phone source is the property record and never requires an owners do
   }
 });
 
-test("owner OTP console sink logs the code only when enabled and never calls the provider", async () => {
-  const logs: string[] = [];
-  const sent: Array<{ phone: string; message: string }> = [];
-  const send = async (phone: string, message: string) => {
-    sent.push({ phone, message });
+test("owner OTP sender defaults to the WhatsApp sender and supports explicit injection", async () => {
+  const defaultSender = getOwnerAccountOtpSender();
+  assert.equal(defaultSender, sendOwnerWhatsApp);
+
+  const calls: Array<{ phone: string; message: string; retries?: number }> = [];
+  const injected = async (phone: string, message: string, retries?: number) => {
+    calls.push({ phone, message, retries });
     return { success: true };
   };
+  const delegating = createOwnerAccountOtpSender(() => getOwnerAccountOtpSender());
 
-  const sinkOn = createOwnerOtpSender({
-    sinkEnabled: () => true,
-    send,
-    log: (line) => logs.push(line),
-  });
-  const sinkResult = await sinkOn("551234567", "رمز التحقق: 123456", 2);
-  assert.deepEqual(sinkResult, { success: true });
-  assert.equal(sent.length, 0);
-  assert.equal(logs.length, 1);
-  assert.match(logs[0], /^\[DEV OWNER OTP\] to=05••••4567 :: /);
-  assert.match(logs[0], /123456/);
+  try {
+    setOwnerAccountOtpSender(injected);
+    assert.equal(getOwnerAccountOtpSender(), injected);
+    assert.deepEqual(await delegating("551234567", "رمز التحقق: 123456", 2), {
+      success: true,
+    });
+    assert.deepEqual(calls, [
+      { phone: "551234567", message: "رمز التحقق: 123456", retries: 2 },
+    ]);
+  } finally {
+    setOwnerAccountOtpSender(defaultSender);
+  }
 
-  const sinkOff = createOwnerOtpSender({
-    sinkEnabled: () => false,
-    send,
-    log: (line) => logs.push(line),
-  });
-  const providerResult = await sinkOff("551234567", "رمز التحقق: 654321", 2);
-  assert.deepEqual(providerResult, { success: true });
-  assert.deepEqual(sent, [
-    { phone: "551234567", message: "رمز التحقق: 654321" },
-  ]);
-  assert.equal(logs.length, 1);
+  assert.equal(getOwnerAccountOtpSender(), sendOwnerWhatsApp);
 });

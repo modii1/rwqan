@@ -5,7 +5,6 @@ import type {
   OwnerAccountPropertyOption,
   OwnerPropertyMembership,
 } from "../../shared/owner-accounts";
-import { devOwnerOtpSinkEnabled } from "../config/runtimeEnvironment";
 import { firebaseService } from "../firebaseService";
 import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import {
@@ -58,41 +57,32 @@ export const readPropertyRegisteredPhone: OwnerAccountPropertyReader = async (
   };
 };
 
-function maskOwnerOtpPhone(phone: string): string {
-  const localPhone = `0${phone}`;
-  return `${localPhone.slice(0, 2)}••••${localPhone.slice(-4)}`;
-}
-
 /**
- * Owner OTP transport. The LOCAL console sink only substitutes delivery: it
- * never changes code generation, HMAC hashing, TTL, or attempt/issue limits,
- * and it never touches Enjazatik settings or credentials. See
- * devOwnerOtpSinkEnabled for the strict activation conditions.
+ * Explicit dependency injection for the owner OTP transport.
+ *
+ * `sendOwnerWhatsApp` is the default in every environment, including LIVE.
+ * A LOCAL-only initializer (server/config/loadEnv.ts, excluded from LIVE sync)
+ * may replace it at runtime. This file never imports the local console sink and
+ * carries no development-only dependency, so it syncs to LIVE unchanged.
  */
-export function createOwnerOtpSender(dependencies: {
-  sinkEnabled: () => boolean;
-  send: OwnerAccountOtpSender;
-  log: (line: string) => void;
-}): OwnerAccountOtpSender {
-  return async (phone, message, retries) => {
-    if (dependencies.sinkEnabled()) {
-      dependencies.log(
-        `[DEV OWNER OTP] to=${maskOwnerOtpPhone(phone)} :: ${message}`,
-      );
-      return { success: true };
-    }
-    return dependencies.send(phone, message, retries);
-  };
+let ownerOtpSender: OwnerAccountOtpSender = sendOwnerWhatsApp;
+
+export function setOwnerAccountOtpSender(sender: OwnerAccountOtpSender): void {
+  ownerOtpSender = sender;
 }
 
-const ownerOtpSender = createOwnerOtpSender({
-  sinkEnabled: devOwnerOtpSinkEnabled,
-  send: sendOwnerWhatsApp,
-  log: (line) => console.log(line),
-});
+export function getOwnerAccountOtpSender(): OwnerAccountOtpSender {
+  return ownerOtpSender;
+}
+
+export function createOwnerAccountOtpSender(
+  resolveSender: () => OwnerAccountOtpSender,
+): OwnerAccountOtpSender {
+  return (phone, message, retries) => resolveSender()(phone, message, retries);
+}
 
 export const ownerAccountService = new OwnerAccountService(ownerAccountStore, {
-  sender: ownerOtpSender,
+  sender: createOwnerAccountOtpSender(() => ownerOtpSender),
   propertyReader: readTrustedOwnerPhone,
   attachPropertyReader: readPropertyRegisteredPhone,
 });

@@ -25,3 +25,18 @@ if (process.env.NODE_ENV !== "production") {
     console.warn(`[env] ${resolution.reason}`);
   }
 }
+
+if (
+  process.env.NODE_ENV === "development" &&
+  process.env.DEV_OWNER_OTP_SINK?.trim() === "console"
+) {
+  // LOCAL-only owner OTP console sink. The module lives under server/config/,
+  // which is excluded from the LIVE sync, and the dynamic import keeps its
+  // module evaluation after dotenv so the real WhatsApp sender still reads the
+  // loaded environment. It is a no-op unless every LOCAL condition holds.
+  void import("./localOwnerOtpSink")
+    .then((module) => module.installLocalOwnerOtpSink())
+    .catch((error) => {
+      console.warn("[env] Local owner OTP sink was not installed:", error);
+    });
+}
