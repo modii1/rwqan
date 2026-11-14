@@ -266,10 +266,12 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                   <Input
                     id="owner-pin"
                     type="password"
-                    placeholder="••••••"
+                    placeholder="••••"
                     value={pin}
                     onChange={(event) => setPin(event.target.value)}
                     autoComplete="current-password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     dir="ltr"
                     disabled={isLoading}
                     data-testid="input-pin"

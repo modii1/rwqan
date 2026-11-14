@@ -28,6 +28,17 @@ export async function hashPassword(plain: string): Promise<string> {
   return hash(plain);
 }
 
+/**
+ * Store an Argon2id hash. An existing Argon2id value is returned unchanged so
+ * callers can safely pass either a plaintext PIN or an already-hashed value.
+ */
+export async function ensureArgon2idHash(value: string): Promise<string> {
+  if (typeof value !== "string") {
+    throw new TypeError("Password must be a string");
+  }
+  return isArgon2idHash(value) ? value : hashPassword(value);
+}
+
 export async function verifyPassword(stored: string, candidate: string): Promise<boolean> {
   if (typeof stored !== "string" || typeof candidate !== "string") {
     return false;
