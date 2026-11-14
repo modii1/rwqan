@@ -36,6 +36,7 @@ class MemoryOwnerAccountStore implements OwnerAccountStore {
       purpose: challenge.purpose,
       ownerAccountId: challenge.ownerAccountId,
       propertyNumber: challenge.propertyNumber,
+      phoneSubject: challenge.phoneSubject,
     } : null;
   }
 
@@ -209,18 +210,19 @@ class MemoryOwnerAccountStore implements OwnerAccountStore {
   }
 }
 
-function fixture() {
+function fixture(initialNow = 1_800_000_000_000) {
   const store = new MemoryOwnerAccountStore();
   const sent: Array<{ phone: string; message: string }> = [];
   let id = 0;
-  const properties = new Map([
+  let now = initialNow;
+  const properties = new Map<string, { propertyNumber: string; whatsappNumber: string | null }>([
     ["P-1", { propertyNumber: "P-1", whatsappNumber: "0551234567" }],
     ["P-2", { propertyNumber: "P-2", whatsappNumber: "0551234567" }],
     ["P-3", { propertyNumber: "P-3", whatsappNumber: "0561234567" }],
   ]);
   const service = new OwnerAccountService(store, {
     secret: "s".repeat(32),
-    now: () => 1_800_000_000_000,
+    now: () => now,
     createCode: () => "123456",
     createOpaqueId: () => `${"A".repeat(41)}${String(++id).padStart(2, "0")}`,
     sender: async (phone, message) => {
@@ -229,7 +231,45 @@ function fixture() {
     },
     propertyReader: async (propertyNumber) => properties.get(propertyNumber) || null,
   });
-  return { store, service, sent };
+  return {
+    store,
+    service,
+    sent,
+    properties,
+    setNow: (value: number) => {
+      now = value;
+    },
+  };
+}
+
+function seedAccountWithPrimaryProperty(
+  service: OwnerAccountService,
+  store: MemoryOwnerAccountStore,
+  propertyNumber = "P-1",
+): OwnerAccount {
+  const timestamp = new Date(1_800_000_000_000).toISOString();
+  const account: OwnerAccount = {
+    id: "C".repeat(43),
+    schemaVersion: 1,
+    phoneSubject: service.phoneSubject("0551234567"),
+    authVersion: 1,
+    status: "active",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLoginAt: null,
+  };
+  store.accounts.set(account.id, account);
+  store.memberships.set(propertyNumber, {
+    schemaVersion: 1,
+    ownerAccountId: account.id,
+    propertyNumber,
+    status: "active",
+    isPrimary: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    revokedAt: null,
+  });
+  return account;
 }
 
 test("owner account OTPs are purpose-bound and use the existing generic wording", async () => {
@@ -382,4 +422,369 @@ test("another account cannot attach a claimed or revoked property", async () => 
         error.code === "PROPERTY_ALREADY_CLAIMED",
     );
   }
+});
+
+test("attach sends the OTP to the target property's registered phone and adds only that property", async () => {
+  const { service, store, sent, properties } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+  const primaryMembership = structuredClone(store.memberships.get("P-1"));
+  const primaryProperty = structuredClone(properties.get("P-1"));
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-3",
+    ipAddress: "127.0.0.1",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.phone, "561234567");
+  assert.notEqual(sent[0]?.phone, "551234567");
+
+  const storedChallenge = store.challenges.get(challenge.challengeId);
+  assert.equal(storedChallenge?.purpose, "attach_property");
+  assert.equal(storedChallenge?.ownerAccountId, account.id);
+  assert.equal(storedChallenge?.propertyNumber, "P-3");
+  assert.equal(
+    storedChallenge?.phoneSubject,
+    service.phoneSubject("0561234567"),
+  );
+
+  const verified = await service.verifyAttach({
+    challengeId: challenge.challengeId,
+    code: "123456",
+    ownerAccountId: account.id,
+    authVersion: 1,
+  });
+
+  assert.deepEqual(
+    verified.memberships.map((membership) => membership.propertyNumber).sort(),
+    ["P-1", "P-3"],
+  );
+  assert.equal(store.memberships.get("P-3")?.isPrimary, false);
+  assert.deepEqual(store.memberships.get("P-1"), primaryMembership);
+  assert.deepEqual(properties.get("P-1"), primaryProperty);
+});
+
+test("an account for 00000 can add 00001 only through the 00001 registered phone", async () => {
+  const { service, store, properties, sent } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store, "00000");
+  properties.set("00001", { propertyNumber: "00001", whatsappNumber: "0561234567" });
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "00000",
+    propertyNumber: "00001",
+    ipAddress: "127.0.0.1",
+  });
+  assert.equal(store.challenges.get(challenge.challengeId)?.propertyNumber, "00001");
+  assert.equal(sent.at(-1)?.phone, "561234567");
+  assert.notEqual(sent.at(-1)?.phone, "551234567");
+
+  const verified = await service.verifyAttach({
+    challengeId: challenge.challengeId,
+    code: "123456",
+    ownerAccountId: account.id,
+    authVersion: 1,
+  });
+  assert.deepEqual(
+    verified.memberships.map((membership) => membership.propertyNumber).sort(),
+    ["00000", "00001"],
+  );
+});
+
+test("attach rejects unknown properties and properties without a valid registered phone", async () => {
+  const { service, store, properties } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+
+  await assert.rejects(
+    service.issueAttach({
+      ownerAccountId: account.id,
+      authVersion: 1,
+      currentPropertyNumber: "P-1",
+      propertyNumber: "MISSING",
+      ipAddress: "127.0.0.1",
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "PROPERTY_NOT_FOUND",
+  );
+
+  properties.set("P-4", { propertyNumber: "P-4", whatsappNumber: null });
+  await assert.rejects(
+    service.issueAttach({
+      ownerAccountId: account.id,
+      authVersion: 1,
+      currentPropertyNumber: "P-1",
+      propertyNumber: "P-4",
+      ipAddress: "127.0.0.1",
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "PROPERTY_PHONE_INVALID",
+  );
+});
+
+test("attach requires an active account membership for the current property", async () => {
+  const { service, store } = fixture();
+  seedAccountWithPrimaryProperty(service, store);
+
+  await assert.rejects(
+    service.issueAttach({
+      ownerAccountId: "C".repeat(43),
+      authVersion: 1,
+      currentPropertyNumber: "P-3",
+      propertyNumber: "P-2",
+      ipAddress: "127.0.0.1",
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "ACCOUNT_SESSION_INVALID",
+  );
+});
+
+test("attach fails closed when the target property's phone changes after the challenge is issued", async () => {
+  const { service, store, properties } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-3",
+    ipAddress: "127.0.0.1",
+  });
+
+  properties.set("P-3", { propertyNumber: "P-3", whatsappNumber: "0551234567" });
+
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "CHALLENGE_CONTEXT_INVALID",
+  );
+  assert.equal(store.memberships.has("P-3"), false);
+});
+
+test("attach challenges cannot be verified by another account", async () => {
+  const { service, store } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-3",
+    ipAddress: "127.0.0.1",
+  });
+
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: "D".repeat(43),
+      authVersion: 1,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "CHALLENGE_CONTEXT_INVALID",
+  );
+
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 2,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "ACCOUNT_SESSION_INVALID",
+  );
+
+  assert.equal(store.memberships.has("P-3"), false);
+});
+
+test("attach rejects expired and already-consumed challenges", async () => {
+  const { service, store, setNow } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+
+  const expired = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-3",
+    ipAddress: "127.0.0.1",
+  });
+  setNow(1_800_000_000_000 + 10 * 60 * 1000 + 1);
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: expired.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "CHALLENGE_EXPIRED",
+  );
+
+  const consumed = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-2",
+    ipAddress: "127.0.0.2",
+  });
+  await service.verifyAttach({
+    challengeId: consumed.challengeId,
+    code: "123456",
+    ownerAccountId: account.id,
+    authVersion: 1,
+  });
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: consumed.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "CHALLENGE_USED",
+  );
+});
+
+test("concurrent attach verification consumes the challenge exactly once", async () => {
+  const { service, store } = fixture();
+  const account = seedAccountWithPrimaryProperty(service, store);
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "P-1",
+    propertyNumber: "P-3",
+    ipAddress: "127.0.0.1",
+  });
+
+  const results = await Promise.allSettled([
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  const rejected = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  assert.ok(rejected);
+  assert.ok(rejected.reason instanceof OwnerAccountOtpError);
+  assert.equal(rejected.reason.code, "CHALLENGE_USED");
+  assert.equal(store.memberships.has("P-3"), true);
+});
+
+test("attach reads the target phone from the property record without an owners document", async () => {
+  const store = new MemoryOwnerAccountStore();
+  const sent: Array<{ phone: string }> = [];
+  let id = 0;
+  // The attach reader only knows `properties` rows. There is deliberately no
+  // owners/{propertyNumber} document anywhere in this test.
+  const properties = new Map([
+    ["00001", { propertyNumber: "00001", whatsappNumber: "0561234567" }],
+  ]);
+  const service = new OwnerAccountService(store, {
+    secret: "s".repeat(32),
+    now: () => 1_800_000_000_000,
+    createCode: () => "123456",
+    createOpaqueId: () => `${"A".repeat(41)}${String(++id).padStart(2, "0")}`,
+    sender: async (phone) => {
+      sent.push({ phone });
+      return { success: true };
+    },
+    propertyReader: async () => {
+      throw new Error("the claim phone reader must not be used for attach");
+    },
+    attachPropertyReader: async (propertyNumber) => properties.get(propertyNumber) || null,
+  });
+  const account = seedAccountWithPrimaryProperty(service, store, "00000");
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "00000",
+    propertyNumber: "00001",
+    ipAddress: "127.0.0.1",
+  });
+  assert.equal(sent[0]?.phone, "561234567");
+  assert.equal(
+    store.challenges.get(challenge.challengeId)?.phoneSubject,
+    service.phoneSubject("0561234567"),
+  );
+
+  const verified = await service.verifyAttach({
+    challengeId: challenge.challengeId,
+    code: "123456",
+    ownerAccountId: account.id,
+    authVersion: 1,
+  });
+  assert.deepEqual(
+    verified.memberships.map((membership) => membership.propertyNumber).sort(),
+    ["00000", "00001"],
+  );
+  assert.equal(store.memberships.get("00001")?.isPrimary, false);
+});
+
+test("attach re-reads the property phone on verify and rejects a changed number", async () => {
+  const store = new MemoryOwnerAccountStore();
+  const sent: Array<{ phone: string }> = [];
+  let id = 0;
+  const properties = new Map<string, { propertyNumber: string; whatsappNumber: string | null }>([
+    ["00001", { propertyNumber: "00001", whatsappNumber: "0561234567" }],
+  ]);
+  const service = new OwnerAccountService(store, {
+    secret: "s".repeat(32),
+    now: () => 1_800_000_000_000,
+    createCode: () => "123456",
+    createOpaqueId: () => `${"A".repeat(41)}${String(++id).padStart(2, "0")}`,
+    sender: async (phone) => {
+      sent.push({ phone });
+      return { success: true };
+    },
+    propertyReader: async () => {
+      throw new Error("the claim phone reader must not be used for attach");
+    },
+    attachPropertyReader: async (propertyNumber) => properties.get(propertyNumber) || null,
+  });
+  const account = seedAccountWithPrimaryProperty(service, store, "00000");
+
+  const challenge = await service.issueAttach({
+    ownerAccountId: account.id,
+    authVersion: 1,
+    currentPropertyNumber: "00000",
+    propertyNumber: "00001",
+    ipAddress: "127.0.0.1",
+  });
+  assert.equal(sent[0]?.phone, "561234567");
+
+  properties.set("00001", { propertyNumber: "00001", whatsappNumber: "0551234567" });
+
+  await assert.rejects(
+    service.verifyAttach({
+      challengeId: challenge.challengeId,
+      code: "123456",
+      ownerAccountId: account.id,
+      authVersion: 1,
+    }),
+    (error: unknown) => error instanceof OwnerAccountOtpError &&
+      error.code === "CHALLENGE_CONTEXT_INVALID",
+  );
+  assert.equal(store.memberships.has("00001"), false);
 });

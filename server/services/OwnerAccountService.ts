@@ -65,7 +65,7 @@ export interface OwnerAccountStore {
   getAccount(id: string): Promise<OwnerAccount | null>;
   getChallengeContext(challengeId: string): Promise<Pick<
     OwnerAccountOtpChallenge,
-    "purpose" | "ownerAccountId" | "propertyNumber"
+    "purpose" | "ownerAccountId" | "propertyNumber" | "phoneSubject"
   > | null>;
   getMembership(propertyNumber: string): Promise<OwnerPropertyMembership | null>;
   listActiveMemberships(ownerAccountId: string): Promise<OwnerPropertyMembership[]>;
@@ -163,6 +163,14 @@ export interface OwnerAccountServiceOptions {
   createOpaqueId?: () => string;
   sender: OwnerAccountOtpSender;
   propertyReader: OwnerAccountPropertyReader;
+  /**
+   * Phone source for the attach flow. Attaching an additional property must use
+   * the property's own registered WhatsApp number (`properties.whatsappNumber`),
+   * the original source used across the system, which exists for every property
+   * and does not require an `owners/{propertyNumber}` document. When omitted it
+   * falls back to `propertyReader` so existing callers keep working.
+   */
+  attachPropertyReader?: OwnerAccountPropertyReader;
   issueWindowMs?: number;
   maxIssuesPerPhone?: number;
   maxIssuesPerIp?: number;
@@ -213,6 +221,7 @@ export class OwnerAccountService {
   private readonly issueWindowMs: number;
   private readonly maxIssuesPerPhone: number;
   private readonly maxIssuesPerIp: number;
+  private readonly attachPropertyReader: OwnerAccountPropertyReader;
 
   constructor(
     private readonly store: OwnerAccountStore,
@@ -229,6 +238,7 @@ export class OwnerAccountService {
       OWNER_ACCOUNT_OTP_MAX_ISSUES_PER_PHONE;
     this.maxIssuesPerIp = options.maxIssuesPerIp ??
       OWNER_ACCOUNT_OTP_MAX_ISSUES_PER_IP;
+    this.attachPropertyReader = options.attachPropertyReader || options.propertyReader;
   }
 
   async issueLogin(input: {
@@ -310,7 +320,7 @@ export class OwnerAccountService {
         "العقار مرتبط بحساب مالك.",
       );
     }
-    const phone = await this.readPropertyPhone(propertyNumber);
+    const phone = await this.readPropertyPhone(propertyNumber, this.attachPropertyReader);
     return this.issue({
       purpose: "attach_property",
       phone,
@@ -441,8 +451,18 @@ export class OwnerAccountService {
       );
     }
     const propertyNumber = this.requirePropertyNumber(context.propertyNumber);
-    const phone = await this.readPropertyPhone(propertyNumber);
+    const phone = await this.readPropertyPhone(propertyNumber, this.attachPropertyReader);
     const phoneSubject = this.subject(PHONE_SUBJECT_DOMAIN, phone);
+    // The OTP was issued for the target property's registered phone. If that
+    // phone changed (or the challenge was issued for another property/phone),
+    // fail closed and force a brand-new challenge instead of attaching.
+    if (phoneSubject !== context.phoneSubject) {
+      throw new OwnerAccountOtpError(
+        "CHALLENGE_CONTEXT_INVALID",
+        403,
+        "تغيّر رقم التواصل المسجل للعقار. ابدأ عملية إضافة العقار من جديد.",
+      );
+    }
     const candidateCodeHash = this.codeHash({
       challengeId,
       purpose: "attach_property",
@@ -636,10 +656,13 @@ export class OwnerAccountService {
     }
   }
 
-  private async readPropertyPhone(propertyNumber: string): Promise<string> {
+  private async readPropertyPhone(
+    propertyNumber: string,
+    reader: OwnerAccountPropertyReader = this.options.propertyReader,
+  ): Promise<string> {
     let property: Awaited<ReturnType<OwnerAccountPropertyReader>>;
     try {
-      property = await this.options.propertyReader(propertyNumber);
+      property = await reader(propertyNumber);
     } catch {
       throw this.unavailable();
     }

@@ -460,3 +460,30 @@ export function devCustomerOtpSinkEnabled(
   if (externalServicesEnabled(environment)) return false;
   return getFirebaseProjectId(environment) === DEV_FIREBASE_PROJECT_ID;
 }
+
+const DEV_OWNER_OTP_SINK_KEY = "DEV_OWNER_OTP_SINK";
+const DEV_OWNER_OTP_SINK_CONSOLE = "console";
+
+/**
+ * Local-only override for the OWNER account OTP *transport* (login, claim and
+ * attach). When enabled, the freshly generated code is written to the server
+ * console instead of being sent over WhatsApp, so the owner sign-in ceremony
+ * can be exercised on a local machine. It only substitutes delivery: the code
+ * is still random, HMAC-hashed, verified normally, and keeps the same TTL and
+ * attempt/issue limits. It never touches Enjazatik settings or credentials.
+ *
+ * Enabled strictly when ALL hold: NODE_ENV=development, DEV_OWNER_OTP_SINK
+ * =console, and the Firebase project is the isolated DEV project. Deployed
+ * TEST runs with NODE_ENV=production, so this can never activate there, in
+ * LIVE, or in production. Customer OTP has its own separate sink and is not
+ * affected by this flag.
+ */
+export function devOwnerOtpSinkEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (environment.NODE_ENV !== "development") return false;
+  if (environment[DEV_OWNER_OTP_SINK_KEY]?.trim() !== DEV_OWNER_OTP_SINK_CONSOLE) {
+    return false;
+  }
+  return getFirebaseProjectId(environment) === DEV_FIREBASE_PROJECT_ID;
+}

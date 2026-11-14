@@ -7,6 +7,7 @@ import { Building2, KeyRound, Loader2, Plus, ShieldCheck } from "lucide-react";
 import { normalizePhoneDigits } from "@shared/phone";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,7 @@ export function OwnerAccountManager() {
   const [propertyNumber, setPropertyNumber] = useState("");
   const [code, setCode] = useState("");
   const [challenge, setChallenge] = useState<OwnerAccountChallenge | null>(null);
+  const [isPropertyConfirmed, setIsPropertyConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const { data: session } = useQuery<OwnerSession>({
@@ -58,6 +60,7 @@ export function OwnerAccountManager() {
     setPropertyNumber("");
     setCode("");
     setChallenge(null);
+    setIsPropertyConfirmed(false);
     setError("");
     setIsBusy(false);
   }, [open]);
@@ -69,6 +72,16 @@ export function OwnerAccountManager() {
     setOpen(nextOpen);
   };
 
+  const handlePropertyNumberChange = (value: string) => {
+    setPropertyNumber(cleanPropertyNumber(value));
+    // Changing the target property invalidates any confirmation and any
+    // previously issued challenge/code; the user must start over.
+    setIsPropertyConfirmed(false);
+    setChallenge(null);
+    setCode("");
+    if (error) setError("");
+  };
+
   const requestCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isBusy) return;
@@ -78,6 +91,10 @@ export function OwnerAccountManager() {
       const validation = validateOwnerAccountPropertyNumber(propertyNumber);
       if (!validation.propertyNumber) {
         setError(validation.error || "رقم العقار غير صحيح");
+        return;
+      }
+      if (!isPropertyConfirmed) {
+        setError("أكّد أنك تريد إضافة هذا العقار إلى حسابك أولاً.");
         return;
       }
       requestedPropertyNumber = validation.propertyNumber;
@@ -142,8 +159,24 @@ export function OwnerAccountManager() {
           }),
         },
       );
-      const payload = await response.json().catch(() => null) as { ok?: unknown } | null;
+      const payload = await response.json().catch(() => null) as {
+        ok?: unknown;
+        code?: unknown;
+      } | null;
       if (!response.ok || payload?.ok !== true) {
+        const failureCode = typeof payload?.code === "string" ? payload.code : "";
+        if (
+          failureCode === "CHALLENGE_EXPIRED" ||
+          failureCode === "CHALLENGE_USED" ||
+          failureCode === "CHALLENGE_CONTEXT_INVALID" ||
+          failureCode === "ATTEMPTS_EXHAUSTED"
+        ) {
+          // The challenge is no longer usable; return to the start so the user
+          // explicitly re-confirms the target property before a new attempt.
+          setChallenge(null);
+          setCode("");
+          setIsPropertyConfirmed(false);
+        }
         throw new Error(ownerAccountApiError(payload, "رمز التحقق غير صحيح أو منتهي"));
       }
 
@@ -169,6 +202,7 @@ export function OwnerAccountManager() {
     if (isBusy) return;
     setChallenge(null);
     setCode("");
+    setIsPropertyConfirmed(false);
     setError("");
   };
 
@@ -239,8 +273,7 @@ export function OwnerAccountManager() {
                     dir="ltr"
                     value={propertyNumber}
                     onChange={(event) => {
-                      setPropertyNumber(cleanPropertyNumber(event.target.value));
-                      if (error) setError("");
+                      handlePropertyNumberChange(event.target.value);
                     }}
                     maxLength={5}
                     placeholder="5 أرقام"
@@ -250,6 +283,40 @@ export function OwnerAccountManager() {
                     data-testid="input-owner-account-property"
                     className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
                   />
+
+                  {propertyNumber.length === 5 ? (
+                    <div
+                      className="rounded-xl border border-[#e2d7c1] bg-[#fbf7ee] p-3 text-sm leading-6 text-[#625c4f]"
+                      data-testid="owner-account-attach-confirmation"
+                    >
+                      <p>
+                        سيتم إضافة العقار رقم{" "}
+                        <span dir="ltr" className="font-bold text-[#29372f]">{propertyNumber}</span>{" "}
+                        إلى حسابك الحالي بعد التحقق من رقم التواصل المسجل له.
+                      </p>
+                      <div className="mt-2 flex items-start gap-2">
+                        <Checkbox
+                          id="owner-account-confirm-property"
+                          checked={isPropertyConfirmed}
+                          onCheckedChange={(checked) => {
+                            setIsPropertyConfirmed(checked === true);
+                            if (error) setError("");
+                          }}
+                          disabled={isBusy}
+                          aria-label={`تأكيد إضافة العقار ${propertyNumber}`}
+                          data-testid="checkbox-owner-account-confirm-property"
+                          className="mt-0.5 border-[#9a7623] data-[state=checked]:bg-[#29372f] data-[state=checked]:text-[#d8bf76]"
+                        />
+                        <Label
+                          htmlFor="owner-account-confirm-property"
+                          className="cursor-pointer text-sm font-semibold leading-6 text-[#2f2a1f]"
+                        >
+                          أؤكد أنني أريد إضافة العقار رقم{" "}
+                          <span dir="ltr">{propertyNumber}</span> إلى حسابي.
+                        </Label>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex items-start gap-3 rounded-xl border border-[#d8c9a8] bg-[#fbf7ee] p-4 text-sm leading-6 text-[#625c4f]">
@@ -271,7 +338,10 @@ export function OwnerAccountManager() {
                 <Button
                   type="submit"
                   className="bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
-                  disabled={isBusy}
+                  disabled={
+                    isBusy ||
+                    (hasOwnerAccount && (!isPropertyConfirmed || propertyNumber.length !== 5))
+                  }
                   data-testid="button-owner-account-manager-challenge"
                 >
                   {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
@@ -281,6 +351,12 @@ export function OwnerAccountManager() {
             </form>
           ) : (
             <form onSubmit={verifyCode} className="space-y-4" noValidate aria-busy={isBusy}>
+              {hasOwnerAccount ? (
+                <p className="rounded-lg bg-[#f0ede5] px-3 py-2 text-xs text-[#6f6249]">
+                  العقار المستهدف:{" "}
+                  <span dir="ltr" className="font-bold text-[#29372f]">{propertyNumber}</span>
+                </p>
+              ) : null}
               {expiryMinutes ? (
                 <p className="rounded-lg bg-[#f0ede5] px-3 py-2 text-xs text-[#6f6249]">
                   ينتهي الرمز خلال {expiryMinutes} دقائق.

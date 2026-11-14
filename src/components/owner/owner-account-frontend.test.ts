@@ -35,6 +35,21 @@ test("the owner header exposes opt-in account claiming and verified property att
   assert.match(accountManagerSource, /queryKey: \["\/api\/owner\/properties"\]/);
 });
 
+test("adding a property requires an explicit confirmation of the exact target number", () => {
+  assert.match(accountManagerSource, /data-testid="owner-account-attach-confirmation"/);
+  assert.match(accountManagerSource, /data-testid="checkbox-owner-account-confirm-property"/);
+  assert.match(accountManagerSource, /أؤكد أنني أريد إضافة العقار رقم/);
+  assert.match(accountManagerSource, /سيتم إضافة العقار رقم/);
+  assert.match(accountManagerSource, /العقار المستهدف/);
+  assert.match(accountManagerSource, /isPropertyConfirmed/);
+  assert.match(accountManagerSource, /handlePropertyNumberChange/);
+  assert.match(
+    accountManagerSource,
+    /setIsPropertyConfirmed\(false\);[\s\S]*?setChallenge\(null\);/,
+  );
+  assert.match(accountManagerSource, /CHALLENGE_CONTEXT_INVALID/);
+});
+
 test("the owner account dialog is constrained to the mobile viewport and has accessible controls", () => {
   assert.match(accountManagerSource, /max-h-\[calc\(100svh-1\.5rem\)\]/);
   assert.match(accountManagerSource, /w-\[calc\(100%-1\.5rem\)\]/);

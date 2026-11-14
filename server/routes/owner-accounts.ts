@@ -5,11 +5,14 @@ import type {
   OwnerAccountPropertyOption,
   OwnerPropertyMembership,
 } from "../../shared/owner-accounts";
+import { devOwnerOtpSinkEnabled } from "../config/runtimeEnvironment";
 import { firebaseService } from "../firebaseService";
 import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import {
   OwnerAccountOtpError,
   OwnerAccountService,
+  type OwnerAccountOtpSender,
+  type OwnerAccountPropertyReader,
 } from "../services/OwnerAccountService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
 import {
@@ -21,22 +24,77 @@ import { requireOwner, requireSameOrigin } from "./middleware";
 
 const router = Router();
 
+/**
+ * Claim keeps the existing trusted-owner identity source: properties without a
+ * separately persisted owner phone fail closed until that legacy identity has
+ * been migrated/backfilled.
+ */
+const readTrustedOwnerPhone: OwnerAccountPropertyReader = async (propertyNumber) => {
+  const [property, trustedOwner] = await Promise.all([
+    firebaseService.getPropertyByNumber(propertyNumber),
+    firebaseService.getOwnerByPropertyNumber(propertyNumber),
+  ]);
+  if (!property) return null;
+  return {
+    propertyNumber: property.propertyNumber,
+    whatsappNumber: trustedOwner?.phone || null,
+  };
+};
+
+/**
+ * Attaching an additional property uses the property's own registered WhatsApp
+ * number — the original source used across the system. It never requires or
+ * creates an `owners/{propertyNumber}` document; that document belongs to the
+ * password-reset flow.
+ */
+export const readPropertyRegisteredPhone: OwnerAccountPropertyReader = async (
+  propertyNumber,
+) => {
+  const property = await firebaseService.getPropertyByNumber(propertyNumber);
+  if (!property) return null;
+  return {
+    propertyNumber: property.propertyNumber,
+    whatsappNumber: property.whatsappNumber || null,
+  };
+};
+
+function maskOwnerOtpPhone(phone: string): string {
+  const localPhone = `0${phone}`;
+  return `${localPhone.slice(0, 2)}••••${localPhone.slice(-4)}`;
+}
+
+/**
+ * Owner OTP transport. The LOCAL console sink only substitutes delivery: it
+ * never changes code generation, HMAC hashing, TTL, or attempt/issue limits,
+ * and it never touches Enjazatik settings or credentials. See
+ * devOwnerOtpSinkEnabled for the strict activation conditions.
+ */
+export function createOwnerOtpSender(dependencies: {
+  sinkEnabled: () => boolean;
+  send: OwnerAccountOtpSender;
+  log: (line: string) => void;
+}): OwnerAccountOtpSender {
+  return async (phone, message, retries) => {
+    if (dependencies.sinkEnabled()) {
+      dependencies.log(
+        `[DEV OWNER OTP] to=${maskOwnerOtpPhone(phone)} :: ${message}`,
+      );
+      return { success: true };
+    }
+    return dependencies.send(phone, message, retries);
+  };
+}
+
+const ownerOtpSender = createOwnerOtpSender({
+  sinkEnabled: devOwnerOtpSinkEnabled,
+  send: sendOwnerWhatsApp,
+  log: (line) => console.log(line),
+});
+
 export const ownerAccountService = new OwnerAccountService(ownerAccountStore, {
-  sender: sendOwnerWhatsApp,
-  propertyReader: async (propertyNumber) => {
-    const [property, trustedOwner] = await Promise.all([
-      firebaseService.getPropertyByNumber(propertyNumber),
-      firebaseService.getOwnerByPropertyNumber(propertyNumber),
-    ]);
-    if (!property) return null;
-    return {
-      propertyNumber: property.propertyNumber,
-      // Claim and attach verification must not trust the mutable public contact
-      // number. Properties without a separately persisted owner phone fail
-      // closed until that legacy identity has been migrated/backfilled.
-      whatsappNumber: trustedOwner?.phone || null,
-    };
-  },
+  sender: ownerOtpSender,
+  propertyReader: readTrustedOwnerPhone,
+  attachPropertyReader: readPropertyRegisteredPhone,
 });
 
 function requestIp(req: Request): string {

@@ -5,10 +5,13 @@ import test from "node:test";
 import express from "express";
 import session from "express-session";
 
-import { analyticsService, propertyService, subscriptionService } from "../services";
+import { analyticsService, authService, propertyService, subscriptionService } from "../services";
 import { bookingCommissionStore } from "../services/BookingCommissionStore";
+import { contactIdentityService } from "../services/ContactIdentityService";
 import { firebaseService } from "../firebaseService";
+import authRouter from "./auth";
 import ownerRouter from "./owner";
+import ownerAccountRouter, { ownerAccountService } from "./owner-accounts";
 import { ownerInquiryNoteService } from "../services/OwnerInquiryNoteService";
 import { ownerInquiryVisibilityService } from "../services/OwnerInquiryVisibilityService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
@@ -822,5 +825,165 @@ test("owner notes can only be saved for an inquiry belonging to the active prope
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
+  }
+});
+
+test("legacy PIN login shows only its property while OTP login keeps authorized account properties", async () => {
+  const originals = {
+    validateOwnerPin: authService.validateOwnerPin,
+    verifyLogin: ownerAccountService.verifyLogin,
+    revoke: contactIdentityService.revoke,
+    listMemberships: ownerAccountStore.listActiveMemberships,
+    validateMembership: ownerAccountStore.validateActiveMembership,
+    property: firebaseService.getPropertyByNumber,
+    subscription: firebaseService.getSubscriptionByPropertyNumber,
+    linked: firebaseService.getSubscriptionsLinkedToProperty,
+    multi: firebaseService.getMultiPropertySubscriptions,
+  };
+  const accountId = "A".repeat(43);
+  const timestamp = "2026-09-26T00:00:00.000Z";
+  const account = {
+    id: accountId,
+    schemaVersion: 1 as const,
+    phoneSubject: "b".repeat(64),
+    authVersion: 1,
+    status: "active" as const,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLoginAt: timestamp,
+  };
+  const memberships = [
+    {
+      schemaVersion: 1 as const,
+      ownerAccountId: accountId,
+      propertyNumber: "00000",
+      status: "active" as const,
+      isPrimary: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      revokedAt: null,
+    },
+    {
+      schemaVersion: 1 as const,
+      ownerAccountId: accountId,
+      propertyNumber: "00001",
+      status: "active" as const,
+      isPrimary: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      revokedAt: null,
+    },
+  ];
+  const properties: Record<string, any> = {
+    "00000": { propertyNumber: "00000", name: "كيم", city: "الرياض", pin: "1234" },
+    "00001": { propertyNumber: "00001", name: "شاليه بيت القمر", city: "بريدة", pin: "3366" },
+  };
+  let membershipReads = 0;
+
+  (authService as any).validateOwnerPin = async (propertyNumber: string, pin: string) =>
+    propertyNumber === "00000" && pin === "1234";
+  (ownerAccountService as any).verifyLogin = async () => ({ account, memberships });
+  (contactIdentityService as any).revoke = async () => {};
+  (ownerAccountStore as any).listActiveMemberships = async () => {
+    membershipReads += 1;
+    return memberships;
+  };
+  (ownerAccountStore as any).validateActiveMembership = async () => true;
+  (firebaseService as any).getPropertyByNumber = async (propertyNumber: string) =>
+    properties[propertyNumber] || null;
+  (firebaseService as any).getSubscriptionByPropertyNumber = async () => null;
+  (firebaseService as any).getSubscriptionsLinkedToProperty = async () => [];
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
+
+  const app = express();
+  app.use(express.json());
+  app.use(session({
+    secret: "owner-session-isolation-test-secret",
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: false },
+  }));
+  app.use(authRouter);
+  app.use(ownerAccountRouter);
+  app.use(ownerRouter);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const sessionCookieFrom = (response: Response): string => {
+    const setCookies = typeof (response.headers as any).getSetCookie === "function"
+      ? (response.headers as any).getSetCookie() as string[]
+      : [response.headers.get("set-cookie") || ""];
+    for (const cookie of setCookies) {
+      const value = cookie.split(";", 1)[0];
+      if (value.startsWith("connect.sid=")) return value;
+    }
+    const fallback = (response.headers.get("set-cookie") || "").match(
+      /connect\.sid=[^;,\s]+/,
+    );
+    return fallback ? fallback[0] : "";
+  };
+
+  const otpLogin = async () => {
+    const response = await fetch(`${baseUrl}/api/owner/account/login/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        challengeId: "C".repeat(43),
+        phone: "0551234567",
+        code: "123456",
+      }),
+    });
+    assert.equal(response.status, 200);
+    const cookie = sessionCookieFrom(response);
+    assert.match(cookie, /^connect\.sid=/);
+    return cookie;
+  };
+
+  const listProperties = async (cookie: string) => {
+    const response = await fetch(`${baseUrl}/api/owner/properties`, {
+      headers: { cookie },
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    return payload.properties.map((property: any) => property.propertyNumber);
+  };
+
+  try {
+    // 1) OTP session: every active, authorized account membership is listed.
+    const otpCookie = await otpLogin();
+    assert.deepEqual(await listProperties(otpCookie), ["00000", "00001"]);
+
+    // 2) PIN login on the same browser session: only the entered property, and
+    //    no account-membership read is used to build the list.
+    const pinLogin = await fetch(`${baseUrl}/api/owner/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: otpCookie },
+      body: JSON.stringify({ propertyNumber: "00000", pin: "1234" }),
+    });
+    assert.equal(pinLogin.status, 200);
+    const pinCookie = sessionCookieFrom(pinLogin) || otpCookie;
+    const membershipReadsBeforePinListing = membershipReads;
+    assert.deepEqual(await listProperties(pinCookie), ["00000"]);
+    assert.equal(membershipReads, membershipReadsBeforePinListing);
+
+    // 3) Switching back to OTP restores exactly the account's authorized list,
+    //    with no leftovers from the legacy session.
+    const otpCookieAgain = await otpLogin();
+    assert.deepEqual(await listProperties(otpCookieAgain), ["00000", "00001"]);
+  } finally {
+    authService.validateOwnerPin = originals.validateOwnerPin;
+    ownerAccountService.verifyLogin = originals.verifyLogin;
+    contactIdentityService.revoke = originals.revoke;
+    ownerAccountStore.listActiveMemberships = originals.listMemberships;
+    ownerAccountStore.validateActiveMembership = originals.validateMembership;
+    firebaseService.getPropertyByNumber = originals.property;
+    firebaseService.getSubscriptionByPropertyNumber = originals.subscription;
+    firebaseService.getSubscriptionsLinkedToProperty = originals.linked;
+    firebaseService.getMultiPropertySubscriptions = originals.multi;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

@@ -68,6 +68,11 @@ router.post("/api/owner/login", async (req, res) => {
 
   await clearCustomerAccessForPrivilegedLogin(req, res);
   delete (req.session as any).isAdmin;
+  // A property-number/PIN login is a legacy, single-property session. It must
+  // never inherit an owner-account marker from a previous phone/OTP session,
+  // otherwise the dashboard would list memberships of an unrelated account.
+  delete (req.session as any).ownerAccountId;
+  delete (req.session as any).authVersion;
   (req.session as any).propertyNumber = propertyNumber;
   req.session.save((err: any) => {
     if (err) return res.status(500).json({ error: "Session save failed" });
@@ -148,7 +153,11 @@ router.post("/api/admin/login", async (req, res) => {
 // ======================
 router.get("/api/owner/session", (req, res) => {
   const isLoggedIn = Boolean((req.session as any).propertyNumber);
-  res.json({ isLoggedIn, propertyNumber: (req.session as any).propertyNumber || null });
+  res.json({
+    isLoggedIn,
+    propertyNumber: (req.session as any).propertyNumber || null,
+    hasOwnerAccount: Boolean((req.session as any).ownerAccountId),
+  });
 });
 
 router.get("/api/admin/session", (req, res) => {

@@ -8,7 +8,11 @@ import express from "express";
 import { firebaseService } from "../firebaseService";
 import { contactIdentityService } from "../services/ContactIdentityService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
-import ownerAccountRouter, { ownerAccountService } from "./owner-accounts";
+import ownerAccountRouter, {
+  createOwnerOtpSender,
+  ownerAccountService,
+  readPropertyRegisteredPhone,
+} from "./owner-accounts";
 
 function accountFixture() {
   const timestamp = "2026-09-26T00:00:00.000Z";
@@ -275,4 +279,120 @@ test("account login selects the first existing membership when the primary prope
     contactIdentityService.revoke = originals.revoke;
     await server.close();
   }
+});
+
+test("attach challenge binds the session account, current property, and requested target", async () => {
+  const originals = {
+    issueAttach: ownerAccountService.issueAttach,
+    validate: ownerAccountStore.validateActiveMembership,
+  };
+  const { account } = accountFixture();
+  const session: Record<string, any> = {
+    propertyNumber: "P-1",
+    ownerAccountId: account.id,
+    authVersion: account.authVersion,
+  };
+  let input: Record<string, unknown> | null = null;
+  const captured = () => input as Record<string, unknown> | null;
+  (ownerAccountStore as any).validateActiveMembership = async () => true;
+  (ownerAccountService as any).issueAttach = async (value: Record<string, unknown>) => {
+    input = value;
+    return {
+      challengeId: "C".repeat(43),
+      maskedPhone: "05••••4567",
+      expiresInSeconds: 600,
+    };
+  };
+  const server = await startRouter(session);
+  try {
+    const response = await fetch(
+      `${server.baseUrl}/api/owner/account/properties/challenge`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ propertyNumber: "00001" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      challengeId: "C".repeat(43),
+      maskedPhone: "05••••4567",
+      expiresInSeconds: 600,
+    });
+    assert.equal(captured()?.ownerAccountId, account.id);
+    assert.equal(captured()?.authVersion, account.authVersion);
+    assert.equal(captured()?.currentPropertyNumber, "P-1");
+    assert.equal(captured()?.propertyNumber, "00001");
+    assert.equal(typeof captured()?.ipAddress, "string");
+  } finally {
+    ownerAccountService.issueAttach = originals.issueAttach;
+    ownerAccountStore.validateActiveMembership = originals.validate;
+    await server.close();
+  }
+});
+
+test("attach phone source is the property record and never requires an owners document", async () => {
+  const originals = {
+    property: firebaseService.getPropertyByNumber,
+    owner: firebaseService.getOwnerByPropertyNumber,
+  };
+  let ownerReads = 0;
+  (firebaseService as any).getPropertyByNumber = async (propertyNumber: string) => ({
+    propertyNumber,
+    name: "Property",
+    city: "بريدة",
+    whatsappNumber: "0551234567",
+  });
+  (firebaseService as any).getOwnerByPropertyNumber = async () => {
+    ownerReads += 1;
+    return null;
+  };
+
+  try {
+    assert.deepEqual(await readPropertyRegisteredPhone("00001"), {
+      propertyNumber: "00001",
+      whatsappNumber: "0551234567",
+    });
+    assert.equal(ownerReads, 0);
+
+    (firebaseService as any).getPropertyByNumber = async () => null;
+    assert.equal(await readPropertyRegisteredPhone("MISSING"), null);
+    assert.equal(ownerReads, 0);
+  } finally {
+    firebaseService.getPropertyByNumber = originals.property;
+    firebaseService.getOwnerByPropertyNumber = originals.owner;
+  }
+});
+
+test("owner OTP console sink logs the code only when enabled and never calls the provider", async () => {
+  const logs: string[] = [];
+  const sent: Array<{ phone: string; message: string }> = [];
+  const send = async (phone: string, message: string) => {
+    sent.push({ phone, message });
+    return { success: true };
+  };
+
+  const sinkOn = createOwnerOtpSender({
+    sinkEnabled: () => true,
+    send,
+    log: (line) => logs.push(line),
+  });
+  const sinkResult = await sinkOn("551234567", "رمز التحقق: 123456", 2);
+  assert.deepEqual(sinkResult, { success: true });
+  assert.equal(sent.length, 0);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /^\[DEV OWNER OTP\] to=05••••4567 :: /);
+  assert.match(logs[0], /123456/);
+
+  const sinkOff = createOwnerOtpSender({
+    sinkEnabled: () => false,
+    send,
+    log: (line) => logs.push(line),
+  });
+  const providerResult = await sinkOff("551234567", "رمز التحقق: 654321", 2);
+  assert.deepEqual(providerResult, { success: true });
+  assert.deepEqual(sent, [
+    { phone: "551234567", message: "رمز التحقق: 654321" },
+  ]);
+  assert.equal(logs.length, 1);
 });

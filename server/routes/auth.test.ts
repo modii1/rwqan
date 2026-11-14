@@ -189,3 +189,101 @@ test("admin login endpoint throttles repeated invalid attempts", async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("legacy property-number login clears inherited owner-account markers", async () => {
+  const originalValidateOwnerPin = authService.validateOwnerPin;
+  const originalRevoke = contactIdentityService.revoke;
+  const session: Record<string, unknown> = {
+    propertyNumber: "99999",
+    ownerAccountId: "A".repeat(43),
+    authVersion: 3,
+    isAdmin: true,
+    save(callback: (error?: Error) => void) {
+      callback();
+    },
+  };
+
+  (authService as any).validateOwnerPin = async () => true;
+  (contactIdentityService as any).revoke = async () => {};
+
+  const app = express();
+  app.use(express.json());
+  app.use(cookieParser());
+  app.use((req, _res, next) => {
+    (req as any).session = session;
+    next();
+  });
+  app.use(authRouter);
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/owner/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ propertyNumber: "12345", pin: "valid-pin" }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(session.propertyNumber, "12345");
+    assert.equal("ownerAccountId" in session, false);
+    assert.equal("authVersion" in session, false);
+    assert.equal("isAdmin" in session, false);
+  } finally {
+    authService.validateOwnerPin = originalValidateOwnerPin;
+    contactIdentityService.revoke = originalRevoke;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("owner session endpoint reports whether the session is bound to an owner account", async () => {
+  const app = express();
+  let session: Record<string, unknown> = {
+    propertyNumber: "12345",
+    ownerAccountId: "A".repeat(43),
+    authVersion: 1,
+  };
+  app.use((req, _res, next) => {
+    (req as any).session = session;
+    next();
+  });
+  app.use(authRouter);
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const accountSession = await fetch(
+      `http://127.0.0.1:${port}/api/owner/session`,
+    );
+    assert.equal(accountSession.status, 200);
+    assert.deepEqual(await accountSession.json(), {
+      isLoggedIn: true,
+      propertyNumber: "12345",
+      hasOwnerAccount: true,
+    });
+
+    session = { propertyNumber: "12345" };
+    const legacySession = await fetch(
+      `http://127.0.0.1:${port}/api/owner/session`,
+    );
+    assert.equal(legacySession.status, 200);
+    assert.deepEqual(await legacySession.json(), {
+      isLoggedIn: true,
+      propertyNumber: "12345",
+      hasOwnerAccount: false,
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

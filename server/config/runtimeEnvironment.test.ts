@@ -9,6 +9,7 @@ import {
   assertProductionSecurityEnvironment,
   classifyPaymobKeyMode,
   devCustomerOtpSinkEnabled,
+  devOwnerOtpSinkEnabled,
   paymobEnabled,
   whatsappDeliveryWebhookDisabled,
   whatsappDeliveryWebhookEnabled,
@@ -574,6 +575,56 @@ test("DEV customer OTP console sink stays off outside the DEV project", () => {
     devCustomerOtpSinkEnabled({
       NODE_ENV: "development",
       DEV_CUSTOMER_OTP_SINK: "console",
+      FIREBASE_SERVICE_ACCOUNT: NON_DEV_SERVICE_ACCOUNT,
+    }),
+    false,
+  );
+});
+
+const DEV_OWNER_OTP_SINK_ENV = {
+  DEV_OWNER_OTP_SINK: "console",
+  FIREBASE_SERVICE_ACCOUNT: DEV_ADMIN_SERVICE_ACCOUNT,
+};
+
+test("DEV owner OTP console sink is enabled only in the isolated LOCAL target", () => {
+  assert.equal(
+    devOwnerOtpSinkEnabled({
+      NODE_ENV: "development",
+      ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT: "true",
+      ...DEV_OWNER_OTP_SINK_ENV,
+    }),
+    true,
+  );
+});
+
+test("DEV owner OTP console sink stays off outside NODE_ENV=development", () => {
+  for (const nodeEnv of ["production", "test"] as const) {
+    assert.equal(
+      devOwnerOtpSinkEnabled({
+        NODE_ENV: nodeEnv,
+        ALLOW_EXTERNAL_SERVICES_IN_DEVELOPMENT: "true",
+        ...DEV_OWNER_OTP_SINK_ENV,
+      }),
+      false,
+    );
+  }
+});
+
+test("DEV owner OTP console sink stays off without the console flag", () => {
+  assert.equal(
+    devOwnerOtpSinkEnabled({
+      NODE_ENV: "development",
+      FIREBASE_SERVICE_ACCOUNT: DEV_ADMIN_SERVICE_ACCOUNT,
+    }),
+    false,
+  );
+});
+
+test("DEV owner OTP console sink stays off outside the DEV project", () => {
+  assert.equal(
+    devOwnerOtpSinkEnabled({
+      NODE_ENV: "development",
+      DEV_OWNER_OTP_SINK: "console",
       FIREBASE_SERVICE_ACCOUNT: NON_DEV_SERVICE_ACCOUNT,
     }),
     false,
