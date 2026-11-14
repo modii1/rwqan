@@ -922,6 +922,147 @@ function mergeThreeWay(
   }
 }
 
+// ── test-file merge ──────────────────────────────────────────────────────────
+
+function isTestFilePath(file: string): boolean {
+  return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/.test(file);
+}
+
+interface ParsedTestFile {
+  prefix: string;
+  blocks: Array<{ title: string; content: string }>;
+}
+
+/**
+ * Parse a top-level node:test/describe file into its shared prefix and test
+ * blocks. Only the conservative shape used by this repository is accepted:
+ * top-level `test(`, `it(`, or `describe(` blocks ending with a line `});`.
+ * Anything else returns null so the caller keeps the normal conflict path.
+ */
+function parseTestFile(text: string): ParsedTestFile | null {
+  const normalized = canonicalContent(text);
+  const lines = normalized.split("\n");
+  const starts: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^(test|it|describe)\s*\(/.test(lines[index])) starts.push(index);
+  }
+  if (starts.length === 0) return null;
+
+  const prefix = lines.slice(0, starts[0]).join("\n").replace(/\s+$/, "");
+  const blocks: Array<{ title: string; content: string }> = [];
+
+  for (let index = 0; index < starts.length; index += 1) {
+    const start = starts[index];
+    const nextStart = starts[index + 1] ?? lines.length;
+    let end = -1;
+    for (let line = start + 1; line < nextStart; line += 1) {
+      if (lines[line] === "});") {
+        end = line;
+        break;
+      }
+    }
+    if (end < 0) return null;
+    for (let line = end + 1; line < nextStart; line += 1) {
+      if (lines[line].trim() !== "") return null;
+    }
+    const content = lines.slice(start, end + 1).join("\n");
+    const titleMatch = content.match(
+      /^(?:test|it|describe)\s*\(\s*(["'`])([\s\S]*?)\1/
+    );
+    if (!titleMatch) return null;
+    blocks.push({ title: titleMatch[2], content });
+  }
+
+  const lastBlock = blocks[blocks.length - 1];
+  const trailingStart =
+    starts[starts.length - 1] + lastBlock.content.split("\n").length;
+  for (let line = trailingStart; line < lines.length; line += 1) {
+    if (lines[line].trim() !== "") return null;
+  }
+
+  return { prefix, blocks };
+}
+
+/**
+ * Merge two independently-added test files by title.
+ *
+ * - Identical shared prefixes are required (imports/helpers must match).
+ * - A test that exists on both sides must be byte-identical; otherwise this is
+ *   a real conflict and null is returned.
+ * - Tests that exist on only one side are kept, so no coverage is lost.
+ * - Duplicate titles are collapsed, so repeated tests are not duplicated.
+ */
+function mergeTestFileAdditions(
+  testText: string,
+  liveText: string
+): string | null {
+  const testFile = parseTestFile(testText);
+  const liveFile = parseTestFile(liveText);
+  if (!testFile || !liveFile) return null;
+  if (testFile.prefix !== liveFile.prefix) return null;
+
+  const byTitle = new Map<string, string>();
+  for (const block of testFile.blocks) {
+    if (byTitle.has(block.title)) return null;
+    byTitle.set(block.title, block.content);
+  }
+
+  const liveOnly: Array<{ title: string; content: string }> = [];
+  const seenLive = new Set<string>();
+  for (const block of liveFile.blocks) {
+    if (seenLive.has(block.title)) return null;
+    seenLive.add(block.title);
+    const existing = byTitle.get(block.title);
+    if (existing !== undefined) {
+      if (existing !== block.content) return null;
+      continue;
+    }
+    byTitle.set(block.title, block.content);
+    liveOnly.push(block);
+  }
+
+  const blocks = [...testFile.blocks, ...liveOnly].map(
+    (block) => block.content
+  );
+  const prefix = testFile.prefix;
+  return `${prefix ? `${prefix}\n\n` : ""}${blocks.join("\n\n")}\n`;
+}
+
+/**
+ * True only when LIVE's exact content matches a historical TEST version of the
+ * file. In that case LIVE holds a stale exported TEST copy, not an independent
+ * LIVE edit, so the newer TEST version may be transferred safely.
+ */
+async function liveMatchesHistoricalTestVersion(params: {
+  file: string;
+  liveText: string;
+  testWorkspace: DeployWorkspaceInfo;
+  deps: DeployAutoSyncDependencies;
+}): Promise<boolean> {
+  try {
+    const output = await params.deps.run(
+      ["log", "--format=%H", "-n", "20", "--", params.file],
+      params.testWorkspace.path
+    );
+    const shas = output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^[0-9a-f]{40}$/.test(line));
+    for (const sha of shas) {
+      const content = await params.deps
+        .showFile(sha, params.file, params.testWorkspace.path)
+        .catch(() => null);
+      if (content !== null && canonicalContent(content) === params.liveText) {
+        return true;
+      }
+    }
+  } catch {
+    // Missing history must never turn a real LIVE change into a transfer.
+  }
+  return false;
+}
+
+
 // ── sync baseline (last successful TEST→LIVE sync) ───────────────────────────
 
 type SyncBaselineSource = "trailer" | "last-sync" | "merge-base";
@@ -1479,10 +1620,49 @@ async function buildLivePlan(params: {
     }
     // 6) Added on both sides with different content.
     if (baseText === null) {
+      // 6a) Test files: LIVE may hold an older exported TEST version. Matching
+      // a historical TEST blob proves there is no independent LIVE edit to
+      // preserve, so the newer TEST file is a safe transfer.
+      if (isTestFilePath(file)) {
+        const staleLiveCopy = await liveMatchesHistoricalTestVersion({
+          file,
+          liveText,
+          testWorkspace,
+          deps,
+        });
+        if (staleLiveCopy) {
+          actions.push({
+            path: file,
+            kind: "transfer",
+            reason:
+              "LIVE يطابق نسخة TEST سابقة لهذا الملف — نقل النسخة الأحدث آمن دون فقدان أي تعديل LIVE.",
+            content: testContent,
+          });
+          transferPaths.push(file);
+          continue;
+        }
+        // 6b) Independent test additions are merged by test title. Identical
+        // shared prefixes and unique/identical test bodies are required; a
+        // modified test with the same title remains a real conflict.
+        const mergedTests = mergeTestFileAdditions(testText, liveText);
+        if (mergedTests !== null) {
+          actions.push({
+            path: file,
+            kind: "auto-merge",
+            reason:
+              "دمج اختبارات TEST وLIVE معًا دون فقدان اختبار أو تكراره.",
+            content: mergedTests,
+          });
+          mergePaths.push(file);
+          continue;
+        }
+      }
       actions.push({
         path: file,
         kind: "conflict",
-        reason: "أُضيف الملف في TEST وLIVE بمحتوى مختلف — يحتاج قرارًا.",
+        reason: isTestFilePath(file)
+          ? "ملف اختبار أُضيف في TEST وLIVE بتعديل غير قابل للدمج (نفس الاختبار أو البنية المشتركة) — يحتاج قرارًا."
+          : "أُضيف الملف في TEST وLIVE بمحتوى مختلف — يحتاج قرارًا.",
       });
       conflictPaths.push(file);
       continue;
@@ -1533,6 +1713,20 @@ async function buildLivePlan(params: {
     // 9) Both sides changed: attempt a real three-way merge.
     const merged = mergeThreeWay(liveText, baseText, testText);
     if (merged.conflict) {
+      if (isTestFilePath(file)) {
+        const mergedTests = mergeTestFileAdditions(testText, liveText);
+        if (mergedTests !== null) {
+          actions.push({
+            path: file,
+            kind: "auto-merge",
+            reason:
+              "دمج اختبارات TEST وLIVE معًا دون فقدان اختبار أو تكراره.",
+            content: mergedTests,
+          });
+          mergePaths.push(file);
+          continue;
+        }
+      }
       actions.push({
         path: file,
         kind: "conflict",

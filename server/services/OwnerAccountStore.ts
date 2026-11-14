@@ -177,7 +177,7 @@ export class FirestoreOwnerAccountStore implements OwnerAccountStore {
 
   async getChallengeContext(challengeId: string): Promise<Pick<
     OwnerAccountOtpChallenge,
-    "purpose" | "ownerAccountId" | "propertyNumber"
+    "purpose" | "ownerAccountId" | "propertyNumber" | "phoneSubject"
   > | null> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId)) return null;
     const snapshot = await this.getDatabase().collection(CHALLENGES).doc(challengeId).get();
@@ -188,6 +188,7 @@ export class FirestoreOwnerAccountStore implements OwnerAccountStore {
           purpose: challenge.purpose,
           ownerAccountId: challenge.ownerAccountId,
           propertyNumber: challenge.propertyNumber,
+          phoneSubject: challenge.phoneSubject,
         }
       : null;
   }

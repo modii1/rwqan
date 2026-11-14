@@ -45,6 +45,10 @@ interface SyncEnvOptions {
   live?: Record<string, string>;
   /** Simulated `git log` output (used to discover the baseline trailer). */
   log?: string;
+  /** Historical TEST file blobs by commit SHA and path. */
+  historicalTest?: Record<string, Record<string, string>>;
+  /** Historical TEST commit SHAs per path (`git log --format=%H -- path`). */
+  fileHistory?: Record<string, string[]>;
   /** Extra SHAs accepted as the recorded baseline. */
   baseShas?: string[];
   /** SHA written in the fake `Sync-Test-SHA:` trailer (defaults to TEST_SHA). */
@@ -118,7 +122,13 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       ) {
         return TEST_SHA;
       }
-      if (args[0] === "log") return options.log ?? "";
+      if (args[0] === "log") {
+        if (args.includes("--format=%H")) {
+          const file = args[args.length - 1];
+          return (options.fileHistory?.[file] ?? []).join("\n");
+        }
+        return options.log ?? "";
+      }
       if (args[0] === "cat-file") return "";
       if (args[0] === "merge-base" && args[1] === "--is-ancestor") {
         if (
@@ -171,6 +181,8 @@ function makeSyncEnv(options: SyncEnvOptions = {}) {
       return "";
     },
     showFile: async (rev: string, file: string) => {
+      const historical = options.historicalTest?.[rev]?.[file];
+      if (historical !== undefined) return historical;
       const source =
         rev === APPROVED_UPLOAD_BRANCH_TEST || rev === TEST_SHA
           ? options.test
@@ -522,6 +534,148 @@ test("a real same-line overlap is the only conflict; safe files still transfer",
     rmSync(env.root, { recursive: true, force: true });
   }
 });
+
+test("a test file whose LIVE copy is an older TEST version transfers the newer TEST file", async () => {
+  const file = "server/routes/owner-upload-receipt.test.ts";
+  const historical = "1".repeat(40);
+  const oldTest = [
+    'import test from "node:test";',
+    "",
+    'test("old nine-payment assertion", async () => {',
+    "  // old",
+    "});",
+    "",
+  ].join("\n");
+  const newTest = [
+    'import test from "node:test";',
+    "",
+    'test("new data-independent assertion", async () => {',
+    "  // new",
+    "});",
+    "",
+  ].join("\n");
+  const env = makeSyncEnv({
+    nameStatus: `A\t${file}`,
+    test: { [file]: newTest },
+    live: { [file]: oldTest },
+    fileHistory: { [file]: [historical] },
+    historicalTest: { [historical]: { [file]: oldTest } },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.equal(preflight.partial, false);
+    assert.deepEqual(preflight.files, [file]);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(env.liveFiles[file], newTest);
+    assert.equal(env.liveFiles[file].includes("old nine-payment assertion"), false);
+    assert.equal(env.calls.writes.length, 1);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("independent test additions from TEST and LIVE are merged without loss or duplication", async () => {
+  const file = "server/services/feature.test.ts";
+  const prefix = [
+    'import assert from "node:assert/strict";',
+    'import test from "node:test";',
+    "",
+  ].join("\n");
+  const testOnly = [
+    'test("test-only coverage", async () => {',
+    "  assert.equal(1, 1);",
+    "});",
+    "",
+  ].join("\n");
+  const liveOnly = [
+    'test("live-only coverage", async () => {',
+    "  assert.equal(3, 3);",
+    "});",
+    "",
+  ].join("\n");
+  const shared = [
+    'test("shared coverage", async () => {',
+    "  assert.equal(2, 2);",
+    "});",
+    "",
+  ].join("\n");
+  const testContent = `${prefix}${testOnly}${shared}`;
+  const liveContent = `${prefix}${liveOnly}${shared}`;
+
+  const env = makeSyncEnv({
+    nameStatus: `A\t${file}`,
+    test: { [file]: testContent },
+    live: { [file]: liveContent },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, true);
+    assert.deepEqual(preflight.conflicts, []);
+    assert.equal(preflight.partial, false);
+    assert.deepEqual(preflight.files, [file]);
+
+    const result = await runLiveSync({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      token: preflight.token,
+      confirm: true,
+      dependencies: env.deps,
+    });
+    assert.equal(result.ok, true);
+    const merged = env.liveFiles[file];
+    assert.match(merged, /test-only coverage/);
+    assert.match(merged, /live-only coverage/);
+    assert.equal((merged.match(/test\("shared coverage"/g) ?? []).length, 1);
+    assert.equal(merged.includes("<<<<<<<"), false);
+    assert.equal(env.calls.writes.length, 1);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+test("the same test title with different bodies remains a real conflict", async () => {
+  const file = "server/services/feature.test.ts";
+  const prefix = 'import test from "node:test";\n\n';
+  const testContent = `${prefix}test("same test", async () => {\n  assert.equal(1, 1);\n});\n`;
+  const liveContent = `${prefix}test("same test", async () => {\n  assert.equal(2, 2);\n});\n`;
+  const env = makeSyncEnv({
+    nameStatus: `A\t${file}`,
+    test: { [file]: testContent },
+    live: { [file]: liveContent },
+  });
+  try {
+    const preflight = await runLiveSyncPreflight({
+      testWorkspace: env.testWorkspace,
+      liveWorkspace: env.liveWorkspace,
+      dependencies: env.deps,
+    });
+    assert.equal(preflight.canSync, false);
+    assert.deepEqual(preflight.conflicts?.map((entry) => entry.path), [file]);
+    assert.equal(env.calls.writes.length, 0);
+    assert.equal(noForbiddenCommands(env.calls), true);
+  } finally {
+    rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
 
 test("a transfer that would drop a LIVE security invariant becomes a conflict", async () => {
   const file = "server/services/DeployPrepublishGate.ts";

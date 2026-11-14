@@ -10,6 +10,8 @@ import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import {
   OwnerAccountOtpError,
   OwnerAccountService,
+  type OwnerAccountOtpSender,
+  type OwnerAccountPropertyReader,
 } from "../services/OwnerAccountService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
 import {
@@ -21,22 +23,68 @@ import { requireOwner, requireSameOrigin } from "./middleware";
 
 const router = Router();
 
+/**
+ * Claim keeps the existing trusted-owner identity source: properties without a
+ * separately persisted owner phone fail closed until that legacy identity has
+ * been migrated/backfilled.
+ */
+const readTrustedOwnerPhone: OwnerAccountPropertyReader = async (propertyNumber) => {
+  const [property, trustedOwner] = await Promise.all([
+    firebaseService.getPropertyByNumber(propertyNumber),
+    firebaseService.getOwnerByPropertyNumber(propertyNumber),
+  ]);
+  if (!property) return null;
+  return {
+    propertyNumber: property.propertyNumber,
+    whatsappNumber: trustedOwner?.phone || null,
+  };
+};
+
+/**
+ * Attaching an additional property uses the property's own registered WhatsApp
+ * number — the original source used across the system. It never requires or
+ * creates an `owners/{propertyNumber}` document; that document belongs to the
+ * password-reset flow.
+ */
+export const readPropertyRegisteredPhone: OwnerAccountPropertyReader = async (
+  propertyNumber,
+) => {
+  const property = await firebaseService.getPropertyByNumber(propertyNumber);
+  if (!property) return null;
+  return {
+    propertyNumber: property.propertyNumber,
+    whatsappNumber: property.whatsappNumber || null,
+  };
+};
+
+/**
+ * Explicit dependency injection for the owner OTP transport.
+ *
+ * `sendOwnerWhatsApp` is the default in every environment, including LIVE.
+ * A LOCAL-only initializer (server/config/loadEnv.ts, excluded from LIVE sync)
+ * may replace it at runtime. This file never imports the local console sink and
+ * carries no development-only dependency, so it syncs to LIVE unchanged.
+ */
+let ownerOtpSender: OwnerAccountOtpSender = sendOwnerWhatsApp;
+
+export function setOwnerAccountOtpSender(sender: OwnerAccountOtpSender): void {
+  ownerOtpSender = sender;
+}
+
+export function getOwnerAccountOtpSender(): OwnerAccountOtpSender {
+  return ownerOtpSender;
+}
+
+export function createOwnerAccountOtpSender(
+  resolveSender: () => OwnerAccountOtpSender,
+): OwnerAccountOtpSender {
+  return (phone, message, retries) => resolveSender()(phone, message, retries);
+}
+
 export const ownerAccountService = new OwnerAccountService(ownerAccountStore, {
-  sender: sendOwnerWhatsApp,
-  propertyReader: async (propertyNumber) => {
-    const [property, trustedOwner] = await Promise.all([
-      firebaseService.getPropertyByNumber(propertyNumber),
-      firebaseService.getOwnerByPropertyNumber(propertyNumber),
-    ]);
-    if (!property) return null;
-    return {
-      propertyNumber: property.propertyNumber,
-      // Claim and attach verification must not trust the mutable public contact
-      // number. Properties without a separately persisted owner phone fail
-      // closed until that legacy identity has been migrated/backfilled.
-      whatsappNumber: trustedOwner?.phone || null,
-    };
-  },
+  sender: createOwnerAccountOtpSender(() => ownerOtpSender),
+  propertyReader: readTrustedOwnerPhone,
+  attachPropertyReader: readPropertyRegisteredPhone,
 });
 
 function requestIp(req: Request): string {

@@ -6,9 +6,16 @@ import cookieParser from "cookie-parser";
 import express from "express";
 
 import { firebaseService } from "../firebaseService";
+import { sendOwnerWhatsApp } from "../integrations/whatsapp";
 import { contactIdentityService } from "../services/ContactIdentityService";
 import { ownerAccountStore } from "../services/OwnerAccountStore";
-import ownerAccountRouter, { ownerAccountService } from "./owner-accounts";
+import ownerAccountRouter, {
+  createOwnerAccountOtpSender,
+  getOwnerAccountOtpSender,
+  ownerAccountService,
+  readPropertyRegisteredPhone,
+  setOwnerAccountOtpSender,
+} from "./owner-accounts";
 
 function accountFixture() {
   const timestamp = "2026-09-26T00:00:00.000Z";
@@ -275,4 +282,114 @@ test("account login selects the first existing membership when the primary prope
     contactIdentityService.revoke = originals.revoke;
     await server.close();
   }
+});
+
+test("attach challenge binds the session account, current property, and requested target", async () => {
+  const originals = {
+    issueAttach: ownerAccountService.issueAttach,
+    validate: ownerAccountStore.validateActiveMembership,
+  };
+  const { account } = accountFixture();
+  const session: Record<string, any> = {
+    propertyNumber: "P-1",
+    ownerAccountId: account.id,
+    authVersion: account.authVersion,
+  };
+  let input: Record<string, unknown> | null = null;
+  const captured = () => input as Record<string, unknown> | null;
+  (ownerAccountStore as any).validateActiveMembership = async () => true;
+  (ownerAccountService as any).issueAttach = async (value: Record<string, unknown>) => {
+    input = value;
+    return {
+      challengeId: "C".repeat(43),
+      maskedPhone: "05••••4567",
+      expiresInSeconds: 600,
+    };
+  };
+  const server = await startRouter(session);
+  try {
+    const response = await fetch(
+      `${server.baseUrl}/api/owner/account/properties/challenge`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ propertyNumber: "00001" }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      challengeId: "C".repeat(43),
+      maskedPhone: "05••••4567",
+      expiresInSeconds: 600,
+    });
+    assert.equal(captured()?.ownerAccountId, account.id);
+    assert.equal(captured()?.authVersion, account.authVersion);
+    assert.equal(captured()?.currentPropertyNumber, "P-1");
+    assert.equal(captured()?.propertyNumber, "00001");
+    assert.equal(typeof captured()?.ipAddress, "string");
+  } finally {
+    ownerAccountService.issueAttach = originals.issueAttach;
+    ownerAccountStore.validateActiveMembership = originals.validate;
+    await server.close();
+  }
+});
+
+test("attach phone source is the property record and never requires an owners document", async () => {
+  const originals = {
+    property: firebaseService.getPropertyByNumber,
+    owner: firebaseService.getOwnerByPropertyNumber,
+  };
+  let ownerReads = 0;
+  (firebaseService as any).getPropertyByNumber = async (propertyNumber: string) => ({
+    propertyNumber,
+    name: "Property",
+    city: "بريدة",
+    whatsappNumber: "0551234567",
+  });
+  (firebaseService as any).getOwnerByPropertyNumber = async () => {
+    ownerReads += 1;
+    return null;
+  };
+
+  try {
+    assert.deepEqual(await readPropertyRegisteredPhone("00001"), {
+      propertyNumber: "00001",
+      whatsappNumber: "0551234567",
+    });
+    assert.equal(ownerReads, 0);
+
+    (firebaseService as any).getPropertyByNumber = async () => null;
+    assert.equal(await readPropertyRegisteredPhone("MISSING"), null);
+    assert.equal(ownerReads, 0);
+  } finally {
+    firebaseService.getPropertyByNumber = originals.property;
+    firebaseService.getOwnerByPropertyNumber = originals.owner;
+  }
+});
+
+test("owner OTP sender defaults to the WhatsApp sender and supports explicit injection", async () => {
+  const defaultSender = getOwnerAccountOtpSender();
+  assert.equal(defaultSender, sendOwnerWhatsApp);
+
+  const calls: Array<{ phone: string; message: string; retries?: number }> = [];
+  const injected = async (phone: string, message: string, retries?: number) => {
+    calls.push({ phone, message, retries });
+    return { success: true };
+  };
+  const delegating = createOwnerAccountOtpSender(() => getOwnerAccountOtpSender());
+
+  try {
+    setOwnerAccountOtpSender(injected);
+    assert.equal(getOwnerAccountOtpSender(), injected);
+    assert.deepEqual(await delegating("551234567", "رمز التحقق: 123456", 2), {
+      success: true,
+    });
+    assert.deepEqual(calls, [
+      { phone: "551234567", message: "رمز التحقق: 123456", retries: 2 },
+    ]);
+  } finally {
+    setOwnerAccountOtpSender(defaultSender);
+  }
+
+  assert.equal(getOwnerAccountOtpSender(), sendOwnerWhatsApp);
 });

@@ -31,7 +31,7 @@ async function withOwnerSession(
   }
 }
 
-test("the payments history exposes a receipt state for every payment", async () => {
+test("the payments history exposes the receipt state for every 90001 payment", async () => {
   await withOwnerSession(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/owner/payments`);
     assert.equal(response.status, 200);
@@ -39,6 +39,7 @@ test("the payments history exposes a receipt state for every payment", async () 
     assert.ok(Array.isArray(rows));
     assert.ok(rows.length > 0, "expected at least one payment");
     for (const row of rows) {
+      assert.equal(row.propertyNumber, "90001");
       assert.equal(typeof row.hasReceipt, "boolean");
       assert.ok(
         Object.prototype.hasOwnProperty.call(row, "receiptScanStatus"),
@@ -46,6 +47,7 @@ test("the payments history exposes a receipt state for every payment", async () 
       );
       if (!row.hasReceipt) {
         assert.equal(row.receiptUrl, undefined);
+        assert.equal(row.receiptScanStatus, null);
       } else {
         assert.equal(typeof row.receiptUrl, "string");
       }
