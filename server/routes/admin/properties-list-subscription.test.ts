@@ -57,9 +57,64 @@ test("admin property list uses the canonical subscription when legacy duplicates
 
     assert.equal(response.status, 200);
     assert.equal(properties.length, 1);
-    assert.equal(properties[0].subscriptionStatus, "suspended");
+    assert.equal(properties[0].subscriptionStatus, "موقوف مؤقتاً");
     assert.equal(properties[0].isSubscriptionExpired, false);
     assert.equal(properties[0].isPremiumActive, false);
+  } finally {
+    propertyService.getAll = originalGetAll;
+    firebaseService.getSubscriptions = originalGetSubscriptions;
+    firebaseService.getMultiPropertySubscriptions =
+      originalGetMultiPropertySubscriptions;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("admin property list computes a future-dated stored expired status as active", async () => {
+  const originalGetAll = propertyService.getAll;
+  const originalGetSubscriptions = firebaseService.getSubscriptions;
+  const originalGetMultiPropertySubscriptions =
+    firebaseService.getMultiPropertySubscriptions;
+
+  (propertyService as any).getAll = async () => [
+    { propertyNumber: "CON-1", name: "Contradictory property" },
+  ];
+  (firebaseService as any).getSubscriptions = async () => [
+    {
+      id: "SUB-CON-1",
+      propertyNumber: "CON-1",
+      packageId: "current",
+      startDate: "2026-11-09T00:00:00.000Z",
+      endDate: "2030-01-01T00:00:00.000Z",
+      status: "منتهي",
+      subscriptionType: "premium",
+      cancelledAt: null,
+      suspendedAt: null,
+    },
+  ];
+  (firebaseService as any).getMultiPropertySubscriptions = async () => [];
+
+  const app = express();
+  app.use(propertiesRouter);
+  const server = app.listen(0, "127.0.0.1");
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/admin/properties`,
+    );
+    const properties = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(properties.length, 1);
+    assert.equal(properties[0].subscriptionStatus, "ساري");
+    assert.equal(properties[0].isSubscriptionExpired, false);
+    assert.equal(properties[0].isPremiumActive, true);
   } finally {
     propertyService.getAll = originalGetAll;
     firebaseService.getSubscriptions = originalGetSubscriptions;

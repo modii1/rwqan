@@ -14,7 +14,7 @@ import { FACILITIES } from "@shared/schema";
 import { useRouter, useSearchParams } from "next/navigation";
 import { normalizeArabicText } from "@/lib/arabicSearch";
 import AdminLinkedPropertiesSection from "./linked-properties";
-import { getSubscriptionTypeLabel, isPremiumSubscriptionType, normalizeSubscriptionStatus } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isPremiumSubscriptionType, isSubscriptionStatusActive, normalizeSubscriptionStatus } from "@shared/subscriptionType";
 import {
   normalizePropertyFacilitySelection,
   togglePropertyFacilitySelection,
@@ -1185,15 +1185,11 @@ export default function PropertiesSection() {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">الحالة:</span>
                 <span className={`font-medium ${
-                  linkedPropertyView.subscription.subscription.status === 'نشط' || 
-                  linkedPropertyView.subscription.subscription.status === 'ساري'
+                  isSubscriptionStatusActive(linkedPropertyView.subscription.subscription.status)
                     ? 'text-green-600'
                     : 'text-red-600'
                 }`}>
-                  {linkedPropertyView.subscription.subscription.status === 'نشط' ? 'نشط' : 
-                   linkedPropertyView.subscription.subscription.status === 'ساري' ? 'ساري' :
-                   linkedPropertyView.subscription.subscription.status === 'منتهي' ? 'منتهي' :
-                   linkedPropertyView.subscription.subscription.status || '-'}
+                  {linkedPropertyView.subscription.subscription.status || '-'}
                 </span>
               </div>
               {linkedPropertyView.subscription.subscription.startDate && (
@@ -1298,8 +1294,8 @@ export default function PropertiesSection() {
                         <Td>{lp.city}</Td>
                         <Td>{lp.type}</Td>
                         <Td>
-                          <Badge className={lp.subscriptionStatus === 'نشط' ? 'bg-green-100 text-green-800 dark:bg-green-900/30' : 'bg-red-100 text-red-800 dark:bg-red-900/30'}>
-                            {lp.subscriptionStatus === 'نشط' ? 'نشط' : lp.subscriptionStatus === 'منتهي' ? 'منتهي' : lp.subscriptionStatus || 'غير نشط'}
+                          <Badge className={isSubscriptionStatusActive(lp.subscriptionStatus) ? 'bg-green-100 text-green-800 dark:bg-green-900/30' : 'bg-red-100 text-red-800 dark:bg-red-900/30'}>
+                            {lp.subscriptionStatus ? normalizeSubscriptionStatus(lp.subscriptionStatus) : 'غير نشط'}
                           </Badge>
                         </Td>
                         <Td>

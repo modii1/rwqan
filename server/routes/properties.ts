@@ -15,7 +15,11 @@ import {
   getMaximumPrimaryPropertyPrice,
   getPrimaryPropertyPrice,
 } from "../../shared/propertyPrice";
-import { getEffectiveSubscriptionType, isActivePremiumSubscription } from "../../shared/subscriptionType";
+import {
+  getEffectiveSubscriptionType,
+  isActivePremiumSubscription,
+  computeSubscriptionStatus,
+} from "../../shared/subscriptionType";
 import { calculateRemainingDays } from "../utils/dateUtils";
 import { requireAdmin, requireSameOrigin } from "./middleware";
 import { hasActivePropertyHold } from "../../shared/propertyAvailability";
@@ -41,10 +45,34 @@ export function toPublicProperty(property: any) {
 }
 
 function isExpiredSubscription(subscription: any): boolean {
-  if (!subscription || subscription.status === "منتهي" || subscription.status === "expired") {
-    return true;
+  if (!subscription) return true;
+
+  // لا تعتمد على الحالة المخزنة وحدها أبدًا — حساب الحالة من كامل حقول الوثيقة.
+  const computed = computeSubscriptionStatus({
+    status: subscription.status,
+    endDate: subscription.endDate,
+    cancelledAt: subscription.cancelledAt,
+    cancelReason: subscription.cancelReason,
+    suspendedAt: subscription.suspendedAt,
+    remainingDurationMs: subscription.remainingDurationMs,
+    startDate: subscription.startDate,
+  });
+
+  // إذا كانت الحالة المحسوبة منتهية → منتهي
+  if (computed === "منتهي") return true;
+
+  // إذا كانت معلقاً مؤقتاً → لا تُعتبر سارية، hence "منتهية" من وجهة العرض العام
+  if (computed === "موقوف مؤقتاً") return true;
+
+  // إذا كانت الحالة المحسوبة غير نشطة → منتهي من وجهة العرض العام
+  if (computed === "غير نشط") return true;
+
+  // إذا كان هناك تاريخ نهاية && صلب → تحقق من الأيام المتبقية مباشرة كشبكة أمان
+  if (subscription.endDate) {
+    return calculateRemainingDays(subscription.endDate) < 0;
   }
-  return !subscription.endDate || calculateRemainingDays(subscription.endDate) < 0;
+
+  return true;
 }
 
 function getPublicSubscriptionFields(subscription: any, isSubscriptionExpired: boolean) {

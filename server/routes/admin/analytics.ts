@@ -3,7 +3,7 @@ import { requireAdmin } from "../middleware";
 import { analyticsService, propertyService, subscriptionService, paymentService, addOnService } from "../../services";
 import { firebaseService } from "../../firebaseService";
 import { updateRemainingDaysInSheet } from "../../scheduler";
-import { isPremiumSubscriptionType } from "../../../shared/subscriptionType";
+import { computeSubscriptionStatus, getEffectiveSubscriptionType, isPremiumSubscriptionType, isSubscriptionStatusActive } from "../../../shared/subscriptionType";
 import { buildContactAnalytics } from "../../services/contactAnalytics";
 import { bookingCommissionService } from "../../services/BookingCommissionService";
 import {
@@ -331,6 +331,21 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
       firebaseService.getSuggestions()
     ]);
 
+    // الحالة الموحدة للاشتراكات: محسوبة من كامل حقول الوثيقة
+    // (status + endDate + cancelledAt + suspendedAt) بدل الاعتماد على الحالة المخزنة فقط.
+    const computeSubscriptionState = (sub: any) =>
+      computeSubscriptionStatus({
+        status: sub?.status,
+        endDate: sub?.endDate,
+        startDate: sub?.startDate,
+        cancelledAt: sub?.cancelledAt,
+        cancelReason: sub?.cancelReason,
+        suspendedAt: sub?.suspendedAt,
+        remainingDurationMs: sub?.remainingDurationMs,
+      });
+    const isSubscriptionEffectivelyActive = (status: string) =>
+      status === "ساري" || status === "ينتهي قريباً" || status === "نشط مجاني";
+
     // 1. عقارات جديدة اليوم (تاريخ الإنشاء - createdAt)
     const newPropertiesToday = properties.filter(p => {
       if (!p.createdAt) return false;
@@ -559,7 +574,8 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     // 6. اشتراكات ستنتهي خلال 7 أيام
     const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const expiringSoon = subscriptions.filter(sub => {
-      if (sub.status !== 'active') return false;
+      const status = computeSubscriptionState(sub);
+      if (!isSubscriptionEffectivelyActive(status)) return false;
       const endDate = new Date(sub.endDate || "");
       return endDate > now && endDate <= sevenDaysLater;
     });
@@ -585,7 +601,8 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
 
     // 7. اشتراكات منتهية حديثاً
     const recentlyExpired = subscriptions.filter(sub => {
-      if (sub.status !== 'expired') return false;
+      const status = computeSubscriptionState(sub);
+      if (status !== "منتهي") return false;
       const endDate = new Date(sub.endDate || "");
       return endDate >= sevenDaysAgo && endDate < now;
     });
@@ -671,18 +688,43 @@ router.get("/api/admin/alerts", requireAdmin, async (req, res) => {
     }
 
     // حساب الإحصائيات - دعم القيم العربية والإنجليزية
-    const activeSubscriptions = subscriptions.filter(s =>
-      s.status === 'active' || s.status === 'نشط'
+    // استخدام الحالة المحسوبة الموحدة (status + endDate + cancelledAt + suspendedAt)
+    const subscriptionStates = subscriptions.map((s) => computeSubscriptionState(s));
+    const activeSubscriptions = subscriptionStates.filter((status) =>
+      isSubscriptionEffectivelyActive(status),
     ).length;
-    const expiredSubscriptions = subscriptions.filter(s =>
-      s.status === 'expired' || s.status === 'منتهي'
+    const expiredSubscriptions = subscriptionStates.filter(
+      (status) => status === "منتهي",
     ).length;
-    const trustedProperties = properties.filter(p =>
-      isPremiumSubscriptionType(p.subscriptionType)
-    ).length;
-    const normalProperties = properties.filter(p =>
-      !isPremiumSubscriptionType(p.subscriptionType)
-    ).length;
+    const trustedProperties = properties.filter(p => {
+      const sub = subscriptions.find((s) => s.propertyNumber === p.propertyNumber);
+      const status = computeSubscriptionState(sub);
+      const isExpired = !sub || status === "منتهي";
+      const effectiveSubscriptionType = sub
+        ? getEffectiveSubscriptionType({
+            subscriptionType: sub.subscriptionType,
+            packageType: sub.packageType,
+            price: (sub as any).price,
+          })
+        : "عادي";
+      return (
+        isPremiumSubscriptionType(effectiveSubscriptionType) &&
+        isSubscriptionStatusActive(status, isExpired)
+      );
+    }).length;
+    const normalProperties = properties.filter(p => {
+      const sub = subscriptions.find((s) => s.propertyNumber === p.propertyNumber);
+      const status = computeSubscriptionState(sub);
+      const isExpired = !sub || status === "منتهي";
+      const effectiveSubscriptionType = sub
+        ? getEffectiveSubscriptionType({
+            subscriptionType: sub.subscriptionType,
+            packageType: sub.packageType,
+            price: (sub as any).price,
+          })
+        : "عادي";
+      return !isPremiumSubscriptionType(effectiveSubscriptionType) || isExpired;
+    }).length;
 
     // مدفوعات اليوم المكتملة فقط للإحصائيات (تتصفر نهاية اليوم)
     const todayCompletedPaymentsStats = payments.filter(p => {

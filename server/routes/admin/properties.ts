@@ -16,6 +16,7 @@ import {
   resolvePaymentPropertyPlan,
 } from "../../utils/paymentScenarioFlow";
 import {
+  computeSubscriptionStatus,
   getEffectiveSubscriptionType,
   getSubscriptionTypeLabel,
   isActivePremiumSubscription,
@@ -38,10 +39,18 @@ import {
 
 const router = Router();
 
-const ACTIVE_LINKED_SUBSCRIPTION_STATUSES = new Set(["نشط", "ساري", "نشط مجاني", "active"]);
-
-function isLinkedSubscriptionActive(status?: string | null): boolean {
-  return ACTIVE_LINKED_SUBSCRIPTION_STATUSES.has(String(status || "").trim());
+function isLinkedSubscriptionActive(subscription?: any): boolean {
+  if (!subscription) return false;
+  const status = computeSubscriptionStatus({
+    status: subscription.status,
+    endDate: subscription.endDate,
+    startDate: subscription.startDate,
+    cancelledAt: subscription.cancelledAt,
+    cancelReason: subscription.cancelReason,
+    suspendedAt: subscription.suspendedAt,
+    remainingDurationMs: subscription.remainingDurationMs,
+  });
+  return status === "ساري" || status === "ينتهي قريباً" || status === "نشط مجاني";
 }
 
 function withoutCommissionHoldUpdates(
@@ -117,7 +126,7 @@ router.get("/api/admin/properties", async (_req, res) => {
     const linkedCountMap: Record<string, number> = {};
     // Source 1: Count via linkedProperty (additional property's subscription points to main)
     for (const sub of subscriptions) {
-      if (sub.linkedProperty && isLinkedSubscriptionActive(sub.status)) {
+      if (sub.linkedProperty && isLinkedSubscriptionActive(sub)) {
         linkedCountMap[sub.linkedProperty] = (linkedCountMap[sub.linkedProperty] || 0) + 1;
       }
     }
@@ -132,7 +141,7 @@ router.get("/api/admin/properties", async (_req, res) => {
     }
     // Source 3: Override with multi_property_subscriptions count if larger
     for (const ms of multiSubs) {
-      if (!isLinkedSubscriptionActive(ms.status)) continue;
+      if (!isLinkedSubscriptionActive(ms)) continue;
       const propSet = new Set<string>([ms.propertyNumber1]);
       if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
       if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
@@ -147,7 +156,18 @@ router.get("/api/admin/properties", async (_req, res) => {
         subscriptions,
         property.propertyNumber,
       );
-      const isExpired = !sub || calculateRemainingDays(sub.endDate) < 0;
+      const computedStatus = sub
+        ? computeSubscriptionStatus({
+            status: sub.status,
+            endDate: sub.endDate,
+            startDate: sub.startDate,
+            cancelledAt: sub.cancelledAt,
+            cancelReason: sub.cancelReason,
+            suspendedAt: sub.suspendedAt,
+            remainingDurationMs: sub.remainingDurationMs,
+          })
+        : "غير نشط";
+      const isExpired = !sub || computedStatus === "منتهي";
       const effectiveSubscriptionType = sub
         ? getEffectiveSubscriptionType({
             subscriptionType: sub.subscriptionType,
@@ -157,13 +177,13 @@ router.get("/api/admin/properties", async (_req, res) => {
         : "عادي";
       const isPremiumActive = isActivePremiumSubscription({
         subscriptionType: effectiveSubscriptionType,
-        status: sub?.status,
+        status: computedStatus,
         isExpired,
       });
       return {
         ...property,
         subscriptionType: isPremiumActive ? "مميز" : "عادي",
-        subscriptionStatus: sub?.status || null,
+        subscriptionStatus: computedStatus,
         isSubscriptionExpired: isExpired,
         isPremiumActive,
         linkedPropertyCount: linkedCountMap[property.propertyNumber] || 0
@@ -189,7 +209,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     
     // Source 1: Subscriptions where linkedProperty points to this property
     for (const sub of subscriptions) {
-      if (sub.linkedProperty === propertyNumber && isLinkedSubscriptionActive(sub.status)) {
+      if (sub.linkedProperty === propertyNumber && isLinkedSubscriptionActive(sub)) {
         linkedPropertyNumbers.add(sub.propertyNumber);
       }
     }
@@ -207,7 +227,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     
     // Source 3: multi_property_subscriptions
     for (const ms of multiSubs) {
-      if (!isLinkedSubscriptionActive(ms.status)) continue;
+      if (!isLinkedSubscriptionActive(ms)) continue;
       const propSet = new Set<string>([ms.propertyNumber1]);
       if (ms.propertyNumber2) propSet.add(ms.propertyNumber2);
       if (ms.additionalProperties) ms.additionalProperties.forEach((ap: string) => propSet.add(ap));
@@ -221,6 +241,17 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
     const linkedProperties = Array.from(linkedPropertyNumbers).map(pn => {
       const prop = allProperties.find((p: any) => p.propertyNumber === pn);
       const sub = subscriptions.find(s => s.propertyNumber === pn);
+      const computedStatus = sub
+        ? computeSubscriptionStatus({
+            status: sub.status,
+            endDate: sub.endDate,
+            startDate: sub.startDate,
+            cancelledAt: sub.cancelledAt,
+            cancelReason: sub.cancelReason,
+            suspendedAt: sub.suspendedAt,
+            remainingDurationMs: sub.remainingDurationMs,
+          })
+        : "غير نشط";
       return {
         propertyNumber: pn,
         name: prop?.name || pn,
@@ -234,7 +265,7 @@ router.get("/api/admin/properties/:propertyNumber/linked-properties", async (req
         facilities: prop?.facilities || [],
         prices: prop?.prices || null,
         subscriptionType: sub?.subscriptionType || prop?.subscriptionType || 'عادي',
-        subscriptionStatus: sub?.status || null,
+        subscriptionStatus: computedStatus,
         startDate: sub?.startDate || null,
         endDate: sub?.endDate || null,
         packageId: sub?.packageId || null,
@@ -1060,7 +1091,7 @@ router.get("/api/admin/additional-property-requests", async (req, res) => {
 
     // Get all linked properties (properties that have linkedProperty set)
     const linkedProperties = subscriptions.filter((s: any) => 
-      s.linkedProperty && isLinkedSubscriptionActive(s.status)
+      s.linkedProperty && isLinkedSubscriptionActive(s)
     );
 
     const linkedRequests = await Promise.all(
@@ -1175,12 +1206,22 @@ router.get("/api/admin/property/:propertyNumber/subscription", async (req, res) 
 
     const property = await firebaseService.getPropertyByNumber(propertyNumber);
     
+    const computedStatus = computeSubscriptionStatus({
+      status: subscription.status,
+      endDate: subscription.endDate,
+      startDate: subscription.startDate,
+      cancelledAt: subscription.cancelledAt,
+      cancelReason: subscription.cancelReason,
+      suspendedAt: subscription.suspendedAt,
+      remainingDurationMs: subscription.remainingDurationMs,
+    });
+
     res.json({
       found: true,
       propertyNumber,
       subscription: {
         subscriptionType: subscription.subscriptionType || subscription.packageType || 'عادي',
-        status: subscription.status,
+        status: computedStatus,
         startDate: subscription.startDate,
         endDate: subscription.endDate,
         packageId: subscription.packageId,

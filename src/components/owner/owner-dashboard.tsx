@@ -51,6 +51,9 @@ import { classifyReceiptError, classifyReceiptScan } from "@/lib/receipt-scan";
 import {
   calculateRemainingDays,
   calculateSubscriptionDuration,
+  getSubscriptionStatusFromRecord,
+  getSubscriptionDisplayLabel,
+  isCancelledSubscription,
 } from "@/lib/subscription-utils";
 import {
   DropdownMenu,
@@ -66,9 +69,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  getSubscriptionTypeLabel,
   isPremiumSubscriptionType,
-  isSubscriptionStatusSuspended,
 } from "@shared/subscriptionType";
 import {
   OwnerMobileNavigation,
@@ -332,9 +333,19 @@ export default function OwnerDashboard() {
     retry: false,
     refetchOnWindowFocus: true,
   });
-  const isSubscriptionSuspended = isSubscriptionStatusSuspended(
-    currentSubscription?.status,
-  );
+  const subscriptionStatusRecord = {
+    status: currentSubscription?.status,
+    endDate: currentSubscription?.endDate,
+    startDate: currentSubscription?.startDate,
+    cancelledAt: currentSubscription?.cancelledAt,
+    suspendedAt: currentSubscription?.suspendedAt,
+    remainingDurationMs: currentSubscription?.remainingDurationMs,
+  };
+  const computedSubscriptionStatus = getSubscriptionStatusFromRecord(subscriptionStatusRecord);
+  const isSubscriptionSuspended = computedSubscriptionStatus === "suspended";
+  const isSubscriptionCancelled = isCancelledSubscription(subscriptionStatusRecord);
+  const isSubscriptionExpired = computedSubscriptionStatus === "expired";
+  const isFreeSubscription = currentSubscription?.status === "نشط مجاني";
 
   // 5.0.1) جلب بيانات الاشتراك للعقار المربوط
   const { data: linkedPropertySubscription } = useQuery<any>({
@@ -914,25 +925,13 @@ export default function OwnerDashboard() {
   // إذا لم تكن موجودة، نحسبها محلياً كـ fallback
   const calculateRemainingDaysLocal = () => {
     if (isSubscriptionSuspended) {
-      const frozenDuration = Number(currentSubscription.remainingDurationMs);
+      const frozenDuration = Number(currentSubscription?.remainingDurationMs);
       return Number.isFinite(frozenDuration)
         ? Math.max(0, Math.ceil(frozenDuration / (24 * 60 * 60 * 1000)))
         : null;
     }
 
-    if (!isPremiumSubscriptionType(property.subscriptionType)) {
-      return null;
-    }
-
-    // أولوية: sheetRemainingDays من الشيت مباشرة
-    if (
-      currentSubscription &&
-      (currentSubscription as any).sheetRemainingDays !== undefined
-    ) {
-      return (currentSubscription as any).sheetRemainingDays;
-    }
-
-    // fallback: حساب محلي إذا لم تكن القيمة موجودة
+    // لا نشترط أن يكون النوع «مميز»: الاشتراك قد يكون عاديًا لكنه منتهٍ.
     if (currentSubscription?.endDate) {
       return calculateRemainingDays(
         currentSubscription.endDate,
@@ -964,16 +963,27 @@ export default function OwnerDashboard() {
       : null;
 
   const isNearExpiry =
-    remainingDays !== null && remainingDays <= 7 && remainingDays >= 0;
+    !isSubscriptionSuspended &&
+    !isSubscriptionExpired &&
+    remainingDays !== null &&
+    remainingDays >= 0 &&
+    remainingDays <= 7;
 
-  const isVip = !isSubscriptionSuspended && isPremiumSubscriptionType(property.subscriptionType) && (remainingDays === null || remainingDays >= 0);
+  const isVip =
+    !isSubscriptionSuspended &&
+    !isSubscriptionCancelled &&
+    isPremiumSubscriptionType(property.subscriptionType) &&
+    (computedSubscriptionStatus === "active" ||
+      computedSubscriptionStatus === "expiring");
 
   // زر واحد ذكي للاشتراك (ترقية / إدارة)
   const subscriptionButtonLabel = isSubscriptionSuspended
     ? "عرض الاشتراك"
-    : isVip
-      ? "إدارة الاشتراك"
-      : "ترقية الاشتراك";
+    : isSubscriptionExpired || isSubscriptionCancelled
+      ? "تجديد الاشتراك"
+      : isVip
+        ? "إدارة الاشتراك"
+        : "ترقية الاشتراك";
 
   const handleComingSoon = () => {
     toast({
@@ -1136,22 +1146,17 @@ export default function OwnerDashboard() {
   const completedPaymentsCount = paymentsData?.filter((payment: any) => payment.status === "مكتمل").length || 0;
   const linkedPropertiesCount = additionalPropertyRequests?.approvedRequests?.length || 0;
   const imageCount = property.imageUrls?.length || 0;
-  const subscriptionStateLabel =
-    isSubscriptionSuspended
-      ? "موقوف مؤقتاً"
-      : remainingDays !== null && remainingDays < 0
-      ? "منتهي"
-      : getSubscriptionTypeLabel(property.subscriptionType);
+  const subscriptionStateLabel = getSubscriptionDisplayLabel(computedSubscriptionStatus, isFreeSubscription);
   const remainingDaysLabel =
     isSubscriptionSuspended && remainingDays !== null
       ? `${remainingDays} يوم محفوظ`
-      : remainingDays === null
-      ? "غير محدد"
-      : remainingDays < 0
+      : isSubscriptionExpired
         ? "منتهي"
-        : remainingDays === 0
-          ? "اليوم الأخير"
-          : `${remainingDays} يوم`;
+        : remainingDays === null
+          ? "غير محدد"
+          : remainingDays === 0
+            ? "اليوم الأخير"
+            : `${remainingDays} يوم`;
   const hasCompletedSmartVerification =
     property.verificationStatus === "approved" ||
     property.verificationStatus === "verified" ||
@@ -1176,7 +1181,7 @@ export default function OwnerDashboard() {
       return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
     })()
     : "غير محدد";
-  const subscriptionProgressValue = remainingDays < 0 ? 100 : (progressPercent ?? 0);
+  const subscriptionProgressValue = isSubscriptionExpired ? 100 : (progressPercent ?? 0);
 
   return (
     <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
@@ -1342,6 +1347,11 @@ export default function OwnerDashboard() {
           <Badge className="gap-1 rounded-md border border-[#d9c37b] bg-[#f4e8bd] text-[#5f4817]">
             <Crown className="h-3 w-3" />
             مميز
+          </Badge>
+        ) : isSubscriptionCancelled ? (
+          <Badge className="gap-1 rounded-md bg-red-600 text-white">
+            <XCircle className="h-3 w-3" />
+            ملغى
           </Badge>
         ) : isSubscriptionSuspended ? (
           <Badge className="gap-1 rounded-md bg-slate-600 text-white">
@@ -1746,7 +1756,7 @@ export default function OwnerDashboard() {
                   variant={isVip ? "default" : "secondary"}
                   className="text-xs md:text-sm px-3 md:px-4 py-1"
                 >
-                  {remainingDays !== null && remainingDays < 0 ? "عادي" : getSubscriptionTypeLabel(property.subscriptionType)}
+                  {subscriptionStateLabel}
                 </Badge>
                 {property.subscriptionDate && (
                   <span className="text-xs text-muted-foreground">
@@ -1775,7 +1785,7 @@ export default function OwnerDashboard() {
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>التقدم</span>
                     <span>
-                      {remainingDays < 0 ? (
+                      {isSubscriptionExpired ? (
                         <span className="font-bold text-red-500">منتهي</span>
                       ) : remainingDays === 0 ? (
                         <span className="font-bold text-orange-500">
@@ -1793,7 +1803,7 @@ export default function OwnerDashboard() {
                     </span>
                   </div>
                   <ProgressBar
-                    value={remainingDays < 0 ? 100 : (progressPercent ?? 0)}
+                    value={isSubscriptionExpired ? 100 : (progressPercent ?? 0)}
                   />
                 </div>
               )}

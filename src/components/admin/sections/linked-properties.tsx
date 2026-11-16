@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Pencil, Trash2, Unlink, Home, Link, Search, Building, Clock, CheckCircle, AlertCircle, Plus, Users, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LinkIcon } from "lucide-react";
-import { getSubscriptionTypeLabel } from "@shared/subscriptionType";
+import { getSubscriptionTypeLabel, isSubscriptionStatusActive, normalizeSubscriptionStatus } from "@shared/subscriptionType";
 
 interface LinkedProperty {
   propertyNumber: string;
@@ -232,16 +232,32 @@ export default function LinkedPropertiesSection() {
   });
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'نشط':
-        return <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">نشط</Badge>;
-      case 'منتهي':
-        return <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">منتهي</Badge>;
-      case 'pending':
-        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">معلق</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
+    const normalized = normalizeSubscriptionStatus(status);
+    const isActive = isSubscriptionStatusActive(status);
+    const isExpiring = normalized === "ينتهي قريباً";
+    const isReviewLike =
+      normalized === "موقوف مؤقتاً" || normalized === "قيد المراجعة" || normalized === "معلق";
+    if (isActive) {
+      return (
+        <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+          {normalized === "نشط مجاني" ? "نشط مجاني" : "ساري"}
+        </Badge>
+      );
     }
+    if (isExpiring) {
+      return (
+        <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+          ينتهي قريباً
+        </Badge>
+      );
+    }
+    if (normalized === "منتهي") {
+      return <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">منتهي</Badge>;
+    }
+    if (isReviewLike) {
+      return <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">{normalized}</Badge>;
+    }
+    return <Badge variant="secondary">{normalized}</Badge>;
   };
 
   const formatDate = (dateStr: string | undefined | null) => {
@@ -320,7 +336,7 @@ export default function LinkedPropertiesSection() {
             </div>
             <div>
               <p className="text-2xl font-bold text-amber-600">
-                {data?.data?.filter(p => p.subscriptionStatus === 'نشط').length || 0}
+                {data?.data?.filter(p => isSubscriptionStatusActive(p.subscriptionStatus)).length || 0}
               </p>
               <p className="text-sm text-amber-700/70">نشط</p>
             </div>

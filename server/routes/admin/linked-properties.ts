@@ -5,7 +5,7 @@ import {
   LinkedPropertyMutationError,
 } from "../../firebaseService";
 import { propertyService } from "../../services";
-import { isSubscriptionStatusActive } from "../../../shared/subscriptionType";
+import { isSubscriptionStatusActive, computeSubscriptionStatus } from "../../../shared/subscriptionType";
 import { calculateRemainingDays } from "../../utils/dateUtils";
 
 const router = Router();
@@ -49,6 +49,18 @@ router.get("/api/admin/linked-properties", async (req, res) => {
         const mainSub = allSubscriptions.find(s => s.propertyNumber === mainPropertyNumber);
         const parentNumber = propNumber === mainPropertyNumber ? null : mainPropertyNumber;
 
+        const computedChildStatus = sub
+          ? computeSubscriptionStatus({
+              status: sub.status,
+              endDate: sub.endDate,
+              startDate: sub.startDate,
+              cancelledAt: sub.cancelledAt,
+              cancelReason: sub.cancelReason,
+              suspendedAt: sub.suspendedAt,
+              remainingDurationMs: sub.remainingDurationMs,
+            })
+          : "غير نشط";
+
         // Detect mismatch between the linked property's state and the main's state
         const childSubType = sub?.subscriptionType || prop?.subscriptionType || "عادي";
         const mainSubType = mainSub?.subscriptionType || mainProp?.subscriptionType || "عادي";
@@ -79,7 +91,7 @@ router.get("/api/admin/linked-properties", async (req, res) => {
           mainEndDate,
           verificationStatus: prop?.verificationStatus,
           isMismatched,
-          subscriptionStatus: sub?.status || "غير مرتبط",
+          subscriptionStatus: sub ? computedChildStatus : "غير مرتبط",
           endDate: childEndDate || mainEndDate || undefined,
           startDate: sub?.startDate || multiSub.startDate || undefined,
           packageId: sub?.packageId || multiSub.packageId || undefined,

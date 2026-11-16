@@ -63,3 +63,11 @@ env:
     secret: projects/rwqan-757/secrets/rwqan-test-paymob-hmac-secret/versions/1
     availability:
       - RUNTIME
+  - variable: ENJAZATIK_URL
+    secret: projects/rwqan-production-v2/secrets/ENJAZATIK_URL/versions/1
+    availability:
+      - RUNTIME
+  - variable: ENJAZATIK_TOKEN
+    secret: projects/rwqan-production-v2/secrets/ENJAZATIK_TOKEN/versions/1
+    availability:
+      - RUNTIME

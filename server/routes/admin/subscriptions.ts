@@ -553,6 +553,15 @@ router.put("/api/admin/subscriptions/:id", async (req, res) => {
       });
     }
 
+    // حماية من التناقض: لا يمكن تعيين "منتهي" لتاريخ انتهاء في المستقبل
+    // إلا إذا كان هناك إلغاء موثق بالفعل (cancelledAt موجود).
+    if (storedStatus === "منتهي" && !isExpiredByDate && !currentSubscription.cancelledAt) {
+      return res.status(400).json({
+        error: "لا يمكن تعيين حالة 'منتهي' لانتهاء مستقبلي دون إلغاء موثق.",
+        nextAction: "حدّث تاريخ الانتهاء إلى تاريخ في الماضي، أو استخدم صفحة الإلغاء لتسجيل إلغاء صريح.",
+      });
+    }
+
     if (storedStatus === "ساري" || storedStatus === "نشط مجاني") {
       baseUpdates.cancelledAt = null;
       baseUpdates.cancelReason = null;

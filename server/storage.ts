@@ -273,9 +273,17 @@ export class FirebaseStorage implements IStorage {
     // This logic might be different in Firebase depending on how automated tasks are handled
     // For now, we update the active subscription
     const sub = await this.getSubscriptionByPropertyNumber(propertyNumber);
-    if (sub) {
-      await this.updateSubscription(sub.id, { status: remainingDays <= 0 ? 'منتهي' : sub.status });
-    }
+    if (!sub) return;
+
+    // لا تُحول إلى "منتهي" إذا كان هناك إلغاء موثق أو تعليق حالي — تُحترم هذه الحالات.
+    const isCancelled = Boolean(sub.cancelledAt);
+    const isSuspended = Boolean(sub.suspendedAt) && sub.remainingDurationMs !== null && sub.remainingDurationMs !== undefined;
+    if (isCancelled || isSuspended) return;
+
+    // إذا كانتremainingDays <= 0 والتاريخ انتهى، يمكن تعيين منتهي.
+    // خلاف ذلك، احتفظ بالحالة الحالية لتجنب التناقض بين status وتاريخ النهاية.
+    const newStatus = remainingDays <= 0 ? 'منتهي' : sub.status;
+    await this.updateSubscription(sub.id, { status: newStatus });
   }
 
   async updateAllSubscriptionsRemainingDays(updates: Array<{ propertyNumber: string; remainingDays: number }>): Promise<number> {

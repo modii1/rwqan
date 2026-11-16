@@ -32,14 +32,13 @@ import {
 import {
   calculateRemainingDays,
   calculateSubscriptionDuration,
-  getSubscriptionStatus,
-  getStatusInfo,
+  getSubscriptionStatusFromRecord,
+  getSubscriptionDisplayLabel,
+  isCancelledSubscription,
   formatDate as formatSubDate,
-  canExtendSubscription,
 } from "@/lib/subscription-utils";
 import {
   isPremiumSubscriptionType,
-  isSubscriptionStatusActive,
   isSubscriptionStatusSuspended,
 } from "@shared/subscriptionType";
 import {
@@ -377,7 +376,6 @@ export default function OwnerSubscriptionPage() {
   const { data: subscription, isLoading: subLoading } = useQuery<any>({
     queryKey: ["/api/owner/current-subscription"],
   });
-  const isSuspended = isSubscriptionStatusSuspended(subscription?.status);
 
   // Fetch available packages
   const { data: rawPackages = [] } = useQuery<any[]>({
@@ -436,7 +434,7 @@ export default function OwnerSubscriptionPage() {
   const runVerification = async () => {
     if (isRunningVerification || hasCompletedSmartVerification) return;
 
-    if (isSuspended) {
+    if (isSubscriptionStatusSuspended(subscription?.status)) {
       toast({
         title: "التحقق موقوف مؤقتاً",
         description:
@@ -549,7 +547,7 @@ export default function OwnerSubscriptionPage() {
 
   // Verify an additional property
   const verifyAdditionalProperty = async (index: number) => {
-    if (isSuspended) {
+    if (isSubscriptionStatusSuspended(subscription?.status)) {
       toast({
         title: "التحقق موقوف مؤقتاً",
         description:
@@ -921,6 +919,21 @@ export default function OwnerSubscriptionPage() {
     }
   };
 
+  // حالة الاشتراك الموحدة — تحترم cancelledAt و suspendedAt وتاريخ النهاية
+  const subscriptionStatusRecord = {
+    status: subscription?.status,
+    endDate: subscription?.endDate,
+    startDate: subscription?.startDate,
+    cancelledAt: subscription?.cancelledAt,
+    suspendedAt: subscription?.suspendedAt,
+    remainingDurationMs: subscription?.remainingDurationMs,
+  };
+  const computedSubscriptionStatus = getSubscriptionStatusFromRecord(subscriptionStatusRecord);
+  const isSuspended = computedSubscriptionStatus === "suspended";
+  const isCancelled = isCancelledSubscription(subscriptionStatusRecord);
+  const isExpired = computedSubscriptionStatus === "expired";
+  const isFreeSubscription = subscription?.status === "نشط مجاني";
+
   // Calculate remaining days using shared subscription-utils
   const frozenRemainingDuration = Number(subscription?.remainingDurationMs);
   const remainingDays = isSuspended && Number.isFinite(frozenRemainingDuration)
@@ -928,63 +941,41 @@ export default function OwnerSubscriptionPage() {
     : subscription?.endDate
       ? calculateRemainingDays(subscription.endDate, subscription?.startDate)
       : 0;
-  
-  const displayDays = Math.max(0, remainingDays);
-  const isExpired = !isSuspended && remainingDays < 0;
+
+  const displayDays = isExpired ? 0 : Math.max(0, remainingDays);
   const hasActiveCurrentSubscription =
     !subscription?.isPlaceholder &&
-    isSubscriptionStatusActive(subscription?.status, isExpired);
+    (computedSubscriptionStatus === "active" ||
+      computedSubscriptionStatus === "expiring" ||
+      isFreeSubscription);
   const isNearExpiry = hasActiveCurrentSubscription
     && !isSuspended
-    && remainingDays >= 0
-    && remainingDays <= 10;
+    && (computedSubscriptionStatus === "expiring" ||
+      (remainingDays >= 0 && remainingDays <= 10));
   const canExtend = Boolean(
     hasActiveCurrentSubscription &&
     !isSuspended &&
     subscription?.endDate &&
-    canExtendSubscription(subscription.endDate, subscription?.status),
+    remainingDays >= 0 &&
+    remainingDays <= 10,
   );
 
   // Subscription duration & status
   const subscriptionDuration = subscription?.startDate && subscription?.endDate
     ? calculateSubscriptionDuration(subscription.startDate, subscription.endDate)
     : 0;
-  
-  // Determine subscription status based on pending payment from check-pending API
-  // AND property verification status
-  let subStatus: string;
-  
-  // A suspended subscription keeps its own lifecycle state regardless of property review.
-  if (isSuspended) {
-    subStatus = 'suspended';
-  }
-  // First check: if property is rejected → show rejected
-  else if (property?.verificationStatus === 'rejected') {
-    console.log("[DEBUG] Property is rejected, showing rejected status");
-    subStatus = 'rejected';
-  }
-  // Second check: if property is pending → show pending
-  else if (property?.verificationStatus === 'pending') {
-    console.log("[DEBUG] Property is pending, showing pending status");
-    subStatus = 'pending';
-  }
-  // Third check: if there's a pending payment → pending (قيد المراجعة)
-  else if (pendingPayment?.hasPending) {
-    console.log("[DEBUG] Has pending payment, showing pending status");
-    subStatus = 'pending';
-  } 
-  // Fourth check: if subscription exists and is active → show based on subscription
-  else if (subscription?.endDate) {
-    // Use the utility function for normal status
-    subStatus = getSubscriptionStatus(subscription.endDate, subscription?.status);
-    console.log("[DEBUG] Using subscription status:", subStatus);
-  } else {
-    // No subscription → inactive (غير نشط)
-    console.log("[DEBUG] No subscription, showing inactive");
-    subStatus = 'inactive';
-  }
-  const statusInfo = getStatusInfo(subStatus as any);
 
+  // حالة الاشتراك فقط — حالة الدفع المعلقة تُعرض منفصلة في شريط مستقل
+  const subStatus: string =
+    computedSubscriptionStatus === "suspended"
+      ? "suspended"
+      : computedSubscriptionStatus === "expired"
+        ? "expired"
+        : computedSubscriptionStatus === "expiring"
+          ? "expiring"
+          : computedSubscriptionStatus === "active"
+            ? "active"
+            : "inactive";
   // Card color mapping based on status
   const getCardColors = (status: string) => {
     const colors: Record<string, { border: string; bg: string; text: string }> = {
@@ -1038,29 +1029,21 @@ export default function OwnerSubscriptionPage() {
     pendingPayment.payment?.status === "مرفوض" &&
     latestOwnerPayment?.status === "مرفوض";
 
-  // Get subscription status with custom Arabic labels for display
-  const getSubscriptionDisplayStatus = () => {
-    const status = subscription?.status;
-    const isFree = status === 'نشط مجاني';
-    
-    if (subStatus === 'expired') {
-      return { label: 'منتهي', bgColor: 'bg-red-500', textColor: 'text-white' };
-    }
-    if (subStatus === 'suspended') {
-      return { label: 'موقوف مؤقتاً', bgColor: 'bg-slate-600', textColor: 'text-white' };
-    }
-    if (subStatus === 'expiring') {
-      return { label: 'ينتهي قريباً', bgColor: 'bg-amber-500', textColor: 'text-white' };
-    }
-    if (isFree) {
-      return { label: 'نشط مجاني', bgColor: 'bg-blue-500', textColor: 'text-white' };
-    }
-    if (subStatus === 'active') {
-      return { label: 'مفعل', bgColor: 'bg-green-500', textColor: 'text-white' };
-    }
-    return { label: 'غير نشط', bgColor: 'bg-gray-400', textColor: 'text-white' };
+  // حالة الاشتراك فقط — لا تتأثر بوجود دفعة معلقة
+  const subscriptionStatusPalette: Record<string, { bgColor: string; textColor: string }> = {
+    active: { bgColor: 'bg-green-500', textColor: 'text-white' },
+    expiring: { bgColor: 'bg-amber-500', textColor: 'text-white' },
+    expired: { bgColor: 'bg-red-500', textColor: 'text-white' },
+    suspended: { bgColor: 'bg-slate-600', textColor: 'text-white' },
+    cancelled: { bgColor: 'bg-gray-500', textColor: 'text-white' },
+    pending: { bgColor: 'bg-amber-500', textColor: 'text-white' },
+    rejected: { bgColor: 'bg-red-600', textColor: 'text-white' },
+    inactive: { bgColor: 'bg-gray-400', textColor: 'text-white' },
   };
-  const subStatusDisplay = getSubscriptionDisplayStatus();
+  const subStatusDisplay = {
+    label: getSubscriptionDisplayLabel(computedSubscriptionStatus, isFreeSubscription),
+    ...(subscriptionStatusPalette[computedSubscriptionStatus] || subscriptionStatusPalette.inactive),
+  };
   const subscriptionStartDate = subscription?.startDate ? new Date(subscription.startDate) : null;
   const subscriptionEndDate = subscription?.endDate ? new Date(subscription.endDate) : null;
   const hasValidSubscriptionDates =
@@ -1136,6 +1119,15 @@ export default function OwnerSubscriptionPage() {
         description: `تم حفظ ${displayedRemainingDays} يوم. لن تُحتسب مدة التوقف، ويستطيع المسؤول استئناف الاشتراك من لوحة الإدارة.`,
         bannerClass: "border-slate-200 bg-slate-50 text-slate-900",
         iconClass: "bg-slate-600 text-white",
+      };
+    }
+    if (isCancelled) {
+      return {
+        tone: "red",
+        title: "تم إلغاء الاشتراك",
+        description: "تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور العقار في المنصة.",
+        bannerClass: "border-red-200 bg-red-50 text-red-900",
+        iconClass: "bg-red-600 text-white",
       };
     }
     if (isExpired) {
@@ -1741,6 +1733,11 @@ export default function OwnerSubscriptionPage() {
                   <Badge variant="outline" className={`${propertyStatusDisplay.className} rounded-md px-3 py-1 text-xs font-bold`}>
                     {propertyStatusDisplay.label}
                   </Badge>
+                  {pendingPayment?.hasPending && (
+                    <Badge className="rounded-md bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+                      دفعة قيد المراجعة
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -1840,6 +1837,11 @@ export default function OwnerSubscriptionPage() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                   <AlertTriangle className="ml-1 inline h-4 w-4" />
                   اشتراكك ينتهي قريباً. يمكنك التمديد لإضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.
+                </div>
+              ) : !hasSubscriptionDateConflict && isCancelled ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  <AlertTriangle className="ml-1 inline h-4 w-4" />
+                  تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور عقارك في المنصة.
                 </div>
               ) : !hasSubscriptionDateConflict && isExpired ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -2017,7 +2019,9 @@ export default function OwnerSubscriptionPage() {
           {isExpired && (
             <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               <AlertTriangle className="w-4 h-4 inline ml-1" />
-              اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة.
+              {isCancelled
+                ? "تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور عقارك في المنصة."
+                : "اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة."}
             </div>
           )}
 
