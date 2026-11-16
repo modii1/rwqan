@@ -4,6 +4,7 @@
  * - حساب الأيام المتبقية
  * - تحديد حالة الاشتراك
  */
+import { computeSubscriptionStatus } from "@shared/subscriptionType";
 
 /**
  * تحويل تاريخ من أي صيغة إلى Date object آمن
@@ -187,6 +188,95 @@ export function getSubscriptionStatus(
   return 'active';
 }
    
+export interface SubscriptionStatusRecord {
+  status?: string | null;
+  endDate?: string | null;
+  startDate?: string | null;
+  cancelledAt?: string | null;
+  suspendedAt?: string | null;
+  remainingDurationMs?: number | null;
+}
+
+/**
+ * هل الوثيقة تحمل إلغاءً صريحًا لم يُستبدل بإعادة تفعيل؟
+ * إعادة التفعيل المعتمدة في المشروع هي أن يكون startDate بعد cancelledAt.
+ */
+export function isCancelledSubscription(record: SubscriptionStatusRecord): boolean {
+  const cancelledAt = record.cancelledAt ? parseDate(record.cancelledAt) : null;
+  if (!cancelledAt) return false;
+  const start = record.startDate ? parseDate(record.startDate) : null;
+  if (!start) return true;
+  return start.getTime() <= cancelledAt.getTime();
+}
+
+/**
+ * حالة الاشتراك الموحدة من سجل الاشتراك الكامل.
+ * تعتمد على computeSubscriptionStatus (التي تحترم cancelledAt و suspendedAt
+ * وتاريخ النهاية) بدلًا من endDate وحدها أو status المخزنة وحدها.
+ */
+export function getSubscriptionStatusFromRecord(
+  record: SubscriptionStatusRecord,
+): SubscriptionStatus {
+  const computed = computeSubscriptionStatus({
+    status: record.status,
+    endDate: record.endDate,
+    startDate: record.startDate,
+    cancelledAt: record.cancelledAt,
+    suspendedAt: record.suspendedAt,
+    remainingDurationMs: record.remainingDurationMs,
+  });
+
+  switch (computed) {
+    case "ساري":
+      return "active";
+    case "ينتهي قريباً":
+      return "expiring";
+    case "منتهي":
+      return "expired";
+    case "موقوف مؤقتاً":
+      return "suspended";
+    case "نشط مجاني":
+      return "active";
+    case "قيد المراجعة":
+    case "معلق":
+      return "pending";
+    case "موقوف":
+      return "cancelled";
+    case "مرفوض":
+      return "rejected";
+    default:
+      return "inactive";
+  }
+}
+
+/**
+ * تسمية عربية موحدة لحالة الاشتراك.
+ * حالة الدفع المعلقة ليست جزءًا من هذه الدالة — تُعرض منفصلة.
+ */
+export function getSubscriptionDisplayLabel(
+  status: SubscriptionStatus,
+  isFree = false,
+): string {
+  switch (status) {
+    case "active":
+      return isFree ? "نشط مجاني" : "ساري";
+    case "expiring":
+      return "ينتهي قريباً";
+    case "expired":
+      return "منتهي";
+    case "suspended":
+      return "موقوف مؤقتاً";
+    case "cancelled":
+      return "ملغى";
+    case "pending":
+      return "قيد المراجعة";
+    case "rejected":
+      return "مرفوض";
+    default:
+      return "غير نشط";
+  }
+}
+
 /**
  * معلومات حالة الاشتراك للعرض
  */
