@@ -761,7 +761,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent dir="rtl" className="sm:max-w-[560px]">
+        <DialogContent dir="rtl" className="sm:max-w-[560px] lg:w-[calc(100%-2rem)] lg:max-w-3xl lg:max-h-[90vh] lg:overflow-y-auto 2xl:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-[#b88d2b]">
               <Pencil className="w-5 h-5" />
@@ -884,7 +884,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Suspend / resume dialog */}
       <Dialog open={lifecycleDialogOpen} onOpenChange={setLifecycleDialogOpen}>
-        <DialogContent dir="rtl" className="sm:max-w-[480px]">
+        <DialogContent dir="rtl" className="sm:max-w-[480px] lg:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {lifecycleAction === "suspend" ? (
@@ -957,7 +957,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Cancel Dialog */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <XCircle className="w-5 h-5" />
@@ -1010,7 +1010,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Notify Dialog */}
       <Dialog open={notifyDialogOpen} onOpenChange={setNotifyDialogOpen}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-green-600">
               <MessageSquare className="w-5 h-5" />
@@ -1080,7 +1080,7 @@ export default function AdminSubscriptionsSection() {
 
       {/* Bulk Notify Dialog */}
       <Dialog open={bulkNotifyDialogOpen} onOpenChange={setBulkNotifyDialogOpen}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-green-600">
               <Send className="w-5 h-5" />

@@ -174,7 +174,7 @@ export default function AdminBackup() {
             إنشاء نسخة احتياطية جديدة
           </Button>
         </DialogTrigger>
-        <DialogContent dir="rtl" className="max-w-md">
+        <DialogContent dir="rtl" className="max-w-md lg:w-[calc(100%-2rem)] lg:max-w-3xl">
           <DialogHeader>
             <DialogTitle>إنشاء نسخة احتياطية</DialogTitle>
             <DialogDescription>

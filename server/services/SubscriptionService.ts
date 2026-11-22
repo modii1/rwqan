@@ -369,6 +369,12 @@ export class SubscriptionService {
     return firebaseService.getPackages();
   }
 
+  async getPackagesForAudience(
+    audience: "public" | "owner",
+  ): Promise<Package[]> {
+    return firebaseService.getPackagesForAudience(audience);
+  }
+
   async getPackageById(id: string): Promise<Package | null> {
     return firebaseService.getPackageById(id);
   }

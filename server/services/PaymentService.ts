@@ -298,7 +298,11 @@ export class PaymentService {
       propertyPlan.kept,
     );
     const calculatedDates = await runAdminApprovalStage(
-      () => calculateActionDates((payment as any).action, currentSub, pkg.duration),
+      () => calculateActionDates(
+        (payment as any).action,
+        currentSub,
+        Number((payment as any).durationDays) || pkg.duration,
+      ),
       {
         status: 500,
         code: "SUBSCRIPTION_PREPARATION_FAILED",
@@ -1164,6 +1168,12 @@ export class PaymentService {
         packageType: subscriptionType,
         linkedProperties: additionalProps.length > 0 ? additionalProps : undefined,
         propertyCount: 1 + additionalProps.length,
+        billingPeriod: (payment as any).billingPeriod,
+        durationDays: (payment as any).durationDays,
+        packageName: (payment as any).packageName,
+        basePrice: (payment as any).basePrice,
+        discountAmount: (payment as any).discountAmount,
+        packageDiscountAmount: (payment as any).packageDiscountAmount,
       };
 
       await firebaseService.addSubscriptionToSheet(

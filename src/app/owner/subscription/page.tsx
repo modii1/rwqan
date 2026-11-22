@@ -1,5 +1,5 @@
-"use client";
-import { useEffect, useState, useRef, useCallback } from "react";
+﻿"use client";
+import { useEffect, useState, useRef, useCallback, type CSSProperties } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
@@ -9,12 +9,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { PriceDisplay } from "@/components/price-display";
+import { OwnerPaymentSummary } from "@/components/owner/owner-payment-summary";
+import { FeatureIcon } from "@/components/feature-icon";
+import { normalizePackageFeatures } from "@shared/packageFeatures";
 import { formatDiscount } from "@/lib/currency";
 import { Progress } from "@/components/ui/progress";
 import {
-  Crown, CreditCard, Check, ChevronRight, Clock, Home,
-  Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft,
-  Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2, PauseCircle,
+  Crown, CreditCard, Check, ChevronRight, ChevronLeft, Clock, Home,
+  Star, Zap, Upload, AlertTriangle, RefreshCcw, CheckCircle2, Phone, ArrowLeft, Edit3, MessageCircle, ShieldCheck,
+  Calendar, Timer, Banknote, Info, X, Loader2, Plus, Trash2, PauseCircle, Image as ImageIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ReceiptScanOverlay } from "@/components/receipt-scan-overlay";
@@ -46,13 +49,25 @@ import {
   OwnerPageHeader,
   OwnerPageMain,
 } from "@/components/owner/owner-page";
+import {
+  OwnerInput,
+  OwnerStatCard,
+  OwnerAlert,
+  OwnerEmptyState,
+  ownerPanelClass,
+  ownerPrimaryButtonClass,
+  ownerSecondaryButtonClass,
+} from "@/components/owner/owner-ui";
 import { runOwnerManualVerification } from "@/lib/owner-verification";
 import { getOwnerPendingPaymentRefetchInterval } from "@/lib/workflow-query-refresh";
 import { getOwnerLoginUrl } from "@/lib/owner-login-redirect";
 import {
   calculateSubscriptionPrice,
+  calculateSubscriptionPriceForPeriod,
+  getPackageBillingOption,
   getIncludedPropertyCount,
   getMaximumPropertyCount,
+  type BillingPeriod,
 } from "@shared/subscriptionPricing";
 
 type ReceiptUploadError = Error & { code?: string; status?: number };
@@ -146,7 +161,46 @@ export default function OwnerSubscriptionPage() {
   const { toast } = useToast();
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  // Each subscription step brings its content into view. The visual step bar
+  // was removed, so the page scrolls to the relevant card instead.
+  const didMountStepScroll = useRef(false);
+  useEffect(() => {
+    if (!didMountStepScroll.current) {
+      didMountStepScroll.current = true;
+      return;
+    }
+    const targetId =
+      currentStep === 1
+        ? "packages-section"
+        : currentStep === 2
+          ? "owner-subscription-step-2"
+          : "owner-subscription-step-3";
+    const target = document.getElementById(targetId);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [currentStep]);
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem("owner-billing-period") === "quarterly") {
+        setBillingPeriod("quarterly");
+      }
+    } catch {
+      // ignore storage restrictions
+    }
+  }, []);
+  const changeBillingPeriod = (period: BillingPeriod) => {
+    setBillingPeriod(period);
+    try {
+      window.sessionStorage.setItem("owner-billing-period", period);
+    } catch {
+      // ignore storage restrictions
+    }
+  };
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [action, setAction] = useState<"new" | "upgrade" | "extend">("upgrade");
   const [paymentMethod, setPaymentMethod] = useState<"online" | "bank" | null>(null);
@@ -343,6 +397,19 @@ export default function OwnerSubscriptionPage() {
   const [addOnAiScanResult, setAddOnAiScanResult] = useState<any>(null);
   const [unlinkPropertyDialog, setUnlinkPropertyDialog] = useState<{ open: boolean; propertyNumber: string; propertyName: string }>({ open: false, propertyNumber: "", propertyName: "" });
 
+  // Payment-history actions (moved from the dashboard): retry, upload receipt, verify.
+  const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState<any>(null);
+  const [showReceiptDialog, setShowReceiptDialog] = useState(false);
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
+  const [paymentReceiptFeedback, setPaymentReceiptFeedback] = useState<{
+    title: string;
+    message: string;
+    tone: "error" | "review";
+  } | null>(null);
+  const [isUploadingPaymentReceipt, setIsUploadingPaymentReceipt] = useState(false);
+  const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
+  const paymentReceiptInputRef = useRef<HTMLInputElement>(null);
+
   interface AIScanResult {
     recommendation: string;
     confidence: number;
@@ -377,9 +444,9 @@ export default function OwnerSubscriptionPage() {
     queryKey: ["/api/owner/current-subscription"],
   });
 
-  // Fetch available packages
+  // Fetch packages available to the owner audience
   const { data: rawPackages = [] } = useQuery<any[]>({
-    queryKey: ["/api/packages"],
+    queryKey: ["/api/owner/packages"],
   });
 
   // Deduplicate packages
@@ -424,6 +491,132 @@ export default function OwnerSubscriptionPage() {
     queryKey: ["/api/owner/payments"],
     enabled: !!property?.propertyNumber,
   });
+
+  // Deep-link support: scroll to the requested subscription section
+  // (e.g. /owner/subscription#payments-section from the dashboard).
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (!hash) return;
+    let attempts = 0;
+    const laterTimers: ReturnType<typeof setTimeout>[] = [];
+    const timer = setInterval(() => {
+      const el = document.getElementById(hash);
+      if (el) {
+        el.scrollIntoView({ block: "start" });
+        clearInterval(timer);
+        // Re-align after late layout shifts (fonts, package cards, images).
+        laterTimers.push(
+          setTimeout(() => el.scrollIntoView({ block: "start" }), 600),
+        );
+        laterTimers.push(
+          setTimeout(() => el.scrollIntoView({ block: "start" }), 1300),
+        );
+      } else if (++attempts > 20) {
+        clearInterval(timer);
+      }
+    }, 150);
+    return () => {
+      clearInterval(timer);
+      laterTimers.forEach(clearTimeout);
+    };
+  }, []);
+
+  // Payment-history actions (same endpoints as the dashboard).
+  const retryPaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const response = await apiRequest("POST", "/api/owner/payment/retry", { paymentId });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.checkoutUrl) window.location.href = data.checkoutUrl;
+    },
+    onError: (error: any) => {
+      toast({
+        title: "خطأ",
+        description: error?.message || "تعذر إعادة الدفع",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const verifyPaymentMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const response = await fetch(
+        `/api/payment/verify-status/${encodeURIComponent(paymentId)}`,
+      );
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.verified) {
+        toast({
+          title: "تم التحقق بنجاح",
+          description: data?.message || "تم تأكيد الدفع",
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/owner/current-subscription"] });
+      } else {
+        toast({
+          title: "لم يتم التأكيد",
+          description: data?.message || "الدفعة لم تكتمل بعد",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "خطأ",
+        description: error?.message || "تعذر التحقق من الدفع",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handlePaymentReceiptUpload = async () => {
+    if (!paymentReceiptFile || !selectedPaymentForReceipt) return;
+    setIsUploadingPaymentReceipt(true);
+    setPaymentReceiptFeedback(null);
+    try {
+      const formData = new FormData();
+      formData.append("paymentId", selectedPaymentForReceipt.id);
+      formData.append("receipt", paymentReceiptFile);
+      const response = await fetch("/api/owner/payment/upload-receipt", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const info = classifyReceiptError({
+          message: result?.error,
+          code: result?.code,
+          status: response.status,
+        });
+        setPaymentReceiptFeedback({ title: info.title, message: info.message, tone: "error" });
+        toast({ title: info.title, description: info.message, variant: "destructive" });
+        await queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/owner/payments"] });
+      setPaymentReceiptFeedback({
+        title: "تم رفع الإيصال",
+        message: "تم رفع الإيصال وسيتم مراجعته من الإدارة.",
+        tone: "review",
+      });
+      toast({
+        title: "تم رفع الإيصال",
+        description: "سيتم مراجعته من الإدارة.",
+      });
+      setShowReceiptDialog(false);
+      setSelectedPaymentForReceipt(null);
+      setPaymentReceiptFile(null);
+    } catch (error: any) {
+      const info = classifyReceiptError(error);
+      setPaymentReceiptFeedback({ title: info.title, message: info.message, tone: "error" });
+      toast({ title: info.title, description: info.message, variant: "destructive" });
+    } finally {
+      setIsUploadingPaymentReceipt(false);
+    }
+  };
 
   // Owner self-service smart verification
   const [isRunningVerification, setIsRunningVerification] = useState(false);
@@ -491,11 +684,22 @@ export default function OwnerSubscriptionPage() {
     ? getMaximumPropertyCount(selectedPackage)
     : 1;
   const selectedPackagePricing = selectedPackage
-    ? calculateSubscriptionPrice(
+    ? calculateSubscriptionPriceForPeriod(
         selectedPackage,
         Math.min(plannedPropertyCount, selectedPackageMaxProperties),
+        billingPeriod,
       )
     : null;
+  const selectedBillingOption = selectedPackage
+    ? getPackageBillingOption(selectedPackage, billingPeriod)
+    : null;
+  const selectedAdditionalTotal = selectedPackagePricing
+    ? selectedPackagePricing.additionalPropertyCount *
+      selectedPackagePricing.additionalPropertyPrice
+    : 0;
+  const selectedOriginalTotal = selectedBillingOption
+    ? selectedBillingOption.originalPrice + selectedAdditionalTotal
+    : selectedPackagePricing?.total || 0;
   const selectedPackageIncludedProperties = selectedPackage
     ? getIncludedPropertyCount(selectedPackage)
     : 1;
@@ -629,7 +833,7 @@ export default function OwnerSubscriptionPage() {
 
   // Initiate card payment
   const cardPaymentMutation = useMutation({
-    mutationFn: async (data: { packageId: string; action: string; discountCode?: string }) => {
+    mutationFn: async (data: { packageId: string; action: string; billingPeriod: BillingPeriod; discountCode?: string }) => {
       const verifiedProperties = additionalProperties.filter(p => p.verified).map(p => p.number);
       const res = await fetch("/api/owner/payment/initiate", {
         method: "POST",
@@ -638,6 +842,7 @@ export default function OwnerSubscriptionPage() {
           propertyNumber: property?.propertyNumber,
           packageId: data.packageId,
           action: data.action,
+          billingPeriod: data.billingPeriod,
           paymentMethod: "cards",
           discountCode: data.discountCode || "",
           additionalProperties: verifiedProperties.length > 0 ? verifiedProperties : undefined,
@@ -670,13 +875,14 @@ export default function OwnerSubscriptionPage() {
 
   // Bank transfer payment
   const bankTransferMutation = useMutation({
-    mutationFn: async (data: { packageId: string; action: string; receipt: File; discountCode?: string }) => {
+    mutationFn: async (data: { packageId: string; action: string; billingPeriod: BillingPeriod; receipt: File; discountCode?: string }) => {
       setBankTransferResult(null);
       setPaymentSuccess(false);
       const formData = new FormData();
       formData.append("propertyNumber", property?.propertyNumber || "");
       formData.append("packageId", data.packageId);
       formData.append("action", data.action);
+      formData.append("billingPeriod", data.billingPeriod);
       formData.append("receipt", data.receipt);
       if (data.discountCode) formData.append("discountCode", data.discountCode);
       const verifiedProperties = additionalProperties.filter(p => p.verified).map(p => p.number);
@@ -863,39 +1069,49 @@ export default function OwnerSubscriptionPage() {
     },
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPackageId) return;
-
+  const ensureAdditionalPropertiesReady = () => {
     // Check if selected package requires additional property
     const isMultiPropertyPackage = selectedPackage && (
-      (selectedPackage as any).maxProperties > 1 || 
-      selectedPackage.propertyCount === 2 || 
+      (selectedPackage as any).maxProperties > 1 ||
+      selectedPackage.propertyCount === 2 ||
       selectedPackage.id === 'pkg-month-2properties'
     );
-    
+
     if (
       isMultiPropertyPackage &&
       action !== "extend" &&
       missingIncludedProperties > 0
     ) {
       setShowAdditionalPropertyError(true);
-      toast({ 
-        title: "خطأ في البيانات", 
+      toast({
+        title: "خطأ في البيانات",
         description: `يجب إضافة ${missingIncludedProperties === 1 ? "عقار إضافي واحد" : `${missingIncludedProperties} عقارات إضافية`} لهذه الباقة`,
-        variant: "destructive" 
+        variant: "destructive"
       });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const goToOwnerPaymentStep = () => {
+    if (!ensureAdditionalPropertiesReady()) return;
+    setCurrentStep(3);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPackageId) return;
+
+    if (!ensureAdditionalPropertiesReady()) return;
 
     if (paymentMethod === "online") {
-      cardPaymentMutation.mutate({ packageId: selectedPackageId, action, discountCode: validatedDiscount?.code });
+      cardPaymentMutation.mutate({ packageId: selectedPackageId, action, billingPeriod, discountCode: validatedDiscount?.code });
     } else if (paymentMethod === "bank") {
       if (!receiptFile) {
         toast({ title: "مطلوب", description: "يرجى رفع إيصال التحويل", variant: "destructive" });
         return;
       }
-      bankTransferMutation.mutate({ packageId: selectedPackageId, action, receipt: receiptFile, discountCode: validatedDiscount?.code });
+      bankTransferMutation.mutate({ packageId: selectedPackageId, action, billingPeriod, receipt: receiptFile, discountCode: validatedDiscount?.code });
     }
   };
 
@@ -979,14 +1195,14 @@ export default function OwnerSubscriptionPage() {
   // Card color mapping based on status
   const getCardColors = (status: string) => {
     const colors: Record<string, { border: string; bg: string; text: string }> = {
-      active: { border: 'border-green-500', bg: 'bg-green-50', text: 'text-green-700' },
-      expiring: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
-      expired: { border: 'border-red-400', bg: 'bg-red-50', text: 'text-red-700' },
-      suspended: { border: 'border-slate-400', bg: 'bg-slate-50', text: 'text-slate-700' },
-      cancelled: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
-      pending: { border: 'border-amber-400', bg: 'bg-amber-50', text: 'text-amber-700' },
-      inactive: { border: 'border-gray-400', bg: 'bg-gray-50', text: 'text-gray-700' },
-      rejected: { border: 'border-red-600', bg: 'bg-red-50', text: 'text-red-700' },
+      active: { border: 'border-[#cfe5d6]', bg: 'bg-[#f6fbf7]', text: 'text-[#126b38]' },
+      expiring: { border: 'border-[#e2d3a6]', bg: 'bg-[#fdf6e3]', text: 'text-[#80621d]' },
+      expired: { border: 'border-[#f1c8c8]', bg: 'bg-[#fff5f5]', text: 'text-[#b42318]' },
+      suspended: { border: 'border-[#e6ddc9]', bg: 'bg-[#fffdf8]', text: 'text-[#6f685b]' },
+      cancelled: { border: 'border-[#d9cfb8]', bg: 'bg-[#fafaf7]', text: 'text-[#6f685b]' },
+      pending: { border: 'border-[#e2d3a6]', bg: 'bg-[#fdf6e3]', text: 'text-[#80621d]' },
+      inactive: { border: 'border-[#d9cfb8]', bg: 'bg-[#fafaf7]', text: 'text-[#6f685b]' },
+      rejected: { border: 'border-[#f1c8c8]', bg: 'bg-[#fff5f5]', text: 'text-[#b42318]' },
     };
     return colors[status] || colors.expired;
   };
@@ -1031,14 +1247,14 @@ export default function OwnerSubscriptionPage() {
 
   // حالة الاشتراك فقط — لا تتأثر بوجود دفعة معلقة
   const subscriptionStatusPalette: Record<string, { bgColor: string; textColor: string }> = {
-    active: { bgColor: 'bg-green-500', textColor: 'text-white' },
-    expiring: { bgColor: 'bg-amber-500', textColor: 'text-white' },
-    expired: { bgColor: 'bg-red-500', textColor: 'text-white' },
-    suspended: { bgColor: 'bg-slate-600', textColor: 'text-white' },
-    cancelled: { bgColor: 'bg-gray-500', textColor: 'text-white' },
-    pending: { bgColor: 'bg-amber-500', textColor: 'text-white' },
-    rejected: { bgColor: 'bg-red-600', textColor: 'text-white' },
-    inactive: { bgColor: 'bg-gray-400', textColor: 'text-white' },
+    active: { bgColor: 'bg-[#f6fbf7]', textColor: 'text-[#126b38]' },
+    expiring: { bgColor: 'bg-[#fdf6e3]', textColor: 'text-[#80621d]' },
+    expired: { bgColor: 'bg-[#fff5f5]', textColor: 'text-[#b42318]' },
+    suspended: { bgColor: 'bg-[#29372f]', textColor: 'text-white' },
+    cancelled: { bgColor: 'bg-[#6f685b]', textColor: 'text-white' },
+    pending: { bgColor: 'bg-[#fdf6e3]', textColor: 'text-[#80621d]' },
+    rejected: { bgColor: 'bg-[#fff5f5]', textColor: 'text-[#b42318]' },
+    inactive: { bgColor: 'bg-[#6f685b]', textColor: 'text-white' },
   };
   const subStatusDisplay = {
     label: getSubscriptionDisplayLabel(computedSubscriptionStatus, isFreeSubscription),
@@ -1070,14 +1286,43 @@ export default function OwnerSubscriptionPage() {
     !hasValidSubscriptionDates || hasSubscriptionDateConflict || isExpired || subscriptionDuration <= 0
       ? 0
       : Math.max(5, Math.min(100, (remainingDays / Math.max(1, subscriptionDuration)) * 100));
+
+  // ===== عرض موحّد لصفحة الاشتراك =====
+  // الباقة المجانية تُعرض باسم «مجانية» وحالة «مجاني» — لا تُعرض «ساري» أبداً.
+  const isFreePlan =
+    isFreeSubscription ||
+    subscription?.packageId === "pkg-free" ||
+    (currentPackageObj ? Number(currentPackageObj.price) === 0 : false);
+  const planName = isFreePlan ? "مجانية" : currentPackageObj?.name || getPackageName(subscription?.packageId);
+  const planDurationDays = currentPackageObj?.duration || subscriptionDuration || null;
+  const subscriptionStateText = isSuspended
+    ? "موقوف"
+    : isCancelled
+      ? "ملغي"
+      : isExpired
+        ? "منتهي"
+        : computedSubscriptionStatus === "pending"
+          ? "قيد المراجعة"
+          : isFreePlan
+            ? "مجاني"
+            : hasActiveCurrentSubscription
+              ? "ساري"
+              : "غير نشط";
+  // شريط المدة: نسبة المدة المنقضية (0% في البداية) وليست المتبقية.
+  const elapsedDays = Math.max(0, subscriptionDuration - displayedRemainingDays);
+  const elapsedPercent =
+    hasValidSubscriptionDates && !hasSubscriptionDateConflict && subscriptionDuration > 0
+      ? Math.max(0, Math.min(100, (elapsedDays / subscriptionDuration) * 100))
+      : 0;
+  const remainingPercent = Math.max(0, Math.min(100, 100 - elapsedPercent));
   const propertyStatusDisplay = (() => {
     switch (property?.verificationStatus) {
       case "approved":
-        return { label: "العقار معتمد", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+        return { label: "العقار معتمد", className: "border-[#cfe5d6] bg-[#f6fbf7] text-[#126b38]" };
       case "pending":
-        return { label: "العقار قيد الاعتماد", className: "border-amber-200 bg-amber-50 text-amber-700" };
+        return { label: "العقار قيد الاعتماد", className: "border-[#e2d3a6] bg-[#fdf6e3] text-[#80621d]" };
       case "rejected":
-        return { label: "العقار مرفوض", className: "border-red-200 bg-red-50 text-red-700" };
+        return { label: "العقار مرفوض", className: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]" };
       default:
         return { label: "حالة العقار غير محددة", className: "border-stone-200 bg-stone-50 text-stone-700" };
     }
@@ -1090,8 +1335,8 @@ export default function OwnerSubscriptionPage() {
         tone: "red",
         title: "العقار غير ظاهر حالياً",
         description: "تم رفض اعتماد بيانات العقار. راجع السبب وعدل البيانات قبل متابعة الاشتراك.",
-        bannerClass: "border-red-200 bg-red-50 text-red-900",
-        iconClass: "bg-red-600 text-white",
+        bannerClass: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]",
+        iconClass: "bg-[#b42318] text-white",
       };
     }
     if (property?.verificationStatus === "pending") {
@@ -1099,8 +1344,8 @@ export default function OwnerSubscriptionPage() {
         tone: "amber",
         title: "العقار بانتظار الاعتماد",
         description: "الاشتراك لا يعني ظهور العقار قبل اكتمال اعتماد بيانات العقار من الإدارة.",
-        bannerClass: "border-amber-200 bg-amber-50 text-amber-900",
-        iconClass: "bg-amber-500 text-white",
+        bannerClass: "border-[#e2d3a6] bg-[#fdf6e3] text-[#80621d]",
+        iconClass: "bg-[#fdf6e3] text-white",
       };
     }
     if (hasSubscriptionDateConflict) {
@@ -1108,8 +1353,8 @@ export default function OwnerSubscriptionPage() {
         tone: "red",
         title: "تنبيه في تواريخ الاشتراك",
         description: "حالة الاشتراك وحالة العقار كما هي في النظام، لكن الأيام المتبقية لا يمكن حسابها لأن تاريخ البداية بعد تاريخ الانتهاء.",
-        bannerClass: "border-red-200 bg-red-50 text-red-900",
-        iconClass: "bg-red-600 text-white",
+        bannerClass: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]",
+        iconClass: "bg-[#b42318] text-white",
       };
     }
     if (isSuspended) {
@@ -1117,8 +1362,8 @@ export default function OwnerSubscriptionPage() {
         tone: "neutral",
         title: "الاشتراك موقوف مؤقتاً",
         description: `تم حفظ ${displayedRemainingDays} يوم. لن تُحتسب مدة التوقف، ويستطيع المسؤول استئناف الاشتراك من لوحة الإدارة.`,
-        bannerClass: "border-slate-200 bg-slate-50 text-slate-900",
-        iconClass: "bg-slate-600 text-white",
+        bannerClass: "border-[#e6ddc9] bg-[#fffdf8] text-[#293129]",
+        iconClass: "bg-[#29372f] text-white",
       };
     }
     if (isCancelled) {
@@ -1126,8 +1371,8 @@ export default function OwnerSubscriptionPage() {
         tone: "red",
         title: "تم إلغاء الاشتراك",
         description: "تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور العقار في المنصة.",
-        bannerClass: "border-red-200 bg-red-50 text-red-900",
-        iconClass: "bg-red-600 text-white",
+        bannerClass: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]",
+        iconClass: "bg-[#b42318] text-white",
       };
     }
     if (isExpired) {
@@ -1135,8 +1380,8 @@ export default function OwnerSubscriptionPage() {
         tone: "red",
         title: "ظهور العقار متوقف",
         description: "الاشتراك منتهي. قم بالتجديد لإعادة ظهور العقار في المنصة.",
-        bannerClass: "border-red-200 bg-red-50 text-red-900",
-        iconClass: "bg-red-600 text-white",
+        bannerClass: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]",
+        iconClass: "bg-[#b42318] text-white",
       };
     }
     if (isNearExpiry) {
@@ -1144,8 +1389,8 @@ export default function OwnerSubscriptionPage() {
         tone: "amber",
         title: "الاشتراك ينتهي قريباً",
         description: "يمكنك التجديد الآن لأن المتبقي 10 أيام أو أقل. التجديد يضيف المدة بعد تاريخ الانتهاء الحالي.",
-        bannerClass: "border-amber-200 bg-amber-50 text-amber-900",
-        iconClass: "bg-amber-500 text-white",
+        bannerClass: "border-[#e2d3a6] bg-[#fdf6e3] text-[#80621d]",
+        iconClass: "bg-[#fdf6e3] text-white",
       };
     }
     if (subStatus === "active") {
@@ -1153,8 +1398,8 @@ export default function OwnerSubscriptionPage() {
         tone: "green",
         title: "العقار ظاهر في المنصة",
         description: "الاشتراك نشط وبيانات العقار معتمدة حالياً.",
-        bannerClass: "border-emerald-200 bg-emerald-50 text-emerald-900",
-        iconClass: "bg-emerald-600 text-white",
+        bannerClass: "border-[#cfe5d6] bg-[#f6fbf7] text-[#126b38]",
+        iconClass: "bg-[#128c47] text-white",
       };
     }
     return {
@@ -1169,19 +1414,63 @@ export default function OwnerSubscriptionPage() {
   // Filter packages - show upgradable ones
   const availablePackages = packages.filter((pkg: any) => {
     if (!pkg.isActive) return false;
-    if (pkg.price === 0) return false;
+    if (pkg.isVisible === false) return false;
     return true;
   });
+  const packagesForPeriod = availablePackages.filter((pkg: any) => {
+    const option = getPackageBillingOption(pkg, billingPeriod);
+    return option.enabled && option.originalPrice > 0;
+  });
+  const recommendedPackage = packagesForPeriod.find(
+    (pkg: any) => pkg.isRecommended === true,
+  );
+  // Visual order only: the saved admin order stays untouched. The recommended
+  // plan is placed in the centre column of the first row (index 1) so it is the
+  // middle card on desktop without rewriting any Firestore data.
+  const displayPackagesForPeriod = (() => {
+    if (!recommendedPackage || packagesForPeriod.length <= 1) {
+      return packagesForPeriod;
+    }
+    const others = packagesForPeriod.filter(
+      (pkg: any) => pkg.id !== recommendedPackage.id,
+    );
+    const ordered = [...others];
+    ordered.splice(Math.min(1, ordered.length), 0, recommendedPackage);
+    return ordered;
+  })();
+  const packagesGridClass =
+    displayPackagesForPeriod.length === 1
+      ? "mx-auto grid max-w-md grid-cols-1 gap-5"
+      : displayPackagesForPeriod.length === 2
+        ? "mx-auto grid max-w-3xl grid-cols-1 gap-5 md:grid-cols-2"
+        : "grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3";
+  const packageAccents = [
+    { text: "#4ade80", border: "#2f6b4a", buttonBg: "#128c47", buttonText: "#ffffff" },
+    { text: "#f0b429", border: "#c9a859", buttonBg: "#f0b429", buttonText: "#1f1a0f" },
+    { text: "#d4a373", border: "#a67c52", buttonBg: "#a67c52", buttonText: "#ffffff" },
+    { text: "#a3b18a", border: "#6b7a5a", buttonBg: "#6b7a5a", buttonText: "#ffffff" },
+  ];
+
+  // Never keep a package selected after switching to a period it does not
+  // support (for example a monthly-only package while viewing 3 months).
+  useEffect(() => {
+    if (!selectedPackageId) return;
+    const selected = packages.find((pkg: any) => pkg.id === selectedPackageId);
+    if (!selected) return;
+    if (!getPackageBillingOption(selected, billingPeriod).enabled) {
+      setSelectedPackageId(null);
+    }
+  }, [billingPeriod, packages, selectedPackageId]);
 
   const currentPkgPrice = currentPackagePrice;
 
   const getCategoryColor = (cat: string) => {
     switch (cat) {
-      case "اعلان": return "bg-amber-500";
+      case "اعلان": return "bg-[#fdf6e3]";
       case "ابراز": return "bg-purple-500";
-      case "تثبيت": return "bg-blue-500";
-      case "توثيق": return "bg-emerald-500";
-      default: return "bg-slate-500";
+      case "تثبيت": return "bg-[#315f92]";
+      case "توثيق": return "bg-[#128c47]";
+      default: return "bg-[#6f685b]";
     }
   };
 
@@ -1209,34 +1498,34 @@ export default function OwnerSubscriptionPage() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4" dir="rtl">
         <Card className="max-w-lg w-full p-8 text-center space-y-6">
           <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+            <div className="w-20 h-20 rounded-full bg-[#fdf6e3] flex items-center justify-center">
               <Clock className="w-10 h-10 text-[#c9951d]" />
             </div>
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-[#434040] mb-2">تم استلام طلبك بنجاح!</h1>
-            <p className="text-muted-foreground">طلب شراء إضافة قيد المراجعة</p>
+            <h1 className="text-2xl font-bold text-[#293129] mb-2">تم استلام طلبك بنجاح!</h1>
+            <p className="text-[#6f685b]">طلب شراء إضافة قيد المراجعة</p>
           </div>
-          <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+          <div className="bg-[#faf7ef] rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground flex items-center gap-2">
+              <span className="text-[#6f685b] flex items-center gap-2">
                 <Home className="w-4 h-4" />رقم العقار
               </span>
               <span className="font-bold text-lg">{property?.propertyNumber}</span>
             </div>
             {selectedAddOn && (
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">الإضافة</span>
+                <span className="text-[#6f685b]">الإضافة</span>
                 <Badge className="bg-[#c9951d] text-white">{selectedAddOn.name}</Badge>
               </div>
             )}
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="bg-[#fdf6e3] border border-[#e2d3a6] rounded-lg p-4">
             <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-[#80621d] mt-0.5 flex-shrink-0" />
               <div className="text-right">
-                <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
-                <p className="text-sm text-amber-700">
+                <p className="font-semibold text-[#80621d] mb-1">قيد المراجعة</p>
+                <p className="text-sm text-[#80621d]">
                   تم استلام إيصال الدفع. سيتم تفعيل الإضافة بعد التحقق من التحويل البنكي خلال 24 ساعة.
                 </p>
               </div>
@@ -1247,19 +1536,19 @@ export default function OwnerSubscriptionPage() {
           {addOnAiScanResult && (
             <div className={`p-4 rounded-lg border ${
               addOnAiScanResult.recommendation === 'تفعيل_تلقائي' 
-                ? 'bg-emerald-50 border-emerald-300' 
+                ? 'bg-[#f6fbf7] border-[#cfe5d6]' 
                 : addOnAiScanResult.recommendation === 'رفض'
-                ? 'bg-red-50 border-red-300'
-                : 'bg-amber-50 border-amber-300'
+                ? 'bg-[#fff5f5] border-[#f1c8c8]'
+                : 'bg-[#fdf6e3] border-[#e2d3a6]'
             }`}>
               <div className="flex items-center justify-between mb-3">
                 <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
                 <Badge variant="outline" className={
                   addOnAiScanResult.recommendation === 'تفعيل_تلقائي' 
-                    ? 'border-emerald-500 text-emerald-600' 
+                    ? 'border-[#cfe5d6] text-[#126b38]' 
                     : addOnAiScanResult.recommendation === 'رفض'
-                    ? 'border-red-500 text-red-600'
-                    : 'border-amber-500 text-amber-600'
+                    ? 'border-[#f1c8c8] text-[#b42318]'
+                    : 'border-[#e2d3a6] text-[#80621d]'
                 }>
                   {addOnAiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
                   {addOnAiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
@@ -1270,14 +1559,14 @@ export default function OwnerSubscriptionPage() {
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">نسبة الأصالة</span>
+                    <span className="text-[#6f685b]">نسبة الأصالة</span>
                     <span className="font-bold">{addOnAiScanResult.authenticityScore}%</span>
                   </div>
                   <Progress value={addOnAiScanResult.authenticityScore} className="h-2" />
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">نسبة التطابق</span>
+                    <span className="text-[#6f685b]">نسبة التطابق</span>
                     <span className="font-bold">{addOnAiScanResult.matchScore}%</span>
                   </div>
                   <Progress value={addOnAiScanResult.matchScore} className="h-2" />
@@ -1285,24 +1574,24 @@ export default function OwnerSubscriptionPage() {
               </div>
 
               {addOnAiScanResult.summary && (
-                <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                <p className="text-xs text-[#6f685b] bg-white/50 rounded p-2">
                   {addOnAiScanResult.summary}
                 </p>
               )}
 
-              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+              <div className="text-xs text-[#6f685b] mt-2 pt-2 border-t border-current/20">
                 مستوى الثقة: {addOnAiScanResult.confidence}%
               </div>
             </div>
           )}
 
-          <div className="text-sm text-muted-foreground">
+          <div className="text-sm text-[#6f685b]">
             <p className="flex items-center justify-center gap-2">
               <Phone className="w-4 h-4" />للاستفسار: 0533220646
             </p>
           </div>
           <div className="flex flex-col gap-3">
-            <Button onClick={() => { setAddOnPaymentSuccess(false); setSelectedAddOn(null); setAddOnStep(1); setAddOnAiScanResult(null); }} className="w-full bg-[#434040] hover:bg-[#333]">
+            <Button onClick={() => { setAddOnPaymentSuccess(false); setSelectedAddOn(null); setAddOnStep(1); setAddOnAiScanResult(null); }} className="w-full bg-[#293129] hover:bg-[#293129]">
               العودة لصفحة الاشتراك
             </Button>
           </div>
@@ -1316,8 +1605,8 @@ export default function OwnerSubscriptionPage() {
     return (
       <div className="min-h-screen bg-background p-6 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block w-8 h-8 border-4 border-[#434040] border-t-transparent rounded-full animate-spin" />
-          <p className="mt-4 text-muted-foreground">جاري التحميل...</p>
+          <div className="inline-block w-8 h-8 border-4 border-[#6f685b] border-t-transparent rounded-full animate-spin" />
+          <p className="mt-4 text-[#6f685b]">جاري التحميل...</p>
         </div>
         {receiptScanOverlay}
       </div>
@@ -1356,22 +1645,22 @@ export default function OwnerSubscriptionPage() {
           {isVerificationFailed ? (
             <>
               <div className="flex justify-center">
-                <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center">
-                  <AlertTriangle className="w-10 h-10 text-red-500" />
+                <div className="w-20 h-20 rounded-full bg-[#fff5f5] flex items-center justify-center">
+                  <AlertTriangle className="w-10 h-10 text-[#b42318]" />
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-red-700 mb-2">فشل التحقق من بيانات العقار</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-2xl font-bold text-[#b42318] mb-2">فشل التحقق من بيانات العقار</h1>
+                <p className="text-[#6f685b]">
                   بيانات العقار غير مكتملة — يرجى إكمال الحقول التالية
                 </p>
               </div>
               {missingFields && missingFields.length > 0 && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-right">
-                  <p className="font-semibold text-red-800 mb-2">الحقول الناقصة:</p>
+                <div className="bg-[#fff5f5] border border-[#f1c8c8] rounded-lg p-4 text-right">
+                  <p className="font-semibold text-[#b42318] mb-2">الحقول الناقصة:</p>
                   <div className="space-y-1">
                     {missingFields.map((field, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm text-red-700">
+                      <div key={idx} className="flex items-center gap-2 text-sm text-[#b42318]">
                         <X className="w-3 h-3 flex-shrink-0" />
                         <span>{getMissingFieldLabel(field)}</span>
                       </div>
@@ -1380,7 +1669,7 @@ export default function OwnerSubscriptionPage() {
                 </div>
               )}
               <div className="flex flex-col gap-3">
-                <Button onClick={() => router.push("/owner/update-property")} className="w-full bg-red-600 hover:bg-red-700">
+                <Button onClick={() => router.push("/owner/update-property")} className="w-full bg-[#b42318] hover:bg-[#b42318]/90">
                   تعديل بيانات العقار
                 </Button>
                 <Button onClick={() => router.push("/owner/dashboard")} variant="outline" className="w-full">
@@ -1391,25 +1680,25 @@ export default function OwnerSubscriptionPage() {
           ) : isPaymentRejected ? (
             <>
               <div className="flex justify-center">
-                <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center">
-                  <AlertTriangle className="w-10 h-10 text-red-500" />
+                <div className="w-20 h-20 rounded-full bg-[#fff5f5] flex items-center justify-center">
+                  <AlertTriangle className="w-10 h-10 text-[#b42318]" />
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-red-700 mb-2">تم رفض الدفع</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-2xl font-bold text-[#b42318] mb-2">تم رفض الدفع</h1>
+                <p className="text-[#6f685b]">
                   {bankTransferResult?.message || "لم نتمكن من قبول إيصال التحويل."}
                 </p>
               </div>
               {bankTransferResult?.nextAction && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-right text-sm text-red-700">
+                <div className="bg-[#fff5f5] border border-[#f1c8c8] rounded-lg p-4 text-right text-sm text-[#b42318]">
                   {bankTransferResult.nextAction}
                 </div>
               )}
               <div className="flex flex-col gap-3">
                 <Button
                   onClick={() => router.push(bankTransferResult?.nextUrl || "/owner/subscription")}
-                  className="w-full bg-red-600 hover:bg-red-700"
+                  className="w-full bg-[#b42318] hover:bg-[#b42318]/90"
                 >
                   {bankTransferResult?.actionLabel || "إعادة المحاولة"}
                 </Button>
@@ -1421,24 +1710,24 @@ export default function OwnerSubscriptionPage() {
           ) : isAutoActivated ? (
             <>
               <div className="flex justify-center">
-                <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+                <div className="w-20 h-20 rounded-full bg-[#f6fbf7] flex items-center justify-center">
+                  <CheckCircle2 className="w-10 h-10 text-[#126b38]" />
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-emerald-700 mb-2">تم تفعيل اشتراكك بنجاح!</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-2xl font-bold text-[#126b38] mb-2">تم تفعيل اشتراكك بنجاح!</h1>
+                <p className="text-[#6f685b]">
                   تم التحقق من دفعك وبيانات عقارك وتفعيل اشتراكك تلقائياً
                 </p>
               </div>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-emerald-700">
+              <div className="bg-[#f6fbf7] border border-[#cfe5d6] rounded-lg p-4">
+                <div className="flex items-center gap-2 text-[#126b38]">
                   <CheckCircle2 className="w-5 h-5" />
                   <p className="font-semibold">الاشتراك نشط الآن</p>
                 </div>
               </div>
               <div className="flex flex-col gap-3">
-                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#293129] hover:bg-[#293129]">
                   العودة للوحة التحكم
                 </Button>
               </div>
@@ -1446,23 +1735,23 @@ export default function OwnerSubscriptionPage() {
           ) : isPendingManualReview ? (
             <>
               <div className="flex justify-center">
-                <div className="w-20 h-20 rounded-full bg-orange-100 flex items-center justify-center">
-                  <Clock className="w-10 h-10 text-orange-500" />
+                <div className="w-20 h-20 rounded-full bg-[#fdf6e3] flex items-center justify-center">
+                  <Clock className="w-10 h-10 text-[#80621d]" />
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-orange-700 mb-2">الإيصال يحتاج مراجعة يدوية</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-2xl font-bold text-[#80621d] mb-2">الإيصال يحتاج مراجعة يدوية</h1>
+                <p className="text-[#6f685b]">
                   {bankTransferResult?.message || "تعذر التحقق من الإيصال تلقائياً. سيتم مراجعته من قبل الإدارة خلال 24 ساعة."}
                 </p>
               </div>
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-orange-700">
+              <div className="bg-[#fdf6e3] border border-[#e2d3a6] rounded-lg p-4">
+                <div className="flex items-center gap-2 text-[#80621d]">
                   <Clock className="w-5 h-5" />
                   <p className="font-semibold">بانتظار المراجعة</p>
                 </div>
                 {bankTransferResult?.nextAction && (
-                  <p className="mt-2 text-sm text-orange-700 text-right">
+                  <p className="mt-2 text-sm text-[#80621d] text-right">
                     {bankTransferResult.nextAction}
                   </p>
                 )}
@@ -1471,12 +1760,12 @@ export default function OwnerSubscriptionPage() {
                 {bankTransferResult?.nextUrl && (
                   <Button
                     onClick={() => router.push(bankTransferResult.nextUrl || "/owner/subscription")}
-                    className="w-full bg-orange-600 hover:bg-orange-700"
+                    className="w-full bg-[#29372f] hover:bg-[#1f2b25]"
                   >
                     {bankTransferResult.actionLabel || "متابعة"}
                   </Button>
                 )}
-                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#293129] hover:bg-[#293129]">
                   العودة للوحة التحكم
                 </Button>
               </div>
@@ -1484,38 +1773,38 @@ export default function OwnerSubscriptionPage() {
           ) : (
             <>
               <div className="flex justify-center">
-                <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-[#fdf6e3] flex items-center justify-center">
                   <Clock className="w-10 h-10 text-[#c9951d]" />
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-[#434040] mb-2">تم استلام طلبك بنجاح!</h1>
-                <p className="text-muted-foreground">
+                <h1 className="text-2xl font-bold text-[#293129] mb-2">تم استلام طلبك بنجاح!</h1>
+                <p className="text-[#6f685b]">
                   {isPendingAdminApproval
                     ? (bankTransferResult?.message || "تم التحقق من الدفع والبيانات، وبقي اعتماد الإدارة")
                     : `${action === "upgrade" ? "طلب الترقية" : "طلب التمديد"} قيد المراجعة`}
                 </p>
               </div>
-              <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+              <div className="bg-[#faf7ef] rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground flex items-center gap-2">
+                  <span className="text-[#6f685b] flex items-center gap-2">
                     <Home className="w-4 h-4" />رقم العقار
                   </span>
                   <span className="font-bold text-lg">{property?.propertyNumber}</span>
                 </div>
                 {selectedPackage && (
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">الباقة</span>
+                    <span className="text-[#6f685b]">الباقة</span>
                     <Badge className="bg-[#c9951d] text-white">{selectedPackage.name}</Badge>
                   </div>
                 )}
               </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="bg-[#fdf6e3] border border-[#e2d3a6] rounded-lg p-4">
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <CheckCircle2 className="w-5 h-5 text-[#80621d] mt-0.5 flex-shrink-0" />
                   <div className="text-right">
-                    <p className="font-semibold text-amber-800 mb-1">قيد المراجعة</p>
-                    <p className="text-sm text-amber-700">
+                    <p className="font-semibold text-[#80621d] mb-1">قيد المراجعة</p>
+                    <p className="text-sm text-[#80621d]">
                       {isPendingAdminApproval
                         ? "لا يلزمك إجراء إضافي الآن. سيتم تفعيل الاشتراك بعد اعتماد الإدارة للعقار الجديد."
                         : "تم استلام إيصال الدفع. سيتم تفعيل الاشتراك بعد التحقق من التحويل البنكي خلال 24 ساعة."}
@@ -1528,19 +1817,19 @@ export default function OwnerSubscriptionPage() {
               {aiScanResult && (
                 <div className={`p-4 rounded-lg border ${
                   aiScanResult.recommendation === 'تفعيل_تلقائي' 
-                    ? 'bg-emerald-50 border-emerald-300' 
+                    ? 'bg-[#f6fbf7] border-[#cfe5d6]' 
                     : aiScanResult.recommendation === 'رفض'
-                    ? 'bg-red-50 border-red-300'
-                    : 'bg-amber-50 border-amber-300'
+                    ? 'bg-[#fff5f5] border-[#f1c8c8]'
+                    : 'bg-[#fdf6e3] border-[#e2d3a6]'
                 }`}>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-bold text-sm">نتيجة الفحص الذكي</h4>
                     <Badge variant="outline" className={
                       aiScanResult.recommendation === 'تفعيل_تلقائي' 
-                        ? 'border-emerald-500 text-emerald-600' 
+                        ? 'border-[#cfe5d6] text-[#126b38]' 
                         : aiScanResult.recommendation === 'رفض'
-                        ? 'border-red-500 text-red-600'
-                        : 'border-amber-500 text-amber-600'
+                        ? 'border-[#f1c8c8] text-[#b42318]'
+                        : 'border-[#e2d3a6] text-[#80621d]'
                     }>
                       {aiScanResult.recommendation === 'تفعيل_تلقائي' && 'مطابق - جاهز للتفعيل'}
                       {aiScanResult.recommendation === 'مراجعة_يدوية' && 'يحتاج مراجعة'}
@@ -1551,14 +1840,14 @@ export default function OwnerSubscriptionPage() {
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">نسبة الأصالة</span>
+                        <span className="text-[#6f685b]">نسبة الأصالة</span>
                         <span className="font-bold">{aiScanResult.authenticityScore}%</span>
                       </div>
                       <Progress value={aiScanResult.authenticityScore} className="h-2" />
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">نسبة التطابق</span>
+                        <span className="text-[#6f685b]">نسبة التطابق</span>
                         <span className="font-bold">{aiScanResult.matchScore}%</span>
                       </div>
                       <Progress value={aiScanResult.matchScore} className="h-2" />
@@ -1566,13 +1855,13 @@ export default function OwnerSubscriptionPage() {
                   </div>
 
                   {aiScanResult.summary && (
-                    <p className="text-xs text-muted-foreground bg-white/50 rounded p-2">
+                    <p className="text-xs text-[#6f685b] bg-white/50 rounded p-2">
                       {aiScanResult.summary}
                     </p>
                   )}
 
                   {Array.isArray(aiScanResult.blockers) && aiScanResult.blockers.length > 0 && (
-                    <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
+                    <div className="mt-2 rounded bg-[#fff5f5] p-2 text-xs text-[#b42318]">
                       <div className="font-semibold mb-1">سبب المراجعة اليدوية:</div>
                       <ul className="list-disc pr-4 space-y-0.5">
                         {aiScanResult.blockers.map((item: string, index: number) => (
@@ -1583,24 +1872,24 @@ export default function OwnerSubscriptionPage() {
                   )}
 
                   {aiScanResult.manualReviewReason && (!Array.isArray(aiScanResult.blockers) || aiScanResult.blockers.length === 0) && (
-                    <p className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
+                    <p className="mt-2 rounded bg-[#fff5f5] p-2 text-xs text-[#b42318]">
                       {aiScanResult.manualReviewReason}
                     </p>
                   )}
 
-                  <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-current/20">
+                  <div className="text-xs text-[#6f685b] mt-2 pt-2 border-t border-current/20">
                     مستوى الثقة: {aiScanResult.confidence}%
                   </div>
                 </div>
               )}
 
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-[#6f685b]">
                 <p className="flex items-center justify-center gap-2">
                   <Phone className="w-4 h-4" />للاستفسار: 0533220646
                 </p>
               </div>
               <div className="flex flex-col gap-3">
-                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#434040] hover:bg-[#333]">
+                <Button onClick={() => router.push("/owner/dashboard")} className="w-full bg-[#293129] hover:bg-[#293129]">
                   العودة للوحة التحكم
                 </Button>
               </div>
@@ -1615,12 +1904,15 @@ export default function OwnerSubscriptionPage() {
   // Incomplete Data Dialog
 
   return (
-    <div className="min-h-screen bg-[#f5f6f3]">
+    <div
+      className="min-h-screen bg-[#f5f6f3]"
+      style={{ "--riyal-symbol-scale": "0.9" } as CSSProperties}
+    >
       {/* Incomplete Data Dialog */}
       <Dialog open={showIncompleteDataDialog} onOpenChange={setShowIncompleteDataDialog}>
         <DialogContent className="max-w-md" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <DialogTitle className="flex items-center gap-2 text-[#80621d]">
               <AlertTriangle className="w-5 h-5" />
               بيانات العقار الإضافي غير مكتملة
             </DialogTitle>
@@ -1631,14 +1923,14 @@ export default function OwnerSubscriptionPage() {
           </DialogHeader>
           <div className="space-y-2 py-2">
             {incompletePropertyData?.missingFields?.map((field: string, idx: number) => (
-              <div key={idx} className="flex items-center gap-2 text-sm bg-amber-50 p-2 rounded">
-                <X className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <div key={idx} className="flex items-center gap-2 text-sm bg-[#fdf6e3] p-2 rounded">
+                <X className="w-4 h-4 text-[#b42318] flex-shrink-0" />
                 <span>{getMissingFieldLabel(field)}</span>
               </div>
             ))}
           </div>
-          <div className="bg-blue-50 p-3 rounded-lg mt-3">
-            <p className="text-sm text-blue-800">
+          <div className="bg-[#faf7ef] p-3 rounded-lg mt-3">
+            <p className="text-sm text-[#293129]">
               <strong>ملاحظة:</strong> يجب على مالك العقار الإضافي إكمال بياناته في صفحة "تحديث بيانات العقار" أولاً، ثم حاول الإضافة مرة أخرى.
             </p>
           </div>
@@ -1655,585 +1947,296 @@ export default function OwnerSubscriptionPage() {
       </Dialog>
 
       <OwnerPageHeader
-        title="إدارة الاشتراك"
-        description="الباقة والمدفوعات وحالة الظهور"
+        title="الاشتراك والمدفوعات"
+        description="إدارة باقتك وتجديد اشتراكك والإضافات والمدفوعات"
         backHref="/owner/dashboard"
-        accessory={isSuspended ? (
-          <Badge className="gap-1 rounded-md bg-slate-600 text-white">
-            <PauseCircle className="h-3 w-3" />
-            موقوف
-          </Badge>
-        ) : undefined}
       />
 
-      <OwnerPageMain className="flex flex-col gap-5 sm:gap-6 [&>*]:order-3">
-        <Card className="overflow-hidden rounded-lg border border-[#ded3bc] bg-[#fffdf8]" style={{ order: 1 }}>
-          <div className={`border-b p-5 md:p-6 ${subscriptionVisualState.bannerClass}`}>
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-start gap-4">
-                <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg ${subscriptionVisualState.iconClass}`}>
-                  {isSuspended ? (
-                    <PauseCircle className="h-5 w-5" />
-                  ) : subscriptionVisualState.tone === "green" ? (
-                    <CheckCircle2 className="h-5 w-5" />
-                  ) : subscriptionVisualState.tone === "amber" ? (
-                    <Clock className="h-5 w-5" />
-                  ) : (
-                    <AlertTriangle className="h-5 w-5" />
-                  )}
-                </div>
-                <div>
-                  <p className="text-lg font-bold">{subscriptionVisualState.title}</p>
-                  <p className="mt-1 max-w-2xl text-sm leading-6 opacity-85">
-                    {subscriptionVisualState.description}
-                  </p>
-                  {hasSubscriptionDateConflict && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="mt-3 h-9 rounded-lg border-red-200 bg-white/70 text-red-800 hover:bg-white"
-                      onClick={() => window.open("https://wa.me/966533220646", "_blank")}
-                    >
-                      تواصل مع الإدارة
-                    </Button>
-                  )}
-                </div>
+      <OwnerPageMain className="space-y-5 sm:space-y-6">
+        <nav aria-label="أقسام الاشتراك" className="flex gap-2 overflow-x-auto pb-1">
+          {[
+            ["current-subscription-section", "الاشتراك الحالي"],
+            ["packages-section", "الباقات"],
+            ["addons-section", "الإضافات"],
+            ["linked-properties-section", "العقارات المرتبطة"],
+            ["payments-section", "المدفوعات"],
+          ].map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="whitespace-nowrap rounded-xl border border-[#e6ddc9] bg-white px-3 py-2 text-xs font-semibold text-[#6f685b] transition-colors hover:border-[#cbb98d] hover:text-[#293129]"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+
+        {/* ===== اشتراكك الحالي — المصدر الوحيد لمعلومات الاشتراك ===== */}
+        <section
+          id="current-subscription-section"
+          data-testid="current-subscription-card"
+          className="scroll-mt-24 overflow-hidden rounded-2xl border border-[#29372f] bg-[#29372f] text-[#fffdf8] shadow-[0_18px_45px_rgba(41,55,47,0.16)]"
+        >
+          <div className="p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#d8bf76]">اشتراكك الحالي</p>
+                <h2 className="mt-1 text-3xl font-bold leading-snug text-white">{planName}</h2>
+                <p className="mt-1 text-sm text-[#cfd6d0]">
+                  عقار رقم {property?.propertyNumber}
+                  {property?.name ? ` — ${property.name}` : ""}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs md:min-w-56">
-                <div className="rounded-lg border border-current/15 bg-white/55 p-3">
-                  <p className="font-semibold opacity-70">حالة الاشتراك</p>
-                  <p className="mt-1 font-bold">{displayStatusLabel}</p>
-                </div>
-                <div className="rounded-lg border border-current/15 bg-white/55 p-3">
-                  <p className="font-semibold opacity-70">حالة العقار</p>
-                  <p className="mt-1 font-bold">{propertyStatusDisplay.label.replace("العقار ", "")}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <section className="p-5 md:p-8 space-y-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-2">
-                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#a77d22]">الباقة الحالية</p>
-                  <div className="space-y-1">
-                    <h2 className="text-3xl md:text-4xl font-bold leading-tight text-[#2f2d2b]">
-                      {getPackageName(subscription?.packageId)}
-                    </h2>
-                    <p className="text-sm text-[#776f63]">
-                      عقار رقم {property?.propertyNumber || "غير محدد"}
-                      {property?.name ? ` - ${property.name}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge className={`${statusBadgeClass} rounded-md px-3 py-1 text-xs font-bold`}>
-                    {displayStatusLabel}
-                  </Badge>
-                  <Badge variant="outline" className={`${propertyStatusDisplay.className} rounded-md px-3 py-1 text-xs font-bold`}>
-                    {propertyStatusDisplay.label}
-                  </Badge>
-                  {pendingPayment?.hasPending && (
-                    <Badge className="rounded-md bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
-                      دفعة قيد المراجعة
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
-                  <p className="text-xs font-semibold text-[#776f63]">الأيام المتبقية</p>
-                  <div className="mt-3 flex items-end gap-2">
-                    <span className={`text-5xl font-black leading-none ${hasSubscriptionDateConflict || isExpired ? "text-red-600" : isNearExpiry ? "text-[#b7791f]" : "text-[#2f2d2b]"}`}>
-                      {daysMetricValue}
-                    </span>
-                    <span className="pb-1 text-sm font-semibold text-[#776f63]">
-                      {daysMetricLabel}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
-                  <div className="flex items-center gap-2 text-[#776f63]">
-                    <Banknote className="h-4 w-4" />
-                    <p className="text-xs font-semibold">رسوم الاشتراك</p>
-                  </div>
-                  <div className="mt-3">
-                    <PriceDisplay amount={currentPackagePrice} size="lg" />
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-[#e5dcc7] bg-white p-5">
-                  <div className="flex items-center gap-2 text-[#776f63]">
-                    <Timer className="h-4 w-4" />
-                    <p className="text-xs font-semibold">مدة الاشتراك</p>
-                  </div>
-                  <p className="mt-4 text-2xl font-bold text-[#2f2d2b]">
-                    {currentPackageObj?.duration || subscriptionDuration || 30} يوم
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-[#e5dcc7] bg-white p-5 space-y-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-[#2f2d2b]">التقدم الزمني للاشتراك</p>
-                    <p className="text-xs text-[#776f63]">
-                      {hasSubscriptionDateConflict
-                        ? "لا يمكن حساب التقدم بسبب تعارض تاريخ البداية والانتهاء"
-                        : isExpired
-                          ? "انتهت مدة الاشتراك"
-                          : isNearExpiry
-                            ? "اشتراكك قريب من الانتهاء"
-                            : `متبقي ${displayedRemainingDays} يوم`}
-                    </p>
-                  </div>
-                  <span className="text-xs font-semibold text-[#a77d22]">
-                    {hasSubscriptionDateConflict ? "غير متسق" : `${Math.round(progressPercent)}%`}
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-[#eee6d5]">
-                  <div
-                    className={`h-2 rounded-full ${hasSubscriptionDateConflict || isExpired ? "bg-red-600" : isNearExpiry ? "bg-[#c9951d]" : "bg-[#2f2d2b]"}`}
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg bg-[#f8f4eb] p-4">
-                    <div className="flex items-center gap-2 text-[#776f63]">
-                      <Calendar className="h-4 w-4" />
-                      <p className="text-xs font-semibold">تاريخ البداية</p>
-                    </div>
-                    <p className="mt-2 text-sm font-bold text-[#2f2d2b]">
-                      {subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-[#f8f4eb] p-4">
-                    <div className="flex items-center gap-2 text-[#776f63]">
-                      <Calendar className="h-4 w-4" />
-                      <p className="text-xs font-semibold">تاريخ الانتهاء</p>
-                    </div>
-                    <p className="mt-2 text-sm font-bold text-[#2f2d2b]">
-                      {subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {isSuspended ? (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                  <PauseCircle className="ml-1 inline h-4 w-4" />
-                  المدة المتبقية محفوظة بالكامل، ولن تتغير حتى يستأنف المسؤول الاشتراك.
-                </div>
-              ) : !hasSubscriptionDateConflict && !canExtend && !isExpired ? (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-                  <div className="flex items-center gap-2">
-                    <Info className="h-4 w-4 flex-shrink-0" />
-                    <span>يمكن التمديد عند بقاء 10 أيام أو أقل. الترقية متاحة الآن وتبدأ من تاريخ اليوم.</span>
-                  </div>
-                </div>
-              ) : !hasSubscriptionDateConflict && isNearExpiry ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  <AlertTriangle className="ml-1 inline h-4 w-4" />
-                  اشتراكك ينتهي قريباً. يمكنك التمديد لإضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.
-                </div>
-              ) : !hasSubscriptionDateConflict && isCancelled ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  <AlertTriangle className="ml-1 inline h-4 w-4" />
-                  تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور عقارك في المنصة.
-                </div>
-              ) : !hasSubscriptionDateConflict && isExpired ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  <AlertTriangle className="ml-1 inline h-4 w-4" />
-                  اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة.
-                </div>
-              ) : null}
-
-              {!isSuspended && (
-              <div className="flex flex-col gap-3 border-t border-[#e5dcc7] pt-5 sm:flex-row">
-                <Button
-                  className="h-11 flex-1 rounded-lg bg-[#2f2d2b] text-white hover:bg-[#2f2d2b] gap-2"
-                  onClick={() => {
-                    setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
-                    setShowUpgradeDialog(true);
-                  }}
-                >
-                  <Zap className="h-4 w-4" />
-                  {hasActiveCurrentSubscription ? "تغيير الباقة" : "اختيار باقة وتفعيل الاشتراك"}
-                </Button>
-                {canExtend && (
-                  <Button
-                    variant="outline"
-                    className="h-11 flex-1 rounded-lg border-[#c9951d] bg-[#fffdf8] text-[#7b5a13] hover:bg-[#fffdf8] sm:flex-none"
-                    onClick={() => {
-                      setAction("extend");
-                      setSelectedPackageId(subscription?.packageId || null);
-                      setCurrentStep(2);
-                      setShowUpgradeDialog(false);
-                    }}
-                  >
-                    <RefreshCcw className="ml-2 h-4 w-4" />
-                    تمديد الاشتراك
-                  </Button>
-                )}
-              </div>
-              )}
-            </section>
-
-            <aside className="border-t border-[#ded3bc] bg-[#f4efe3] p-5 md:p-6 lg:border-r lg:border-t-0">
-              <div className="space-y-5">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#a77d22]">قواعد واضحة</p>
-                  <h3 className="mt-2 text-xl font-bold text-[#2f2d2b]">الترقية والتجديد</h3>
-                </div>
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
-                    <div className="flex items-start gap-3">
-                      <RefreshCcw className="mt-0.5 h-4 w-4 text-[#a77d22]" />
-                      <div>
-                        <p className="text-sm font-bold text-[#2f2d2b]">التجديد</p>
-                        <p className="text-xs leading-6 text-[#776f63]">متاح عند بقاء 10 أيام أو أقل، وتتم إضافة المدة الجديدة بعد تاريخ الانتهاء الحالي.</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
-                    <div className="flex items-start gap-3">
-                      <Zap className="mt-0.5 h-4 w-4 text-[#a77d22]" />
-                      <div>
-                        <p className="text-sm font-bold text-[#2f2d2b]">الترقية</p>
-                        <p className="text-xs leading-6 text-[#776f63]">تبدأ من اليوم وتعيد عداد الاشتراك حسب الباقة الجديدة.</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-[#ded3bc] bg-[#fffdf8] p-4">
-                    <div className="flex items-start gap-3">
-                      <Home className="mt-0.5 h-4 w-4 text-[#a77d22]" />
-                      <div>
-                        <p className="text-sm font-bold text-[#2f2d2b]">الاشتراك المشترك</p>
-                        <p className="text-xs leading-6 text-[#776f63]">
-                          {visibleLinkedCount > 0
-                            ? `${visibleLinkedCount} عقار ضمن نفس الاشتراك وتواريخه.`
-                            : "لا توجد عقارات ضمن اشتراك مشترك حالياً."}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </div>
-        </Card>
-
-        {/* ===== بطاقة الباقة الحالية ===== */}
-        <Card className={`hidden p-6 border-2 ${cardColors.border} ${cardColors.bg}`}>
-          <div className="flex items-center justify-between mb-5">
-            <h2 className={`text-xl font-bold flex items-center gap-2 ${cardColors.text}`}>
-              <Crown className="w-5 h-5 text-[#c9951d]" />
-              الباقة الحالية
-            </h2>
-            <div className="flex items-center gap-2">
-              <Badge className={`${subStatusDisplay.bgColor} ${subStatusDisplay.textColor} px-3 py-1`}>
-                {subStatusDisplay.label}
-              </Badge>
-            </div>
-          </div>
-
-          {/* اسم الباقة */}
-          <div className="text-center mb-5 pb-4 border-b">
-            <p className={`text-2xl font-bold ${cardColors.text}`}>{getPackageName(subscription?.packageId)}</p>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-5 text-sm">
-            {/* الأيام المتبقية - كبير */}
-            <div className="col-span-2 md:col-span-1 text-center p-4 rounded-xl bg-muted/40">
-              <p className="text-muted-foreground text-xs mb-1">الأيام المتبقية</p>
-              <p className={`text-5xl font-black ${isExpired ? "text-red-500" : isNearExpiry ? "text-amber-500" : "text-[#434040]"}`}>
-                {isExpired ? "0" : displayDays}
-              </p>
-              <p className="text-muted-foreground text-sm mt-1">{isExpired ? "منتهي" : "يوم"}</p>
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-bold ${
+                  isSuspended
+                    ? "border-white/20 bg-white/10 text-white"
+                    : isCancelled || isExpired
+                      ? "border-[#f1c8c8]/40 bg-[#fff5f5]/10 text-[#f7c9c9]"
+                      : isFreePlan
+                        ? "border-[#cfe5d6]/40 bg-[#f6fbf7]/10 text-[#d7f0df]"
+                        : "border-[#d8bf76]/40 bg-[#d8bf76]/15 text-[#f0ddaa]"
+                }`}
+              >
+                {subscriptionStateText}
+              </span>
             </div>
 
-            {/* تفاصيل الاشتراك */}
-            <div className="col-span-2 grid grid-cols-2 gap-4">
-              <div className="flex items-start gap-2">
-                <Banknote className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-muted-foreground text-xs">رسوم الاشتراك</p>
-                  <PriceDisplay amount={currentPackagePrice} size="lg" />
-                </div>
+            <dl className="mt-5 grid gap-3">
+              <div className="rounded-xl border border-white/12 bg-white/[0.07] p-3">
+                <dt className="text-[11px] text-[#aab4ac]">رسوم الاشتراك</dt>
+                <dd className="mt-1 text-lg font-bold text-white">
+                  {isFreePlan ? "مجاناً" : <PriceDisplay amount={currentPackagePrice} size="sm" />}
+                </dd>
               </div>
-              <div className="flex items-start gap-2">
-                <Timer className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-muted-foreground text-xs">مدة الاشتراك</p>
-                  <p className="font-bold text-muted-foreground">{currentPackageObj?.duration || subscriptionDuration || 30} يوم</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-muted-foreground text-xs">تاريخ البداية</p>
-                  <p className="font-bold text-muted-foreground text-xs">{subscription?.startDate ? formatSubDate(subscription.startDate) : "—"}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <Calendar className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-muted-foreground text-xs">تاريخ الانتهاء</p>
-                  <p className="font-bold text-muted-foreground text-xs">{subscription?.endDate ? formatSubDate(subscription.endDate) : "—"}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+            </dl>
 
-          {/* Progress bar */}
-          {!isExpired && subscription?.startDate && subscription?.endDate && (
-            <div className="mt-4">
-              <div className="w-full bg-muted rounded-full h-2">
+            <div className="mt-5 rounded-xl border border-white/12 bg-white/[0.06] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <span className="text-[#aab4ac]">المدة المنقضية</span>
+                <span className="font-bold text-[#f0ddaa]">
+                  {hasSubscriptionDateConflict ? "غير متاح" : `${Math.round(elapsedPercent)}%`}
+                </span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/12">
                 <div
-                  className={`h-2 rounded-full transition-all ${isNearExpiry ? "bg-amber-500" : "bg-[#434040]"}`}
-                  style={{
-                    width: `${Math.max(5, Math.min(100, (remainingDays / Math.max(1, subscriptionDuration)) * 100))}%`
-                  }}
+                  className="h-full rounded-full bg-[#d8bf76] transition-all"
+                  style={{ width: `${hasSubscriptionDateConflict ? 0 : elapsedPercent}%` }}
                 />
               </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#aab4ac]">
+                <span>المتبقي {hasSubscriptionDateConflict ? "—" : `${Math.round(remainingPercent)}%`}</span>
+                <span className="font-semibold text-[#f0ddaa]">
+                  {hasSubscriptionDateConflict ? "تعارض في التواريخ" : `${displayedRemainingDays} يوم متبقٍ`}
+                </span>
+              </div>
             </div>
-          )}
 
-          {/* ملاحظة التمديد */}
-          {!canExtend && !isExpired && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700 flex items-center gap-2">
-              <Info className="w-4 h-4 flex-shrink-0" />
-              يمكن التمديد عند بقاء 10 أيام أو أقل
-            </div>
-          )}
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-white/[0.06] p-3">
+                <dt className="text-[11px] text-[#aab4ac]">تاريخ البداية</dt>
+                <dd className="mt-1 text-sm font-bold text-white">
+                  {subscription?.startDate ? formatSubDate(subscription.startDate, false) : "غير محدد"}
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white/[0.06] p-3">
+                <dt className="text-[11px] text-[#aab4ac]">تاريخ الانتهاء</dt>
+                <dd className="mt-1 text-sm font-bold text-white">
+                  {subscription?.endDate ? formatSubDate(subscription.endDate, false) : "غير محدد"}
+                </dd>
+              </div>
+            </dl>
 
-          {isNearExpiry && (
-            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-              <AlertTriangle className="w-4 h-4 inline ml-1" />
-              اشتراكك ينتهي قريباً! قم بالتمديد للحفاظ على ظهور عقارك.
-            </div>
-          )}
-
-          {isExpired && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              <AlertTriangle className="w-4 h-4 inline ml-1" />
-              {isCancelled
-                ? "تم إلغاء هذا الاشتراك. اختر باقة جديدة لاستعادة ظهور عقارك في المنصة."
-                : "اشتراكك منتهي. قم بالتجديد لإعادة ظهور عقارك في المنصة."}
-            </div>
-          )}
-
-          {/* أزرار الترقية والتمديد */}
-          <div className="flex gap-3 mt-5 pt-4 border-t">
-            <Button
-              className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2 border-2 border-violet-600 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-              onClick={() => {
-                setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
-                setShowUpgradeDialog(true);
-              }}
-            >
-              <Zap className="w-4 h-4" />
-              {hasActiveCurrentSubscription ? "تغيير الباقة" : "اختيار باقة وتفعيل الاشتراك"}
-            </Button>
-            {canExtend && (
-              <Button
-                variant="outline"
-                className="flex-1 md:flex-none min-w-0 gap-2 border-2 border-blue-400 shadow-sm hover:shadow-md hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all duration-200 cursor-pointer bg-white text-blue-700"
-                onClick={() => {
-                  setAction("extend");
-                  setSelectedPackageId(subscription?.packageId || null);
-                  setCurrentStep(2);
-                  setShowUpgradeDialog(false);
-                }}
-              >
-                <RefreshCcw className="w-4 h-4" />
-                تمديد الاشتراك
-              </Button>
+            {isSuspended && (
+              <p className="mt-4 rounded-xl border border-white/12 bg-white/[0.06] p-3 text-xs leading-6 text-[#cfd6d0]">
+                الاشتراك موقوف مؤقتاً. المدة المتبقية محفوظة ولن تُحتسب حتى يستأنف المسؤول الاشتراك.
+              </p>
+            )}
+            {hasSubscriptionDateConflict && (
+              <p className="mt-4 rounded-xl border border-[#f1c8c8]/40 bg-[#fff5f5]/10 p-3 text-xs leading-6 text-[#f7c9c9]">
+                تواريخ الاشتراك غير متسقة (تاريخ البداية بعد تاريخ الانتهاء). راجع الإدارة لتصحيح التواريخ.
+              </p>
             )}
           </div>
+
+          {!isSuspended && (
+            <div className="grid gap-2 border-t border-white/10 p-3 sm:grid-cols-2 sm:p-4">
+              <Button
+                className="h-11 rounded-xl bg-[#d8bf76] text-sm font-bold text-[#29372f] transition-colors hover:bg-[#cbb05f]"
+                onClick={() => {
+                  setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
+                  document.getElementById("packages-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                <Zap className="ml-2 h-4 w-4" />
+                {hasActiveCurrentSubscription ? "تغيير الباقة" : "اختيار باقة"}
+              </Button>
+              {canExtend ? (
+                <Button
+                  className="h-11 rounded-xl border border-white/15 bg-white/10 text-sm font-bold text-white transition-colors hover:bg-white/15"
+                  onClick={() => {
+                    setAction("extend");
+                    setSelectedPackageId(subscription?.packageId || null);
+                    setCurrentStep(2);
+                  }}
+                >
+                  <RefreshCcw className="ml-2 h-4 w-4" />
+                  تمديد الاشتراك
+                </Button>
+              ) : (
+                <p className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[11px] text-[#aab4ac]">
+                  التمديد متاح عند بقاء 10 أيام أو أقل
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ===== حالة اعتماد العقار — قسم مستقل تماماً عن الاشتراك ===== */}
+        <Card className={`${ownerPanelClass} p-5 sm:p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                {property?.verificationStatus === "approved" ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : property?.verificationStatus === "rejected" ? (
+                  <AlertTriangle className="h-5 w-5" />
+                ) : (
+                  <Clock className="h-5 w-5" />
+                )}
+              </span>
+              <div>
+                <h2 className="font-bold text-[#293129]">حالة اعتماد العقار</h2>
+                <p className="mt-0.5 text-xs text-[#6f685b]">اعتماد العقار مستقل عن حالة الاشتراك</p>
+              </div>
+            </div>
+            <Badge variant="outline" className={`rounded-lg px-3 py-1 text-xs font-bold ${propertyStatusDisplay.className}`}>
+              {propertyStatusDisplay.label}
+            </Badge>
+          </div>
+
+          <p className="mt-4 text-sm leading-6 text-[#6f685b]">
+            {property?.verificationStatus === "approved"
+              ? "بيانات العقار معتمدة ويمكن للعملاء رؤية العقار في المنصة."
+              : property?.verificationStatus === "pending"
+                ? "العقار بانتظار اعتماد الإدارة. قد يكون اشتراكك فعالاً، لكن ظهور العقار للعملاء يبدأ بعد الاعتماد."
+                : property?.verificationStatus === "rejected"
+                  ? "تم رفض اعتماد العقار. راجع بيانات العقار وحدّثها ثم أعد الإرسال."
+                  : "لم تكتمل بيانات العقار بعد. أكمل البيانات ليتم اعتماده."}
+          </p>
+
+          {property?.verificationStatus !== "approved" && (
+            <div className="mt-4">
+              <Button
+                variant="outline"
+                className={ownerSecondaryButtonClass}
+                onClick={() => router.push("/owner/update-property")}
+              >
+                <Edit3 className="ml-2 h-4 w-4" />
+                {property?.verificationStatus === "rejected" ? "تعديل بيانات العقار" : "استكمال بيانات العقار"}
+              </Button>
+            </div>
+          )}
+
+          {isSuspended && (
+            <div className="mt-4">
+              <OwnerAlert tone="info" icon={<PauseCircle className="w-5 h-5" />} title="التحقق موقوف مؤقتاً">
+                أوقفت الإدارة التحقق مؤقتاً. لن يمكن تشغيل التحقق حتى يُستأنف الاشتراك.
+              </OwnerAlert>
+            </div>
+          )}
+
+          {!isSuspended && !hasCompletedSmartVerification && property?.verificationStatus === "pending" && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
+            <div className="mt-4">
+              <Button
+                type="button"
+                onClick={runVerification}
+                disabled={isRunningVerification}
+                className={`w-full ${ownerPrimaryButtonClass}`}
+              >
+                {isRunningVerification ? (
+                  <>
+                    <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+                    جاري التحقق...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 ml-2" />
+                    تحقق من بيانات العقار
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </Card>
 
-        {/* Pending Payment Notice */}
-        {pendingPayment?.hasPending && (
-          <Card className="p-4 border-amber-300 bg-amber-50">
-            <div className="flex items-center gap-2 text-amber-700">
-              <Clock className="w-5 h-5" />
+        {/* ===== الباقات والترقية والتجديد ===== */}
+        <Card id="packages-section" className={`${ownerPanelClass} scroll-mt-24 p-5 sm:p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                <Crown className="h-5 w-5" />
+              </span>
               <div>
-                <p className="font-semibold">
-                  {pendingPayment.action === 'upgrade' && 'لديك طلب ترقية قيد المراجعة'}
-                  {pendingPayment.action === 'extend' && 'لديك طلب تمديد قيد المراجعة'}
-                  {pendingPayment.action === 'new' && 'لديك دفعة قيد المراجعة'}
-                  {!pendingPayment.action && 'لديك دفعة قيد المراجعة'}
-                </p>
-                <p className="text-sm">
-                  {pendingPayment.action === 'upgrade' && 'سيتم ترقية اشتراكك بعد مراجعة الإيصال'}
-                  {pendingPayment.action === 'extend' && 'سيتم تمديد اشتراكك بعد مراجعة الإيصال'}
-                  {(!pendingPayment.action || pendingPayment.action === 'new') && 'سيتم تفعيل اشتراكك بعد مراجعة الإيصال'}
-                </p>
+                <h2 className="font-bold text-[#293129]">الباقات والترقية والتجديد</h2>
+                <p className="mt-0.5 text-xs text-[#6f685b]">اختر الباقة المناسبة لك</p>
               </div>
             </div>
-          </Card>
-        )}
+            <Badge variant="outline" className="rounded-lg border-[#e6ddc9] bg-[#faf7ef] px-3 py-1 text-xs font-bold text-[#80621d]">
+              باقتك الحالية: {planName}
+            </Badge>
+          </div>
 
-        {/* Rejected Payment Notice */}
-        {shouldShowRejectedPaymentNotice && (
-          <Card className="p-4 border-red-300 bg-red-50">
-            <div className="flex items-center gap-2 text-red-700 mb-3">
-              <AlertTriangle className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">تم رفض الدفعة السابقة</p>
-                <p className="text-sm">
-                  {pendingPayment.payment?.notes || "يرجى إعادة التحويل ورفع إيصال صحيح"}
-                </p>
+        </Card>
+
+        {/* مفتاح المدة والعنوان — خارج البطاقات وفي منتصف الشاشة */}
+        {currentStep === 1 && (
+          <div className="scroll-mt-24">
+            <div className="flex w-full justify-center">
+              <div
+                className="inline-flex rounded-full border border-[#e6ddc9] bg-white p-1 shadow-sm"
+                role="tablist"
+                aria-label="مدة الاشتراك"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={billingPeriod === "monthly"}
+                  onClick={() => changeBillingPeriod("monthly")}
+                  className={`rounded-full px-5 py-2 text-sm font-bold transition-colors ${
+                    billingPeriod === "monthly"
+                      ? "bg-[#29372f] text-white shadow"
+                      : "text-[#6f685b] hover:text-[#293129]"
+                  }`}
+                  data-testid="billing-period-monthly"
+                >
+                  شهري
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={billingPeriod === "quarterly"}
+                  onClick={() => changeBillingPeriod("quarterly")}
+                  className={`rounded-full px-5 py-2 text-sm font-bold transition-colors ${
+                    billingPeriod === "quarterly"
+                      ? "bg-[#29372f] text-white shadow"
+                      : "text-[#6f685b] hover:text-[#293129]"
+                  }`}
+                  data-testid="billing-period-quarterly"
+                >
+                  كل 3 أشهر
+                </button>
               </div>
             </div>
-            <Button
-              onClick={() => router.push("/owner/update-property")}
-              variant="outline"
-              className="w-full border-red-300 text-red-700 hover:bg-red-100"
+            <h2
+              className="mt-4 text-center text-xl font-bold text-[#293129] sm:text-2xl"
+              data-testid="packages-period-title"
             >
-              تعديل بيانات العقار
-            </Button>
-          </Card>
-        )}
-
-        {/* Owner Self-Service Verification (new property with successful payment awaiting admin) */}
-        {isSuspended && (
-          <Card className="border-slate-300 bg-slate-50 p-4">
-            <div className="flex items-start gap-3 text-slate-700">
-              <PauseCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-              <div>
-                <p className="font-semibold">التحقق موقوف مؤقتاً</p>
-                <p className="text-sm">
-                  أوقفت الإدارة الاشتراك مؤقتاً. لن يمكن تشغيل التحقق أو تفعيل
-                  الاشتراك حتى تعيد الإدارة استئنافه.
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-        {!isSuspended && !hasCompletedSmartVerification && property?.verificationStatus === 'pending' && pendingPayment?.payment?.status === "نجح - قيد التحقق" && (
-          <Card className="p-4 border-blue-300 bg-blue-50">
-            <div className="flex items-center gap-2 text-blue-700 mb-3">
-              <CheckCircle2 className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">تم استلام الدفع بنجاح</p>
-                <p className="text-sm">يمكنك التحقق من اكتمال بيانات العقار، وسيتم التفعيل بعد اعتماد الإدارة إذا كان العقار جديداً</p>
-              </div>
-            </div>
-            <Button
-              type="button"
-              onClick={runVerification}
-              disabled={isRunningVerification}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {isRunningVerification ? (
-                <>
-                  <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                  جاري التحقق...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 ml-2" />
-                  تحقق من بيانات العقار
-                </>
-              )}
-            </Button>
-          </Card>
-        )}
-
-        {/* Pending Additional Property Requests (Under Review) */}
-        {additionalPropertyRequests?.pendingRequests?.length > 0 && (
-          <Card className="p-4 border-blue-300 bg-blue-50">
-            <div className="flex items-center gap-2 text-blue-700 mb-3">
-              <Clock className="w-5 h-5" />
-              <p className="font-semibold">عقارات قيد المراجعة</p>
-            </div>
-            <div className="space-y-2">
-              {additionalPropertyRequests.pendingRequests.map((req: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-200">
-                  <div className="flex items-center gap-2">
-                    <Home className="w-4 h-4 text-blue-600" />
-                    <div>
-                      <p className="font-bold text-sm">{req.propertyNumber}</p>
-                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    قيد الانتظار
-                  </Badge>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-blue-600 mt-3">
-              سيتم تفعيل هذه العقارات بعد موافقة الإدارة
-            </p>
-          </Card>
-        )}
-
-        {/* If this property is linked to a main property */}
-        {currentSubscription?.linkedToMain && (
-          <Card className="p-4 border-blue-300 bg-blue-50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-blue-700">
-                <Home className="w-5 h-5" />
-                <div>
-                  <p className="font-semibold">مرتبط بعقار رئيسي</p>
-                  <p className="text-sm">
-                    رقم العقار: <span className="font-bold">{currentSubscription.linkedToMain.propertyNumber}</span>
-                    {currentSubscription.linkedToMain.name && (
-                      <> - <span>{currentSubscription.linkedToMain.name}</span></>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
-                {currentSubscription.linkedToMain.subscriptionStatus === 'نشط' ? 'نشط' : 
-                 currentSubscription.linkedToMain.subscriptionStatus || 'غير نشط'}
-              </Badge>
-            </div>
-          </Card>
-        )}
-
-        {/* Approved Linked Properties */}
-        {additionalPropertyRequests?.approvedRequests?.length > 0 && (
-          <Card className="p-4 border-green-300 bg-green-50">
-            <div className="flex items-center gap-2 text-green-700 mb-3">
-              <CheckCircle2 className="w-5 h-5" />
-              <p className="font-semibold">العقارات المرتبطة</p>
-            </div>
-            <div className="space-y-2">
-              {additionalPropertyRequests.approvedRequests.map((req: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
-                  <div className="flex items-center gap-2">
-                    <Home className="w-4 h-4 text-green-600" />
-                    <div>
-                      <p className="font-bold text-sm">{req.propertyNumber}</p>
-                      <p className="text-xs text-muted-foreground">{req.name} - {req.city}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
-                      تم الربط
-                    </Badge>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
-                      onClick={() => {
-                        setUnlinkPropertyDialog({ open: true, propertyNumber: req.propertyNumber, propertyName: req.name });
-                      }}
-                      title="فصل العقار"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+              {billingPeriod === "monthly"
+                ? "أسعار الاشتراك الشهري"
+                : "أسعار الاشتراك لثلاثة أشهر"}
+            </h2>
+          </div>
         )}
 
         {/* ===== نافذة تأكيد فصل العقار ===== */}
@@ -2262,208 +2265,336 @@ export default function OwnerSubscriptionPage() {
           </DialogContent>
         </Dialog>
 
-        {/* ===== نافذة اختيار الباقة للترقية ===== */}
-        {showUpgradeDialog && currentStep === 1 && (
-          <Card className="p-6" style={{ order: 2 }}>
-          <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-[#434040]">
-                {action === "new" ? "اختر باقة لتفعيل الاشتراك" : "اختر الباقة الجديدة"}
-              </h2>
-              <Button variant="ghost" size="icon" onClick={() => setShowUpgradeDialog(false)}>
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-
-            {/* تنبيه مهم - عند الترقية */}
-            {!isExpired && remainingDays > 0 && action === "upgrade" && (
-              <div className="mb-6 p-4 bg-amber-50 border-2 border-amber-300 rounded-xl">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="font-bold text-amber-800 mb-2">تنبيه مهم</p>
-                    <p className="text-sm text-amber-700 mb-3">
-                      لديك اشتراك متبقي فيه <span className="font-bold">{remainingDays}</span> يوم. تغيير الباقة سيؤدي إلى:
-                    </p>
-                    <ul className="space-y-1.5 text-sm text-amber-700">
-                      <li className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                        تصفير العداد الحالي
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                        بدء باقة جديدة من اليوم
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-                        الأيام المتبقية السابقة لن تُرحّل (ينطبق على الترقية والتخفيض)
-                      </li>
-                    </ul>
-                  </div>
-                </div>
+        {/* ===== اختيار الباقة وملخص الاشتراك ===== */}
+        {currentStep === 1 && (
+          <div className="mt-5 space-y-5">
+            {packagesForPeriod.length === 0 && (
+              <div className="rounded-xl border border-dashed border-[#e6ddc9] bg-white p-6 text-center text-sm text-[#6f685b]">
+                لا توجد باقات تدعم{" "}
+                {billingPeriod === "monthly"
+                  ? "الاشتراك الشهري"
+                  : "الاشتراك لمدة ثلاثة أشهر"}{" "}
+                حالياً.
               </div>
             )}
 
-            {/* الباقات المتاحة */}
-            <h3 className="font-semibold text-muted-foreground text-sm mb-3">الباقات المتاحة</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {availablePackages.map((pkg: any) => {
+            <div className={packagesGridClass} data-testid="packages-grid">
+              {displayPackagesForPeriod.map((pkg: any, packageIndex: number) => {
                 const isCurrentPkg = subscription?.packageId === pkg.id;
                 const packageMaxProperties = getMaximumPropertyCount(pkg);
-                const packagePricing = calculateSubscriptionPrice(
+                const packagePricing = calculateSubscriptionPriceForPeriod(
                   pkg,
                   Math.min(baseGroupPropertyCount, packageMaxProperties),
+                  billingPeriod,
                 );
-                const packagePricePerIncludedProperty =
-                  packagePricing.includedPropertyCount > 0
-                    ? packagePricing.basePrice / packagePricing.includedPropertyCount
-                    : packagePricing.basePrice;
-                const isDowngrade = action === "upgrade" && packagePricing.total < currentPkgPrice;
+                const billingOption = getPackageBillingOption(pkg, billingPeriod);
+                const isRecommended = pkg.isRecommended === true;
+                const includedCount = Math.max(1, packagePricing.includedPropertyCount);
+                const isDowngrade =
+                  billingPeriod === "monthly" &&
+                  action === "upgrade" &&
+                  packagePricing.total < currentPkgPrice;
                 const isSelected = selectedPackageId === pkg.id;
-                const isMultiProperty = packageMaxProperties > 1;
                 const isExpanded = expandedPackages.has(pkg.id);
-                const featuresToShow = isExpanded ? pkg.features : (pkg.features || []).slice(0, 4);
-                const hasMoreFeatures = (pkg.features?.length || 0) > 4;
+                const allFeatures = normalizePackageFeatures(pkg.features);
+                const featuresToShow = isExpanded ? allFeatures : allFeatures.slice(0, 5);
+                const hasMoreFeatures = allFeatures.length > 5;
+                const accent = isRecommended
+                  ? packageAccents[1]
+                  : packageAccents[packageIndex % packageAccents.length];
+                const selectedShadow = isSelected
+                  ? `0 0 0 2px ${accent.text}, 0 0 0 4px #fafaf7`
+                  : undefined;
 
                 return (
                   <div
                     key={pkg.id}
-                    className={`p-5 rounded-xl border-2 transition-all cursor-pointer ${isSelected
-                      ? "ring-2 ring-[#434040] bg-[#434040]/5 border-[#434040]"
-                      : isCurrentPkg
-                        ? "border-[#c9951d]/40 bg-[#c9951d]/5"
-                        : "border-border hover:border-[#434040]/50"
-                      }`}
-                    onClick={() => setSelectedPackageId(pkg.id)}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    className={`relative flex h-full flex-col rounded-2xl border-2 bg-gradient-to-b from-[#232d27] via-[#1f2822] to-[#1a211c] p-6 text-right text-white shadow-xl transition-all cursor-pointer ${isRecommended ? "lg:-translate-y-1" : ""}`}
+                    style={{ borderColor: accent.border, boxShadow: selectedShadow }}
+                    onClick={() => {
+                      setSelectedPackageId(pkg.id);
+                      setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedPackageId(pkg.id);
+                        setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
+                      }
+                    }}
+                    data-testid={`package-card-${pkg.id}`}
                   >
-                    {/* اسم الباقة والحالة */}
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-bold text-[#434040]">{pkg.name}</h3>
-                      <div className="flex flex-col items-end gap-1">
-                        {isSelected && <Badge className="bg-[#434040] text-white text-[10px]">مختار</Badge>}
-                        {isCurrentPkg && <Badge className="bg-[#c9951d] border-0 text-[10px] text-white">الحالي</Badge>}
-                      </div>
-                    </div>
-
-                    {/* المدة */}
-                    <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
-
-                    {/* السعر */}
-                    <div className="flex items-end gap-1 mb-2">
-                      <PriceDisplay amount={packagePricePerIncludedProperty} size="lg" />
-                      {isMultiProperty && (
-                        <span className="text-xs text-muted-foreground mb-1">/ عقار</span>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      {isRecommended && (
+                        <Badge className="gap-1 border-0 bg-[#c9951d] text-[#241d0c]">
+                          <Star className="h-3 w-3" />
+                          موصى بها
+                        </Badge>
+                      )}
+                      {(pkg.featuredBadge || isPremiumSubscriptionType(pkg.type)) && (
+                        <Badge className="border border-white/15 bg-white/10 text-white/80">
+                          {pkg.featuredBadge || "مميز"}
+                        </Badge>
+                      )}
+                      {isCurrentPkg && (
+                        <Badge className="border-0 bg-[#c9951d] text-white">
+                          الحالي
+                        </Badge>
+                      )}
+                      {isSelected && (
+                        <Badge className="border-0 bg-white text-[#1c241f]">
+                          مختار
+                        </Badge>
                       )}
                     </div>
 
-                    {/* معلومات الباقة المتعددة */}
-                    {isMultiProperty && (
-                      <div className="text-xs space-y-1 mb-2">
-                        <div className="text-muted-foreground">الإجمالي: <span className="font-bold text-[#434040]"><PriceDisplay amount={packagePricing.basePrice} size="sm" /></span> للعقارين</div>
-                        <p className="text-muted-foreground">2 عقارات</p>
-                      </div>
+                    <div className="flex items-center gap-2">
+                      {isRecommended ? (
+                        <Star className="h-5 w-5" style={{ color: accent.text }} />
+                      ) : (
+                        <ShieldCheck className="h-5 w-5" style={{ color: accent.text }} />
+                      )}
+                      <h3 className="text-lg font-bold text-white">{pkg.name}</h3>
+                    </div>
+                    {pkg.description && (
+                      <p className="mt-1 text-xs leading-6 text-white/65">
+                        {pkg.description}
+                      </p>
                     )}
 
-                    {/* المميزات */}
-                    {isPremiumSubscriptionType(pkg.type) && (
-                      <Badge className="bg-[#c9951d] border-0 text-xs text-[#fbfaf9] mb-2">مميز</Badge>
-                    )}
-                    {pkg.features && pkg.features.length > 0 && (
-                      <div className="space-y-1 mt-2">
-                        {featuresToShow.map((f: string, i: number) => (
-                          <div key={i} className="text-xs flex items-start gap-2">
-                            <span className="text-[#434040] font-bold mt-0.5">✓</span>
-                            <span>{f}</span>
-                          </div>
-                        ))}
-                        {hasMoreFeatures && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedPackages(prev => {
-                                const newSet = new Set(prev);
-                                if (newSet.has(pkg.id)) {
-                                  newSet.delete(pkg.id);
-                                } else {
-                                  newSet.add(pkg.id);
-                                }
-                                return newSet;
-                              });
-                            }}
-                            className="text-xs text-[#c9951d] font-semibold hover:underline mt-1"
-                          >
-                            {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
-                          </button>
-                        )}
+                    <div className="mt-4">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="[&_img]:invert [&_img]:brightness-0">
+                          <PriceDisplay
+                            amount={packagePricing.basePrice}
+                            size="xl"
+                            textColor="text-white"
+                          />
+                        </div>
+                        <span className="mb-1 text-xs text-white/60">
+                          {billingPeriod === "quarterly" ? "لثلاثة أشهر" : "شهرياً"}
+                        </span>
                       </div>
+                      <p className="mt-1 text-xs text-white/60">
+                        {billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} ·{" "}
+                        {billingOption.durationDays} يوم
+                      </p>
+                      {billingOption.discountPercent > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="text-sm text-white/60">
+                            <PriceDisplay
+                              amount={billingOption.originalPrice}
+                              size="sm"
+                              textColor="text-white/60"
+                              strike
+                            />
+                          </div>
+                          <Badge
+                            className="border-0 text-[#1f1a0f]"
+                            style={{ backgroundColor: accent.text }}
+                          >
+                            خصم {billingOption.discountPercent}%
+                          </Badge>
+                        </div>
+                      )}
+                      {packageMaxProperties > 1 && (
+                        <p className="mt-2 text-[11px] text-white/55">
+                          تشمل {includedCount} عقارات · حتى {packageMaxProperties} عقارات
+                        </p>
+                      )}
+                    </div>
+
+                    {allFeatures.length > 0 && (
+                      <ul className="mt-5 space-y-2.5">
+                        {featuresToShow.map((feature, index) => (
+                          <li key={`${pkg.id}-feature-${index}`} className="flex items-start gap-2">
+                            <span className="mt-0.5 flex-none" style={{ color: accent.text }}>
+                              <FeatureIcon
+                                feature={feature.text}
+                                icon={feature.icon}
+                                className="h-4 w-4"
+                              />
+                            </span>
+                            <span className="text-sm leading-6 text-white/85">{feature.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {hasMoreFeatures && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedPackages((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(pkg.id)) {
+                              next.delete(pkg.id);
+                            } else {
+                              next.add(pkg.id);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="mt-3 w-fit text-xs font-semibold text-white/70 hover:text-white hover:underline"
+                      >
+                        {isExpanded
+                          ? "عرض أقل"
+                          : `عرض المزيد (${allFeatures.length - 5}+)`}
+                      </button>
                     )}
                     {isDowngrade && (
-                      <p className="text-xs text-blue-500 mt-2">تخفيض الباقة - ستبدأ من اليوم</p>
+                      <p className="mt-3 text-xs text-white/60">
+                        تخفيض الباقة - ستبدأ من اليوم
+                      </p>
                     )}
+                    <div className="mt-auto pt-5">
+                      <Button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedPackageId(pkg.id);
+                          setAction(hasActiveCurrentSubscription ? "upgrade" : "new");
+                          setCurrentStep(2);
+                        }}
+                        className="h-11 w-full rounded-full text-sm font-bold"
+                        style={{ backgroundColor: accent.buttonBg, color: accent.buttonText }}
+                        data-testid={`button-subscribe-${pkg.id}`}
+                      >
+                        اشترك الآن
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* أزرار المتابعة والإلغاء */}
-            <div className="flex gap-3 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowUpgradeDialog(false);
-                  setSelectedPackageId(null);
-                }}
-                className="border-red-300 text-red-600 hover:bg-red-50"
-              >
-                إلغاء
-              </Button>
-              <Button
-                onClick={() => {
-                  if (selectedPackageId) setCurrentStep(2);
-                }}
-                disabled={!selectedPackageId}
-                className="flex-1 bg-green-600 hover:bg-green-700"
-              >
-                متابعة للدفع
-              </Button>
+            {/* ملخص الاختيار وإجراء واحد للمتابعة */}
+            <div className="rounded-2xl border border-[#e6ddc9] bg-white p-4 sm:p-5" data-testid="subscription-selection-summary">
+              {selectedPackageId && selectedPackage ? (
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-[#293129]">
+                      الباقة المختارة: {selectedPackage.name}
+                    </p>
+                    <p className="text-xs text-[#6f685b]">
+                      {billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} ·{" "}
+                      {selectedBillingOption?.durationDays ?? selectedPackage.duration} يوم
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-[#6f685b]">
+                      {selectedBillingOption && selectedBillingOption.discountPercent > 0 && (
+                        <>
+                          <span>السعر الأصلي</span>
+                          <PriceDisplay
+                            amount={selectedOriginalTotal}
+                            size="sm"
+                            strike
+                          />
+                          <span>·</span>
+                          <span>الخصم {selectedBillingOption.discountPercent}%</span>
+                          <span>·</span>
+                        </>
+                      )}
+                      <span className="font-bold text-[#293129]">السعر النهائي</span>
+                      <PriceDisplay
+                        amount={selectedPackagePricing?.total || 0}
+                        size="sm"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => setCurrentStep(2)}
+                    className={`h-11 rounded-xl px-6 ${ownerPrimaryButtonClass}`}
+                    data-testid="button-continue-subscription"
+                  >
+                    متابعة الاشتراك
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-center text-sm text-[#6f685b]">
+                  اختر باقة بالنقر عليها للمتابعة.
+                </p>
+              )}
             </div>
-          </Card>
+
+            {!isExpired && remainingDays > 0 && action === "upgrade" && (
+              <OwnerAlert
+                tone="warning"
+                icon={<AlertTriangle className="w-5 h-5" />}
+                title="تنبيه عند تغيير الباقة"
+              >
+                تغيير الباقة يصفّر العداد الحالي ويبدأ باقة جديدة من اليوم؛ الأيام المتبقية السابقة لن تُرحّل.
+              </OwnerAlert>
+            )}
+
+            <Card className={`${ownerPanelClass} p-5`}>
+              <h3 className="text-sm font-bold text-[#293129]">قواعد الاشتراك والتجديد</h3>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-3">
+                  <p className="text-xs font-bold text-[#293129]">الترقية</p>
+                  <p className="mt-1 text-[11px] leading-5 text-[#6f685b]">تبدأ من اليوم وتعيد عداد الاشتراك حسب الباقة الجديدة.</p>
+                </div>
+                <div className="rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-3">
+                  <p className="text-xs font-bold text-[#293129]">التجديد</p>
+                  <p className="mt-1 text-[11px] leading-5 text-[#6f685b]">متاح عند بقاء 10 أيام أو أقل، وتُضاف المدة بعد تاريخ الانتهاء الحالي.</p>
+                </div>
+                <div className="rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-3">
+                  <p className="text-xs font-bold text-[#293129]">الاشتراك المشترك</p>
+                  <p className="mt-1 text-[11px] leading-5 text-[#6f685b]">
+                    {visibleLinkedCount > 0 ? `${visibleLinkedCount} عقار ضمن نفس الاشتراك.` : "لا توجد عقارات مرتبطة حالياً."}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </div>
         )}
 
-        {/* Step 2: Payment Method */}
+        {/* Step 2: Subscription summary and additional properties */}
         {currentStep === 2 && selectedPackageId && (
-          <Card className="p-8" style={{ order: 2 }}>
-            <h2 className="text-xl font-bold text-[#434040] mb-6">
-              {action === "new" ? "تفعيل الاشتراك" : action === "upgrade" ? "ترقية الاشتراك" : "تمديد الاشتراك"} — طريقة الدفع
+          <Card
+            id="owner-subscription-step-2"
+            className="mx-auto w-full scroll-mt-24 p-8"
+            style={{ order: 2 }}
+          >
+            <h2 className="text-xl font-bold text-[#293129] mb-6">
+              الخطوة 2: ملخص الاشتراك والعقارات
             </h2>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="space-y-6">
 
               {/* Selected Package Summary */}
               {selectedPackage && (
-                <div className="p-4 bg-muted/30 rounded-lg flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">الباقة المختارة</p>
-                    <p className="font-bold">{selectedPackage.name}</p>
-                  </div>
-                  <div className="text-left">
-                    <PriceDisplay amount={selectedPackagePricing?.total || selectedPackage.price} size="lg" />
-                    <p className="text-xs text-muted-foreground">{selectedPackage.duration} يوم</p>
-                  </div>
-                </div>
+                <OwnerPaymentSummary
+                  data-testid="owner-subscription-summary"
+                  packageName={selectedPackage.name}
+                  durationLabel={`${billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} · ${
+                    selectedBillingOption?.durationDays ??
+                    selectedPackage.duration
+                  } يوم`}
+                  originalPrice={selectedBillingOption?.originalPrice ?? 0}
+                  discountPercent={selectedBillingOption?.discountPercent ?? 0}
+                  discountAmount={selectedBillingOption?.discountAmount ?? 0}
+                  additionalPropertiesCount={
+                    selectedPackagePricing?.additionalPropertyCount ?? 0
+                  }
+                  additionalPropertiesTotal={selectedAdditionalTotal}
+                  finalTotal={calculateTotalPrice()}
+                />
               )}
 
               {/* Additional Properties Input for Multi-Property Packages */}
               {selectedPackage && selectedPackageMaxProperties > 1 && (
-                <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-3 flex items-center gap-2">
+                <div className="p-4 bg-[#faf7ef]  border border-[#e6ddc9]  rounded-lg">
+                  <h4 className="font-bold text-[#293129]  mb-3 flex items-center gap-2">
                     <Crown className="w-5 h-5" />
                     ربط عقارات إضافية
                   </h4>
                   
                   {/* Existing members are automatically renewed and never re-entered. */}
                   {existingGroupProperties.length > 0 && (
-                    <div className="mb-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-700">
-                      <p className="mb-2 text-sm font-semibold text-blue-800 dark:text-blue-200">
+                    <div className="mb-4 p-3 bg-white  rounded-lg border border-[#e6ddc9] ">
+                      <p className="mb-2 text-sm font-semibold text-[#293129] ">
                         العقارات المشمولة تلقائياً في التجديد
                       </p>
                       <div className="space-y-2">
@@ -2473,12 +2604,12 @@ export default function OwnerSubscriptionPage() {
                             className="flex items-center justify-between gap-2 text-sm"
                           >
                             <div className="flex items-center gap-2">
-                              <Home className="w-4 h-4 text-blue-600" />
-                              <span className="font-bold text-blue-600">
+                              <Home className="w-4 h-4 text-[#315f92]" />
+                              <span className="font-bold text-[#315f92]">
                                 {groupProperty.propertyNumber}
                               </span>
                               {groupProperty.name && groupProperty.name !== groupProperty.propertyNumber && (
-                                <span className="text-muted-foreground">{groupProperty.name}</span>
+                                <span className="text-[#6f685b]">{groupProperty.name}</span>
                               )}
                             </div>
                             {groupProperty.isMain && (
@@ -2491,11 +2622,17 @@ export default function OwnerSubscriptionPage() {
                   )}
                   
                   {action === "extend" || missingIncludedProperties === 0 ? (
-                    <p className="text-sm mb-4 text-blue-700 dark:text-blue-300">
-                      إضافة عقار جديد اختيارية، وسعر كل عقار إضافي {selectedPackagePricing?.additionalPropertyPrice || 0} ريال.
+                    <p className="text-sm mb-4 text-[#6f685b] ">
+                      إضافة عقار جديد اختيارية، وسعر كل عقار إضافي{" "}
+                      <PriceDisplay
+                        amount={selectedPackagePricing?.additionalPropertyPrice || 0}
+                        size="sm"
+                        className="inline-flex align-middle"
+                      />
+                      .
                     </p>
                   ) : (
-                    <p className={`text-sm mb-4 ${showAdditionalPropertyError ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-amber-700 dark:text-amber-300'}`}>
+                    <p className={`text-sm mb-4 ${showAdditionalPropertyError ? 'text-[#b42318]  font-semibold' : 'text-[#80621d] '}`}>
                       ⚠️ يجب إضافة {missingIncludedProperties === 1 ? "عقار إضافي واحد" : `${missingIncludedProperties} عقارات إضافية`} لهذه الباقة
                     </p>
                   )}
@@ -2521,12 +2658,12 @@ export default function OwnerSubscriptionPage() {
                               variant="outline"
                               onClick={() => verifyAdditionalProperty(index)}
                               disabled={prop.number.length !== 5 || prop.verifying || verifyingProperty !== null}
-                              className="border-blue-400 text-blue-700 hover:bg-blue-50"
+                              className="border-[#e6ddc9] text-[#6f685b] hover:bg-[#faf7ef]"
                             >
                               {prop.verifying ? "..." : "تحقق"}
                             </Button>
                           ) : (
-                            <div className="flex items-center gap-1 text-green-600 px-2">
+                            <div className="flex items-center gap-1 text-[#126b38] px-2">
                               <CheckCircle2 className="w-4 h-4" />
                             </div>
                           )}
@@ -2535,13 +2672,13 @@ export default function OwnerSubscriptionPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => removeAdditionalProperty(index)}
-                            className="text-red-500 hover:text-red-700"
+                            className="text-[#b42318] hover:text-[#b42318]"
                           >
                             <X className="w-4 h-4" />
                           </Button>
                         </div>
                         {prop.error && (
-                          <p className="text-sm text-red-600 mt-1">{prop.error}</p>
+                          <p className="text-sm text-[#b42318] mt-1">{prop.error}</p>
                         )}
                       </div>
                     </div>
@@ -2553,7 +2690,7 @@ export default function OwnerSubscriptionPage() {
                       type="button"
                       variant="outline"
                       onClick={addAdditionalProperty}
-                      className="border-blue-400 text-blue-700 hover:bg-blue-50 w-full"
+                      className="border-[#e6ddc9] text-[#6f685b] hover:bg-[#faf7ef] w-full"
                     >
                       <Plus className="w-4 h-4 mr-2" />
                       إضافة عقار آخر
@@ -2562,27 +2699,36 @@ export default function OwnerSubscriptionPage() {
 
                   {/* Price summary */}
                   {selectedPackagePricing && (
-                    <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                    <div className="mt-4 p-3 bg-[#faf7ef]  rounded-lg">
                       <div className="space-y-1">
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-blue-800 dark:text-blue-200">
+                          <span className="text-[#293129] ">
                             الباقة الأساسية ({selectedPackagePricing.includedPropertyCount} عقارات)
                           </span>
-                          <span className="font-bold">{selectedPackagePricing.basePrice} ريال</span>
+                          <span className="font-bold">
+                            <PriceDisplay amount={selectedPackagePricing.basePrice} size="sm" />
+                          </span>
                         </div>
                         {additionalProperties.filter(p => p.verified).map((p, idx) => (
                           <div key={idx} className="flex justify-between items-center text-sm">
-                            <span className="text-blue-800 dark:text-blue-200">عقار إضافي ({p.number})</span>
+                            <span className="text-[#293129] ">عقار إضافي ({p.number})</span>
                             <span className="font-bold">
-                              {idx < includedNewPropertySlots
-                                ? "مشمول"
-                                : `${selectedPackagePricing.additionalPropertyPrice} ريال`}
+                              {idx < includedNewPropertySlots ? (
+                                "مشمول"
+                              ) : (
+                                <PriceDisplay
+                                  amount={selectedPackagePricing.additionalPropertyPrice}
+                                  size="sm"
+                                />
+                              )}
                             </span>
                           </div>
                         ))}
-                        <div className="flex justify-between items-center pt-2 border-t border-blue-300">
-                          <span className="font-bold text-blue-900 dark:text-blue-100">الإجمالي</span>
-                          <span className="font-bold text-blue-900 dark:text-blue-100">{calculateTotalPrice()} ريال</span>
+                        <div className="flex justify-between items-center pt-2 border-t border-[#e6ddc9]">
+                          <span className="font-bold text-[#293129] ">الإجمالي</span>
+                          <span className="font-bold text-[#293129] ">
+                            <PriceDisplay amount={calculateTotalPrice()} size="md" />
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -2590,78 +2736,132 @@ export default function OwnerSubscriptionPage() {
                 </div>
               )}
 
+              <div className="flex flex-col-reverse gap-3 border-t pt-6 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCurrentStep(1)}
+                  className="gap-2"
+                  data-testid="owner-summary-back"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  رجوع
+                </Button>
+                <Button
+                  type="button"
+                  onClick={goToOwnerPaymentStep}
+                  className="flex-1 bg-[#293129] hover:bg-[#293129]"
+                  data-testid="owner-summary-continue"
+                >
+                  متابعة للدفع
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Step 3: Payment Method */}
+        {currentStep === 3 && selectedPackageId && (
+          <Card
+            id="owner-subscription-step-3"
+            className="mx-auto w-full scroll-mt-24 p-8"
+            style={{ order: 2 }}
+          >
+            <h2 className="text-xl font-bold text-[#293129] mb-6">
+              الخطوة 3: طريقة الدفع
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-6">
+
+              <OwnerPaymentSummary
+                packageName={selectedPackage?.name ?? ""}
+                durationLabel={`${billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} · ${
+                  selectedBillingOption?.durationDays ??
+                  selectedPackage?.duration ??
+                  0
+                } يوم`}
+                originalPrice={selectedBillingOption?.originalPrice ?? 0}
+                discountPercent={selectedBillingOption?.discountPercent ?? 0}
+                discountAmount={selectedBillingOption?.discountAmount ?? 0}
+                additionalPropertiesCount={
+                  selectedPackagePricing?.additionalPropertyCount ?? 0
+                }
+                additionalPropertiesTotal={selectedAdditionalTotal}
+                finalTotal={calculateTotalPrice()}
+              />
+
               {/* Payment Methods */}
               <div>
                 <h3 className="text-lg font-bold mb-4">اختر طريقة الدفع</h3>
                 <div className="space-y-3">
                   <div
                     onClick={() => setPaymentMethod("online")}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === "online" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === "online" ? "border-[#6f685b] bg-[#293129]/5" : "border-[#e6ddc9] hover:border-[#6f685b]/50"}`}
                   >
                     <div className="font-semibold flex items-center gap-2">
-                      <CreditCard className="w-5 h-5 text-[#434040]" />
+                      <CreditCard className="w-5 h-5 text-[#293129]" />
                       الدفع الإلكتروني
                     </div>
-                    <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay — تفعيل فوري</p>
+                    <p className="text-sm text-[#6f685b]">بطاقة ائتمان أو Apple Pay — تفعيل فوري</p>
                   </div>
                   <div
                     onClick={() => setPaymentMethod("bank")}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === "bank" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition ${paymentMethod === "bank" ? "border-[#6f685b] bg-[#293129]/5" : "border-[#e6ddc9] hover:border-[#6f685b]/50"}`}
                   >
                     <div className="font-semibold">تحويل بنكي</div>
-                    <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل — خلال 24 ساعة</p>
+                    <p className="text-sm text-[#6f685b]">مع تحميل إيصال التحويل — خلال 24 ساعة</p>
                   </div>
                 </div>
               </div>
 
               {/* Discount Code */}
-              <div className="p-4 bg-muted/30 rounded-lg">
+              <div className="p-4 bg-[#faf7ef] rounded-lg">
                 <label className="block text-sm font-semibold mb-2">كود خصم (اختياري)</label>
                 <div className="flex gap-2">
                   <Input placeholder="أدخل كود الخصم" value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} />
-                  <Button type="button" variant="outline" onClick={validateDiscount} className="border-green-400 text-green-700 hover:bg-green-50">تحقق</Button>
+                  <Button type="button" variant="outline" onClick={validateDiscount} className="border-[#cfe5d6] text-[#126b38] hover:bg-[#f6fbf7]">تحقق</Button>
                 </div>
                 {validatedDiscount && (
-                  <p className="text-sm text-green-600 mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
+                  <p className="text-sm text-[#126b38] mt-2">✓ سيتم خصم {formatDiscount(validatedDiscount.value, validatedDiscount.type)}</p>
                 )}
               </div>
 
               {/* Bank Receipt */}
               {paymentMethod === "bank" && (
-                <div className="p-4 bg-muted/30 rounded-lg space-y-3">
-                  <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+                <div className="p-4 bg-[#faf7ef] rounded-lg space-y-3">
+                  <div className="p-5 bg-[#faf7ef] border-2 border-[#e6ddc9] rounded-xl space-y-3">
                     <div className="flex items-center gap-2 mb-3">
-                      <CreditCard className="w-6 h-6 text-blue-700" />
-                      <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
+                      <CreditCard className="w-6 h-6 text-[#6f685b]" />
+                      <p className="font-bold text-lg text-[#293129]">معلومات التحويل البنكي</p>
                     </div>
                     {bankAccount ? (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                          <span className="text-sm font-semibold text-blue-700">البنك</span>
-                          <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                          <span className="text-sm font-semibold text-[#6f685b]">البنك</span>
+                          <span className="text-base font-bold text-[#293129]">{bankAccount.bankName}</span>
                         </div>
                         <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                          <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
-                          <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                          <span className="text-sm font-semibold text-[#6f685b]">اسم المستفيد</span>
+                          <span className="text-base font-bold text-[#293129]">{bankAccount.beneficiaryName}</span>
                         </div>
                         <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                          <span className="text-sm font-semibold text-blue-700">IBAN</span>
-                          <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                          <span className="text-sm font-semibold text-[#6f685b]">IBAN</span>
+                          <span className="text-base font-bold text-[#293129] tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
                         </div>
                         {bankAccount.accountNumber && (
                           <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                            <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
-                            <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                            <span className="text-sm font-semibold text-[#6f685b]">رقم الحساب</span>
+                            <span className="text-base font-bold text-[#293129] font-mono" dir="ltr">{bankAccount.accountNumber}</span>
                           </div>
                         )}
                         {bankAccount.barcodeUrl && (
                           <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                            <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                            <p className="text-sm font-semibold text-[#6f685b] mb-2">باركود الحساب البنكي</p>
                             <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
                           </div>
                         )}
                         <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                          <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                          <p className="text-sm font-semibold text-[#6f685b] mb-2">QR Code للدفع</p>
                           <img 
                             src="/assets/bank-qr.png" 
                             alt="QR Code للدفع" 
@@ -2671,11 +2871,11 @@ export default function OwnerSubscriptionPage() {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
+                      <p className="text-[#315f92] text-center py-4">جاري تحميل بيانات الحساب...</p>
                     )}
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2">
-                      <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
-                      <ul className="text-sm text-amber-700 space-y-1">
+                    <div className="mt-3 p-3 bg-[#fdf6e3] border border-[#e2d3a6] rounded-lg space-y-2">
+                      <p className="text-sm font-semibold text-[#80621d]">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
+                      <ul className="text-sm text-[#80621d] space-y-1">
                         <li>• الرمز المرجعي: <span className="font-mono font-bold">RWQN-MRQDHB</span></li>
                         <li>• رقم العقار</li>
                       </ul>
@@ -2690,7 +2890,7 @@ export default function OwnerSubscriptionPage() {
                       onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
-                    <Button type="button" variant="outline" onClick={() => receiptInputRef.current?.click()} className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50">
+                    <Button type="button" variant="outline" onClick={() => receiptInputRef.current?.click()} className="w-full gap-2 border-[#e6ddc9] text-[#6f685b] hover:bg-[#faf7ef]">
                       <Upload className="w-4 h-4" />
                       {receiptFile ? receiptFile.name : "اختر صورة الإيصال"}
                     </Button>
@@ -2699,23 +2899,21 @@ export default function OwnerSubscriptionPage() {
               )}
 
               {/* Submit */}
-              <div className="flex gap-3 pt-6 border-t">
+              <div className="flex flex-col-reverse gap-3 pt-6 border-t sm:flex-row">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => {
-                    setCurrentStep(1);
-                    if (action === "upgrade") setShowUpgradeDialog(true);
-                  }}
+                  onClick={() => setCurrentStep(2)}
                   className="gap-2"
+                  data-testid="owner-payment-back"
                 >
                   <ChevronRight className="w-4 h-4" />
-                  رجوع
+                  السابق
                 </Button>
                 <Button
                   type="submit"
                   disabled={!paymentMethod || cardPaymentMutation.isPending || bankTransferMutation.isPending || (paymentMethod === "bank" && !receiptFile)}
-                  className="flex-1 bg-[#434040] hover:bg-[#333]"
+                  className="flex-1 bg-[#293129] hover:bg-[#293129]"
                 >
                   {cardPaymentMutation.isPending || bankTransferMutation.isPending ? (
                     <>
@@ -2734,16 +2932,16 @@ export default function OwnerSubscriptionPage() {
         {selectedAddOn && (
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-[#434040]">شراء إضافة - {selectedAddOn.name}</h2>
+              <h2 className="text-xl font-bold text-[#293129]">شراء إضافة - {selectedAddOn.name}</h2>
               <Button variant="ghost" size="icon" onClick={() => { setSelectedAddOn(null); setAddOnStep(1); }}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
 
             {/* Add-on Summary */}
-            <div className="p-4 bg-muted/30 rounded-lg flex items-center justify-between mb-6">
+            <div className="p-4 bg-[#faf7ef] rounded-lg flex items-center justify-between mb-6">
               <div>
-                <p className="text-sm text-muted-foreground">الإضافة</p>
+                <p className="text-sm text-[#6f685b]">الإضافة</p>
                 <p className="font-bold">{selectedAddOn.name}</p>
                 {selectedAddOn.category && (
                   <Badge className={`${getCategoryColor(selectedAddOn.category)} text-white text-xs mt-1`}>
@@ -2753,7 +2951,7 @@ export default function OwnerSubscriptionPage() {
               </div>
               <div className="text-left">
                 <PriceDisplay amount={selectedAddOn.price} size="lg" />
-                <p className="text-xs text-muted-foreground">{selectedAddOn.duration} يوم</p>
+                <p className="text-xs text-[#6f685b]">{selectedAddOn.duration} يوم</p>
               </div>
             </div>
 
@@ -2763,60 +2961,60 @@ export default function OwnerSubscriptionPage() {
               <div className="space-y-3">
                 <div
                   onClick={() => { setAddOnPaymentMethod("online"); setAddOnStep(2); }}
-                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "online" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "online" ? "border-[#6f685b] bg-[#293129]/5" : "border-[#e6ddc9] hover:border-[#6f685b]/50"}`}
                 >
                   <div className="font-semibold flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#434040]" />
+                    <CreditCard className="w-5 h-5 text-[#293129]" />
                     الدفع الإلكتروني
                   </div>
-                  <p className="text-sm text-muted-foreground">بطاقة ائتمان أو Apple Pay — تفعيل فوري</p>
+                  <p className="text-sm text-[#6f685b]">بطاقة ائتمان أو Apple Pay — تفعيل فوري</p>
                 </div>
                 <div
                   onClick={() => { setAddOnPaymentMethod("bank"); setAddOnStep(2); }}
-                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "bank" ? "border-[#434040] bg-[#434040]/5" : "border-border hover:border-[#434040]/50"}`}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition ${addOnStep === 2 && addOnPaymentMethod === "bank" ? "border-[#6f685b] bg-[#293129]/5" : "border-[#e6ddc9] hover:border-[#6f685b]/50"}`}
                 >
                   <div className="font-semibold">تحويل بنكي</div>
-                  <p className="text-sm text-muted-foreground">مع تحميل إيصال التحويل — خلال 24 ساعة</p>
+                  <p className="text-sm text-[#6f685b]">مع تحميل إيصال التحويل — خلال 24 ساعة</p>
                 </div>
               </div>
             </div>
 
             {/* Bank Transfer Details */}
             {addOnPaymentMethod === "bank" && (
-              <div className="mt-4 p-4 bg-muted/30 rounded-lg space-y-3">
-                <div className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl space-y-3">
+              <div className="mt-4 p-4 bg-[#faf7ef] rounded-lg space-y-3">
+                <div className="p-5 bg-[#faf7ef] border-2 border-[#e6ddc9] rounded-xl space-y-3">
                   <div className="flex items-center gap-2 mb-3">
-                    <CreditCard className="w-6 h-6 text-blue-700" />
-                    <p className="font-bold text-lg text-blue-800">معلومات التحويل البنكي</p>
+                    <CreditCard className="w-6 h-6 text-[#6f685b]" />
+                    <p className="font-bold text-lg text-[#293129]">معلومات التحويل البنكي</p>
                   </div>
                   {bankAccount ? (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                        <span className="text-sm font-semibold text-blue-700">البنك</span>
-                        <span className="text-base font-bold text-blue-900">{bankAccount.bankName}</span>
+                        <span className="text-sm font-semibold text-[#6f685b]">البنك</span>
+                        <span className="text-base font-bold text-[#293129]">{bankAccount.bankName}</span>
                       </div>
                       <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                        <span className="text-sm font-semibold text-blue-700">اسم المستفيد</span>
-                        <span className="text-base font-bold text-blue-900">{bankAccount.beneficiaryName}</span>
+                        <span className="text-sm font-semibold text-[#6f685b]">اسم المستفيد</span>
+                        <span className="text-base font-bold text-[#293129]">{bankAccount.beneficiaryName}</span>
                       </div>
                       <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                        <span className="text-sm font-semibold text-blue-700">IBAN</span>
-                        <span className="text-base font-bold text-blue-900 tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
+                        <span className="text-sm font-semibold text-[#6f685b]">IBAN</span>
+                        <span className="text-base font-bold text-[#293129] tracking-wide font-mono" dir="ltr">{bankAccount.iban}</span>
                       </div>
                       {bankAccount.accountNumber && (
                         <div className="flex items-center justify-between p-3 bg-white/70 rounded-lg">
-                          <span className="text-sm font-semibold text-blue-700">رقم الحساب</span>
-                          <span className="text-base font-bold text-blue-900 font-mono" dir="ltr">{bankAccount.accountNumber}</span>
+                          <span className="text-sm font-semibold text-[#6f685b]">رقم الحساب</span>
+                          <span className="text-base font-bold text-[#293129] font-mono" dir="ltr">{bankAccount.accountNumber}</span>
                         </div>
                       )}
                       {bankAccount.barcodeUrl && (
                         <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                          <p className="text-sm font-semibold text-blue-700 mb-2">باركود الحساب البنكي</p>
+                          <p className="text-sm font-semibold text-[#6f685b] mb-2">باركود الحساب البنكي</p>
                           <img src={bankAccount.barcodeUrl} alt="باركود الحساب البنكي" className="max-w-[200px] mx-auto rounded-lg" />
                         </div>
                       )}
                       <div className="mt-4 p-3 bg-white/70 rounded-lg text-center">
-                        <p className="text-sm font-semibold text-blue-700 mb-2">QR Code للدفع</p>
+                        <p className="text-sm font-semibold text-[#6f685b] mb-2">QR Code للدفع</p>
                         <img 
                           src="/assets/bank-qr.png" 
                           alt="QR Code للدفع" 
@@ -2826,11 +3024,11 @@ export default function OwnerSubscriptionPage() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-blue-600 text-center py-4">جاري تحميل بيانات الحساب...</p>
+                    <p className="text-[#315f92] text-center py-4">جاري تحميل بيانات الحساب...</p>
                   )}
-                  <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg space-y-2">
-                    <p className="text-sm font-semibold text-amber-800">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
-                    <ul className="text-sm text-amber-700 space-y-1">
+                  <div className="mt-3 p-3 bg-[#fdf6e3] border border-[#e2d3a6] rounded-lg space-y-2">
+                    <p className="text-sm font-semibold text-[#80621d]">⚠ يرجى كتابة المعلومات التالية في ملاحظات التحويل:</p>
+                    <ul className="text-sm text-[#80621d] space-y-1">
                       <li>• الرمز المرجعي: <span className="font-mono font-bold">RWQN-MRQDHB</span></li>
                       <li>• رقم العقار</li>
                     </ul>
@@ -2851,7 +3049,7 @@ export default function OwnerSubscriptionPage() {
                     type="button" 
                     variant="outline" 
                     onClick={() => document.getElementById('add-on-receipt')?.click()}
-                    className="w-full gap-2 border-blue-400 text-blue-700 hover:bg-blue-50"
+                    className="w-full gap-2 border-[#e6ddc9] text-[#6f685b] hover:bg-[#faf7ef]"
                   >
                     <Upload className="w-4 h-4" />
                     {addOnReceiptFile ? addOnReceiptFile.name : "اختر صورة الإيصال"}
@@ -2875,7 +3073,7 @@ export default function OwnerSubscriptionPage() {
                 type="button"
                 disabled={!addOnPaymentMethod || addonOnlinePaymentMutation.isPending || addonBankTransferMutation.isPending || (addOnPaymentMethod === "bank" && !addOnReceiptFile)}
                 onClick={handleAddOnSubmit}
-                className="flex-1 bg-[#434040] hover:bg-[#333]"
+                className="flex-1 bg-[#293129] hover:bg-[#293129]"
               >
                 {(addonOnlinePaymentMutation.isPending || addonBankTransferMutation.isPending) ? (
                   <>
@@ -2890,8 +3088,8 @@ export default function OwnerSubscriptionPage() {
 
         {/* Add-ons Section */}
         {addOnPackages && addOnPackages.length > 0 && (
-          <Card className="p-6">
-            <h2 className="text-xl font-bold text-[#434040] mb-4 flex items-center gap-2">
+          <Card id="addons-section" className={`${ownerPanelClass} scroll-mt-24 p-5 sm:p-6`}>
+            <h2 className="text-xl font-bold text-[#293129] mb-4 flex items-center gap-2">
               <Star className="w-5 h-5 text-[#c9951d]" />
               الإضافات
             </h2>
@@ -2899,12 +3097,12 @@ export default function OwnerSubscriptionPage() {
             {/* Active Add-ons */}
             {propertyAddons && propertyAddons.filter((a: any) => a.status === "active").length > 0 && (
               <div className="mb-4">
-                <h3 className="text-sm font-semibold text-muted-foreground mb-2">إضافاتك النشطة</h3>
+                <h3 className="text-sm font-semibold text-[#6f685b] mb-2">إضافاتك النشطة</h3>
                 <div className="space-y-2">
                   {propertyAddons.filter((a: any) => a.status === "active").map((addon: any) => {
                     const pkg = addOnPackages.find((p: any) => p.id === addon.addOnPackageId);
                     return (
-                      <div key={addon.id} className="flex items-center justify-between p-3 rounded-lg border border-emerald-300 bg-emerald-50/50">
+                      <div key={addon.id} className="flex items-center justify-between p-3 rounded-lg border border-[#cfe5d6] bg-[#f6fbf7]">
                         <div className="flex items-center gap-2">
                           <Badge className={`${getCategoryColor(pkg?.category || "")} text-white text-xs`}>
                             {pkg?.category || "إضافة"}
@@ -2912,7 +3110,7 @@ export default function OwnerSubscriptionPage() {
                           <span className="font-semibold text-sm">{pkg?.name || addon.addOnPackageId}</span>
                         </div>
                         {addon.endDate && (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-[#6f685b]">
                             حتى {new Date(addon.endDate).toLocaleDateString('en-US', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' })}
                           </span>
                         )}
@@ -2933,8 +3131,8 @@ export default function OwnerSubscriptionPage() {
                   <div
                     key={pkg.id}
                     className={`p-4 rounded-lg border-2 transition-all ${alreadyActive
-                      ? "border-emerald-300 bg-emerald-50/30"
-                      : "border-border hover:border-[#434040]/50"
+                      ? "border-[#cfe5d6] bg-[#f6fbf7]"
+                      : "border-[#e6ddc9] hover:border-[#6f685b]/50"
                       }`}
                   >
                     <div className="flex items-start justify-between mb-2">
@@ -2944,19 +3142,19 @@ export default function OwnerSubscriptionPage() {
                         </Badge>
                         <h4 className="font-semibold">{pkg.name}</h4>
                         {pkg.description && (
-                          <p className="text-xs text-muted-foreground">{pkg.description}</p>
+                          <p className="text-xs text-[#6f685b]">{pkg.description}</p>
                         )}
                       </div>
                       <PriceDisplay amount={pkg.price} size="sm" />
                     </div>
                     {alreadyActive ? (
-                      <Badge className="bg-[#434040] text-white text-xs">
+                      <Badge className="bg-[#293129] text-white text-xs">
                         <Check className="w-3 h-3 ml-1" />مفعّل
                       </Badge>
                     ) : (
                       <Button
                         size="sm"
-                        className="w-full mt-2 bg-orange-500 hover:bg-orange-600 border-2 border-orange-500 shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
+                        className="w-full mt-2 rounded-xl bg-[#29372f] px-5 font-bold text-white transition-colors hover:bg-[#1f2b25] sm:w-auto"
                         disabled={addonPaymentMutation.isPending}
                         onClick={() => {
                           setSelectedAddOn(pkg);
@@ -2975,6 +3173,392 @@ export default function OwnerSubscriptionPage() {
           </Card>
         )}
 
+
+        {/* ===== الاشتراكات المشتركة والعقارات المرتبطة ===== */}
+        <Card id="linked-properties-section" className={`${ownerPanelClass} scroll-mt-24 p-5 sm:p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                <Home className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="font-bold text-[#293129]">الاشتراكات المشتركة والعقارات المرتبطة</h2>
+                <p className="mt-0.5 text-xs text-[#6f685b]">العقارات التي تشترك معك في نفس الاشتراك</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="rounded-lg border-[#e6ddc9] bg-[#faf7ef] px-3 py-1 text-xs font-bold text-[#80621d]">
+              {visibleLinkedCount} عقار
+            </Badge>
+          </div>
+
+          {currentSubscription?.linkedToMain && (
+            <div className="mt-4 rounded-xl border border-[#e6ddc9] bg-[#faf7ef] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-bold text-[#293129]">مرتبط بعقار رئيسي</p>
+                  <p className="mt-1 text-xs text-[#6f685b]">
+                    رقم العقار: <span className="font-bold">{currentSubscription.linkedToMain.propertyNumber}</span>
+                    {currentSubscription.linkedToMain.name ? ` — ${currentSubscription.linkedToMain.name}` : ""}
+                  </p>
+                </div>
+                <Badge variant="outline" className="rounded-lg border-[#e6ddc9] bg-white px-3 py-1 text-xs font-bold text-[#6f685b]">
+                  {currentSubscription.linkedToMain.subscriptionStatus === "نشط" ? "نشط" : currentSubscription.linkedToMain.subscriptionStatus || "غير نشط"}
+                </Badge>
+              </div>
+            </div>
+          )}
+
+          {additionalPropertyRequests?.approvedRequests?.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-bold text-[#6f685b]">العقارات المرتبطة</p>
+              {additionalPropertyRequests.approvedRequests.map((req: any, idx: number) => (
+                <div key={idx} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#cfe5d6] bg-[#f6fbf7] p-3">
+                  <div className="flex items-center gap-2">
+                    <Home className="h-4 w-4 text-[#126b38]" />
+                    <div>
+                      <p className="text-sm font-bold text-[#293129]">{req.propertyNumber}</p>
+                      <p className="text-xs text-[#6f685b]">{req.name} - {req.city}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-lg border-[#cfe5d6] bg-white px-2 py-1 text-[11px] font-bold text-[#126b38]">تم الربط</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-[#b42318] hover:bg-[#fff5f5] hover:text-[#b42318]"
+                      onClick={() => setUnlinkPropertyDialog({ open: true, propertyNumber: req.propertyNumber, propertyName: req.name })}
+                      title="فصل العقار"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {additionalPropertyRequests?.pendingRequests?.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-bold text-[#6f685b]">عقارات قيد المراجعة</p>
+              {additionalPropertyRequests.pendingRequests.map((req: any, idx: number) => (
+                <div key={idx} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2d3a6] bg-[#fdf6e3] p-3">
+                  <div className="flex items-center gap-2">
+                    <Home className="h-4 w-4 text-[#80621d]" />
+                    <div>
+                      <p className="text-sm font-bold text-[#293129]">{req.propertyNumber}</p>
+                      <p className="text-xs text-[#6f685b]">{req.name} - {req.city}</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="rounded-lg border-[#e2d3a6] bg-white px-2 py-1 text-[11px] font-bold text-[#80621d]">قيد الانتظار</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!currentSubscription?.linkedToMain &&
+            !(additionalPropertyRequests?.approvedRequests?.length > 0) &&
+            !(additionalPropertyRequests?.pendingRequests?.length > 0) && (
+              <div className="mt-4">
+                <OwnerEmptyState
+                  icon={<Home className="w-6 h-6" />}
+                  title="لا توجد عقارات مرتبطة"
+                  description="عند ربط عقارات إضافية بنفس الاشتراك ستظهر هنا."
+                />
+              </div>
+            )}
+        </Card>
+
+        {/* ===== المدفوعات والتحويلات البنكية ===== */}
+        <Card id="payments-section" className={`${ownerPanelClass} scroll-mt-24 p-5 sm:p-6`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                <CreditCard className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="font-bold text-[#293129]">المدفوعات والتحويلات البنكية</h2>
+                <p className="mt-0.5 text-xs text-[#6f685b]">سجل عمليات الدفع على هذا العقار</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="rounded-lg border-[#e6ddc9] bg-[#faf7ef] px-3 py-1 text-xs font-bold text-[#80621d]">
+              {paymentsData?.length || 0} عملية
+            </Badge>
+          </div>
+
+          {pendingPayment?.hasPending && (
+            <div className="mt-4">
+              <OwnerAlert tone="warning" icon={<Clock className="w-5 h-5" />} title="دفعة قيد المراجعة">
+                {pendingPayment.action === "upgrade"
+                  ? "سيتم ترقية اشتراكك بعد مراجعة الإيصال."
+                  : pendingPayment.action === "extend"
+                    ? "سيتم تمديد اشتراكك بعد مراجعة الإيصال."
+                    : "سيتم تفعيل اشتراكك بعد مراجعة الإيصال."}
+              </OwnerAlert>
+            </div>
+          )}
+
+          {shouldShowRejectedPaymentNotice && (
+            <div className="mt-4">
+              <OwnerAlert tone="danger" icon={<AlertTriangle className="w-5 h-5" />} title="تم رفض الدفعة السابقة">
+                {pendingPayment.payment?.notes || "يرجى إعادة التحويل ورفع إيصال صحيح."}
+              </OwnerAlert>
+            </div>
+          )}
+
+          {!paymentsData || paymentsData.length === 0 ? (
+            <div className="mt-4">
+              <OwnerEmptyState
+                icon={<CreditCard className="w-6 h-6" />}
+                title="لا توجد مدفوعات حتى الآن"
+                description="ستظهر هنا عمليات الاشتراك والإضافات بعد إتمامها."
+              />
+            </div>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {sortPaymentsNewestFirst(paymentsData).map((payment: any) => {
+                const status = payment.status || "غير محدد";
+                const amount = payment.finalAmount || payment.amount || 0;
+                const method =
+                  payment.paymentMethod === "bank_transfer"
+                    ? "تحويل بنكي"
+                    : payment.paymentMethod === "paymob"
+                      ? "دفع إلكتروني"
+                      : payment.paymentMethod || "غير محدد";
+                const statusClass =
+                  status === "مكتمل"
+                    ? "border-[#cfe5d6] bg-[#f6fbf7] text-[#126b38]"
+                    : status === "مرفوض" || status === "فشل"
+                      ? "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]"
+                      : status === "قيد المراجعة" || status === "معلق" || status === "نجح - قيد التحقق"
+                        ? "border-[#e2d3a6] bg-[#fdf6e3] text-[#80621d]"
+                        : "border-[#e6ddc9] bg-[#fffdf8] text-[#6f685b]";
+                const isBank = method === "تحويل بنكي";
+                const canUpload =
+                  isBank && (status === "معلق" || status === "قيد المراجعة");
+                const canRetry =
+                  !isBank &&
+                  (status === "معلق" || status === "فشل" || status === "قيد المراجعة");
+                const canVerify = status === "نجح - قيد التحقق";
+                const isExpanded = expandedPaymentId === payment.id;
+                return (
+                  <div key={payment.id} className="rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-white text-[#9a7623]">
+                          <CreditCard className="h-5 w-5" />
+                        </span>
+                        <div>
+                          <div className="text-sm font-bold text-[#293129]">
+                            <PriceDisplay amount={amount} size="sm" />
+                          </div>
+                          <p className="text-[11px] text-[#6f685b]">{method}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#6f685b]">
+                        <span>{formatSubDate(payment.createdAt || payment.completedAt, false)}</span>
+                        <Badge variant="outline" className={`rounded-lg px-2 py-1 text-[11px] font-bold ${statusClass}`}>
+                          {status}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className={ownerSecondaryButtonClass}
+                        onClick={() => setExpandedPaymentId(isExpanded ? null : payment.id)}
+                      >
+                        {isExpanded ? "إخفاء التفاصيل" : "تفاصيل الدفع"}
+                      </Button>
+                      {canUpload && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className={ownerPrimaryButtonClass}
+                          onClick={() => {
+                            setSelectedPaymentForReceipt(payment);
+                            setPaymentReceiptFile(null);
+                            setPaymentReceiptFeedback(null);
+                            setShowReceiptDialog(true);
+                          }}
+                        >
+                          <Upload className="ml-1.5 h-4 w-4" />
+                          رفع الإيصال
+                        </Button>
+                      )}
+                      {canRetry && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className={ownerPrimaryButtonClass}
+                          disabled={retryPaymentMutation.isPending}
+                          onClick={() => retryPaymentMutation.mutate(payment.id)}
+                        >
+                          إعادة الدفع
+                        </Button>
+                      )}
+                      {canVerify && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className={ownerSecondaryButtonClass}
+                          disabled={verifyPaymentMutation.isPending}
+                          onClick={() => verifyPaymentMutation.mutate(payment.id)}
+                        >
+                          تحقق من الدفع
+                        </Button>
+                      )}
+                    </div>
+
+                    {isExpanded && (
+                      <dl className="mt-3 grid gap-2 rounded-xl bg-[#faf7ef] p-3 text-xs sm:grid-cols-2">
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-[#6f685b]">رقم العملية</dt>
+                          <dd className="font-mono text-[#293129]" dir="ltr">
+                            {payment.id || "—"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-[#6f685b]">طريقة الدفع</dt>
+                          <dd className="font-semibold text-[#293129]">{method}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-[#6f685b]">التاريخ</dt>
+                          <dd className="font-semibold text-[#293129]">
+                            {formatSubDate(payment.createdAt || payment.completedAt, false)}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-[#6f685b]">الحالة</dt>
+                          <dd className="font-semibold text-[#293129]">{status}</dd>
+                        </div>
+                        {payment.notes && (
+                          <div className="sm:col-span-2">
+                            <dt className="text-[#6f685b]">ملاحظات</dt>
+                            <dd className="mt-1 leading-6 text-[#293129]">{payment.notes}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Dialog open={showReceiptDialog} onOpenChange={setShowReceiptDialog}>
+          <DialogContent
+            dir="rtl"
+            className="max-h-[90vh] w-[calc(100%-1.5rem)] max-w-md overflow-y-auto rounded-2xl border-[#e6ddc9] bg-[#fffdf8] p-5"
+          >
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-[#293129]">
+                <Upload className="w-5 h-5 text-[#9a7623]" />
+                رفع إيصال التحويل البنكي
+              </DialogTitle>
+              <DialogDescription className="text-xs leading-5 text-[#6f685b]">
+                ارفع صورة إيصال التحويل للدفعة المعلقة وسيتم مراجعته من الإدارة.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {selectedPaymentForReceipt && (
+                <div className="space-y-2 rounded-xl border border-[#f0eadc] bg-white p-3 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-[#6f685b]">المبلغ</span>
+                    <div className="font-bold">
+                      <PriceDisplay
+                        amount={
+                          selectedPaymentForReceipt.finalAmount ||
+                          selectedPaymentForReceipt.amount ||
+                          0
+                        }
+                        size="sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-[#6f685b]">رقم العملية</span>
+                    <span className="font-mono text-xs" dir="ltr">
+                      {selectedPaymentForReceipt.id}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-[#293129]">
+                  صورة الإيصال الجديد
+                </label>
+                <input
+                  ref={paymentReceiptInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => {
+                    setPaymentReceiptFile(e.target.files?.[0] || null);
+                    setPaymentReceiptFeedback(null);
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => paymentReceiptInputRef.current?.click()}
+                  className={`h-11 w-full gap-2 ${ownerSecondaryButtonClass}`}
+                >
+                  <Upload className="w-4 h-4" />
+                  {paymentReceiptFile ? paymentReceiptFile.name : "اختر صورة الإيصال"}
+                </Button>
+              </div>
+
+              {paymentReceiptFeedback && (
+                <div
+                  className={`rounded-lg border p-3 text-sm ${
+                    paymentReceiptFeedback.tone === "error"
+                      ? "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]"
+                      : "border-[#e2d3a6] bg-[#fdf6e3] text-[#80621d]"
+                  }`}
+                >
+                  <p className="font-semibold">{paymentReceiptFeedback.title}</p>
+                  <p className="mt-1 text-xs leading-5">{paymentReceiptFeedback.message}</p>
+                </div>
+              )}
+
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={ownerSecondaryButtonClass}
+                  onClick={() => setShowReceiptDialog(false)}
+                >
+                  إلغاء
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handlePaymentReceiptUpload}
+                  disabled={!paymentReceiptFile || isUploadingPaymentReceipt}
+                  className={`h-11 flex-1 ${ownerPrimaryButtonClass}`}
+                >
+                  {isUploadingPaymentReceipt ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                      جاري الرفع...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 ml-2" />
+                      رفع الإيصال
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
       </OwnerPageMain>
       <OwnerMobileNavigation />

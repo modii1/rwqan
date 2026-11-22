@@ -8,6 +8,13 @@ import {
   PropertySuspendedError,
 } from "../../services/propertySuspension";
 import { notificationSettingsSchema } from "../../../shared/schema";
+import {
+  DEFAULT_PLATFORM_FONT_ID,
+  getPlatformFontOption,
+  isPlatformFontId,
+  normalizePlatformFontId,
+} from "../../../shared/platformFonts";
+import { requireAdmin, requireSameOrigin } from "../middleware";
 
 const router = Router();
 
@@ -406,5 +413,55 @@ router.post("/api/admin/feature-flags/initialize", async (_req, res) => {
     res.status(500).json({ error: "فشل في تهيئة الميزات" });
   }
 });
+
+// ======================
+// Platform font (customer pages)
+// ======================
+
+router.get(
+  "/api/admin/settings/font",
+  requireAdmin,
+  async (_req, res) => {
+    try {
+      const fontId = await firebaseService.getPlatformFontId();
+      const font = getPlatformFontOption(fontId);
+      res.set("Cache-Control", "no-store, private");
+      res.json({
+        fontId,
+        font,
+        defaultFontId: DEFAULT_PLATFORM_FONT_ID,
+      });
+    } catch (err) {
+      console.error("Error fetching platform font setting:", err);
+      res.status(500).json({ error: "تعذّر جلب إعداد الخط." });
+    }
+  },
+);
+
+router.put(
+  "/api/admin/settings/font",
+  requireSameOrigin,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const requested = (req.body ?? {}).fontId;
+      if (!isPlatformFontId(requested)) {
+        res.status(400).json({ error: "خط غير معروف أو غير مدعوم." });
+        return;
+      }
+      const fontId = normalizePlatformFontId(requested);
+      await firebaseService.savePlatformFontId(fontId);
+      res.set("Cache-Control", "no-store, private");
+      res.json({
+        success: true,
+        fontId,
+        font: getPlatformFontOption(fontId),
+      });
+    } catch (err) {
+      console.error("Error saving platform font setting:", err);
+      res.status(500).json({ error: "تعذّر حفظ إعداد الخط." });
+    }
+  },
+);
 
 export default router;

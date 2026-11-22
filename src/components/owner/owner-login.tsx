@@ -7,12 +7,16 @@ import { AuthGateway } from "@/components/auth/auth-gateway";
 import CustomerAuthPage, { CustomerAuthPageFallback } from "@/components/customer/customer-auth-page";
 import { OwnerAccountLogin } from "@/components/owner/owner-account-login";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import type { AuthRole } from "@/lib/auth-role";
 import { getSafeOwnerLoginDestination } from "@/lib/owner-login-redirect";
 import { cleanPropertyNumber } from "@/lib/validation";
+import {
+  OwnerInput,
+  ownerLabelClass,
+  ownerPrimaryButtonClass,
+} from "@/components/owner/owner-ui";
 
 interface OwnerLoginProps {
   initialMode?: AuthRole;
@@ -210,12 +214,12 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
           >
             <TabsList
               aria-label="طريقة دخول مالك العقار"
-              className="mb-6 grid h-auto w-full grid-cols-2 rounded-xl border border-[#ded5c2] bg-[#f0ede5] p-1"
+              className="mb-6 grid h-auto w-full grid-cols-2 rounded-xl border border-[#e6ddc9] bg-[#faf7ef] p-1"
             >
               <TabsTrigger
                 value="account"
                 disabled={isLoading || isOwnerAccountBusy}
-                className="min-h-11 rounded-lg font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
+                className="min-h-11 rounded-xl font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
                 data-testid="owner-login-method-account"
               >
                 رقم الجوال
@@ -223,7 +227,7 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
               <TabsTrigger
                 value="legacy"
                 disabled={isLoading || isOwnerAccountBusy}
-                className="min-h-11 rounded-lg font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
+                className="min-h-11 rounded-xl font-bold data-[state=active]:bg-white data-[state=active]:text-[#29372f]"
                 data-testid="owner-login-method-legacy"
               >
                 رقم العقار
@@ -240,8 +244,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
             <TabsContent value="legacy" className="mt-0">
               <form onSubmit={handleOwnerLogin} className="space-y-5">
                 <div>
-                  <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-property-number">رقم العقار</label>
-                  <Input
+                  <label className={ownerLabelClass} htmlFor="owner-property-number">رقم العقار</label>
+                  <OwnerInput
                     id="owner-property-number"
                     type="text"
                     placeholder="5 أرقام"
@@ -254,16 +258,16 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                     autoComplete="username"
                     maxLength={5}
                     data-testid="input-property-number"
-                    className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                    className="h-12 text-base"
                   />
                   {propertyNumber && propertyNumber.length !== 5 && (
-                    <p className="mt-1 text-xs text-red-500">يجب أن يكون 5 أرقام</p>
+                    <p className="mt-1 text-xs text-[#b42318]">يجب أن يكون 5 أرقام</p>
                   )}
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="owner-pin">الرقم السري</label>
-                  <Input
+                  <label className={ownerLabelClass} htmlFor="owner-pin">الرقم السري</label>
+                  <OwnerInput
                     id="owner-pin"
                     type="password"
                     placeholder="••••"
@@ -275,13 +279,13 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                     dir="ltr"
                     disabled={isLoading}
                     data-testid="input-pin"
-                    className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                    className="h-12 text-base"
                   />
                 </div>
 
                 <Button
                   type="submit"
-                  className="h-12 w-full rounded-xl bg-[#29372f] text-base font-bold text-white hover:bg-[#1f2b25]"
+                  className={`h-12 w-full text-base ${ownerPrimaryButtonClass}`}
                   disabled={isLoading}
                   data-testid="button-login"
                 >
@@ -303,7 +307,7 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                     type="button"
                     variant="link"
                     onClick={() => router.push("/forgot-password")}
-                    className="h-auto text-sm text-[#687064] hover:text-[#242822]"
+                    className="h-auto text-sm text-[#6f685b] hover:text-[#293129]"
                     data-testid="link-forgot-password"
                   >
                     نسيت الرقم السري؟
@@ -313,7 +317,7 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
             </TabsContent>
           </Tabs>
 
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-1 border-t border-[#e9dfca] pt-5 text-sm text-[#687064]">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-1 border-t border-[#e6ddc9] pt-5 text-sm text-[#687064]">
             <span>ليس لديك حساب؟</span>
             <Button
               variant="link"
@@ -330,8 +334,8 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
         <div className="mx-auto w-full max-w-xl" data-testid="auth-panel-admin">
           <form onSubmit={handleAdminLogin} className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-code">اسم المستخدم</label>
-              <Input
+              <label className={ownerLabelClass} htmlFor="admin-code">اسم المستخدم</label>
+              <OwnerInput
                 id="admin-code"
                 type="text"
                 placeholder="أدخل كود المسؤول"
@@ -341,13 +345,13 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                 dir="ltr"
                 disabled={isLoading}
                 data-testid="input-admin-code"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                className="h-12 text-base"
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#242822]" htmlFor="admin-password">كلمة المرور</label>
-              <Input
+              <label className={ownerLabelClass} htmlFor="admin-password">كلمة المرور</label>
+              <OwnerInput
                 id="admin-password"
                 type="password"
                 placeholder="••••••"
@@ -357,13 +361,13 @@ export default function OwnerLogin({ initialMode = "owner" }: OwnerLoginProps) {
                 dir="ltr"
                 disabled={isLoading}
                 data-testid="input-admin-password"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white text-base focus-visible:ring-[#9a7623]"
+                className="h-12 text-base"
               />
             </div>
 
             <Button
               type="submit"
-              className="h-12 w-full rounded-xl bg-[#29372f] text-base font-bold text-white hover:bg-[#1f2b25]"
+              className={`h-12 w-full text-base ${ownerPrimaryButtonClass}`}
               disabled={isLoading}
               data-testid="button-admin-login"
             >

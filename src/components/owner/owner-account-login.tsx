@@ -6,7 +6,6 @@ import { KeyRound, Loader2, ShieldCheck, Smartphone } from "lucide-react";
 import { normalizePhoneDigits } from "@shared/phone";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   ownerAccountApiError,
@@ -15,6 +14,12 @@ import {
   validateOwnerAccountPhone,
   type OwnerAccountChallenge,
 } from "@/lib/owner-account-client";
+import {
+  OwnerInput,
+  ownerLabelClass,
+  ownerPrimaryButtonClass,
+  ownerSecondaryButtonClass,
+} from "@/components/owner/owner-ui";
 
 interface OwnerAccountLoginProps {
   onAuthenticated: () => void;
@@ -121,8 +126,8 @@ export function OwnerAccountLogin({
 
   return (
     <div data-testid="owner-account-login" className="space-y-5">
-      <div className="flex items-start gap-3 rounded-xl border border-[#d8c9a8] bg-[#fbf7ee] p-4">
-        <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#29372f] text-[#d8bf76]">
+      <div className="flex items-start gap-3 rounded-xl border border-[#efe3c6] bg-[#faf7ef] p-4">
+        <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#29372f] text-[#d8bf76]">
           <ShieldCheck className="h-5 w-5" aria-hidden="true" />
         </span>
         <div className="min-w-0">
@@ -136,12 +141,12 @@ export function OwnerAccountLogin({
       {!challenge ? (
         <form onSubmit={requestCode} className="space-y-4" noValidate aria-busy={isBusy}>
           <div className="space-y-2">
-            <Label htmlFor="owner-account-phone" className="font-semibold text-[#242822]">
+            <Label htmlFor="owner-account-phone" className={ownerLabelClass}>
               رقم الجوال
             </Label>
             <div className="relative">
               <Smartphone className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b7140]" aria-hidden="true" />
-              <Input
+              <OwnerInput
                 id="owner-account-phone"
                 type="tel"
                 inputMode="tel"
@@ -157,25 +162,25 @@ export function OwnerAccountLogin({
                 aria-describedby={error ? "owner-account-login-error" : "owner-account-phone-help"}
                 disabled={isBusy}
                 data-testid="input-owner-account-phone"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white pl-3 pr-10 text-base focus-visible:ring-[#9a7623]"
+                className="h-12 pl-3 pr-10 text-base"
               />
             </div>
             {!error ? (
-              <p id="owner-account-phone-help" className="text-xs leading-5 text-[#7a705f]">
+              <p id="owner-account-phone-help" className="text-xs leading-5 text-[#6f685b]">
                 يمكنك إدخاله بصيغة 05XXXXXXXX أو 9665XXXXXXXX.
               </p>
             ) : null}
           </div>
 
           {error ? (
-            <p id="owner-account-login-error" className="text-sm font-medium text-red-600" role="alert">
+            <p id="owner-account-login-error" className="text-sm font-medium text-[#b42318]" role="alert">
               {error}
             </p>
           ) : null}
 
           <Button
             type="submit"
-            className="h-12 w-full rounded-xl bg-[#29372f] text-base font-bold text-white hover:bg-[#1f2b25]"
+            className={`h-12 w-full text-base ${ownerPrimaryButtonClass}`}
             disabled={isBusy}
             data-testid="button-owner-account-challenge"
           >
@@ -185,18 +190,18 @@ export function OwnerAccountLogin({
         </form>
       ) : (
         <form onSubmit={verifyCode} className="space-y-4" noValidate aria-busy={isBusy}>
-          <div className="rounded-xl border border-[#e9dfca] bg-white p-4 text-sm leading-6 text-[#625c4f]">
+          <div className="rounded-xl border border-[#e6ddc9] bg-white p-4 text-sm leading-6 text-[#6f685b]">
             أرسلنا رمز التحقق إلى الرقم <span dir="ltr" className="font-bold text-[#293129]">{challenge.maskedPhone}</span>.
             {expiryMinutes ? <span> ينتهي خلال {expiryMinutes} دقائق.</span> : null}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="owner-account-code" className="font-semibold text-[#242822]">
+            <Label htmlFor="owner-account-code" className={ownerLabelClass}>
               رمز التحقق
             </Label>
             <div className="relative">
               <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b7140]" aria-hidden="true" />
-              <Input
+              <OwnerInput
                 id="owner-account-code"
                 type="text"
                 inputMode="numeric"
@@ -213,24 +218,24 @@ export function OwnerAccountLogin({
                 aria-describedby={error ? "owner-account-login-error" : undefined}
                 disabled={isBusy}
                 data-testid="input-owner-account-code"
-                className="h-12 rounded-xl border-[#d9cfb8] bg-white pl-3 pr-10 text-center text-xl tracking-[0.45em] focus-visible:ring-[#9a7623]"
+                className="h-12 pl-3 pr-10 text-center text-xl tracking-[0.45em]"
               />
             </div>
           </div>
 
           {error ? (
-            <p id="owner-account-login-error" className="text-sm font-medium text-red-600" role="alert">
+            <p id="owner-account-login-error" className="text-sm font-medium text-[#b42318]" role="alert">
               {error}
             </p>
           ) : null}
 
           <div className="grid grid-cols-2 gap-3">
-            <Button type="button" variant="outline" onClick={returnToPhone} disabled={isBusy}>
+            <Button type="button" variant="outline" onClick={returnToPhone} disabled={isBusy} className={`h-12 ${ownerSecondaryButtonClass}`}>
               تغيير رقم الجوال
             </Button>
             <Button
               type="submit"
-              className="bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
+              className={`h-12 ${ownerPrimaryButtonClass}`}
               disabled={isBusy}
               data-testid="button-owner-account-verify"
             >

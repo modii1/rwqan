@@ -14,6 +14,11 @@ import {
 import {
     normalizeStoredOwnerSubscriptionWhatsAppTemplates,
 } from "../shared/subscription-whatsapp";
+import {
+    DEFAULT_PLATFORM_FONT_ID,
+    normalizePlatformFontId,
+    type PlatformFontId,
+} from "../shared/platformFonts";
 import type {
     Property,
     InsertProperty,
@@ -80,6 +85,7 @@ import {
     isSubscriptionPackageDurationAllowed,
     normalizeSubscriptionPackageDuration,
 } from "../shared/subscriptionPackagePolicy";
+import { packageMatchesAudience } from "../shared/packageAudience";
 import { getExactPaymobPaymentMethod } from "./utils/paymobPaymentMethod";
 import {
     getActiveCommissionHoldVersion,
@@ -1282,6 +1288,25 @@ export class FirebaseService {
             linkedProperty: subscriptionData.linkedProperty || undefined,
             linkedProperties: subscriptionData.linkedProperties || undefined,
             propertyCount: subscriptionData.propertyCount || 1,
+            // لقطة السعر/المدة وقت الشراء - لا تؤثر على الاشتراكات القديمة.
+            ...(subscriptionData.billingPeriod
+                ? { billingPeriod: subscriptionData.billingPeriod }
+                : {}),
+            ...(subscriptionData.durationDays != null && Number.isFinite(Number(subscriptionData.durationDays))
+                ? { durationDays: Number(subscriptionData.durationDays) }
+                : {}),
+            ...(subscriptionData.packageName
+                ? { packageName: String(subscriptionData.packageName) }
+                : {}),
+            ...(subscriptionData.basePrice != null && Number.isFinite(Number(subscriptionData.basePrice))
+                ? { basePrice: Number(subscriptionData.basePrice) }
+                : {}),
+            ...(subscriptionData.discountAmount != null && Number.isFinite(Number(subscriptionData.discountAmount))
+                ? { discountAmount: Number(subscriptionData.discountAmount) }
+                : {}),
+            ...(subscriptionData.packageDiscountAmount != null && Number.isFinite(Number(subscriptionData.packageDiscountAmount))
+                ? { packageDiscountAmount: Number(subscriptionData.packageDiscountAmount) }
+                : {}),
         };
 
         const docRef = this.db.collection("subscriptions").doc(id);
@@ -3087,7 +3112,26 @@ export class FirebaseService {
             .filter((pkg): pkg is Package => pkg !== null);
 
         // إزالة التكرار بناءً على الـ ID (لضمان عدم وجود أخطاء في واجهة المستخدم)
-        return Array.from(new Map(packages.map(pkg => [pkg.id, pkg])).values());
+        const visible = packages.filter(
+            (pkg) => (pkg as any).isVisible !== false && !(pkg as any).archivedAt,
+        );
+        const unique = Array.from(new Map(visible.map(pkg => [pkg.id, pkg])).values());
+        // ترتيب العرض من لوحة الأدمن (sortOrder ثم الاسم).
+        return unique.sort((a, b) => {
+            const orderA = Number((a as any).sortOrder ?? 0);
+            const orderB = Number((b as any).sortOrder ?? 0);
+            if (Number.isFinite(orderA) && Number.isFinite(orderB) && orderA !== orderB) {
+                return orderA - orderB;
+            }
+            return String(a.name || "").localeCompare(String(b.name || ""), "ar");
+        });
+    }
+
+    async getPackagesForAudience(
+        audience: "public" | "owner",
+    ): Promise<Package[]> {
+        const packages = await this.getPackages();
+        return packages.filter((pkg) => packageMatchesAudience(pkg, audience));
     }
 
     async getPackageById(id: string): Promise<Package | null> {
@@ -3166,6 +3210,12 @@ export class FirebaseService {
             durationDays: duration,
             isActive,
         };
+        // Reactivating an archived package restores it: clear the archive marker
+        // and make it visible again. The admin can hide it afterwards.
+        if (isActive && (existing as any).archivedAt) {
+            (normalizedUpdates as any).archivedAt = null;
+            normalizedUpdates.isVisible = true;
+        }
         await ref.update(normalizedUpdates);
         return { ...existing, ...normalizedUpdates } as Package;
     }
@@ -3174,8 +3224,36 @@ export class FirebaseService {
         const ref = this.db.collection("packages").doc(id);
         const doc = await ref.get();
         if (!doc.exists) return false;
-        await ref.delete();
+        // أرشفة منطقية: نحافظ على السجل التاريخي ولا نحذف المستند.
+        // الاشتراكات والمدفوعات السابقة تبقى قابلة للقراءة.
+        await ref.update({
+            isActive: false,
+            isVisible: false,
+            archivedAt: new Date().toISOString(),
+        });
         return true;
+    }
+
+    /**
+     * Only one package can be the recommended plan. This clears the marker on
+     * every other package after the selected one is saved. Historical package
+     * documents and subscriptions are never touched.
+     */
+    async clearRecommendedPackages(exceptId: string): Promise<void> {
+        const snapshot = await this.db
+            .collection("packages")
+            .where("isRecommended", "==", true)
+            .get();
+        const others = snapshot.docs.filter((doc) => {
+            const data = doc.data() || {};
+            return doc.id !== exceptId && (data.id || doc.id) !== exceptId;
+        });
+        if (others.length === 0) return;
+        const batch = this.db.batch();
+        others.forEach((doc) => {
+            batch.update(doc.ref, { isRecommended: false });
+        });
+        await batch.commit();
     }
 
     // ================== المدفوعات (Payments) ==================
@@ -6293,6 +6371,32 @@ export class FirebaseService {
             updatedAt: new Date().toISOString(),
         };
         await this.db.collection("settings").doc("notification_settings").set(data);
+    }
+
+    // ================== Platform Font Setting ==================
+
+    /**
+     * Central customer-platform font. Unknown/missing values fall back to the
+     * current default (Cairo) so a bad document can never break page rendering.
+     */
+    async getPlatformFontId(): Promise<PlatformFontId> {
+        try {
+            const doc = await this.db.collection("settings").doc("platform_font").get();
+            if (doc.exists) {
+                return normalizePlatformFontId(doc.data()?.fontId);
+            }
+        } catch (err) {
+            console.error("Error loading platform font setting from Firebase:", err);
+        }
+        return DEFAULT_PLATFORM_FONT_ID;
+    }
+
+    async savePlatformFontId(fontId: PlatformFontId): Promise<void> {
+        const normalized = normalizePlatformFontId(fontId);
+        await this.db.collection("settings").doc("platform_font").set({
+            fontId: normalized,
+            updatedAt: new Date().toISOString(),
+        });
     }
 
     // ================== Expired Add-ons ==================

@@ -20,8 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { OwnerPropertyOption } from "@shared/owner-inquiries";
 import { OwnerAccountManager } from "@/components/owner/owner-account-manager";
 
-export const ownerPanelClass = "rounded-lg border border-[#dfe2dc] bg-white shadow-sm shadow-black/[0.03]";
-export const ownerSoftPanelClass = "rounded-lg border border-[#e2e5df] bg-[#f8f9f7]";
+export { ownerPanelClass, ownerSoftPanelClass } from "@/components/owner/owner-ui";
 
 const ownerNavigation: Array<{
   href: string;
@@ -53,10 +52,10 @@ function OwnerDesktopNavigation() {
             href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors",
+              "inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors",
               active
-                ? "bg-[#2f2a1f] text-white"
-                : "text-[#687064] hover:bg-[#eef0eb] hover:text-[#242822]",
+                ? "bg-[#29372f] text-white"
+                : "text-[#6f685b] hover:bg-[#fafaf7] hover:text-[#293129]",
             )}
           >
             <Icon className="h-4 w-4" />
@@ -74,7 +73,7 @@ export function OwnerMobileNavigation() {
   return (
     <nav
       aria-label="صفحات المالك"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-[#dfe2dc] bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-[#d9cfb8] bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden"
     >
       <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
         {ownerNavigation.map(({ href, shortLabel, icon: Icon }) => {
@@ -85,8 +84,8 @@ export function OwnerMobileNavigation() {
               href={href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-semibold transition-colors",
-                active ? "bg-[#242822] text-white" : "text-[#687064] hover:bg-[#eef0eb]",
+                "flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-semibold transition-colors",
+                active ? "bg-[#29372f] text-white" : "text-[#6f685b] hover:bg-[#fafaf7]",
               )}
             >
               <Icon className="h-4 w-4" />
@@ -146,7 +145,7 @@ function OwnerPropertySwitcher() {
         aria-label="تبديل العقار"
         value={current.propertyNumber}
         onChange={(event) => void switchProperty(event.target.value)}
-        className="h-10 max-w-[7.5rem] rounded-lg border border-[#dfe2dc] bg-white px-2 text-xs font-bold text-[#242822] outline-none focus-visible:ring-2 focus-visible:ring-[#80621d] sm:max-w-[11rem] sm:text-sm"
+        className="h-10 max-w-[7.5rem] rounded-xl border border-[#d9cfb8] bg-white px-2 text-xs font-bold text-[#293129] outline-none focus-visible:ring-2 focus-visible:ring-[#80621d] sm:max-w-[11rem] sm:text-sm"
       >
         {properties.map((property) => (
           <option key={property.propertyNumber} value={property.propertyNumber}>
@@ -176,25 +175,25 @@ export function OwnerPageHeader({
   actions,
 }: OwnerPageHeaderProps) {
   return (
-    <header className="sticky top-0 z-30 border-b border-[#dfe2dc] bg-white/95 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-3 sm:px-4 lg:px-6">
+    <header className="sticky top-0 z-30 border-b border-[#e9dfca] bg-[#fffdf8]/95 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 lg:px-6">
         {backHref && (
           <Link
             href={backHref}
             aria-label="العودة إلى لوحة التحكم"
-            className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg border border-[#dfe2dc] bg-white text-[#687064] transition-colors hover:bg-[#eef0eb]"
+            className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-[#e6ddc9] bg-white text-[#6f685b] transition-colors hover:bg-[#fafaf7]"
           >
             <ArrowRight className="h-5 w-5" />
           </Link>
         )}
 
         <div className="min-w-0 flex-1">
-          {eyebrow && <p className="truncate text-xs font-bold text-[#80621d]">{eyebrow}</p>}
+          {eyebrow && <p className="truncate text-[11px] font-bold text-[#8b6b25]">{eyebrow}</p>}
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-lg font-bold text-[#242822] sm:text-xl">{title}</h1>
+            <h1 className="truncate text-base font-bold text-[#293129] sm:text-xl">{title}</h1>
             {accessory}
           </div>
-          {description && <p className="mt-0.5 truncate text-xs text-[#687064] sm:text-sm">{description}</p>}
+          {description && <p className="mt-0.5 truncate text-[11px] text-[#6f685b] sm:text-sm">{description}</p>}
         </div>
 
         <OwnerPropertySwitcher />
@@ -209,20 +208,21 @@ export function OwnerPageHeader({
 interface OwnerPageMainProps {
   children: ReactNode;
   className?: string;
-  maxWidth?: "4xl" | "5xl" | "7xl";
+  maxWidth?: "4xl" | "5xl" | "6xl" | "7xl";
 }
 
-export function OwnerPageMain({ children, className, maxWidth = "7xl" }: OwnerPageMainProps) {
+export function OwnerPageMain({ children, className, maxWidth = "6xl" }: OwnerPageMainProps) {
   const maxWidthClass = {
     "4xl": "max-w-4xl",
     "5xl": "max-w-5xl",
+    "6xl": "max-w-6xl",
     "7xl": "max-w-7xl",
   }[maxWidth];
 
   return (
     <main
       className={cn(
-        "mx-auto w-full px-3 py-5 pb-28 sm:px-4 sm:py-6 lg:px-6 lg:py-8 lg:pb-10",
+        "mx-auto w-full px-3 py-5 pb-28 sm:px-4 sm:py-6 sm:pb-28 md:pb-28 lg:px-6 lg:py-8 lg:pb-10",
         maxWidthClass,
         className,
       )}
@@ -234,10 +234,10 @@ export function OwnerPageMain({ children, className, maxWidth = "7xl" }: OwnerPa
 
 export function OwnerLoadingState({ text = "جاري التحميل..." }: { text?: string }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f5f6f3] px-4 text-center">
+    <div className="flex min-h-screen items-center justify-center bg-[#fafaf7] px-4 text-center">
       <div>
         <Loader2 className="mx-auto h-7 w-7 animate-spin text-[#80621d]" />
-        <p className="mt-3 text-sm font-medium text-[#687064]">{text}</p>
+        <p className="mt-3 text-sm font-medium text-[#6f685b]">{text}</p>
       </div>
     </div>
   );
@@ -255,13 +255,13 @@ export function OwnerSectionHeading({ title, description, icon, action }: OwnerS
     <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-2.5">
         {icon && (
-          <span className="mt-0.5 inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-[#eef0eb] text-[#80621d]">
+          <span className="mt-0.5 inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
             {icon}
           </span>
         )}
         <div className="min-w-0">
-          <h2 className="text-base font-bold text-[#242822] sm:text-lg">{title}</h2>
-          {description && <p className="mt-1 text-xs leading-5 text-[#687064] sm:text-sm">{description}</p>}
+          <h2 className="text-base font-bold text-[#293129] sm:text-lg">{title}</h2>
+          {description && <p className="mt-1 text-xs leading-5 text-[#6f685b] sm:text-sm">{description}</p>}
         </div>
       </div>
       {action && <div className="flex-none">{action}</div>}

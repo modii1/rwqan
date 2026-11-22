@@ -157,7 +157,7 @@ export default function BankAccountsSection() {
               إضافة حساب
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]" dir="rtl">
+          <DialogContent className="sm:max-w-[500px] lg:w-[calc(100%-2rem)] lg:max-w-2xl" dir="rtl">
             <DialogHeader>
               <DialogTitle>إضافة حساب بنكي جديد</DialogTitle>
             </DialogHeader>

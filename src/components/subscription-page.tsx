@@ -11,17 +11,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw, CreditCard, AlertTriangle } from "lucide-react";
+import { ChevronRight, ChevronLeft, Upload, Clock, CheckCircle2, Home, Phone, Lock, ArrowLeft, RefreshCw, CreditCard, AlertTriangle, Loader2, ShieldCheck, Star } from "lucide-react";
 import { PriceDisplay } from "@/components/price-display";
+import { SummaryStrikePrice } from "@/components/summary-strike-price";
+import { FeatureIcon } from "@/components/feature-icon";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useOwnerVerification } from "@/components/owner/owner-verification-gate";
 import { Progress } from "@/components/ui/progress";
 import { formatDiscount, getCurrencyLabel } from "@/lib/currency";
 import { validatePhoneNumber, validatePropertyNumber, validatePin, cleanName, validateTextInput, validateNumericInput, validateWhatsAppInput, validatePropertyNumberInput, validatePinInput } from "@/lib/validation";
 import { getSubscriptionTypeLabel, isPremiumSubscriptionType } from "@shared/subscriptionType";
 import {
+  calculateSubscriptionPriceForPeriod,
+  getPackageBillingOption,
+  getMaximumPropertyCount,
+  type BillingPeriod,
+} from "@shared/subscriptionPricing";
+import {
   FREE_COMMISSION_CONSENT_TEXT,
   isFreeSubscriptionPackage,
 } from "@shared/freeCommissionConsent";
+import { normalizePackageFeatures } from "@shared/packageFeatures";
 
 // Visual Captcha helpers
 const CAPTCHA_CHARS = '23456789';
@@ -88,9 +98,25 @@ export default function SubscriptionPage() {
 
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem("public-billing-period") === "quarterly") {
+        setBillingPeriod("quarterly");
+      }
+    } catch {
+      // ignore storage restrictions
+    }
+  }, []);
+  const changeBillingPeriod = (period: BillingPeriod) => {
+    setBillingPeriod(period);
+    try {
+      window.sessionStorage.setItem("public-billing-period", period);
+    } catch {
+      // ignore storage restrictions
+    }
+  };
   const [freeCommissionConsentAccepted, setFreeCommissionConsentAccepted] = useState(false);
-  const [packageToView, setPackageToView] = useState<Package | null>(null);
-  const [showAllPackages, setShowAllPackages] = useState(true);
   const [expandedPackages, setExpandedPackages] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -131,6 +157,10 @@ export default function SubscriptionPage() {
 
   const [discountCode, setDiscountCode] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Mandatory post-registration verification (reuses the existing server action).
+  const ownerVerification = useOwnerVerification();
+  const [verificationModalOpen, setVerificationModalOpen] = useState(true);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -208,7 +238,7 @@ export default function SubscriptionPage() {
     }, 50);
   }, []);
 
-  // Redraw captcha when step 3 becomes visible (canvas is now in DOM)
+  // Redraw captcha when the payment step becomes visible (canvas is in DOM)
   useEffect(() => {
     if (currentStep === 3) {
       // If captcha text exists but canvas wasn't drawn yet, draw it
@@ -224,19 +254,70 @@ export default function SubscriptionPage() {
 
   useEffect(() => { refreshCaptcha(); }, [refreshCaptcha]);
 
+  // Each subscription step starts at the top of the page.
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentStep]);
+
   const { data: rawPackages = [] } = useQuery<Package[]>({
     queryKey: ['/api/packages'],
   });
 
-  // التأكد من عدم تكرار الباقات (حل لمشكلة Duplicate Keys)
-  // Hide باقة النخبة packages on initial signup (only available for upgrades)
-  const ELITE_PACKAGE_IDS = ['pkg-2properties', 'pkg-month-2properties', 'pkg-month-2prop'];
+  // The public API already filters hidden, archived, and inactive packages.
+  // This additional filter is only about the period the customer selected.
   const packages = Array.from(new Map(rawPackages.map(pkg => [pkg.id, pkg])).values())
-    .filter(pkg => !ELITE_PACKAGE_IDS.includes(pkg.id));
+    .filter((pkg) => {
+      const isMonthlyFree =
+        isFreeSubscriptionPackage(pkg) && pkg.monthlyEnabled !== false;
+      if (isMonthlyFree) {
+        return billingPeriod === "monthly";
+      }
+      const option = getPackageBillingOption(pkg, billingPeriod);
+      return option.enabled && option.originalPrice > 0;
+    });
+
+  const recommendedPackage = packages.find((pkg) => pkg.isRecommended === true);
+  const displayPackages = (() => {
+    if (!recommendedPackage || packages.length <= 1) return packages;
+    const others = packages.filter((pkg) => pkg.id !== recommendedPackage.id);
+    const ordered = [...others];
+    ordered.splice(Math.min(1, ordered.length), 0, recommendedPackage);
+    return ordered;
+  })();
+  const packagesGridClass =
+    displayPackages.length === 1
+      ? "mx-auto grid max-w-md grid-cols-1 gap-5"
+      : displayPackages.length === 2
+        ? "mx-auto grid max-w-3xl grid-cols-1 gap-5 md:grid-cols-2"
+        : "grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3";
 
   const selectedPackage = packages.find(p => p.id === selectedPackageId);
-  const isFreePackage = isFreeSubscriptionPackage(selectedPackage);
+  const isFreePackage =
+    isFreeSubscriptionPackage(selectedPackage) &&
+    billingPeriod === "monthly" &&
+    selectedPackage?.monthlyEnabled !== false;
   const requiresFreeCommissionConsent = isFreePackage;
+  const selectedBillingOption = selectedPackage && !isFreePackage
+    ? getPackageBillingOption(selectedPackage, billingPeriod)
+    : null;
+  const selectedPackagePricing = selectedPackage && !isFreePackage
+    ? calculateSubscriptionPriceForPeriod(selectedPackage, 1, billingPeriod)
+    : null;
+
+  // Never keep a package selected after switching to a period it does not support.
+  useEffect(() => {
+    if (!selectedPackageId) return;
+    const selected = rawPackages.find((pkg) => pkg.id === selectedPackageId);
+    if (!selected) return;
+    const free = isFreeSubscriptionPackage(selected);
+    const supported = free
+      ? billingPeriod === "monthly" && selected.monthlyEnabled !== false
+      : getPackageBillingOption(selected, billingPeriod).enabled;
+    if (!supported) {
+      setSelectedPackageId(null);
+      setFreeCommissionConsentAccepted(false);
+    }
+  }, [billingPeriod, rawPackages, selectedPackageId]);
 
   const selectPackage = (packageId: string) => {
     setFreeCommissionConsentAccepted(false);
@@ -266,6 +347,15 @@ export default function SubscriptionPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPackageId) return;
+    if (!validateForm()) {
+      setCurrentStep(2);
+      toast({
+        title: "بيانات العقار غير مكتملة",
+        description: "راجع الحقول المطلوبة في بيانات العقار قبل إتمام الدفع.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (requiresFreeCommissionConsent && !freeCommissionConsentAccepted) return;
 
     // Captcha validation
@@ -289,6 +379,7 @@ export default function SubscriptionPage() {
         facilities,
         prices,
         packageId: selectedPackageId,
+        billingPeriod,
         freeCommissionConsentAccepted,
         subscriptionType: getSubscriptionTypeLabel(selectedPackage?.type),
       };
@@ -328,6 +419,7 @@ export default function SubscriptionPage() {
             const paymentResponse = await apiRequest('POST', '/api/owner/payment/initiate', {
               propertyNumber,
               packageId: selectedPackageId,
+              billingPeriod,
               discountCode: validatedDiscount?.code,
               paymentMethod: 'cards',
             });
@@ -368,6 +460,7 @@ export default function SubscriptionPage() {
           const formDataUpload = new FormData();
           formDataUpload.append('propertyNumber', propertyNumber);
           formDataUpload.append('packageId', selectedPackageId);
+          formDataUpload.append('billingPeriod', billingPeriod);
           formDataUpload.append('receipt', receiptFile);
           if (validatedDiscount?.code) {
             formDataUpload.append('discountCode', validatedDiscount.code);
@@ -663,6 +756,138 @@ export default function SubscriptionPage() {
             </Button>
           </div>
         </Card>
+
+        <Dialog open={verificationModalOpen} onOpenChange={setVerificationModalOpen}>
+          <DialogContent
+            dir="rtl"
+            className="max-h-[calc(100svh-1.5rem)] w-[calc(100%-1.5rem)] max-w-md overflow-y-auto rounded-2xl border-[#ded3bc] bg-[#fffdf8] p-5 text-right sm:p-6"
+            data-testid="owner-verification-modal"
+          >
+            <DialogHeader className="text-right">
+              <DialogTitle className="text-xl text-[#293129]">تحقق من عقارك أولًا</DialogTitle>
+              <DialogDescription className="pt-1 leading-6 text-[#6f685b]">
+                تمت إضافة عقارك بنجاح. لإتاحة إدارة بيانات العقار والصور، يجب إكمال خطوة
+                التحقق أولًا. تساعد هذه الخطوة على التأكد من صحة بيانات العقار وربطها
+                بالعقار الصحيح.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <p className="rounded-xl border border-[#e2d3a6] bg-[#fdf6e3] p-3 text-xs leading-6 text-[#80621d]">
+                لن تتمكن من فتح بيانات العقار أو إدارة صوره حتى إكمال إجراء التحقق المطلوب.
+              </p>
+
+              {ownerVerification.error && (
+                <div
+                  className={`rounded-xl border p-3 text-sm ${
+                    ownerVerification.inProgress
+                      ? "border-[#d9e4ef] bg-[#f9fbfd] text-[#315f92]"
+                      : "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]"
+                  }`}
+                >
+                  <p className="font-bold">
+                    {ownerVerification.inProgress ? "التحقق قيد المعالجة" : "تعذر التحقق"}
+                  </p>
+                  <p className="mt-1 leading-6">{ownerVerification.error}</p>
+                  {ownerVerification.inProgress && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-3 rounded-xl border-[#d9cfb8] bg-white text-[#29372f] hover:bg-[#faf7ef]"
+                      onClick={() => ownerVerification.refreshStatus()}
+                    >
+                      تحديث الحالة
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {ownerVerification.result?.missingFields &&
+                ownerVerification.result.missingFields.length > 0 && (
+                  <div className="rounded-xl border border-[#e2d3a6] bg-[#fdf6e3] p-3 text-sm text-[#80621d]">
+                    <p className="font-bold">بيانات العقار تحتاج إلى استكمال</p>
+                    <ul className="mt-2 list-disc space-y-1 pr-4">
+                      {ownerVerification.result.missingFields.map((field) => (
+                        <li key={field}>{field}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Button
+                        type="button"
+                        className="rounded-xl bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
+                        onClick={() =>
+                          router.push(
+                            registrationLoginRequired ? "/owner/login" : "/owner/update-property",
+                          )
+                        }
+                      >
+                        استكمال بيانات العقار
+                      </Button>
+                      {!registrationLoginRequired && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-xl border-[#d9cfb8] bg-white text-[#29372f] hover:bg-[#faf7ef]"
+                          onClick={() => router.push("/owner/images")}
+                        >
+                          إدارة الصور
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              {ownerVerification.result?.verified && (
+                <div className="rounded-xl border border-[#cfe5d6] bg-[#f6fbf7] p-3 text-sm text-[#126b38]">
+                  <p className="font-bold">تم التحقق من العقار</p>
+                  <p className="mt-1 leading-6">
+                    {ownerVerification.result.pendingAdminApproval
+                      ? "تم التحقق من بيانات العقار بنجاح، وبقي اعتماد الإدارة لظهوره للعملاء."
+                      : "تم التحقق من بيانات العقار بنجاح. يمكنك الآن إدارة البيانات والصور."}
+                  </p>
+                  <Button
+                    type="button"
+                    className="mt-3 w-full rounded-xl bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
+                    onClick={() =>
+                      router.push(
+                        registrationLoginRequired ? "/owner/login" : "/owner/dashboard",
+                      )
+                    }
+                  >
+                    {registrationLoginRequired ? "تسجيل الدخول" : "الانتقال إلى لوحة التحكم"}
+                  </Button>
+                </div>
+              )}
+
+              {!ownerVerification.result?.verified && (
+                <Button
+                  type="button"
+                  onClick={() => ownerVerification.verify()}
+                  disabled={ownerVerification.isVerifying || ownerVerification.inProgress}
+                  className="h-12 w-full rounded-xl bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
+                  data-testid="button-registration-verify"
+                >
+                  {ownerVerification.isVerifying ? (
+                    <>
+                      <Loader2 className="ml-2 h-5 w-5 animate-spin" />
+                      جارٍ التحقق...
+                    </>
+                  ) : ownerVerification.inProgress ? (
+                    <>
+                      <Clock className="ml-2 h-5 w-5" />
+                      التحقق قيد المعالجة
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="ml-2 h-5 w-5" />
+                      التحقق من العقار
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -679,154 +904,292 @@ export default function SubscriptionPage() {
       </header>
       <div className="mx-auto max-w-6xl px-3 py-5 sm:px-6 sm:py-8">
         {/* Progress Bar - 3 Steps */}
-        <div className="mb-5 rounded-2xl border border-[#d8c9aa] bg-[#fffdfa] px-3 py-4 shadow-[0_18px_55px_-42px_rgba(41,55,47,0.65)] sm:mb-8 sm:px-6 sm:py-5">
-          <div className="flex items-start justify-between gap-1 sm:gap-3">
-            {/* Step 1 */}
-            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 1 ? "step" : undefined}>
+        <div className="mb-5 rounded-2xl border border-[#d8c9aa] bg-[#fffdfa] px-2 py-4 shadow-[0_18px_55px_-42px_rgba(41,55,47,0.65)] sm:mb-8 sm:px-6 sm:py-5">
+          <ol className="flex items-start justify-between gap-1 sm:gap-3">
+            <li className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 1 ? "step" : undefined}>
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 1 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 {currentStep > 1 ? '✓' : '1'}
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">اختيار الباقة</p>
-            </div>
+              <p className="mt-2 text-center text-[10px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">اختيار الباقة</p>
+            </li>
 
-            {/* Line 1-2 */}
-            <div className={`mt-4 h-0.5 min-w-3 flex-1 rounded-full sm:h-1 ${currentStep >= 2 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></div>
+            <li className={`mt-4 h-0.5 min-w-2 flex-1 rounded-full sm:h-1 ${currentStep >= 2 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></li>
 
-            {/* Step 2 */}
-            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 2 ? "step" : undefined}>
+            <li className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 2 ? "step" : undefined}>
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 2 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 {currentStep > 2 ? '✓' : '2'}
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">بيانات العقار</p>
-            </div>
+              <p className="mt-2 text-center text-[10px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">بيانات العقار</p>
+            </li>
 
-            {/* Line 2-3 */}
-            <div className={`mt-4 h-0.5 min-w-3 flex-1 rounded-full sm:h-1 ${currentStep >= 3 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></div>
+            <li className={`mt-4 h-0.5 min-w-2 flex-1 rounded-full sm:h-1 ${currentStep >= 3 ? 'bg-[#80601B]' : 'bg-[#ddd7ca]'}`} aria-hidden="true"></li>
 
-            {/* Step 3 */}
-            <div className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 3 ? "step" : undefined}>
+            <li className="flex min-w-0 flex-1 flex-col items-center" aria-current={currentStep === 3 ? "step" : undefined}>
               <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold text-white transition sm:h-10 sm:w-10 ${currentStep >= 3 ? 'bg-[#29372F]' : 'bg-[#c9c3b6]'}`}>
                 3
               </div>
-              <p className="mt-2 text-center text-[11px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">طريقة الدفع</p>
-            </div>
-          </div>
+              <p className="mt-2 text-center text-[10px] font-semibold leading-4 text-[#2F2A1F] sm:text-xs">طريقة الدفع</p>
+            </li>
+          </ol>
         </div>
 
         {/* Step 1: Select Package */}
         {currentStep === 1 && (
           <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
-            <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 1: اختر باقة الاشتراك</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {(showAllPackages ? packages : packages.slice(0, 4)).map((pkg) => {
+            <div className="text-center">
+              <h2 className="text-xl font-bold text-[#29372F]">الخطوة 1: اختر باقة الاشتراك</h2>
+            </div>
+
+            {/* مفتاح المدة في منتصف الشاشة */}
+            <div className="mt-5 flex w-full justify-center">
+              <div
+                role="tablist"
+                aria-label="مدة الاشتراك"
+                className="inline-flex rounded-full border border-[#d8c9aa] bg-white p-1 shadow-sm"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={billingPeriod === "monthly"}
+                  onClick={() => changeBillingPeriod("monthly")}
+                  className={`rounded-full px-5 py-2 text-sm font-bold transition-colors ${
+                    billingPeriod === "monthly"
+                      ? "bg-[#29372F] text-white shadow"
+                      : "text-[#6f685b] hover:text-[#29372F]"
+                  }`}
+                  data-testid="public-billing-period-monthly"
+                >
+                  شهري
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={billingPeriod === "quarterly"}
+                  onClick={() => changeBillingPeriod("quarterly")}
+                  className={`rounded-full px-5 py-2 text-sm font-bold transition-colors ${
+                    billingPeriod === "quarterly"
+                      ? "bg-[#29372F] text-white shadow"
+                      : "text-[#6f685b] hover:text-[#29372F]"
+                  }`}
+                  data-testid="public-billing-period-quarterly"
+                >
+                  كل 3 أشهر
+                </button>
+              </div>
+            </div>
+
+            <h3
+              className="mt-4 text-center text-xl font-bold text-[#29372F] sm:text-2xl"
+              data-testid="public-packages-period-title"
+            >
+              {billingPeriod === "monthly"
+                ? "أسعار الاشتراك الشهري"
+                : "أسعار الاشتراك لثلاثة أشهر"}
+            </h3>
+
+            {packages.length === 0 && (
+              <div className="mt-5 rounded-xl border border-dashed border-[#d8c9aa] bg-white p-6 text-center text-sm text-[#6f685b]">
+                لا توجد باقات متاحة لهذه المدة حالياً.
+              </div>
+            )}
+
+            <div
+              className={`mt-5 ${packagesGridClass}`}
+              data-testid="public-packages-grid"
+            >
+              {displayPackages.map((pkg) => {
                 const isExpanded = expandedPackages.has(pkg.id);
-                const featuresToShow = isExpanded ? pkg.features : (pkg.features || []).slice(0, 4);
-                const hasMoreFeatures = (pkg.features?.length || 0) > 4;
+                const allFeatures = normalizePackageFeatures(pkg.features);
+                const featuresToShow = isExpanded ? allFeatures : allFeatures.slice(0, 5);
+                const hasMoreFeatures = allFeatures.length > 5;
+                const isRecommended = pkg.isRecommended === true;
+                const isFree =
+                  isFreeSubscriptionPackage(pkg) &&
+                  billingPeriod === "monthly" &&
+                  pkg.monthlyEnabled !== false;
+                const billingOption = getPackageBillingOption(pkg, billingPeriod);
+                const packagePricing = calculateSubscriptionPriceForPeriod(pkg, 1, billingPeriod);
+                const includedCount = Math.max(1, packagePricing.includedPropertyCount);
+                const maximumProperties = getMaximumPropertyCount(pkg);
+                const isSelected = selectedPackageId === pkg.id;
+                const accentCheck = isRecommended ? "text-[#f0b429]" : "text-[#4ade80]";
+                const cardTone = isRecommended
+                  ? "border-[#c9a859] bg-[#1c241f] shadow-2xl lg:-translate-y-1"
+                  : "border-[#2e3a33] bg-[#1c241f] hover:border-[#128c47]/70";
+                const selectedTone = isSelected
+                  ? isRecommended
+                    ? "ring-2 ring-[#f0b429] ring-offset-2 ring-offset-[#f6f2e8]"
+                    : "ring-2 ring-[#4ade80] ring-offset-2 ring-offset-[#f6f2e8]"
+                  : "";
 
                 return (
-                <div
-                  key={pkg.id}
-                  className={`rounded-xl border-2 p-4 transition-all sm:p-5 ${selectedPackageId === pkg.id
-                    ? 'border-[#80601B] bg-[#80601B]/5 ring-2 ring-[#80601B]/25'
-                    : 'border-[#e4d9c1] bg-white/60 hover:border-[#80601B]/50'
-                    }`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-bold">{pkg.name}</h3>
-                      {pkg.price === 0 ? (
-                        <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
-                      ) : (
-                        <PriceDisplay amount={pkg.price} size="lg" />
+                  <div
+                    key={pkg.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    className={`relative flex h-full flex-col rounded-2xl border-2 p-6 text-center transition-all cursor-pointer sm:p-7 ${cardTone} ${selectedTone}`}
+                    onClick={() => selectPackage(pkg.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectPackage(pkg.id);
+                      }
+                    }}
+                    data-testid={`public-package-card-${pkg.id}`}
+                  >
+                    <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+                      {isRecommended && (
+                        <Badge className="gap-1 border-0 bg-[#f0b429] text-[#241d0c]">
+                          <Star className="h-3 w-3" />
+                          موصى بها
+                        </Badge>
+                      )}
+                      {(pkg.featuredBadge || isPremiumSubscriptionType(pkg.type)) && (
+                        <Badge
+                          className={
+                            isRecommended
+                              ? "border border-[#c9a859]/50 bg-white/10 text-[#f0ddaa]"
+                              : "border border-[#128c47]/40 bg-[#128c47]/15 text-[#4ade80]"
+                          }
+                        >
+                          {pkg.featuredBadge || "مميز"}
+                        </Badge>
+                      )}
+                      {isSelected && (
+                        <Badge className="border-0 bg-white text-[#1c241f]">
+                          مختار
+                        </Badge>
                       )}
                     </div>
-                    {selectedPackageId === pkg.id && (
-                      <Badge className="bg-[#29372F] text-white">مختار</Badge>
+
+                    <div className="flex items-center justify-center gap-2">
+                      {isRecommended ? (
+                        <Star className="h-5 w-5 text-[#f0b429]" />
+                      ) : (
+                        <ShieldCheck className="h-5 w-5 text-[#4ade80]" />
+                      )}
+                      <h4 className="text-xl font-bold text-white">{pkg.name}</h4>
+                    </div>
+                    {pkg.description && (
+                      <p className="mt-2 text-xs leading-6 text-white/65">
+                        {pkg.description}
+                      </p>
                     )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">{pkg.duration} يوم</p>
-                  {isPremiumSubscriptionType(pkg.type) && (
-                    <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] mb-3">مميز</Badge>
-                  )}
-                  
-                  {/* Features List */}
-                  {pkg.features && pkg.features.length > 0 && (
-                    <div className="mb-3">
-                      <ul className="space-y-1">
-                        {featuresToShow.map((feature, idx) => (
-                          <li key={idx} className="text-xs flex items-start gap-1.5">
-                            <span className="text-[#80601B] font-bold mt-0.5">•</span>
-                            <span className="text-muted-foreground leading-tight">{feature}</span>
+
+                    <div className="mt-5">
+                      <div className="flex flex-wrap items-end justify-center gap-2">
+                        {isFree ? (
+                          <span className="text-4xl font-bold text-white">مجاناً</span>
+                        ) : (
+                          <div className="[&_img]:invert [&_img]:brightness-0">
+                            <PriceDisplay
+                              amount={packagePricing.basePrice}
+                              size="xl"
+                              textColor="text-white"
+                            />
+                          </div>
+                        )}
+                        <span className="mb-1 text-xs text-white/60">
+                          {billingPeriod === "quarterly" ? "لثلاثة أشهر" : "شهرياً"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-white/60">
+                        {billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} ·{" "}
+                        {isFree ? pkg.duration : billingOption.durationDays} يوم
+                      </p>
+                      {!isFree && billingOption.discountPercent > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                          <div className="text-sm text-white/60">
+                            <PriceDisplay
+                              amount={billingOption.originalPrice}
+                              size="sm"
+                              textColor="text-white/60"
+                              strike
+                            />
+                          </div>
+                          <Badge className="border-0 bg-[#f0b429] text-[#241d0c]">
+                            خصم {billingOption.discountPercent}%
+                          </Badge>
+                        </div>
+                      )}
+                      {maximumProperties > 1 && (
+                        <p className="mt-2 text-[11px] text-white/55">
+                          تشمل {includedCount} عقارات · حتى {maximumProperties} عقارات
+                        </p>
+                      )}
+                    </div>
+
+                    {allFeatures.length > 0 && (
+                      <ul className="mt-6 space-y-3 text-right">
+                        {featuresToShow.map((feature, index) => (
+                          <li key={`${pkg.id}-feature-${index}`} className="flex items-start gap-2">
+                            <FeatureIcon
+                              feature={feature.text}
+                              icon={feature.icon}
+                              className={`mt-1 h-4 w-4 flex-none ${accentCheck}`}
+                            />
+                            <span className="text-sm leading-6 text-white/85">{feature.text}</span>
                           </li>
                         ))}
                       </ul>
-                      {hasMoreFeatures && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExpandedPackages(prev => {
-                              const newSet = new Set(prev);
-                              if (newSet.has(pkg.id)) {
-                                newSet.delete(pkg.id);
-                              } else {
-                                newSet.add(pkg.id);
-                              }
-                              return newSet;
-                            });
-                          }}
-                          className="text-xs text-[#80601B] font-semibold hover:underline mt-1"
-                        >
-                          {isExpanded ? 'عرض أقل' : `عرض المزيد (${pkg.features.length - 4}+)`}
-                        </button>
-                      )}
-                    </div>
-                  )}
+                    )}
+                    {hasMoreFeatures && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedPackages((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(pkg.id)) {
+                              next.delete(pkg.id);
+                            } else {
+                              next.add(pkg.id);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="mt-3 w-full text-center text-xs font-semibold text-white/70 hover:text-white"
+                      >
+                        {isExpanded
+                          ? "عرض أقل"
+                          : `عرض المزيد (${allFeatures.length - 5}+)`}
+                      </button>
+                    )}
 
-                  <div className="flex flex-col gap-2 min-[390px]:flex-row">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPackageToView(pkg)}
-                      className="flex-1"
-                    >
-                      التفاصيل
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => {
-                        selectPackage(pkg.id);
-                        setCurrentStep(2);
-                      }}
-                      className={`flex-1 ${selectedPackageId === pkg.id ? 'bg-[#29372F] text-white hover:bg-[#1f2a24]' : 'bg-[#80601B] text-white hover:bg-[#6f5317]'}`}
-                    >
-                      اختيار
-                    </Button>
+                    <div className="mt-auto pt-6">
+                      <Button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selectPackage(pkg.id);
+                          setCurrentStep(2);
+                        }}
+                        className={`h-12 w-full rounded-full text-base font-bold ${
+                          isRecommended
+                            ? "bg-[#f0b429] text-[#1f1a0f] hover:bg-[#d9a21f]"
+                            : "bg-[#128c47] text-white hover:bg-[#0f753b]"
+                        }`}
+                        data-testid={`public-select-package-${pkg.id}`}
+                      >
+                        {isFree ? "ابدأ مجاناً" : "اشترك الآن"}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );})}
-            </div>
-            <div className="flex justify-end pt-6 border-t border-[#e4d9c1]">
-              <Button
-                onClick={() => setCurrentStep(2)}
-                disabled={!selectedPackageId}
-                className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317] md:flex-none"
-              >
-                التالي: بيانات العقار
-              </Button>
+                );
+              })}
             </div>
           </Card>
         )}
 
         {/* Step 2: Property Details */}
         {currentStep === 2 && selectedPackageId && (
-          <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
+          <Card id="property-section" className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
             <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 2: بيانات العقار</h2>
-            <form onSubmit={(e) => { 
-              e.preventDefault(); 
+            <form onSubmit={(e) => {
+              e.preventDefault();
               if (validateForm()) {
-                setCurrentStep(3); 
+                setCurrentStep(3);
               }
             }} className="space-y-6">
 
@@ -919,6 +1282,7 @@ export default function SubscriptionPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {errors.city && <p className="text-xs text-red-500 mt-1">{errors.city}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">الاتجاه *</label>
@@ -932,6 +1296,7 @@ export default function SubscriptionPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {errors.direction && <p className="text-xs text-red-500 mt-1">{errors.direction}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">النوع *</label>
@@ -945,6 +1310,7 @@ export default function SubscriptionPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {errors.type && <p className="text-xs text-red-500 mt-1">{errors.type}</p>}
                   </div>
                 </div>
                 <div className="mt-4">
@@ -967,35 +1333,44 @@ export default function SubscriptionPage() {
                   <div>
                     <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
                     <Input type="number" placeholder="500" value={prices.weekday} onChange={(e) => setPrices({ ...prices, weekday: validateNumericInput(e.target.value) })} required />
+                    {errors.weekday && <p className="text-xs text-red-500 mt-1">{errors.weekday}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">نهاية الأسبوع</label>
                     <Input type="number" placeholder="800" value={prices.weekend} onChange={(e) => setPrices({ ...prices, weekend: validateNumericInput(e.target.value) })} required />
+                    {errors.weekend && <p className="text-xs text-red-500 mt-1">{errors.weekend}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">مبيت</label>
                     <Input type="number" placeholder="1200" value={prices.overnight} onChange={(e) => setPrices({ ...prices, overnight: validateNumericInput(e.target.value) })} required />
+                    {errors.overnight && <p className="text-xs text-red-500 mt-1">{errors.overnight}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-2">إجازات</label>
                     <Input type="number" placeholder="1000" value={prices.holidays} onChange={(e) => setPrices({ ...prices, holidays: validateNumericInput(e.target.value) })} required />
+                    {errors.holidays && <p className="text-xs text-red-500 mt-1">{errors.holidays}</p>}
                   </div>
                 </div>
               </div>
 
-              {/* Submit */}
               <div className="flex flex-col-reverse gap-3 border-t border-[#e4d9c1] pt-6 sm:flex-row">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setCurrentStep(1)}
                   className="w-full gap-2 sm:w-auto"
+                  data-testid="public-property-back"
                 >
                   <ChevronRight className="w-4 h-4" />
                   السابق
                 </Button>
-                <Button type="submit" className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]">
-                  التالي: طريقة الدفع
+                <Button
+                  type="submit"
+                  className="w-full flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
+                  data-testid="public-property-continue"
+                >
+                  متابعة للدفع
+                  <ChevronLeft className="w-4 h-4" />
                 </Button>
               </div>
             </form>
@@ -1004,8 +1379,120 @@ export default function SubscriptionPage() {
 
         {/* Step 3: Payment Method */}
         {currentStep === 3 && selectedPackageId && (
-          <Card className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
+          <Card id="payment-section" className="border-[#d8c9aa] bg-[#fffdfa] p-4 shadow-[0_24px_70px_-48px_rgba(41,55,47,0.7)] sm:p-6 lg:p-8">
             <h2 className="text-xl font-bold text-[#29372F] mb-6">الخطوة 3: طريقة الدفع</h2>
+            {selectedPackage && (
+              <div
+                className="mb-6 overflow-hidden rounded-2xl border border-[#d8c9aa] bg-[#fffdfa]"
+                data-testid="subscription-summary"
+              >
+                <div className="border-b border-[#e4d9c1] bg-[#faf7ef] px-4 py-3">
+                  <h3 className="text-base font-bold text-[#29372F]">ملخص الاشتراك</h3>
+                </div>
+                <table className="w-full table-fixed border-collapse text-sm">
+                  <colgroup>
+                    <col />
+                    <col className="w-[7rem] sm:w-[10rem]" />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-[#faf7ef] text-[10px] text-[#8a8170] sm:text-[11px]">
+                      <th scope="col" className="px-3 py-2 text-right font-bold sm:px-4">
+                        اسم البند
+                      </th>
+                      <th scope="col" className="px-3 py-2 text-left font-bold sm:px-4">
+                        القيمة
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-[#eee5d4]">
+                      <th
+                        scope="row"
+                        className="px-3 py-3 text-right align-middle text-xs font-semibold text-[#6f685b] sm:px-4"
+                      >
+                        الباقة المختارة
+                      </th>
+                      <td className="break-words px-3 py-3 text-left align-middle text-sm font-bold text-[#29372F] sm:px-4">
+                        {selectedPackage.name}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-[#eee5d4]">
+                      <th
+                        scope="row"
+                        className="px-3 py-3 text-right align-middle text-xs font-semibold text-[#6f685b] sm:px-4"
+                      >
+                        مدة الاشتراك
+                      </th>
+                      <td className="px-3 py-3 text-left align-middle text-sm font-bold text-[#29372F] sm:px-4">
+                        {billingPeriod === "quarterly" ? "3 أشهر" : "شهري"} ·{" "}
+                        {isFreePackage
+                          ? selectedPackage.duration
+                          : selectedBillingOption?.durationDays ?? selectedPackage.duration} يوم
+                      </td>
+                    </tr>
+                    {!isFreePackage && selectedBillingOption && selectedBillingOption.discountPercent > 0 && (
+                      <>
+                        <tr className="border-b border-[#eee5d4]">
+                          <th
+                            scope="row"
+                            className="px-3 py-3 text-right align-middle text-xs font-semibold text-[#6f685b] sm:px-4"
+                          >
+                            السعر الأصلي
+                          </th>
+                          <td className="px-3 py-3 text-left align-middle sm:px-4">
+                            <SummaryStrikePrice
+                              amount={selectedBillingOption.originalPrice}
+                            />
+                          </td>
+                        </tr>
+                        <tr className="border-b border-[#eee5d4]">
+                          <th
+                            scope="row"
+                            className="px-3 py-3 text-right align-middle text-xs font-semibold text-[#6f685b] sm:px-4"
+                          >
+                            الخصم
+                          </th>
+                          <td className="px-3 py-3 text-left align-middle sm:px-4">
+                            <span className="inline-flex flex-col items-end gap-1 align-middle sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-2">
+                              <Badge className="border-0 bg-[#f0b429] text-[#241d0c]">
+                                خصم {selectedBillingOption.discountPercent}%
+                              </Badge>
+                              <PriceDisplay
+                                amount={selectedBillingOption.discountAmount}
+                                size="sm"
+                                textColor="text-[#128c47]"
+                              />
+                            </span>
+                          </td>
+                        </tr>
+                      </>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-[#29372F]">
+                      <th
+                        scope="row"
+                        className="px-3 py-4 text-right align-middle text-sm font-bold text-white sm:px-4"
+                      >
+                        السعر النهائي
+                      </th>
+                      <td className="px-3 py-4 text-left align-middle sm:px-4">
+                        {isFreePackage ? (
+                          <span className="text-2xl font-bold text-white">مجاناً</span>
+                        ) : (
+                          <PriceDisplay
+                            amount={selectedPackagePricing?.total || 0}
+                            size="lg"
+                            textColor="text-white"
+                            className="[&_img]:invert [&_img]:brightness-0"
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-6">
               {!isFreePackage && (
                 <div>
@@ -1174,6 +1661,7 @@ export default function SubscriptionPage() {
                   variant="outline"
                   onClick={() => setCurrentStep(2)}
                   className="w-full gap-2 sm:w-auto"
+                  data-testid="public-payment-back"
                 >
                   <ChevronRight className="w-4 h-4" />
                   السابق
@@ -1193,68 +1681,6 @@ export default function SubscriptionPage() {
             </form>
           </Card>
         )}
-
-        {/* Package Details Modal */}
-        <Dialog open={!!packageToView} onOpenChange={() => setPackageToView(null)}>
-          <DialogContent className="max-h-[90svh] w-[calc(100%_-_1.5rem)] max-w-md overflow-y-auto border-[#d8c9aa] bg-[#fffdfa]" dir="rtl">
-            <DialogHeader>
-              <DialogTitle className="text-[#29372F]">{packageToView?.name}</DialogTitle>
-              <DialogDescription>تفاصيل الباقة الكاملة</DialogDescription>
-            </DialogHeader>
-            {packageToView && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">السعر</p>
-                  {packageToView.price === 0 ? (
-                    <p className="text-2xl font-bold text-[#29372F]">مجاني</p>
-                  ) : (
-                    <PriceDisplay amount={packageToView.price} size="lg" />
-                  )}
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">مدة الاشتراك</p>
-                  <p className="font-semibold">{packageToView.duration} يوم</p>
-                </div>
-                {packageToView.features && packageToView.features.length > 0 && (
-                  <div>
-                    <p className="text-sm text-muted-foreground mb-2">الميزات:</p>
-                    <ul className="space-y-1">
-                      {packageToView.features.map((feature, idx) => (
-                        <li key={idx} className="text-sm flex items-start gap-2">
-                          <span className="text-[#29372F] font-bold mt-0.5">✓</span>
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {isPremiumSubscriptionType(packageToView.type) && (
-                  <Badge className="bg-[#80601B] border-0 text-xs text-[#fbfaf9] w-fit">
-                    مميز
-                  </Badge>
-                )}
-                <div className="flex flex-col-reverse gap-2 pt-4 sm:flex-row">
-                  <Button
-                    variant="outline"
-                    onClick={() => setPackageToView(null)}
-                    className="flex-1"
-                  >
-                    إغلاق
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      selectPackage(packageToView.id);
-                      setPackageToView(null);
-                    }}
-                    className="flex-1 bg-[#80601B] text-white hover:bg-[#6f5317]"
-                  >
-                    اختيار
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );

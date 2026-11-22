@@ -18,6 +18,12 @@ import {
   createPublicRegistrationPlan,
   isFreeSubscriptionPackage,
 } from "../../shared/freeCommissionConsent";
+import { isPackageVisibleToCustomers } from "../../shared/subscriptionPackagePolicy";
+import { packageMatchesAudience } from "../../shared/packageAudience";
+import {
+  getPackageBillingOption,
+  type BillingPeriod,
+} from "../../shared/subscriptionPricing";
 
 const router = Router();
 
@@ -155,10 +161,32 @@ router.post("/api/properties/register", async (req, res) => {
     const selectedPackage = await firebaseService.getPurchasablePackageById(
       packageId,
     );
-    if (!selectedPackage) {
+    if (!selectedPackage || !isPackageVisibleToCustomers(selectedPackage)) {
       return res.status(404).json({ error: "الباقة غير موجودة أو غير متاحة" });
     }
-    const isFreePackage = isFreeSubscriptionPackage(selectedPackage);
+    if (!packageMatchesAudience(selectedPackage, "public")) {
+      return res.status(404).json({ error: "الباقة غير متاحة للاشتراك العام" });
+    }
+    const billingPeriod: BillingPeriod =
+      data.billingPeriod === "quarterly" ? "quarterly" : "monthly";
+    const isMonthlyFree =
+      isFreeSubscriptionPackage(selectedPackage) &&
+      selectedPackage.monthlyEnabled !== false;
+    const billingOption = getPackageBillingOption(selectedPackage, billingPeriod);
+    if (isMonthlyFree) {
+      if (billingPeriod !== "monthly") {
+        return res.status(400).json({
+          code: "BILLING_PERIOD_DISABLED",
+          error: "هذه المدة غير متاحة لهذه الباقة حالياً",
+        });
+      }
+    } else if (!billingOption.enabled) {
+      return res.status(400).json({
+        code: "BILLING_PERIOD_DISABLED",
+        error: "هذه المدة غير متاحة لهذه الباقة حالياً",
+      });
+    }
+    const isFreePackage = isMonthlyFree;
     if (isFreePackage && data.freeCommissionConsentAccepted !== true) {
       return res.status(400).json({
         code: "FREE_COMMISSION_CONSENT_REQUIRED",
@@ -477,7 +505,7 @@ router.post("/api/discount/validate", async (req, res) => {
 // GET all available packages
 router.get("/api/packages", async (req, res) => {
   try {
-    const packages = await subscriptionService.getPackages();
+    const packages = await subscriptionService.getPackagesForAudience("public");
     res.json(packages);
   } catch (err: any) {
     console.error("Get packages error:", err?.message);

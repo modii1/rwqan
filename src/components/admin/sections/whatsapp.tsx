@@ -800,7 +800,7 @@ function SubscriptionOwnerSends() {
       >
         <DialogContent
           dir="rtl"
-          className="w-[calc(100vw-2rem)] max-w-md overflow-hidden"
+          className="w-[calc(100vw-2rem)] max-w-md overflow-hidden lg:max-w-2xl"
           data-testid="dialog-confirm-owner-notification"
         >
           <DialogHeader>

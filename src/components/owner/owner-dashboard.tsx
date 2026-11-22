@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -51,8 +51,10 @@ import { classifyReceiptError, classifyReceiptScan } from "@/lib/receipt-scan";
 import {
   calculateRemainingDays,
   calculateSubscriptionDuration,
+  formatDate,
   getSubscriptionStatusFromRecord,
   getSubscriptionDisplayLabel,
+  getSubscriptionStatusText,
   isCancelledSubscription,
 } from "@/lib/subscription-utils";
 import {
@@ -77,9 +79,11 @@ import {
   OwnerPageMain,
   ownerPanelClass,
 } from "./owner-page";
+import { OwnerStatCard } from "./owner-ui";
 
-const ownerSoftPanelClass = "rounded-lg border border-[#e5dcc7] bg-[#fffdf8]";
-const ownerTileClass = "rounded-lg border border-[#eee4cf] bg-[#fbf7ee]";
+// نظام التصميم الموحد - مستخرج من صفحة تسجيل الدخول
+const ownerSoftPanelClass = "rounded-xl border border-[#e5dcc7] bg-white shadow-sm";
+const ownerTileClass = "rounded-xl border border-[#f0eadc] bg-[#fffdf8]";
 
 function getPaymentTime(value: any): number {
   if (!value) return 0;
@@ -288,6 +292,13 @@ export default function OwnerDashboard() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  // تحديث isAuthenticated بناءً على بيانات الجلسة
+  useEffect(() => {
+    if (sessionData && !isSessionLoading) {
+      setIsAuthenticated(sessionData.isLoggedIn);
+    }
+  }, [sessionData, isSessionLoading]);
 
   // 2) Property fetch
   const {
@@ -913,7 +924,7 @@ export default function OwnerDashboard() {
     }
   };
 
-  if (isSessionLoading || isAuthenticated === null)
+  if (isSessionLoading || !sessionData?.isLoggedIn)
     return <Loader text="جاري التحقق من الجلسة..." />;
   if (isPropertyLoading) return <Loader text="جاري تحميل بيانات العقار..." />;
   if (propertyError || !property)
@@ -1045,15 +1056,15 @@ export default function OwnerDashboard() {
   const getCategoryColor = (category: string) => {
     switch (category) {
       case "اعلان":
-        return "bg-amber-500";
+        return "bg-[#9a7623]";
       case "ابراز":
-        return "bg-purple-500";
+        return "bg-[#80621d]";
       case "تثبيت":
-        return "bg-blue-500";
+        return "bg-[#315f92]";
       case "توثيق":
-        return "bg-emerald-500";
+        return "bg-[#128c47]";
       default:
-        return "bg-slate-500";
+        return "bg-[#6f685b]";
     }
   };
 
@@ -1147,6 +1158,7 @@ export default function OwnerDashboard() {
   const linkedPropertiesCount = additionalPropertyRequests?.approvedRequests?.length || 0;
   const imageCount = property.imageUrls?.length || 0;
   const subscriptionStateLabel = getSubscriptionDisplayLabel(computedSubscriptionStatus, isFreeSubscription);
+  const subscriptionStatusText = getSubscriptionStatusText(subscriptionStatusRecord);
   const remainingDaysLabel =
     isSubscriptionSuspended && remainingDays !== null
       ? `${remainingDays} يوم محفوظ`
@@ -1173,25 +1185,19 @@ export default function OwnerDashboard() {
     hasCompletedSmartVerification
       ? "border-[#b8dec3] bg-[#f6fff8] text-[#128c47]"
       : property.verificationStatus === "rejected"
-        ? "border-[#f1c8c8] bg-[#fff5f5] text-red-700"
+        ? "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]"
         : "border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]";
-  const subscriptionSinceLabel = property.subscriptionDate
-    ? (() => {
-      const d = new Date(property.subscriptionDate);
-      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
-    })()
-    : "غير محدد";
   const subscriptionProgressValue = isSubscriptionExpired ? 100 : (progressPercent ?? 0);
 
   return (
-    <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
+    <div className="min-h-screen bg-[#fafaf7] text-[#293129]">
       {/* ===== تنبيه أعلى الصفحة عند قرب انتهاء الاشتراك ===== */}
       {false && shouldShowNotification(NOTIFICATION_KEYS.subscriptionExpiry, isNearExpiry) && (
-        <div className="bg-red-50 dark:bg-red-950/30 border-b border-red-200 dark:border-red-900">
+        <div className="bg-[#fff5f5] border-b border-[#f1c8c8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-3 flex items-center justify-between gap-2 text-xs md:text-sm">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-red-500 flex-shrink-0" />
-              <p className="text-red-700 dark:text-red-400 font-medium">
+              <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 text-[#b42318] flex-shrink-0" />
+              <p className="text-[#b42318] font-medium">
                 اشتراكك ينتهي بـ{" "}
                 <span className="font-bold">{remainingDays}</span> أيام –{" "}
                 <span className="md:inline hidden">نوصي بتجديده مبكراً</span>
@@ -1199,7 +1205,7 @@ export default function OwnerDashboard() {
             </div>
             <button
               onClick={() => hideNotification(NOTIFICATION_KEYS.subscriptionExpiry)}
-              className="text-red-500 p-1"
+              className="text-[#b42318] p-1"
               title="إخفاء بشكل دائم"
             >
               <XCircle className="w-4 h-4" />
@@ -1213,14 +1219,14 @@ export default function OwnerDashboard() {
         <div className="bg-[#fff9ec] border-b border-[#ead7a8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg border border-[#ead7a8] bg-white flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-xl border border-[#d9cfb8] bg-white flex items-center justify-center flex-shrink-0 shadow-sm">
                 <Clock className="w-5 h-5 text-[#9a7623]" />
               </div>
               <div>
-                <p className="font-bold text-amber-800 dark:text-amber-300 text-sm md:text-base">
+                <p className="font-bold text-[#80621d] text-sm md:text-base">
                   لديك دفعة بانتظار رفع إيصال التحويل
                 </p>
-                <p className="text-xs text-amber-600 dark:text-amber-400">
+                <p className="text-xs text-[#80621d]">
                   يرجى رفع إيصال التحويل البنكي لتفعيل الاشتراك
                 </p>
               </div>
@@ -1229,13 +1235,13 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-[#d8c9a8] text-[#6f5520] bg-white flex-shrink-0"
+                className="rounded-xl border-[#d9cfb8] text-[#80621d] hover:bg-[#fafaf7] bg-white flex-shrink-0"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
                   setHighlightPayments(true);
                   setTimeout(() => setHighlightPayments(false), 3000);
-                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                  router.push("/owner/subscription#payments-section");
                 }}
               >
                 عرض التفاصيل
@@ -1257,14 +1263,14 @@ export default function OwnerDashboard() {
         <div className="bg-[#f4f8fc] border-b border-[#c9d9eb]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg border border-[#c9d9eb] bg-white flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-xl border border-[#c9d9eb] bg-white flex items-center justify-center flex-shrink-0 shadow-sm">
                 <CheckCircle2 className="w-5 h-5 text-[#315f92]" />
               </div>
               <div>
-                <p className="font-bold text-blue-800 dark:text-blue-300 text-sm md:text-base">
+                <p className="font-bold text-[#315f92] text-sm md:text-base">
                   تم استلام إيصالك وهو قيد التحقق
                 </p>
-                <p className="text-xs text-blue-600 dark:text-blue-400">
+                <p className="text-xs text-[#315f92]">
                   سيتم مراجعة الإيصال والتفعيل خلال 24 ساعة
                 </p>
               </div>
@@ -1273,13 +1279,13 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-[#c9d9eb] text-[#315f92] bg-white flex-shrink-0"
+                className="rounded-xl border-[#d9cfb8] text-[#80621d] hover:bg-[#fafaf7]"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
                   setHighlightPayments(true);
                   setTimeout(() => setHighlightPayments(false), 1000);
-                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                  router.push("/owner/subscription#payments-section");
                 }}
               >
                 عرض التفاصيل
@@ -1301,14 +1307,14 @@ export default function OwnerDashboard() {
         <div className="bg-[#fff5f5] border-b border-[#f1c8c8]">
           <div className="max-w-7xl mx-auto px-3 md:px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg border border-[#f1c8c8] bg-white flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
+              <div className="w-12 h-12 rounded-xl border border-[#f1c8c8] bg-white flex items-center justify-center flex-shrink-0 shadow-sm">
+                <AlertTriangle className="w-5 h-5 text-[#b42318]" />
               </div>
               <div>
-                <p className="font-bold text-red-800 dark:text-red-300 text-sm md:text-base">
+                <p className="font-bold text-[#b42318] text-sm md:text-base">
                   تم رفض إيصال التحويل
                 </p>
-                <p className="text-xs text-red-600 dark:text-red-400">
+                <p className="text-xs text-[#b42318]">
                   يرجى إعادة التحويل ورفع إيصال صحيح
                 </p>
               </div>
@@ -1317,20 +1323,20 @@ export default function OwnerDashboard() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-[#f1c8c8] text-red-700 bg-white flex-shrink-0"
+                className="rounded-xl border-[#d9cfb8] text-[#80621d] hover:bg-[#fafaf7]"
                 onClick={() => {
                   setPaymentFilter("all");
                   setPaymentsExpanded(true);
                   setHighlightPayments(true);
                   setTimeout(() => setHighlightPayments(false), 1000);
-                  document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
+                  router.push("/owner/subscription#payments-section");
                 }}
               >
                 عرض التفاصيل
               </Button>
               <button
                 onClick={() => hideNotification(NOTIFICATION_KEYS.paymentRejected)}
-                className="text-red-500 p-1"
+                className="text-[#b42318] p-1"
                 title="إخفاء بشكل دائم"
               >
                 <XCircle className="w-5 h-5" />
@@ -1342,19 +1348,20 @@ export default function OwnerDashboard() {
 
       <OwnerPageHeader
         title="لوحة التحكم"
-        description={`عقار #${property.propertyNumber}`}
+        eyebrow="مالك العقار"
+        description={`${property.name || `عقار رقم ${property.propertyNumber}`} · #${property.propertyNumber}`}
         accessory={isVip ? (
-          <Badge className="gap-1 rounded-md border border-[#d9c37b] bg-[#f4e8bd] text-[#5f4817]">
+          <Badge className="gap-1 rounded-full border border-[#d9c37b] bg-[#f6ecc9] text-[#5f4817]">
             <Crown className="h-3 w-3" />
             مميز
           </Badge>
         ) : isSubscriptionCancelled ? (
-          <Badge className="gap-1 rounded-md bg-red-600 text-white">
+          <Badge className="gap-1 rounded-full bg-[#b42318] text-white">
             <XCircle className="h-3 w-3" />
             ملغى
           </Badge>
         ) : isSubscriptionSuspended ? (
-          <Badge className="gap-1 rounded-md bg-slate-600 text-white">
+          <Badge className="gap-1 rounded-full bg-[#5b6b61] text-white">
             <PauseCircle className="h-3 w-3" />
             موقوف
           </Badge>
@@ -1366,115 +1373,146 @@ export default function OwnerDashboard() {
             onClick={handleLogout}
             title="تسجيل الخروج"
             aria-label="تسجيل الخروج"
-            className="h-10 w-10 text-[#6f6249]"
+            className="h-12 w-12 rounded-xl text-[#687064]"
           >
             <LogOut className="h-4 w-4" />
           </Button>
         )}
       />
 
-      <OwnerPageMain className="space-y-5 sm:space-y-6 lg:space-y-8">
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <Card className={`${ownerPanelClass} overflow-hidden`}>
-            <div className="border-b border-[#eee4cf] bg-[#fffdf8] p-5 md:p-6">
-              <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-[#8b7140]">حالة الاشتراك</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant={isVip ? "default" : "secondary"}
-                      className="rounded-lg px-3 py-1 text-sm"
-                    >
-                      {subscriptionStateLabel}
-                    </Badge>
-                    <Badge variant="outline" className="rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]">
-                      منذ {subscriptionSinceLabel}
-                    </Badge>
-                    {currentSubscription?.linkedProperty && (
-                      <Badge variant="outline" className="rounded-lg border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]">
-                        مرتبط: {currentSubscription.linkedProperty}
-                      </Badge>
-                    )}
+      <OwnerPageMain className="space-y-4 pb-28 sm:space-y-5 lg:space-y-6">
+        {/* ===== هوية المالك والعقار + الاشتراك ===== */}
+        <section className="overflow-hidden rounded-2xl border border-[#29372f] bg-[#29372f] text-[#fffdf8] shadow-[0_18px_45px_rgba(41,55,47,0.16)]">
+          <div className="relative">
+            <div className="pointer-events-none absolute -left-20 -top-28 h-72 w-72 rounded-full border border-[#ccb46f]/25" aria-hidden="true" />
+            <div className="pointer-events-none absolute -left-6 -top-10 h-56 w-56 rounded-full border border-[#ccb46f]/15" aria-hidden="true" />
+            <div className="relative grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d8bf76]/35 bg-[#d8bf76]/12 px-3 py-1 text-[11px] font-bold text-[#f0ddaa]">
+                    <Crown className="h-3.5 w-3.5" />
+                    مالك العقار
+                  </span>
+                  <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold text-white">
+                    {subscriptionStateLabel}
+                  </span>
+                  <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] font-semibold text-[#d9e0da]">
+                    {verificationStateLabel}
+                  </span>
+                  {currentSubscription?.linkedProperty && (
+                    <span className="rounded-full border border-[#d8bf76]/30 bg-[#d8bf76]/10 px-3 py-1 text-[11px] font-semibold text-[#f0ddaa]">
+                      مرتبط: {currentSubscription.linkedProperty}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-5 text-xs font-bold text-[#d8bf76]">
+                  عقار رقم {property.propertyNumber}
+                </p>
+                <h2 className="mt-1 truncate text-2xl font-bold leading-snug sm:text-3xl">
+                  {property.name || `عقار رقم ${property.propertyNumber}`}
+                </h2>
+                <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[#cfd6d0]">
+                  <span>{property.city || "المدينة غير محددة"}</span>
+                  {property.location && <span className="text-[#8f9a92]">·</span>}
+                  {property.location && <span>{property.location}</span>}
+                  {property.direction && <span className="text-[#8f9a92]">·</span>}
+                  {property.direction && <span>اتجاه {property.direction}</span>}
+                </p>
+                {property.whatsappNumber && (
+                  <p className="mt-2 text-xs text-[#aab4ac]">
+                    جوال المالك: <span dir="ltr">{property.whatsappNumber}</span>
+                  </p>
+                )}
+
+                <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <DashboardHeroMetric label="طلبات الشهر" value={String(stats.monthlyRequests)} />
+                  <DashboardHeroMetric label="الصور" value={`${imageCount}/15`} />
+                  <DashboardHeroMetric label="العقارات المرتبطة" value={String(linkedPropertiesCount)} />
+                  <DashboardHeroMetric label="الإضافات النشطة" value={String(activeAddOnsCount)} />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/12 bg-white/[0.07] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-[#d8bf76]">حالة الاشتراك</p>
+                    <p className="mt-1 text-3xl font-bold text-white">{remainingDaysLabel}</p>
+                  </div>
+                  <span className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-bold text-[#f0ddaa]">
+                    {subscriptionStatusText.text}
+                  </span>
+                </div>
+
+                <dl className="mt-4 space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-3 text-[#cfd6d0]">
+                    <dt>تاريخ البداية</dt>
+                    <dd className="font-semibold text-white" dir="ltr">
+                      {currentSubscription?.startDate ? formatDate(currentSubscription.startDate, false) : "غير محدد"}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-[#cfd6d0]">
+                    <dt>تاريخ الانتهاء</dt>
+                    <dd className="font-semibold text-white" dir="ltr">
+                      {currentSubscription?.endDate ? formatDate(currentSubscription.endDate, false) : "غير محدد"}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[11px] text-[#aab4ac]">
+                    <span>تقدم الاشتراك</span>
+                    <span>{Math.round(subscriptionProgressValue)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/12">
+                    <div
+                      className="h-full rounded-full bg-[#d8bf76] transition-all"
+                      style={{ width: `${Math.max(0, Math.min(100, subscriptionProgressValue))}%` }}
+                    />
                   </div>
                 </div>
 
                 <Button
-                  className="h-11 rounded-lg bg-[#2f2a1f] px-5 text-sm font-bold text-white"
+                  className="mt-4 h-11 w-full rounded-xl bg-[#d8bf76] text-sm font-bold text-[#29372f] transition-colors hover:bg-[#cbb05f]"
                   onClick={() => router.push("/owner/subscription")}
                   data-testid="button-subscription-manage"
                 >
-                  <CreditCard className="w-4 h-4 ml-2" />
+                  <CreditCard className="ml-2 h-4 w-4" />
                   {subscriptionButtonLabel}
                 </Button>
               </div>
             </div>
 
-            <div className="p-5 md:p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-[#8b7140]">التقدم</p>
-                  <p className={`mt-1 text-3xl font-bold ${remainingDays === 0 ? "text-orange-600" : remainingDays !== null && remainingDays < 0 ? "text-red-600" : "text-[#2f2a1f]"}`}>
-                    {remainingDaysLabel}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-sm md:min-w-[260px]">
-                  <div className="rounded-lg border border-[#eee4cf] bg-[#fffdf8] px-3 py-2">
-                    <p className="text-xs text-[#8b7140]">العقار</p>
-                    <p className="font-bold text-[#2f2a1f]">#{property.propertyNumber}</p>
-                  </div>
-                  <div className="rounded-lg border border-[#eee4cf] bg-[#fffdf8] px-3 py-2">
-                    <p className="text-xs text-[#8b7140]">التحقق</p>
-                    <p className="font-bold text-[#2f2a1f]">{verificationStateLabel}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-5">
-                <ProgressBar value={subscriptionProgressValue} />
-              </div>
-            </div>
-          </Card>
-
-          <Card className={`${ownerPanelClass} p-5 md:p-6`}>
-            <div className="mb-5">
-              <p className="text-sm font-semibold text-[#8b7140]">العقار</p>
-              <h2 className="mt-1 truncate text-2xl font-bold text-[#2f2a1f]">
-                {property.name || `عقار رقم ${property.propertyNumber}`}
-              </h2>
-              <p className="mt-2 text-sm text-[#6f6249]">
-                {property.city || "المدينة غير محددة"}
-                {property.location ? ` - ${property.location}` : ""}
-              </p>
-            </div>
-            <div className="grid gap-2">
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+            <div className="relative grid gap-2 border-t border-white/10 p-3 sm:grid-cols-3 sm:p-4">
+              <button
+                type="button"
                 onClick={() => router.push("/owner/update-property")}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white text-sm font-bold text-[#29372f] transition-colors hover:bg-[#f6f1e4]"
               >
-                <Edit3 className="w-4 h-4 ml-2" />
+                <Edit3 className="h-4 w-4" />
                 تحديث بيانات العقار
-              </Button>
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+              </button>
+              <button
+                type="button"
                 onClick={() => router.push("/owner/images")}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 text-sm font-bold text-white transition-colors hover:bg-white/15"
               >
-                <ImageIcon className="w-4 h-4 ml-2" />
+                <ImageIcon className="h-4 w-4" />
                 إدارة الصور ({imageCount}/15)
-              </Button>
-              <Button
-                variant="outline"
-                className="h-11 justify-start rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
+              </button>
+              <button
+                type="button"
                 onClick={() => router.push(`/property/${property.propertyNumber}`)}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 text-sm font-bold text-white transition-colors hover:bg-white/15"
               >
-                <Eye className="w-4 h-4 ml-2" />
+                <Eye className="h-4 w-4" />
                 مشاهدة صفحة العقار
-              </Button>
+              </button>
             </div>
-          </Card>
+          </div>
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-2.5">
           {isSubscriptionSuspended && (
             <WorkflowNotice
               tone="blue"
@@ -1494,7 +1532,7 @@ export default function OwnerDashboard() {
               title="المراجعة تعمل على إيصال التحويل"
               description="تم استلام الإيصال، وسيتم تحديث حالة الدفع والاشتراك بعد انتهاء التحقق."
               actionLabel="عرض سجل المدفوعات"
-              onAction={() => router.push("/owner/subscription")}
+              onAction={() => router.push("/owner/subscription#payments-section")}
             />
           )}
           {hasPendingReceiptPayment && (
@@ -1505,7 +1543,7 @@ export default function OwnerDashboard() {
               title="يوجد دفع بانتظار رفع إيصال التحويل"
               description="ارفع إيصال التحويل الصحيح حتى يبدأ التحقق وتظهر حالة المراجعة بوضوح."
               actionLabel="رفع الإيصال"
-              onAction={() => router.push("/owner/subscription")}
+              onAction={() => router.push("/owner/subscription#payments-section")}
             />
           )}
           {hasRejectedPayment && (
@@ -1516,7 +1554,7 @@ export default function OwnerDashboard() {
               title="تم رفض إيصال تحويل سابق"
               description="راجع السبب في سجل المدفوعات ثم ارفع إيصالاً صحيحاً أو أعد محاولة الدفع."
               actionLabel="معالجة الدفع"
-              onAction={() => router.push("/owner/subscription")}
+              onAction={() => router.push("/owner/subscription#payments-section")}
             />
           )}
           {!isSubscriptionSuspended && !hasPaymentUnderReview && !hasPendingReceiptPayment && !hasRejectedPayment && property.verificationStatus === "approved" && (
@@ -1532,27 +1570,79 @@ export default function OwnerDashboard() {
           )}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <DashboardKpiCard
+            icon={<MessageCircle className="h-5 w-5" />}
+            label="طلبات العملاء"
+            value={String(requestsData?.summary?.total || 0)}
+            note={`${requestsData?.summary?.awaitingResponse || 0} بانتظار الرد`}
+            onClick={() => router.push("/owner/requests")}
+            testId="kpi-requests"
+          />
+          <DashboardKpiCard
+            icon={<CheckCircle2 className="h-5 w-5" />}
+            label="حجوزات مؤكدة"
+            value={String(requestsData?.summary?.confirmed || 0)}
+            note={
+              (requestsData?.summary?.commissionAttention || 0) > 0
+                ? `${requestsData.summary.commissionAttention} عمولة للمتابعة`
+                : "لا توجد عمولات معلقة"
+            }
+            tone={(requestsData?.summary?.commissionAttention || 0) > 0 ? "gold" : "green"}
+            onClick={() => router.push("/owner/requests")}
+            testId="kpi-confirmed"
+          />
+          <DashboardKpiCard
+            icon={<Receipt className="h-5 w-5" />}
+            label="المدفوعات المكتملة"
+            value={String(completedPaymentsCount)}
+            note={`${pendingPaymentsCount} عملية معلقة`}
+            tone="blue"
+            onClick={() => router.push("/owner/subscription#payments-section")}
+            testId="kpi-payments"
+          />
+          <DashboardKpiCard
+            icon={<Zap className="h-5 w-5" />}
+            label="الإضافات النشطة"
+            value={String(activeAddOnsCount)}
+            note={`من ${addOnPackages.length} إضافة متاحة`}
+            onClick={() => router.push("/owner/subscription#addons-section")}
+            testId="kpi-addons"
+          />
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.6fr)]">
           <Card className={`${ownerPanelClass} overflow-hidden`}>
-            <div className="flex flex-col gap-3 border-b border-[#edf0eb] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div className="flex flex-col gap-3 border-b border-[#f0eadc] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#eef0eb] text-[#80621d]">
+                <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
                   <MessageCircle className="h-5 w-5" />
                 </span>
                 <div className="min-w-0">
-                  <h2 className="font-bold text-[#242822]">طلبات العملاء</h2>
-                  <p className="mt-0.5 text-xs text-[#687064]">متابعة التواصل ونتيجة الحجز والعمولة</p>
+                  <h2 className="font-bold text-[#293129]">طلبات العملاء</h2>
+                  <p className="mt-0.5 text-xs text-[#6f685b]">متابعة التواصل ونتيجة الحجز والعمولة</p>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                className="h-10 rounded-lg border-[#d8c9a8] bg-white text-[#6f5520]"
-                onClick={() => router.push("/owner/requests")}
-              >
-                عرض كل الطلبات
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl border-[#d9cfb8] bg-white text-[#80621d] hover:bg-[#fafaf7]"
+                  onClick={() => setShowRequestsStats(true)}
+                  data-testid="button-requests-stats"
+                >
+                  <BarChart2 className="ml-2 h-4 w-4" />
+                  إحصائيات مفصلة
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl border-[#d9cfb8] bg-white text-[#80621d] hover:bg-[#fafaf7]"
+                  onClick={() => router.push("/owner/requests")}
+                >
+                  عرض كل الطلبات
+                </Button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 divide-x divide-x-reverse divide-y border-[#edf0eb] sm:grid-cols-4 sm:divide-y-0">
+            <div className="grid grid-cols-2 divide-x divide-x-reverse divide-y divide-[#f0eadc] sm:grid-cols-4 sm:divide-y-0">
               <OwnerRequestMetric label="كل الطلبات" value={requestsData?.summary?.total || 0} />
               <OwnerRequestMetric label="بانتظار الرد" value={requestsData?.summary?.awaitingResponse || 0} />
               <OwnerRequestMetric label="حجوزات مؤكدة" value={requestsData?.summary?.confirmed || 0} />
@@ -1562,553 +1652,50 @@ export default function OwnerDashboard() {
 
           <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
             <div className="flex items-center gap-3">
-              <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#eef0eb] text-[#80621d]">
+              <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
                 <BarChart2 className="h-5 w-5" />
               </span>
               <div>
-                <h2 className="font-bold text-[#242822]">ملخص الطلبات</h2>
-                <p className="mt-0.5 text-xs text-[#687064]">بيانات هذا العقار فقط</p>
+                <h2 className="font-bold text-[#293129]">ملخص الطلبات</h2>
+                <p className="mt-0.5 text-xs text-[#6f685b]">بيانات هذا العقار فقط</p>
               </div>
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div>
-                <dt className="text-xs text-[#687064]">هذا الشهر</dt>
-                <dd className="mt-1 font-bold text-[#242822]">{stats.monthlyRequests}</dd>
+                <dt className="text-xs text-[#6f685b]">هذا الشهر</dt>
+                <dd className="mt-1 font-bold text-[#293129]">{stats.monthlyRequests}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#687064]">المتوسط اليومي</dt>
-                <dd className="mt-1 font-bold text-[#242822]">{stats.dailyAverage}</dd>
+                <dt className="text-xs text-[#6f685b]">المتوسط اليومي</dt>
+                <dd className="mt-1 font-bold text-[#293129]">{stats.dailyAverage}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#687064]">اليوم الأعلى</dt>
-                <dd className="mt-1 font-bold text-[#242822]">{stats.highestDemandDay}</dd>
+                <dt className="text-xs text-[#6f685b]">اليوم الأعلى</dt>
+                <dd className="mt-1 font-bold text-[#293129]">{stats.highestDemandDay}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#687064]">فترة الذروة</dt>
-                <dd className="mt-1 font-bold text-[#242822]">{stats.peakPeriod}</dd>
+                <dt className="text-xs text-[#6f685b]">فترة الذروة</dt>
+                <dd className="mt-1 font-bold text-[#293129]">{stats.peakPeriod}</dd>
               </div>
             </dl>
           </Card>
         </section>
 
-        <section className="hidden">
-          <div className="overflow-hidden rounded-lg border border-[#2f2a1f] bg-[#2f2a1f] text-white">
-            <div className="grid min-h-[360px] lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="flex flex-col justify-between gap-8 p-5 md:p-7">
-                <div className="space-y-5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="rounded-lg border border-white/15 bg-white/10 px-3 py-1 text-white">
-                      مركز التحكم
-                    </Badge>
-                    <Badge className="rounded-lg border border-[#d7bd76]/40 bg-[#d7bd76]/15 px-3 py-1 text-[#f7df9c]">
-                      {subscriptionStateLabel}
-                    </Badge>
-                    {property.verificationStatus === "approved" && (
-                      <Badge className="rounded-lg border border-[#78d998]/30 bg-[#128c47]/20 px-3 py-1 text-[#9ff0b6]">
-                        معتمد
-                      </Badge>
-                    )}
-                  </div>
 
-                  <div>
-                    <p className="text-sm font-semibold text-[#d7bd76]">
-                      عقار رقم {property.propertyNumber}
-                    </p>
-                    <h2 className="mt-2 max-w-3xl text-3xl font-bold leading-tight md:text-5xl">
-                      {property.name || "لوحة إدارة العقار"}
-                    </h2>
-                    <p className="mt-4 max-w-2xl text-sm leading-7 text-[#d9d0bf] md:text-base">
-                      {property.city || "المدينة غير محددة"}
-                      {property.location ? ` - ${property.location}` : ""}
-                      {property.direction ? ` - ${property.direction}` : ""}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="space-y-5">
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                    <DashboardHeroMetric label="الأيام المتبقية" value={remainingDaysLabel} />
-                    <DashboardHeroMetric label="طلبات الشهر" value={String(stats.monthlyRequests)} />
-                    <DashboardHeroMetric label="الصور" value={`${imageCount}/15`} />
-                    <DashboardHeroMetric label="العقارات المرتبطة" value={String(linkedPropertiesCount)} />
-                  </div>
 
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <button
-                      type="button"
-                      onClick={() => router.push("/owner/update-property")}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white text-[#2f2a1f] px-4 text-sm font-bold"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                      تحديث البيانات
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => router.push("/owner/images")}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/10 px-4 text-sm font-bold text-white"
-                    >
-                      <ImageIcon className="h-4 w-4" />
-                      إدارة الصور
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/property/${property.propertyNumber}`)}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/10 px-4 text-sm font-bold text-white"
-                    >
-                      <Eye className="h-4 w-4" />
-                      مشاهدة الصفحة
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-white/10 bg-white/[0.06] p-3 lg:border-r lg:border-t-0">
-                {heroImage ? (
-                  <img
-                    src={heroImage}
-                    alt={property.name || "صورة العقار"}
-                    className="h-72 w-full rounded-lg object-cover lg:h-full"
-                  />
-                ) : (
-                  <div className="flex h-72 w-full items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] lg:h-full">
-                    <ImageIcon className="h-12 w-12 text-white/35" />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-            <DashboardStatusTile
-              icon={<CreditCard className="h-5 w-5" />}
-              title="الاشتراك"
-              value={subscriptionStateLabel}
-              note={`المتبقي: ${remainingDaysLabel}`}
-              actionLabel={subscriptionButtonLabel}
-              onAction={() => router.push("/owner/subscription")}
-            />
-            <DashboardStatusTile
-              icon={<Activity className="h-5 w-5" />}
-              title="التحقق"
-              value={verificationStateLabel}
-              note={property.verificationStatus === "approved" ? "بيانات العقار جاهزة للعرض" : "راجع بيانات العقار أو شغل التحقق"}
-              toneClass={verificationTone}
-              actionLabel={hasCompletedSmartVerification ? "تم الفحص" : "تشغيل التحقق"}
-              onAction={hasCompletedSmartVerification ? () => undefined : startSmartVerification}
-            />
-            <DashboardStatusTile
-              icon={<Receipt className="h-5 w-5" />}
-              title="المدفوعات"
-              value={`${pendingPaymentsCount} معلقة`}
-              note={`${completedPaymentsCount} عملية مكتملة`}
-              actionLabel="عرض السجل"
-              onAction={() => {
-                setPaymentFilter("all");
-                setPaymentsExpanded(true);
-                document.getElementById("payments-section")?.scrollIntoView({ behavior: "smooth" });
-              }}
-            />
-          </div>
-        </section>
-
-        <section className="hidden">
-          <DashboardQuickAction
-            icon={<Zap className="h-5 w-5" />}
-            title="الإضافات النشطة"
-            value={String(activeAddOnsCount)}
-            action="إدارة"
-            onClick={() => router.push("/owner/subscription")}
-          />
-          <DashboardQuickAction
-            icon={<MessageCircle className="h-5 w-5" />}
-            title="طلبات واتساب"
-            value={String(stats.monthlyRequests)}
-            action="تفاصيل"
-            onClick={() => setShowRequestsStats(true)}
-          />
-          <DashboardQuickAction
-            icon={<ImageIcon className="h-5 w-5" />}
-            title="صور العقار"
-            value={`${imageCount}/15`}
-            action="تعديل"
-            onClick={() => router.push("/owner/images")}
-          />
-          <DashboardQuickAction
-            icon={<Home className="h-5 w-5" />}
-            title="العقارات المرتبطة"
-            value={String(linkedPropertiesCount)}
-            action="عرض"
-            onClick={() => {
-              document.getElementById("linked-properties-section")?.scrollIntoView({ behavior: "smooth" });
-            }}
-          />
-        </section>
-
-        {/* ===== كرت حالة الاشتراك + Progress Bar ===== */}
-        <Card className={`hidden ${ownerSoftPanelClass} p-4 md:p-6`}>
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6">
-            <div className="space-y-2 flex-1">
-              <h2 className="font-bold text-base md:text-lg text-[#2f2a1f]">
-                حالة الاشتراك
-              </h2>
-              <div className="flex items-center gap-2 md:gap-3 flex-wrap">
-                <Badge
-                  variant={isVip ? "default" : "secondary"}
-                  className="text-xs md:text-sm px-3 md:px-4 py-1"
-                >
-                  {subscriptionStateLabel}
-                </Badge>
-                {property.subscriptionDate && (
-                  <span className="text-xs text-muted-foreground">
-                    منذ{" "}
-                    {(() => {
-                      const d = new Date(property.subscriptionDate);
-                      return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()}`;
-                    })()}
-                  </span>
-                )}
-                {currentSubscription?.linkedProperty && (
-                  <div className="mt-2">
-                    <Badge
-                      variant="outline"
-                      className="text-xs px-2 py-0.5 border-[#c9d9eb] text-[#315f92] bg-[#f4f8fc]"
-                    >
-                      <Home className="w-3 h-3 ml-1" />
-                      مرتبط: {currentSubscription.linkedProperty}
-                    </Badge>
-                  </div>
-                )}
-              </div>
-
-              {remainingDays !== null && (
-                <div className="mt-3 space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>التقدم</span>
-                    <span>
-                      {isSubscriptionExpired ? (
-                        <span className="font-bold text-red-500">منتهي</span>
-                      ) : remainingDays === 0 ? (
-                        <span className="font-bold text-orange-500">
-                          اليوم الأخير
-                        </span>
-                      ) : (
-                        <>
-                          باقي{" "}
-                          <span className="font-bold text-primary">
-                            {remainingDays}
-                          </span>{" "}
-                          يوم
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <ProgressBar
-                    value={isSubscriptionExpired ? 100 : (progressPercent ?? 0)}
-                  />
-                </div>
-              )}
-            </div>
-
-            <Button
-              className="w-full md:w-auto h-10 md:h-12 text-sm md:text-base font-bold gap-2 bg-[#2f2a1f] text-white flex-shrink-0"
-              onClick={() => router.push("/owner/subscription")}
-              data-testid="button-subscription-manage"
-            >
-              <CreditCard className="w-4 md:w-5 h-4 md:h-5" />
-              <span className="hidden md:inline">
-                {subscriptionButtonLabel}
-              </span>
-              <span className="md:hidden">إدارة</span>
-            </Button>
-          </div>
-        </Card>
-
-        {/* ===== قسم الإضافات (عرض دائماً) ===== */}
-        <Card className={`hidden ${ownerPanelClass} p-4 md:p-6`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-[#9a7623]" />
-              <h2 className="font-bold text-base md:text-lg text-[#2f2a1f]">
-                إضافاتك
-              </h2>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-[#6f5520] border-[#d8c9a8] bg-white"
-              onClick={() => router.push("/owner/subscription")}
-              data-testid="button-go-to-addons"
-            >
-              <Plus className="w-4 h-4 ml-1" />
-              شراء إضافات
-            </Button>
-          </div>
-
-          {/* عرض الإضافات النشطة فقط */}
-          {propertyAddOns.filter((a) => a.status === "active").length === 0 ? (
-            <div className="text-center py-6">
-              <Zap className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-muted-foreground text-sm">
-                لا توجد إضافات نشطة لعقارك
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                اذهب لصفحة الاشتراك لشراء إضافات جديدة
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {propertyAddOns
-                .filter((a) => a.status === "active")
-                .map((addon) => {
-                  const pkg = addOnPackages.find(
-                    (p) => p.id === addon.addOnPackageId,
-                  );
-                  const endDate = addon.endDate
-                    ? new Date(addon.endDate)
-                    : null;
-                  const now = new Date();
-                  const daysLeft = endDate
-                    ? Math.ceil(
-                      (endDate.getTime() - now.getTime()) /
-                      (1000 * 60 * 60 * 24),
-                    )
-                    : null;
-
-                  return (
-                    <Card
-                      key={addon.id}
-                      className="p-4 relative overflow-hidden border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/20"
-                      data-testid={`addon-active-${addon.id}`}
-                    >
-                      <div
-                        className={`absolute top-0 right-0 left-0 h-1 ${pkg ? getCategoryColor(pkg.category) : "bg-emerald-500"}`}
-                      />
-
-                      <div className="flex items-start justify-between gap-3 mt-1">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap mb-2">
-                            <h4 className="font-semibold">
-                              {pkg?.name || "إضافة"}
-                            </h4>
-                            {pkg && (
-                              <Badge
-                                className={`${getCategoryColor(pkg.category)} text-white text-xs`}
-                              >
-                                {pkg.category}
-                              </Badge>
-                            )}
-                            <Badge
-                              variant="outline"
-                              className="text-emerald-600 border-emerald-300 bg-emerald-100 text-xs"
-                            >
-                              <CheckCircle2 className="w-3 h-3 ml-1" />
-                              نشط
-                            </Badge>
-                          </div>
-
-                          {pkg?.description && (
-                            <p className="text-xs text-muted-foreground mb-2">
-                              {pkg.description}
-                            </p>
-                          )}
-
-                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Star className="w-3 h-3" />
-                              <PriceDisplay
-                                amount={pkg?.price || 0}
-                                size="sm"
-                              />
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              <span>
-                                {pkg?.durationDays === 0
-                                  ? "دائم"
-                                  : `${pkg?.durationDays || 0} يوم`}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="text-left shrink-0">
-                          {endDate ? (
-                            <div className="text-xs">
-                              <p className="text-muted-foreground">ينتهي في</p>
-                              <p className="font-bold text-foreground">
-                                {endDate.toLocaleDateString("en-US")}
-                              </p>
-                              {daysLeft !== null && daysLeft > 0 && (
-                                <p
-                                  className={`text-xs mt-1 ${daysLeft <= 3 ? "text-red-500 font-bold" : "text-emerald-600"}`}
-                                >
-                                  باقي {daysLeft} يوم
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <Badge className="bg-emerald-500 text-white">
-                              دائم
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
-            </div>
-          )}
-
-          {/* عرض الإضافات المعلقة */}
-          {propertyAddOns.filter((a) => a.status === "pending").length > 0 && (
-            <div className="mt-4 pt-4 border-t border-amber-200 dark:border-amber-800">
-              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-amber-600">
-                <Clock className="w-4 h-4" />
-                طلبات معلقة (
-                {propertyAddOns.filter((a) => a.status === "pending").length})
-              </h4>
-              <div className="space-y-3">
-                {propertyAddOns
-                  .filter((a) => a.status === "pending")
-                  .map((addon) => {
-                    const pkg = addOnPackages.find(
-                      (p) => p.id === addon.addOnPackageId,
-                    );
-                    return (
-                      <Card
-                        key={addon.id}
-                        className="p-4 relative overflow-hidden border-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
-                        data-testid={`addon-pending-${addon.id}`}
-                      >
-                        <div className="absolute top-0 right-0 left-0 h-1 bg-amber-500" />
-
-                        <div className="flex items-start justify-between gap-3 mt-1">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 flex-wrap mb-2">
-                              <h4 className="font-semibold">
-                                {pkg?.name || "إضافة"}
-                              </h4>
-                              {pkg && (
-                                <Badge
-                                  className={`${getCategoryColor(pkg.category)} text-white text-xs`}
-                                >
-                                  {pkg.category}
-                                </Badge>
-                              )}
-                              <Badge className="bg-amber-500 text-white text-xs">
-                                <Clock className="w-3 h-3 ml-1" />
-                                بانتظار الموافقة
-                              </Badge>
-                            </div>
-
-                            {pkg?.description && (
-                              <p className="text-xs text-muted-foreground mb-2">
-                                {pkg.description}
-                              </p>
-                            )}
-
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                              <div className="flex items-center gap-1">
-                                <Star className="w-3 h-3" />
-                                <PriceDisplay
-                                  amount={pkg?.price || 0}
-                                  size="sm"
-                                />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                <span>
-                                  {pkg?.durationDays === 0
-                                    ? "دائم"
-                                    : `${pkg?.durationDays || 0} يوم`}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="mt-2 text-xs text-muted-foreground">
-                              <span>تاريخ الطلب: </span>
-                              <span className="font-medium">
-                                {addon.createdAt
-                                  ? new Date(
-                                    addon.createdAt,
-                                  ).toLocaleDateString("en-US")
-                                  : "-"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="text-left shrink-0">
-                            <div className="text-xs text-center">
-                              <p className="text-muted-foreground">
-                                بعد التفعيل
-                              </p>
-                              <p className="font-bold text-amber-600">
-                                {pkg?.durationDays === 0
-                                  ? "دائم"
-                                  : `${pkg?.durationDays || 0} يوم`}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-                    );
-                  })}
-              </div>
-              <p className="text-xs text-amber-600 mt-3 bg-amber-100 dark:bg-amber-900/30 p-2 rounded-md">
-                سيتم تفعيل الإضافات بعد مراجعة الإدارة للإيصال المرفوع
-              </p>
-            </div>
-          )}
-
-          {/* عرض الإضافات المنتهية */}
-          {propertyAddOns.filter((a) => a.status === "expired").length > 0 && (
-            <div className="mt-4 pt-4 border-t border-violet-200 dark:border-violet-800">
-              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-muted-foreground">
-                <XCircle className="w-4 h-4" />
-                إضافات منتهية
-              </h4>
-              <div className="space-y-2">
-                {propertyAddOns
-                  .filter((a) => a.status === "expired")
-                  .map((addon) => {
-                    const pkg = addOnPackages.find(
-                      (p) => p.id === addon.addOnPackageId,
-                    );
-                    return (
-                      <div
-                        key={addon.id}
-                        className="flex items-center justify-between p-2 bg-muted/30 rounded-md text-sm border border-muted"
-                      >
-                        <span className="text-muted-foreground">
-                          {pkg?.name || "إضافة"}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          انتهى:{" "}
-                          {addon.endDate
-                            ? new Date(addon.endDate).toLocaleDateString(
-                              "en-US",
-                            )
-                            : "-"}
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
-        </Card>
 
         {/* ===== عروض المناسبات (العيد) ===== */}
         <OwnerOccasionsSection />
 
         {/* ===== شريط التحقق الذكي المتحرك ===== */}
         {property && (
-          <Card className={`p-4 md:p-6 ${hasCompletedSmartVerification ? "rounded-lg border border-[#cfe5d6] bg-[#f8fff9]" : "rounded-lg border border-[#d8e4ea] bg-[#f7fbfd]"}`}>
+          <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
             <div className="space-y-4">
               {/* العنوان والزر */}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h3 className={`font-bold text-lg md:text-xl flex items-center gap-2 ${hasCompletedSmartVerification ? "text-[#128c47]" : "text-[#315f92]"}`}>
+                    <h3 className={`flex items-center gap-2 text-base font-bold sm:text-lg ${hasCompletedSmartVerification ? "text-[#128c47]" : "text-[#293129]"}`}>
                     {isSubscriptionSuspended ? (
                       <>
                         <PauseCircle className="w-6 h-6" />
@@ -2126,7 +1713,7 @@ export default function OwnerDashboard() {
                       </>
                     )}
                   </h3>
-                  <p className="text-sm text-muted-foreground mt-1">
+                  <p className="text-sm text-[#6f685b] mt-1">
                     {isSubscriptionSuspended
                       ? "أوقفت الإدارة الاشتراك مؤقتاً، ولا يمكن تشغيل التحقق حتى تعيد تفعيله"
                       : property.verificationStatus === "approved"
@@ -2137,7 +1724,7 @@ export default function OwnerDashboard() {
                     }
                   </p>
                   {property.verificationStatus === "rejected" && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                    <p className="text-xs text-[#b42318] mt-1 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
                       العقار مرفوض - يرجى تصحيح البيانات وإعادة التحقق
                     </p>
@@ -2147,7 +1734,7 @@ export default function OwnerDashboard() {
                   <Button
                     type="button"
                     onClick={startSmartVerification}
-                    className="bg-[#315f92] text-white flex-shrink-0"
+                    className="h-11 flex-shrink-0 rounded-xl bg-[#29372f] px-5 font-bold text-white transition-colors hover:bg-[#1f2b25]"
                     data-testid="button-start-verification"
                   >
                     <Activity className="w-4 h-4 ml-2" />
@@ -2161,18 +1748,18 @@ export default function OwnerDashboard() {
                     <div className="space-y-3">
                       {/* النسبة المئوية */}
                       <div className="text-center">
-                        <div className="text-4xl font-bold text-[#315f92] mb-1">
+                        <div className="text-3xl font-bold text-[#80621d] mb-1">
                           {verificationProgress}%
                         </div>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-[#6f685b]">
                           جاري التحقق من البيانات...
                         </p>
                       </div>
 
                       {/* شريط التقدم */}
-                      <div className="w-full h-2 bg-white rounded-full overflow-hidden border border-[#d8e4ea]">
+                      <div className="w-full h-2 bg-[#f5f1e7] rounded-full overflow-hidden border border-[#efe7d6]">
                         <div
-                          className="h-full bg-[#315f92] transition-all duration-500 ease-out"
+                          className="h-full bg-[#9a7623] transition-all duration-500 ease-out"
                           style={{ width: `${verificationProgress}%` }}
                         />
                       </div>
@@ -2182,24 +1769,24 @@ export default function OwnerDashboard() {
                         {verificationSteps.map((step) => (
                           <div
                             key={step.step}
-                            className={`flex items-center gap-3 p-3 rounded-lg border ${step.status === "success"
-                              ? "bg-green-50 border-green-200 dark:bg-green-900/20"
+                            className={`flex items-center gap-3 p-3 rounded-xl border ${step.status === "success"
+                              ? "bg-[#f6fbf7] border-[#cfe5d6]"
                               : step.status === "error"
-                                ? "bg-red-50 border-red-200 dark:bg-red-900/20"
+                                ? "bg-[#fff5f5] border-[#f1c8c8]"
                                 : step.status === "checking"
-                                  ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20"
-                                  : "bg-gray-50 border-gray-200 dark:bg-gray-800"
+                                  ? "bg-[#fdf8ec] border-[#e8d9b4]"
+                                  : "bg-[#fffdf8] border-[#f0eadc]"
                               }`}
                           >
                             {/* الأيقونة */}
                             <div
                               className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${step.status === "success"
-                                ? "bg-green-500"
+                                ? "bg-[#128c47]"
                                 : step.status === "error"
-                                  ? "bg-red-500"
+                                  ? "bg-[#b42318]"
                                   : step.status === "checking"
-                                    ? "bg-blue-500"
-                                    : "bg-gray-300"
+                                    ? "bg-[#9a7623]"
+                                    : "bg-[#c9c0ad]"
                                 }`}
                             >
                               {step.status === "success" ? (
@@ -2219,14 +1806,14 @@ export default function OwnerDashboard() {
                                 {step.name}
                               </div>
                               {step.message && (
-                                <div className="text-xs text-muted-foreground mt-1">
+                                <div className="text-xs text-[#6f685b] mt-1">
                                   {step.message}
                                 </div>
                               )}
                             </div>
 
                             {/* رقم الخطوة */}
-                            <div className="text-xs font-bold text-muted-foreground">
+                            <div className="text-xs font-bold text-[#6f685b]">
                               {step.step}/7
                             </div>
                           </div>
@@ -2238,16 +1825,16 @@ export default function OwnerDashboard() {
                   {/* نتيجة الفحص الواضحة للعميل */}
                   {verificationResult && !isVerifying && !verificationResult.success && (
                     <div
-                      className={`mt-4 p-4 rounded-lg border-2 ${verificationResult.success
-                        ? "bg-green-50 border-green-400 dark:bg-green-900/20"
-                        : "bg-red-50 border-red-400 dark:bg-red-900/20"
+                      className={`mt-4 p-4 rounded-xl border ${verificationResult.success
+                        ? "bg-[#f6fbf7] border-[#cfe5d6]"
+                        : "bg-[#fff5f5] border-[#f1c8c8]"
                         }`}
                     >
                       <div className="flex items-start gap-3">
                         <div
                           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${verificationResult.success
-                            ? "bg-green-500"
-                            : "bg-red-500"
+                            ? "bg-[#128c47]"
+                            : "bg-[#b42318]"
                             }`}
                         >
                           {verificationResult.success ? (
@@ -2259,8 +1846,8 @@ export default function OwnerDashboard() {
                         <div className="flex-1">
                           <h4
                             className={`font-bold text-lg ${verificationResult.success
-                              ? "text-green-700 dark:text-green-400"
-                              : "text-red-700 dark:text-red-400"
+                              ? "text-[#126b38]"
+                              : "text-[#b42318]"
                               }`}
                           >
                             {verificationResult.success
@@ -2269,8 +1856,8 @@ export default function OwnerDashboard() {
                           </h4>
                           <p
                             className={`text-sm mt-1 ${verificationResult.success
-                              ? "text-green-600 dark:text-green-300"
-                              : "text-red-600 dark:text-red-300"
+                              ? "text-[#126b38]"
+                              : "text-[#b42318]"
                               }`}
                           >
                             {verificationResult.summary}
@@ -2279,10 +1866,10 @@ export default function OwnerDashboard() {
                           {/* قائمة الأخطاء */}
                           {verificationResult.errors.length > 0 && (
                             <div className="mt-3 space-y-1">
-                              <p className="text-sm font-semibold text-red-700 dark:text-red-400">
+                              <p className="text-sm font-semibold text-[#b42318]">
                                 المشاكل التي تحتاج إصلاح:
                               </p>
-                              <ul className="list-disc list-inside text-sm text-red-600 dark:text-red-300 space-y-1">
+                              <ul className="list-disc list-inside text-sm text-[#b42318] space-y-1">
                                 {verificationResult.errors.map((error, idx) => (
                                   <li key={idx}>{error}</li>
                                 ))}
@@ -2295,7 +1882,7 @@ export default function OwnerDashboard() {
                             <Button
                               variant="default"
                               size="sm"
-                              className="mt-3 bg-red-600 text-white gap-2"
+                              className="mt-3 bg-[#b42318] text-white gap-2"
                               onClick={() =>
                                 router.push("/owner/update-property")
                               }
@@ -2312,185 +1899,30 @@ export default function OwnerDashboard() {
               </Card>
         )}
 
-        {/* ===== سجل المدفوعات ===== */}
-        <Card
-          id="payments-section"
-          className={`${ownerPanelClass} p-4 md:p-6 ${
-            highlightPayments
-              ? "ring-2 ring-[#b88d2b]/40 ring-offset-2"
-              : ""
-          }`}
-        >
-          {/* رأس القسم مع زر التوسيع/الطي */}
-          <div className="flex items-center justify-between mb-4">
-            <button
-              type="button"
-              onClick={() => setPaymentsExpanded(!paymentsExpanded)}
-              className="flex items-center gap-2"
-              data-testid="button-toggle-payments"
-            >
-              <div className="w-8 h-8 rounded-lg border border-[#e2d6bd] bg-[#fffaf0] flex items-center justify-center">
-                {paymentsExpanded ? (
-                  <Minus className="w-4 h-4 text-primary" />
-                ) : (
-                  <Plus className="w-4 h-4 text-primary" />
-                )}
-              </div>
-              <h2 className="text-lg font-bold text-[#2f2a1f] flex items-center gap-2">
-                <Receipt className="w-5 h-5" />
-                سجل المدفوعات
-              </h2>
-            </button>
-            <Badge variant="outline" className="text-xs">
-              {paymentsData?.length || 0} عملية
-            </Badge>
-          </div>
 
-          {/* أزرار الفلترة */}
-          {paymentsExpanded && paymentsData && paymentsData.length > 0 && (
-            <div className="flex items-center gap-2 mb-4 flex-wrap">
-              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                <Filter className="w-4 h-4" />
-                <span>فلترة:</span>
+        {/* ===== معلومات العقار ===== */}
+        <section className="space-y-4">
+          <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                  <Home className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className="font-bold text-[#293129]">معلومات العقار</h2>
+                  <p className="mt-0.5 text-xs text-[#6f685b]">البيانات التي تظهر في صفحة العقار</p>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={paymentFilter === "all" ? "default" : "outline"}
-                  onClick={() => setPaymentFilter("all")}
-                  className="text-xs"
-                  data-testid="button-filter-all"
-                >
-                  الكل ({paymentsData.length})
-                </Button>
-                <Button
-                  size="sm"
-                  variant={
-                    paymentFilter === "completed" ? "default" : "outline"
-                  }
-                  onClick={() => setPaymentFilter("completed")}
-                  className="text-xs"
-                  data-testid="button-filter-completed"
-                >
-                  <CheckCircle2 className="w-3 h-3 ml-1" />
-                  مكتمل (
-                  {paymentsData.filter((p: any) => p.status === "مكتمل").length}
-                  )
-                </Button>
-                <Button
-                  size="sm"
-                  variant={paymentFilter === "pending" ? "default" : "outline"}
-                  onClick={() => setPaymentFilter("pending")}
-                  className="text-xs"
-                  data-testid="button-filter-pending"
-                >
-                  <Clock className="w-3 h-3 ml-1" />
-                  معلق (
-                  {
-                    paymentsData.filter(
-                      (p: any) =>
-                        p.status === "قيد المراجعة" ||
-                        p.status === "معلق" ||
-                        p.status === "نجح - قيد التحقق",
-                    ).length
-                  }
-                  )
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl border-[#d9cfb8] bg-white text-[#80621d] hover:bg-[#fafaf7]"
+                onClick={() => router.push("/owner/update-property")}
+              >
+                <Edit3 className="ml-2 h-4 w-4" />
+                تحديث البيانات
+              </Button>
             </div>
-          )}
-
-          {/* محتوى المدفوعات */}
-          {paymentsExpanded && (
-            <>
-              {paymentsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                  <span className="mr-2 text-muted-foreground">
-                    جاري تحميل المدفوعات...
-                  </span>
-                </div>
-              ) : !paymentsData || paymentsData.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Receipt className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>لا توجد مدفوعات حتى الآن</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {paymentsData
-                    .filter((payment: any) => {
-                      if (paymentFilter === "all") return true;
-                      if (paymentFilter === "completed")
-                        return payment.status === "مكتمل";
-                      if (paymentFilter === "pending")
-                        return (
-                          payment.status === "قيد المراجعة" ||
-                          payment.status === "معلق" ||
-                          payment.status === "نجح - قيد التحقق"
-                        );
-                      return true;
-                    })
-                    .map((payment: any) => (
-                      <PaymentRow
-                        key={payment.id}
-                        payment={payment}
-                        onRetryPayment={(p) => {
-                          if (p.paymentMethod === "تحويل بنكي") {
-                            setReceiptUploadFeedback(null);
-                            setSelectedPaymentForReceipt(p);
-                            setShowReceiptDialog(true);
-                          } else {
-                            retryPaymentMutation.mutate(p.id);
-                          }
-                        }}
-                        isRetrying={retryPaymentMutation.isPending}
-                        onVerifyPayment={(p) =>
-                          verifyPaymentMutation.mutate(p.id)
-                        }
-                        isVerifying={verifyPaymentMutation.isPending}
-                      />
-                    ))}
-
-                  {/* رسالة إذا لم توجد نتائج بعد الفلترة */}
-                  {paymentsData.filter((payment: any) => {
-                    if (paymentFilter === "all") return true;
-                    if (paymentFilter === "completed")
-                      return payment.status === "مكتمل";
-                    if (paymentFilter === "pending")
-                      return (
-                        payment.status === "قيد المراجعة" ||
-                        payment.status === "معلق" ||
-                        payment.status === "نجح - قيد التحقق"
-                      );
-                    return true;
-                  }).length === 0 && (
-                      <div className="text-center py-6 text-muted-foreground">
-                        <Filter className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                        <p>لا توجد مدفوعات مطابقة للفلتر المحدد</p>
-                      </div>
-                    )}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* رسالة عند الطي */}
-          {!paymentsExpanded && (
-            <div className="text-center py-4 text-muted-foreground text-sm">
-              اضغط على <Plus className="w-4 h-4 inline mx-1" /> لعرض سجل
-              المدفوعات
-            </div>
-          )}
-        </Card>
-
-        {/* ===== معلومات العقار + أداء العقار ===== */}
-        <div className="space-y-4">
-          {/* معلومات العقار */}
-          <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
-            <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
-              معلومات العقار
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <dl className="grid grid-cols-2 gap-2.5 text-sm sm:grid-cols-3">
               <Info title="اسم العقار" value={property.name} />
               <Info title="المدينة" value={property.city} />
               <Info title="الموقع" value={property.location} />
@@ -2539,76 +1971,29 @@ export default function OwnerDashboard() {
                   )
                 }
               />
-            </div>
+            </dl>
           </Card>
 
-          {/* ===== العقارات المربوطة ===== */}
-          {/* Use approvedRequests from additional-property-requests API for full info */}
-          {additionalPropertyRequests?.approvedRequests && additionalPropertyRequests.approvedRequests.length > 0 && (
-            <Card id="linked-properties-section" className={`${ownerPanelClass} p-6`}>
-              <div className="flex items-center gap-2 mb-4">
-                <Home className="w-5 h-5 text-[#315f92]" />
-                <h2 className="text-lg font-bold text-[#2f2a1f]">
-                  العقارات المربوطة
-                </h2>
-                <Badge variant="outline" className="border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]">
-                  {additionalPropertyRequests.approvedRequests.length} عقار
-                </Badge>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {additionalPropertyRequests.approvedRequests.map((req: any) => (
-                  <div key={req.propertyNumber} className={ownerTileClass + " p-4"}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-bold text-lg text-[#315f92]">{req.propertyNumber}</div>
-                      <Badge variant="outline" className="bg-[#f8fff9] text-[#128c47] border-[#cfe5d6]">
-                        نشط
-                      </Badge>
-                    </div>
-                    <div className="text-sm">
-                      <div className="font-medium">{req.name}</div>
-                      <div className="text-muted-foreground">{req.city}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+        </section>
 
-          {/* Show message when no linked properties */}
-          {(!additionalPropertyRequests?.approvedRequests || additionalPropertyRequests.approvedRequests.length === 0) && (
-            <Card id="linked-properties-section" className={`${ownerPanelClass} p-6`}>
+        {/* ===== أداء العقار + تحليلات وملخص ===== */}
+        <section className="grid gap-4 lg:grid-cols-2">
+          <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
-                <Home className="w-5 h-5 text-muted-foreground" />
-                <div>
-                  <h3 className="font-medium text-[#2f2a1f]">العقارات المربوطة</h3>
-                  <p className="text-sm text-muted-foreground">
-                    يمكنك ربط عقار آخر باشتراكك للوصول إلى باقة العقارين
-                  </p>
-                </div>
+                <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                  <Activity className="h-5 w-5" />
+                </span>
+                <h2 className="font-bold text-[#293129]">أداء العقار</h2>
               </div>
-            </Card>
-          )}
-
-          {/* ===== أداء العقار ===== */}
-          <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-[#2f2a1f]">أداء العقار</h2>
-              <Badge variant="outline" className="flex items-center gap-1">
-                <Activity className="w-3 h-3" />
+              <Badge variant="outline" className="flex items-center gap-1 rounded-lg border-[#d9cfb8] bg-[#fffdf8] text-[#80621d]">
+                <Activity className="h-3 w-3" />
                 تحليلات ذكية
               </Badge>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid gap-2.5 sm:grid-cols-3">
               {/* معدل التفاعل */}
-              <div className="hidden">
-                <StatCard
-                  label="معدل التفاعل"
-                  value={analytics?.engagementRate || "متوسط"}
-                  icon={<Activity className="w-4 h-4" />}
-                />
-              </div>
 
               {/* فترة الذروة: يوم + ساعة */}
               <StatCard
@@ -2638,92 +2023,52 @@ export default function OwnerDashboard() {
               />
             </div>
           </Card>
-        </div>
 
-        {/* ===== تحليلات وملخص ===== */}
-        <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-[#2f2a1f]">تحليلات وملخص</h2>
-            <Badge variant="outline" className="text-xs">
-              بيانات حقيقية
-            </Badge>
-          </div>
+          <Card className={`${ownerPanelClass} p-4 sm:p-5`}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+                  <BarChart2 className="h-5 w-5" />
+                </span>
+                <h2 className="font-bold text-[#293129]">تحليلات وملخص</h2>
+              </div>
+              <Badge variant="outline" className="rounded-lg border-[#d9cfb8] bg-[#fffdf8] text-[11px] text-[#80621d]">
+                بيانات حقيقية
+              </Badge>
+            </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <AnalyticsBox
-              label="طلبات واتساب هذا الشهر"
-              value={String(stats.monthlyRequests)}
-              note={stats.previousMonthGrowth >= 0
-                ? `نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`
-                : undefined}
-            />
+            <div className="grid grid-cols-2 gap-2.5">
+              <AnalyticsBox
+                label="طلبات واتساب هذا الشهر"
+                value={String(stats.monthlyRequests)}
+                note={stats.previousMonthGrowth >= 0
+                  ? `نمو +${stats.previousMonthGrowth}% عن الشهر الماضي`
+                  : undefined}
+              />
 
-            <AnalyticsBox
-              label="متوسط الطلبات يومياً"
-              value={String(stats.dailyAverage)}
-              note="معدل ثابت وجيد"
-            />
+              <AnalyticsBox
+                label="متوسط الطلبات يومياً"
+                value={String(stats.dailyAverage)}
+                note="معدل ثابت وجيد"
+              />
 
-            <AnalyticsBox
-              label="اليوم الأعلى طلباً"
-              value={stats.highestDemandDay}
-              note="ركز عروضك في أيام الذروة"
-            />
+              <AnalyticsBox
+                label="اليوم الأعلى طلباً"
+                value={stats.highestDemandDay}
+                note="ركز عروضك في أيام الذروة"
+              />
 
-            <AnalyticsBox
-              label="ترتيبك بين العقارات"
-              value={stats.rank > 0 ? `#${stats.rank}` : "—"}
-              note={`من أصل ${stats.totalProperties} عقار`}
-            />
-          </div>
-        </Card>
-
-        {/* ===== أزرار التحكم (أيقونات كبيرة) ===== */}
-        <Card className={`hidden ${ownerPanelClass} p-6`}>
-          <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
-            إدارة العقار والإعدادات
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <BigActionButton
-              icon={<ImageIcon className="w-6 h-6" />}
-              title="إدارة الصور"
-              desc="رفع وتحديث صور العقار"
-              onClick={() => window.location.href = "/owner/images"}
-            />
-            <BigActionButton
-              icon={<Edit3 className="w-6 h-6" />}
-              title="تحديث بيانات العقار"
-              desc="الاسم – المدينة – الوصف"
-              onClick={() => window.location.href = "/owner/update-property"}
-            />
-
-            <BigActionButton
-              icon={<BarChart2 className="w-6 h-6" />}
-              title="الإحصائيات المفصلة"
-              desc="رسوم بيانية وفلترة حسب التاريخ"
-              onClick={handleComingSoon}
-            />
-          </div>
-        </Card>
-
-        {/* ===== صور العقار ===== */}
-        {property.imageUrls && property.imageUrls.length > 0 && (
-          <Card className={`hidden ${ownerPanelClass} p-6 mt-2`}>
-            <h2 className="text-lg font-bold text-[#2f2a1f] mb-4">
-              صور العقار ({property.imageUrls.length})
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {property.imageUrls.map((url, idx) => (
-                <img
-                  key={idx}
-                  src={url}
-                  alt={`صورة ${idx + 1}`}
-                  className="w-full h-32 object-cover rounded-lg"
-                />
-              ))}
+              <AnalyticsBox
+                label="ترتيبك بين العقارات"
+                value={stats.rank > 0 ? `#${stats.rank}` : "—"}
+                note={`من أصل ${stats.totalProperties} عقار`}
+              />
             </div>
           </Card>
-        )}
+        </section>
+
+
+        {/* ===== صور العقار ===== */}
 
         {/* ===== Modal إحصائيات الطلبات ===== */}
         {showRequestsStats && (
@@ -2738,13 +2083,13 @@ export default function OwnerDashboard() {
 
         {/* ===== نافذة رفع الإيصال للتحويل البنكي ===== */}
         <Dialog open={showReceiptDialog} onOpenChange={setShowReceiptDialog}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-h-[90vh] w-[calc(100%-1.5rem)] max-w-md overflow-y-auto rounded-2xl border-[#e6ddc9] bg-[#fffdf8] p-5">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Upload className="w-5 h-5" />
+              <DialogTitle className="flex items-center gap-2 text-[#293129]">
+                <Upload className="w-5 h-5 text-[#9a7623]" />
                 رفع إيصال التحويل البنكي
               </DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="text-xs leading-5 text-[#6f685b]">
                 ارفع صورة إيصال التحويل البنكي للدفعة المعلقة وسيتم مراجعته
               </DialogDescription>
             </DialogHeader>
@@ -2752,9 +2097,9 @@ export default function OwnerDashboard() {
             <div className="space-y-4 py-4">
               {/* معلومات الدفعة */}
               {selectedPaymentForReceipt && (
-                <div className="p-3 bg-muted/20 rounded-lg text-sm space-y-2">
+                <div className="space-y-2 rounded-xl border border-[#f0eadc] bg-white p-3 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">المبلغ:</span>
+                    <span className="text-[#6f685b]">المبلغ:</span>
                     <span className="font-bold">
                       <PriceDisplay
                         amount={selectedPaymentForReceipt.finalAmount}
@@ -2763,7 +2108,7 @@ export default function OwnerDashboard() {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">الباقة:</span>
+                    <span className="text-[#6f685b]">الباقة:</span>
                     <span>
                       {getPackageNameArabic(
                         selectedPaymentForReceipt.packageId,
@@ -2773,12 +2118,12 @@ export default function OwnerDashboard() {
                   {selectedPaymentForReceipt.receiptUrl &&
                     selectedReceiptVerified === true && (
                     <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">إيصال سابق:</span>
+                      <span className="text-[#6f685b]">إيصال سابق:</span>
                       <a
                         href={selectedPaymentForReceipt.receiptUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-primary text-xs underline"
+                        className="text-xs font-semibold text-[#80621d] underline"
                       >
                         عرض الإيصال السابق
                       </a>
@@ -2789,7 +2134,7 @@ export default function OwnerDashboard() {
 
               {/* رفع الإيصال */}
               <div className="space-y-2">
-                <label className="block text-sm font-semibold">
+                <label className="block text-xs font-bold text-[#293129]">
                   صورة الإيصال الجديد
                 </label>
                 <input
@@ -2806,13 +2151,13 @@ export default function OwnerDashboard() {
                   type="button"
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full gap-2"
+                  className="h-11 w-full gap-2 rounded-xl border-[#d9cfb8] bg-white text-[#80621d] hover:bg-[#fafaf7]"
                 >
                   <Upload className="w-4 h-4" />
                   {receiptFile ? receiptFile.name : "اختر صورة الإيصال"}
                 </Button>
                 {receiptFile && (
-                  <p className="text-xs text-green-600">
+                  <p className="text-xs font-semibold text-[#128c47]">
                     تم اختيار: {receiptFile.name}
                   </p>
                 )}
@@ -2822,11 +2167,11 @@ export default function OwnerDashboard() {
               {selectedPaymentForReceipt?.receiptUrl &&
                 selectedReceiptVerified === true && (
                   <div className="space-y-3">
-                    <div className="border rounded-lg overflow-hidden">
+                    <div className="overflow-hidden rounded-xl border border-[#e6ddc9]">
                       <img
                         src={selectedPaymentForReceipt.receiptUrl}
                         alt="إيصال التحويل"
-                        className="w-full max-h-48 object-contain bg-gray-50"
+                        className="w-full max-h-48 object-contain bg-[#fafaf7]"
                       />
                     </div>
                   </div>
@@ -2836,8 +2181,8 @@ export default function OwnerDashboard() {
                 <div
                   className={`rounded-lg border p-3 text-sm ${
                     receiptUploadFeedback.tone === "error"
-                      ? "border-red-200 bg-red-50 text-red-700"
-                      : "border-amber-200 bg-amber-50 text-amber-800"
+                      ? "border-[#f0d6d6] bg-[#fffafa] text-[#b42318]"
+                      : "border-[#e8d9b4] bg-[#fdf8ec] text-[#80621d]"
                   }`}
                 >
                   <p className="font-semibold">{receiptUploadFeedback.title}</p>
@@ -2848,11 +2193,11 @@ export default function OwnerDashboard() {
               )}
 
               {/* أزرار الإجراء */}
-              <div className="flex gap-2 pt-4">
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row">
                 <Button
                   onClick={handleReceiptUpload}
                   disabled={!receiptFile || isUploadingReceipt}
-                  className="flex-1 gap-2"
+                  className="h-11 flex-1 gap-2 rounded-xl bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
                 >
                   {isUploadingReceipt ? (
                     <>
@@ -2868,6 +2213,7 @@ export default function OwnerDashboard() {
                 </Button>
                 <Button
                   variant="outline"
+                  className="h-11 rounded-xl border-[#d9cfb8] bg-white text-[#6f685b] hover:bg-[#fafaf7]"
                   onClick={() => {
                     setShowReceiptDialog(false);
                     setSelectedPaymentForReceipt(null);
@@ -2909,11 +2255,23 @@ function getPackageNameArabic(packageId: string): string {
 
 function DashboardHeroMetric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-3">
-      <p className="text-[11px] font-semibold text-[#d7bd76]">{label}</p>
-      <p className="mt-1 truncate text-lg font-bold text-white">{value}</p>
+    <div className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5">
+      <p className="text-[11px] font-semibold text-[#d8bf76]">{label}</p>
+      <p className="mt-1 truncate text-base font-bold text-white">{value}</p>
     </div>
   );
+}
+
+function DashboardKpiCard(props: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  note: string;
+  tone?: "gold" | "green" | "blue" | "red";
+  onClick: () => void;
+  testId?: string;
+}) {
+  return <OwnerStatCard {...props} />;
 }
 
 function OwnerRequestMetric({
@@ -2927,7 +2285,7 @@ function OwnerRequestMetric({
 }) {
   return (
     <div className="min-w-0 p-4 sm:p-5">
-      <p className={`text-2xl font-bold tabular-nums ${attention ? "text-[#a66317]" : "text-[#242822]"}`}>{value}</p>
+      <p className={`text-2xl font-bold tabular-nums ${attention ? "text-[#a66317]" : "text-[#293129]"}`}>{value}</p>
       <p className="mt-1 text-xs font-semibold leading-5 text-[#687064]">{label}</p>
     </div>
   );
@@ -3027,49 +2385,49 @@ function WorkflowNotice({
 }) {
   const toneClass = {
     amber: {
-      wrap: "border-[#ead7a8] bg-[#fff9ec]",
-      icon: "border-[#ead7a8] bg-white text-[#9a7623]",
-      badge: "border-[#e2c27a] bg-[#fff3d4] text-[#7a5413]",
-      button: "border-[#d8c9a8] text-[#6f5520]",
+      wrap: "border-[#d9cfb8] bg-[#fafaf7]",
+      icon: "border-[#d9cfb8] bg-white text-[#80621d]",
+      badge: "border-[#d9cfb8] bg-[#f5f3ee] text-[#80621d]",
+      button: "border-[#d9cfb8] text-[#80621d]",
     },
     blue: {
-      wrap: "border-[#c9d9eb] bg-[#f4f8fc]",
+      wrap: "border-[#c9d9eb] bg-[#fafbfc]",
       icon: "border-[#c9d9eb] bg-white text-[#315f92]",
-      badge: "border-[#b7cbe2] bg-[#eaf2fb] text-[#315f92]",
+      badge: "border-[#c9d9eb] bg-[#f4f8fc] text-[#315f92]",
       button: "border-[#c9d9eb] text-[#315f92]",
     },
     red: {
-      wrap: "border-[#f1c8c8] bg-[#fff5f5]",
-      icon: "border-[#f1c8c8] bg-white text-red-700",
-      badge: "border-[#efb6b6] bg-[#ffecec] text-red-700",
-      button: "border-[#f1c8c8] text-red-700",
+      wrap: "border-[#f1c8c8] bg-[#fefbfb]",
+      icon: "border-[#f1c8c8] bg-white text-[#b42318]",
+      badge: "border-[#f1c8c8] bg-[#fff5f5] text-[#b42318]",
+      button: "border-[#f1c8c8] text-[#b42318]",
     },
     green: {
-      wrap: "border-[#cfe5d6] bg-[#f8fff9]",
+      wrap: "border-[#cfe5d6] bg-[#fafcfa]",
       icon: "border-[#cfe5d6] bg-white text-[#128c47]",
-      badge: "border-[#b8dec3] bg-[#effaf2] text-[#128c47]",
+      badge: "border-[#cfe5d6] bg-[#f6fbf7] text-[#128c47]",
       button: "border-[#cfe5d6] text-[#128c47]",
     },
   }[tone];
 
   return (
-    <div className={`rounded-lg border p-4 md:p-5 ${toneClass.wrap}`}>
+    <div className={`rounded-xl border p-4 md:p-5 shadow-sm ${toneClass.wrap}`}>
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-start gap-3">
-          <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border ${toneClass.icon}`}>
+          <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border ${toneClass.icon}`}>
             {icon}
           </div>
           <div>
             <Badge variant="outline" className={`mb-2 rounded-lg ${toneClass.badge}`}>
               {label}
             </Badge>
-            <h3 className="font-bold text-[#2f2a1f]">{title}</h3>
-            <p className="mt-1 text-sm leading-6 text-[#6f6249]">{description}</p>
+            <h3 className="font-bold text-[#293129]">{title}</h3>
+            <p className="mt-1 text-sm leading-6 text-[#687064]">{description}</p>
           </div>
         </div>
         <Button
           variant="outline"
-          className={`h-10 flex-shrink-0 rounded-lg bg-white px-4 font-bold ${toneClass.button}`}
+          className={`h-11 flex-shrink-0 rounded-xl bg-white px-4 font-bold ${toneClass.button} hover:bg-[#fafaf7] transition-colors`}
           onClick={onAction}
         >
           {actionLabel}
@@ -3084,7 +2442,7 @@ function Loader({ text }: { text: string }) {
     <div className="min-h-screen flex items-center justify-center text-center">
       <div>
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="mt-4 text-muted-foreground">{text}</p>
+        <p className="mt-4 text-[#6f685b]">{text}</p>
       </div>
     </div>
   );
@@ -3094,11 +2452,11 @@ function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-md p-8 text-center">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
-          <AlertTriangle className="w-8 h-8 text-red-500" />
+        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-[#fff5f5] flex items-center justify-center">
+          <AlertTriangle className="w-8 h-8 text-[#b42318]" />
         </div>
         <h2 className="text-xl font-bold mb-2">خطأ في تحميل البيانات</h2>
-        <p className="text-muted-foreground mb-4">
+        <p className="text-[#6f685b] mb-4">
           تعذر تحميل بيانات العقار، حاول مرة أخرى.
         </p>
         <div className="flex gap-2 justify-center">
@@ -3116,9 +2474,9 @@ function ErrorView({ setLocation }: { setLocation: (path: string) => void }) {
 
 function Info({ title, value }: { title: string; value: React.ReactNode }) {
   return (
-    <div className={ownerTileClass + " p-3"}>
-      <p className="text-xs text-[#8b7140]">{title}</p>
-      <div className="font-semibold text-base truncate text-[#2f2a1f]">{value || "---"}</div>
+    <div className="min-w-0 rounded-lg border border-[#f0eadc] bg-[#fffdf8] px-3 py-2">
+      <dt className="text-[11px] font-semibold text-[#6f685b]">{title}</dt>
+      <dd className="mt-0.5 truncate text-sm font-bold text-[#293129]">{value || "---"}</dd>
     </div>
   );
 }
@@ -3127,7 +2485,7 @@ function ProgressBar({ value }: { value: number }) {
   return (
     <div className="w-full h-2 rounded-full bg-[#eee4cf] overflow-hidden">
       <div
-        className="h-full rounded-full bg-[#b88d2b] transition-all"
+        className="h-full rounded-full bg-[#9a7623] transition-all"
         style={{ width: `${value}%` }}
       />
     </div>
@@ -3144,13 +2502,13 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className={ownerTileClass + " p-3 flex items-center gap-3"}>
-      <div className="w-9 h-9 rounded-lg border border-[#e2d6bd] bg-white flex items-center justify-center text-[#9a7623]">
+    <div className={ownerTileClass + " flex items-center gap-3 p-3"}>
+      <div className="flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-white text-[#80621d]">
         {icon}
       </div>
-      <div className="flex-1">
-        <p className="text-xs text-[#8b7140]">{label}</p>
-        <p className="font-semibold text-sm text-[#2f2a1f]">{value}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-semibold text-[#6f685b]">{label}</p>
+        <p className="mt-0.5 truncate text-sm font-bold text-[#293129]">{value}</p>
       </div>
     </div>
   );
@@ -3166,10 +2524,10 @@ function AnalyticsBox({
   note?: string;
 }) {
   return (
-    <div className={ownerTileClass + " p-4"}>
-      <p className="text-xs text-[#8b7140] mb-1">{label}</p>
-      <p className="text-xl font-bold text-[#2f2a1f] mb-1">{value}</p>
-      {note && <p className="text-[11px] text-[#6f6249]">{note}</p>}
+    <div className={ownerTileClass + " p-3"}>
+      <p className="text-[11px] font-semibold text-[#6f685b]">{label}</p>
+      <p className="mt-1 truncate text-xl font-bold text-[#293129]">{value}</p>
+      {note && <p className="mt-0.5 truncate text-[11px] text-[#6f685b]">{note}</p>}
     </div>
   );
 }
@@ -3224,36 +2582,36 @@ function PaymentRow({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "مكتمل":
-        return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+        return <CheckCircle2 className="w-4 h-4 text-[#128c47]" />;
       case "نجح - قيد التحقق":
-        return <CheckCircle2 className="w-4 h-4 text-blue-500" />;
+        return <CheckCircle2 className="w-4 h-4 text-[#315f92]" />;
       case "قيد المراجعة":
-        return <Clock className="w-4 h-4 text-amber-500" />;
+        return <Clock className="w-4 h-4 text-[#a66317]" />;
       case "معلق":
-        return <Clock className="w-4 h-4 text-blue-500" />;
+        return <Clock className="w-4 h-4 text-[#315f92]" />;
       case "ملغي":
       case "فشل":
-        return <XCircle className="w-4 h-4 text-red-500" />;
+        return <XCircle className="w-4 h-4 text-[#b42318]" />;
       default:
-        return <Clock className="w-4 h-4 text-muted-foreground" />;
+        return <Clock className="w-4 h-4 text-[#6f685b]" />;
     }
   };
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case "مكتمل":
-        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+        return "border border-[#cfe5d6] bg-[#f6fbf7] text-[#128c47]";
       case "نجح - قيد التحقق":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+        return "border border-[#d9e4ef] bg-[#f9fbfd] text-[#315f92]";
       case "قيد المراجعة":
-        return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+        return "border border-[#e8d9b4] bg-[#fdf8ec] text-[#a66317]";
       case "معلق":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+        return "border border-[#d9e4ef] bg-[#f9fbfd] text-[#315f92]";
       case "ملغي":
       case "فشل":
-        return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+        return "border border-[#f0d6d6] bg-[#fffafa] text-[#b42318]";
       default:
-        return "bg-muted text-muted-foreground";
+        return "border border-[#efe7d6] bg-[#fffdf8] text-[#6f685b]";
     }
   };
 
@@ -3411,19 +2769,19 @@ function PaymentRow({
 
   return (
     <div
-      className="rounded-lg bg-white border border-[#e2d6bd] overflow-hidden"
+      className="overflow-hidden rounded-xl border border-[#f0eadc] bg-[#fffdf8]"
       data-testid={`payment-row-${payment.id}`}
     >
       {/* الصف الرئيسي */}
-      <div className="flex flex-col md:flex-row md:items-center gap-3 p-4">
+      <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
         {/* السعر على اليسار */}
-        <div className="flex items-center gap-2 md:order-first order-last flex-shrink-0">
-          <div className="text-center md:text-right min-w-[80px]">
-            <div className="font-bold text-primary text-lg">
+        <div className="flex flex-shrink-0 items-center gap-2 md:order-first order-last">
+          <div className="min-w-[80px] text-center md:text-right">
+            <div className="text-lg font-bold text-[#80621d]">
               <PriceDisplay amount={amount} size="lg" />
             </div>
             {payment.paymentMethod && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-[11px] text-[#6f685b]">
                 {getPaymentMethodArabic(payment.paymentMethod)}
               </div>
             )}
@@ -3431,34 +2789,34 @@ function PaymentRow({
         </div>
 
         {/* معلومات الباقة */}
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="w-10 h-10 rounded-lg border border-[#eadfca] bg-[#fffaf0] flex items-center justify-center flex-shrink-0">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-[#efe7d6] bg-white">
             <CreditCard className="w-5 h-5 text-[#9a7623]" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge
                 className={`text-xs px-2 py-0.5 flex items-center gap-1 ${getStatusBadgeClass(normalizedStatus)}`}
               >
                 {getStatusIcon(normalizedStatus)}
                 {getDisplayStatus(normalizedStatus)}
               </Badge>
-              <span className="font-semibold text-sm truncate">
+              <span className="truncate text-sm font-bold text-[#293129]">
                 {getPackageNameArabic(payment.packageId)}
               </span>
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
+            <div className="mt-1 text-[11px] text-[#6f685b]">
               {formatDate(payment.createdAt)}
             </div>
             {statusReason && (
                 <div
-                  className={`text-xs mt-1 ${normalizedStatus === "مكتمل"
-                    ? "text-green-600 dark:text-green-400"
+                  className={`mt-1 text-[11px] font-semibold ${normalizedStatus === "مكتمل"
+                    ? "text-[#128c47]"
                     : normalizedStatus === "فشل"
-                      ? "text-red-600 dark:text-red-400"
+                      ? "text-[#b42318]"
                       : normalizedStatus === "نجح - قيد التحقق"
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-amber-600 dark:text-amber-400"
+                        ? "text-[#315f92]"
+                        : "text-[#a66317]"
                     }`}
                 >
                   {statusReason}
@@ -3548,7 +2906,7 @@ function PaymentRow({
           <Button
             size="sm"
             variant="default"
-            className="bg-primary text-white gap-1 flex-shrink-0"
+            className="flex-shrink-0 gap-1 rounded-xl bg-[#29372f] text-white hover:bg-[#1f2b25]"
             onClick={() => onRetryPayment(payment)}
             disabled={isRetrying}
             data-testid={`button-retry-payment-${payment.id}`}
@@ -3572,29 +2930,29 @@ function PaymentRow({
 
       {/* تفاصيل الدفعة الموسعة - للدفعات الناجحة قيد التحقق */}
       {showDetails && payment.status === "نجح - قيد التحقق" && (
-        <div className="border-t border-border/40 bg-blue-50/50 dark:bg-blue-900/10 p-4">
-          <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded text-sm text-blue-800 dark:text-blue-300 mb-4">
+        <div className="border-t border-[#f0eadc] bg-[#f9fbfd] p-4">
+          <div className="mb-4 rounded-xl border border-[#d9e4ef] bg-white p-3 text-sm text-[#315f92]">
             ✅ تم استلام الدفع بنجاح! يرجى إكمال بيانات العقار وسيتم تفعيل
             الاشتراك تلقائياً.
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
             <div>
-              <div className="text-xs text-muted-foreground mb-1">
+              <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                 المبلغ المدفوع
               </div>
-              <div className="font-bold text-primary">
+              <div className="font-bold text-[#80621d]">
                 <PriceDisplay amount={amount} size="sm" />
               </div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground mb-1">الباقة</div>
+              <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">الباقة</div>
               <div className="font-semibold">
                 {getPackageNameArabic(payment.packageId)}
               </div>
             </div>
             {payment.pendingSubscriptionType && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   نوع الاشتراك
                 </div>
                 <Badge
@@ -3614,7 +2972,7 @@ function PaymentRow({
             )}
             {payment.pendingStartDate && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   تاريخ البداية المتوقع
                 </div>
                 <div className="font-semibold">{payment.pendingStartDate}</div>
@@ -3622,7 +2980,7 @@ function PaymentRow({
             )}
             {payment.pendingEndDate && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   تاريخ الانتهاء المتوقع
                 </div>
                 <div className="font-semibold">{payment.pendingEndDate}</div>
@@ -3634,12 +2992,12 @@ function PaymentRow({
 
       {/* تفاصيل الدفعة الموسعة - للدفعات المكتملة */}
       {showDetails && isCompleted && (
-        <div className="border-t border-border/40 bg-muted/5 p-4">
+        <div className="border-t border-[#f0eadc] bg-[#fffdf8] p-4">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
             {/* المبلغ الأصلي */}
             {payment.amount && payment.amount !== amount && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   المبلغ الأصلي
                 </div>
                 <div className="font-semibold">
@@ -3651,10 +3009,10 @@ function PaymentRow({
             {/* كود الخصم */}
             {payment.discountCode && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   كود الخصم
                 </div>
-                <div className="font-semibold text-green-600">
+                <div className="font-semibold text-[#128c47]">
                   {payment.discountCode}
                 </div>
               </div>
@@ -3663,10 +3021,10 @@ function PaymentRow({
             {/* قيمة الخصم */}
             {payment.discountAmount > 0 && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   قيمة الخصم
                 </div>
-                <div className="font-semibold text-green-600">
+                <div className="font-semibold text-[#128c47]">
                   -<PriceDisplay amount={payment.discountAmount} size="sm" />
                 </div>
               </div>
@@ -3674,10 +3032,10 @@ function PaymentRow({
 
             {/* المبلغ المدفوع */}
             <div>
-              <div className="text-xs text-muted-foreground mb-1">
+              <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                 المبلغ المدفوع
               </div>
-              <div className="font-bold text-primary">
+              <div className="font-bold text-[#80621d]">
                 <PriceDisplay amount={amount} size="sm" />
               </div>
             </div>
@@ -3685,7 +3043,7 @@ function PaymentRow({
             {/* فترة الاشتراك */}
             {payment.pendingStartDate && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   بداية الاشتراك
                 </div>
                 <div className="font-semibold">{payment.pendingStartDate}</div>
@@ -3693,7 +3051,7 @@ function PaymentRow({
             )}
             {payment.pendingEndDate && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   نهاية الاشتراك
                 </div>
                 <div className="font-semibold">{payment.pendingEndDate}</div>
@@ -3703,7 +3061,7 @@ function PaymentRow({
             {/* نوع الاشتراك */}
             {payment.pendingSubscriptionType && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   نوع الاشتراك
                 </div>
                 <Badge
@@ -3725,7 +3083,7 @@ function PaymentRow({
             {/* نوع العملية */}
             {payment.action && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   نوع العملية
                 </div>
                 <div className="font-semibold">
@@ -3743,7 +3101,7 @@ function PaymentRow({
             {/* تاريخ الإتمام */}
             {payment.completedAt && (
               <div>
-                <div className="text-xs text-muted-foreground mb-1">
+                <div className="mb-1 text-[11px] font-semibold text-[#6f685b]">
                   تاريخ الإتمام
                 </div>
                 <div className="font-semibold">
@@ -3836,16 +3194,23 @@ function RequestsStatsModal({
   }) || [];
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <Card className="w-full max-w-3xl max-h-[80vh] overflow-y-auto">
-        <div className="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-primary flex items-center gap-2">
-            <BarChart2 className="w-5 h-5" />
-            إحصائيات طلبات واتساب
-          </h2>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[#1b211d]/55 p-3 py-6 sm:items-center sm:p-4">
+      <Card className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border-[#e6ddc9] bg-[#fffdf8] shadow-[0_20px_50px_rgba(29,38,32,0.25)]">
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-[#f0eadc] bg-[#fffdf8] p-4 sm:p-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#80621d]">
+              <BarChart2 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold leading-tight text-[#293129] sm:text-base">إحصائيات طلبات واتساب</h2>
+              <p className="mt-0.5 truncate text-xs text-[#6f685b]">{propertyName || "هذا العقار"}</p>
+            </div>
+          </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-muted-foreground"
+            aria-label="إغلاق"
+            className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-[#e6ddc9] bg-white text-[#6f685b] transition-colors hover:bg-[#fafaf7]"
             data-testid="button-close-modal"
           >
             ✕
@@ -3853,19 +3218,19 @@ function RequestsStatsModal({
         </div>
         
         {/* Search and Filters */}
-        <div className="p-4 border-b border-border bg-muted/20">
+        <div className="flex-none border-b border-[#f0eadc] bg-white p-3 sm:p-4">
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="text"
               placeholder="بحث بالرقم أو الكود..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 px-3 py-2 border rounded-lg text-sm"
+              className="h-11 flex-1 rounded-xl border border-[#d9cfb8] bg-white px-3 text-sm text-[#293129] outline-none placeholder:text-[#9c9382] focus:border-[#9a7623] focus:ring-2 focus:ring-[#9a7623]/15"
             />
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value as any)}
-              className="px-3 py-2 border rounded-lg text-sm"
+              className="h-11 rounded-xl border border-[#d9cfb8] bg-white px-3 text-sm text-[#293129] outline-none focus:border-[#9a7623] focus:ring-2 focus:ring-[#9a7623]/15"
             >
               <option value="all">كل الأوقات</option>
               <option value="today">اليوم</option>
@@ -3875,29 +3240,29 @@ function RequestsStatsModal({
           </div>
         </div>
         
-        <div className="p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           {requestsLoading ? (
-            <div className="text-center py-12 text-muted-foreground">
+            <div className="py-12 text-center text-sm text-[#6f685b]">
               جاري التحميل...
             </div>
           ) : filteredRequests.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-[#e6ddc9] bg-white px-4 py-10 text-center text-sm text-[#6f685b]">
               {searchTerm || dateFilter !== "all" ? "لا توجد نتائج للبحث" : "لا توجد طلبات حتى الآن"}
             </div>
           ) : (
             <>
-              <div className="mb-6 p-4 bg-primary/5 rounded-lg border border-primary/15">
-                <p className="text-sm text-muted-foreground mb-2">
-                  عدد الطلبات ({filteredRequests.length})
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#efe7d6] bg-white px-4 py-3">
+                <p className="text-xs font-semibold text-[#6f685b]">
+                  عدد الطلبات بعد الفلترة
                 </p>
-                <p className="text-2xl font-bold text-primary">
+                <p className="text-xl font-bold tabular-nums text-[#80621d]">
                   {filteredRequests.length}
                 </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="border-b border-border">
-                    <tr className="text-muted-foreground">
+                  <thead className="border-b border-[#f0eadc] bg-[#fffdf8]">
+                    <tr className="text-[11px] font-bold text-[#6f685b]">
                       <th className="text-right p-3">العقار</th>
                       <th className="text-right p-3">الكود</th>
                       <th className="text-right p-3">التاريخ والوقت</th>
@@ -3908,24 +3273,24 @@ function RequestsStatsModal({
                     {filteredRequests.map((req: any, idx: number) => (
                       <tr
                         key={idx}
-                        className="border-b border-border/50"
+                        className="border-b border-[#f5f0e4] last:border-0"
                       >
                         <td className="p-3">
-                          <span className="font-medium text-primary">
+                          <span className="font-bold text-[#293129]">
                             {propertyName || req.propertyNumber || "-"}
                           </span>
                         </td>
-                        <td className="p-3 font-mono text-primary">
+                        <td className="p-3 font-mono text-xs text-[#80621d]">
                           {req.requestCode || req.id}
                         </td>
-                        <td className="p-3 text-muted-foreground">
+                        <td className="p-3 text-xs text-[#6f685b]">
                           {formatLiveSaudiTime(req.timestamp)}
                         </td>
                         <td className="p-3">
                           {req.canDelete && req.contactRequestId && (
                             <button
                               onClick={() => onDeleteRequest?.(req.contactRequestId)}
-                              className="text-red-500 text-sm"
+                              className="text-sm text-[#b42318] transition-opacity hover:opacity-70"
                               title="حذف"
                             >
                               🗑️

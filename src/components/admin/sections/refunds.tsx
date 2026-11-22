@@ -169,7 +169,7 @@ export default function RefundsSection() {
               <Plus className="w-4 h-4 ml-1" /> استرجاع جديد
             </Button>
           </DialogTrigger>
-          <DialogContent dir="rtl">
+          <DialogContent dir="rtl" className="lg:w-[calc(100%-2rem)] lg:max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingId ? "تعديل الاسترجاع" : "إضافة استرجاع جديد"}</DialogTitle>
             </DialogHeader>

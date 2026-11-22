@@ -15,6 +15,13 @@ import {
     OwnerSectionHeading,
     ownerPanelClass,
 } from "@/components/owner/owner-page";
+import {
+    OwnerEmptyState,
+    ownerPageClass,
+    ownerPrimaryButtonClass,
+    ownerSecondaryButtonClass,
+} from "@/components/owner/owner-ui";
+import { OwnerVerificationGate } from "@/components/owner/owner-verification-gate";
 
 export default function OwnerImagesPage() {
     const router = useRouter();
@@ -160,14 +167,16 @@ export default function OwnerImagesPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
+        <div className={ownerPageClass}>
             <OwnerPageHeader
+                eyebrow="معرض العقار"
                 title="صور العقار"
                 description={property?.propertyNumber ? `عقار رقم ${property.propertyNumber}` : "رفع الصور وترتيب معرض العقار"}
                 backHref="/owner/dashboard"
             />
 
             <OwnerPageMain maxWidth="5xl" className="space-y-4 sm:space-y-6">
+                <OwnerVerificationGate property={property} pageLabel="صور العقار">
                 <Card className={`${ownerPanelClass} p-4 sm:p-6`}>
                     <OwnerSectionHeading
                         title="إضافة صور"
@@ -176,11 +185,11 @@ export default function OwnerImagesPage() {
                     />
 
                     <div className="mb-4">
-                        <div className="mb-2 flex items-center justify-between text-xs font-semibold text-[#74684f]">
+                        <div className="mb-2 flex items-center justify-between text-xs font-semibold text-[#6f685b]">
                             <span>المساحة المستخدمة</span>
                             <span dir="ltr">{allImages.length} / 15</span>
                         </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-[#eee6d5]">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#f0eadc]">
                             <div
                                 className="h-full rounded-full bg-[#9a7623] transition-[width]"
                                 style={{ width: `${Math.min(100, (allImages.length / 15) * 100)}%` }}
@@ -203,12 +212,12 @@ export default function OwnerImagesPage() {
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploadMutation.isPending || allImages.length >= 15}
-                            className="flex min-h-32 w-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#cdbd9d] bg-[#fffdf8] px-4 text-center transition-colors hover:bg-[#faf4e7] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex min-h-32 w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#d9cfb8] bg-[#fffdf8] px-4 text-center transition-colors hover:bg-[#faf4e7] disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#f3eddf] text-[#8a681d]">
+                            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[#efe7d6] bg-[#faf7ef] text-[#8a681d]">
                                 <ImageIcon className="h-5 w-5" />
                             </span>
-                            <span className="text-sm font-bold">
+                            <span className="text-sm font-bold text-[#293129]">
                                 {allImages.length >= 15 ? "وصلت إلى الحد الأقصى" : "اختر صوراً من جهازك"}
                             </span>
                         </button>
@@ -216,17 +225,17 @@ export default function OwnerImagesPage() {
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                                 {previews.map((src, idx) => (
-                                    <div key={src} className="relative overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#fffdf8]">
+                                    <div key={src} className="relative overflow-hidden rounded-xl border border-[#e6ddc9] bg-[#fffdf8]">
                                         <img src={src} alt={`معاينة ${idx + 1}`} className="aspect-[4/3] w-full object-cover" />
                                         <button
                                             onClick={() => removePreview(idx)}
-                                            className="absolute left-2 top-2 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-white/95 text-red-600 shadow-sm"
+                                            className="absolute left-2 top-2 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#f1c8c8] bg-white/95 text-[#b42318] shadow-sm"
                                             type="button"
                                             aria-label={`إزالة ${selectedFiles[idx]?.name || `الصورة ${idx + 1}`}`}
                                         >
                                             <X className="h-4 w-4" />
                                         </button>
-                                        <p className="truncate px-2 py-2 text-xs text-[#6f6249]">{selectedFiles[idx]?.name}</p>
+                                        <p className="truncate px-2 py-2 text-xs text-[#6f685b]">{selectedFiles[idx]?.name}</p>
                                     </div>
                                 ))}
                             </div>
@@ -234,7 +243,7 @@ export default function OwnerImagesPage() {
                                 <Button
                                     onClick={() => uploadMutation.mutate(selectedFiles)}
                                     disabled={uploadMutation.isPending}
-                                    className="h-11 bg-[#2f2a1f] font-bold text-white"
+                                    className={`h-11 ${ownerPrimaryButtonClass}`}
                                 >
                                     <Upload className="ml-2 h-4 w-4" />
                                     {uploadMutation.isPending ? "جاري الرفع..." : `رفع ${selectedFiles.length} صورة`}
@@ -242,7 +251,7 @@ export default function OwnerImagesPage() {
                                 <Button
                                     type="button"
                                     variant="outline"
-                                    className="h-11 border-[#d8c9a8] bg-white text-[#6f5520]"
+                                    className={`h-11 ${ownerSecondaryButtonClass}`}
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     تغيير الاختيار
@@ -262,15 +271,15 @@ export default function OwnerImagesPage() {
                     {allImages.length > 0 ? (
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                             {allImages.map((url: string, idx: number) => (
-                                <article key={url} className="overflow-hidden rounded-lg border border-[#e2d6bd] bg-[#fffdf8]">
+                                <article key={url} className="overflow-hidden rounded-xl border border-[#e6ddc9] bg-[#fffdf8]">
                                     <img src={url} alt={`صورة العقار ${idx + 1}`} className="aspect-[4/3] w-full object-cover" />
-                                    <div className="flex items-center gap-1 border-t border-[#eee4cf] p-2">
-                                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#8b7140]">صورة {idx + 1}</span>
+                                    <div className="flex items-center gap-1 border-t border-[#f0eadc] p-2">
+                                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#80621d]">صورة {idx + 1}</span>
                                         <a
                                             href={url}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#6f5520] hover:bg-[#f3eddf]"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-[#6f5520] transition-colors hover:bg-[#faf7ef]"
                                             aria-label={`فتح الصورة ${idx + 1}`}
                                         >
                                             <ExternalLink className="h-4 w-4" />
@@ -278,7 +287,7 @@ export default function OwnerImagesPage() {
                                         <button
                                             onClick={() => handleDelete(url)}
                                             disabled={deleteMutation.isPending}
-                                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-[#b42318] transition-colors hover:bg-[#fff5f5] disabled:opacity-50"
                                             type="button"
                                             aria-label={`حذف الصورة ${idx + 1}`}
                                         >
@@ -289,12 +298,14 @@ export default function OwnerImagesPage() {
                             ))}
                         </div>
                     ) : (
-                        <div className="flex min-h-32 flex-col items-center justify-center rounded-lg bg-[#fffdf8] px-4 text-center text-[#74684f]">
-                            <ImageIcon className="mb-2 h-7 w-7 opacity-50" />
-                            <p className="text-sm">أضف أول صورة للعقار من القسم أعلاه</p>
-                        </div>
+                        <OwnerEmptyState
+                            icon={<ImageIcon className="h-5 w-5" />}
+                            title="لا توجد صور بعد"
+                            description="أضف أول صورة للعقار من القسم أعلاه."
+                        />
                     )}
                 </Card>
+                </OwnerVerificationGate>
             </OwnerPageMain>
             <OwnerMobileNavigation />
         </div>

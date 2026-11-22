@@ -102,6 +102,13 @@ export const subscriptionSchema = z.object({
   cancelReason: z.string().nullable().optional(),
   suspendedAt: z.string().nullable().optional(),
   remainingDurationMs: z.number().nonnegative().nullable().optional(),
+  // ===== لقطة سعر/مدة الاشتراك وقت الشراء (اختيارية للتوافق) =====
+  billingPeriod: z.enum(["monthly", "quarterly"]).optional(),
+  durationDays: z.number().optional(),
+  packageName: z.string().optional(),
+  basePrice: z.number().optional(),
+  discountAmount: z.number().optional(),
+  packageDiscountAmount: z.number().optional(),
 });
 
 export type Subscription = z.infer<typeof subscriptionSchema>;
@@ -111,19 +118,45 @@ export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 // =========================
 // Package Schema (الباقات)
 // =========================
+export const packageFeatureSchema = z.union([
+  z.string().min(1).max(300),
+  z.object({
+    text: z.string().min(1).max(300),
+    icon: z.string().min(1).max(80).optional(),
+  }),
+]);
+export type PackageFeatureValue = z.infer<typeof packageFeatureSchema>;
+
 export const packageSchema = z.object({
   id: z.string(),
   name: z.string(),
-  duration: z.number(), // بالأيام
-  price: z.number(), // السعر الإجمالي للباقة
+  duration: z.number(), // بالأيام (المدة الشهرية/الافتراضية)
+  price: z.number(), // السعر الشهري الافتراضي (للتوافق مع البيانات الحالية)
   pricePerProperty: z.number().optional(), // السعر لكل عقار (مثلاً 25 ريال)
+  audience: z.enum(["public", "owner", "both"]).optional(), // مكان ظهور الباقة
   type: z.enum(['عادي', 'مميز', 'premium', 'trusted', 'normal', 'free', 'مجاني']),
-  features: z.array(z.string()).default([]),
+  features: z.array(packageFeatureSchema).default([]),
   description: z.string().optional(), // وصف الباقة
   isActive: z.boolean().default(true),
   propertyCount: z.number().default(1), // عدد العقارات الافتراضي
   maxProperties: z.number().optional(), // الحد الأقصى للعقارات المسموح بها
   createdAt: z.string().optional(),
+
+  // ===== خيارات المدة (إضافة متوافقة مع البيانات الحالية) =====
+  monthlyPrice: z.number().optional(), // إن لم تُحدد يُستخدم price
+  quarterlyPrice: z.number().optional(), // سعر ثلاثة أشهر (لا يُفترض 3× الشهري)
+  monthlyDiscountPercent: z.number().min(0).max(100).optional(),
+  quarterlyDiscountPercent: z.number().min(0).max(100).optional(),
+  monthlyEnabled: z.boolean().optional(), // افتراضيًا مفعّل
+  quarterlyEnabled: z.boolean().optional(), // افتراضيًا معطّل حتى يحدد الأدمن السعر
+  quarterlyDurationDays: z.number().optional(), // افتراضيًا 90
+  isVisible: z.boolean().optional(), // افتراضيًا ظاهر
+  sortOrder: z.number().optional(), // ترتيب العرض
+  featuredBadge: z.string().optional(), // مثل «الأكثر طلبًا»
+  isRecommended: z.boolean().optional(), // الباقة الموصى بها (تظهر في المنتصف)
+  discountStartsAt: z.string().optional(), // بداية فترة العرض (YYYY-MM-DD)
+  discountEndsAt: z.string().optional(), // نهاية فترة العرض (YYYY-MM-DD)
+  archivedAt: z.string().optional(), // أرشفة بدل الحذف النهائي
 });
 
 export type Package = z.infer<typeof packageSchema>;
@@ -354,6 +387,11 @@ export const paymentSchema = z.object({
   verifiedAt: z.string().optional(),
   approvedByAdminAt: z.string().optional(),
   packageName: z.string().optional(),
+  // ===== لقطة مدة/سعر الباقة المختارة (اختيارية للتوافق) =====
+  billingPeriod: z.enum(["monthly", "quarterly"]).optional(),
+  durationDays: z.number().optional(),
+  basePrice: z.number().optional(),
+  packageDiscountAmount: z.number().optional(),
   ocrConfidence: z.number().optional(),
   autoMatched: z.union([z.boolean(), z.string()]).optional(),
   createdAt: z.string().optional(),

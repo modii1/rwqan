@@ -818,7 +818,7 @@ export default function PropertiesSection() {
 
       {/* Edit/Add Dialog */}
       <Dialog open={!!editing} onOpenChange={() => { setEditing(null); resetForm(); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" dir="rtl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto lg:w-[calc(100%-2rem)] lg:max-w-6xl lg:p-8 2xl:max-w-7xl" dir="rtl" data-testid="property-edit-dialog">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة عقار جديد" : "تعديل العقار"}</DialogTitle>
             <DialogDescription>
@@ -1104,7 +1104,7 @@ export default function PropertiesSection() {
               )}
 
               {/* Buttons */}
-              <div className="flex justify-end gap-2 pt-4 border-t">
+              <div className="flex justify-end gap-2 pt-4 border-t lg:sticky lg:bottom-0 lg:z-10 lg:bg-background/95 lg:py-3">
                 <Button variant="outline" onClick={() => { setEditing(null); resetForm(); }}>
                   إلغاء
                 </Button>
@@ -1126,7 +1126,7 @@ export default function PropertiesSection() {
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-lg" data-testid="property-delete-dialog">
           <DialogHeader>
             <DialogTitle className="text-red-600">تأكيد الحذف</DialogTitle>
             <DialogDescription>
@@ -1152,7 +1152,7 @@ export default function PropertiesSection() {
 
       {/* Linked Property Subscription Details */}
       <Dialog open={!!linkedPropertyView} onOpenChange={() => setLinkedPropertyView(null)}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:w-[calc(100%-2rem)] lg:max-w-3xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Home className="w-5 h-5 text-blue-500" />
@@ -1248,7 +1248,7 @@ export default function PropertiesSection() {
 
       {/* Linked Properties List Dialog */}
       <Dialog open={!!linkedPropertiesList} onOpenChange={() => setLinkedPropertiesList(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" dir="rtl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto lg:w-[calc(100%-2rem)] lg:max-w-6xl lg:p-8 2xl:max-w-7xl" dir="rtl" data-testid="property-linked-list-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Link className="w-5 h-5 text-primary" />

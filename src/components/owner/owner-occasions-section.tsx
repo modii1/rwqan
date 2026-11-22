@@ -4,12 +4,12 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Calendar, Loader2, Star } from "lucide-react";
 import type { Occasion, OccasionProperty } from "@shared/schema";
 import { OwnerSectionHeading, ownerPanelClass } from "./owner-page";
+import { OwnerEmptyState, OwnerInput } from "./owner-ui";
 
 interface OwnerOccasionData {
   occasion: Occasion;
@@ -60,7 +60,7 @@ export default function OwnerOccasionsSection() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-6">
-        <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
+        <Loader2 className="h-6 w-6 animate-spin text-[#80621d]" />
       </div>
     );
   }
@@ -80,19 +80,21 @@ export default function OwnerOccasionsSection() {
       {occasionsData.map(({ occasion, propertyData, isEnrolled }) => {
         if (!isEnrolled || !propertyData) {
           return (
-            <div key={occasion.id} className="rounded-lg bg-[#fffdf8] px-4 py-6 text-center text-sm text-[#74684f]">
-              <Calendar className="mx-auto mb-2 h-7 w-7 opacity-50" />
-              <p className="font-semibold text-[#2f2a1f]">عقارك غير مسجل في {occasion.name}</p>
-              <p className="mt-1 text-xs">تواصل مع الإدارة للانضمام</p>
-            </div>
+            <OwnerEmptyState
+              key={occasion.id}
+              className="mb-3"
+              icon={<Calendar className="h-5 w-5" />}
+              title={`عقارك غير مسجل في ${occasion.name}`}
+              description="تواصل مع الإدارة للانضمام."
+            />
           );
         }
 
         return (
-          <div key={occasion.id} className="space-y-3 border-t border-[#eee4cf] pt-4 first:border-t-0 first:pt-0">
+          <div key={occasion.id} className="space-y-3 border-t border-[#f0eadc] pt-4 first:border-t-0 first:pt-0">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="truncate text-sm font-bold text-[#2f2a1f]">{occasion.name}</h3>
-              <Badge variant="outline" className="flex-none rounded-md border-[#d8c9a8] bg-[#fffdf8] text-xs text-[#6f5520]">
+              <h3 className="truncate text-sm font-bold text-[#293129]">{occasion.name}</h3>
+              <Badge variant="outline" className="flex-none rounded-lg border-[#e6ddc9] bg-[#fffdf8] text-xs text-[#80621d]">
                 {occasion.days?.length || 0} أيام
               </Badge>
             </div>
@@ -101,9 +103,9 @@ export default function OwnerOccasionsSection() {
               {occasion.days?.map(day => {
                 const isAvailable = Boolean(propertyData.availability[day.key]);
                 return (
-                  <div key={day.key} className="rounded-lg border border-[#e8dfce] bg-[#fffdf8] p-3">
+                  <div key={day.key} className="rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-3">
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-[#2f2a1f]">{day.label}</span>
+                      <span className="text-xs font-bold text-[#293129]">{day.label}</span>
                       <Switch
                         checked={isAvailable}
                         onCheckedChange={(checked) => {
@@ -120,10 +122,10 @@ export default function OwnerOccasionsSection() {
                         aria-label={`${day.label}: ${isAvailable ? "متوفر" : "غير متوفر"}`}
                       />
                     </div>
-                    <label className="mb-1.5 block text-[11px] font-medium text-[#74684f]" htmlFor={`occasion-${occasion.id}-${day.key}`}>
+                    <label className="mb-1.5 block text-[11px] font-medium text-[#6f685b]" htmlFor={`occasion-${occasion.id}-${day.key}`}>
                       السعر
                     </label>
-                    <Input
+                    <OwnerInput
                       id={`occasion-${occasion.id}-${day.key}`}
                       type="text"
                       inputMode="numeric"
@@ -146,7 +148,7 @@ export default function OwnerOccasionsSection() {
                       onKeyDown={(e) => {
                         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                       }}
-                      className="h-9 text-center text-xs"
+                      className="h-10 text-center text-xs"
                       dir="ltr"
                     />
                   </div>

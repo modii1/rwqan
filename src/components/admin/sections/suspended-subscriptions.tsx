@@ -529,7 +529,7 @@ export default function SuspendedSubscriptionsSection() {
       )}
 
       <Dialog open={Boolean(selectedSubscription)} onOpenChange={(open) => !open && setSelectedSubscription(null)}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogContent dir="rtl" className="sm:max-w-md lg:w-[calc(100%-2rem)] lg:max-w-3xl lg:max-h-[90vh] lg:overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-right">
               <PlayCircle className="h-5 w-5 text-green-700" />
@@ -573,7 +573,7 @@ export default function SuspendedSubscriptionsSection() {
       >
         <DialogContent
           dir="rtl"
-          className="max-h-[85svh] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto"
+          className="max-h-[85svh] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto lg:max-w-2xl"
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-right">
@@ -647,7 +647,7 @@ export default function SuspendedSubscriptionsSection() {
       >
         <DialogContent
           dir="rtl"
-          className="w-[calc(100vw-1.5rem)] max-w-md"
+          className="w-[calc(100vw-1.5rem)] max-w-md lg:max-w-xl"
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-right">

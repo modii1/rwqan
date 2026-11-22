@@ -719,7 +719,7 @@ const totals = completedPayments.reduce((acc, p) => {
             </Button>
           </DialogTrigger>
 
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto lg:w-[calc(100%-2rem)] lg:max-w-6xl lg:p-8 2xl:max-w-7xl" dir="rtl">
             <DialogHeader>
               <DialogTitle>أرباح الشريك</DialogTitle>
             </DialogHeader>

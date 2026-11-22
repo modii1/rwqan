@@ -5,14 +5,10 @@ import { queryClient } from "@/lib/queryClient";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Select,
-    SelectContent,
     SelectItem,
-    SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +29,18 @@ import {
     OwnerSectionHeading,
     ownerPanelClass,
 } from "@/components/owner/owner-page";
+import {
+    OwnerInput,
+    OwnerSelectContent,
+    OwnerSelectTrigger,
+    OwnerTextarea,
+    ownerLabelClass,
+    ownerPageClass,
+    ownerPrimaryButtonClass,
+    ownerSecondaryButtonClass,
+    ownerSoftPanelClass,
+} from "@/components/owner/owner-ui";
+import { OwnerVerificationGate } from "@/components/owner/owner-verification-gate";
 
 const CITIES = ["بريدة", "عنيزة", "الرس", "البكيرية", "المذنب", "البدائع", "الأسياح", "رياض الخبراء", "عيون الجواء"];
 const DIRECTIONS = ["شمال", "جنوب", "شرق", "غرب"];
@@ -150,7 +158,24 @@ export default function UpdatePropertyPage() {
         },
         onSuccess: (data) => {
             queryClient.setQueryData(["/api/owner/property"], data);
-            
+
+            const verified =
+                data?.verificationStatus === "approved" ||
+                data?.verificationStatus === "verified" ||
+                data?.smartVerificationPassed === true;
+
+            if (!verified) {
+                // Keep the owner on the completion screen; the verification gate
+                // exposes an explicit «إعادة التحقق» action. This avoids firing a
+                // duplicate verification request automatically after every save.
+                toast({
+                    title: "تم حفظ البيانات",
+                    description: "اضغط «إعادة التحقق» لإكمال الوصول إلى البيانات والصور.",
+                });
+                queryClient.invalidateQueries({ queryKey: ["/api/owner/property"] });
+                return;
+            }
+
             if (data.needsManualVerification) {
                 toast({ 
                     title: "تم التحديث - يحتاج تحقق يدوي",
@@ -242,14 +267,16 @@ export default function UpdatePropertyPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#f5f6f3] text-[#242822]">
+        <div className={ownerPageClass}>
             <OwnerPageHeader
+                eyebrow="بيانات العقار"
                 title="بيانات العقار"
                 description={property?.propertyNumber ? `عقار رقم ${property.propertyNumber}` : "بيانات العرض والأسعار والمرافق"}
                 backHref="/owner/dashboard"
             />
 
             <OwnerPageMain maxWidth="4xl" className="space-y-4 sm:space-y-6">
+                <OwnerVerificationGate property={property} pageLabel="بيانات العقار">
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     {/* ====== 1. Basic Info ====== */}
@@ -261,19 +288,19 @@ export default function UpdatePropertyPage() {
                         />
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div>
-                                <label className="block text-sm font-semibold mb-2">اسم العقار</label>
-                                <Input
+                                <label className={ownerLabelClass}>اسم العقار</label>
+                                <OwnerInput
                                     value={form.name}
                                     onChange={(e) => setForm({ ...form, name: validateTextInput(e.target.value) })}
                                     placeholder="اسم العقار"
                                     maxLength={30}
                                     data-testid="input-name"
                                 />
-                                <span className="text-xs text-[#6f6249]">{form.name?.length || 0}/30 حرف</span>
+                                <span className="text-xs text-[#6f685b]">{form.name?.length || 0}/30 حرف</span>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">رقم واتساب</label>
-                                <Input
+                                <label className={ownerLabelClass}>رقم واتساب</label>
+                                <OwnerInput
                                     value={form.whatsappNumber}
                                     onChange={(e) => setForm({ ...form, whatsappNumber: validateWhatsAppInput(e.target.value).cleaned })}
                                     placeholder="966XXXXXXXXX"
@@ -281,8 +308,8 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">الموقع / الحي</label>
-                                <Input
+                                <label className={ownerLabelClass}>الموقع / الحي</label>
+                                <OwnerInput
                                     value={form.location}
                                     onChange={(e) => setForm({ ...form, location: validateTextInput(e.target.value) })}
                                     placeholder="اسم الحي"
@@ -290,7 +317,7 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">المدينة</label>
+                                <label className={ownerLabelClass}>المدينة</label>
                                 <Select 
                                     value={form.city || ""} 
                                     onValueChange={(v) => { 
@@ -299,15 +326,15 @@ export default function UpdatePropertyPage() {
                                         }
                                     }}
                                 >
-                                    <SelectTrigger><SelectValue placeholder="اختر المدينة" /></SelectTrigger>
-                                    <SelectContent position="popper" sideOffset={4}>
+                                    <OwnerSelectTrigger><SelectValue placeholder="اختر المدينة" /></OwnerSelectTrigger>
+                                    <OwnerSelectContent position="popper" sideOffset={4}>
                                         {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                    </SelectContent>
+                                    </OwnerSelectContent>
                                 </Select>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-semibold mb-2">الاتجاه</label>
+                                <label className={ownerLabelClass}>الاتجاه</label>
                                 <Select 
                                     value={form.direction || ""}
                                     onValueChange={(v) => { 
@@ -316,14 +343,14 @@ export default function UpdatePropertyPage() {
                                         }
                                     }}
                                 >
-                                    <SelectTrigger><SelectValue placeholder="اختر الاتجاه" /></SelectTrigger>
-                                    <SelectContent position="popper" sideOffset={4}>
+                                    <OwnerSelectTrigger><SelectValue placeholder="اختر الاتجاه" /></OwnerSelectTrigger>
+                                    <OwnerSelectContent position="popper" sideOffset={4}>
                                         {DIRECTIONS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                                    </SelectContent>
+                                    </OwnerSelectContent>
                                 </Select>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">النوع</label>
+                                <label className={ownerLabelClass}>النوع</label>
                                 <Select 
                                     value={form.type || ""} 
                                     onValueChange={(v) => {
@@ -332,15 +359,15 @@ export default function UpdatePropertyPage() {
                                         }
                                     }}
                                 >
-                                    <SelectTrigger><SelectValue placeholder="اختر النوع" /></SelectTrigger>
-                                    <SelectContent>
+                                    <OwnerSelectTrigger><SelectValue placeholder="اختر النوع" /></OwnerSelectTrigger>
+                                    <OwnerSelectContent>
                                         {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                                    </SelectContent>
+                                    </OwnerSelectContent>
                                 </Select>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">السعة القصوى</label>
-                                <Input
+                                <label className={ownerLabelClass}>السعة القصوى</label>
+                                <OwnerInput
                                     type="number"
                                     min={1}
                                     max={1000}
@@ -355,8 +382,8 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div className="md:col-span-2">
-                                <label className="block text-sm font-semibold mb-2">بيان التوفر</label>
-                                <Input
+                                <label className={ownerLabelClass}>بيان التوفر</label>
+                                <OwnerInput
                                     value={form.availabilityNote}
                                     onChange={(e) => setForm({
                                         ...form,
@@ -379,8 +406,8 @@ export default function UpdatePropertyPage() {
                         />
                         <div className="grid grid-cols-2 gap-3 sm:gap-4">
                             <div>
-                                <label className="block text-sm font-semibold mb-2">وسط الأسبوع</label>
-                                <Input
+                                <label className={ownerLabelClass}>وسط الأسبوع</label>
+                                <OwnerInput
                                     type="number"
                                     value={form.prices.weekday}
                                     onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekday: validateNumericInput(e.target.value) } })}
@@ -388,8 +415,8 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">نهاية الأسبوع</label>
-                                <Input
+                                <label className={ownerLabelClass}>نهاية الأسبوع</label>
+                                <OwnerInput
                                     type="number"
                                     value={form.prices.weekend}
                                     onChange={(e) => setForm({ ...form, prices: { ...form.prices, weekend: validateNumericInput(e.target.value) } })}
@@ -397,8 +424,8 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">مبيت</label>
-                                <Input
+                                <label className={ownerLabelClass}>مبيت</label>
+                                <OwnerInput
                                     type="number"
                                     value={form.prices.overnight}
                                     onChange={(e) => setForm({ ...form, prices: { ...form.prices, overnight: validateNumericInput(e.target.value) } })}
@@ -406,8 +433,8 @@ export default function UpdatePropertyPage() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-2">إجازات</label>
-                                <Input
+                                <label className={ownerLabelClass}>إجازات</label>
+                                <OwnerInput
                                     type="number"
                                     value={form.prices.holidays}
                                     onChange={(e) => setForm({ ...form, prices: { ...form.prices, holidays: validateNumericInput(e.target.value) } })}
@@ -431,13 +458,13 @@ export default function UpdatePropertyPage() {
                                 {selectedFacilities.map(fac => (
                                     <span
                                         key={fac}
-                                        className="inline-flex items-center gap-1 rounded-lg border border-[#eadfca] bg-[#fffaf0] px-3 py-1 text-xs font-medium text-[#6f5520]"
+                                        className="inline-flex items-center gap-1 rounded-xl border border-[#e6ddc9] bg-[#fffdf8] px-3 py-1 text-xs font-medium text-[#80621d]"
                                     >
                                         {fac}
                                         <button
                                             type="button"
                                             onClick={() => toggleFacility(fac)}
-                                            className="text-red-600"
+                                            className="text-[#b42318]"
                                         >
                                             <X className="w-3 h-3" />
                                         </button>
@@ -448,8 +475,8 @@ export default function UpdatePropertyPage() {
 
                         {/* Search */}
                         <div className="relative mb-3">
-                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                            <Input
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9c9382]" />
+                            <OwnerInput
                                 placeholder="ابحث عن مرفق..."
                                 value={facilitySearch}
                                 onChange={(e) => setFacilitySearch(e.target.value)}
@@ -459,9 +486,9 @@ export default function UpdatePropertyPage() {
                         </div>
 
                         {/* Checkbox grid */}
-                        <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto rounded-lg border border-[#eee4cf] bg-[#fffdf8] p-2 min-[390px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                        <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto rounded-xl border border-[#f0eadc] bg-[#fffdf8] p-2 min-[390px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                             {filteredFacilities.map(facility => (
-                                <div key={facility} className="flex min-h-10 items-center gap-2 rounded-md px-2 hover:bg-[#f6f0e3]">
+                                <div key={facility} className="flex min-h-10 items-center gap-2 rounded-xl px-2 hover:bg-[#faf7ef]">
                                     <Checkbox
                                         checked={selectedFacilities.includes(facility)}
                                         onCheckedChange={() => toggleFacility(facility)}
@@ -476,7 +503,7 @@ export default function UpdatePropertyPage() {
                     </Card>
 
                     {/* ====== 4. SEO Description ====== */}
-                    <Card className="rounded-lg border border-[#e0c97b] bg-[#fffdf0] p-4 sm:p-6">
+                    <Card className={`${ownerSoftPanelClass} border-[#efe3c6] p-4 sm:p-6`}>
                         <OwnerSectionHeading
                             title="وصف العقار"
                             description="وصف مختصر يساعد في إظهار العقار في نتائج البحث"
@@ -485,17 +512,17 @@ export default function UpdatePropertyPage() {
 
                         {isPremium ? (
                             <>
-                                <Textarea
+                                <OwnerTextarea
                                     value={seoDescription}
                                     onChange={(e) => setSeoDescription(e.target.value)}
                                     placeholder="اكتب وصفاً مميزاً لعقارك يظهر في نتائج البحث..."
-                                    className="min-h-[100px] mb-3"
+                                    className="mb-3 min-h-[100px]"
                                     data-testid="input-seo-description"
                                 />
                                 <Button
                                     type="button"
                                     variant="outline"
-                                    className="border-[#d8c9a8] text-[#6f5520] bg-white"
+                                    className={ownerSecondaryButtonClass}
                                     onClick={() => seoMutation.mutate(seoDescription)}
                                     disabled={seoMutation.isPending}
                                 >
@@ -504,12 +531,12 @@ export default function UpdatePropertyPage() {
                             </>
                         ) : (
                             <div className="text-center py-4">
-                                <p className="text-[#6f5520] mb-3 text-sm">
+                                <p className="mb-3 text-sm text-[#80621d]">
                                     ميزة وصف SEO متاحة فقط للمشتركين في{" "}
                                     <span className="font-bold">الباقة المميزة</span>
                                 </p>
                                 <Link href="/owner/subscription">
-                                    <Button variant="outline" className="border-[#d8c9a8] text-[#6f5520] bg-white">
+                                    <Button variant="outline" className={ownerSecondaryButtonClass}>
                                         <Star className="w-4 h-4 ml-2" />
                                         ترقية الاشتراك
                                     </Button>
@@ -521,7 +548,7 @@ export default function UpdatePropertyPage() {
                     {/* Save property button */}
                     <Button
                         type="submit"
-                        className="h-12 w-full bg-[#2f2a1f] font-bold text-white"
+                        className={`h-12 w-full ${ownerPrimaryButtonClass}`}
                         disabled={mutation.isPending}
                     >
                         <Save className="w-5 h-5 ml-2" />
@@ -538,8 +565,8 @@ export default function UpdatePropertyPage() {
                     />
                     <div className="grid gap-4 md:grid-cols-3">
                         <div>
-                            <label className="block text-sm font-semibold mb-2">الرقم السري الحالي</label>
-                            <Input
+                            <label className={ownerLabelClass}>الرقم السري الحالي</label>
+                            <OwnerInput
                                 type="password"
                                 value={passwordForm.currentPassword}
                                 onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
@@ -548,8 +575,8 @@ export default function UpdatePropertyPage() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold mb-2">الرقم السري الجديد</label>
-                            <Input
+                            <label className={ownerLabelClass}>الرقم السري الجديد</label>
+                            <OwnerInput
                                 type="password"
                                 value={passwordForm.newPassword}
                                 onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
@@ -558,8 +585,8 @@ export default function UpdatePropertyPage() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold mb-2">تأكيد الرقم السري الجديد</label>
-                            <Input
+                            <label className={ownerLabelClass}>تأكيد الرقم السري الجديد</label>
+                            <OwnerInput
                                 type="password"
                                 value={passwordForm.confirmPassword}
                                 onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
@@ -576,7 +603,7 @@ export default function UpdatePropertyPage() {
                                 !passwordForm.newPassword ||
                                 !passwordForm.confirmPassword
                             }
-                            className="h-11 w-full md:col-span-3"
+                            className={`h-11 w-full md:col-span-3 ${ownerSecondaryButtonClass}`}
                             variant="outline"
                         >
                             <Lock className="w-4 h-4 ml-2" />
@@ -584,6 +611,7 @@ export default function UpdatePropertyPage() {
                         </Button>
                     </div>
                 </Card>
+                </OwnerVerificationGate>
             </OwnerPageMain>
             <OwnerMobileNavigation />
         </div>

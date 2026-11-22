@@ -147,7 +147,7 @@ export default function DiscountsSection() {
 
       {/* ================= مودال إضافة/تعديل ================= */}
       <Dialog open={!!editingCode} onOpenChange={() => setEditingCode(null)}>
-        <DialogContent className="max-w-md" dir="rtl">
+        <DialogContent className="max-w-md lg:w-[calc(100%-2rem)] lg:max-w-2xl" dir="rtl">
           <DialogHeader>
             <DialogTitle>{isNew ? "إضافة كود" : "تعديل الكود"}</DialogTitle>
           </DialogHeader>

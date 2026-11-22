@@ -46,3 +46,18 @@ export function isPurchasableSubscriptionPackage(
     isSubscriptionPackageDurationAllowed(duration, true)
   );
 }
+
+/**
+ * A package is visible to customers only when the admin kept it visible and it
+ * was not archived. This is independent from `isActive`: a visible package can
+ * still reject new subscriptions when it is operationally stopped.
+ */
+export function isPackageVisibleToCustomers(
+  subscriptionPackage: { isVisible?: unknown; archivedAt?: unknown } | null | undefined,
+): boolean {
+  if (!subscriptionPackage) return false;
+  return (
+    subscriptionPackage.isVisible !== false &&
+    !subscriptionPackage.archivedAt
+  );
+}

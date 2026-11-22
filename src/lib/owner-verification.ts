@@ -30,7 +30,12 @@ export async function runOwnerManualVerification(): Promise<OwnerManualVerificat
   }
 
   if (!response.ok) {
-    throw new Error(data?.error || data?.message || "تعذر تشغيل التحقق الذكي.");
+    const error = new Error(
+      data?.error || data?.message || "تعذر تشغيل التحقق الذكي.",
+    ) as Error & { code?: string; status?: number };
+    error.code = typeof data?.code === "string" ? data.code : undefined;
+    error.status = response.status;
+    throw error;
   }
 
   if (!data || typeof data !== "object") {

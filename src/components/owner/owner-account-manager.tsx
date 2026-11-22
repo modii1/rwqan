@@ -326,18 +326,18 @@ export function OwnerAccountManager() {
               )}
 
               {error ? (
-                <p id="owner-account-manager-error" className="text-sm font-medium text-red-600" role="alert">
+                <p id="owner-account-manager-error" className="text-sm font-medium text-[#b42318]" role="alert">
                   {error}
                 </p>
               ) : null}
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
+              <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2 sm:gap-3">
                 <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={isBusy}>
                   إلغاء
                 </Button>
                 <Button
                   type="submit"
-                  className="bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
+                  className="w-full bg-[#29372f] font-bold text-white hover:bg-[#1f2b25]"
                   disabled={
                     isBusy ||
                     (hasOwnerAccount && (!isPropertyConfirmed || propertyNumber.length !== 5))
@@ -352,13 +352,13 @@ export function OwnerAccountManager() {
           ) : (
             <form onSubmit={verifyCode} className="space-y-4" noValidate aria-busy={isBusy}>
               {hasOwnerAccount ? (
-                <p className="rounded-lg bg-[#f0ede5] px-3 py-2 text-xs text-[#6f6249]">
+                <p className="rounded-xl bg-[#faf7ef] px-3 py-2 text-xs text-[#6f685b]">
                   العقار المستهدف:{" "}
                   <span dir="ltr" className="font-bold text-[#29372f]">{propertyNumber}</span>
                 </p>
               ) : null}
               {expiryMinutes ? (
-                <p className="rounded-lg bg-[#f0ede5] px-3 py-2 text-xs text-[#6f6249]">
+                <p className="rounded-xl bg-[#faf7ef] px-3 py-2 text-xs text-[#6f685b]">
                   ينتهي الرمز خلال {expiryMinutes} دقائق.
                 </p>
               ) : null}
@@ -393,7 +393,7 @@ export function OwnerAccountManager() {
               </div>
 
               {error ? (
-                <p id="owner-account-manager-error" className="text-sm font-medium text-red-600" role="alert">
+                <p id="owner-account-manager-error" className="text-sm font-medium text-[#b42318]" role="alert">
                   {error}
                 </p>
               ) : null}

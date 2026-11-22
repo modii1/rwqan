@@ -427,7 +427,7 @@ export default function PartnerProfitsSection() {
                     شهر آخر
                   </Button>
                 </DialogTrigger>
-                <DialogContent dir="rtl">
+                <DialogContent dir="rtl" className="lg:w-[calc(100%-2rem)] lg:max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>تجهيز دورة شهرية يدويًا</DialogTitle>
                     <DialogDescription>
@@ -800,7 +800,7 @@ export default function PartnerProfitsSection() {
                     إضافة تكلفة
                   </Button>
                 </DialogTrigger>
-                <DialogContent dir="rtl" className="max-h-[85vh] flex flex-col p-0">
+                <DialogContent dir="rtl" className="max-h-[85vh] flex flex-col p-0 lg:w-[calc(100%-2rem)] lg:max-w-4xl lg:max-h-[90vh] 2xl:max-w-5xl">
                   <DialogHeader className="px-6 pt-6 pb-2">
                     <DialogTitle>إضافة تكلفة جديدة</DialogTitle>
                     <DialogDescription>أدخل بيانات التكلفة لخصمها من الأرباح</DialogDescription>
@@ -891,7 +891,7 @@ export default function PartnerProfitsSection() {
 
       {/* ===================== تأكيد حذف دورة ===================== */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
-        <DialogContent dir="rtl" data-testid="dialog-delete-cycle">
+        <DialogContent dir="rtl" data-testid="dialog-delete-cycle" className="lg:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertTriangle className="w-5 h-5" />
@@ -944,7 +944,7 @@ export default function PartnerProfitsSection() {
 
       {/* ===================== نموذج تسجيل تحويل ===================== */}
       <Dialog open={!!transferProfitId} onOpenChange={(open) => { if (!open) setTransferProfitId(null); }}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:w-[calc(100%-2rem)] lg:max-w-2xl">
           <DialogHeader>
             <DialogTitle>تسجيل تحويل للشريك</DialogTitle>
             <DialogDescription>

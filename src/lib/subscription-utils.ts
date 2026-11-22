@@ -277,6 +277,63 @@ export function getSubscriptionDisplayLabel(
   }
 }
 
+export interface SubscriptionStatusTextResult {
+  status: SubscriptionStatus;
+  text: string;
+  date: string | null;
+}
+
+/**
+ * نص عرض موحّد لحالة الاشتراك يتضمن التاريخ الصحيح للعرض:
+ * - الاشتراك الساري: «تم التفعيل منذ» + startDate.
+ * - الاشتراك المنتهي: «انتهى الاشتراك منذ» + endDate.
+ * - الاشتراك الذي لم يبدأ: «يبدأ الاشتراك في» + startDate.
+ * - الاشتراك الملغي: «تم إلغاء الاشتراك في» + cancelledAt.
+ * يعتمد على الحالة المحسوبة (تاريخ النهاية + الإلغاء + التعليق) وليس النص المخزن وحده.
+ */
+export function getSubscriptionStatusText(record: SubscriptionStatusRecord): SubscriptionStatusTextResult {
+  const status = getSubscriptionStatusFromRecord(record);
+  const isFree = record.status === "نشط مجاني" || record.status === "free_active";
+  const cancelled = isCancelledSubscription(record);
+  const startDate = record.startDate ? parseDate(record.startDate) : null;
+  const endDate = record.endDate ? parseDate(record.endDate) : null;
+  const cancelledAt = record.cancelledAt ? parseDate(record.cancelledAt) : null;
+  const suspendedAt = record.suspendedAt ? parseDate(record.suspendedAt) : null;
+  const format = (value: Date | null | undefined): string => (value ? formatDate(value) : "غير محدد");
+
+  let text: string;
+  let date: string | null = null;
+
+  if (cancelled) {
+    text = `تم إلغاء الاشتراك في ${format(cancelledAt)}`;
+    date = record.cancelledAt ?? null;
+  } else if (startDate && startDate.getTime() > Date.now()) {
+    text = `يبدأ الاشتراك في ${format(startDate)}`;
+    date = record.startDate ?? null;
+  } else if (status === "expired") {
+    text = `انتهى الاشتراك منذ ${format(endDate)}`;
+    date = record.endDate ?? null;
+  } else if (status === "active") {
+    text = isFree ? `نشط مجاني منذ ${format(startDate)}` : `تم التفعيل منذ ${format(startDate)}`;
+    date = record.startDate ?? null;
+  } else if (status === "expiring") {
+    text = `ينتهي الاشتراك في ${format(endDate)}`;
+    date = record.endDate ?? null;
+  } else if (status === "suspended") {
+    text = `تم تعليق الاشتراك في ${format(suspendedAt)}`;
+    date = record.suspendedAt ?? null;
+  } else if (status === "pending") {
+    text = `قيد المراجعة منذ ${format(startDate)}`;
+    date = record.startDate ?? null;
+  } else {
+    const fallbackStatus = status as SubscriptionStatus;
+    text = getSubscriptionDisplayLabel(fallbackStatus, isFree);
+    date = fallbackStatus === "active" ? record.startDate ?? null : null;
+  }
+
+  return { status, text, date };
+}
+
 /**
  * معلومات حالة الاشتراك للعرض
  */

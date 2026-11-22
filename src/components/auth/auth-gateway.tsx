@@ -36,7 +36,7 @@ export function AuthGateway({
   titleTestId,
 }: AuthGatewayProps) {
   return (
-    <div className="relative min-h-[calc(100vh-70px)] min-h-[calc(100svh-70px)] overflow-hidden bg-[#f2efe6] px-3 py-5 sm:px-6 sm:py-10" dir="rtl">
+    <div className="relative min-h-[calc(100vh-70px)] min-h-[calc(100svh-70px)] overflow-hidden bg-[#fafaf7] px-3 py-5 sm:px-6 sm:py-10" dir="rtl">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[#d8caa9]" aria-hidden="true" />
       <div className="relative mx-auto grid w-full max-w-5xl overflow-hidden rounded-[1.75rem] border border-[#d9cfb8] bg-[#fffdf8] shadow-[0_24px_70px_rgba(53,49,39,0.12)] lg:min-h-[610px] lg:grid-cols-[minmax(290px,0.82fr)_minmax(0,1.18fr)]">
         <h1 className="sr-only" data-testid={titleTestId}>{heading}</h1>
@@ -63,7 +63,7 @@ export function AuthGateway({
           dir="rtl"
           className="min-w-0 bg-[#fffdf8] px-4 py-5 sm:px-8 sm:py-8 lg:px-10 lg:py-10"
         >
-          <div className="mb-6 flex items-center gap-3 border-b border-[#e9dfca] pb-5 lg:hidden">
+          <div className="mb-6 flex items-center gap-3 border-b border-[#e6ddc9] pb-5 lg:hidden">
             <img src="/assets/logo-icon.png" alt="روقان" className="h-12 w-12 flex-none object-contain" />
             <div className="min-w-0">
               <p className="text-xs font-bold text-[#8b6b25]">{contextLabel}</p>
@@ -75,7 +75,7 @@ export function AuthGateway({
 
           <TabsList
             aria-label="اختيار نوع الحساب"
-            className="grid h-auto w-full grid-cols-3 gap-1 rounded-2xl border border-[#ded5c2] bg-[#f0ede5] p-1.5"
+            className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl border border-[#e6ddc9] bg-[#faf7ef] p-1.5"
           >
             {roles.map((role) => {
               const Icon = role.icon;

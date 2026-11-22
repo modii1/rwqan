@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { DeployBar } from "@/components/deploy-bar";
+import { LocalPathSwitch } from "@/components/local-path-switch";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import QueryProvider from "@/lib/query-provider";
@@ -18,6 +19,8 @@ export default function LayoutContent({ children }: { children: React.ReactNode 
             <TooltipProvider>
                 <div className="min-h-screen flex flex-col bg-background">
                     <DeployBar />
+                    {/* LOCAL-only: build-time gate, never rendered in TEST/LIVE builds. */}
+                    {process.env.NODE_ENV !== "production" && <LocalPathSwitch />}
                     <Header />
                     <main className="flex-1">
                         {children}

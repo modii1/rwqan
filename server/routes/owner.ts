@@ -59,6 +59,12 @@ import {
   isPremiumSubscriptionType,
   isSubscriptionStatusSuspended,
 } from "../../shared/subscriptionType";
+import {
+  getPackageBillingOption,
+  type BillingPeriod,
+} from "../../shared/subscriptionPricing";
+import { isPackageVisibleToCustomers } from "../../shared/subscriptionPackagePolicy";
+import { packageMatchesAudience } from "../../shared/packageAudience";
 import type { Payment } from "../../shared/schema";
 import {
   assertPropertyNotSuspended,
@@ -1179,6 +1185,16 @@ router.delete(
 // ======================================================
 // 📦 GET /api/owner/current-subscription - Owner's current subscription
 // ======================================================
+router.get("/api/owner/packages", requireOwner, async (_req, res) => {
+  try {
+    const packages = await subscriptionService.getPackagesForAudience("owner");
+    res.json(packages);
+  } catch (error) {
+    console.error("Owner packages error:", error);
+    res.status(500).json({ error: "فشل في جلب الباقات" });
+  }
+});
+
 router.get("/api/owner/current-subscription", requireOwner, async (req, res) => {
   try {
     const propertyNumber = (req.session as any)?.propertyNumber;
@@ -1658,6 +1674,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       action,
       secondPropertyNumber,
       additionalProperties,
+      billingPeriod,
     } = req.body;
     const isAddon = action === "addon";
 
@@ -1682,6 +1699,21 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
 
     const pkg = await firebaseService.getPurchasablePackageById(packageId);
     if (!pkg) return res.status(404).json({ error: "الباقة غير موجودة" });
+    if (!isAddon && !isPackageVisibleToCustomers(pkg)) {
+      return res.status(404).json({ error: "الباقة غير متاحة للاشتراك" });
+    }
+    if (!isAddon && !packageMatchesAudience(pkg, "owner")) {
+      return res.status(404).json({ error: "الباقة غير متاحة لصفحة المالك" });
+    }
+
+    const period: BillingPeriod = billingPeriod === "quarterly" ? "quarterly" : "monthly";
+    const billingOption = getPackageBillingOption(pkg, period);
+    if (!isAddon && !billingOption.enabled) {
+      return res.status(400).json({
+        error: "هذه المدة غير متاحة لهذه الباقة حالياً",
+        code: "BILLING_PERIOD_DISABLED",
+      });
+    }
 
     // Handle multiple additional properties
     let allAdditionalProps: string[] = [];
@@ -1746,17 +1778,32 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
     }
     allAdditionalProps = prepared?.plan.linkedPropertyNumbers || [];
     parsedSecondPropertyNumber = allAdditionalProps[0];
-    let finalAmount = prepared?.plan.pricing.total ?? Number(pkg.price || 0);
-    
-    // Apply discount
+    const additionalTotal = prepared
+      ? prepared.plan.pricing.additionalPropertyCount *
+        prepared.plan.pricing.additionalPropertyPrice
+      : 0;
+    const amount = isAddon
+      ? Number(pkg.price || 0)
+      : Math.round((billingOption.originalPrice + additionalTotal) * 100) / 100;
+    let finalAmount = isAddon
+      ? Number(pkg.price || 0)
+      : Math.round((billingOption.finalPrice + additionalTotal) * 100) / 100;
+    let discountAmount = isAddon ? 0 : billingOption.discountAmount;
+
+    // Apply discount code on top of the package-period discount, safely.
     if (discountCode) {
       const discount = await firebaseService.getDiscountCodeByCode(discountCode);
-      if (discount && discount.isActive) {
-        if (discount.type === "نسبة") {
-          finalAmount -= (finalAmount * discount.value) / 100;
-        } else {
-          finalAmount -= discount.value;
-        }
+      const notExpired =
+        !discount?.expiryDate ||
+        new Date(discount.expiryDate).getTime() >= Date.now();
+      if (discount && discount.isActive && notExpired) {
+        const codeDiscountAmount =
+          discount.type === "نسبة"
+            ? (finalAmount * discount.value) / 100
+            : discount.value;
+        const safeCodeDiscount = Math.max(0, Math.min(finalAmount, codeDiscountAmount));
+        discountAmount = Math.round((discountAmount + safeCodeDiscount) * 100) / 100;
+        finalAmount = Math.round(Math.max(0, finalAmount - safeCodeDiscount) * 100) / 100;
       }
     }
 
@@ -1821,9 +1868,9 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       id: paymentId,
       propertyNumber,
       packageId,
-      amount: finalAmount,
+      amount,
       discountCode: discountCode || "",
-      discountAmount: 0,
+      discountAmount,
       finalAmount,
       status: "قيد المراجعة",
       paymentMethod: "تحويل بنكي",
@@ -1836,6 +1883,15 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       paymentReference,
       ownerAccountId: (req.session as any).ownerAccountId || undefined,
+      ...(isAddon
+        ? {}
+        : {
+            billingPeriod: period,
+            durationDays: billingOption.durationDays,
+            packageName: pkg.name,
+            basePrice: billingOption.originalPrice,
+            packageDiscountAmount: billingOption.discountAmount,
+          }),
     } as any);
     paymentCreated = true;
     console.log(`[BANK_TRANSFER] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
@@ -1878,19 +1934,27 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
       }
     }
 
-    // Handle extension/upgrade - save pending subscription data
-    if (!isAddon && (action === 'extend' || action === 'upgrade')) {
+    // Handle subscription dates - store pending dates for every action so the
+    // activation path always uses the period the owner actually paid for.
+    if (!isAddon) {
       const { startDate: bankStartDate, endDate: bankEndDate } = calculateActionDates(
         action,
         currentSubscriptionForAction,
-        pkg.duration,
+        billingOption.durationDays,
       );
 
       await paymentService.update(payment.id, {
         action: action,
+        billingPeriod: period,
+        durationDays: billingOption.durationDays,
         pendingStartDate: formatDateRiyadh(bankStartDate),
         pendingEndDate: formatDateRiyadh(bankEndDate),
-      });
+        pendingPrice: finalAmount,
+        pendingSubscriptionType:
+          isPremiumSubscriptionType(pkg.type) || billingOption.finalPrice > 0
+            ? "مميز"
+            : "عادي",
+      } as any);
 
 
       // Send WhatsApp notification for receipt upload
@@ -1977,7 +2041,7 @@ router.post("/api/owner/payment/bank-transfer", requireOwner, requireSameOrigin,
 
         if (propertyComplete.isComplete) {
           const currentSubscription = currentSubscriptionForAction || await subscriptionService.getByProperty(propertyNumber);
-          const activationDates = calculateActionDates(action, currentSubscription, pkg.duration);
+          const activationDates = calculateActionDates(action, currentSubscription, billingOption.durationDays);
           const paymentForActivation = {
             ...payment,
             action: (action as any) || "new",
@@ -3153,7 +3217,7 @@ router.post("/api/owner/property/activate", requireOwner, requireSameOrigin, asy
       const calculatedDates = calculateActionDates(
         pendingPayment.action,
         currentSubscriptionForActivation,
-        pkg.duration,
+        Number((pendingPayment as any).durationDays) || pkg.duration,
       );
       const pendingStartDate = pendingPayment.pendingStartDate
         ? new Date(pendingPayment.pendingStartDate)
@@ -3179,6 +3243,12 @@ router.post("/api/owner/property/activate", requireOwner, requireSameOrigin, asy
         startDate: formatDateRiyadh(startDate),
         endDate: normalizedEndDate,
         paymentId: pendingPayment.id,
+        billingPeriod: (pendingPayment as any).billingPeriod,
+        durationDays: (pendingPayment as any).durationDays,
+        packageName: (pendingPayment as any).packageName || pkg.name,
+        basePrice: (pendingPayment as any).basePrice,
+        discountAmount: (pendingPayment as any).discountAmount,
+        packageDiscountAmount: (pendingPayment as any).packageDiscountAmount,
       };
 
       await firebaseService.addSubscriptionToSheet(
@@ -3432,7 +3502,11 @@ router.post("/api/owner/property/run-verification", requireOwner, requireSameOri
     if (pendingActivationPayment) {
       const pkg = await storage.getPackageById(pendingActivationPayment.packageId);
       if (pkg) {
-        const activationDates = calculateActionDates(pendingActivationPayment.action, currentSubscription, pkg.duration);
+        const activationDates = calculateActionDates(
+          pendingActivationPayment.action,
+          currentSubscription,
+          Number((pendingActivationPayment as any).durationDays) || pkg.duration,
+        );
 
         if (isNewProperty) {
           await queueVerifiedNewPropertyForAdminApproval({
@@ -3522,7 +3596,7 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
     paymobOrderId?: string;
   } | null = null;
   try {
-    const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties } = req.body;
+    const { propertyNumber: bodyPropertyNumber, packageId, discountCode, action, secondPropertyNumber, additionalProperties, billingPeriod } = req.body;
     const sessionPropertyNumber = (req.session as any).propertyNumber;
     const requestedPropertyNumber = bodyPropertyNumber || sessionPropertyNumber;
 
@@ -3539,6 +3613,21 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
     const pkg = await firebaseService.getPurchasablePackageById(packageId);
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
+    }
+    if (!isPackageVisibleToCustomers(pkg)) {
+      return res.status(404).json({ error: "الباقة غير متاحة للاشتراك" });
+    }
+    if (!packageMatchesAudience(pkg, "owner")) {
+      return res.status(404).json({ error: "الباقة غير متاحة لصفحة المالك" });
+    }
+
+    const period: BillingPeriod = billingPeriod === "quarterly" ? "quarterly" : "monthly";
+    const billingOption = getPackageBillingOption(pkg, period);
+    if (!billingOption.enabled) {
+      return res.status(400).json({
+        error: "هذه المدة غير متاحة لهذه الباقة حالياً",
+        code: "BILLING_PERIOD_DISABLED",
+      });
     }
 
     // Handle multiple additional properties
@@ -3584,8 +3673,12 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
     const currentSubscriptionForPaymentAction = prepared.group.mainSubscription;
     allAdditionalProps = prepared.plan.linkedPropertyNumbers;
     parsedSecondPropertyNumber = allAdditionalProps[0];
-    const amount = prepared.plan.pricing.total;
-    let finalAmount = amount;
+    const additionalTotal =
+      prepared.plan.pricing.additionalPropertyCount *
+      prepared.plan.pricing.additionalPropertyPrice;
+    const amount = Math.round((billingOption.originalPrice + additionalTotal) * 100) / 100;
+    let finalAmount = Math.round((billingOption.finalPrice + additionalTotal) * 100) / 100;
+    let discountAmount = billingOption.discountAmount;
     const actionValidation = validatePaymentSubscriptionAction(
       action,
       currentSubscriptionForPaymentAction,
@@ -3605,18 +3698,19 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
       ? `سيتم فصل ${willAutoUnlink} عقار تلقائياً لأن الباقة الجديدة لا تدعم هذا العدد`
       : null;
 
-    let discountAmount = 0;
-
     if (discountCode) {
       const discount = await storage.getDiscountCodeByCode(discountCode);
-      if (discount && discount.isActive) {
-        if (discount.type === "نسبة") {
-          discountAmount = (finalAmount * discount.value) / 100;
-          finalAmount -= discountAmount;
-        } else {
-          discountAmount = discount.value;
-          finalAmount -= discount.value;
-        }
+      const notExpired =
+        !discount?.expiryDate ||
+        new Date(discount.expiryDate).getTime() >= Date.now();
+      if (discount && discount.isActive && notExpired) {
+        const codeDiscountAmount =
+          discount.type === "نسبة"
+            ? (finalAmount * discount.value) / 100
+            : discount.value;
+        const safeCodeDiscount = Math.max(0, Math.min(finalAmount, codeDiscountAmount));
+        discountAmount = Math.round((discountAmount + safeCodeDiscount) * 100) / 100;
+        finalAmount = Math.round(Math.max(0, finalAmount - safeCodeDiscount) * 100) / 100;
       }
     }
 
@@ -3635,6 +3729,11 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
       additionalProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       linkedProperties: allAdditionalProps.length > 0 ? allAdditionalProps : undefined,
       ownerAccountId: (req.session as any).ownerAccountId || undefined,
+      billingPeriod: period,
+      durationDays: billingOption.durationDays,
+      packageName: pkg.name,
+      basePrice: billingOption.originalPrice,
+      packageDiscountAmount: billingOption.discountAmount,
     } as any);
     createdPaymentId = payment.id;
     console.log(`[CARD_PAYMENT] ✅ Payment created: ${payment.id} for property: ${propertyNumber}, package: ${packageId}`);
@@ -3642,19 +3741,24 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
     // للتمديد/الترقية بالبطاقة: احفظ التواريخ المعلقة ضمن الحد الأقصى للمدة المتبقية حتى يتمكن
     // الـ webhook من تفعيل الاشتراك بالتواريخ الصحيحة. بدون هذا لا يجد الـ webhook
     // pendingEndDate فلا يُفعّل تمديد/ترقية البطاقة أبداً.
-    if (action === 'extend' || action === 'upgrade') {
+    {
       const { startDate: cardStart, endDate: cardEnd } = calculateActionDates(
         action,
         currentSubscriptionForPaymentAction,
-        pkg.duration,
+        billingOption.durationDays,
       );
       await paymentService.update(payment.id, {
         action,
+        billingPeriod: period,
+        durationDays: billingOption.durationDays,
         pendingStartDate: formatDateRiyadh(cardStart),
         pendingEndDate: formatDateRiyadh(cardEnd),
         pendingPrice: finalAmount,
-        pendingSubscriptionType: (isPremiumSubscriptionType(pkg.type) || pkg.price > 0) ? "مميز" : "عادي",
-      });
+        pendingSubscriptionType:
+          isPremiumSubscriptionType(pkg.type) || billingOption.finalPrice > 0
+            ? "مميز"
+            : "عادي",
+      } as any);
     }
 
     const merchantAttemptKey = `RWQN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
@@ -3670,7 +3774,7 @@ router.post("/api/owner/payment/initiate", requireOwner, requireSameOrigin, asyn
       property?.name || "عقار",
       property?.whatsappNumber || "0500000000",
       pkg.name,
-      pkg.duration || 30,
+      billingOption.durationDays,
       "cards",
       { merchantAttemptKey, paymentId: payment.id },
     );
@@ -3842,6 +3946,9 @@ router.post("/api/owner/payment/retry", requireOwner, requireSameOrigin, async (
     if (!pkg) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
+    if (!packageMatchesAudience(pkg, "owner")) {
+      return res.status(404).json({ error: "الباقة غير متاحة لصفحة المالك" });
+    }
 
     const property = await firebaseService.getPropertyByNumber(payment.propertyNumber);
     const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(
@@ -3892,7 +3999,7 @@ router.post("/api/owner/payment/retry", requireOwner, requireSameOrigin, async (
       propertyName,
       phone,
       pkg.name,
-      pkg.duration || 30,
+      (payment as any).durationDays || pkg.duration || 30,
       "cards",
       {
         merchantAttemptKey: reservedRetry.merchantAttemptKey,
@@ -4422,6 +4529,9 @@ router.post("/api/owner/subscription/prepare-payment", requireOwner, requireSame
     if (!newPackage) {
       return res.status(404).json({ error: "الباقة غير موجودة" });
     }
+    if (!packageMatchesAudience(newPackage, "owner")) {
+      return res.status(404).json({ error: "الباقة غير متاحة لصفحة المالك" });
+    }
 
     const currentSubscription = await firebaseService.getSubscriptionByPropertyNumber(propertyNumber);
     const actionValidation = validateSubscriptionAction(action, currentSubscription);
@@ -4620,7 +4730,11 @@ router.post("/api/owner/subscription/confirm", requireOwner, requireSameOrigin, 
       }
     }
 
-    const calculatedDates = calculateActionDates(action, currentSubscription, newPackage.duration);
+    const calculatedDates = calculateActionDates(
+      action,
+      currentSubscription,
+      Number((paymentRecord as any).durationDays) || newPackage.duration,
+    );
     const persistedStartDate = paymentRecord.pendingStartDate
       ? new Date(paymentRecord.pendingStartDate)
       : fulfilledSubscription?.startDate
@@ -4671,11 +4785,17 @@ router.post("/api/owner/subscription/confirm", requireOwner, requireSameOrigin, 
       endDate: newEndDate.toISOString(),
       status: 'نشط',
       paymentId: paymentId || "",
-      price: newPackage.price,
+      price: (paymentRecord as any).basePrice ?? newPackage.price,
       subscriptionType: isPremium ? "مميز" : "عادي",
       packageType: isPremium ? "مميز" : "عادي",
       linkedProperties: retainedLinkedProperties,
       propertyCount: retainedLinkedProperties.length + 1,
+      billingPeriod: (paymentRecord as any).billingPeriod,
+      durationDays: (paymentRecord as any).durationDays,
+      packageName: (paymentRecord as any).packageName || newPackage.name,
+      basePrice: (paymentRecord as any).basePrice,
+      discountAmount: (paymentRecord as any).discountAmount,
+      packageDiscountAmount: (paymentRecord as any).packageDiscountAmount,
     };
 
     await firebaseService.addSubscriptionToSheet(

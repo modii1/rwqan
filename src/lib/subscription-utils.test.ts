@@ -5,6 +5,7 @@ import {
   canExtendSubscription,
   getSubscriptionStatusFromRecord,
   getSubscriptionDisplayLabel,
+  getSubscriptionStatusText,
   isCancelledSubscription,
 } from "./subscription-utils";
 
@@ -90,4 +91,51 @@ test("reactivation after cancellation is active again", () => {
   };
   assert.equal(isCancelledSubscription(record), false);
   assert.equal(getSubscriptionStatusFromRecord(record), "active");
+});
+
+test("active subscription status text is anchored to the activation startDate", () => {
+  const record = {
+    status: "نشط",
+    startDate: "2026-10-17T00:00:00.000Z",
+    endDate: "2026-12-16T00:00:00.000Z",
+  };
+  const result = getSubscriptionStatusText(record);
+  assert.equal(result.status, "active");
+  assert.ok(result.text.includes("تم التفعيل منذ"));
+  assert.equal(result.date, record.startDate);
+});
+
+test("expired subscription status text is anchored to the endDate and not the startDate", () => {
+  const record = {
+    status: "نشط",
+    startDate: "2026-10-17T00:00:00.000Z",
+    endDate: "2026-11-16T00:00:00.000Z",
+  };
+  const result = getSubscriptionStatusText(record);
+  assert.equal(result.status, "expired");
+  assert.ok(result.text.includes("انتهى الاشتراك منذ"));
+  assert.equal(result.date, record.endDate);
+});
+
+test("cancelled subscription status text is anchored to the cancellation date", () => {
+  const record = {
+    status: "منتهي",
+    startDate: "2026-10-17T00:00:00.000Z",
+    endDate: "2026-11-16T00:00:00.000Z",
+    cancelledAt: "2026-11-10T00:00:00.000Z",
+  };
+  const result = getSubscriptionStatusText(record);
+  assert.ok(result.text.includes("تم إلغاء الاشتراك في"));
+  assert.equal(result.date, record.cancelledAt);
+});
+
+test("not started subscription status text uses the future startDate", () => {
+  const record = {
+    status: "نشط",
+    startDate: "2027-01-01T00:00:00.000Z",
+    endDate: "2027-03-01T00:00:00.000Z",
+  };
+  const result = getSubscriptionStatusText(record);
+  assert.ok(result.text.includes("يبدأ الاشتراك في"));
+  assert.equal(result.date, record.startDate);
 });

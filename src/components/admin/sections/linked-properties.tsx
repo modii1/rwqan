@@ -501,7 +501,7 @@ export default function LinkedPropertiesSection() {
 
       {/* Property Details Dialog */}
       <Dialog open={!!selectedProperty} onOpenChange={() => setSelectedProperty(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto lg:w-[calc(100%-2rem)] lg:max-w-5xl lg:p-8 2xl:max-w-6xl" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <LinkIcon className="w-5 h-5 text-primary" />
@@ -597,7 +597,7 @@ export default function LinkedPropertiesSection() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editingProperty} onOpenChange={() => setEditingProperty(null)}>
-        <DialogContent className="max-w-lg" dir="rtl">
+        <DialogContent className="max-w-lg lg:w-[calc(100%-2rem)] lg:max-w-3xl" dir="rtl">
           <DialogHeader>
             <DialogTitle>تعديل العقار المضاف</DialogTitle>
             <DialogDescription>
@@ -658,7 +658,7 @@ export default function LinkedPropertiesSection() {
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-red-600 flex items-center gap-2">
               <AlertCircle className="w-5 h-5" />
@@ -688,7 +688,7 @@ export default function LinkedPropertiesSection() {
 
       {/* Unlink Confirmation */}
       <Dialog open={!!unlinkConfirm} onOpenChange={() => setUnlinkConfirm(null)}>
-        <DialogContent dir="rtl">
+        <DialogContent dir="rtl" className="lg:max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-amber-600 flex items-center gap-2">
               <Unlink className="w-5 h-5" />
@@ -719,7 +719,7 @@ export default function LinkedPropertiesSection() {
 
       {/* Create Group Dialog */}
       <Dialog open={showCreateGroup} onOpenChange={setShowCreateGroup}>
-        <DialogContent className="max-w-lg" dir="rtl">
+        <DialogContent className="max-w-lg lg:w-[calc(100%-2rem)] lg:max-w-3xl" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="w-5 h-5 text-primary" />

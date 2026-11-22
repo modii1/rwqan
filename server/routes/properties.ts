@@ -323,7 +323,7 @@ router.get("/api/properties/:id/seo", async (req, res) => {
 // Packages (public)
 router.get("/api/packages", async (req, res) => {
   try {
-    const packages = await subscriptionService.getPackages();
+    const packages = await subscriptionService.getPackagesForAudience("public");
     res.json(packages);
   } catch (err: any) {
     console.error("Get packages error:", err?.message);

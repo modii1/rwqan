@@ -10,8 +10,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Bell, BellOff, Save, Loader2, MessageCircle, Home, CreditCard, Receipt, Edit, DollarSign, Smartphone, ShieldCheck, Clock } from "lucide-react";
+import { Bell, BellOff, Save, Loader2, MessageCircle, Home, CreditCard, Receipt, Edit, DollarSign, Smartphone, ShieldCheck, Clock, Type, RotateCcw, Check } from "lucide-react";
 import type { NotificationSettings } from "@shared/schema";
+import {
+  DEFAULT_PLATFORM_FONT_ID,
+  PLATFORM_FONTS,
+  getPlatformFontFamilyStack,
+  getPlatformFontOption,
+  normalizePlatformFontId,
+  type PlatformFontId,
+} from "@shared/platformFonts";
 import {
   DEFAULT_OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATES,
   OWNER_SUBSCRIPTION_WHATSAPP_TEMPLATE_PLACEHOLDERS,
@@ -183,6 +191,8 @@ export function WhatsAppNotificationSettings() {
 
   return (
     <div className="min-w-0 max-w-full space-y-6" dir="rtl">
+      <PlatformFontSettings />
+
       <Card className="min-w-0 overflow-hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -584,6 +594,212 @@ export function WhatsAppNotificationSettings() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+interface PlatformFontResponse {
+  fontId: string;
+  font: { id: string; label: string; family: string; note: string };
+  defaultFontId: string;
+}
+
+function PlatformFontSettings() {
+  const { toast } = useToast();
+  const {
+    data: fontSettings,
+    isLoading: fontLoading,
+    isError: fontError,
+    refetch: refetchFont,
+  } = useQuery<PlatformFontResponse>({
+    queryKey: ["/api/admin/settings/font"],
+  });
+
+  const savedFontId = normalizePlatformFontId(fontSettings?.fontId);
+  const [selectedFontId, setSelectedFontId] =
+    useState<PlatformFontId>(savedFontId);
+
+  useEffect(() => {
+    setSelectedFontId(savedFontId);
+  }, [savedFontId]);
+
+  const selectedFont = getPlatformFontOption(selectedFontId);
+  const savedFont = getPlatformFontOption(savedFontId);
+  const isDirty = selectedFontId !== savedFontId;
+
+  const saveMutation = useMutation({
+    mutationFn: async (fontId: PlatformFontId) =>
+      apiRequest("PUT", "/api/admin/settings/font", { fontId }),
+    onSuccess: (_response, fontId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/font"] });
+      toast({
+        title: "تم حفظ الخط",
+        description: `تم تطبيق ${getPlatformFontOption(fontId).label} على صفحات العملاء.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "خطأ",
+        description: "تعذّر حفظ إعداد الخط. حاول مرة أخرى.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Card className="min-w-0 overflow-hidden" data-testid="platform-font-settings">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Type className="h-5 w-5 text-[#80621d]" />
+          إعدادات الخطوط
+        </CardTitle>
+        <CardDescription>
+          خط واحد مركزي يُطبّق على جميع صفحات العملاء، مع بقاء لوحة الأدمن على خط Cairo.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {fontLoading ? (
+          <div className="flex items-center justify-center rounded-xl border bg-muted/40 py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        ) : fontError ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <p className="text-sm font-semibold text-destructive">
+              تعذّر تحميل إعداد الخط.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => void refetchFont()}
+            >
+              إعادة المحاولة
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-4 py-3">
+              <span className="text-sm font-semibold">الخط الحالي للعملاء:</span>
+              <span
+                className="rounded-full border border-[#d8c9aa] bg-[#fffdfa] px-3 py-1 text-sm font-bold text-[#29372F]"
+                style={{ fontFamily: getPlatformFontFamilyStack(savedFontId) }}
+                data-testid="platform-font-current"
+              >
+                {savedFont.label}
+              </span>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-semibold">اختر خط المنصة</p>
+              <div
+                className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                role="radiogroup"
+                aria-label="اختر خط المنصة"
+              >
+                {PLATFORM_FONTS.map((font) => {
+                  const isSelected = font.id === selectedFontId;
+                  return (
+                    <button
+                      key={font.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      onClick={() => setSelectedFontId(font.id)}
+                      data-testid={`platform-font-option-${font.id}`}
+                      className={`flex min-w-0 items-center justify-between gap-3 rounded-xl border-2 px-4 py-3 text-right transition ${
+                        isSelected
+                          ? "border-[#80621d] bg-[#faf5e8] shadow-sm"
+                          : "border-[#e6ddc9] bg-white hover:border-[#cbb98d]"
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span
+                          className="block truncate text-base font-bold text-[#293129]"
+                          style={{ fontFamily: getPlatformFontFamilyStack(font.id) }}
+                        >
+                          {font.label}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-[#6f685b]">
+                          {font.note}
+                        </span>
+                      </span>
+                      <span
+                        className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border ${
+                          isSelected
+                            ? "border-[#80621d] bg-[#80621d] text-white"
+                            : "border-[#d8c9aa] bg-white"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        {isSelected && <Check className="h-3 w-3" />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold">معاينة مباشرة</p>
+                <p className="text-xs text-muted-foreground">
+                  معاينة بالخط المحدد قبل الحفظ: {selectedFont.label}
+                </p>
+              </div>
+              <div
+                dir="rtl"
+                data-testid="platform-font-preview"
+                className="rounded-xl border border-[#d8c9aa] bg-[#faf7ef] p-4 sm:p-5"
+                style={{ fontFamily: getPlatformFontFamilyStack(selectedFontId) }}
+              >
+                <p className="text-lg font-bold text-[#29372F] sm:text-xl">
+                  روقـان | نُـزل ورفـاهية
+                </p>
+                <p className="mt-2 text-sm leading-7 text-[#4a3b2a]">
+                  اشترك الآن، أدر عقارك، وتابع طلبات الحجز بسهولة من مكان واحد.
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[#6f685b]">
+                  الأسعار: 150 ر.س — 135 ر.س | الأرقام: 1234567890
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-6 text-muted-foreground">
+                يُطبّق الخط على الصفحات العامة وصفحات المالك والنماذج والنوافذ والأزرار والجداول والرسائل،
+                دون تغيير الأحجام أو الأوزان أو الألوان.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => saveMutation.mutate(DEFAULT_PLATFORM_FONT_ID)}
+                  disabled={saveMutation.isPending || savedFontId === DEFAULT_PLATFORM_FONT_ID}
+                  data-testid="platform-font-reset"
+                >
+                  <RotateCcw className="ml-2 h-4 w-4" />
+                  استعادة الخط الافتراضي
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => saveMutation.mutate(selectedFontId)}
+                  disabled={saveMutation.isPending || !isDirty}
+                  className="bg-[#80621d] text-white hover:bg-[#6f5317]"
+                  data-testid="platform-font-save"
+                >
+                  {saveMutation.isPending ? (
+                    <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="ml-2 h-4 w-4" />
+                  )}
+                  حفظ الخط
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

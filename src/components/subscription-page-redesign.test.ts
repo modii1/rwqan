@@ -7,7 +7,7 @@ const source = readFileSync(
   "utf8",
 );
 
-test("owner signup retains its three steps and all existing account fields", () => {
+test("public signup keeps three independent steps: package, property data, payment", () => {
   for (const copy of [
     "اختيار الباقة",
     "بيانات العقار",
@@ -22,11 +22,18 @@ test("owner signup retains its three steps and all existing account fields", () 
     "مبيت",
     "إجازات",
   ]) {
-    assert.ok(source.includes(copy), `missing owner signup copy: ${copy}`);
+    assert.ok(source.includes(copy), `missing public signup copy: ${copy}`);
   }
   assert.match(source, /aria-current=\{currentStep === 1 \? "step" : undefined\}/);
   assert.match(source, /aria-current=\{currentStep === 2 \? "step" : undefined\}/);
   assert.match(source, /aria-current=\{currentStep === 3 \? "step" : undefined\}/);
+  assert.match(source, /currentStep === 3 && selectedPackageId/);
+  assert.ok(
+    !source.includes("بيانات العقار والدفع"),
+    "the property and payment steps must stay independent",
+  );
+  assert.match(source, /id="payment-section"/);
+  assert.match(source, /data-testid=\{`public-select-package-\$\{pkg\.id\}`\}/);
 });
 
 test("owner signup keeps both payment methods as keyboard-accessible choices", () => {
