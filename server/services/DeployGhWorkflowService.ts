@@ -1,5 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  TEST_PUBLISH_APPROVED_OLD_SHA,
+  testPublishBranch,
+} from "../config/testPublishSources";
 
 /**
  * RWQAN DEPLOY — TEST & LIVE publish delegation to GitHub Actions (dispatch).
@@ -59,6 +63,15 @@ export interface GhWorkflowDispatchRequest {
   commit: string;
   /** Server working directory for the read-only `git ls-remote` probe. */
   cwd: string;
+  /** Optional branch override: when set, dispatches on this branch instead of
+   * the default TEST branch. Used for OLD→main publishing. The caller must
+   * have already validated source/branch match. */
+  branch?: string;
+  /** Selected TEST source (OLD/NEW); sent to the workflow as `inputs.source`. */
+  source?: "OLD" | "NEW";
+  /** Exact full SHA approved by the admin; sent as `inputs.expected_sha` and
+   * re-verified against the remote tip before dispatch. */
+  expectedSha?: string;
 }
 
 /** Input of the LIVE workflow dispatch delegation. */
@@ -222,6 +235,25 @@ function resolveGhConfig(
       return { invalid: keys.workflowFile };
     }
   }
+
+  // HARD SEPARATION: LIVE has one fixed destination. No environment override
+  // may point it at TEST, another repository, another branch, or the TEST
+  // workflow. The remote used for the read-only tip probe must likewise be the
+  // official production remote (`mine` → modii1/rwqan), never the legacy origin.
+  if (environment === "LIVE") {
+    if (repository !== DEPLOY_GH_LIVE_REPOSITORY) {
+      return { invalid: keys.repository };
+    }
+    if (branch !== DEPLOY_GH_LIVE_BRANCH) {
+      return { invalid: keys.branch };
+    }
+    if (workflowFile !== DEPLOY_GH_LIVE_WORKFLOW_FILE) {
+      return { invalid: keys.workflowFile };
+    }
+    if (remoteName !== DEPLOY_GH_LIVE_REMOTE_NAME) {
+      return { invalid: keys.remoteName };
+    }
+  }
   return { repository, branch, workflowFile, remoteName };
 }
 
@@ -306,6 +338,40 @@ async function readRemoteTipViaApi(
     return { tip: sha, status: 200 };
   } catch {
     return { tip: null, status: null };
+  }
+}
+
+/**
+ * READ-ONLY ancestry check: is `ancestor` part of `descendant`'s history?
+ * Uses GitHub's compare endpoint (`base...head`). Returns TRUE for `ahead` and
+ * `identical`, FALSE for `behind`/`diverged`, and NULL when it cannot be
+ * proven (the caller must fail closed).
+ */
+async function compareAncestryViaApi(
+  input: {
+    repository: string;
+    ancestor: string;
+    descendant: string;
+    token: string;
+  },
+  fetchImpl: typeof fetch,
+): Promise<boolean | null> {
+  try {
+    const response = await fetchImpl(
+      `${GH_API_BASE}/repos/${input.repository}/compare/${input.ancestor}...${input.descendant}`,
+      {
+        method: "GET",
+        headers: githubHeaders(input.token || null),
+        signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status !== 200) return null;
+    const body = (await response.json()) as { status?: unknown };
+    if (body.status === "ahead" || body.status === "identical") return true;
+    if (body.status === "behind" || body.status === "diverged") return false;
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -596,6 +662,8 @@ async function postDispatch(
   dispatchDetail: string,
   commit: string,
   fetchImpl: typeof fetch,
+  /** Only TEST workflows define inputs; LIVE must receive `{ref}` only. */
+  inputs?: Record<string, string>,
 ): Promise<GhWorkflowDispatchResult> {
   const actionsUrl = `https://github.com/${config.repository}/actions/workflows/${config.workflowFile}`;
   const url = `${GH_API_BASE}/repos/${config.repository}/actions/workflows/${config.workflowFile}/dispatches`;
@@ -610,7 +678,10 @@ async function postDispatch(
         "Content-Type": "application/json",
         "User-Agent": "rwqan-deploy-bar",
       },
-      body: JSON.stringify({ ref: config.branch }),
+      body: JSON.stringify({
+        ref: config.branch,
+        ...(inputs ? { inputs } : {}),
+      }),
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
     });
   } catch {
@@ -661,12 +732,84 @@ export async function dispatchTestDeployWorkflow(
   fetchImpl: typeof fetch = fetch,
   readTipImpl: typeof readRemoteBranchHead = readRemoteBranchHead,
 ): Promise<GhWorkflowDispatchResult> {
-  const config = resolveGhConfig("TEST", environment);
-  if ("invalid" in config) {
+  // Branch override: when the caller requests OLD (main), dispatch on main;
+  // otherwise use the configured TEST branch (test/unified-gateway-ui-only).
+  const effectiveBranch = request.branch ?? DEPLOY_GH_TEST_BRANCH;
+
+  // Build an effective config with the possibly-overridden branch. The
+  // repository and workflow file stay the same for TEST; only the branch changes.
+  const config: ResolvedGhEnvConfig = {
+    repository: DEPLOY_GH_TEST_REPOSITORY,
+    branch: effectiveBranch,
+    workflowFile: DEPLOY_GH_TEST_WORKFLOW_FILE,
+    remoteName: DEPLOY_GH_TEST_REMOTE_NAME,
+  };
+
+  // Validate the effective config against safety patterns.
+  if (!GH_SANE_REPOSITORY_PATTERN.test(config.repository)) {
     return {
       kind: "blocked",
       stage: "target",
-      reason: `إعداد GitHub المطلوب غير متوفر: قيمة ${config.invalid} غير صالحة. التصحيح يتطلب تعديل إعدادات البيئة يدويًا.`,
+      reason: "إعداد GitHub المطلوب غير متوفر: قيمة المستودع غير صالحة.",
+    };
+  }
+  if (!GH_SANE_BRANCH_PATTERN.test(config.branch) || config.branch.includes("..")) {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "إعداد GitHub المطلوب غير متوفر: قيمة الفرع غير صالحة.",
+    };
+  }
+  if (!GH_SANE_WORKFLOW_PATTERN.test(config.workflowFile)) {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "إعداد GitHub المطلوب غير متوفر: قيمة ملف workflow غير صالحة.",
+    };
+  }
+  if (!GH_SANE_REMOTE_PATTERN.test(config.remoteName)) {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "إعداد GitHub المطلوب غير متوفر: قيمة اسم remote غير صالحة.",
+    };
+  }
+  // HARD SEPARATION: TEST can only be dispatched on main (OLD) or
+  // test/unified-gateway-ui-only (NEW). Any other branch — including master or
+  // any feature branch — is refused, even through a branch override.
+  if (config.branch !== "main" && config.branch !== "test/unified-gateway-ui-only") {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "الفرع المطلوب غير مصرح به للنشر إلى TEST. الفروع المصرح بها: main أو test/unified-gateway-ui-only فقط.",
+    };
+  }
+  // The requested source must match the requested branch. This is enforced
+  // again inside the workflow, so a mismatched pair can never deploy.
+  if (config.branch === "main" && request.source !== "OLD") {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "الفرع main مخصص لمصدر OLD فقط — رُفض الطلب.",
+    };
+  }
+  if (
+    config.branch === "test/unified-gateway-ui-only" &&
+    request.source !== "NEW"
+  ) {
+    return {
+      kind: "blocked",
+      stage: "target",
+      reason: "الفرع test/unified-gateway-ui-only مخصص لمصدر NEW فقط — رُفض الطلب.",
+    };
+  }
+  // The approved SHA is mandatory and must be a full 40-hex commit.
+  const expectedSha = (request.expectedSha ?? request.commit).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(expectedSha)) {
+    return {
+      kind: "blocked",
+      stage: "source",
+      reason: "SHA المعتمد مفقود أو غير صالح — يجب تمرير SHA كامل (40 خانة).",
     };
   }
 
@@ -718,14 +861,53 @@ export async function dispatchTestDeployWorkflow(
     }
     remoteTip = apiTip.tip;
   }
-  if (remoteTip !== request.commit.toLowerCase()) {
-    return {
-      kind: "blocked",
-      stage: "source",
-      reason:
-        `tip الفرع ${config.branch} على ${config.repository} لا يطابق الـcommit المعتمد ` +
-        `(${remoteTip.slice(0, 7)} ≠ ${request.commit.slice(0, 7)}) — رُفض الطلب حفاظًا عليه من نشر commit غير معتمد.`,
-    };
+  if (remoteTip !== expectedSha) {
+    // OLD is allowed to lag behind main: main also carries the workflow
+    // definition commit, which is NOT application code. The approved app SHA
+    // must still be part of main's history. NEW keeps the strict tip equality.
+    if (request.source !== "OLD") {
+      return {
+        kind: "blocked",
+        stage: "source",
+        reason:
+          `tip الفرع ${config.branch} على ${config.repository} لا يطابق الـSHA المعتمد ` +
+          `(${remoteTip.slice(0, 7)} ≠ ${expectedSha.slice(0, 7)}) — رُفض الطلب حفاظًا عليه من نشر commit غير معتمد.`,
+      };
+    }
+    if (expectedSha !== TEST_PUBLISH_APPROVED_OLD_SHA) {
+      return {
+        kind: "blocked",
+        stage: "source",
+        reason: `SHA OLD غير مطابق للمعتمد (${TEST_PUBLISH_APPROVED_OLD_SHA.slice(0, 7)}) — رُفض الطلب.`,
+      };
+    }
+    const ancestry = await compareAncestryViaApi(
+      {
+        repository: config.repository,
+        ancestor: expectedSha,
+        descendant: remoteTip,
+        token,
+      },
+      fetchImpl,
+    );
+    if (ancestry === false) {
+      return {
+        kind: "blocked",
+        stage: "source",
+        reason:
+          `SHA التطبيق المعتمد ${expectedSha.slice(0, 7)} ليس ضمن تاريخ الفرع ${config.branch} ` +
+          `(tip ${remoteTip.slice(0, 7)}) — رُفض الطلب حفاظًا عليه من نشر commit غير معتمد.`,
+      };
+    }
+    if (ancestry === null) {
+      return {
+        kind: "blocked",
+        stage: "source",
+        reason:
+          "تعذّر التحقق من أن SHA التطبيق المعتمد ينتمي إلى الفرع (استعلام قراءة فقط) — " +
+          "رُفض الطلب بدلًا من افتراض صحته.",
+      };
+    }
   }
 
   // Duplicate-rollout prevention: refuse when this environment's workflow is
@@ -744,10 +926,17 @@ export async function dispatchTestDeployWorkflow(
   return postDispatch(
     config,
     token,
-    `أُرسل طلب النشر إلى GitHub (workflow_dispatch على ${config.workflowFile} للفرع ${config.branch}).` +
-      " سيُنشأ الـRollout من الفرع البعيد ويُدار من GitHub Actions — هذا الطلب لا يثبت نجاح النشر نفسه.",
-    remoteTip,
+    `أُرسل طلب النشر إلى GitHub (workflow_dispatch على ${config.workflowFile} للفرع ${config.branch})` +
+      ` للمصدر ${request.source ?? ""} والـSHA ${expectedSha.slice(0, 7)}.` +
+      " سيُنشأ الـRollout من الـSHA المعتمد ويُدار من GitHub Actions — هذا الطلب لا يثبت نجاح النشر نفسه.",
+    // The recorded source is the APPROVED application SHA — not the branch tip.
+    // For OLD, the tip may be a newer workflow-definition commit.
+    expectedSha,
     fetchImpl,
+    {
+      source: request.source ?? "",
+      expected_sha: expectedSha,
+    },
   );
 }
 
@@ -912,4 +1101,383 @@ export async function readDeployWorkflowRunStatus(
     anonymousStatusCache.set(cacheKey, { value: status, readAtMs: Date.now() });
   }
   return status;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* TEST source snapshot (read-only preview used by the deploy bar)      */
+/* ------------------------------------------------------------------ */
+
+export interface TestSourceSnapshot {
+  source: "OLD" | "NEW";
+  branch: string;
+  /** The SHA that will actually be deployed (OLD = approved app SHA; NEW = tip). */
+  sha: string | null;
+  shortSha: string | null;
+  /** Current branch tip (may be newer than `sha` for OLD). */
+  branchTipSha: string | null;
+  committedAt: string | null;
+  subject: string | null;
+  design: "old" | "new" | "unknown";
+  markers: Record<string, boolean | null>;
+  available: boolean;
+  /** OLD only: the approved application SHA. */
+  approvedSha?: string;
+  /** OLD only: TRUE when the approved SHA is part of the branch history. */
+  matchesApproved?: boolean;
+  reason?: string;
+}
+
+/**
+ * Files that exist ONLY in the NEW redesign. Their presence/absence in a
+ * commit tree is a deterministic, non-secret fingerprint of the design.
+ */
+const NEW_DESIGN_MARKERS = [
+  "src/components/feature-icon.tsx",
+  "shared/platformFonts.ts",
+  "shared/packageIcons.ts",
+  "src/components/owner/owner-ui.tsx",
+] as const;
+
+async function readLocalGit(
+  cwd: string,
+  args: string[],
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
+      timeout: 15_000,
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return (stdout ?? "").trim();
+  } catch {
+    return null;
+  }
+}
+
+async function readLocalCommitMeta(
+  cwd: string,
+  sha: string,
+): Promise<{ committedAt: string; subject: string } | null> {
+  const exists = await readLocalGit(cwd, ["cat-file", "-e", sha + "^{commit}"]);
+  if (exists === null) return null;
+  const out = await readLocalGit(cwd, [
+    "log",
+    "-1",
+    "--format=%cI%n%s",
+    sha,
+  ]);
+  if (!out) return null;
+  const [committedAt, ...rest] = out.split("\n");
+  return {
+    committedAt: committedAt || "",
+    subject: rest.join(" ").trim(),
+  };
+}
+
+async function readLocalMarkers(
+  cwd: string,
+  sha: string,
+): Promise<Record<string, boolean> | null> {
+  const out = await readLocalGit(cwd, [
+    "ls-tree",
+    "-r",
+    "--name-only",
+    sha,
+  ]);
+  if (out === null) return null;
+  const paths = new Set(out.split(/\r?\n/));
+  const markers: Record<string, boolean> = {};
+  for (const marker of NEW_DESIGN_MARKERS) {
+    markers[marker] = paths.has(marker);
+  }
+  return markers;
+}
+
+async function readLocalAncestry(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean | null> {
+  const hasDescendant = await readLocalGit(cwd, [
+    "cat-file",
+    "-e",
+    descendant + "^{commit}",
+  ]);
+  if (hasDescendant === null) return null;
+  const hasAncestor = await readLocalGit(cwd, [
+    "cat-file",
+    "-e",
+    ancestor + "^{commit}",
+  ]);
+  if (hasAncestor === null) return null;
+  try {
+    await execFileAsync(
+      "git",
+      ["-C", cwd, "merge-base", "--is-ancestor", ancestor, descendant],
+      { timeout: 15_000, windowsHide: true },
+    );
+    return true;
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === 1) return false;
+    return null;
+  }
+}
+
+async function isAncestorOnBranch(
+  cwd: string,
+  repository: string,
+  ancestor: string,
+  descendant: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<boolean | null> {
+  if (ancestor === descendant) return true;
+  const local = await readLocalAncestry(cwd, ancestor, descendant);
+  if (local !== null) return local;
+  return compareAncestryViaApi(
+    { repository, ancestor, descendant, token },
+    fetchImpl,
+  );
+}
+
+async function readApiCommitMeta(
+  repository: string,
+  sha: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<{ committedAt: string; subject: string } | null> {
+  try {
+    const response = await fetchImpl(
+      GH_API_BASE + "/repos/" + repository + "/commits/" + sha,
+      {
+        method: "GET",
+        headers: githubHeaders(token || null),
+        signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status !== 200) return null;
+    const body = (await response.json()) as {
+      commit?: { author?: { date?: unknown }; message?: unknown };
+    };
+    const date =
+      typeof body?.commit?.author?.date === "string"
+        ? body.commit.author.date
+        : "";
+    const message =
+      typeof body?.commit?.message === "string" ? body.commit.message : "";
+    return {
+      committedAt: date,
+      subject: message.split(/\r?\n/)[0].trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readApiMarker(
+  repository: string,
+  path: string,
+  sha: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<boolean | null> {
+  try {
+    const response = await fetchImpl(
+      GH_API_BASE +
+        "/repos/" +
+        repository +
+        "/contents/" +
+        path +
+        "?ref=" +
+        encodeURIComponent(sha),
+      {
+        method: "GET",
+        headers: githubHeaders(token || null),
+        signal: AbortSignal.timeout(API_READ_TIMEOUT_MS),
+      },
+    );
+    if (response.status === 200) return true;
+    if (response.status === 404) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function readCommitFingerprint(
+  cwd: string,
+  repository: string,
+  sha: string,
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<{
+  meta: { committedAt: string; subject: string } | null;
+  markers: Record<string, boolean | null>;
+  design: "old" | "new" | "unknown";
+}> {
+  const emptyMarkers: Record<string, boolean | null> = {};
+  for (const marker of NEW_DESIGN_MARKERS) emptyMarkers[marker] = null;
+
+  let meta = await readLocalCommitMeta(cwd, sha);
+  if (!meta) {
+    meta = await readApiCommitMeta(repository, sha, token, fetchImpl);
+  }
+
+  const localMarkers = await readLocalMarkers(cwd, sha);
+  let markers: Record<string, boolean | null> = emptyMarkers;
+  if (localMarkers) {
+    markers = { ...localMarkers };
+  } else {
+    const results = await Promise.all(
+      NEW_DESIGN_MARKERS.map((marker) =>
+        readApiMarker(repository, marker, sha, token, fetchImpl),
+      ),
+    );
+    const next: Record<string, boolean | null> = {};
+    NEW_DESIGN_MARKERS.forEach((marker, index) => {
+      next[marker] = results[index];
+    });
+    markers = next;
+  }
+
+  const values = Object.values(markers);
+  const unresolved = values.some((value) => value === null);
+  const present = values.filter((value) => value === true).length;
+  const design: "old" | "new" | "unknown" = unresolved
+    ? "unknown"
+    : present === 0
+      ? "old"
+      : present >= 2
+        ? "new"
+        : "unknown";
+
+  return { meta, markers, design };
+}
+
+/**
+ * Read-only snapshot of one TEST source.
+ *
+ * - NEW: 'sha' is the branch tip (the approved NEW SHA at preview time).
+ * - OLD: 'sha' is ALWAYS the pinned application SHA; 'branchTipSha' exposes the
+ *   current main tip, which may be newer because it also contains the workflow
+ *   definition commit. 'matchesApproved' proves the pinned SHA is on main.
+ *
+ * Never writes, never trusts a local HEAD, and never returns secrets.
+ */
+export async function readTestSourceSnapshot(
+  source: "OLD" | "NEW",
+  environment: Record<string, string | undefined> = process.env,
+  fetchImpl: typeof fetch = fetch,
+  readTipImpl: typeof readRemoteBranchHead = readRemoteBranchHead,
+  cwd: string = process.cwd(),
+): Promise<TestSourceSnapshot> {
+  const branch = testPublishBranch(source);
+  const repository = DEPLOY_GH_TEST_REPOSITORY;
+  const token = environment[DEPLOY_GH_TOKEN_ENV_KEY]?.trim() ?? "";
+
+  const tip = await readTipImpl({
+    cwd,
+    remoteName: DEPLOY_GH_TEST_REMOTE_NAME,
+    branch,
+  });
+  let branchTip = tip.tip;
+  if (!branchTip) {
+    const apiTip = await readRemoteTipViaApi(
+      { repository, branch, token },
+      fetchImpl,
+    );
+    branchTip = apiTip.tip;
+  }
+  if (!branchTip) {
+    return {
+      source,
+      branch,
+      sha: null,
+      shortSha: null,
+      branchTipSha: null,
+      committedAt: null,
+      subject: null,
+      design: "unknown",
+      markers: {},
+      available: false,
+      reason:
+        "تعذّر قراءة SHA الفرع من GitHub (استعلام قراءة فقط) — لن يُسمح بالنشر.",
+    };
+  }
+  const branchTipSha = branchTip.toLowerCase();
+
+  if (source === "NEW") {
+    const fingerprint = await readCommitFingerprint(
+      cwd,
+      repository,
+      branchTipSha,
+      token,
+      fetchImpl,
+    );
+    return {
+      source,
+      branch,
+      sha: branchTipSha,
+      shortSha: branchTipSha.slice(0, 7),
+      branchTipSha,
+      committedAt: fingerprint.meta?.committedAt ?? null,
+      subject: fingerprint.meta?.subject ?? null,
+      design: fingerprint.design,
+      markers: fingerprint.markers,
+      available: true,
+      ...(fingerprint.design === "unknown"
+        ? {
+            reason:
+              "تعذّر إثبات بصمة التصميم لهذا الـcommit — لن يُسمح بالنشر حتى تتضح.",
+          }
+        : {}),
+    };
+  }
+
+  // OLD: deploy the pinned application SHA, not the (possibly newer) main tip.
+  const appSha = TEST_PUBLISH_APPROVED_OLD_SHA;
+  const fingerprint = await readCommitFingerprint(
+    cwd,
+    repository,
+    appSha,
+    token,
+    fetchImpl,
+  );
+  const onBranch = await isAncestorOnBranch(
+    cwd,
+    repository,
+    appSha,
+    branchTipSha,
+    token,
+    fetchImpl,
+  );
+  const available = fingerprint.meta !== null;
+  let reason: string | undefined;
+  if (!available) {
+    reason = "تعذّر قراءة commit التطبيق المعتمد لـOLD — لن يُسمح بالنشر.";
+  } else if (onBranch === false) {
+    reason = `SHA التطبيق المعتمد ${appSha.slice(0, 7)} ليس ضمن تاريخ الفرع ${branch}.`;
+  } else if (onBranch === null) {
+    reason = `تعذّر التحقق من أن SHA التطبيق المعتمد ينتمي إلى ${branch}.`;
+  } else if (fingerprint.design !== "old") {
+    reason = `بصمة التصميم للـSHA المعتمد هي ${fingerprint.design} وليست التصميم القديم.`;
+  }
+
+  return {
+    source,
+    branch,
+    sha: appSha,
+    shortSha: appSha.slice(0, 7),
+    branchTipSha,
+    committedAt: fingerprint.meta?.committedAt ?? null,
+    subject: fingerprint.meta?.subject ?? null,
+    design: fingerprint.design,
+    markers: fingerprint.markers,
+    available,
+    approvedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+    matchesApproved: onBranch === true,
+    ...(reason ? { reason } : {}),
+  };
 }

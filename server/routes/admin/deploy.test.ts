@@ -1096,7 +1096,7 @@ test("the publish route forwards approval and the client-confirmed target to the
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "1.0.0", approve: true, target: "rwqan-sa-dev" }),
+      body: JSON.stringify({ version: "1.0.0", approve: true, target: "rwqan-sa-dev", source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 201);
     assert.equal(seen.approval, true);
@@ -1156,7 +1156,7 @@ test("a real publish that fails at a stage reports 502 with the stage and no rel
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "1.0.0", approve: true }),
+      body: JSON.stringify({ version: "1.0.0", approve: true, source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 502);
     const body = (await res.json()) as any;
@@ -1175,7 +1175,7 @@ test("a verified real publish is recorded with target, ref and post-deploy verif
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "1.0.0", approve: true }),
+      body: JSON.stringify({ version: "1.0.0", approve: true, source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 201);
     const body = (await res.json()) as any;
@@ -1196,7 +1196,7 @@ test("a real deploy with no explicit version carries a real (non-prototype) vers
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ approve: true }),
+      body: JSON.stringify({ approve: true, source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 201);
     const body = (await res.json()) as any;
@@ -1365,7 +1365,7 @@ test("a real publish whose post-deploy verification fails is never recorded as d
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "1.0.0", approve: true }),
+      body: JSON.stringify({ version: "1.0.0", approve: true, source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 502);
     const body = (await res.json()) as any;
@@ -1511,14 +1511,14 @@ test("a second concurrent publish is refused with 409 DEPLOY_PUBLISH_IN_PROGRESS
     const first = fetch(url, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ approve: true, version: "p1" }),
+      body: JSON.stringify({ approve: true, version: "p1", source: "NEW", expectedSha: FAKE_SHA }),
     });
     // The first request holds the single-flight lock while its executor pends.
     await new Promise((resolve) => setTimeout(resolve, 50));
     const second = await fetch(url, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ approve: true, version: "p2" }),
+      body: JSON.stringify({ approve: true, version: "p2", source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(second.status, 409);
     assert.equal(
@@ -1675,7 +1675,7 @@ test("a TEST publish is NOT gated by Firebase auth: it reaches the executor and 
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "gh-only-test", approve: true, environment: "TEST" }),
+      body: JSON.stringify({ version: "gh-only-test", approve: true, environment: "TEST", source: "NEW", expectedSha: FAKE_SHA }),
     });
     // The auth gate MUST NOT return 403 DEPLOY_AUTH_REQUIRED for TEST.
     assert.notEqual(res.status, 403);
@@ -1715,7 +1715,7 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "202-test", approve: true, environment: "TEST" }),
+      body: JSON.stringify({ version: "202-test", approve: true, environment: "TEST", source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.equal(res.status, 202);
     const body = await res.json();
@@ -1738,6 +1738,57 @@ test("a TEST publish accepted by GitHub returns 202 without a release record", a
   });
 });
 
+test("a TEST publish is refused without source, expected SHA, or with an unapproved OLD SHA", async () => {
+  const store = new InMemoryDeploySystemStore();
+  const app = buildApp(store);
+  await withServer(app, async (base) => {
+    const post = (body: Record<string, unknown>) =>
+      fetch(`${base}/api/admin/deploy/releases`, {
+        method: "POST",
+        headers: ADMIN_HEADERS,
+        body: JSON.stringify(body),
+      });
+
+    const missingSource = await post({ approve: true, environment: "TEST" });
+    assert.equal(missingSource.status, 400);
+    assert.equal(
+      ((await missingSource.json()) as { code: string }).code,
+      "DEPLOY_SOURCE_REQUIRED",
+    );
+
+    const missingSha = await post({
+      approve: true,
+      environment: "TEST",
+      source: "NEW",
+    });
+    assert.equal(missingSha.status, 400);
+    assert.equal(
+      ((await missingSha.json()) as { code: string }).code,
+      "DEPLOY_EXPECTED_SHA_REQUIRED",
+    );
+
+    const shortSha = await post({
+      approve: true,
+      environment: "TEST",
+      source: "NEW",
+      expectedSha: FAKE_SHA.slice(0, 7),
+    });
+    assert.equal(shortSha.status, 400);
+
+    const oldMismatch = await post({
+      approve: true,
+      environment: "TEST",
+      source: "OLD",
+      expectedSha: FAKE_SHA,
+    });
+    assert.equal(oldMismatch.status, 409);
+    assert.equal(
+      ((await oldMismatch.json()) as { code: string }).code,
+      "DEPLOY_OLD_SHA_MISMATCH",
+    );
+  });
+});
+
 test("a REAL secret-scan failure still blocks a TEST dispatch", async () => {
   const store = new InMemoryDeploySystemStore();
   let executorCalled = false;
@@ -1757,7 +1808,7 @@ test("a REAL secret-scan failure still blocks a TEST dispatch", async () => {
     const res = await fetch(`${base}/api/admin/deploy/releases`, {
       method: "POST",
       headers: ADMIN_HEADERS,
-      body: JSON.stringify({ version: "secret-fail", approve: true, environment: "TEST" }),
+      body: JSON.stringify({ version: "secret-fail", approve: true, environment: "TEST", source: "NEW", expectedSha: FAKE_SHA }),
     });
     assert.notEqual(res.status, 202);
     assert.equal(executorCalled, false, "a real secret finding must still stop the dispatch");

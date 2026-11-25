@@ -1,13 +1,16 @@
 # RWQAN TEST — Firebase App Hosting automatic rollout for the TEST backend.
 #
-# Purpose: a manual workflow_dispatch on the TEST branch creates a rollout on
-# the TEST backend (rwqan-backend @ europe-west4, project rwqan-757) using the
-# exact commit SHA of that branch.
+# Purpose: a manual workflow_dispatch on either the OLD (main) or NEW
+# (test/unified-gateway-ui-only) branch creates a rollout on the TEST backend
+# (rwqan-backend @ europe-west4, project rwqan-757) using the exact commit SHA
+# of the dispatched branch.
 #
 # Production safety (hard requirements, do not relax):
-#   - This workflow MUST ONLY ever run on the branch
-#     test/unified-gateway-ui-only. The `if:` guard on the job enforces this
-#     even for workflow_dispatch, so a manual run can never target another branch.
+#   - This workflow MUST ONLY ever run on branches main (OLD) or
+#     test/unified-gateway-ui-only (NEW). The `if:` guard enforces this even for
+#     workflow_dispatch, so a manual run can never target another branch.
+#   - The `source` input MUST match the dispatched branch: OLD→main,
+#     NEW→test/unified-gateway-ui-only. A mismatch aborts before any deploy.
 #   - LIVE stays on main / backend `rwqan` / firebase.json / apphosting.yaml —
 #     none of those are touched by this file.
 #
@@ -16,8 +19,11 @@
 #   Repository secrets:
 #     WIF_PROVIDER        projects/<proj-no>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
 #     WIF_SERVICE_ACCOUNT <sa-name>@<project>.iam.gserviceaccount.com
-#   The provider's attribute condition must restrict admission to
-#   repository "modii1/rwqan" + ref "refs/heads/test/unified-gateway-ui-only".
+#   IMPORTANT: The WIF provider's attribute condition must admit BOTH
+#     refs/heads/main AND refs/heads/test/unified-gateway-ui-only on repository
+#     "modii1/rwqan". If WIF is restricted to only test/unified-gateway-ui-only,
+#     dispatching on main (source=OLD) will fail with 403. This requires a
+#     manual WIF provider update — see the implementation report.
 #   The service account gets roles/firebaseapphosting.developer scoped to the
 #   TEST backend only (see setup instructions).
 #   firebase-tools resolves credentials from GOOGLE_APPLICATION_CREDENTIALS
@@ -33,6 +39,18 @@ name: Deploy TEST Rollout
 
 on:
   workflow_dispatch:
+    inputs:
+      source:
+        description: "مصدر النشر إلى TEST: OLD (القديم) أو NEW (الجديد)"
+        required: true
+        type: choice
+        options:
+          - OLD
+          - NEW
+      expected_sha:
+        description: "Full 40-hex commit SHA approved by the admin (must equal the dispatched tip)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -46,9 +64,9 @@ jobs:
   deploy-test:
     name: App Hosting TEST rollout
     runs-on: ubuntu-latest
-    # Hard guard: push triggers (and manual dispatches) on any other ref abort
-    # immediately, before any command runs.
-    if: github.ref == 'refs/heads/test/unified-gateway-ui-only'
+    # Hard guard: only main (OLD) and test/unified-gateway-ui-only (NEW) may run.
+    # Any other branch (including any LIVE-related ref) aborts immediately.
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test/unified-gateway-ui-only'
 
     steps:
       - name: Check WIF configuration
@@ -64,8 +82,63 @@ jobs:
             exit 1
           fi
 
-      - name: Check out repository
+      - name: Validate source/branch/SHA match
+        id: validate
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ inputs.source }}" != "OLD" ]; then
+            echo "::error::المصدر OLD يتطلب الفرع main، لكن عمليات الإرسال جرت على الفرع ${{ github.ref }}"
+            exit 1
+          fi
+          if [ "${{ github.ref }}" = "refs/heads/test/unified-gateway-ui-only" ] && [ "${{ inputs.source }}" != "NEW" ]; then
+            echo "::error::المصدر NEW يتطلب الفرع test/unified-gateway-ui-only، لكن عمليات الإرسال جرت على الفرع ${{ github.ref }}"
+            exit 1
+          fi
+          if ! echo "${{ inputs.expected_sha }}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::expected_sha يجب أن يكون SHA كاملًا (40 خانة سداسية)."
+            exit 1
+          fi
+          # OLD is pinned to the approved APPLICATION commit. The dispatched
+          # commit (github.sha) may be NEWER because it also contains this
+          # workflow file; that is expected and is verified by ancestry below.
+          if [ "${{ inputs.source }}" = "OLD" ] && [ "${{ inputs.expected_sha }}" != "15c60767c49b812f6f35e8c29245651cbd4fe3dd" ]; then
+            echo "::error::OLD expected_sha يجب أن يساوي SHA التطبيق المعتمد 15c60767c49b812f6f35e8c29245651cbd4fe3dd."
+            exit 1
+          fi
+          echo "source_valid=true" >> "$GITHUB_OUTPUT"
+          echo "=== Publishing ${{ inputs.source }} from ${{ github.ref }} at ${{ inputs.expected_sha }} ==="
+
+      # Check out the DISPATCHED branch with full history so the ancestry of
+      # the approved application SHA can be proven. This is NOT the build
+      # source; the next checkout is.
+      - name: Check out dispatched branch for verification
+        if: steps.validate.outputs.source_valid == 'true'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Verify approved application SHA belongs to the dispatched branch
+        if: steps.validate.outputs.source_valid == 'true'
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${{ inputs.expected_sha }}^{commit}" 2>/dev/null; then
+            echo "::error::expected_sha غير موجود في المستودع: ${{ inputs.expected_sha }}"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${{ inputs.expected_sha }}" "${{ github.sha }}"; then
+            echo "::error::SHA التطبيق المعتمد ${{ inputs.expected_sha }} ليس ضمن تاريخ الفرع ${{ github.ref }} (github.sha=${{ github.sha }}) — لن يُنشر commit غير معتمد."
+            exit 1
+          fi
+          echo "=== Verified ${{ inputs.expected_sha }} is part of ${{ github.ref }} (dispatch commit ${{ github.sha }}) ==="
+
+      # The BUILD source is exactly the approved application SHA — never the
+      # branch tip and never github.sha.
+      - name: Check out exact approved application SHA
+        if: steps.validate.outputs.source_valid == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
         if: steps.auth.outputs.mode == 'wif'
@@ -78,6 +151,7 @@ jobs:
           project_id: rwqan-757
 
       - name: Install Firebase CLI
+        if: steps.auth.outputs.mode == 'wif'
         # Pinned: >= 15.22.3 carries the fix for issue #10726 where older 15.x
         # replaced the real ADC/STS error with a misleading
         # "Failed to authenticate, have you run firebase login?" in CI.
@@ -102,6 +176,7 @@ jobs:
             --format="value(bindings.role,bindings.members[])" || true
 
       - name: Create App Hosting TEST rollout
+        if: steps.auth.outputs.mode == 'wif'
         # The renderer substitutes the exact SHA of the commit that triggered
         # this run — never a local archive without commit identity. Credentials
         # come from GOOGLE_APPLICATION_CREDENTIALS exported by the auth step.
@@ -111,5 +186,5 @@ jobs:
         # global firebase CLI options (project + config file).
         run: |
           firebase -P rwqan-757 -c firebase.dev.json apphosting:rollouts:create rwqan-backend \
-            --git-commit ${{ github.sha }} \
+            --git-commit ${{ inputs.expected_sha }} \
             --force

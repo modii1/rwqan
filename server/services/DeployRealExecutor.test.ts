@@ -29,6 +29,7 @@ import {
 } from "./DeployGhWorkflowService";
 import { resolveFirebaseCommand } from "./DeployToolsService";
 import { clearDeployAuth, __test_setDeployCredentials } from "./deployAuth";
+import { TEST_PUBLISH_APPROVED_OLD_SHA } from "./DeployExecutor";
 
 const COMMIT = "c".repeat(40);
 // Token-shaped fixtures are assembled at runtime so the repository secret
@@ -213,6 +214,8 @@ function testPublish(
     approval: true,
     worktree: "clean",
     environment: "TEST",
+    source: "NEW",
+    expectedSha: COMMIT.toLowerCase(),
     ...input,
   };
 }
@@ -951,32 +954,51 @@ test("a TEST publish never requires Firebase CLI auth even when a session id is 
   assertNoFirebaseCliCalls(calls, getProbeCalls());
 });
 
-test("a TEST publish dispatches the GitHub remote tip, not the local HEAD, when they differ", async () => {
-  const dispatches: Array<{ commit: string; cwd: string }> = [];
+test("a TEST publish uses the approved SHA, never the local HEAD", async () => {
+  const dispatches: Array<{ commit: string; cwd: string; expectedSha?: string }> = [];
   const { deps, calls, getProbeCalls } = fakeDeps({
     dispatch: async (request) => {
       dispatches.push(request);
-      return acceptedDispatch("b".repeat(40));
+      return acceptedDispatch(COMMIT.toLowerCase());
     },
-    // Remote tip differs from the local COMMIT used by testPublish()
-    readRemoteTip: async () => ({ tip: "b".repeat(40) }),
+    readRemoteTip: async () => ({ tip: COMMIT.toLowerCase() }),
   });
-  const outcome = await executor(deps).publish(testPublish());
+  // Local HEAD is a different commit; TEST must ignore it and use the approved
+  // remote SHA from the request.
+  const outcome = await executor(deps).publish(
+    testPublish({ gitCommit: "e".repeat(40) }),
+  );
 
   assert.equal(outcome.deployed, false);
   assert.equal(outcome.blocked, false);
   assert.equal(outcome.stage, null);
   assert.equal(dispatches.length, 1);
-  // The dispatch must carry the REMOTE tip, not the local COMMIT.
-  assert.equal(dispatches[0].commit, "b".repeat(40));
-  assert.notEqual(dispatches[0].commit, COMMIT);
-  // The recorded source is the remote tip GitHub actually builds.
-  assert.equal(outcome.ghDispatch?.commit, "b".repeat(40));
-  assert.equal(outcome.releaseRef, `${DEPLOY_DEV_BACKEND_ID}:bbbbbbb`);
+  assert.equal(dispatches[0].commit, COMMIT.toLowerCase());
+  assert.notEqual(dispatches[0].commit, "e".repeat(40));
+  assert.equal(dispatches[0].expectedSha, COMMIT.toLowerCase());
+  assert.equal(outcome.ghDispatch?.commit, COMMIT.toLowerCase());
+  assert.equal(outcome.releaseRef, `${DEPLOY_DEV_BACKEND_ID}:${COMMIT.slice(0, 7)}`);
   assert.equal(outcome.via, "github_actions");
 
   // HARD GUARANTEE: no Firebase CLI command ran for TEST.
   assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a TEST publish refuses when the branch moved after approval", async () => {
+  let dispatched = 0;
+  const { deps } = fakeDeps({
+    dispatch: async () => {
+      dispatched += 1;
+      return acceptedDispatch("b".repeat(40));
+    },
+    readRemoteTip: async () => ({ tip: "b".repeat(40) }),
+  });
+  // The admin approved COMMIT, but the remote tip is now bbbb. Refuse.
+  const outcome = await executor(deps).publish(testPublish());
+
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "source");
+  assert.equal(dispatched, 0);
 });
 
 test("a TEST publish works on a deployed runtime: no real-deploy opt-in, no local Git, unknown worktree", async () => {
@@ -1002,6 +1024,123 @@ test("a TEST publish works on a deployed runtime: no real-deploy opt-in, no loca
   assert.equal(dispatches.length, 1);
   assert.equal(dispatches[0].commit, COMMIT.toLowerCase());
   assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("an OLD publish dispatches main with the approved OLD SHA", async () => {
+  const dispatches: Array<{ commit: string; branch?: string; source?: string; expectedSha?: string }> = [];
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatch: async (request) => {
+      dispatches.push(request);
+      return {
+        kind: "accepted",
+        detail: "أُرسل طلب النشر إلى GitHub.",
+        branch: "main",
+        actionsUrl: GH_ACTIONS_URL,
+        commit: TEST_PUBLISH_APPROVED_OLD_SHA,
+      };
+    },
+    readRemoteTip: async () => ({ tip: TEST_PUBLISH_APPROVED_OLD_SHA }),
+  });
+  const outcome = await executor(deps).publish(
+    testPublish({
+      source: "OLD",
+      expectedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+      gitCommit: TEST_PUBLISH_APPROVED_OLD_SHA,
+    }),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.ghDispatch?.accepted, true);
+  assert.equal(outcome.ghDispatch?.ref, "main");
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].branch, "main");
+  assert.equal(dispatches[0].source, "OLD");
+  assert.equal(dispatches[0].expectedSha, TEST_PUBLISH_APPROVED_OLD_SHA);
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("an OLD publish with a non-approved SHA is refused before any dispatch", async () => {
+  let dispatched = 0;
+  const { deps, calls } = fakeDeps({
+    dispatch: async () => {
+      dispatched += 1;
+      return acceptedDispatch();
+    },
+  });
+  const outcome = await executor(deps).publish(
+    testPublish({ source: "OLD", expectedSha: "b".repeat(40) }),
+  );
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "source");
+  assert.equal(dispatched, 0);
+  assert.equal(calls.length, 0);
+});
+
+test("an OLD publish tolerates a newer main tip and still dispatches the approved app SHA", async () => {
+  const dispatches: Array<{ commit: string; branch?: string; source?: string; expectedSha?: string }> = [];
+  const { deps, calls, getProbeCalls } = fakeDeps({
+    dispatch: async (request) => {
+      dispatches.push(request);
+      return {
+        kind: "accepted",
+        detail: "أُرسل طلب النشر إلى GitHub.",
+        branch: "main",
+        actionsUrl: GH_ACTIONS_URL,
+        commit: TEST_PUBLISH_APPROVED_OLD_SHA,
+      };
+    },
+    // main also carries the workflow-definition commit → tip is newer.
+    readRemoteTip: async () => ({ tip: "c".repeat(40) }),
+  });
+  const outcome = await executor(deps).publish(
+    testPublish({
+      source: "OLD",
+      expectedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+      gitCommit: TEST_PUBLISH_APPROVED_OLD_SHA,
+    }),
+  );
+
+  assert.equal(outcome.blocked, false);
+  assert.equal(outcome.ghDispatch?.accepted, true);
+  assert.equal(outcome.ghDispatch?.ref, "main");
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].branch, "main");
+  assert.equal(dispatches[0].expectedSha, TEST_PUBLISH_APPROVED_OLD_SHA);
+  assert.equal(outcome.ghDispatch?.commit, TEST_PUBLISH_APPROVED_OLD_SHA);
+  assertNoFirebaseCliCalls(calls, getProbeCalls());
+});
+
+test("a TEST publish without expectedSha is refused before any dispatch", async () => {
+  let dispatched = 0;
+  const { deps } = fakeDeps({
+    dispatch: async () => {
+      dispatched += 1;
+      return acceptedDispatch();
+    },
+  });
+  const outcome = await executor(deps).publish(
+    testPublish({ expectedSha: null }),
+  );
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "source");
+  assert.equal(dispatched, 0);
+});
+
+test("a TEST publish with a SHA that differs from the branch tip is refused", async () => {
+  let dispatched = 0;
+  const { deps } = fakeDeps({
+    dispatch: async () => {
+      dispatched += 1;
+      return acceptedDispatch();
+    },
+    readRemoteTip: async () => ({ tip: COMMIT.toLowerCase() }),
+  });
+  const outcome = await executor(deps).publish(
+    testPublish({ expectedSha: "d".repeat(40) }),
+  );
+  assert.equal(outcome.blocked, true);
+  assert.equal(outcome.stage, "source");
+  assert.equal(dispatched, 0);
 });
 
 test("a TEST publish can never call the LIVE dispatcher", async () => {

@@ -43,6 +43,8 @@ import {
 } from "../../services/DeployGitHubService";
 import {
   createDeployExecutor,
+  isFullPublishSha,
+  TEST_PUBLISH_APPROVED_OLD_SHA,
   type DeployExecutor,
   type DeployPublishOutcome,
 } from "../../services/DeployExecutor";
@@ -68,7 +70,10 @@ import {
   type DeployWorktreeState,
 } from "../../../shared/deploySystem";
 import { readDeployToolsInfo } from "../../services/DeployToolsService";
-import { readDeployWorkflowRunStatus } from "../../services/DeployGhWorkflowService";
+import {
+  readDeployWorkflowRunStatus,
+  readTestSourceSnapshot,
+} from "../../services/DeployGhWorkflowService";
 import {
   resolveDeployGithubToken,
   DEPLOY_GITHUB_TOKEN_ENV_KEY,
@@ -309,6 +314,37 @@ export function createAdminDeployRouter(
       if (!handleStoreFailure(res, error)) {
         res.status(500).json({ code: "DEPLOY_STATE_FAILED", error: "تعذّر تحميل حالة النشر." });
       }
+    }
+  });
+
+  // Read-only TEST source preview: the remote tip + commit metadata + a
+  // deterministic design fingerprint for OLD (main) and NEW
+  // (test/unified-gateway-ui-only). Used by the deploy bar to show the EXACT
+  // SHA before the admin approves. No write, no deploy, no secrets.
+  router.get("/api/admin/deploy/test-sources", async (_req, res) => {
+    res.set("Cache-Control", "no-store, private");
+    try {
+      const githubEnv = await resolveStatusGithubEnv();
+      const [oldSnapshot, newSnapshot] = await Promise.all([
+        readTestSourceSnapshot("OLD", githubEnv, fetch, undefined, process.cwd()),
+        readTestSourceSnapshot("NEW", githubEnv, fetch, undefined, process.cwd()),
+      ]);
+      res.json({
+        approvedOldSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+        sources: {
+          OLD: {
+            ...oldSnapshot,
+            approvedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+            matchesApproved: oldSnapshot.matchesApproved === true,
+          },
+          NEW: newSnapshot,
+        },
+      });
+    } catch {
+      res.status(503).json({
+        code: "TEST_SOURCES_UNAVAILABLE",
+        error: "تعذّر قراءة مصادر النشر إلى TEST (استعلام قراءة فقط).",
+      });
     }
   });
 
@@ -871,6 +907,73 @@ export function createAdminDeployRouter(
         });
         return;
       }
+
+      // Extract and validate the TEST publish source + approved SHA.
+      // TEST requires both; LIVE ignores them and keeps its own fixed path.
+      const bodySource =
+        typeof body.source === "string" ? body.source.trim() : null;
+      const bodyExpectedSha =
+        typeof body.expectedSha === "string" ? body.expectedSha.trim() : null;
+      const approvalRequested =
+        body.approve === true || body.approval === true;
+      let publishSource: "OLD" | "NEW" | null = null;
+      let publishExpectedSha: string | null = null;
+
+      if (environment === "TEST" && approvalRequested) {
+        if (bodySource !== "OLD" && bodySource !== "NEW") {
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: "مصدر النشر إلى TEST مطلوب — يجب اختيار OLD أو NEW.",
+          });
+          res.status(400).json({
+            code: "DEPLOY_SOURCE_REQUIRED",
+            error: "مصدر النشر إلى TEST مطلوب — يجب اختيار OLD أو NEW.",
+          });
+          return;
+        }
+        if (!isFullPublishSha(bodyExpectedSha)) {
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: "SHA المعتمد مطلوب للنشر إلى TEST ويجب أن يكون SHA كاملًا.",
+          });
+          res.status(400).json({
+            code: "DEPLOY_EXPECTED_SHA_REQUIRED",
+            error: "SHA المعتمد مطلوب للنشر إلى TEST ويجب أن يكون SHA كاملًا (40 خانة).",
+          });
+          return;
+        }
+        publishExpectedSha = bodyExpectedSha.toLowerCase();
+        if (
+          bodySource === "OLD" &&
+          publishExpectedSha !== TEST_PUBLISH_APPROVED_OLD_SHA
+        ) {
+          await store.recordAudit({
+            action: "publish_failed",
+            environment,
+            result: "rejected",
+            reason: `SHA غير مطابق لـ OLD المعتمد (${TEST_PUBLISH_APPROVED_OLD_SHA.slice(0, 7)}).`,
+          });
+          res.status(409).json({
+            code: "DEPLOY_OLD_SHA_MISMATCH",
+            error: `SHA غير مطابق لنسخة OLD المعتمدة. المطلوب ${TEST_PUBLISH_APPROVED_OLD_SHA} — لن يُنشر commit آخر.`,
+          });
+          return;
+        }
+        publishSource = bodySource;
+      } else if (bodySource !== null) {
+        // LIVE ignores source/expectedSha by design; still reject nonsense.
+        if (bodySource !== "OLD" && bodySource !== "NEW") {
+          res.status(400).json({
+            code: "DEPLOY_INVALID_SOURCE",
+            error: "قيمة مصدر النشر غير صالحة — يُسمح بـ OLD أو NEW فقط.",
+          });
+          return;
+        }
+      }
       const context = await readGitContext();
       const report = await collectChecks();
       // Use the latest explicitly-run checks (real results + run times) where
@@ -984,6 +1087,8 @@ export function createAdminDeployRouter(
             requestedTarget,
             worktree: context.git?.worktree ?? "unknown",
             environment,
+            source: publishSource,
+            expectedSha: publishExpectedSha,
             sessionId,
             adminId,
           });

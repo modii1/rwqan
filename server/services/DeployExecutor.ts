@@ -40,6 +40,37 @@ export type DeployPublishStage =
   | "deploy"
   | "verify";
 
+/** Source of a TEST publish: OLD (main) or NEW (test/unified-gateway-ui-only). */
+export type DeployPublishSource = "OLD" | "NEW";
+
+/**
+ * The approved OLD application SHA and branch names live in a neutral config
+ * module so the workflow service can use them without an import cycle. This
+ * re-export keeps the existing public API of this module unchanged.
+ */
+import {
+  TEST_PUBLISH_APPROVED_OLD_SHA as APPROVED_OLD_SHA,
+  testPublishBranch,
+} from "../config/testPublishSources";
+export const TEST_PUBLISH_APPROVED_OLD_SHA = APPROVED_OLD_SHA;
+
+/** TRUE when a value is a full 40-hex Git SHA. */
+export function isFullPublishSha(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value.trim());
+}
+
+/** Map a TEST publish source to its canonical GitHub branch. */
+export function sourceToBranch(source: DeployPublishSource): string {
+  return testPublishBranch(source);
+}
+
+/** Map a GitHub branch ref to its TEST publish source. */
+export function branchToSource(branch: string): DeployPublishSource | null {
+  if (branch === "refs/heads/main") return "OLD";
+  if (branch === "refs/heads/test/unified-gateway-ui-only") return "NEW";
+  return null;
+}
+
 /** Result of asking the executor to publish. */
 export interface DeployPublishOutcome {
   /** TRUE only when a real deploy actually happened AND was verified. */
@@ -111,6 +142,13 @@ export interface DeployPublishInput {
   worktree?: "clean" | "dirty" | "unknown";
   /** Active deploy environment selecting the target (defaults to TEST). */
   environment?: DeployTargetEnvironment;
+  /** TEST publish source: OLD (main) or NEW (test/unified-gateway-ui-only).
+   * Required for TEST; ignored for LIVE. The server validates source/branch match. */
+  source?: DeployPublishSource | null;
+  /** The exact full SHA the admin approved for the selected source. For OLD it
+   * MUST equal TEST_PUBLISH_APPROVED_OLD_SHA and the remote main tip. Required
+   * for TEST; ignored for LIVE. */
+  expectedSha?: string | null;
   /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
   sessionId?: string;
   /** Admin id that owns the credentials, used to prevent cross-admin credential use. */

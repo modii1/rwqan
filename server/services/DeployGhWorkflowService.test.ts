@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TEST_PUBLISH_APPROVED_OLD_SHA } from "../config/testPublishSources";
 import {
   dispatchTestDeployWorkflow,
   dispatchLiveDeployWorkflow,
   DEPLOY_GH_TOKEN_ENV_KEY,
   DEPLOY_GH_LIVE_BRANCH_ENV_KEY,
-  DEPLOY_GH_TEST_BRANCH_ENV_KEY,
-  DEPLOY_GH_TEST_WORKFLOW_ENV_KEY,
   type GhWorkflowDispatchRequest,
   type GhLiveWorkflowDispatchRequest,
   readDeployWorkflowRunStatus,
+  readTestSourceSnapshot,
   resetDeployWorkflowStatusCache,
 } from "./DeployGhWorkflowService";
 
@@ -18,8 +18,16 @@ const OTHER_COMMIT = "b".repeat(40);
 const TOKEN = "ghs_test-token-value-000000000000000000000";
 const CWD = "/repo";
 
-function request(): GhWorkflowDispatchRequest {
-  return { commit: COMMIT, cwd: CWD };
+function request(
+  overrides: Partial<GhWorkflowDispatchRequest> = {},
+): GhWorkflowDispatchRequest {
+  return {
+    commit: COMMIT,
+    cwd: CWD,
+    source: "NEW",
+    expectedSha: COMMIT,
+    ...overrides,
+  };
 }
 
 function liveRequest(): GhLiveWorkflowDispatchRequest {
@@ -48,13 +56,10 @@ test("missing token fails closed at stage auth without any API call", async () =
   assert.match(reason, new RegExp(DEPLOY_GH_TOKEN_ENV_KEY));
 });
 
-test("invalid environment override refuses before token/API use", async () => {
+test("an unknown branch override is refused before token/API use", async () => {
   const result = await dispatchTestDeployWorkflow(
-    request(),
-    {
-      [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN,
-      [`${"DEPLOY_GITHUB_TEST_REPOSITORY"}`]: "bad repo name/with spaces",
-    },
+    request({ branch: "feature/unknown" }),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
     fetchThatMustNotRun,
     () => {
       throw new Error("readTip must not be called");
@@ -65,7 +70,7 @@ test("invalid environment override refuses before token/API use", async () => {
   assert.equal(result.kind === "blocked" ? result.stage : null, "target");
   assert.match(
     result.kind === "blocked" ? result.reason : "",
-    /DEPLOY_GITHUB_TEST_REPOSITORY/,
+    /غير مصرح/,
   );
 });
 
@@ -144,7 +149,7 @@ test("API fallback tip mismatch is refused and NO dispatch POST is ever sent", a
 
   assert.equal(result.kind, "blocked");
   assert.equal(result.kind === "blocked" ? result.stage : null, "source");
-  assert.match(result.kind === "blocked" ? result.reason : "", /لا يطابق الـcommit المعتمد/);
+  assert.match(result.kind === "blocked" ? result.reason : "", /لا يطابق الـSHA المعتمد/);
   assert.equal(calls.length, 1, "only the read-only GET may have run");
 });
 
@@ -163,7 +168,7 @@ test("API fallback 404 produces a clear 'branch missing' reason", async () => {
 
 test("remote tip different from the approved commit is refused", async () => {
   const result = await dispatchTestDeployWorkflow(
-    { commit: COMMIT, cwd: CWD },
+    request(),
     { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
     fetchThatMustNotRun,
     async () => ({ tip: OTHER_COMMIT.toLowerCase() }),
@@ -174,6 +179,130 @@ test("remote tip different from the approved commit is refused", async () => {
   const reason = result.kind === "blocked" ? result.reason : "";
   assert.match(reason, /bbbbbb/);
   assert.match(reason, /aaaaaa/);
+});
+
+test("OLD accepts a newer main tip when the approved app SHA is an ancestor", async () => {
+  const newerTip = "c".repeat(40);
+  const calls: Array<{ url: string; method: string }> = [];
+  const result = await dispatchTestDeployWorkflow(
+    request({
+      branch: "main",
+      source: "OLD",
+      commit: TEST_PUBLISH_APPROVED_OLD_SHA,
+      expectedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+    }),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url, init) => {
+      calls.push({ url: String(url), method: (init?.method ?? "GET").toUpperCase() });
+      const u = String(url);
+      if (u.includes("/compare/")) {
+        return { status: 200, json: async () => ({ status: "ahead" }) } as Response;
+      }
+      if (u.includes("/runs")) {
+        return { status: 200, json: async () => ({ workflow_runs: [] }) } as Response;
+      }
+      return { status: 204 } as Response;
+    },
+    async () => ({ tip: newerTip }),
+  );
+
+  assert.equal(result.kind, "accepted");
+  assert.equal(result.kind === "accepted" ? result.branch : null, "main");
+  // The recorded source is the approved APPLICATION SHA, not the newer tip.
+  assert.equal(
+    result.kind === "accepted" ? result.commit : null,
+    TEST_PUBLISH_APPROVED_OLD_SHA,
+  );
+  assert.ok(calls.some((call) => call.method === "POST"));
+});
+
+test("OLD refuses when the approved app SHA is not part of the branch (diverged)", async () => {
+  let dispatched = 0;
+  const result = await dispatchTestDeployWorkflow(
+    request({
+      branch: "main",
+      source: "OLD",
+      commit: TEST_PUBLISH_APPROVED_OLD_SHA,
+      expectedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+    }),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") dispatched += 1;
+      if (String(url).includes("/compare/")) {
+        return { status: 200, json: async () => ({ status: "diverged" }) } as Response;
+      }
+      return { status: 200, json: async () => ({ workflow_runs: [] }) } as Response;
+    },
+    async () => ({ tip: "c".repeat(40) }),
+  );
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.kind === "blocked" ? result.stage : null, "source");
+  assert.equal(dispatched, 0);
+});
+
+test("OLD refuses when ancestry cannot be proven (fail closed)", async () => {
+  let dispatched = 0;
+  const result = await dispatchTestDeployWorkflow(
+    request({
+      branch: "main",
+      source: "OLD",
+      commit: TEST_PUBLISH_APPROVED_OLD_SHA,
+      expectedSha: TEST_PUBLISH_APPROVED_OLD_SHA,
+    }),
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") dispatched += 1;
+      return { status: 404, json: async () => ({}) } as Response;
+    },
+    async () => ({ tip: "c".repeat(40) }),
+  );
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.kind === "blocked" ? result.stage : null, "source");
+  assert.equal(dispatched, 0);
+});
+
+test("OLD snapshot pins the approved app SHA even when main's tip is newer", async () => {
+  const newerTip = "c".repeat(40);
+  const snapshot = await readTestSourceSnapshot(
+    "OLD",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url) => {
+      if (String(url).includes("/compare/")) {
+        return { status: 200, json: async () => ({ status: "ahead" }) } as Response;
+      }
+      return { status: 404, json: async () => ({}) } as Response;
+    },
+    async () => ({ tip: newerTip }),
+    process.cwd(),
+  );
+
+  assert.equal(snapshot.sha, TEST_PUBLISH_APPROVED_OLD_SHA);
+  assert.equal(snapshot.branchTipSha, newerTip);
+  assert.equal(snapshot.matchesApproved, true);
+  assert.equal(snapshot.design, "old");
+  assert.equal(snapshot.available, true);
+});
+
+test("OLD snapshot refuses an approved SHA that is not on main", async () => {
+  const newerTip = "c".repeat(40);
+  const snapshot = await readTestSourceSnapshot(
+    "OLD",
+    { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+    async (url) => {
+      if (String(url).includes("/compare/")) {
+        return { status: 200, json: async () => ({ status: "diverged" }) } as Response;
+      }
+      return { status: 404, json: async () => ({}) } as Response;
+    },
+    async () => ({ tip: newerTip }),
+    process.cwd(),
+  );
+
+  assert.equal(snapshot.sha, TEST_PUBLISH_APPROVED_OLD_SHA);
+  assert.equal(snapshot.matchesApproved, false);
+  assert.ok(snapshot.reason);
 });
 
 test("successful dispatch (204) returns accepted with non-secret fields", async () => {
@@ -198,7 +327,15 @@ test("successful dispatch (204) returns accepted with non-secret fields", async 
   );
   const headers = new Headers(call.init.headers as HeadersInit);
   assert.equal(headers.get("Authorization"), `Bearer ${TOKEN}`);
-  assert.equal((call.init.body as string).includes("test/unified-gateway-ui-only"), true);
+  const body = JSON.parse(String(call.init.body)) as {
+    ref?: string;
+    inputs?: Record<string, string>;
+  };
+  assert.equal(body.ref, "test/unified-gateway-ui-only");
+  assert.deepEqual(body.inputs, {
+    source: "NEW",
+    expected_sha: COMMIT.toLowerCase(),
+  });
 
   assert.equal(result.kind, "accepted");
   if (result.kind === "accepted") {
@@ -304,10 +441,36 @@ test("LIVE dispatch accepted: read-only tip via API (ls-remote off), dup guard s
   const postCall = calls.find((c) => c.method === "POST");
   assert.ok(postCall, "a dispatch POST must be sent");
   assert.match(postCall.url, /\/dispatches$/);
+  assert.match(
+    postCall.url,
+    /\/repos\/modii1\/rwqan\/actions\/workflows\/deploy-live\.yml\/dispatches$/,
+    "LIVE must dispatch only the official repository workflow",
+  );
   assert.ok(
     !calls.some((c) => c.method === "POST" && String(c.url).includes("commit")),
     "LIVE dispatch body must not contain a commit",
   );
+});
+
+test("LIVE refuses legacy-repository and TEST-branch overrides before any API call", async () => {
+  const overrides = [
+    { DEPLOY_GITHUB_LIVE_REPOSITORY: "iheeb1/rwqan-sa" },
+    { DEPLOY_GITHUB_LIVE_BRANCH: "test/unified-gateway-ui-only" },
+    { DEPLOY_GITHUB_LIVE_WORKFLOW_FILE: "deploy-test.yml" },
+    { DEPLOY_GITHUB_LIVE_REMOTE: "origin" },
+  ];
+  for (const override of overrides) {
+    const result = await dispatchLiveDeployWorkflow(
+      liveRequest(),
+      { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN, ...override },
+      fetchThatMustNotRun,
+      () => {
+        throw new Error("readTip must not be called for an invalid LIVE destination");
+      },
+    );
+    assert.equal(result.kind, "blocked");
+    assert.equal(result.kind === "blocked" ? result.stage : null, "target");
+  }
 });
 
 test("LIVE dup-guard blocks dispatch when a run is already running", async () => {
@@ -466,46 +629,38 @@ test("a failed run exposes the failed job/step as its reason", async () => {
 
 // ---------------- TEST/LIVE separation + rollout verification ----------------
 
-test("TEST refuses a branch override that points at main or master", async () => {
-  for (const branch of ["main", "MAIN", "master"]) {
+test("TEST refuses any source/branch mismatch", async () => {
+  const cases: GhWorkflowDispatchRequest[] = [
+    request({ branch: "main", source: "NEW" }),
+    request({ branch: "test/unified-gateway-ui-only", source: "OLD" }),
+  ];
+  for (const req of cases) {
     const result = await dispatchTestDeployWorkflow(
-      request(),
-      {
-        [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN,
-        DEPLOY_GITHUB_TEST_BRANCH: branch,
-      },
+      req,
+      { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
       fetchThatMustNotRun,
       () => {
-        throw new Error("readTip must not be called when the branch is refused");
+        throw new Error("readTip must not be called when the pair is refused");
       },
     );
     assert.equal(result.kind, "blocked");
     assert.equal(result.kind === "blocked" ? result.stage : null, "target");
-    assert.match(
-      result.kind === "blocked" ? result.reason : "",
-      /DEPLOY_GITHUB_TEST_BRANCH/,
-    );
   }
 });
 
-test("TEST refuses the LIVE workflow file override", async () => {
-  const result = await dispatchTestDeployWorkflow(
-    request(),
-    {
-      [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN,
-      DEPLOY_GITHUB_TEST_WORKFLOW_FILE: "deploy-live.yml",
-    },
-    fetchThatMustNotRun,
-    () => {
-      throw new Error("readTip must not be called when the workflow is refused");
-    },
-  );
-  assert.equal(result.kind, "blocked");
-  assert.equal(result.kind === "blocked" ? result.stage : null, "target");
-  assert.match(
-    result.kind === "blocked" ? result.reason : "",
-    /DEPLOY_GITHUB_TEST_WORKFLOW_FILE/,
-  );
+test("TEST refuses a missing or invalid expected SHA", async () => {
+  for (const bad of ["", "abc", COMMIT.slice(0, 7)]) {
+    const result = await dispatchTestDeployWorkflow(
+      request({ expectedSha: bad }),
+      { [DEPLOY_GH_TOKEN_ENV_KEY]: TOKEN },
+      fetchThatMustNotRun,
+      () => {
+        throw new Error("readTip must not be called for an invalid SHA");
+      },
+    );
+    assert.equal(result.kind, "blocked");
+    assert.equal(result.kind === "blocked" ? result.stage : null, "source");
+  }
 });
 
 function runStateFetch(

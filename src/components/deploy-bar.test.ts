@@ -228,17 +228,17 @@ test("TEST publish no longer auto-commits or auto-pushes; it warns about local c
   assert.doesNotMatch(source, /autoCommit/);
   assert.doesNotMatch(source, /DeployTestAutoCommitService/);
   assert.match(source, /localChangesIgnored/);
-  assert.match(source, /لن تُنشر هذه التغييرات/);
-  assert.match(source, /آخر Commit معتمد/);
+  assert.match(source, /النشر يستخدم SHA GitHub المعتمد/);
+  assert.match(source, /شجرة العمل المحلية/);
 });
 
 
 test("TEST publish confirmation and result messages use plain Arabic (no technical jargon)", () => {
   const source = read("./deploy-bar.tsx");
   // The confirmation prompt is written for a non-technical site owner.
-  assert.match(source, /هل تريد تحديث بيئة التجربة/);
+  assert.match(source, /تأكيد نشر نسخة محددة إلى بيئة التجربة/);
   assert.match(source, /رابط بيئة التجربة/);
-  assert.match(source, /يبدأ التحديث من GitHub تلقائيًا/);
+  assert.match(source, /سيستخدم الـWorkflow نفس هذا SHA/);
   assert.match(source, /الموافقة هنا طلب بدء التحديث فقط/);
   // No technical terms in the confirm/result surface.
   assert.doesNotMatch(source, /workflow_dispatch/);

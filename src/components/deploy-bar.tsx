@@ -18,7 +18,7 @@
  * (TEST/LIVE data-environment switch), and استعادة (isolated restore).
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,28 @@ interface DeployRestoreSummary {
 }
 
 export const DEPLOY_BAR_HEIGHT_PX = 40;
+
+/** Read-only TEST source preview returned by /api/admin/deploy/test-sources. */
+interface TestSourceInfo {
+  source: "OLD" | "NEW";
+  branch: string;
+  sha: string | null;
+  shortSha: string | null;
+  /** Current branch tip (may differ from `sha` for OLD when main also carries the workflow commit). */
+  branchTipSha?: string | null;
+  committedAt: string | null;
+  subject: string | null;
+  design: "old" | "new" | "unknown";
+  markers: Record<string, boolean | null>;
+  available: boolean;
+  reason?: string;
+  approvedSha?: string;
+  matchesApproved?: boolean;
+}
+interface TestSourcesResponse {
+  approvedOldSha: string;
+  sources: { OLD: TestSourceInfo; NEW: TestSourceInfo };
+}
 
 const STATUS_LABEL: Record<DeployReleaseStatus, string> =
   DEPLOY_STATE_DESCRIPTORS.reduce(
@@ -526,13 +548,95 @@ export function DeployBar() {
     environment === "LIVE" ? GH_LIVE_ACTIONS_URL : GH_TEST_ACTIONS_URL;
   /** Remembers the environment of the next publish request (auto-resume uses this). */
   const lastPublishEnvRef = useRef<"TEST" | "LIVE">("TEST");
+  /** TEST publish source chosen explicitly by the admin — never inferred from LOCAL. */
+  const [testPublishSource, setTestPublishSource] = useState<"OLD" | "NEW" | null>(null);
+  /** Exact remote SHA approved for the selected source (fetched from the server). */
+  const [testExpectedSha, setTestExpectedSha] = useState<string | null>(null);
+  const [testSources, setTestSources] = useState<TestSourcesResponse | null>(null);
+  const [testSourcesLoading, setTestSourcesLoading] = useState(false);
+  const [testSourcesError, setTestSourcesError] = useState<string | null>(null);
+
+  const loadTestSources = useCallback(async (): Promise<TestSourcesResponse | null> => {
+    setTestSourcesLoading(true);
+    setTestSourcesError(null);
+    try {
+      const res = await apiRequest("GET", "/api/admin/deploy/test-sources");
+      const data = (await res.json()) as TestSourcesResponse;
+      setTestSources(data);
+      return data;
+    } catch (error) {
+      setTestSourcesError(deployErrorMessage(error));
+      return null;
+    } finally {
+      setTestSourcesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (visible && isDevOrTest) void loadTestSources();
+  }, [visible, isDevOrTest, loadTestSources]);
+
+  const selectTestSource = useCallback(
+    async (source: "OLD" | "NEW") => {
+      setTestPublishSource(source);
+      setTestExpectedSha(null);
+      const data = await loadTestSources();
+      if (!data) {
+        toast({
+          title: "تعذّر قراءة مصادر TEST",
+          description: "خدمة النشر أو GitHub غير متاحة — لم يتم اختيار أي SHA.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const info = data.sources[source];
+      if (!info?.available || !info.sha) {
+        toast({
+          title: `تعذّر التحقق من ${source}`,
+          description: info?.reason ?? "لا يوجد SHA موثّق لهذا المصدر.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (source === "OLD") {
+        if (!info.matchesApproved) {
+          toast({
+            title: "OLD/main لا يطابق SHA المعتمد",
+            description: `المعتمد ${data.approvedOldSha.slice(0, 7)} وtip الحالي ${info.shortSha ?? "غير معروف"} — لن يُنشر.`,
+            variant: "destructive",
+          });
+          return;
+        }
+        if (info.design !== "old") {
+          toast({
+            title: "تعذّر إثبات أن main هو التصميم القديم",
+            description: `بصمة التصميم: ${info.design} — لن يُنشر.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+      if (source === "NEW" && info.design !== "new") {
+        toast({
+          title: "تعذّر إثبات أن الفرع هو التصميم الجديد",
+          description: `بصمة التصميم: ${info.design} — لن يُنشر.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      setTestExpectedSha(info.sha);
+    },
+    [loadTestSources, toast],
+  );
 
   const publishMutation = useMutation({
-    mutationFn: async (input: { environment: "TEST" | "LIVE"; approval: boolean }) => {
+    mutationFn: async (input: { environment: "TEST" | "LIVE"; approval: boolean; source?: "OLD" | "NEW" | null; expectedSha?: string | null }) => {
       if (!state) throw new Error("لا توجد حالة نشر جاهزة للخادم.");
       const res = await apiRequest("POST", "/api/admin/deploy/releases", {
         approve: input.approval,
         environment: input.environment,
+        source: input.source,
+        expectedSha: input.expectedSha,
       });
       return res.json() as Promise<{
         release?: DeployRelease;
@@ -1036,20 +1140,64 @@ export function DeployBar() {
       publishMutation.mutate({ environment: "LIVE", approval: true });
       return;
     }
-    const testDirtyWarning =
-      state.git?.worktree === "dirty"
-        ? "\n\nتنبيه: توجد تغييرات محلية غير محفوظة. لن تُنشر هذه التغييرات، وسيُنشر آخر Commit معتمد على فرع TEST فقط."
-        : "";
-    const confirmed = window.confirm(
-      "هل تريد تحديث بيئة التجربة بآخر نسخة من الموقع؟\n\n" +
-        `رابط بيئة التجربة: ${domain}\n` +
-        `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
-        "يبدأ التحديث من GitHub تلقائيًا، وهو لا يمس الموقع الرسمي إطلاقًا.\n" +
-        "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه." +
-        testDirtyWarning,
-    );
-    if (!confirmed) return;
-    publishMutation.mutate({ environment: "TEST", approval: true });
+    // TEST requires an explicit source + the exact remote SHA approved by the
+    // admin. The SHA is resolved by the server from GitHub, never from local HEAD.
+    if (targetEnv === "TEST") {
+      if (!testPublishSource || !testExpectedSha) {
+        toast({
+          title: "مصدر النشر أو SHA المعتمد مفقود",
+          description:
+            "اختر OLD أو NEW من شريط النشر وانتظر قراءة SHA من GitHub قبل الضغط على نشر.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const info = testSources?.sources[testPublishSource];
+      const sourceLabel = testPublishSource === "OLD"
+        ? "OLD — التصميم القديم"
+        : "NEW — التصميم الجديد 2027";
+      const sourceBranch = info?.branch ?? (testPublishSource === "OLD" ? "main" : "test/unified-gateway-ui-only");
+      const committedAt = info?.committedAt
+        ? new Date(info.committedAt).toLocaleString("ar-SA", { hour12: false })
+        : "غير معروف";
+      const branchTipLine =
+        info?.branchTipSha && info.branchTipSha !== testExpectedSha
+          ? `\nرأس الفرع الحالي (قد يحتوي commit تعريف الـWorkflow): ${info.branchTipSha}`
+          : "";
+      const testDirtyWarning =
+        state.git?.worktree === "dirty"
+          ? "\n\nتنبيه: توجد تغييرات محلية غير محفوظة. النشر يستخدم SHA GitHub المعتمد، وليس شجرة العمل المحلية."
+          : "";
+      const confirmed = window.confirm(
+        "تأكيد نشر نسخة محددة إلى بيئة التجربة؟\n\n" +
+          `المصدر: ${sourceLabel}\n` +
+          `الفرع: ${sourceBranch}\n` +
+          `SHA الكامل: ${testExpectedSha}\n` +
+          branchTipLine +
+          `\nتاريخ الإصدار: ${committedAt}\n` +
+          `ملخص Commit: ${info?.subject ?? "غير معروف"}\n` +
+          `بصمة التصميم: ${info?.design === "old" ? "تصميم قديم" : info?.design === "new" ? "تصميم جديد" : "غير محددة"}\n` +
+          `الوجهة: TEST backend (rwqan-backend @ europe-west4)\n` +
+          `رابط بيئة التجربة: ${domain}\n` +
+          `متابعة تقدّم التحديث: ${GH_TEST_ACTIONS_URL}\n\n` +
+          "سيستخدم الـWorkflow نفس هذا SHA في checkout وفي إنشاء الـrollout، ويرفض أي اختلاف.\n" +
+          "الموافقة هنا طلب بدء التحديث فقط — اكتمال التحديث يظهر في صفحة المتابعة أعلاه." +
+          testDirtyWarning,
+      );
+      if (!confirmed) return;
+      publishMutation.mutate({
+        environment: "TEST",
+        approval: true,
+        source: testPublishSource,
+        expectedSha: testExpectedSha,
+      });
+      // Reset after dispatch so the admin must re-verify the SHA next time.
+      setTestPublishSource(null);
+      setTestExpectedSha(null);
+      return;
+    }
+    // LIVE returned above and TEST returned above; nothing can fall through to
+    // an accidental LIVE publish.
   };
 
   // Dedicated branch upload handler: opens the smart stage stepper and runs the
@@ -1445,12 +1593,59 @@ export function DeployBar() {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          {/* TEST source selection: OLD or NEW — explicit, never inferred from LOCAL.
+              The SHA is resolved by the server from GitHub for the selected source. */}
+          <div className="flex flex-col items-start gap-0.5">
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant={testPublishSource === "OLD" ? "default" : "outline"}
+                className="h-6 shrink-0 px-2 text-[10px]"
+                onClick={() => void selectTestSource("OLD")}
+                disabled={publishMutation.isPending || testSourcesLoading}
+                aria-pressed={testPublishSource === "OLD"}
+                title={`النشر إلى TEST من التصميم القديم (main)${testSources?.sources.OLD.sha ? ` — ${testSources.sources.OLD.sha}` : ""}`}
+              >
+                OLD
+              </Button>
+              <Button
+                size="sm"
+                variant={testPublishSource === "NEW" ? "default" : "outline"}
+                className="h-6 shrink-0 px-2 text-[10px]"
+                onClick={() => void selectTestSource("NEW")}
+                disabled={publishMutation.isPending || testSourcesLoading}
+                aria-pressed={testPublishSource === "NEW"}
+                title={`النشر إلى TEST من التصميم الجديد 2027 (test/unified-gateway-ui-only)${testSources?.sources.NEW.sha ? ` — ${testSources.sources.NEW.sha}` : ""}`}
+              >
+                NEW
+              </Button>
+              {testSourcesLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+              ) : null}
+            </div>
+            <span
+              className="max-w-[11rem] truncate font-mono text-[9px] text-muted-foreground"
+              title={testExpectedSha ?? testSourcesError ?? ""}
+              data-testid="deploy-bar-test-source-sha"
+            >
+              {testPublishSource
+                ? `${testPublishSource} · ${testSources?.sources[testPublishSource]?.branch ?? "…"} · ${testExpectedSha ?? "بانتظار SHA"}`
+                : testSourcesError
+                  ? "تعذّر قراءة SHA"
+                  : "اختر مصدر TEST"}
+            </span>
+          </div>
           <Button
             size="sm"
             variant="default"
             className="h-7 shrink-0 px-2 text-xs"
             onClick={() => startPublish("TEST")}
-            disabled={publishMutation.isPending}
+            disabled={
+              publishMutation.isPending ||
+              testSourcesLoading ||
+              !testPublishSource ||
+              !testExpectedSha
+            }
             data-testid="deploy-bar-publish-test"
           >
             نشر نسخة التجربة

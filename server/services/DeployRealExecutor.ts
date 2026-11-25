@@ -72,6 +72,11 @@ import type {
   GhLiveWorkflowDispatchRequest,
 } from "./DeployGhWorkflowService";
 import {
+  isFullPublishSha,
+  sourceToBranch,
+  TEST_PUBLISH_APPROVED_OLD_SHA,
+} from "./DeployExecutor";
+import {
   DEPLOY_GH_TEST_BRANCH,
   DEPLOY_GH_TEST_REMOTE_NAME,
 } from "./DeployGhWorkflowService";
@@ -335,6 +340,10 @@ export class RealDeployExecutor {
     requestedTarget?: string | null;
     worktree?: "clean" | "dirty" | "unknown";
     environment?: DeployTargetEnvironment;
+    /** TEST publish source: OLD (main) or NEW (test/unified-gateway-ui-only). */
+    source?: "OLD" | "NEW" | null;
+    /** Exact full SHA approved by the admin for the selected source. */
+    expectedSha?: string | null;
     /** Server-side session id used to resolve Firebase CLI credentials (FIREBASE_TOKEN). */
     sessionId?: string;
     /** Admin id that owns the credentials, used to prevent cross-admin credential use. */
@@ -380,11 +389,49 @@ export class RealDeployExecutor {
 
     const cwd = dependencies.cwd();
 
+    // TEST publish source → branch + approved SHA mapping. LIVE keeps its own
+    // fixed branch (main / deploy-live.yml) and can never be crossed with TEST.
+    let testBranch = "";
+    let testSource: "OLD" | "NEW" | null = null;
+    let testExpectedSha = "";
+    if (environment === "TEST") {
+      testSource = input.source ?? null;
+      if (!testSource) {
+        return blockedPublish(
+          target,
+          "source",
+          "مصدر النشر إلى TEST غير محدد — يجب اختيار OLD أو NEW صراحةً.",
+        );
+      }
+      testBranch = sourceToBranch(testSource);
+      const rawExpected = input.expectedSha?.trim() ?? "";
+      if (!isFullPublishSha(rawExpected)) {
+        return blockedPublish(
+          target,
+          "source",
+          "SHA المعتمد للنشر إلى TEST مطلوب ويجب أن يكون SHA كاملًا (40 خانة).",
+        );
+      }
+      testExpectedSha = rawExpected.toLowerCase();
+      // OLD is pinned to the explicitly approved commit. It is never "whatever
+      // main happens to point at now".
+      if (
+        testSource === "OLD" &&
+        testExpectedSha !== TEST_PUBLISH_APPROVED_OLD_SHA
+      ) {
+        return blockedPublish(
+          target,
+          "source",
+          `SHA غير مطابق للنسخة القديمة المعتمدة: المطلوب ${TEST_PUBLISH_APPROVED_OLD_SHA.slice(0, 7)} والمرسل ${testExpectedSha.slice(0, 7)}.`,
+        );
+      }
+    }
+
     // TEST & LIVE publish DELEGATION (GitHub Actions): for BOTH environments
     // the app NEVER runs the Firebase CLI / apphosting:rollouts:create itself.
     // The ONLY path is a workflow_dispatch to GitHub, which creates the rollout
     // from the branch's remote tip:
-    //   TEST → `modii1/rwqan @ test/unified-gateway-ui-only` (deploy-test.yml)
+    //   TEST → `modii1/rwqan @ main` (OLD) or `modii1/rwqan @ test/unified-gateway-ui-only` (NEW)
     //   LIVE → `modii1/rwqan @ main`                        (deploy-live.yml)
     // No git push, no Firebase CLI, no new credentials — a missing pre-existing
     // GitHub token fails closed with a clear admin-facing reason, and (TEST)
@@ -393,6 +440,13 @@ export class RealDeployExecutor {
     // (missing seam) the publish is blocked, not sent to Firebase.
     const isLiveEnvironment = environment === "LIVE";
     if (environment === "TEST") {
+      if (!testSource || !testExpectedSha) {
+        return blockedPublish(
+          target,
+          "source",
+          "مصدر النشر أو SHA المعتمد مفقود — رُفض الطلب قبل أي إرسال.",
+        );
+      }
       if (!dependencies.dispatchTestDeploy) {
         return blockedPublish(
           target,
@@ -409,19 +463,33 @@ export class RealDeployExecutor {
       const remoteTip = await readTip({
         cwd,
         remoteName: DEPLOY_GH_TEST_REMOTE_NAME,
-        branch: DEPLOY_GH_TEST_BRANCH,
+        branch: testBranch,
       });
       if (!remoteTip.tip) {
         return blockedPublish(
           target,
           "source",
-          `تعذّر قراءة tip فرع ${DEPLOY_GH_TEST_BRANCH} على GitHub (استعلام قراءة فقط). يُرجى التأكد من وجود الفرع على المستودع ثم المحاولة مجددًا.`,
+          `تعذّر قراءة tip فرع ${testBranch} على GitHub (استعلام قراءة فقط). يُرجى التأكد من وجود الفرع على المستودع ثم المحاولة مجددًا.`,
         );
       }
-      const remoteCommit = remoteTip.tip;
+      const remoteCommit = remoteTip.tip.toLowerCase();
+      // NEW keeps the strict tip equality. OLD is different: main also carries
+      // the workflow-definition commit, so its tip may legitimately be newer
+      // than the approved application SHA. The dispatch service proves the
+      // approved SHA is part of main's history before dispatching.
+      if (testSource === "NEW" && remoteCommit !== testExpectedSha) {
+        return blockedPublish(
+          target,
+          "source",
+          `تغيّر فرع ${testBranch} بعد اعتماد المعاينة: tip الحالي ${remoteCommit.slice(0, 7)} لا يطابق SHA المعتمد ${testExpectedSha.slice(0, 7)}. أعد فتح المعاينة واختر من جديد — لن يُنشر commit غير معتمد.`,
+        );
+      }
       const gh: GhWorkflowDispatchResult = await dependencies.dispatchTestDeploy({
         commit: remoteCommit,
         cwd,
+        branch: testBranch,
+        source: testSource,
+        expectedSha: testExpectedSha,
       });
       if (gh.kind === "accepted") {
         return {
